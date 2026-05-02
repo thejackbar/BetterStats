@@ -1,15 +1,37 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { useState } from 'react'
+
+const APPLECROSS_ORG_ID = import.meta.env.VITE_DEFAULT_ORG_ID || ''
+
+function useOrgId() {
+  // Extract orgId from URL path segments
+  const { pathname } = useLocation()
+  const segments = pathname.split('/')
+  const idx = segments.findIndex(s => ['dashboard', 'leaderboard', 'compare'].includes(s))
+  if (idx !== -1 && segments[idx + 1]) return segments[idx + 1]
+  // players list: /players/:orgId/list
+  const listIdx = segments.indexOf('list')
+  if (listIdx > 1) return segments[listIdx - 1]
+  return APPLECROSS_ORG_ID
+}
 
 export default function Navbar() {
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
+  const orgId = useOrgId()
+
+  const navLinks = orgId ? [
+    { to: `/dashboard/${orgId}`, label: 'Dashboard' },
+    { to: `/players/${orgId}/list`, label: 'Players' },
+    { to: `/leaderboard/${orgId}`, label: 'Leaderboard' },
+    { to: `/compare/${orgId}`, label: 'Compare' },
+  ] : []
 
   return (
     <nav className="bg-navy-900 border-b border-navy-700 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 group">
+        <Link to={orgId ? `/dashboard/${orgId}` : '/'} className="flex items-center gap-2 group">
           <span className="w-6 h-6 rounded bg-accent flex items-center justify-center">
             <svg viewBox="0 0 24 24" className="w-4 h-4 fill-navy-950" xmlns="http://www.w3.org/2000/svg">
               <circle cx="12" cy="12" r="10" />
@@ -24,15 +46,16 @@ export default function Navbar() {
 
         {/* Desktop links */}
         <div className="hidden md:flex items-center gap-1">
-          <Link to="/onboard" className="btn-ghost">Join a Club</Link>
-          <a
-            href="https://playcricket.com.au"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-ghost text-xs"
-          >
-            PlayHQ ↗
-          </a>
+          {navLinks.map(link => (
+            <Link
+              key={link.to}
+              to={link.to}
+              className={pathname.startsWith(link.to) ? 'btn-ghost text-accent' : 'btn-ghost'}
+            >
+              {link.label}
+            </Link>
+          ))}
+          {!orgId && <Link to="/onboard" className="btn-ghost">Join a Club</Link>}
         </div>
 
         {/* Mobile hamburger */}
@@ -52,8 +75,13 @@ export default function Navbar() {
 
       {/* Mobile menu */}
       {open && (
-        <div className="md:hidden border-t border-navy-700 bg-navy-900 px-4 py-3 flex flex-col gap-2">
-          <Link to="/onboard" className="btn-ghost text-left" onClick={() => setOpen(false)}>Join a Club</Link>
+        <div className="md:hidden border-t border-navy-700 bg-navy-900 px-4 py-3 flex flex-col gap-1">
+          {navLinks.map(link => (
+            <Link key={link.to} to={link.to} className="btn-ghost text-left" onClick={() => setOpen(false)}>
+              {link.label}
+            </Link>
+          ))}
+          {!orgId && <Link to="/onboard" className="btn-ghost text-left" onClick={() => setOpen(false)}>Join a Club</Link>}
         </div>
       )}
     </nav>

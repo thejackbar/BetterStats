@@ -32,6 +32,15 @@ export const api = {
   getOrgSeasons: (orgId) => request(`/organisations/${orgId}/seasons`),
   getSeasonGrades: (orgId, seasonId) => request(`/organisations/${orgId}/seasons/${seasonId}/grades`),
   triggerSync: (orgId) => request(`/organisations/${orgId}/sync`, { method: 'POST' }),
+  getOrgSummary: (orgId, { seasonId, gradeId } = {}) => {
+    const params = new URLSearchParams()
+    if (seasonId) params.set('season_id', seasonId)
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/organisations/${orgId}/summary?${params}`)
+  },
+  getUpcomingMilestones: (orgId, limit = 20) =>
+    request(`/organisations/${orgId}/upcoming-milestones?limit=${limit}`),
+  getOrgFixtures: (orgId) => request(`/organisations/${orgId}/fixtures`),
 
   // Players
   listPlayers: (orgId) => request(`/players?org_id=${orgId}`),
@@ -48,6 +57,8 @@ export const api = {
   getPlayerSeasons: (playerId) => request(`/players/${playerId}/seasons`),
   getPlayerMilestones: (playerId) => request(`/players/${playerId}/milestones`),
   getPlayerPartnerships: (playerId) => request(`/players/${playerId}/partnerships`),
+  getPlayerActivity: (playerId) => request(`/players/${playerId}/activity`),
+  getPlayerUpcomingMilestones: (playerId) => request(`/players/${playerId}/upcoming-milestones`),
   claimPlayer: (playerId) =>
     request(`/players/${playerId}/claim`, { method: 'POST' }),
 
@@ -62,17 +73,19 @@ export const api = {
   getScorecard: (gameId) => request(`/games/${gameId}/scorecard`),
 
   // Leaderboard
-  battingLeaderboard: (orgId, { seasonId, gradeId, limit } = {}) => {
+  battingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
+    if (sortBy) params.set('sort_by', sortBy)
     if (limit) params.set('limit', limit)
     return request(`/leaderboard/batting?${params}`)
   },
-  bowlingLeaderboard: (orgId, { seasonId, gradeId, limit } = {}) => {
+  bowlingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
+    if (sortBy) params.set('sort_by', sortBy)
     if (limit) params.set('limit', limit)
     return request(`/leaderboard/bowling?${params}`)
   },

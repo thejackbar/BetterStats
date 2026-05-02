@@ -5,7 +5,8 @@ import uuid
 
 from app.models.db import get_db
 from app.services.aggregations import (
-    get_batting_leaderboard, get_bowling_leaderboard, get_fielding_leaderboard
+    get_batting_leaderboard, get_bowling_leaderboard, get_fielding_leaderboard,
+    get_batting_leaderboard_extended, get_bowling_leaderboard_extended,
 )
 
 router = APIRouter(prefix="/leaderboard", tags=["leaderboard"])
@@ -20,10 +21,11 @@ async def batting_leaderboard(
     org_id: str,
     season_id: Optional[str] = Query(None),
     grade_id: Optional[str] = Query(None),
+    sort_by: str = Query("total_runs"),
     limit: int = Query(20, le=50),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await get_batting_leaderboard(db, org_id, season_id, grade_id, limit)
+    rows = await get_batting_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit)
     return _stringify(rows)
 
 
@@ -32,10 +34,11 @@ async def bowling_leaderboard(
     org_id: str,
     season_id: Optional[str] = Query(None),
     grade_id: Optional[str] = Query(None),
+    sort_by: str = Query("total_wickets"),
     limit: int = Query(20, le=50),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await get_bowling_leaderboard(db, org_id, season_id, grade_id, limit)
+    rows = await get_bowling_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit)
     return _stringify(rows)
 
 

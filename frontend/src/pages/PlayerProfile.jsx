@@ -21,6 +21,72 @@ const DISMISSAL_COLORS = [
   '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16',
 ]
 
+function daysSince(dateStr) {
+  if (!dateStr) return null
+  const d = new Date(dateStr)
+  const today = new Date()
+  const diff = Math.floor((today - d) / (1000 * 60 * 60 * 24))
+  return diff
+}
+
+function formatDaysSince(days) {
+  if (days === null) return '—'
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  if (days < 7) return `${days} days ago`
+  if (days < 30) return `${Math.floor(days / 7)}w ago`
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`
+  return `${Math.floor(days / 365)}y ago`
+}
+
+function ActivityBadge({ label, value, sub, accent = false }) {
+  return (
+    <div className={clsx(
+      'bg-navy-800 border rounded-xl p-4 flex flex-col gap-1',
+      accent ? 'border-accent/30' : 'border-navy-700'
+    )}>
+      <span className="section-label">{label}</span>
+      <span className={clsx('stat-number font-bold text-lg leading-tight', accent ? 'text-accent' : 'text-white')}>
+        {value ?? '—'}
+      </span>
+      {sub && <span className="text-xs text-slate-500">{sub}</span>}
+    </div>
+  )
+}
+
+function UpcomingMilestonesSection({ data }) {
+  if (!data?.length) return null
+  const ICONS = { runs: '🏏', wickets: '⚡', matches: '📅' }
+  return (
+    <div className="mb-8">
+      <h3 className="display-heading text-lg text-white mb-4">CHASING</h3>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {data.map((m, i) => {
+          const pct = Math.round((m.current / m.target) * 100)
+          return (
+            <div key={i} className="bg-navy-800 border border-navy-700 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-slate-400 flex items-center gap-1.5">
+                  <span>{ICONS[m.type] || '🎯'}</span>
+                  {m.target.toLocaleString()} {m.type}
+                </span>
+                <span className="text-xs text-accent font-mono font-bold">{m.needed} to go</span>
+              </div>
+              <div className="h-2 bg-navy-700 rounded-full overflow-hidden mb-1">
+                <div className="h-full bg-accent rounded-full" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="flex justify-between">
+                <span className="text-xs text-slate-600">{m.current.toLocaleString()}</span>
+                <span className="text-xs text-slate-600">{pct}%</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function DismissalChart({ data }) {
   if (!data?.length) return <p className="text-slate-500 text-sm">No dismissal data</p>
   return (
@@ -182,6 +248,8 @@ export default function PlayerProfile() {
   const [seasons, setSeasons] = useState([])
   const { data, loading, error } = usePlayerStats(playerId, { seasonId })
 
+  const [activity, setActivity] = useState(null)
+  const [upcomingMilestones, setUpcomingMilestones] = useState(null)
   const [dismissals, setDismissals] = useState(null)
   const [byPosition, setByPosition] = useState(null)
   const [byGrade, setByGrade] = useState(null)
@@ -195,6 +263,12 @@ export default function PlayerProfile() {
       .then(setSeasons)
       .catch(() => {})
   }, [data?.player?.organisation_id])
+
+  useEffect(() => {
+    if (!playerId) return
+    api.getPlayerActivity(playerId).then(setActivity).catch(() => setActivity({}))
+    api.getPlayerUpcomingMilestones(playerId).then(setUpcomingMilestones).catch(() => setUpcomingMilestones([]))
+  }, [playerId])
 
   const loadTabData = useCallback((t) => {
     if (t === 'analysis') {
@@ -233,6 +307,10 @@ export default function PlayerProfile() {
   if (cbw?.total_wickets >= 5) badgeMilestones.push(`${cbw.total_wickets} career wickets`)
   if (cbw?.best_figures_wickets >= 5) badgeMilestones.push(`${cbw.best_figures_wickets}-wicket haul`)
 
+  const lastGameDays = activity ? daysSince(activity.last_game_date) : null
+  const lastWicketDays = activity ? daysSince(activity.last_wicket_date) : null
+  const lastDuckDays = activity ? daysSince(activity.last_duck_date) : null
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       {/* Player header */}
@@ -251,7 +329,7 @@ export default function PlayerProfile() {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             {seasons.length > 0 && (
               <select
                 value={seasonId || ''}
@@ -266,16 +344,54 @@ export default function PlayerProfile() {
               Share ↗
             </Link>
             {!player.claimed && (
-              <button
-                onClick={() => api.claimPlayer(playerId)}
-                className="btn-primary text-xs"
-              >
+              <button onClick={() => api.claimPlayer(playerId)} className="btn-primary text-xs">
                 Claim Profile
               </button>
             )}
           </div>
         </div>
       </div>
+
+      {/* Upcoming milestones */}
+      {upcomingMilestones !== null && upcomingMilestones.length > 0 && (
+        <UpcomingMilestonesSection data={upcomingMilestones} />
+      )}
+
+      {/* Activity analytics */}
+      {activity && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
+          <ActivityBadge
+            label="Last Played"
+            value={formatDaysSince(lastGameDays)}
+            sub={activity.last_game_date || undefined}
+            accent={lastGameDays !== null && lastGameDays < 14}
+          />
+          <ActivityBadge
+            label="Last Wicket"
+            value={lastWicketDays !== null ? formatDaysSince(lastWicketDays) : 'No wickets'}
+            sub={activity.last_wicket_date || undefined}
+          />
+          <ActivityBadge
+            label="Last Duck"
+            value={lastDuckDays !== null ? formatDaysSince(lastDuckDays) : 'No ducks'}
+            sub={activity.total_ducks > 0 ? `${activity.total_ducks} career ducks` : 'Duck-free!'}
+          />
+          <ActivityBadge
+            label="Career 6s"
+            value={activity.total_sixes?.toLocaleString()}
+            accent
+          />
+          <ActivityBadge
+            label="Career 4s"
+            value={activity.total_fours?.toLocaleString()}
+          />
+          <ActivityBadge
+            label="Best Spell"
+            value={activity.best_spell_wickets > 0 ? `${activity.best_spell_wickets} wkts` : '—'}
+            sub={activity.total_wickets > 0 ? `${activity.total_wickets} career wkts` : undefined}
+          />
+        </div>
+      )}
 
       {/* Career summary bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-10">
@@ -359,7 +475,6 @@ export default function PlayerProfile() {
 
         {tab === 'analysis' && (
           <div className="p-5 space-y-8">
-            {/* Dismissal breakdown */}
             <div>
               <h3 className="display-heading text-lg text-white mb-4">DISMISSAL BREAKDOWN</h3>
               {dismissals === null
@@ -396,8 +511,6 @@ export default function PlayerProfile() {
                 )
               }
             </div>
-
-            {/* Season by season */}
             <div>
               <h3 className="display-heading text-lg text-white mb-4">SEASON BY SEASON</h3>
               {seasonStats === null
@@ -405,8 +518,6 @@ export default function PlayerProfile() {
                 : <SeasonChart data={seasonStats} />
               }
             </div>
-
-            {/* Batting by position */}
             <div>
               <h3 className="display-heading text-lg text-white mb-4">BATTING BY POSITION</h3>
               {byPosition === null
@@ -414,8 +525,6 @@ export default function PlayerProfile() {
                 : <StatsTable rows={byPosition} columns={POSITION_COLS} />
               }
             </div>
-
-            {/* Batting by grade */}
             <div>
               <h3 className="display-heading text-lg text-white mb-4">BATTING BY GRADE</h3>
               {byGrade === null

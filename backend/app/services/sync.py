@@ -39,6 +39,7 @@ def _extract_player_stats(game_summary: dict, game_id: uuid.UUID) -> dict:
     innings_list = game_summary.get("innings", [])
     for innings in innings_list:
         team = innings.get("team", {})
+        innings_num = innings.get("inningsNumber", 1) or 1
 
         # Batting
         for i, batter in enumerate(innings.get("batting", [])):
@@ -63,6 +64,7 @@ def _extract_player_stats(game_summary: dict, game_id: uuid.UUID) -> dict:
             batting.append({
                 "game_id": game_id,
                 "player_id": pid,
+                "innings_number": innings_num,
                 "runs": runs,
                 "balls": balls,
                 "fours": fours,
@@ -96,6 +98,7 @@ def _extract_player_stats(game_summary: dict, game_id: uuid.UUID) -> dict:
             bowling.append({
                 "game_id": game_id,
                 "player_id": pid,
+                "innings_number": innings_num,
                 "overs": overs_raw,
                 "maidens": maidens,
                 "runs": runs_conceded,
@@ -128,7 +131,7 @@ def _extract_player_stats(game_summary: dict, game_id: uuid.UUID) -> dict:
 
         # Fall of Wickets
         fow_list = innings.get("fallOfWickets", [])
-        innings_num = innings.get("inningsNumber", 1) or 1
+
         for fow in fow_list:
             pid_raw = (fow.get("participant") or {}).get("id")
             pid = _parse_uuid(pid_raw) if pid_raw else None
