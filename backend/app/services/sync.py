@@ -9,7 +9,8 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.models.db import (
     Organisation, Season, Grade, Game, Player,
-    BattingInnings, BowlingSpell, FieldingStat, async_session_maker
+    BattingInnings, BowlingSpell, FieldingStat,
+    FallOfWicket, Partnership, Milestone, async_session_maker
 )
 from app.services import playhq_client
 
@@ -32,6 +33,8 @@ def _extract_player_stats(game_summary: dict, game_id: uuid.UUID) -> dict:
     batting = []
     bowling = []
     fielding = []
+    fow_rows = []
+    partnership_rows = []
 
     innings_list = game_summary.get("innings", [])
     for innings in innings_list:
@@ -123,7 +126,51 @@ def _extract_player_stats(game_summary: dict, game_id: uuid.UUID) -> dict:
                 "stumpings": fielder.get("stumpings", 0) or 0,
             })
 
-    return {"players": players, "batting": batting, "bowling": bowling, "fielding": fielding}
+        # Fall of Wickets
+        fow_list = innings.get("fallOfWickets", [])
+        innings_num = innings.get("inningsNumber", 1) or 1
+        for fow in fow_list:
+            pid_raw = (fow.get("participant") or {}).get("id")
+            pid = _parse_uuid(pid_raw) if pid_raw else None
+            if pid and pid not in players:
+                name = (fow.get("participant") or {}).get("displayName", "Unknown")
+                players[pid] = name
+            fow_rows.append({
+                "game_id": game_id,
+                "innings_number": innings_num,
+                "wicket_number": fow.get("wicketNumber", 0),
+                "score_at_fall": fow.get("score"),
+                "overs_at_fall": fow.get("overs"),
+                "player_id": pid,
+            })
+
+        # Partnerships
+        partnership_list = innings.get("partnerships", [])
+        for i, p in enumerate(partnership_list):
+            b1_raw = (p.get("batter1") or {}).get("id") or (p.get("batter1Participant") or {}).get("id")
+            b2_raw = (p.get("batter2") or {}).get("id") or (p.get("batter2Participant") or {}).get("id")
+            b1 = _parse_uuid(b1_raw) if b1_raw else None
+            b2 = _parse_uuid(b2_raw) if b2_raw else None
+            partnership_rows.append({
+                "game_id": game_id,
+                "innings_number": innings_num,
+                "wicket_number": p.get("wicketNumber", i + 1),
+                "batter1_id": b1,
+                "batter2_id": b2,
+                "runs": p.get("runs", 0) or 0,
+                "balls": p.get("balls"),
+                "batter1_runs": p.get("batter1Runs"),
+                "batter2_runs": p.get("batter2Runs"),
+            })
+
+    return {
+        "players": players,
+        "batting": batting,
+        "bowling": bowling,
+        "fielding": fielding,
+        "fow": fow_rows,
+        "partnerships": partnership_rows,
+    }
 
 
 async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisation:
@@ -268,6 +315,8 @@ async def _upsert_game(
     await session.execute(delete(BattingInnings).where(BattingInnings.game_id == game_id))
     await session.execute(delete(BowlingSpell).where(BowlingSpell.game_id == game_id))
     await session.execute(delete(FieldingStat).where(FieldingStat.game_id == game_id))
+    await session.execute(delete(FallOfWicket).where(FallOfWicket.game_id == game_id))
+    await session.execute(delete(Partnership).where(Partnership.game_id == game_id))
 
     for row in extracted["batting"]:
         session.add(BattingInnings(**row))
@@ -275,8 +324,103 @@ async def _upsert_game(
         session.add(BowlingSpell(**row))
     for row in extracted["fielding"]:
         session.add(FieldingStat(**row))
+    for row in extracted["fow"]:
+        session.add(FallOfWicket(**row))
+    for row in extracted["partnerships"]:
+        session.add(Partnership(**row))
 
     await session.commit()
+
+    # Recompute milestones for all players touched by this game
+    player_ids = list(extracted["players"].keys())
+    if player_ids:
+        await _compute_milestones(session, player_ids, org_id)
+
+
+_RUN_MILESTONES = [50, 100, 250, 500, 1000, 2000, 3000, 5000]
+_WICKET_MILESTONES = [5, 10, 25, 50, 100, 200, 300]
+_MATCH_MILESTONES = [10, 25, 50, 100, 150, 200]
+_CATCH_MILESTONES = [10, 25, 50, 100]
+
+
+async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: uuid.UUID):
+    from sqlalchemy import text, func
+    for pid in player_ids:
+        pid_str = str(pid)
+
+        # Career run total
+        run_res = await session.execute(
+            text("SELECT COALESCE(SUM(runs),0) FROM batting_innings WHERE player_id=:pid"),
+            {"pid": pid_str}
+        )
+        total_runs = int(run_res.scalar() or 0)
+
+        # Career wickets
+        wkt_res = await session.execute(
+            text("SELECT COALESCE(SUM(wickets),0) FROM bowling_spells WHERE player_id=:pid"),
+            {"pid": pid_str}
+        )
+        total_wickets = int(wkt_res.scalar() or 0)
+
+        # Career matches
+        match_res = await session.execute(
+            text("""SELECT COUNT(DISTINCT game_id) FROM (
+                SELECT game_id FROM batting_innings WHERE player_id=:pid
+                UNION SELECT game_id FROM bowling_spells WHERE player_id=:pid
+            ) t"""),
+            {"pid": pid_str}
+        )
+        total_matches = int(match_res.scalar() or 0)
+
+        # Career catches
+        catch_res = await session.execute(
+            text("SELECT COALESCE(SUM(catches),0) FROM fielding_stats WHERE player_id=:pid"),
+            {"pid": pid_str}
+        )
+        total_catches = int(catch_res.scalar() or 0)
+
+        # Existing milestone keys for this player
+        exist_res = await session.execute(
+            text("SELECT milestone_type, milestone_value FROM milestones WHERE player_id=:pid"),
+            {"pid": pid_str}
+        )
+        existing = {(r[0], r[1]) for r in exist_res.fetchall()}
+
+        new_milestones = []
+
+        for threshold in _RUN_MILESTONES:
+            if total_runs >= threshold and ("runs", threshold) not in existing:
+                new_milestones.append(Milestone(
+                    player_id=pid, milestone_type="runs", milestone_value=threshold,
+                    detail=f"{threshold:,} career runs",
+                ))
+
+        for threshold in _WICKET_MILESTONES:
+            if total_wickets >= threshold and ("wickets", threshold) not in existing:
+                new_milestones.append(Milestone(
+                    player_id=pid, milestone_type="wickets", milestone_value=threshold,
+                    detail=f"{threshold} career wickets",
+                ))
+
+        for threshold in _MATCH_MILESTONES:
+            if total_matches >= threshold and ("matches", threshold) not in existing:
+                new_milestones.append(Milestone(
+                    player_id=pid, milestone_type="matches", milestone_value=threshold,
+                    detail=f"{threshold} career matches",
+                ))
+
+        for threshold in _CATCH_MILESTONES:
+            if total_catches >= threshold and ("catches", threshold) not in existing:
+                new_milestones.append(Milestone(
+                    player_id=pid, milestone_type="catches", milestone_value=threshold,
+                    detail=f"{threshold} career catches",
+                ))
+
+        for m in new_milestones:
+            session.add(m)
+
+    if player_ids:
+        await session.commit()
 
 
 async def process_game_updated_webhook(payload: dict):

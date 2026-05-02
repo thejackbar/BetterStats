@@ -6,6 +6,7 @@ import PlayerProfile from './pages/PlayerProfile'
 import Leaderboard from './pages/Leaderboard'
 import MatchScorecard from './pages/MatchScorecard'
 import Onboard from './pages/Onboard'
+import ShareCard from './pages/ShareCard'
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/dashboard/:orgId" element={<Dashboard />} />
         <Route path="/players/:playerId" element={<PlayerProfile />} />
+        <Route path="/players/:playerId/share" element={<ShareCard />} />
         <Route path="/leaderboard/:orgId" element={<Leaderboard />} />
         <Route path="/games/:gameId" element={<MatchScorecard />} />
         <Route path="/onboard" element={<Onboard />} />

@@ -5,6 +5,7 @@ from typing import Optional
 import uuid
 
 from app.models.db import Game, Grade, Season, BattingInnings, BowlingSpell, FieldingStat, Player, get_db
+from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -114,6 +115,12 @@ async def get_scorecard(game_id: str, db: AsyncSession = Depends(get_db)):
         for fs, p in field_result.all()
     ]
 
+    # Fall of Wickets
+    fow = await get_game_fall_of_wickets(db, game_id)
+
+    # Partnerships
+    partnerships = await get_game_partnerships(db, game_id)
+
     grade = await db.get(Grade, game.grade_id)
     season = await db.get(Season, grade.season_id) if grade else None
 
@@ -129,4 +136,12 @@ async def get_scorecard(game_id: str, db: AsyncSession = Depends(get_db)):
         "batting": batting,
         "bowling": bowling,
         "fielding": fielding,
+        "fall_of_wickets": [
+            {k: str(v) if isinstance(v, uuid.UUID) else v for k, v in row.items()}
+            for row in fow
+        ],
+        "partnerships": [
+            {k: str(v) if isinstance(v, uuid.UUID) else v for k, v in row.items()}
+            for row in partnerships
+        ],
     }

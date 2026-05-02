@@ -42,6 +42,12 @@ export const api = {
     if (gradeId) params.set('grade_id', gradeId)
     return request(`/players/${playerId}/stats?${params}`)
   },
+  getPlayerDismissals: (playerId) => request(`/players/${playerId}/dismissals`),
+  getPlayerByPosition: (playerId) => request(`/players/${playerId}/by-position`),
+  getPlayerByGrade: (playerId) => request(`/players/${playerId}/by-grade`),
+  getPlayerSeasons: (playerId) => request(`/players/${playerId}/seasons`),
+  getPlayerMilestones: (playerId) => request(`/players/${playerId}/milestones`),
+  getPlayerPartnerships: (playerId) => request(`/players/${playerId}/partnerships`),
   claimPlayer: (playerId) =>
     request(`/players/${playerId}/claim`, { method: 'POST' }),
 

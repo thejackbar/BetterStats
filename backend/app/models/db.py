@@ -85,6 +85,7 @@ class Player(Base):
     batting_innings = relationship("BattingInnings", back_populates="player")
     bowling_spells = relationship("BowlingSpell", back_populates="player")
     fielding_stats = relationship("FieldingStat", back_populates="player")
+    milestones = relationship("Milestone", back_populates="player")
 
 
 class Game(Base):
@@ -103,6 +104,8 @@ class Game(Base):
     batting_innings = relationship("BattingInnings", back_populates="game")
     bowling_spells = relationship("BowlingSpell", back_populates="game")
     fielding_stats = relationship("FieldingStat", back_populates="game")
+    fall_of_wickets = relationship("FallOfWicket", back_populates="game")
+    partnerships = relationship("Partnership", back_populates="game")
 
 
 class BattingInnings(Base):
@@ -154,3 +157,52 @@ class FieldingStat(Base):
 
     game = relationship("Game", back_populates="fielding_stats")
     player = relationship("Player", back_populates="fielding_stats")
+
+
+class FallOfWicket(Base):
+    __tablename__ = "fall_of_wickets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"))
+    innings_number = Column(Integer, nullable=False)
+    wicket_number = Column(Integer, nullable=False)
+    score_at_fall = Column(Integer)
+    overs_at_fall = Column(Numeric(5, 1))
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+
+    game = relationship("Game", back_populates="fall_of_wickets")
+    player = relationship("Player")
+
+
+class Partnership(Base):
+    __tablename__ = "partnerships"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"))
+    innings_number = Column(Integer, nullable=False)
+    wicket_number = Column(Integer, nullable=False)
+    batter1_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    batter2_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    runs = Column(Integer, default=0)
+    balls = Column(Integer)
+    batter1_runs = Column(Integer)
+    batter2_runs = Column(Integer)
+
+    game = relationship("Game", back_populates="partnerships")
+    batter1 = relationship("Player", foreign_keys=[batter1_id])
+    batter2 = relationship("Player", foreign_keys=[batter2_id])
+
+
+class Milestone(Base):
+    __tablename__ = "milestones"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"))
+    game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="SET NULL"), nullable=True)
+    milestone_type = Column(Text, nullable=False)
+    milestone_value = Column(Integer, nullable=False)
+    achieved_at = Column(Date)
+    detail = Column(Text)
+
+    player = relationship("Player", back_populates="milestones")
+    game = relationship("Game")

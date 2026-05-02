@@ -9,9 +9,17 @@ from app.routers.auth import get_current_user
 from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
     get_player_batting_innings, get_player_bowling_spells,
+    get_dismissal_breakdown, get_batting_by_position, get_batting_by_grade,
+    get_season_by_season, get_player_milestones, get_player_partnerships,
 )
 
 router = APIRouter(prefix="/players", tags=["players"])
+
+
+def _str_keys(d: dict | None) -> dict | None:
+    if not d:
+        return d
+    return {k: str(v) if isinstance(v, uuid.UUID) else v for k, v in d.items()}
 
 
 @router.get("")
@@ -61,11 +69,6 @@ async def get_player_stats(
     batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id)
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id)
 
-    def _str_keys(d: dict | None) -> dict | None:
-        if not d:
-            return d
-        return {k: str(v) if isinstance(v, uuid.UUID) else v for k, v in d.items()}
-
     return {
         "player": {"id": str(player.id), "name": player.name, "claimed": player.claimed},
         "career_batting": _str_keys(batting),
@@ -74,6 +77,56 @@ async def get_player_stats(
         "batting_innings": [_str_keys(i) for i in batting_innings],
         "bowling_spells": [_str_keys(s) for s in bowling_spells],
     }
+
+
+@router.get("/{player_id}/dismissals")
+async def get_player_dismissals(player_id: str, db: AsyncSession = Depends(get_db)):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await get_dismissal_breakdown(db, player_id)
+
+
+@router.get("/{player_id}/by-position")
+async def get_player_by_position(player_id: str, db: AsyncSession = Depends(get_db)):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await get_batting_by_position(db, player_id)
+
+
+@router.get("/{player_id}/by-grade")
+async def get_player_by_grade(player_id: str, db: AsyncSession = Depends(get_db)):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await get_batting_by_grade(db, player_id)
+
+
+@router.get("/{player_id}/seasons")
+async def get_player_seasons(player_id: str, db: AsyncSession = Depends(get_db)):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await get_season_by_season(db, player_id)
+
+
+@router.get("/{player_id}/milestones")
+async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depends(get_db)):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    rows = await get_player_milestones(db, player_id)
+    return [_str_keys(r) for r in rows]
+
+
+@router.get("/{player_id}/partnerships")
+async def get_player_partnerships_endpoint(player_id: str, db: AsyncSession = Depends(get_db)):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    rows = await get_player_partnerships(db, player_id)
+    return [_str_keys(r) for r in rows]
 
 
 @router.post("/{player_id}/claim")

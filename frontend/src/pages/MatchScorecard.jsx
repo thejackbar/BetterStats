@@ -151,6 +151,116 @@ function BowlingScorecard({ bowling = [] }) {
   )
 }
 
+function FallOfWicketsSection({ fow = [] }) {
+  if (!fow.length) return null
+
+  const byInnings = fow.reduce((acc, f) => {
+    const k = f.innings_number
+    if (!acc[k]) acc[k] = []
+    acc[k].push(f)
+    return acc
+  }, {})
+
+  return (
+    <div className="card p-5">
+      <h3 className="display-heading text-lg text-white mb-4">FALL OF WICKETS</h3>
+      {Object.entries(byInnings).map(([inn, items]) => (
+        <div key={inn} className="mb-4 last:mb-0">
+          {Object.keys(byInnings).length > 1 && (
+            <p className="section-label mb-2">Innings {inn}</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {items.map((f, i) => (
+              <div key={i} className="bg-navy-800 border border-navy-700 rounded px-3 py-1.5 text-sm">
+                <span className="stat-number text-accent font-bold">{f.score_at_fall ?? '?'}</span>
+                <span className="text-slate-500 mx-1">-</span>
+                <span className="stat-number text-white">{f.wicket_number}</span>
+                {f.player_name && (
+                  <span className="text-slate-400 text-xs ml-2">({f.player_name})</span>
+                )}
+                {f.overs_at_fall != null && (
+                  <span className="text-slate-600 text-xs ml-1">{f.overs_at_fall} ov</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function PartnershipsSection({ partnerships = [] }) {
+  if (!partnerships.length) return null
+
+  const byInnings = partnerships.reduce((acc, p) => {
+    const k = p.innings_number
+    if (!acc[k]) acc[k] = []
+    acc[k].push(p)
+    return acc
+  }, {})
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-4 border-b border-navy-700">
+        <h3 className="display-heading text-lg text-white">PARTNERSHIPS</h3>
+      </div>
+      {Object.entries(byInnings).map(([inn, items]) => (
+        <div key={inn}>
+          {Object.keys(byInnings).length > 1 && (
+            <p className="section-label px-5 pt-4 pb-1">Innings {inn}</p>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-navy-700">
+                  <th className="table-header">Wkt</th>
+                  <th className="table-header">Batters</th>
+                  <th className="table-header text-right">Runs</th>
+                  <th className="table-header text-right">Balls</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((p, i) => (
+                  <tr key={i} className="table-row">
+                    <td className="table-cell stat-number text-slate-400">{p.wicket_number}</td>
+                    <td className="table-cell text-slate-300">
+                      <span className="flex flex-col gap-0.5">
+                        <span>
+                          {p.batter1_name && (
+                            <Link to={`/players/${p.batter1_id}`} className="hover:text-accent transition-colors">
+                              {p.batter1_name}
+                            </Link>
+                          )}
+                          {p.batter1_runs != null && (
+                            <span className="text-slate-500 text-xs ml-1">({p.batter1_runs})</span>
+                          )}
+                        </span>
+                        <span>
+                          {p.batter2_name && (
+                            <Link to={`/players/${p.batter2_id}`} className="hover:text-accent transition-colors">
+                              {p.batter2_name}
+                            </Link>
+                          )}
+                          {p.batter2_runs != null && (
+                            <span className="text-slate-500 text-xs ml-1">({p.batter2_runs})</span>
+                          )}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="table-cell stat-number text-right font-bold text-white">{p.runs ?? '—'}</td>
+                    <td className="table-cell stat-number text-right text-slate-400">{p.balls ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function FieldingSection({ fielding = [] }) {
   const notable = fielding.filter(f => (f.catches + f.run_outs + f.stumpings) > 0)
   if (!notable.length) return null
@@ -213,6 +323,12 @@ export default function MatchScorecard() {
           </div>
           <BowlingScorecard bowling={game.bowling} />
         </div>
+
+        {/* Fall of Wickets */}
+        <FallOfWicketsSection fow={game.fall_of_wickets ?? []} />
+
+        {/* Partnerships */}
+        <PartnershipsSection partnerships={game.partnerships ?? []} />
 
         {/* Fielding */}
         <FieldingSection fielding={game.fielding} />

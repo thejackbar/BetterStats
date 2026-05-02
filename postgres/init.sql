@@ -95,6 +95,42 @@ CREATE TABLE IF NOT EXISTS fielding_stats (
     stumpings INT DEFAULT 0
 );
 
+-- Fall of wickets per innings per game
+CREATE TABLE IF NOT EXISTS fall_of_wickets (
+    id SERIAL PRIMARY KEY,
+    game_id UUID REFERENCES games(id) ON DELETE CASCADE,
+    innings_number INT NOT NULL,        -- 1 or 2
+    wicket_number INT NOT NULL,         -- 1–10
+    score_at_fall INT,
+    overs_at_fall NUMERIC(5,1),
+    player_id UUID REFERENCES players(id) ON DELETE SET NULL
+);
+
+-- Batting partnerships per innings per game
+CREATE TABLE IF NOT EXISTS partnerships (
+    id SERIAL PRIMARY KEY,
+    game_id UUID REFERENCES games(id) ON DELETE CASCADE,
+    innings_number INT NOT NULL,
+    wicket_number INT NOT NULL,         -- partnership for Nth wicket
+    batter1_id UUID REFERENCES players(id) ON DELETE SET NULL,
+    batter2_id UUID REFERENCES players(id) ON DELETE SET NULL,
+    runs INT DEFAULT 0,
+    balls INT,
+    batter1_runs INT,
+    batter2_runs INT
+);
+
+-- Career milestones per player
+CREATE TABLE IF NOT EXISTS milestones (
+    id SERIAL PRIMARY KEY,
+    player_id UUID REFERENCES players(id) ON DELETE CASCADE,
+    game_id UUID REFERENCES games(id) ON DELETE SET NULL,
+    milestone_type TEXT NOT NULL,       -- 'runs', 'wickets', 'matches', 'catches', 'fifty', 'hundred', 'five_for'
+    milestone_value INT NOT NULL,       -- e.g. 500, 1000, 50, 100, 5, 10
+    achieved_at DATE,
+    detail TEXT                         -- human-readable e.g. "500 career runs"
+);
+
 -- Career batting averages
 CREATE OR REPLACE VIEW career_batting AS
 SELECT
@@ -158,6 +194,12 @@ CREATE INDEX IF NOT EXISTS idx_games_played_at ON games(played_at);
 CREATE INDEX IF NOT EXISTS idx_players_org ON players(organisation_id);
 CREATE INDEX IF NOT EXISTS idx_seasons_org ON seasons(organisation_id);
 CREATE INDEX IF NOT EXISTS idx_grades_season ON grades(season_id);
+CREATE INDEX IF NOT EXISTS idx_fow_game ON fall_of_wickets(game_id);
+CREATE INDEX IF NOT EXISTS idx_partnerships_game ON partnerships(game_id);
+CREATE INDEX IF NOT EXISTS idx_partnerships_batter1 ON partnerships(batter1_id);
+CREATE INDEX IF NOT EXISTS idx_partnerships_batter2 ON partnerships(batter2_id);
+CREATE INDEX IF NOT EXISTS idx_milestones_player ON milestones(player_id);
+CREATE INDEX IF NOT EXISTS idx_milestones_type ON milestones(milestone_type);
 
 -- Grant full access to the cricket user (the DB owner in Docker, but needed for local setups)
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO cricket;

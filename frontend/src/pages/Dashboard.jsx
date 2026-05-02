@@ -7,6 +7,26 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import StatCard from '../components/StatCard'
 import clsx from 'clsx'
 
+const SPONSOR_IMAGE = import.meta.env.VITE_SPONSOR_IMAGE || ''
+const SPONSOR_URL = import.meta.env.VITE_SPONSOR_URL || ''
+const SPONSOR_TEXT = import.meta.env.VITE_SPONSOR_TEXT || ''
+
+function SponsorBanner() {
+  if (!SPONSOR_IMAGE && !SPONSOR_TEXT) return null
+  const inner = (
+    <div className="flex items-center justify-center gap-4 py-3 px-5">
+      {SPONSOR_IMAGE && <img src={SPONSOR_IMAGE} alt="Sponsor" className="h-10 object-contain" />}
+      {SPONSOR_TEXT && <span className="text-slate-400 text-sm">{SPONSOR_TEXT}</span>}
+    </div>
+  )
+  return (
+    <div className="card border border-navy-700/50 mb-6">
+      <p className="section-label text-center pt-2 pb-0">PROUDLY SPONSORED BY</p>
+      {SPONSOR_URL ? <a href={SPONSOR_URL} target="_blank" rel="noopener noreferrer">{inner}</a> : inner}
+    </div>
+  )
+}
+
 function ResultBadge({ result, winningTeam }) {
   const cls = result === 'WIN' ? 'badge-win' : result === 'LOSS' ? 'badge-loss' : 'badge-draw'
   return <span className={cls}>{result || 'N/R'}</span>
@@ -115,6 +135,9 @@ export default function Dashboard() {
         <StatCard label="Recent Games" value={games.length} />
         <StatCard label="Grades" value={grades.length} />
       </div>
+
+      {/* Sponsor banner */}
+      <SponsorBanner />
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Recent results */}
