@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-navy-950 text-white antialiased;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-navy-950;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-navy-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-navy-600 rounded-full;
+  }
+}
+
+@layer components {
+  .stat-number {
+    @apply font-mono text-stat tabular-nums;
+  }
+
+  .card {
+    @apply bg-navy-800 border border-navy-700 rounded-xl;
+  }
+
+  .section-label {
+    @apply text-xs font-semibold uppercase tracking-widest text-slate-500;
+  }
+
+  .display-heading {
+    @apply font-display font-bold uppercase tracking-wide;
+  }
+
+  .accent-bar {
+    @apply h-1 w-10 bg-accent rounded-full;
+  }
+
+  .table-header {
+    @apply text-2xs font-semibold uppercase tracking-widest text-slate-500 px-3 py-2;
+  }
+
+  .table-cell {
+    @apply px-3 py-2.5 text-sm text-slate-200;
+  }
+
+  .table-row {
+    @apply border-b border-navy-700 hover:bg-navy-700/40 transition-colors;
+  }
+
+  .btn-primary {
+    @apply bg-accent hover:bg-accent-dark text-navy-950 font-semibold px-4 py-2 rounded-lg transition-colors text-sm;
+  }
+
+  .btn-ghost {
+    @apply text-slate-400 hover:text-white hover:bg-navy-700 px-3 py-1.5 rounded-lg transition-colors text-sm;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-2xs font-semibold uppercase tracking-wide;
+  }
+
+  .badge-win {
+    @apply badge bg-accent/20 text-accent;
+  }
+
+  .badge-loss {
+    @apply badge bg-red-500/20 text-red-400;
+  }
+
+  .badge-draw {
+    @apply badge bg-slate-500/20 text-slate-400;
+  }
+}
+
+/* Recharts overrides */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #1a2540;
+}
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: #131c2e !important;
+  border: 1px solid #243352 !important;
+  border-radius: 8px !important;
+}

@@ -1,0 +1,24 @@
+import { Routes, Route } from 'react-router-dom'
+import Navbar from './components/Navbar'
+import Home from './pages/Home'
+import Dashboard from './pages/Dashboard'
+import PlayerProfile from './pages/PlayerProfile'
+import Leaderboard from './pages/Leaderboard'
+import MatchScorecard from './pages/MatchScorecard'
+import Onboard from './pages/Onboard'
+
+export default function App() {
+  return (
+    <div className="min-h-screen bg-navy-950">
+      <Navbar />
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/dashboard/:orgId" element={<Dashboard />} />
+        <Route path="/players/:playerId" element={<PlayerProfile />} />
+        <Route path="/leaderboard/:orgId" element={<Leaderboard />} />
+        <Route path="/games/:gameId" element={<MatchScorecard />} />
+        <Route path="/onboard" element={<Onboard />} />
+      </Routes>
+    </div>
+  )
+}
