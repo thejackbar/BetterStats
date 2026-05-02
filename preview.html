@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>BetterStats — Cricket Analytics</title>
+<title>BetterStats — Cricket Analytics Preview</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
@@ -26,17 +26,16 @@
     --slate-5:  #64748b;
     --slate-6:  #475569;
     --red:      #f87171;
+    --green:    #4ade80;
   }
 
   html { background: var(--navy-950); color: var(--white); font-family: 'Inter', sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
   body { min-height: 100vh; background: var(--navy-950); }
 
-  /* ── Scrollbar ── */
   ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: var(--navy-900); }
   ::-webkit-scrollbar-thumb { background: var(--navy-600); border-radius: 99px; }
 
-  /* ── Utilities ── */
   .display { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
   .mono    { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
   .label   { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .12em; color: var(--slate-5); }
@@ -64,39 +63,22 @@
   .nav-btn { background: none; border: none; color: var(--slate-4); font-size: 13px; font-weight: 500; padding: 6px 12px; border-radius: 8px; cursor: pointer; transition: all .15s; font-family: 'Inter', sans-serif; }
   .nav-btn:hover, .nav-btn.active { color: var(--white); background: var(--navy-700); }
 
-  /* ── Page containers ── */
-  .page { display: none; max-width: 900px; margin: 0 auto; padding: 24px 16px 60px; }
+  /* ── Pages ── */
+  .page { display: none; max-width: 960px; margin: 0 auto; padding: 24px 16px 60px; }
   .page.active { display: block; }
-
-  /* ── Home ── */
-  .hero { padding: 48px 0 40px; }
-  .hero h1 { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(48px, 12vw, 80px); font-weight: 800; text-transform: uppercase; line-height: .95; margin: 16px 0 20px; }
-  .hero h1 span { color: var(--accent); }
-  .hero p { color: var(--slate-4); font-size: 16px; line-height: 1.6; max-width: 480px; margin-bottom: 28px; }
-  .btn-primary { background: var(--accent); color: var(--navy-950); font-weight: 700; font-size: 13px; padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; transition: background .15s; font-family: 'Inter', sans-serif; }
-  .btn-primary:hover { background: var(--accent-dk); }
-  .btn-outline { background: none; border: 1px solid var(--navy-600); color: var(--white); font-weight: 600; font-size: 13px; padding: 10px 20px; border-radius: 8px; cursor: pointer; transition: all .15s; font-family: 'Inter', sans-serif; }
-  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
-  .hero-btns { display: flex; gap: 10px; flex-wrap: wrap; }
-
-  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 48px; }
-  .feature-card { padding: 24px; }
-  .feature-icon { font-size: 28px; margin-bottom: 12px; }
-  .feature-card h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 700; text-transform: uppercase; margin-bottom: 8px; }
-  .feature-card p { color: var(--slate-4); font-size: 13px; line-height: 1.6; }
 
   /* ── Section headings ── */
   .section-head { margin-bottom: 24px; }
-  .section-head h2 { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(28px, 7vw, 42px); font-weight: 800; text-transform: uppercase; margin-top: 12px; }
+  .section-head h2 { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(28px, 7vw, 48px); font-weight: 800; text-transform: uppercase; margin-top: 10px; }
   .section-head .sub { color: var(--slate-5); font-size: 12px; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
 
-  /* ── Stat cards grid ── */
-  .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-bottom: 24px; }
-  .stat-card { padding: 14px 16px; }
-  .stat-card .stat-val { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; line-height: 1; margin: 6px 0 4px; color: var(--white); }
-  .stat-card.accent { border-color: rgba(22,199,132,.3); background: rgba(22,199,132,.06); }
-  .stat-card.accent .stat-val { color: var(--accent); }
-  .stat-card .stat-sub { font-size: 11px; color: var(--slate-5); }
+  /* ── Buttons ── */
+  .btn-primary { background: var(--accent); color: var(--navy-950); font-weight: 700; font-size: 13px; padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; transition: background .15s; font-family: 'Inter', sans-serif; }
+  .btn-primary:hover { background: var(--accent-dk); }
+  .btn-outline { background: none; border: 1px solid var(--navy-600); color: var(--white); font-weight: 600; font-size: 13px; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all .15s; font-family: 'Inter', sans-serif; }
+  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-ghost { background: none; border: none; color: var(--slate-4); font-size: 13px; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-family: 'Inter', sans-serif; transition: all .15s; }
+  .btn-ghost:hover { color: var(--white); background: var(--navy-700); }
 
   /* ── Tables ── */
   .table-wrap { overflow-x: auto; }
@@ -109,91 +91,187 @@
   .player-link { color: var(--white); font-weight: 600; cursor: pointer; transition: color .15s; }
   .player-link:hover { color: var(--accent); }
   .rank { color: var(--slate-6); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-  .hi-runs { color: var(--amber); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-  .hi-runs-50 { color: var(--accent); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-  .hi-wkts { color: var(--amber); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-  .hi-wkts-3 { color: var(--accent); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
   td.mono-val { font-family: 'JetBrains Mono', monospace; }
+  th.accent-col { color: var(--accent) !important; }
+  td.accent-col { color: var(--accent); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  td.red-col { color: var(--red); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
 
   /* ── Badges ── */
-  .badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+  .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
   .badge-win  { background: rgba(22,199,132,.15); color: var(--accent); }
   .badge-loss { background: rgba(248,113,113,.15); color: var(--red); }
   .badge-draw { background: rgba(100,116,139,.15); color: var(--slate-4); }
-  .badge-milestone { background: rgba(245,158,11,.15); color: var(--amber); }
+  .badge-amber { background: rgba(245,158,11,.15); color: var(--amber); }
+  .badge-slate { background: rgba(100,116,139,.12); color: var(--slate-3); }
 
-  /* ── Tabs ── */
-  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--navy-700); margin-bottom: 0; }
-  .tab { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 10px 18px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--slate-5); cursor: pointer; transition: all .15s; font-family: 'Inter', sans-serif; }
-  .tab:hover { color: var(--white); }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .tab-content { display: none; }
-  .tab-content.active { display: block; }
+  /* ── Card heading ── */
+  .card-head { padding: 14px 16px; border-bottom: 1px solid var(--navy-700); display: flex; align-items: center; justify-content: space-between; }
+  .card-head h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 700; text-transform: uppercase; }
 
-  /* ── Player profile ── */
-  .player-hero { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
-  .player-name { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(36px, 9vw, 60px); font-weight: 800; text-transform: uppercase; line-height: .95; }
-  .milestones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-  .season-sel { background: var(--navy-800); border: 1px solid var(--navy-600); color: var(--white); font-size: 13px; padding: 6px 12px; border-radius: 8px; outline: none; font-family: 'Inter', sans-serif; cursor: pointer; }
-  .season-sel:focus { border-color: var(--accent); }
+  /* ── Main tabs ── */
+  .main-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--navy-700); }
+  .main-tab { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 10px 18px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--slate-5); cursor: pointer; transition: all .15s; font-family: 'Inter', sans-serif; }
+  .main-tab:hover { color: var(--white); }
+  .main-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-  /* ── Mini SVG chart ── */
-  .chart-wrap { margin-top: 4px; }
-  .chart-label { color: var(--slate-5); font-size: 11px; margin-bottom: 8px; }
+  /* ── Sub-tab bar ── */
+  .sub-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 14px; border-bottom: 1px solid var(--navy-700); background: rgba(13,17,23,.4); }
+  .sub-tab { background: none; border: none; color: var(--slate-4); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; padding: 5px 10px; border-radius: 6px; cursor: pointer; transition: all .15s; font-family: 'Inter', sans-serif; }
+  .sub-tab:hover { color: var(--white); background: var(--navy-700); }
+  .sub-tab.active { background: var(--accent); color: var(--navy-950); }
 
-  /* ── Dashboard ── */
-  .dashboard-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-  @media(min-width: 640px) { .dashboard-grid { grid-template-columns: 2fr 1fr; } }
-  .result-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 4px; border-bottom: 1px solid var(--navy-700); cursor: pointer; transition: background .15s; border-radius: 6px; }
+  /* ── Tab content ── */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ══ HOME ══ */
+  .hero { padding: 48px 0 36px; }
+  .hero h1 { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(48px, 12vw, 80px); font-weight: 800; text-transform: uppercase; line-height: .95; margin: 16px 0 20px; }
+  .hero h1 span { color: var(--accent); }
+  .hero p { color: var(--slate-4); font-size: 16px; line-height: 1.6; max-width: 480px; margin-bottom: 28px; }
+  .hero-btns { display: flex; gap: 10px; flex-wrap: wrap; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 40px; }
+  .feature-card { padding: 22px; }
+  .feature-icon { font-size: 26px; margin-bottom: 10px; }
+  .feature-card h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 700; text-transform: uppercase; margin-bottom: 6px; }
+  .feature-card p { color: var(--slate-4); font-size: 13px; line-height: 1.6; }
+
+  /* ══ DASHBOARD ══ */
+  .clickable-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 8px; }
+  @media(min-width:600px){ .clickable-tiles { grid-template-columns: repeat(4, 1fr); } }
+  .stat-tile { padding: 16px; cursor: pointer; transition: all .18s; border-radius: 12px; border: 1px solid var(--navy-700); background: var(--navy-800); }
+  .stat-tile:hover { border-color: rgba(22,199,132,.4); background: rgba(22,199,132,.04); }
+  .stat-tile.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(22,199,132,.18); background: rgba(22,199,132,.06); }
+  .stat-tile .tile-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .12em; color: var(--slate-5); }
+  .stat-tile .tile-val { font-family: 'JetBrains Mono', monospace; font-size: 30px; font-weight: 700; line-height: 1.1; margin: 6px 0 3px; color: var(--white); }
+  .stat-tile.green .tile-val { color: var(--accent); }
+  .stat-tile .tile-sub { font-size: 11px; color: var(--slate-5); }
+
+  .expand-panel { margin-bottom: 16px; border-radius: 12px; border: 1px solid var(--navy-600); background: var(--navy-800); overflow: hidden; display: none; }
+  .expand-panel.active { display: block; }
+  .expand-panel-head { padding: 12px 16px; border-bottom: 1px solid var(--navy-700); display: flex; align-items: center; justify-content: space-between; }
+  .expand-panel-head h4 { font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700; text-transform: uppercase; color: var(--white); }
+
+  .fixtures-list { display: flex; flex-direction: column; gap: 0; }
+  .fixture-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 16px; border-bottom: 1px solid var(--navy-700); }
+  .fixture-row:last-child { border-bottom: none; }
+  .fixture-teams { font-size: 13px; font-weight: 600; color: var(--white); }
+  .fixture-meta { font-size: 11px; color: var(--slate-5); margin-top: 2px; }
+  .fixture-date-badge { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); background: rgba(22,199,132,.1); padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+
+  .milestones-list { display: flex; flex-direction: column; gap: 0; }
+  .milestone-row { padding: 12px 16px; border-bottom: 1px solid var(--navy-700); }
+  .milestone-row:last-child { border-bottom: none; }
+  .milestone-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .milestone-player { font-size: 13px; font-weight: 600; color: var(--white); cursor: pointer; }
+  .milestone-player:hover { color: var(--accent); }
+  .milestone-info { font-size: 12px; color: var(--slate-4); }
+  .milestone-needs { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--amber); }
+  .progress-bar-bg { background: var(--navy-700); border-radius: 99px; height: 5px; overflow: hidden; }
+  .progress-bar-fill { background: var(--accent); height: 100%; border-radius: 99px; transition: width .4s ease; }
+  .progress-bar-fill.amber { background: var(--amber); }
+
+  .dash-grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 16px; }
+  @media(min-width:640px){ .dash-grid { grid-template-columns: 3fr 2fr; } }
+
+  .result-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 16px; border-bottom: 1px solid var(--navy-700); cursor: pointer; transition: background .15s; }
   .result-row:last-child { border-bottom: none; }
   .result-row:hover { background: rgba(26,37,64,.4); }
   .result-teams { font-size: 13px; font-weight: 600; color: var(--white); }
   .result-meta { font-size: 11px; color: var(--slate-5); margin-top: 2px; }
-  .top-list { list-style: none; }
-  .top-list li { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--navy-700); cursor: pointer; }
-  .top-list li:last-child { border-bottom: none; }
-  .top-list .idx { color: var(--slate-6); font-family: 'JetBrains Mono', monospace; font-size: 12px; width: 20px; flex-shrink: 0; }
-  .top-list .pname { font-size: 13px; color: var(--white); transition: color .15s; }
-  .top-list li:hover .pname { color: var(--accent); }
-  .top-list .pval { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--accent); font-size: 14px; }
 
-  /* ── Scorecard ── */
-  .result-banner { border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; border: 1px solid; }
-  .result-banner.win  { background: rgba(22,199,132,.08);  border-color: rgba(22,199,132,.25); }
-  .result-banner.loss { background: rgba(248,113,113,.08); border-color: rgba(248,113,113,.25); }
-  .result-banner.draw { background: rgba(100,116,139,.08); border-color: rgba(100,116,139,.25); }
-  .result-vs { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(20px, 5vw, 30px); font-weight: 800; text-transform: uppercase; }
+  /* ══ PLAYERS PAGE ══ */
+  .search-bar-wrap { position: relative; margin-bottom: 14px; }
+  .search-bar { width: 100%; background: var(--navy-800); border: 1px solid var(--navy-600); color: var(--white); font-size: 14px; padding: 10px 40px 10px 14px; border-radius: 10px; outline: none; font-family: 'Inter', sans-serif; }
+  .search-bar:focus { border-color: var(--accent); }
+  .search-bar::placeholder { color: var(--slate-6); }
+  .search-clear { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--slate-5); cursor: pointer; font-size: 16px; padding: 4px; }
+  .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .filter-sel { background: var(--navy-800); border: 1px solid var(--navy-600); color: var(--white); font-size: 12px; padding: 6px 12px; border-radius: 8px; outline: none; font-family: 'Inter', sans-serif; cursor: pointer; }
+  .filter-sel:focus { border-color: var(--accent); }
+
+  /* ══ PLAYER PROFILE ══ */
+  .player-hero { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+  .player-name { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(36px, 9vw, 60px); font-weight: 800; text-transform: uppercase; line-height: .95; }
+  .player-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+  .activity-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  @media(min-width:600px){ .activity-strip { grid-template-columns: repeat(6, 1fr); } }
+  .activity-badge { padding: 11px 12px; border-radius: 10px; border: 1px solid var(--navy-700); background: var(--navy-800); }
+  .activity-badge .ab-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--slate-5); margin-bottom: 4px; }
+  .activity-badge .ab-val { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; color: var(--white); line-height: 1.2; }
+  .activity-badge .ab-sub { font-size: 10px; color: var(--slate-5); margin-top: 2px; }
+
+  .chasing-section { margin-bottom: 16px; }
+  .chasing-section h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 700; text-transform: uppercase; color: var(--slate-3); margin-bottom: 10px; }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px,1fr)); gap: 10px; margin-bottom: 16px; }
+  .stat-card { padding: 14px 16px; border-radius: 12px; border: 1px solid var(--navy-700); background: var(--navy-800); }
+  .stat-card .stat-val { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; line-height: 1; margin: 5px 0 3px; color: var(--white); }
+  .stat-card.accent { border-color: rgba(22,199,132,.25); background: rgba(22,199,132,.05); }
+  .stat-card.accent .stat-val { color: var(--accent); }
+  .stat-card .stat-sub { font-size: 11px; color: var(--slate-5); }
+
+  /* ══ COMPARE PAGE ══ */
+  .compare-header { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center; margin-bottom: 24px; }
+  .compare-vs { text-align: center; font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 700; color: var(--slate-5); text-transform: uppercase; }
+  .player-search-wrap { position: relative; }
+  .player-search-input { width: 100%; background: var(--navy-800); border: 1px solid var(--navy-600); color: var(--white); font-size: 14px; padding: 10px 14px; border-radius: 10px; outline: none; font-family: 'Inter', sans-serif; text-align: center; }
+  .player-search-input:focus { border-color: var(--accent); }
+  .player-selected { background: var(--navy-800); border: 1px solid rgba(22,199,132,.4); color: var(--accent); font-size: 14px; padding: 10px 14px; border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 17px; text-transform: uppercase; text-align: center; cursor: pointer; }
+
+  .compare-table-wrap { overflow-x: auto; }
+  .compare-table { width: 100%; border-collapse: collapse; }
+  .compare-table th { padding: 10px 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .compare-table th.center { text-align: center; color: var(--slate-5); }
+  .compare-table th.player-col { color: var(--white); font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700; text-transform: uppercase; }
+  .compare-table th.player-col.right { text-align: right; }
+  .compare-table td { padding: 9px 16px; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--slate-3); border-bottom: 1px solid var(--navy-700); }
+  .compare-table tr:last-child td { border-bottom: none; }
+  .compare-table td.metric-name { font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--slate-5); text-align: center; }
+  .compare-table td.winner { color: var(--green); font-weight: 700; background: rgba(74,222,128,.07); }
+  .compare-table td.right { text-align: right; }
+  .compare-table tr.section-divider td { background: var(--navy-700); color: var(--slate-3); font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 7px 16px; }
+
+  /* ══ LEADERBOARD ══ */
+
+  /* ══ SCORECARD ══ */
+  .result-banner { border-radius: 12px; padding: 18px 22px; margin-bottom: 24px; border: 1px solid; }
+  .result-banner.win  { background: rgba(22,199,132,.07);  border-color: rgba(22,199,132,.25); }
+  .result-banner.loss { background: rgba(248,113,113,.07); border-color: rgba(248,113,113,.25); }
+  .result-vs { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(18px, 5vw, 28px); font-weight: 800; text-transform: uppercase; }
   .result-outcome { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 800; }
-  .result-banner.win  .result-outcome { color: var(--accent); }
+  .result-banner.win .result-outcome { color: var(--accent); }
   .result-banner.loss .result-outcome { color: var(--red); }
-  .result-banner.draw .result-outcome { color: var(--slate-4); }
-  tfoot td { font-weight: 700; color: var(--white); font-family: 'JetBrains Mono', monospace; font-size: 15px; }
 
-  /* ── Card headings ── */
-  .card-head { padding: 14px 16px; border-bottom: 1px solid var(--navy-700); display: flex; align-items: center; justify-content: space-between; }
-  .card-head h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 700; text-transform: uppercase; }
-  .card-head .see-all { color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; }
-  .card-head .see-all:hover { text-decoration: underline; }
+  .innings-overview { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .innings-score-card { padding: 14px 18px; border-radius: 10px; border: 1px solid var(--navy-600); background: var(--navy-800); }
+  .innings-score-card .inn-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; color: var(--slate-5); margin-bottom: 4px; }
+  .innings-score-card .inn-team { font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700; text-transform: uppercase; color: var(--white); margin-bottom: 2px; }
+  .innings-score-card .inn-score { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1; }
+  .innings-score-card .inn-overs { font-size: 11px; color: var(--slate-5); margin-top: 2px; }
 
-  /* ── Responsive tweaks ── */
+  .innings-block { margin-bottom: 16px; }
+  .innings-block .card-head { cursor: default; }
+  .bowling-toggle { font-size: 11px; font-weight: 600; color: var(--accent); cursor: pointer; background: none; border: none; font-family: 'Inter', sans-serif; }
+  .bowling-toggle:hover { text-decoration: underline; }
+  .bowling-section { display: none; border-top: 1px solid var(--navy-700); }
+  .bowling-section.open { display: block; }
+
+  tfoot td { font-weight: 700; color: var(--white); font-family: 'JetBrains Mono', monospace; font-size: 14px; }
+
   @media (max-width: 480px) {
-    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+    .clickable-tiles { grid-template-columns: repeat(2, 1fr); }
+    .activity-strip { grid-template-columns: repeat(3, 1fr); }
     th, td { padding: 8px 8px; }
+    .compare-header { grid-template-columns: 1fr; }
+    .compare-vs { display: none; }
   }
-
-  /* ── Scrollable side lists ── */
-  .scroll-list { max-height: 200px; overflow-y: auto; padding: 8px 16px; }
-  .scroll-list a { display: block; color: var(--slate-3); font-size: 13px; padding: 5px 0; cursor: pointer; transition: color .15s; }
-  .scroll-list a:hover { color: var(--accent); }
-
-  /* ── Two chart panels ── */
-  .chart-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
-  @media(max-width:480px){ .chart-panels { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 
-<!-- ═══════════════════ NAV ═══════════════════ -->
+<!-- ══════════════════════ NAV ══════════════════════ -->
 <nav>
   <div class="logo" onclick="showPage('home')">
     <div class="logo-icon">
@@ -201,21 +279,22 @@
         <circle cx="8" cy="8" r="6" fill="#070b14"/>
         <line x1="8" y1="2" x2="8" y2="14" stroke="#070b14" stroke-width="1.5"/>
         <line x1="2" y1="8" x2="14" y2="8" stroke="#070b14" stroke-width="1.5"/>
-        <circle cx="8" cy="8" r="6" stroke="#070b14" stroke-width="1" fill="none"/>
       </svg>
     </div>
     <div class="logo-text">Better<span>Stats</span></div>
   </div>
   <div class="nav-links">
     <button class="nav-btn active" onclick="showPage('home')">Home</button>
-    <button class="nav-btn" onclick="showPage('dashboard')">Club</button>
-    <button class="nav-btn" onclick="showPage('player')">Player</button>
-    <button class="nav-btn" onclick="showPage('leaderboard')">Board</button>
+    <button class="nav-btn" onclick="showPage('dashboard')">Dashboard</button>
+    <button class="nav-btn" onclick="showPage('players')">Players</button>
+    <button class="nav-btn" onclick="showPage('player')">Profile</button>
+    <button class="nav-btn" onclick="showPage('compare')">Compare</button>
+    <button class="nav-btn" onclick="showPage('leaderboard')">Leaderboard</button>
     <button class="nav-btn" onclick="showPage('scorecard')">Match</button>
   </div>
 </nav>
 
-<!-- ═══════════════════ HOME ═══════════════════ -->
+<!-- ══════════════════════ HOME ══════════════════════ -->
 <div class="page active" id="page-home">
   <div class="hero">
     <div class="accent-bar"></div>
@@ -223,262 +302,403 @@
     <p>The cricket statistics platform built for players. Career averages, innings history, and live match data — all powered by PlayHQ. No manual exports, ever.</p>
     <div class="hero-btns">
       <button class="btn-primary" onclick="showPage('dashboard')">View Club Dashboard</button>
-      <button class="btn-outline" onclick="showPage('player')">Player Profile</button>
+      <button class="btn-outline" onclick="showPage('compare')">Compare Players</button>
     </div>
   </div>
 
   <div class="features">
     <div class="card feature-card">
       <div class="feature-icon">📊</div>
-      <h3>Complete Career Stats</h3>
-      <p>Every innings, every bowling spell, tracked automatically from PlayHQ. Batting average, strike rate, economy — all computed for you.</p>
-    </div>
-    <div class="card feature-card">
-      <div class="feature-icon">⚡</div>
-      <h3>Live Match Updates</h3>
-      <p>PlayHQ webhooks push game updates in real time. Stats refresh automatically after every match — zero manual input.</p>
+      <h3>Club Dashboard</h3>
+      <p>Win rate, total runs, wickets, upcoming fixtures and milestones — all in one clickable dashboard with expandable breakdowns.</p>
     </div>
     <div class="card feature-card">
       <div class="feature-icon">🏏</div>
       <h3>Player Profiles</h3>
-      <p>Claim your profile, track your form, share your season highlights. A home page for every cricketer in the club.</p>
+      <p>Activity strip showing last game, last wicket, career 6s and 4s. Progress bars tracking the next milestone your player is chasing.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">⚔️</div>
+      <h3>Player Comparison</h3>
+      <p>Search any two players and see batting, bowling and fielding stats side-by-side with the superior value highlighted green.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">🏆</div>
+      <h3>Leaderboard</h3>
+      <p>Sort batting by runs, average, strike rate, sixes, fours or ducks. Sort bowling by wickets, economy, best spell or five-fors.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">📋</div>
+      <h3>Full Scorecards</h3>
+      <p>Both innings shown together. Every player name links to their profile. Opposition team clearly labelled with scorecard.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">⚡</div>
+      <h3>PlayHQ Powered</h3>
+      <p>Onboard any club with a single API call. Stats sync automatically after every match — zero manual input required.</p>
     </div>
   </div>
 
-  <div style="margin-top:48px; padding: 32px 24px; background: var(--navy-800); border: 1px solid var(--navy-700); border-radius:12px; text-align:center;">
-    <h2 class="display" style="font-size:28px; margin-bottom:8px;">Riverside Cricket Club</h2>
-    <p style="color:var(--slate-4); font-size:13px; margin-bottom:20px;">2025–26 Season · A Grade Saturday</p>
-    <div style="display:flex; justify-content:center; gap:32px; flex-wrap:wrap; margin-bottom:20px;">
-      <div><div class="label">Players</div><div class="mono" style="font-size:28px; font-weight:700; color:var(--accent)">24</div></div>
-      <div><div class="label">Games</div><div class="mono" style="font-size:28px; font-weight:700">14</div></div>
-      <div><div class="label">Wins</div><div class="mono" style="font-size:28px; font-weight:700">9</div></div>
-      <div><div class="label">Run rate</div><div class="mono" style="font-size:28px; font-weight:700">5.8</div></div>
-    </div>
-    <button class="btn-primary" onclick="showPage('dashboard')">Open Dashboard →</button>
+  <div style="margin-top:40px; padding:28px 24px; background:var(--navy-800); border:1px solid var(--navy-700); border-radius:12px; text-align:center;">
+    <p class="label" style="margin-bottom:6px;">Applecross Cricket Club · Powered by PlayHQ</p>
+    <h2 class="display" style="font-size:30px; margin-bottom:6px;">Ready to connect</h2>
+    <p style="color:var(--slate-4); font-size:13px; margin-bottom:20px;">Onboard with a single POST to <code style="background:var(--navy-700);padding:2px 6px;border-radius:4px;font-size:12px;">/api/organisations/onboard</code></p>
+    <button class="btn-primary" onclick="showPage('dashboard')">Open Demo Dashboard →</button>
   </div>
 </div>
 
-<!-- ═══════════════════ DASHBOARD ═══════════════════ -->
+<!-- ══════════════════════ DASHBOARD ══════════════════════ -->
 <div class="page" id="page-dashboard">
   <div class="section-head">
     <div class="accent-bar"></div>
-    <h2>Riverside CC</h2>
-    <div class="sub">2025–26 · A Grade Saturday</div>
+    <p class="label" style="margin-top:8px;">Riverside Cricket Club</p>
+    <h2>Club Dashboard</h2>
+    <div class="sub">2025–26 Season · A Grade Saturday</div>
   </div>
 
-  <div class="stat-grid">
-    <div class="card stat-card"><div class="label">Players</div><div class="stat-val">24</div></div>
-    <div class="card stat-card accent"><div class="label">Runs scored</div><div class="stat-val">3,841</div></div>
-    <div class="card stat-card"><div class="label">Wickets</div><div class="stat-val">162</div></div>
-    <div class="card stat-card"><div class="label">Wins</div><div class="stat-val">9</div></div>
-    <div class="card stat-card"><div class="label">Losses</div><div class="stat-val">3</div></div>
-    <div class="card stat-card"><div class="label">Draws</div><div class="stat-val">2</div></div>
+  <!-- Season / grade filter row -->
+  <div class="filter-row" style="margin-bottom:16px;">
+    <select class="filter-sel"><option>2025–26 Season</option><option>2024–25 Season</option><option>All Time</option></select>
+    <select class="filter-sel"><option>All Grades</option><option>A Grade</option><option>B Grade</option></select>
   </div>
 
-  <div class="dashboard-grid">
-    <!-- Recent results -->
+  <!-- Clickable stat tiles -->
+  <div class="clickable-tiles">
+    <div class="stat-tile green active" onclick="togglePanel('panel-batting', this)">
+      <div class="tile-label">Win Rate</div>
+      <div class="tile-val">64%</div>
+      <div class="tile-sub">9W · 3L · 2D of 14</div>
+    </div>
+    <div class="stat-tile" onclick="togglePanel('panel-runs', this)">
+      <div class="tile-label">Club Runs</div>
+      <div class="tile-val">3,841</div>
+      <div class="tile-sub">avg 274/inns</div>
+    </div>
+    <div class="stat-tile" onclick="togglePanel('panel-wickets', this)">
+      <div class="tile-label">Club Wickets</div>
+      <div class="tile-val">162</div>
+      <div class="tile-sub">avg 18.4 runs/wkt</div>
+    </div>
+    <div class="stat-tile" onclick="togglePanel('panel-players', this)">
+      <div class="tile-label">Players</div>
+      <div class="tile-val">24</div>
+      <div class="tile-sub">used this season</div>
+    </div>
+  </div>
+
+  <!-- Expandable panels -->
+  <div class="expand-panel active" id="panel-batting">
+    <div class="expand-panel-head">
+      <h4>Results Breakdown</h4>
+      <span class="label">2025–26</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Opponent</th><th>Grade</th><th>Date</th><th class="r">Result</th><th class="r">Score For</th><th class="r">Score Against</th></tr></thead>
+        <tbody>
+          <tr><td class="player-link" onclick="showPage('scorecard')">Bayside CC</td><td style="color:var(--slate-5)">A Grade</td><td style="color:var(--slate-5)">26 Apr</td><td class="r"><span class="badge badge-win">Win</span></td><td class="r mono-val" style="color:var(--accent)">247/7</td><td class="r mono-val">200/10</td></tr>
+          <tr><td class="player-link" onclick="showPage('scorecard')">Northside CC</td><td style="color:var(--slate-5)">A Grade</td><td style="color:var(--slate-5)">12 Apr</td><td class="r"><span class="badge badge-win">Win</span></td><td class="r mono-val" style="color:var(--accent)">218/8</td><td class="r mono-val">195/10</td></tr>
+          <tr><td class="player-link">Eastbank CC</td><td style="color:var(--slate-5)">A Grade</td><td style="color:var(--slate-5)">5 Apr</td><td class="r"><span class="badge badge-loss">Loss</span></td><td class="r mono-val">167/10</td><td class="r mono-val" style="color:var(--red)">201/6</td></tr>
+          <tr><td class="player-link">Hillside CC</td><td style="color:var(--slate-5)">A Grade</td><td style="color:var(--slate-5)">29 Mar</td><td class="r"><span class="badge badge-win">Win</span></td><td class="r mono-val" style="color:var(--accent)">289/5</td><td class="r mono-val">182/10</td></tr>
+          <tr><td class="player-link">Central CC</td><td style="color:var(--slate-5)">A Grade</td><td style="color:var(--slate-5)">22 Mar</td><td class="r"><span class="badge badge-draw">Draw</span></td><td class="r mono-val">198/6</td><td class="r mono-val">198/7</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="expand-panel" id="panel-runs">
+    <div class="expand-panel-head"><h4>Top Run Scorers</h4><span class="label">Season</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Player</th><th class="r">Inn</th><th class="r accent-col">Runs</th><th class="r">Avg</th><th class="r">HS</th><th class="r">50s</th><th class="r">100s</th></tr></thead>
+        <tbody>
+          <tr><td class="rank">1</td><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">13</td><td class="r accent-col">680</td><td class="r mono-val">52.4</td><td class="r mono-val">142*</td><td class="r mono-val">5</td><td class="r mono-val" style="color:var(--amber);font-weight:700">2</td></tr>
+          <tr><td class="rank">2</td><td><span class="player-link">T. Wilson</span></td><td class="r mono-val">12</td><td class="r accent-col">512</td><td class="r mono-val">42.7</td><td class="r mono-val">118</td><td class="r mono-val">3</td><td class="r mono-val" style="color:var(--amber);font-weight:700">1</td></tr>
+          <tr><td class="rank">3</td><td><span class="player-link">R. Davis</span></td><td class="r mono-val">13</td><td class="r accent-col">447</td><td class="r mono-val">37.3</td><td class="r mono-val">89</td><td class="r mono-val">4</td><td class="r mono-val">—</td></tr>
+          <tr><td class="rank">4</td><td><span class="player-link">S. Parker</span></td><td class="r mono-val">11</td><td class="r accent-col">389</td><td class="r mono-val">38.9</td><td class="r mono-val">94*</td><td class="r mono-val">3</td><td class="r mono-val">—</td></tr>
+          <tr><td class="rank">5</td><td><span class="player-link">M. Thompson</span></td><td class="r mono-val">12</td><td class="r accent-col">341</td><td class="r mono-val">31.0</td><td class="r mono-val">76</td><td class="r mono-val">2</td><td class="r mono-val">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="expand-panel" id="panel-wickets">
+    <div class="expand-panel-head"><h4>Top Wicket Takers</h4><span class="label">Season</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Player</th><th class="r">G</th><th class="r">Overs</th><th class="r accent-col">Wkts</th><th class="r">Avg</th><th class="r">Econ</th><th class="r">Best</th><th class="r">5W</th></tr></thead>
+        <tbody>
+          <tr><td class="rank">1</td><td><span class="player-link">A. Chen</span></td><td class="r mono-val">12</td><td class="r mono-val">98</td><td class="r accent-col">24</td><td class="r mono-val">14.2</td><td class="r mono-val">3.47</td><td class="r mono-val" style="color:var(--amber);font-weight:700">5/28</td><td class="r mono-val" style="color:var(--amber);font-weight:700">1</td></tr>
+          <tr><td class="rank">2</td><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">11</td><td class="r mono-val">84</td><td class="r accent-col">18</td><td class="r mono-val">19.4</td><td class="r mono-val">4.82</td><td class="r mono-val" style="color:var(--amber);font-weight:700">5/31</td><td class="r mono-val" style="color:var(--amber);font-weight:700">1</td></tr>
+          <tr><td class="rank">3</td><td><span class="player-link">K. Roberts</span></td><td class="r mono-val">10</td><td class="r mono-val">76</td><td class="r accent-col">15</td><td class="r mono-val">21.3</td><td class="r mono-val">4.20</td><td class="r mono-val">4/32</td><td class="r mono-val" style="color:var(--slate-5)">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="expand-panel" id="panel-players">
+    <div class="expand-panel-head"><h4>All Players</h4><span class="label">24 this season</span></div>
+    <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(160px,1fr)); gap:0; padding: 4px 8px;">
+      <div style="padding:8px 8px;"><span class="player-link" onclick="showPage('player')">J. Mitchell</span><span style="font-size:11px;color:var(--slate-5);margin-left:8px;">680r / 18w</span></div>
+      <div style="padding:8px 8px;"><span class="player-link">T. Wilson</span><span style="font-size:11px;color:var(--slate-5);margin-left:8px;">512r</span></div>
+      <div style="padding:8px 8px;"><span class="player-link">R. Davis</span><span style="font-size:11px;color:var(--slate-5);margin-left:8px;">447r</span></div>
+      <div style="padding:8px 8px;"><span class="player-link">S. Parker</span><span style="font-size:11px;color:var(--slate-5);margin-left:8px;">389r</span></div>
+      <div style="padding:8px 8px;"><span class="player-link">M. Thompson</span><span style="font-size:11px;color:var(--slate-5);margin-left:8px;">341r</span></div>
+      <div style="padding:8px 8px;"><span class="player-link">A. Chen</span><span style="font-size:11px;color:var(--slate-5);margin-left:8px;">24w</span></div>
+      <div style="padding:8px 8px;"><span class="player-link">K. Roberts</span><span style="font-size:11px;color:var(--slate-5);margin-left:8px;">15w</span></div>
+      <div style="padding:8px 8px;"><span class="player-link">B. Harris</span><span style="font-size:11px;color:var(--slate-5);margin-left:8px;">298r</span></div>
+    </div>
+  </div>
+
+  <!-- Dashboard lower grid: upcoming fixtures + milestones -->
+  <div class="dash-grid">
+    <!-- Upcoming fixtures -->
     <div class="card">
-      <div class="card-head"><h3>Recent Results</h3><span class="label">Last 6</span></div>
-      <div style="padding: 4px 12px;">
-        <div class="result-row" onclick="showPage('scorecard')">
+      <div class="card-head"><h3>Upcoming Fixtures</h3><span class="label">Next 3</span></div>
+      <div class="fixtures-list">
+        <div class="fixture-row">
           <div>
-            <div class="result-teams">Riverside CC vs Bayside CC</div>
-            <div class="result-meta">A Grade · 26 Apr 2026</div>
+            <div class="fixture-teams">Riverside CC vs Westside CC</div>
+            <div class="fixture-meta">A Grade · Riverside Cricket Oval</div>
           </div>
-          <span class="badge badge-win">Win</span>
+          <div class="fixture-date-badge">10 May</div>
         </div>
-        <div class="result-row" onclick="showPage('scorecard')">
+        <div class="fixture-row">
           <div>
-            <div class="result-teams">Northside CC vs Riverside CC</div>
-            <div class="result-meta">A Grade · 12 Apr 2026</div>
+            <div class="fixture-teams">Sunnybank CC vs Riverside CC</div>
+            <div class="fixture-meta">A Grade · Sunnybank Reserve</div>
           </div>
-          <span class="badge badge-win">Win</span>
+          <div class="fixture-date-badge">17 May</div>
         </div>
-        <div class="result-row" onclick="showPage('scorecard')">
+        <div class="fixture-row">
           <div>
-            <div class="result-teams">Riverside CC vs Eastbank CC</div>
-            <div class="result-meta">A Grade · 5 Apr 2026</div>
+            <div class="fixture-teams">Riverside CC vs Bayside CC</div>
+            <div class="fixture-meta">A Grade · Final · Riverside Oval</div>
           </div>
-          <span class="badge badge-loss">Loss</span>
-        </div>
-        <div class="result-row" onclick="showPage('scorecard')">
-          <div>
-            <div class="result-teams">Riverside CC vs Hillside CC</div>
-            <div class="result-meta">A Grade · 29 Mar 2026</div>
-          </div>
-          <span class="badge badge-win">Win</span>
-        </div>
-        <div class="result-row" onclick="showPage('scorecard')">
-          <div>
-            <div class="result-teams">Central CC vs Riverside CC</div>
-            <div class="result-meta">A Grade · 22 Mar 2026</div>
-          </div>
-          <span class="badge badge-draw">Draw</span>
-        </div>
-        <div class="result-row" onclick="showPage('scorecard')">
-          <div>
-            <div class="result-teams">Riverside CC vs Lakeside CC</div>
-            <div class="result-meta">A Grade · 15 Mar 2026</div>
-          </div>
-          <span class="badge badge-win">Win</span>
+          <div class="fixture-date-badge">24 May</div>
         </div>
       </div>
     </div>
 
-    <!-- Right column -->
-    <div style="display:flex; flex-direction:column; gap:16px;">
-      <div class="card">
-        <div class="card-head"><h3>Top Batters</h3><span class="see-all" onclick="showPage('leaderboard')">See all →</span></div>
-        <ul class="top-list" style="padding: 6px 16px;">
-          <li onclick="showPage('player')"><span class="idx">1</span><span class="pname">J. Mitchell</span><span class="pval">680</span></li>
-          <li><span class="idx">2</span><span class="pname">T. Wilson</span><span class="pval">512</span></li>
-          <li><span class="idx">3</span><span class="pname">R. Davis</span><span class="pval">447</span></li>
-          <li><span class="idx">4</span><span class="pname">S. Parker</span><span class="pval">389</span></li>
-          <li><span class="idx">5</span><span class="pname">M. Thompson</span><span class="pval">341</span></li>
-        </ul>
-      </div>
-      <div class="card">
-        <div class="card-head"><h3>Top Bowlers</h3><span class="see-all" onclick="showPage('leaderboard')">See all →</span></div>
-        <ul class="top-list" style="padding: 6px 16px;">
-          <li><span class="idx">1</span><span class="pname">A. Chen</span><span class="pval">24w</span></li>
-          <li onclick="showPage('player')"><span class="idx">2</span><span class="pname">J. Mitchell</span><span class="pval">18w</span></li>
-          <li><span class="idx">3</span><span class="pname">K. Roberts</span><span class="pval">15w</span></li>
-          <li><span class="idx">4</span><span class="pname">D. Singh</span><span class="pval">13w</span></li>
-          <li><span class="idx">5</span><span class="pname">L. Brown</span><span class="pval">11w</span></li>
-        </ul>
+    <!-- Upcoming milestones -->
+    <div class="card">
+      <div class="card-head"><h3>Milestones</h3><span class="label">Nearest first</span></div>
+      <div class="milestones-list">
+        <div class="milestone-row">
+          <div class="milestone-top">
+            <span class="milestone-player" onclick="showPage('player')">J. Mitchell</span>
+            <span class="milestone-needs">needs 20r</span>
+          </div>
+          <div style="font-size:11px;color:var(--slate-5);margin-bottom:5px;">700 career runs</div>
+          <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:97%"></div></div>
+        </div>
+        <div class="milestone-row">
+          <div class="milestone-top">
+            <span class="milestone-player">A. Chen</span>
+            <span class="milestone-needs">needs 1w</span>
+          </div>
+          <div style="font-size:11px;color:var(--slate-5);margin-bottom:5px;">25 career wickets</div>
+          <div class="progress-bar-bg"><div class="progress-bar-fill amber" style="width:96%"></div></div>
+        </div>
+        <div class="milestone-row">
+          <div class="milestone-top">
+            <span class="milestone-player">T. Wilson</span>
+            <span class="milestone-needs">needs 38r</span>
+          </div>
+          <div style="font-size:11px;color:var(--slate-5);margin-bottom:5px;">550 career runs</div>
+          <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:93%"></div></div>
+        </div>
+        <div class="milestone-row">
+          <div class="milestone-top">
+            <span class="milestone-player">K. Roberts</span>
+            <span class="milestone-needs">needs 10w</span>
+          </div>
+          <div style="font-size:11px;color:var(--slate-5);margin-bottom:5px;">25 career wickets</div>
+          <div class="progress-bar-bg"><div class="progress-bar-fill amber" style="width:60%"></div></div>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ═══════════════════ PLAYER PROFILE ═══════════════════ -->
+<!-- ══════════════════════ PLAYERS LIST ══════════════════════ -->
+<div class="page" id="page-players">
+  <div class="section-head">
+    <div class="accent-bar"></div>
+    <p class="label" style="margin-top:8px;">Riverside Cricket Club</p>
+    <h2>Players</h2>
+  </div>
+
+  <!-- Search + filters -->
+  <div class="search-bar-wrap">
+    <input class="search-bar" type="text" placeholder="Search players…" oninput="filterPlayers(this.value)" />
+    <button class="search-clear" onclick="clearSearch()">✕</button>
+  </div>
+  <div class="filter-row">
+    <select class="filter-sel"><option>2025–26 Season</option><option>2024–25 Season</option><option>Career</option></select>
+    <select class="filter-sel"><option>All Grades</option><option>A Grade</option><option>B Grade</option></select>
+  </div>
+
+  <div class="card" style="overflow:hidden;">
+    <div class="table-wrap">
+      <table id="players-table">
+        <thead>
+          <tr>
+            <th>Player</th>
+            <th class="r">Inn</th>
+            <th class="r">Runs</th>
+            <th class="r">Avg</th>
+            <th class="r">SR</th>
+            <th class="r">HS</th>
+            <th class="r">50s</th>
+            <th class="r">100s</th>
+            <th class="r">6s</th>
+          </tr>
+        </thead>
+        <tbody id="players-tbody">
+          <tr data-name="j. mitchell"><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">13</td><td class="r mono-val" style="color:var(--accent);font-weight:700">680</td><td class="r mono-val">52.4</td><td class="r mono-val">84.3</td><td class="r mono-val">142*</td><td class="r mono-val">5</td><td class="r mono-val" style="color:var(--amber);font-weight:700">2</td><td class="r mono-val">12</td></tr>
+          <tr data-name="t. wilson"><td><span class="player-link">T. Wilson</span></td><td class="r mono-val">12</td><td class="r mono-val" style="color:var(--accent);font-weight:700">512</td><td class="r mono-val">42.7</td><td class="r mono-val">76.2</td><td class="r mono-val">118</td><td class="r mono-val">3</td><td class="r mono-val" style="color:var(--amber);font-weight:700">1</td><td class="r mono-val">6</td></tr>
+          <tr data-name="r. davis"><td><span class="player-link">R. Davis</span></td><td class="r mono-val">13</td><td class="r mono-val" style="color:var(--accent);font-weight:700">447</td><td class="r mono-val">37.3</td><td class="r mono-val">72.8</td><td class="r mono-val">89</td><td class="r mono-val">4</td><td class="r mono-val">—</td><td class="r mono-val">4</td></tr>
+          <tr data-name="s. parker"><td><span class="player-link">S. Parker</span></td><td class="r mono-val">11</td><td class="r mono-val" style="color:var(--accent);font-weight:700">389</td><td class="r mono-val">38.9</td><td class="r mono-val">81.0</td><td class="r mono-val">94*</td><td class="r mono-val">3</td><td class="r mono-val">—</td><td class="r mono-val">3</td></tr>
+          <tr data-name="m. thompson"><td><span class="player-link">M. Thompson</span></td><td class="r mono-val">12</td><td class="r mono-val" style="color:var(--accent);font-weight:700">341</td><td class="r mono-val">31.0</td><td class="r mono-val">68.4</td><td class="r mono-val">76</td><td class="r mono-val">2</td><td class="r mono-val">—</td><td class="r mono-val">2</td></tr>
+          <tr data-name="b. harris"><td><span class="player-link">B. Harris</span></td><td class="r mono-val">10</td><td class="r mono-val" style="color:var(--accent);font-weight:700">298</td><td class="r mono-val">33.1</td><td class="r mono-val">74.9</td><td class="r mono-val">71</td><td class="r mono-val">2</td><td class="r mono-val">—</td><td class="r mono-val">5</td></tr>
+          <tr data-name="p. edwards"><td><span class="player-link">P. Edwards</span></td><td class="r mono-val">11</td><td class="r mono-val" style="color:var(--accent);font-weight:700">267</td><td class="r mono-val">24.3</td><td class="r mono-val">63.2</td><td class="r mono-val">68</td><td class="r mono-val">1</td><td class="r mono-val">—</td><td class="r mono-val">1</td></tr>
+          <tr data-name="a. chen"><td><span class="player-link">A. Chen</span></td><td class="r mono-val">9</td><td class="r mono-val" style="color:var(--accent);font-weight:700">201</td><td class="r mono-val">22.3</td><td class="r mono-val">58.7</td><td class="r mono-val">54</td><td class="r mono-val">1</td><td class="r mono-val">—</td><td class="r mono-val">3</td></tr>
+          <tr data-name="k. roberts"><td><span class="player-link">K. Roberts</span></td><td class="r mono-val">9</td><td class="r mono-val" style="color:var(--accent);font-weight:700">187</td><td class="r mono-val">20.8</td><td class="r mono-val">61.3</td><td class="r mono-val">48</td><td class="r mono-val">—</td><td class="r mono-val">—</td><td class="r mono-val">2</td></tr>
+          <tr data-name="d. singh"><td><span class="player-link">D. Singh</span></td><td class="r mono-val">8</td><td class="r mono-val" style="color:var(--accent);font-weight:700">143</td><td class="r mono-val">17.9</td><td class="r mono-val">55.0</td><td class="r mono-val">41</td><td class="r mono-val">—</td><td class="r mono-val">—</td><td class="r mono-val">1</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ PLAYER PROFILE ══════════════════════ -->
 <div class="page" id="page-player">
   <div class="player-hero">
     <div>
-      <div class="accent-bar" style="margin-bottom:12px;"></div>
+      <div class="accent-bar" style="margin-bottom:10px;"></div>
       <div class="player-name">James<br>Mitchell</div>
-      <div class="milestones">
-        <span class="badge badge-milestone">2 centuries</span>
+      <div class="player-badges">
+        <span class="badge badge-amber">2 centuries</span>
         <span class="badge badge-win">5 fifties</span>
-        <span class="badge" style="background:rgba(100,116,139,.15);color:var(--slate-3)">18 wickets</span>
+        <span class="badge badge-slate">18 wickets</span>
       </div>
     </div>
-    <select class="season-sel">
-      <option>Career</option>
-      <option selected>2025–26</option>
-      <option>2024–25</option>
-      <option>2023–24</option>
-    </select>
-  </div>
-
-  <!-- Career summary bar -->
-  <div class="stat-grid" style="grid-template-columns: repeat(auto-fill, minmax(100px,1fr));">
-    <div class="card stat-card"><div class="label">Innings</div><div class="stat-val">38</div></div>
-    <div class="card stat-card accent"><div class="label">Runs</div><div class="stat-val">1,624</div></div>
-    <div class="card stat-card"><div class="label">Average</div><div class="stat-val">52.4</div></div>
-    <div class="card stat-card"><div class="label">High Score</div><div class="stat-val">142*</div></div>
-    <div class="card stat-card"><div class="label">Strike Rate</div><div class="stat-val">84.3</div></div>
-    <div class="card stat-card"><div class="label">Wickets</div><div class="stat-val">42</div></div>
-    <div class="card stat-card"><div class="label">Economy</div><div class="stat-val">4.82</div></div>
-  </div>
-
-  <!-- Charts -->
-  <div class="chart-panels">
-    <div class="card" style="padding:16px;">
-      <h3 class="display" style="font-size:15px; margin-bottom:12px;">Form — Last 10 Innings</h3>
-      <div class="chart-label">Runs per innings · avg line at 52</div>
-      <svg width="100%" height="110" viewBox="0 0 280 110" preserveAspectRatio="none" style="display:block;">
-        <!-- Grid -->
-        <line x1="0" y1="22" x2="280" y2="22" stroke="#1a2540" stroke-width="1"/>
-        <line x1="0" y1="55" x2="280" y2="55" stroke="#1a2540" stroke-width="1"/>
-        <line x1="0" y1="88" x2="280" y2="88" stroke="#1a2540" stroke-width="1"/>
-        <!-- Average line -->
-        <line x1="0" y1="50" x2="280" y2="50" stroke="#16c784" stroke-width="1" stroke-dasharray="5 4" opacity=".4"/>
-        <!-- Data line: runs [34, 78, 12, 95, 142, 28, 61, 44, 83, 19] mapped to 0-150 range, height 110 -->
-        <polyline
-          points="0,86 31,53 62,99 93,37 124,4 155,91 186,60 217,73 248,42 280,95"
-          fill="none" stroke="#16c784" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <!-- Dots -->
-        <circle cx="0"   cy="86" r="3" fill="#16c784"/>
-        <circle cx="31"  cy="53" r="3" fill="#16c784"/>
-        <circle cx="62"  cy="99" r="3" fill="#16c784"/>
-        <circle cx="93"  cy="37" r="3" fill="#16c784"/>
-        <circle cx="124" cy="4"  r="4" fill="#f59e0b"/>
-        <circle cx="155" cy="91" r="3" fill="#16c784"/>
-        <circle cx="186" cy="60" r="3" fill="#16c784"/>
-        <circle cx="217" cy="73" r="3" fill="#16c784"/>
-        <circle cx="248" cy="42" r="3" fill="#16c784"/>
-        <circle cx="280" cy="95" r="3" fill="#16c784"/>
-      </svg>
+    <div>
+      <select class="filter-sel" style="margin-bottom:8px;display:block;">
+        <option>Career</option>
+        <option selected>2025–26</option>
+        <option>2024–25</option>
+      </select>
+      <button class="btn-outline" style="width:100%;font-size:12px;" onclick="showPage('compare')">Compare →</button>
     </div>
-    <div class="card" style="padding:16px;">
-      <h3 class="display" style="font-size:15px; margin-bottom:12px;">Runs by Innings</h3>
-      <div class="chart-label">Last 10 · green=50+, gold=100+</div>
-      <svg width="100%" height="110" viewBox="0 0 280 110" preserveAspectRatio="none" style="display:block;">
-        <line x1="0" y1="88" x2="280" y2="88" stroke="#1a2540" stroke-width="1"/>
-        <!-- Bars for: 34,78,12,95,142,28,61,44,83,19 — heights scaled to 100px max -->
-        <rect x="4"   y="63" width="22" height="25" rx="2" fill="#243352"/>
-        <rect x="32"  y="30" width="22" height="58" rx="2" fill="#16c784"/>
-        <rect x="60"  y="79" width="22" height="9"  rx="2" fill="#243352"/>
-        <rect x="88"  y="22" width="22" height="66" rx="2" fill="#16c784"/>
-        <rect x="116" y="4"  width="22" height="84" rx="2" fill="#f59e0b"/>
-        <rect x="144" y="68" width="22" height="20" rx="2" fill="#243352"/>
-        <rect x="172" y="44" width="22" height="44" rx="2" fill="#16c784"/>
-        <rect x="200" y="57" width="22" height="31" rx="2" fill="#243352"/>
-        <rect x="228" y="28" width="22" height="60" rx="2" fill="#16c784"/>
-        <rect x="256" y="75" width="22" height="13" rx="2" fill="#243352"/>
-      </svg>
+  </div>
+
+  <!-- Activity strip -->
+  <div class="activity-strip">
+    <div class="activity-badge">
+      <div class="ab-label">Last Played</div>
+      <div class="ab-val">6d</div>
+      <div class="ab-sub">26 Apr 2026</div>
+    </div>
+    <div class="activity-badge">
+      <div class="ab-label">Last Wicket</div>
+      <div class="ab-val">6d</div>
+      <div class="ab-sub">3w last game</div>
+    </div>
+    <div class="activity-badge">
+      <div class="ab-label">Last Duck</div>
+      <div class="ab-val">3w ago</div>
+      <div class="ab-sub">5 Apr 2026</div>
+    </div>
+    <div class="activity-badge">
+      <div class="ab-label">Career 6s</div>
+      <div class="ab-val">28</div>
+      <div class="ab-sub">all time</div>
+    </div>
+    <div class="activity-badge">
+      <div class="ab-label">Career 4s</div>
+      <div class="ab-val">186</div>
+      <div class="ab-sub">all time</div>
+    </div>
+    <div class="activity-badge">
+      <div class="ab-label">Best Spell</div>
+      <div class="ab-val">5/31</div>
+      <div class="ab-sub">vs Hillside</div>
+    </div>
+  </div>
+
+  <!-- Career stat cards -->
+  <div class="stat-grid">
+    <div class="stat-card"><div class="label">Innings</div><div class="stat-val">38</div></div>
+    <div class="stat-card accent"><div class="label">Runs</div><div class="stat-val">1,624</div></div>
+    <div class="stat-card"><div class="label">Average</div><div class="stat-val">52.4</div></div>
+    <div class="stat-card"><div class="label">High Score</div><div class="stat-val">142*</div></div>
+    <div class="stat-card"><div class="label">Strike Rate</div><div class="stat-val">84.3</div></div>
+    <div class="stat-card"><div class="label">Wickets</div><div class="stat-val">42</div></div>
+    <div class="stat-card"><div class="label">Economy</div><div class="stat-val">4.82</div></div>
+  </div>
+
+  <!-- Chasing milestones -->
+  <div class="chasing-section card" style="padding:16px; margin-bottom:16px;">
+    <h3>Chasing</h3>
+    <div class="milestones-list" style="margin-top:8px;">
+      <div class="milestone-row" style="padding: 10px 0;">
+        <div class="milestone-top">
+          <span style="font-size:13px;color:var(--white);">1,750 career runs</span>
+          <span class="milestone-needs">needs 126r</span>
+        </div>
+        <div style="font-size:11px;color:var(--slate-5);margin-bottom:6px;">1,624 / 1,750</div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:93%"></div></div>
+      </div>
+      <div class="milestone-row" style="padding: 10px 0; border-top: 1px solid var(--navy-700);">
+        <div class="milestone-top">
+          <span style="font-size:13px;color:var(--white);">50 career wickets</span>
+          <span class="milestone-needs">needs 8w</span>
+        </div>
+        <div style="font-size:11px;color:var(--slate-5);margin-bottom:6px;">42 / 50</div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill amber" style="width:84%"></div></div>
+      </div>
+      <div class="milestone-row" style="padding: 10px 0; border-top: 1px solid var(--navy-700); border-bottom:none;">
+        <div class="milestone-top">
+          <span style="font-size:13px;color:var(--white);">75 career games</span>
+          <span class="milestone-needs">needs 14 games</span>
+        </div>
+        <div style="font-size:11px;color:var(--slate-5);margin-bottom:6px;">61 / 75</div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:81%"></div></div>
+      </div>
     </div>
   </div>
 
   <!-- Innings tabs -->
   <div class="card" style="overflow:hidden;">
-    <div class="tabs" style="padding: 0 4px;">
-      <button class="tab active" onclick="switchTab(this,'batting-tab','batting')">Batting</button>
-      <button class="tab" onclick="switchTab(this,'batting-tab','bowling')">Bowling</button>
+    <div class="main-tabs" style="padding:0 4px;">
+      <button class="main-tab active" onclick="switchMainTab(this,'player-tabs','player-batting')">Batting</button>
+      <button class="main-tab" onclick="switchMainTab(this,'player-tabs','player-bowling')">Bowling</button>
     </div>
-
-    <div id="batting" class="tab-content active">
+    <div id="player-batting" class="tab-panel active">
       <div class="table-wrap">
         <table>
-          <thead>
-            <tr>
-              <th>Date</th><th>Grade</th><th class="r">R</th><th class="r">B</th>
-              <th class="r">4s</th><th class="r">6s</th><th class="r">SR</th><th>Dismissal</th>
-            </tr>
-          </thead>
+          <thead><tr><th>Date</th><th>Opponent</th><th class="r">R</th><th class="r">B</th><th class="r">4s</th><th class="r">6s</th><th class="r">SR</th><th>How Out</th></tr></thead>
           <tbody>
-            <tr><td>26 Apr</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">83</td><td class="r mono-val">94</td><td class="r mono-val">9</td><td class="r mono-val">2</td><td class="r mono-val">88.3</td><td style="color:var(--slate-5);font-size:12px">caught</td></tr>
-            <tr><td>12 Apr</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">19</td><td class="r mono-val">28</td><td class="r mono-val">2</td><td class="r mono-val">0</td><td class="r mono-val">67.9</td><td style="color:var(--slate-5);font-size:12px">lbw</td></tr>
-            <tr><td>5 Apr</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val hi-runs-50">44</td><td class="r mono-val">61</td><td class="r mono-val">5</td><td class="r mono-val">0</td><td class="r mono-val">72.1</td><td style="color:var(--slate-5);font-size:12px">bowled</td></tr>
-            <tr><td>29 Mar</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val hi-runs-50">61</td><td class="r mono-val">73</td><td class="r mono-val">7</td><td class="r mono-val">1</td><td class="r mono-val">83.6</td><td style="color:var(--slate-5);font-size:12px">caught</td></tr>
-            <tr><td>22 Mar</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">28</td><td class="r mono-val">34</td><td class="r mono-val">3</td><td class="r mono-val">1</td><td class="r mono-val">82.4</td><td style="color:var(--slate-5);font-size:12px">run out</td></tr>
-            <tr><td>15 Mar</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val hi-runs">142<span style="color:var(--accent);font-size:11px">*</span></td><td class="r mono-val">162</td><td class="r mono-val">14</td><td class="r mono-val">4</td><td class="r mono-val">87.7</td><td style="color:var(--accent);font-size:12px">not out</td></tr>
-            <tr><td>8 Mar</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val hi-runs-50">95</td><td class="r mono-val">110</td><td class="r mono-val">9</td><td class="r mono-val">3</td><td class="r mono-val">86.4</td><td style="color:var(--slate-5);font-size:12px">stumped</td></tr>
-            <tr><td>1 Mar</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">12</td><td class="r mono-val">18</td><td class="r mono-val">1</td><td class="r mono-val">0</td><td class="r mono-val">66.7</td><td style="color:var(--slate-5);font-size:12px">bowled</td></tr>
-            <tr><td>22 Feb</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val hi-runs-50">78</td><td class="r mono-val">88</td><td class="r mono-val">8</td><td class="r mono-val">2</td><td class="r mono-val">88.6</td><td style="color:var(--slate-5);font-size:12px">caught</td></tr>
-            <tr><td>15 Feb</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">34</td><td class="r mono-val">45</td><td class="r mono-val">4</td><td class="r mono-val">0</td><td class="r mono-val">75.6</td><td style="color:var(--slate-5);font-size:12px">lbw</td></tr>
+            <tr><td>26 Apr</td><td style="color:var(--slate-5)">Bayside CC</td><td class="r mono-val" style="color:var(--accent);font-weight:700">83<span style="color:var(--accent);font-size:10px">*</span></td><td class="r mono-val">94</td><td class="r mono-val">9</td><td class="r mono-val">2</td><td class="r mono-val">88.3</td><td style="color:var(--accent);font-size:12px">not out</td></tr>
+            <tr><td>12 Apr</td><td style="color:var(--slate-5)">Northside CC</td><td class="r mono-val">19</td><td class="r mono-val">28</td><td class="r mono-val">2</td><td class="r mono-val">0</td><td class="r mono-val">67.9</td><td style="color:var(--slate-5);font-size:12px">lbw</td></tr>
+            <tr><td>5 Apr</td><td style="color:var(--slate-5)">Eastbank CC</td><td class="r mono-val">0</td><td class="r mono-val">2</td><td class="r mono-val">0</td><td class="r mono-val">0</td><td class="r mono-val">0.0</td><td style="color:var(--red);font-size:12px">bowled 🦆</td></tr>
+            <tr><td>29 Mar</td><td style="color:var(--slate-5)">Hillside CC</td><td class="r mono-val" style="color:var(--accent);font-weight:700">61</td><td class="r mono-val">73</td><td class="r mono-val">7</td><td class="r mono-val">1</td><td class="r mono-val">83.6</td><td style="color:var(--slate-5);font-size:12px">caught</td></tr>
+            <tr><td>15 Mar</td><td style="color:var(--slate-5)">Lakeside CC</td><td class="r mono-val" style="color:var(--amber);font-weight:700">142<span style="color:var(--accent);font-size:10px">*</span></td><td class="r mono-val">162</td><td class="r mono-val">14</td><td class="r mono-val">4</td><td class="r mono-val">87.7</td><td style="color:var(--accent);font-size:12px">not out</td></tr>
           </tbody>
         </table>
       </div>
     </div>
-
-    <div id="bowling" class="tab-content">
+    <div id="player-bowling" class="tab-panel">
       <div class="table-wrap">
         <table>
-          <thead>
-            <tr>
-              <th>Date</th><th>Grade</th><th class="r">O</th><th class="r">M</th>
-              <th class="r">R</th><th class="r">W</th><th class="r">Econ</th><th class="r">Wd</th>
-            </tr>
-          </thead>
+          <thead><tr><th>Date</th><th>Opponent</th><th class="r">O</th><th class="r">M</th><th class="r">R</th><th class="r">W</th><th class="r">Econ</th></tr></thead>
           <tbody>
-            <tr><td>26 Apr</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">8</td><td class="r mono-val">1</td><td class="r mono-val">34</td><td class="r mono-val hi-wkts-3">3</td><td class="r mono-val">4.25</td><td class="r mono-val">2</td></tr>
-            <tr><td>12 Apr</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">6</td><td class="r mono-val">0</td><td class="r mono-val">42</td><td class="r mono-val">1</td><td class="r mono-val">7.00</td><td class="r mono-val">3</td></tr>
-            <tr><td>5 Apr</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">10</td><td class="r mono-val">2</td><td class="r mono-val">38</td><td class="r mono-val hi-wkts-3">3</td><td class="r mono-val">3.80</td><td class="r mono-val">1</td></tr>
-            <tr><td>15 Mar</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">8</td><td class="r mono-val">1</td><td class="r mono-val">28</td><td class="r mono-val hi-wkts">5</td><td class="r mono-val">3.50</td><td class="r mono-val">0</td></tr>
-            <tr><td>8 Mar</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">7</td><td class="r mono-val">0</td><td class="r mono-val">39</td><td class="r mono-val">2</td><td class="r mono-val">5.57</td><td class="r mono-val">2</td></tr>
-            <tr><td>22 Feb</td><td style="color:var(--slate-5)">A Grade</td><td class="r mono-val">9</td><td class="r mono-val">2</td><td class="r mono-val">31</td><td class="r mono-val hi-wkts-3">4</td><td class="r mono-val">3.44</td><td class="r mono-val">1</td></tr>
+            <tr><td>26 Apr</td><td style="color:var(--slate-5)">Bayside CC</td><td class="r mono-val">8</td><td class="r mono-val">1</td><td class="r mono-val">34</td><td class="r mono-val" style="color:var(--accent);font-weight:700">3</td><td class="r mono-val">4.25</td></tr>
+            <tr><td>12 Apr</td><td style="color:var(--slate-5)">Northside CC</td><td class="r mono-val">6</td><td class="r mono-val">0</td><td class="r mono-val">42</td><td class="r mono-val">1</td><td class="r mono-val">7.00</td></tr>
+            <tr><td>29 Mar</td><td style="color:var(--slate-5)">Hillside CC</td><td class="r mono-val">8</td><td class="r mono-val">1</td><td class="r mono-val">31</td><td class="r mono-val" style="color:var(--amber);font-weight:700">5</td><td class="r mono-val">3.88</td></tr>
+            <tr><td>22 Mar</td><td style="color:var(--slate-5)">Central CC</td><td class="r mono-val">7</td><td class="r mono-val">0</td><td class="r mono-val">39</td><td class="r mono-val">2</td><td class="r mono-val">5.57</td></tr>
           </tbody>
         </table>
       </div>
@@ -486,87 +706,275 @@
   </div>
 </div>
 
-<!-- ═══════════════════ LEADERBOARD ═══════════════════ -->
+<!-- ══════════════════════ PLAYER COMPARISON ══════════════════════ -->
+<div class="page" id="page-compare">
+  <div class="section-head">
+    <div class="accent-bar"></div>
+    <p class="label" style="margin-top:8px;">Riverside Cricket Club</p>
+    <h2>Player Comparison</h2>
+  </div>
+
+  <div class="compare-header" style="margin-bottom:24px;">
+    <div>
+      <div class="player-selected" onclick="showPage('player')">J. MITCHELL</div>
+      <div style="font-size:11px;color:var(--slate-5);text-align:center;margin-top:4px;">click to change</div>
+    </div>
+    <div class="compare-vs">VS</div>
+    <div>
+      <div class="player-selected" style="color:var(--white);border-color:var(--navy-600);">T. WILSON</div>
+      <div style="font-size:11px;color:var(--slate-5);text-align:center;margin-top:4px;">click to change</div>
+    </div>
+  </div>
+
+  <div class="card" style="overflow:hidden;">
+    <div class="compare-table-wrap">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th class="player-col" style="width:38%;">J. Mitchell</th>
+            <th class="center" style="width:24%;">Stat</th>
+            <th class="player-col right" style="width:38%;">T. Wilson</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="section-divider"><td colspan="3">Batting</td></tr>
+          <tr>
+            <td class="winner">13</td>
+            <td class="metric-name">Innings</td>
+            <td class="right">12</td>
+          </tr>
+          <tr>
+            <td class="winner">680</td>
+            <td class="metric-name">Runs</td>
+            <td class="right">512</td>
+          </tr>
+          <tr>
+            <td class="winner">52.4</td>
+            <td class="metric-name">Average</td>
+            <td class="right">42.7</td>
+          </tr>
+          <tr>
+            <td class="winner">84.3</td>
+            <td class="metric-name">Strike Rate</td>
+            <td class="right">76.2</td>
+          </tr>
+          <tr>
+            <td class="winner">142*</td>
+            <td class="metric-name">High Score</td>
+            <td class="right">118</td>
+          </tr>
+          <tr>
+            <td class="winner">5</td>
+            <td class="metric-name">Fifties</td>
+            <td class="right">3</td>
+          </tr>
+          <tr>
+            <td class="winner">2</td>
+            <td class="metric-name">Centuries</td>
+            <td class="right">1</td>
+          </tr>
+          <tr>
+            <td class="winner">12</td>
+            <td class="metric-name">Sixes</td>
+            <td class="right">6</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td class="metric-name">Ducks (lower=better)</td>
+            <td class="right winner">1</td>
+          </tr>
+
+          <tr class="section-divider"><td colspan="3">Bowling</td></tr>
+          <tr>
+            <td class="winner">18</td>
+            <td class="metric-name">Wickets</td>
+            <td class="right">4</td>
+          </tr>
+          <tr>
+            <td class="winner">19.4</td>
+            <td class="metric-name">Average</td>
+            <td class="right">38.2</td>
+          </tr>
+          <tr>
+            <td class="winner">4.82</td>
+            <td class="metric-name">Economy</td>
+            <td class="right">5.40</td>
+          </tr>
+          <tr>
+            <td class="winner">5/31</td>
+            <td class="metric-name">Best Spell</td>
+            <td class="right">2/28</td>
+          </tr>
+          <tr>
+            <td class="winner">1</td>
+            <td class="metric-name">Five-fors</td>
+            <td class="right">—</td>
+          </tr>
+
+          <tr class="section-divider"><td colspan="3">Fielding</td></tr>
+          <tr>
+            <td class="winner">8</td>
+            <td class="metric-name">Catches</td>
+            <td class="right">4</td>
+          </tr>
+          <tr>
+            <td>1</td>
+            <td class="metric-name">Run Outs</td>
+            <td class="right winner">2</td>
+          </tr>
+          <tr>
+            <td class="winner">9</td>
+            <td class="metric-name">Total Dismissals</td>
+            <td class="right">6</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ LEADERBOARD ══════════════════════ -->
 <div class="page" id="page-leaderboard">
   <div class="section-head">
     <div class="accent-bar"></div>
-    <div class="label" style="margin-top:8px;">Riverside CC</div>
+    <p class="label" style="margin-top:8px;">Riverside Cricket Club</p>
     <h2>Leaderboard</h2>
   </div>
 
-  <div class="tabs">
-    <button class="tab active" onclick="switchTab(this,'lb-tab','lb-batting')">Batting</button>
-    <button class="tab" onclick="switchTab(this,'lb-tab','lb-bowling')">Bowling</button>
-    <button class="tab" onclick="switchTab(this,'lb-tab','lb-fielding')">Fielding</button>
+  <div class="filter-row" style="margin-bottom:0;">
+    <select class="filter-sel"><option>2025–26 Season</option><option>All Time</option></select>
+    <select class="filter-sel"><option>All Grades</option><option>A Grade</option></select>
+    <button class="btn-outline" style="font-size:12px;" onclick="showPage('compare')">Compare →</button>
   </div>
 
-  <div class="card" style="border-radius: 0 0 12px 12px; border-top: none; overflow: hidden;">
+  <!-- Main tabs -->
+  <div class="main-tabs" style="margin-top:16px;">
+    <button class="main-tab active" onclick="switchMainTab(this,'lb-main','lb-batting-wrap')">Batting</button>
+    <button class="main-tab" onclick="switchMainTab(this,'lb-main','lb-bowling-wrap')">Bowling</button>
+    <button class="main-tab" onclick="switchMainTab(this,'lb-main','lb-fielding-wrap')">Fielding</button>
+  </div>
 
-    <div id="lb-batting" class="tab-content active">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>#</th><th>Player</th><th class="r">Inn</th><th class="r">Runs</th><th class="r">Avg</th><th class="r">SR</th><th class="r">HS</th><th class="r">50s</th><th class="r">100s</th></tr>
-          </thead>
-          <tbody>
-            <tr><td class="rank">1</td><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">13</td><td class="r mono-val" style="color:var(--accent);font-weight:700">680</td><td class="r mono-val">52.4</td><td class="r mono-val">84.3</td><td class="r mono-val">142*</td><td class="r mono-val">5</td><td class="r mono-val" style="color:var(--amber);font-weight:700">2</td></tr>
-            <tr><td class="rank">2</td><td><span class="player-link">T. Wilson</span></td><td class="r mono-val">12</td><td class="r mono-val" style="color:var(--accent);font-weight:700">512</td><td class="r mono-val">42.7</td><td class="r mono-val">76.2</td><td class="r mono-val">118</td><td class="r mono-val">3</td><td class="r mono-val" style="color:var(--amber);font-weight:700">1</td></tr>
-            <tr><td class="rank">3</td><td><span class="player-link">R. Davis</span></td><td class="r mono-val">13</td><td class="r mono-val" style="color:var(--accent);font-weight:700">447</td><td class="r mono-val">37.3</td><td class="r mono-val">72.8</td><td class="r mono-val">89</td><td class="r mono-val">4</td><td class="r mono-val">—</td></tr>
-            <tr><td class="rank">4</td><td><span class="player-link">S. Parker</span></td><td class="r mono-val">11</td><td class="r mono-val" style="color:var(--accent);font-weight:700">389</td><td class="r mono-val">38.9</td><td class="r mono-val">81.0</td><td class="r mono-val">94*</td><td class="r mono-val">3</td><td class="r mono-val">—</td></tr>
-            <tr><td class="rank">5</td><td><span class="player-link">M. Thompson</span></td><td class="r mono-val">12</td><td class="r mono-val" style="color:var(--accent);font-weight:700">341</td><td class="r mono-val">31.0</td><td class="r mono-val">68.4</td><td class="r mono-val">76</td><td class="r mono-val">2</td><td class="r mono-val">—</td></tr>
-            <tr><td class="rank">6</td><td><span class="player-link">B. Harris</span></td><td class="r mono-val">10</td><td class="r mono-val" style="color:var(--accent);font-weight:700">298</td><td class="r mono-val">33.1</td><td class="r mono-val">74.9</td><td class="r mono-val">71</td><td class="r mono-val">2</td><td class="r mono-val">—</td></tr>
-            <tr><td class="rank">7</td><td><span class="player-link">P. Edwards</span></td><td class="r mono-val">11</td><td class="r mono-val" style="color:var(--accent);font-weight:700">267</td><td class="r mono-val">24.3</td><td class="r mono-val">63.2</td><td class="r mono-val">68</td><td class="r mono-val">1</td><td class="r mono-val">—</td></tr>
-            <tr><td class="rank">8</td><td><span class="player-link">A. Chen</span></td><td class="r mono-val">9</td><td class="r mono-val" style="color:var(--accent);font-weight:700">201</td><td class="r mono-val">22.3</td><td class="r mono-val">58.7</td><td class="r mono-val">54</td><td class="r mono-val">1</td><td class="r mono-val">—</td></tr>
-          </tbody>
-        </table>
+  <div class="card" style="border-radius:0 0 12px 12px; border-top:none; overflow:hidden;">
+
+    <!-- BATTING -->
+    <div id="lb-batting-wrap" class="tab-panel active">
+      <div class="sub-tabs">
+        <button class="sub-tab active" onclick="switchSubTab(this,'bat-sub','lb-bat-runs')">Runs</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bat-sub','lb-bat-avg')">Average</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bat-sub','lb-bat-sr')">Strike Rate</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bat-sub','lb-bat-hs')">High Score</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bat-sub','lb-bat-50s')">Fifties</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bat-sub','lb-bat-100s')">Centuries</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bat-sub','lb-bat-6s')">Sixes</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bat-sub','lb-bat-4s')">Fours</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bat-sub','lb-bat-ducks')">Ducks</button>
       </div>
+
+      <!-- Runs -->
+      <div id="lb-bat-runs" class="tab-panel active">
+        <div class="table-wrap"><table>
+          <thead><tr><th>#</th><th>Player</th><th class="r">Inn</th><th class="r accent-col">Runs</th><th class="r">Avg</th><th class="r">SR</th><th class="r">HS</th><th class="r">50s</th><th class="r">100s</th><th class="r">6s</th><th class="r">4s</th><th class="r">0s</th></tr></thead>
+          <tbody>
+            <tr><td class="rank">1</td><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">13</td><td class="r accent-col">680</td><td class="r mono-val">52.4</td><td class="r mono-val">84.3</td><td class="r mono-val">142*</td><td class="r mono-val">5</td><td class="r mono-val" style="color:var(--amber);font-weight:700">2</td><td class="r mono-val">12</td><td class="r mono-val">78</td><td class="r mono-val" style="color:var(--slate-5)">3</td></tr>
+            <tr><td class="rank">2</td><td><span class="player-link">T. Wilson</span></td><td class="r mono-val">12</td><td class="r accent-col">512</td><td class="r mono-val">42.7</td><td class="r mono-val">76.2</td><td class="r mono-val">118</td><td class="r mono-val">3</td><td class="r mono-val" style="color:var(--amber);font-weight:700">1</td><td class="r mono-val">6</td><td class="r mono-val">61</td><td class="r mono-val" style="color:var(--slate-5)">1</td></tr>
+            <tr><td class="rank">3</td><td><span class="player-link">R. Davis</span></td><td class="r mono-val">13</td><td class="r accent-col">447</td><td class="r mono-val">37.3</td><td class="r mono-val">72.8</td><td class="r mono-val">89</td><td class="r mono-val">4</td><td class="r mono-val">—</td><td class="r mono-val">4</td><td class="r mono-val">54</td><td class="r mono-val" style="color:var(--slate-5)">2</td></tr>
+            <tr><td class="rank">4</td><td><span class="player-link">S. Parker</span></td><td class="r mono-val">11</td><td class="r accent-col">389</td><td class="r mono-val">38.9</td><td class="r mono-val">81.0</td><td class="r mono-val">94*</td><td class="r mono-val">3</td><td class="r mono-val">—</td><td class="r mono-val">3</td><td class="r mono-val">49</td><td class="r mono-val" style="color:var(--slate-5)">0</td></tr>
+            <tr><td class="rank">5</td><td><span class="player-link">M. Thompson</span></td><td class="r mono-val">12</td><td class="r accent-col">341</td><td class="r mono-val">31.0</td><td class="r mono-val">68.4</td><td class="r mono-val">76</td><td class="r mono-val">2</td><td class="r mono-val">—</td><td class="r mono-val">2</td><td class="r mono-val">43</td><td class="r mono-val" style="color:var(--slate-5)">1</td></tr>
+            <tr><td class="rank">6</td><td><span class="player-link">B. Harris</span></td><td class="r mono-val">10</td><td class="r accent-col">298</td><td class="r mono-val">33.1</td><td class="r mono-val">74.9</td><td class="r mono-val">71</td><td class="r mono-val">2</td><td class="r mono-val">—</td><td class="r mono-val">5</td><td class="r mono-val">38</td><td class="r mono-val" style="color:var(--slate-5)">0</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <!-- Ducks (different sort to show red highlight) -->
+      <div id="lb-bat-ducks" class="tab-panel">
+        <div class="table-wrap"><table>
+          <thead><tr><th>#</th><th>Player</th><th class="r">Inn</th><th class="r">Runs</th><th class="r">Avg</th><th class="r">SR</th><th class="r">HS</th><th class="r">50s</th><th class="r">100s</th><th class="r">6s</th><th class="r">4s</th><th class="r" style="color:var(--red)">0s</th></tr></thead>
+          <tbody>
+            <tr><td class="rank">1</td><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">13</td><td class="r mono-val">680</td><td class="r mono-val">52.4</td><td class="r mono-val">84.3</td><td class="r mono-val">142*</td><td class="r mono-val">5</td><td class="r mono-val" style="color:var(--amber);font-weight:700">2</td><td class="r mono-val">12</td><td class="r mono-val">78</td><td class="r red-col">3</td></tr>
+            <tr><td class="rank">2</td><td><span class="player-link">R. Davis</span></td><td class="r mono-val">13</td><td class="r mono-val">447</td><td class="r mono-val">37.3</td><td class="r mono-val">72.8</td><td class="r mono-val">89</td><td class="r mono-val">4</td><td class="r mono-val">—</td><td class="r mono-val">4</td><td class="r mono-val">54</td><td class="r red-col">2</td></tr>
+            <tr><td class="rank">3</td><td><span class="player-link">T. Wilson</span></td><td class="r mono-val">12</td><td class="r mono-val">512</td><td class="r mono-val">42.7</td><td class="r mono-val">76.2</td><td class="r mono-val">118</td><td class="r mono-val">3</td><td class="r mono-val" style="color:var(--amber);font-weight:700">1</td><td class="r mono-val">6</td><td class="r mono-val">61</td><td class="r red-col">1</td></tr>
+            <tr><td class="rank">4</td><td><span class="player-link">M. Thompson</span></td><td class="r mono-val">12</td><td class="r mono-val">341</td><td class="r mono-val">31.0</td><td class="r mono-val">68.4</td><td class="r mono-val">76</td><td class="r mono-val">2</td><td class="r mono-val">—</td><td class="r mono-val">2</td><td class="r mono-val">43</td><td class="r red-col">1</td></tr>
+            <tr><td class="rank">5</td><td><span class="player-link">S. Parker</span></td><td class="r mono-val">11</td><td class="r mono-val">389</td><td class="r mono-val">38.9</td><td class="r mono-val">81.0</td><td class="r mono-val">94*</td><td class="r mono-val">3</td><td class="r mono-val">—</td><td class="r mono-val">3</td><td class="r mono-val">49</td><td class="r red-col">0</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <!-- Sixes -->
+      <div id="lb-bat-6s" class="tab-panel">
+        <div class="table-wrap"><table>
+          <thead><tr><th>#</th><th>Player</th><th class="r">Inn</th><th class="r">Runs</th><th class="r">Avg</th><th class="r">SR</th><th class="r">HS</th><th class="r">50s</th><th class="r">100s</th><th class="r accent-col">6s</th><th class="r">4s</th><th class="r">0s</th></tr></thead>
+          <tbody>
+            <tr><td class="rank">1</td><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">13</td><td class="r mono-val">680</td><td class="r mono-val">52.4</td><td class="r mono-val">84.3</td><td class="r mono-val">142*</td><td class="r mono-val">5</td><td class="r mono-val" style="color:var(--amber);font-weight:700">2</td><td class="r accent-col">12</td><td class="r mono-val">78</td><td class="r mono-val" style="color:var(--slate-5)">3</td></tr>
+            <tr><td class="rank">2</td><td><span class="player-link">B. Harris</span></td><td class="r mono-val">10</td><td class="r mono-val">298</td><td class="r mono-val">33.1</td><td class="r mono-val">74.9</td><td class="r mono-val">71</td><td class="r mono-val">2</td><td class="r mono-val">—</td><td class="r accent-col">5</td><td class="r mono-val">38</td><td class="r mono-val" style="color:var(--slate-5)">0</td></tr>
+            <tr><td class="rank">3</td><td><span class="player-link">T. Wilson</span></td><td class="r mono-val">12</td><td class="r mono-val">512</td><td class="r mono-val">42.7</td><td class="r mono-val">76.2</td><td class="r mono-val">118</td><td class="r mono-val">3</td><td class="r mono-val" style="color:var(--amber);font-weight:700">1</td><td class="r accent-col">6</td><td class="r mono-val">61</td><td class="r mono-val" style="color:var(--slate-5)">1</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <!-- Stub panels for other batting sub-tabs -->
+      <div id="lb-bat-avg" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by batting average — same table, Average column highlighted.</p></div>
+      <div id="lb-bat-sr" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by strike rate — Strike Rate column highlighted.</p></div>
+      <div id="lb-bat-hs" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by high score — High Score column highlighted.</p></div>
+      <div id="lb-bat-50s" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by fifties — Fifties column highlighted.</p></div>
+      <div id="lb-bat-100s" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by centuries — Centuries column highlighted amber.</p></div>
+      <div id="lb-bat-4s" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by fours — Fours column highlighted.</p></div>
     </div>
 
-    <div id="lb-bowling" class="tab-content">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>#</th><th>Player</th><th class="r">G</th><th class="r">Overs</th><th class="r">Wkts</th><th class="r">Avg</th><th class="r">Econ</th><th class="r">Best</th><th class="r">Mdns</th></tr>
-          </thead>
-          <tbody>
-            <tr><td class="rank">1</td><td><span class="player-link">A. Chen</span></td><td class="r mono-val">12</td><td class="r mono-val">98</td><td class="r mono-val" style="color:var(--accent);font-weight:700">24</td><td class="r mono-val">14.2</td><td class="r mono-val">3.47</td><td class="r mono-val" style="color:var(--amber);font-weight:700">5</td><td class="r mono-val">18</td></tr>
-            <tr><td class="rank">2</td><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">11</td><td class="r mono-val">84</td><td class="r mono-val" style="color:var(--accent);font-weight:700">18</td><td class="r mono-val">19.4</td><td class="r mono-val">4.82</td><td class="r mono-val" style="color:var(--amber);font-weight:700">5</td><td class="r mono-val">12</td></tr>
-            <tr><td class="rank">3</td><td><span class="player-link">K. Roberts</span></td><td class="r mono-val">10</td><td class="r mono-val">76</td><td class="r mono-val" style="color:var(--accent);font-weight:700">15</td><td class="r mono-val">21.3</td><td class="r mono-val">4.20</td><td class="r mono-val" style="color:var(--accent)">4</td><td class="r mono-val">9</td></tr>
-            <tr><td class="rank">4</td><td><span class="player-link">D. Singh</span></td><td class="r mono-val">10</td><td class="r mono-val">68</td><td class="r mono-val" style="color:var(--accent);font-weight:700">13</td><td class="r mono-val">24.6</td><td class="r mono-val">4.71</td><td class="r mono-val" style="color:var(--accent)">3</td><td class="r mono-val">7</td></tr>
-            <tr><td class="rank">5</td><td><span class="player-link">L. Brown</span></td><td class="r mono-val">9</td><td class="r mono-val">57</td><td class="r mono-val" style="color:var(--accent);font-weight:700">11</td><td class="r mono-val">28.1</td><td class="r mono-val">5.42</td><td class="r mono-val" style="color:var(--accent)">3</td><td class="r mono-val">4</td></tr>
-          </tbody>
-        </table>
+    <!-- BOWLING -->
+    <div id="lb-bowling-wrap" class="tab-panel">
+      <div class="sub-tabs">
+        <button class="sub-tab active" onclick="switchSubTab(this,'bowl-sub','lb-bowl-wkts')">Wickets</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bowl-sub','lb-bowl-econ')">Economy</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bowl-sub','lb-bowl-avg')">Average</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bowl-sub','lb-bowl-best')">Best Spell</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bowl-sub','lb-bowl-5w')">Five-fors</button>
+        <button class="sub-tab" onclick="switchSubTab(this,'bowl-sub','lb-bowl-mdns')">Maidens</button>
       </div>
+      <div id="lb-bowl-wkts" class="tab-panel active">
+        <div class="table-wrap"><table>
+          <thead><tr><th>#</th><th>Player</th><th class="r">G</th><th class="r">Overs</th><th class="r accent-col">Wkts</th><th class="r">Avg</th><th class="r">Econ</th><th class="r">Best</th><th class="r">Mdns</th><th class="r">5W</th></tr></thead>
+          <tbody>
+            <tr><td class="rank">1</td><td><span class="player-link">A. Chen</span></td><td class="r mono-val">12</td><td class="r mono-val">98</td><td class="r accent-col">24</td><td class="r mono-val">14.2</td><td class="r mono-val">3.47</td><td class="r mono-val" style="color:var(--amber);font-weight:700">5/28</td><td class="r mono-val">18</td><td class="r mono-val" style="color:var(--amber);font-weight:700">1</td></tr>
+            <tr><td class="rank">2</td><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">11</td><td class="r mono-val">84</td><td class="r accent-col">18</td><td class="r mono-val">19.4</td><td class="r mono-val">4.82</td><td class="r mono-val" style="color:var(--amber);font-weight:700">5/31</td><td class="r mono-val">12</td><td class="r mono-val" style="color:var(--amber);font-weight:700">1</td></tr>
+            <tr><td class="rank">3</td><td><span class="player-link">K. Roberts</span></td><td class="r mono-val">10</td><td class="r mono-val">76</td><td class="r accent-col">15</td><td class="r mono-val">21.3</td><td class="r mono-val">4.20</td><td class="r mono-val">4/32</td><td class="r mono-val">9</td><td class="r mono-val" style="color:var(--slate-5)">—</td></tr>
+            <tr><td class="rank">4</td><td><span class="player-link">D. Singh</span></td><td class="r mono-val">10</td><td class="r mono-val">68</td><td class="r accent-col">13</td><td class="r mono-val">24.6</td><td class="r mono-val">4.71</td><td class="r mono-val">3/22</td><td class="r mono-val">7</td><td class="r mono-val" style="color:var(--slate-5)">—</td></tr>
+            <tr><td class="rank">5</td><td><span class="player-link">L. Brown</span></td><td class="r mono-val">9</td><td class="r mono-val">57</td><td class="r accent-col">11</td><td class="r mono-val">28.1</td><td class="r mono-val">5.42</td><td class="r mono-val">3/34</td><td class="r mono-val">4</td><td class="r mono-val" style="color:var(--slate-5)">—</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div id="lb-bowl-econ" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by economy rate — Economy column highlighted.</p></div>
+      <div id="lb-bowl-avg" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by bowling average — Average column highlighted.</p></div>
+      <div id="lb-bowl-best" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by best spell — Best column highlighted amber for 5-fors.</p></div>
+      <div id="lb-bowl-5w" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by five-fors — Five-fors column highlighted amber.</p></div>
+      <div id="lb-bowl-mdns" class="tab-panel"><p style="padding:20px;color:var(--slate-5);text-align:center;font-size:13px;">Sorted by maidens — Maidens column highlighted.</p></div>
     </div>
 
-    <div id="lb-fielding" class="tab-content">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>#</th><th>Player</th><th class="r">Games</th><th class="r">Catches</th><th class="r">Run Outs</th><th class="r">Stumpings</th><th class="r">Total</th></tr>
-          </thead>
-          <tbody>
-            <tr><td class="rank">1</td><td><span class="player-link">S. Parker</span></td><td class="r mono-val">12</td><td class="r mono-val">9</td><td class="r mono-val">2</td><td class="r mono-val">—</td><td class="r mono-val" style="color:var(--accent);font-weight:700">11</td></tr>
-            <tr><td class="rank">2</td><td><span class="player-link">R. Davis</span></td><td class="r mono-val">13</td><td class="r mono-val">7</td><td class="r mono-val">3</td><td class="r mono-val">—</td><td class="r mono-val" style="color:var(--accent);font-weight:700">10</td></tr>
-            <tr><td class="rank">3</td><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">11</td><td class="r mono-val">8</td><td class="r mono-val">1</td><td class="r mono-val">—</td><td class="r mono-val" style="color:var(--accent);font-weight:700">9</td></tr>
-            <tr><td class="rank">4</td><td><span class="player-link">T. Wilson</span></td><td class="r mono-val">12</td><td class="r mono-val">4</td><td class="r mono-val">1</td><td class="r mono-val">4 †</td><td class="r mono-val" style="color:var(--accent);font-weight:700">9</td></tr>
-            <tr><td class="rank">5</td><td><span class="player-link">M. Thompson</span></td><td class="r mono-val">12</td><td class="r mono-val">6</td><td class="r mono-val">2</td><td class="r mono-val">—</td><td class="r mono-val" style="color:var(--accent);font-weight:700">8</td></tr>
-          </tbody>
-        </table>
-      </div>
+    <!-- FIELDING -->
+    <div id="lb-fielding-wrap" class="tab-panel">
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>Player</th><th class="r">Games</th><th class="r">Catches</th><th class="r">Run Outs</th><th class="r">Stumpings</th><th class="r accent-col">Total</th></tr></thead>
+        <tbody>
+          <tr><td class="rank">1</td><td><span class="player-link">S. Parker</span></td><td class="r mono-val">12</td><td class="r mono-val">9</td><td class="r mono-val">2</td><td class="r mono-val">—</td><td class="r accent-col">11</td></tr>
+          <tr><td class="rank">2</td><td><span class="player-link">R. Davis</span></td><td class="r mono-val">13</td><td class="r mono-val">7</td><td class="r mono-val">3</td><td class="r mono-val">—</td><td class="r accent-col">10</td></tr>
+          <tr><td class="rank">3</td><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">11</td><td class="r mono-val">8</td><td class="r mono-val">1</td><td class="r mono-val">—</td><td class="r accent-col">9</td></tr>
+          <tr><td class="rank">4</td><td><span class="player-link">T. Wilson</span></td><td class="r mono-val">12</td><td class="r mono-val">4</td><td class="r mono-val">1</td><td class="r mono-val">4 †</td><td class="r accent-col">9</td></tr>
+          <tr><td class="rank">5</td><td><span class="player-link">M. Thompson</span></td><td class="r mono-val">12</td><td class="r mono-val">6</td><td class="r mono-val">2</td><td class="r mono-val">—</td><td class="r accent-col">8</td></tr>
+        </tbody>
+      </table></div>
     </div>
 
   </div>
 </div>
 
-<!-- ═══════════════════ SCORECARD ═══════════════════ -->
+<!-- ══════════════════════ MATCH SCORECARD ══════════════════════ -->
 <div class="page" id="page-scorecard">
+  <!-- Result banner -->
   <div class="result-banner win">
     <div style="display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:12px;">
       <div>
         <div class="label">A Grade · 26 Apr 2026</div>
-        <div class="result-vs" style="margin-top:6px;">Riverside CC <span style="color:var(--slate-5);font-weight:400;font-size:18px">vs</span> Bayside CC</div>
-        <div style="color:var(--slate-4);font-size:12px;margin-top:4px;">Riverside Cricket Oval</div>
+        <div class="result-vs" style="margin-top:6px;">Riverside CC <span style="color:var(--slate-5);font-weight:400;font-size:16px">vs</span> Bayside CC</div>
+        <div style="color:var(--slate-4);font-size:12px;margin-top:3px;">Riverside Cricket Oval · Two-day match</div>
       </div>
       <div style="text-align:right;">
         <div class="result-outcome">WIN</div>
@@ -575,36 +983,50 @@
     </div>
   </div>
 
-  <div style="display:flex; flex-direction:column; gap:16px;">
-    <!-- Batting scorecard -->
-    <div class="card" style="overflow:hidden;">
-      <div class="card-head"><h3>Batting — Riverside CC</h3><span class="label">1st Innings</span></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Batter</th><th style="color:var(--slate-6);font-weight:400;font-size:11px;text-transform:none;letter-spacing:0">Dismissal</th><th class="r">R</th><th class="r">B</th><th class="r">4s</th><th class="r">6s</th><th class="r">SR</th></tr></thead>
-          <tbody>
-            <tr><td><span class="player-link">T. Wilson</span></td><td style="color:var(--slate-5);font-size:12px">caught</td><td class="r mono-val">42</td><td class="r mono-val">56</td><td class="r mono-val">5</td><td class="r mono-val">0</td><td class="r mono-val">75.0</td></tr>
-            <tr><td><span class="player-link">R. Davis</span></td><td style="color:var(--slate-5);font-size:12px">bowled</td><td class="r mono-val">8</td><td class="r mono-val">14</td><td class="r mono-val">1</td><td class="r mono-val">0</td><td class="r mono-val">57.1</td></tr>
-            <tr><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td style="color:var(--accent);font-size:12px">not out</td><td class="r"><span class="hi-runs-50">83</span><span style="color:var(--accent);font-size:11px">*</span></td><td class="r mono-val">94</td><td class="r mono-val">9</td><td class="r mono-val">2</td><td class="r mono-val">88.3</td></tr>
-            <tr><td><span class="player-link">S. Parker</span></td><td style="color:var(--slate-5);font-size:12px">lbw</td><td class="r mono-val">61</td><td class="r mono-val">70</td><td class="r mono-val">6</td><td class="r mono-val">1</td><td class="r mono-val">87.1</td></tr>
-            <tr><td><span class="player-link">M. Thompson</span></td><td style="color:var(--slate-5);font-size:12px">caught</td><td class="r mono-val">24</td><td class="r mono-val">31</td><td class="r mono-val">2</td><td class="r mono-val">1</td><td class="r mono-val">77.4</td></tr>
-            <tr><td><span class="player-link">B. Harris</span></td><td style="color:var(--slate-5);font-size:12px">run out</td><td class="r mono-val">18</td><td class="r mono-val">22</td><td class="r mono-val">1</td><td class="r mono-val">1</td><td class="r mono-val">81.8</td></tr>
-            <tr><td><span class="player-link">A. Chen</span></td><td style="color:var(--slate-5);font-size:12px">bowled</td><td class="r mono-val">4</td><td class="r mono-val">8</td><td class="r mono-val">0</td><td class="r mono-val">0</td><td class="r mono-val">50.0</td></tr>
-            <tr><td><span class="player-link">K. Roberts</span></td><td style="color:var(--accent);font-size:12px">not out</td><td class="r mono-val">7<span style="color:var(--accent);font-size:11px">*</span></td><td class="r mono-val">9</td><td class="r mono-val">1</td><td class="r mono-val">0</td><td class="r mono-val">77.8</td></tr>
-          </tbody>
-          <tfoot><tr><td colspan="2">Total <span style="color:var(--slate-5);font-size:11px;font-weight:400;font-family:'Inter',sans-serif">(7 wkts, 40 overs)</span></td><td class="r" colspan="5">247</td></tr></tfoot>
-        </table>
-      </div>
+  <!-- Innings overview strip -->
+  <div class="innings-overview">
+    <div class="innings-score-card">
+      <div class="inn-label">1st Innings</div>
+      <div class="inn-team">Riverside CC</div>
+      <div class="inn-score">247/7</div>
+      <div class="inn-overs">40 overs</div>
     </div>
+    <div class="innings-score-card">
+      <div class="inn-label">2nd Innings</div>
+      <div class="inn-team">Bayside CC</div>
+      <div class="inn-score">200/10</div>
+      <div class="inn-overs">38.2 overs</div>
+    </div>
+  </div>
 
-    <!-- Bowling scorecard -->
-    <div class="card" style="overflow:hidden;">
-      <div class="card-head"><h3>Bowling — Bayside CC</h3><span class="label">vs Riverside</span></div>
+  <!-- 1st Innings block -->
+  <div class="innings-block card" style="overflow:hidden; margin-bottom:16px;">
+    <div class="card-head">
+      <h3>1st Innings — Riverside CC</h3>
+      <button class="bowling-toggle" onclick="toggleBowling(this, 'bowl-1')">Show Bowling ▾</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Batter</th><th style="color:var(--slate-6);font-size:11px;text-transform:none;letter-spacing:0;">How Out</th><th class="r">R</th><th class="r">B</th><th class="r">4s</th><th class="r">6s</th><th class="r">SR</th></tr></thead>
+        <tbody>
+          <tr><td><span class="player-link">T. Wilson</span></td><td style="color:var(--slate-5);font-size:12px">c Nguyen b Walsh</td><td class="r mono-val">42</td><td class="r mono-val">56</td><td class="r mono-val">5</td><td class="r mono-val">0</td><td class="r mono-val">75.0</td></tr>
+          <tr><td><span class="player-link">R. Davis</span></td><td style="color:var(--slate-5);font-size:12px">bowled Lee</td><td class="r mono-val">8</td><td class="r mono-val">14</td><td class="r mono-val">1</td><td class="r mono-val">0</td><td class="r mono-val">57.1</td></tr>
+          <tr><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td style="color:var(--accent);font-size:12px">not out</td><td class="r mono-val" style="color:var(--accent);font-weight:700">83<span style="font-size:10px">*</span></td><td class="r mono-val">94</td><td class="r mono-val">9</td><td class="r mono-val">2</td><td class="r mono-val">88.3</td></tr>
+          <tr><td><span class="player-link">S. Parker</span></td><td style="color:var(--slate-5);font-size:12px">lbw Nguyen</td><td class="r mono-val">61</td><td class="r mono-val">70</td><td class="r mono-val">6</td><td class="r mono-val">1</td><td class="r mono-val">87.1</td></tr>
+          <tr><td><span class="player-link">M. Thompson</span></td><td style="color:var(--slate-5);font-size:12px">c Murray b Nguyen</td><td class="r mono-val">24</td><td class="r mono-val">31</td><td class="r mono-val">2</td><td class="r mono-val">1</td><td class="r mono-val">77.4</td></tr>
+          <tr><td><span class="player-link">B. Harris</span></td><td style="color:var(--slate-5);font-size:12px">run out (Fleming)</td><td class="r mono-val">18</td><td class="r mono-val">22</td><td class="r mono-val">1</td><td class="r mono-val">1</td><td class="r mono-val">81.8</td></tr>
+          <tr><td><span class="player-link">A. Chen</span></td><td style="color:var(--slate-5);font-size:12px">bowled Walsh</td><td class="r mono-val">4</td><td class="r mono-val">8</td><td class="r mono-val">0</td><td class="r mono-val">0</td><td class="r mono-val">50.0</td></tr>
+          <tr><td><span class="player-link">K. Roberts</span></td><td style="color:var(--accent);font-size:12px">not out</td><td class="r mono-val">7<span style="font-size:10px;color:var(--accent)">*</span></td><td class="r mono-val">9</td><td class="r mono-val">1</td><td class="r mono-val">0</td><td class="r mono-val">77.8</td></tr>
+        </tbody>
+        <tfoot><tr><td colspan="2">Total <span style="color:var(--slate-5);font-size:11px;font-weight:400;font-family:'Inter',sans-serif">(7 wkts, 40 overs)</span></td><td class="r" colspan="5">247</td></tr></tfoot>
+      </table>
+    </div>
+    <div class="bowling-section" id="bowl-1">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Bowler</th><th class="r">O</th><th class="r">M</th><th class="r">R</th><th class="r">W</th><th class="r">Econ</th><th class="r">Wd</th><th class="r">NB</th></tr></thead>
+          <thead><tr><th>Bowler (Bayside CC)</th><th class="r">O</th><th class="r">M</th><th class="r">R</th><th class="r">W</th><th class="r">Econ</th><th class="r">Wd</th><th class="r">NB</th></tr></thead>
           <tbody>
-            <tr><td><span class="player-link">C. Nguyen</span></td><td class="r mono-val">8</td><td class="r mono-val">1</td><td class="r mono-val">42</td><td class="r mono-val hi-wkts-3">3</td><td class="r mono-val">5.25</td><td class="r mono-val">2</td><td class="r mono-val">0</td></tr>
+            <tr><td><span class="player-link">C. Nguyen</span></td><td class="r mono-val">8</td><td class="r mono-val">1</td><td class="r mono-val">42</td><td class="r mono-val" style="color:var(--accent);font-weight:700">3</td><td class="r mono-val">5.25</td><td class="r mono-val">2</td><td class="r mono-val">0</td></tr>
             <tr><td><span class="player-link">P. Walsh</span></td><td class="r mono-val">8</td><td class="r mono-val">0</td><td class="r mono-val">51</td><td class="r mono-val">2</td><td class="r mono-val">6.38</td><td class="r mono-val">3</td><td class="r mono-val">1</td></tr>
             <tr><td><span class="player-link">H. Lee</span></td><td class="r mono-val">8</td><td class="r mono-val">1</td><td class="r mono-val">38</td><td class="r mono-val">1</td><td class="r mono-val">4.75</td><td class="r mono-val">0</td><td class="r mono-val">0</td></tr>
             <tr><td><span class="player-link">G. Murray</span></td><td class="r mono-val">8</td><td class="r mono-val">0</td><td class="r mono-val">56</td><td class="r mono-val">1</td><td class="r mono-val">7.00</td><td class="r mono-val">4</td><td class="r mono-val">0</td></tr>
@@ -613,40 +1035,123 @@
         </table>
       </div>
     </div>
+  </div>
 
-    <!-- Fielding highlights -->
-    <div class="card" style="padding:16px;">
-      <h3 class="display" style="font-size:16px; margin-bottom:12px;">Fielding Highlights</h3>
-      <div style="display:flex; flex-wrap:wrap; gap:16px;">
-        <div><span class="player-link" onclick="showPage('player')">J. Mitchell</span> <span style="color:var(--slate-5);font-size:12px">2ct</span></div>
-        <div><span class="player-link">S. Parker</span> <span style="color:var(--slate-5);font-size:12px">1ct, 1ro</span></div>
-        <div><span class="player-link">T. Wilson</span> <span style="color:var(--slate-5);font-size:12px">†3ct 1st</span></div>
-        <div><span class="player-link">R. Davis</span> <span style="color:var(--slate-5);font-size:12px">1ct</span></div>
+  <!-- 2nd Innings block -->
+  <div class="innings-block card" style="overflow:hidden; margin-bottom:16px;">
+    <div class="card-head">
+      <h3>2nd Innings — Bayside CC</h3>
+      <button class="bowling-toggle" onclick="toggleBowling(this, 'bowl-2')">Show Bowling ▾</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Batter</th><th style="color:var(--slate-6);font-size:11px;text-transform:none;letter-spacing:0;">How Out</th><th class="r">R</th><th class="r">B</th><th class="r">4s</th><th class="r">6s</th><th class="r">SR</th></tr></thead>
+        <tbody>
+          <tr><td><span class="player-link">C. Nguyen</span></td><td style="color:var(--slate-5);font-size:12px">c Mitchell b Chen</td><td class="r mono-val">38</td><td class="r mono-val">45</td><td class="r mono-val">5</td><td class="r mono-val">0</td><td class="r mono-val">84.4</td></tr>
+          <tr><td><span class="player-link">D. Patel</span></td><td style="color:var(--slate-5);font-size:12px">bowled Mitchell</td><td class="r mono-val">14</td><td class="r mono-val">20</td><td class="r mono-val">2</td><td class="r mono-val">0</td><td class="r mono-val">70.0</td></tr>
+          <tr><td><span class="player-link">H. Lee</span></td><td style="color:var(--slate-5);font-size:12px">c Davis b Roberts</td><td class="r mono-val" style="color:var(--accent);font-weight:700">71</td><td class="r mono-val">82</td><td class="r mono-val">8</td><td class="r mono-val">2</td><td class="r mono-val">86.6</td></tr>
+          <tr><td><span class="player-link">G. Murray</span></td><td style="color:var(--slate-5);font-size:12px">lbw Mitchell</td><td class="r mono-val">24</td><td class="r mono-val">34</td><td class="r mono-val">3</td><td class="r mono-val">0</td><td class="r mono-val">70.6</td></tr>
+          <tr><td><span class="player-link">P. Walsh</span></td><td style="color:var(--slate-5);font-size:12px">bowled Chen</td><td class="r mono-val">19</td><td class="r mono-val">28</td><td class="r mono-val">2</td><td class="r mono-val">0</td><td class="r mono-val">67.9</td></tr>
+          <tr><td><span class="player-link">R. Fleming</span></td><td style="color:var(--slate-5);font-size:12px">run out (Parker)</td><td class="r mono-val">8</td><td class="r mono-val">12</td><td class="r mono-val">1</td><td class="r mono-val">0</td><td class="r mono-val">66.7</td></tr>
+          <tr><td><span class="player-link">T. James</span></td><td style="color:var(--slate-5);font-size:12px">c Parker b Singh</td><td class="r mono-val">11</td><td class="r mono-val">16</td><td class="r mono-val">1</td><td class="r mono-val">0</td><td class="r mono-val">68.8</td></tr>
+          <tr><td><span class="player-link">B. Cooper</span></td><td style="color:var(--slate-5);font-size:12px">bowled Roberts</td><td class="r mono-val">6</td><td class="r mono-val">9</td><td class="r mono-val">0</td><td class="r mono-val">0</td><td class="r mono-val">66.7</td></tr>
+          <tr><td><span class="player-link">M. Owen</span></td><td style="color:var(--slate-5);font-size:12px">bowled Mitchell</td><td class="r mono-val">3</td><td class="r mono-val">7</td><td class="r mono-val">0</td><td class="r mono-val">0</td><td class="r mono-val">42.9</td></tr>
+          <tr><td><span class="player-link">K. Hunt</span></td><td style="color:var(--slate-5);font-size:12px">bowled Chen</td><td class="r mono-val">4</td><td class="r mono-val">6</td><td class="r mono-val">1</td><td class="r mono-val">0</td><td class="r mono-val">66.7</td></tr>
+          <tr><td><span class="player-link">A. Brooks</span></td><td style="color:var(--slate-5);font-size:12px">not out</td><td class="r mono-val">2<span style="font-size:10px;color:var(--accent)">*</span></td><td class="r mono-val">4</td><td class="r mono-val">0</td><td class="r mono-val">0</td><td class="r mono-val">50.0</td></tr>
+        </tbody>
+        <tfoot><tr><td colspan="2">Total <span style="color:var(--slate-5);font-size:11px;font-weight:400;font-family:'Inter',sans-serif">(all out, 38.2 overs)</span></td><td class="r" colspan="5">200</td></tr></tfoot>
+      </table>
+    </div>
+    <div class="bowling-section" id="bowl-2">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Bowler (Riverside CC)</th><th class="r">O</th><th class="r">M</th><th class="r">R</th><th class="r">W</th><th class="r">Econ</th><th class="r">Wd</th><th class="r">NB</th></tr></thead>
+          <tbody>
+            <tr><td><span class="player-link" onclick="showPage('player')">J. Mitchell</span></td><td class="r mono-val">9</td><td class="r mono-val">1</td><td class="r mono-val">34</td><td class="r mono-val" style="color:var(--accent);font-weight:700">3</td><td class="r mono-val">3.78</td><td class="r mono-val">1</td><td class="r mono-val">0</td></tr>
+            <tr><td><span class="player-link">A. Chen</span></td><td class="r mono-val">9.2</td><td class="r mono-val">2</td><td class="r mono-val">38</td><td class="r mono-val" style="color:var(--accent);font-weight:700">3</td><td class="r mono-val">4.07</td><td class="r mono-val">2</td><td class="r mono-val">0</td></tr>
+            <tr><td><span class="player-link">K. Roberts</span></td><td class="r mono-val">8</td><td class="r mono-val">1</td><td class="r mono-val">44</td><td class="r mono-val">2</td><td class="r mono-val">5.50</td><td class="r mono-val">0</td><td class="r mono-val">0</td></tr>
+            <tr><td><span class="player-link">D. Singh</span></td><td class="r mono-val">7</td><td class="r mono-val">0</td><td class="r mono-val">51</td><td class="r mono-val">1</td><td class="r mono-val">7.29</td><td class="r mono-val">3</td><td class="r mono-val">0</td></tr>
+            <tr><td><span class="player-link">M. Thompson</span></td><td class="r mono-val">5</td><td class="r mono-val">0</td><td class="r mono-val">33</td><td class="r mono-val">1</td><td class="r mono-val">6.60</td><td class="r mono-val">1</td><td class="r mono-val">0</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
+
 </div>
 
 <script>
+  // ── Page navigation ──
+  const NAV_LABELS = ['home','dashboard','players','player','compare','leaderboard','scorecard'];
+
   function showPage(name) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('page-' + name).classList.add('active');
-    const btns = document.querySelectorAll('.nav-btn');
-    const labels = ['home','dashboard','player','leaderboard','scorecard'];
-    const idx = labels.indexOf(name);
-    if (idx >= 0) btns[idx].classList.add('active');
+    const idx = NAV_LABELS.indexOf(name);
+    if (idx >= 0) document.querySelectorAll('.nav-btn')[idx].classList.add('active');
     window.scrollTo(0, 0);
   }
 
-  function switchTab(btn, groupId, targetId) {
-    // Deactivate all tabs in same group
-    btn.closest('.tabs').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  // ── Dashboard expandable tiles ──
+  function togglePanel(panelId, tile) {
+    const isAlreadyActive = tile.classList.contains('active');
+    // Deactivate all tiles
+    document.querySelectorAll('.stat-tile').forEach(t => t.classList.remove('active'));
+    // Hide all panels
+    document.querySelectorAll('.expand-panel').forEach(p => p.classList.remove('active'));
+    if (!isAlreadyActive) {
+      tile.classList.add('active');
+      document.getElementById(panelId).classList.add('active');
+    }
+  }
+
+  // ── Main tab switcher ──
+  function switchMainTab(btn, groupId, targetId) {
+    const tabBar = btn.closest('.main-tabs');
+    tabBar.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
     btn.classList.add('active');
-    // Find all tab-content siblings
-    const container = btn.closest('.card, .page');
-    container.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
-    document.getElementById(targetId).classList.add('active');
+    const container = btn.closest('.page, .card').querySelector('.card') || btn.closest('.page');
+    // find all sibling tab panels in nearby card
+    const card = btn.closest('.page').querySelector('.card[style*="border-radius:0"]') ||
+                 btn.closest('.card') ||
+                 btn.closest('.page');
+    card.querySelectorAll(':scope > .tab-panel').forEach(tp => tp.classList.remove('active'));
+    const target = document.getElementById(targetId);
+    if (target) target.classList.add('active');
+  }
+
+  // ── Sub-tab switcher ──
+  function switchSubTab(btn, groupId, targetId) {
+    const subBar = btn.closest('.sub-tabs');
+    subBar.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    // Deactivate sibling panels within the parent tab-panel
+    const parent = btn.closest('.tab-panel');
+    parent.querySelectorAll(':scope > .tab-panel').forEach(tp => tp.classList.remove('active'));
+    const target = document.getElementById(targetId);
+    if (target) target.classList.add('active');
+  }
+
+  // ── Bowling toggle ──
+  function toggleBowling(btn, sectionId) {
+    const section = document.getElementById(sectionId);
+    const open = section.classList.toggle('open');
+    btn.textContent = open ? 'Hide Bowling ▴' : 'Show Bowling ▾';
+  }
+
+  // ── Player search ──
+  function filterPlayers(query) {
+    const q = query.toLowerCase();
+    document.querySelectorAll('#players-tbody tr').forEach(row => {
+      const name = row.getAttribute('data-name') || '';
+      row.style.display = name.includes(q) ? '' : 'none';
+    });
+  }
+
+  function clearSearch() {
+    document.querySelector('.search-bar').value = '';
+    filterPlayers('');
   }
 </script>
 </body>
