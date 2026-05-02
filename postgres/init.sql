@@ -158,3 +158,9 @@ CREATE INDEX IF NOT EXISTS idx_games_played_at ON games(played_at);
 CREATE INDEX IF NOT EXISTS idx_players_org ON players(organisation_id);
 CREATE INDEX IF NOT EXISTS idx_seasons_org ON seasons(organisation_id);
 CREATE INDEX IF NOT EXISTS idx_grades_season ON grades(season_id);
+
+-- Grant full access to the cricket user (the DB owner in Docker, but needed for local setups)
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO cricket;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO cricket;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO cricket;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO cricket;
