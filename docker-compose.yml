@@ -20,7 +20,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://cricket:${DB_PASSWORD}@db/betterstats
       SYNC_DATABASE_URL: postgresql://cricket:${DB_PASSWORD}@db/betterstats
       SECRET_KEY: ${SECRET_KEY}
-      PLAYHQ_BASE_URL: https://api.playhq.com
+      PLAYHQ_BASE_URL: https://grassrootsapiproxy.cricket.com.au
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     ports:
       - "127.0.0.1:8000:8000"
