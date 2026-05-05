@@ -10,13 +10,13 @@ function ResultBanner({ game }) {
 
   return (
     <div className={clsx(
-      'rounded-xl p-6 mb-8 border',
+      'rounded-xl p-6 mb-6 border',
       isWin ? 'bg-accent/10 border-accent/30' : isDraw ? 'bg-slate-500/10 border-slate-500/30' : 'bg-red-500/10 border-red-500/30'
     )}>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <p className="section-label mb-1">{game.season?.name} · {game.grade?.name}</p>
-          <h2 className="display-heading text-3xl text-white">
+          <h2 className="display-heading text-2xl md:text-3xl text-white">
             {game.home_team} <span className="text-slate-500 font-sans font-normal text-xl">vs</span> {game.away_team}
           </h2>
           {game.played_at && (
@@ -41,10 +41,21 @@ function ResultBanner({ game }) {
   )
 }
 
+function InningsTotal({ batting }) {
+  const runs = batting.reduce((s, r) => s + (r.runs ?? 0), 0)
+  const wickets = batting.filter(r => !r.not_out && r.dismissal_type && r.dismissal_type !== '').length
+  return (
+    <div className="flex items-center gap-2 text-sm text-slate-400">
+      <span className="stat-number text-white font-bold text-lg">{runs}/{wickets}</span>
+    </div>
+  )
+}
+
 function BattingScorecard({ batting = [] }) {
-  if (!batting.length) return <p className="text-slate-500 text-sm py-4">No batting data.</p>
+  if (!batting.length) return <p className="text-slate-500 text-sm py-4 px-4">No batting data.</p>
 
   const total = batting.reduce((s, r) => s + (r.runs ?? 0), 0)
+  const wickets = batting.filter(r => !r.not_out && r.dismissal_type && r.dismissal_type !== '').length
 
   return (
     <div className="overflow-x-auto">
@@ -92,7 +103,9 @@ function BattingScorecard({ batting = [] }) {
         <tfoot>
           <tr className="border-t border-navy-600">
             <td colSpan={2} className="table-cell text-slate-400 font-semibold text-sm">Total</td>
-            <td className="table-cell stat-number text-right font-bold text-white text-base">{total}</td>
+            <td className="table-cell stat-number text-right font-bold text-white text-base">
+              {total}/{wickets}
+            </td>
             <td colSpan={4} />
           </tr>
         </tfoot>
@@ -102,7 +115,7 @@ function BattingScorecard({ batting = [] }) {
 }
 
 function BowlingScorecard({ bowling = [] }) {
-  if (!bowling.length) return <p className="text-slate-500 text-sm py-4">No bowling data.</p>
+  if (!bowling.length) return <p className="text-slate-500 text-sm py-4 px-4">No bowling data.</p>
 
   return (
     <div className="overflow-x-auto">
@@ -176,7 +189,9 @@ function FallOfWicketsSection({ fow = [] }) {
                 <span className="text-slate-500 mx-1">-</span>
                 <span className="stat-number text-white">{f.wicket_number}</span>
                 {f.player_name && (
-                  <span className="text-slate-400 text-xs ml-2">({f.player_name})</span>
+                  <Link to={`/players/${f.player_id}`} className="text-slate-400 text-xs ml-2 hover:text-accent transition-colors">
+                    ({f.player_name})
+                  </Link>
                 )}
                 {f.overs_at_fall != null && (
                   <span className="text-slate-600 text-xs ml-1">{f.overs_at_fall} ov</span>
@@ -286,6 +301,54 @@ function FieldingSection({ fielding = [] }) {
   )
 }
 
+function InningsBlock({ title, subtitle, batting, bowling, accentTitle = false }) {
+  const [showBowling, setShowBowling] = useState(false)
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-4 border-b border-navy-700 flex items-center justify-between">
+        <div>
+          <h3 className={clsx('display-heading text-xl', accentTitle ? 'text-accent' : 'text-white')}>
+            {title}
+          </h3>
+          {subtitle && <p className="text-slate-500 text-xs mt-0.5">{subtitle}</p>}
+        </div>
+        {batting.length > 0 && (
+          <div className="text-right">
+            <InningsTotal batting={batting} />
+          </div>
+        )}
+      </div>
+
+      {/* Batting */}
+      <div>
+        <div className="px-4 py-2 bg-navy-800/40 border-b border-navy-700/50">
+          <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Batting</span>
+        </div>
+        <BattingScorecard batting={batting} />
+      </div>
+
+      {/* Bowling toggle */}
+      {bowling.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowBowling(s => !s)}
+            className="w-full px-4 py-2 bg-navy-800/40 border-t border-navy-700/50 flex items-center justify-between hover:bg-navy-700/30 transition-colors"
+          >
+            <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Bowling</span>
+            <svg
+              className={clsx('w-4 h-4 text-slate-500 transition-transform', showBowling && 'rotate-180')}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showBowling && <BowlingScorecard bowling={bowling} />}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function MatchScorecard() {
   const { gameId } = useParams()
   const [game, setGame] = useState(null)
@@ -303,34 +366,71 @@ export default function MatchScorecard() {
   if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-red-400">Error: {error}</div>
   if (!game) return null
 
+  // Group batting and bowling by innings_number
+  const inningsNums = [...new Set([
+    ...(game.batting || []).map(r => r.innings_number || 1),
+    ...(game.bowling || []).map(r => r.innings_number || 1),
+  ])].sort()
+
+  const inningsMap = inningsNums.map(num => {
+    const batting = (game.batting || []).filter(r => (r.innings_number || 1) === num)
+    // Bowling for this innings is the *other* team bowling — stored under the innings that was bowled AT
+    // The bowling rows for innings N are bowlers bowling in innings N
+    const bowling = (game.bowling || []).filter(r => (r.innings_number || 1) === num)
+    const teamName = game.innings_teams?.[num] || (num === 1 ? game.home_team : game.away_team)
+    return { num, batting, bowling, teamName }
+  })
+
+  const hasMultipleInnings = inningsMap.length > 1
+
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-5xl mx-auto px-4 py-8">
       <ResultBanner game={game} />
 
+      {/* Match overview strip */}
+      {hasMultipleInnings && (
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          {inningsMap.map(({ num, batting, teamName }) => (
+            <div key={num} className="card p-3 text-center">
+              <p className="section-label mb-1">Innings {num}</p>
+              <p className="text-white text-sm font-medium truncate mb-1">{teamName}</p>
+              <InningsTotal batting={batting} />
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="space-y-6">
-        {/* Batting */}
-        <div className="card overflow-hidden">
-          <div className="px-5 py-4 border-b border-navy-700">
-            <h3 className="display-heading text-xl text-white">BATTING</h3>
-          </div>
-          <BattingScorecard batting={game.batting} />
-        </div>
+        {hasMultipleInnings ? (
+          inningsMap.map(({ num, batting, bowling, teamName }) => (
+            <InningsBlock
+              key={num}
+              title={`INNINGS ${num} — ${teamName?.toUpperCase() || ''}`}
+              batting={batting}
+              bowling={bowling}
+              accentTitle={num === 1}
+            />
+          ))
+        ) : (
+          /* Single-innings fallback: show flat batting + bowling */
+          <>
+            <div className="card overflow-hidden">
+              <div className="px-5 py-4 border-b border-navy-700">
+                <h3 className="display-heading text-xl text-white">BATTING</h3>
+              </div>
+              <BattingScorecard batting={game.batting} />
+            </div>
+            <div className="card overflow-hidden">
+              <div className="px-5 py-4 border-b border-navy-700">
+                <h3 className="display-heading text-xl text-white">BOWLING</h3>
+              </div>
+              <BowlingScorecard bowling={game.bowling} />
+            </div>
+          </>
+        )}
 
-        {/* Bowling */}
-        <div className="card overflow-hidden">
-          <div className="px-5 py-4 border-b border-navy-700">
-            <h3 className="display-heading text-xl text-white">BOWLING</h3>
-          </div>
-          <BowlingScorecard bowling={game.bowling} />
-        </div>
-
-        {/* Fall of Wickets */}
         <FallOfWicketsSection fow={game.fall_of_wickets ?? []} />
-
-        {/* Partnerships */}
         <PartnershipsSection partnerships={game.partnerships ?? []} />
-
-        {/* Fielding */}
         <FieldingSection fielding={game.fielding} />
       </div>
     </div>
