@@ -49,8 +49,9 @@ export default function Onboard() {
   }, [query, selected])
 
   const handleSelect = (org) => {
-    setSelected(org)
-    setQuery(org.name || org.shortName || org.id)
+    const id = org.organisationGuid || org.id
+    setSelected({ id, name: org.name || org.shortName || id })
+    setQuery(org.name || org.shortName || id)
     setShowResults(false)
     setResults([])
   }
@@ -117,7 +118,7 @@ export default function Onboard() {
           {showResults && results.length > 0 && (
             <ul className="absolute z-10 mt-1 w-full bg-navy-800 border border-navy-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
               {results.map((org) => (
-                <li key={org.id}>
+                <li key={org.organisationGuid || org.id}>
                   <button
                     type="button"
                     onClick={() => handleSelect(org)}
