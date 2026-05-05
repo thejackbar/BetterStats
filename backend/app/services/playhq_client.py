@@ -1,5 +1,4 @@
 import httpx
-import asyncio
 import logging
 from typing import Optional
 
@@ -9,36 +8,41 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = settings.playhq_base_url
 DEFAULT_TIMEOUT = 30.0
+_JSCONFIG = "eccn:true"
 
 
-async def _paginate(client: httpx.AsyncClient, url: str, params: dict = None) -> list:
-    results = []
-    cursor = None
-    params = params or {}
+def _base_params(extra: dict = None) -> dict:
+    params = {"jsconfig": _JSCONFIG}
+    if extra:
+        params.update(extra)
+    return params
 
-    while True:
-        if cursor:
-            params["cursor"] = cursor
-        r = await client.get(url, params=params, timeout=DEFAULT_TIMEOUT)
+
+async def search_organisations(query: str) -> list:
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{BASE_URL}/orgsproducts/organisation/search",
+            params=_base_params({"searchString": query}),
+            timeout=DEFAULT_TIMEOUT,
+        )
         r.raise_for_status()
         data = r.json()
-        items = data.get("data", [])
-        results.extend(items)
-        meta = data.get("metadata", {})
-        if not meta.get("hasMore"):
-            break
-        cursor = meta.get("cursor")
-
-    return results
+        return data.get("data", data.get("organisations", data if isinstance(data, list) else []))
 
 
 async def get_organisation(org_id: str) -> Optional[dict]:
+    """Validate an org exists by probing the batting-statistics endpoint."""
     async with httpx.AsyncClient() as client:
         try:
-            r = await client.get(f"{BASE_URL}/v1/organisations/{org_id}", timeout=DEFAULT_TIMEOUT)
+            r = await client.get(
+                f"{BASE_URL}/participants/organisations/{org_id}/batting-statistics",
+                params=_base_params(),
+                timeout=DEFAULT_TIMEOUT,
+            )
+            if r.status_code == 404:
+                return None
             r.raise_for_status()
-            data = r.json()
-            return data.get("data")
+            return {"id": org_id, "name": "", "shortName": ""}
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 return None
@@ -47,40 +51,93 @@ async def get_organisation(org_id: str) -> Optional[dict]:
 
 async def get_seasons(org_id: str) -> list:
     async with httpx.AsyncClient() as client:
-        return await _paginate(client, f"{BASE_URL}/v1/organisations/{org_id}/seasons")
+        try:
+            r = await client.get(
+                f"{BASE_URL}/fixturesladders/organisations/{org_id}/seasons",
+                params=_base_params(),
+                timeout=DEFAULT_TIMEOUT,
+            )
+            r.raise_for_status()
+            data = r.json()
+            return data.get("data", data.get("seasons", data if isinstance(data, list) else []))
+        except Exception as e:
+            logger.warning(f"get_seasons failed for {org_id}: {e}")
+            return []
 
 
-async def get_grades(season_id: str) -> list:
+async def get_teams(org_id: str, season_id: str) -> list:
     async with httpx.AsyncClient() as client:
-        return await _paginate(client, f"{BASE_URL}/v1/seasons/{season_id}/grades")
+        try:
+            r = await client.get(
+                f"{BASE_URL}/fixturesladders/organisations/{org_id}/teams",
+                params=_base_params({"seasonId": season_id}),
+                timeout=DEFAULT_TIMEOUT,
+            )
+            r.raise_for_status()
+            data = r.json()
+            return data.get("data", data.get("teams", data if isinstance(data, list) else []))
+        except Exception as e:
+            logger.warning(f"get_teams failed for org={org_id} season={season_id}: {e}")
+            return []
+
+
+async def _paginate_stats(url: str, season_id: str, extra_params: dict = None) -> list:
+    results = []
+    offset = 1
+    limit = 100
+    async with httpx.AsyncClient() as client:
+        while True:
+            params = _base_params({"seasonId": season_id, "offset": offset, "limit": limit})
+            if extra_params:
+                params.update(extra_params)
+            r = await client.get(url, params=params, timeout=DEFAULT_TIMEOUT)
+            r.raise_for_status()
+            data = r.json()
+            items = data.get("data", data.get("participants", data if isinstance(data, list) else []))
+            if not items:
+                break
+            results.extend(items)
+            if len(items) < limit:
+                break
+            offset += limit
+    return results
+
+
+async def get_batting_stats(org_id: str, season_id: str) -> list:
+    return await _paginate_stats(
+        f"{BASE_URL}/participants/organisations/{org_id}/batting-statistics",
+        season_id,
+        {"sort": "BattingAggregate:desc"},
+    )
+
+
+async def get_bowling_stats(org_id: str, season_id: str) -> list:
+    return await _paginate_stats(
+        f"{BASE_URL}/participants/organisations/{org_id}/bowling-statistics",
+        season_id,
+        {"sort": "BowlingWickets:desc"},
+    )
+
+
+async def get_fielding_stats(org_id: str, season_id: str) -> list:
+    return await _paginate_stats(
+        f"{BASE_URL}/participants/organisations/{org_id}/fielding-statistics",
+        season_id,
+    )
+
+
+# Stubs retained for backward compatibility with sync.py — will be removed in next refactor
+async def get_grades(season_id: str) -> list:
+    return []
 
 
 async def get_fixtures(grade_id: str) -> list:
-    async with httpx.AsyncClient() as client:
-        return await _paginate(client, f"{BASE_URL}/v1/grades/{grade_id}/fixture")
+    return []
 
 
 async def get_game_summary(game_id: str) -> Optional[dict]:
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.get(f"{BASE_URL}/v1/games/{game_id}/summary", timeout=DEFAULT_TIMEOUT)
-            r.raise_for_status()
-            data = r.json()
-            return data.get("data")
-        except httpx.HTTPStatusError as e:
-            logger.warning(f"Failed to fetch game {game_id}: {e.response.status_code}")
-            return None
-        except Exception as e:
-            logger.error(f"Error fetching game {game_id}: {e}")
-            return None
+    return None
 
 
 async def get_games_batch(game_ids: list[str], concurrency: int = 5) -> list[dict]:
-    semaphore = asyncio.Semaphore(concurrency)
-
-    async def fetch_one(game_id: str) -> Optional[dict]:
-        async with semaphore:
-            return await get_game_summary(game_id)
-
-    results = await asyncio.gather(*[fetch_one(gid) for gid in game_ids], return_exceptions=False)
-    return [r for r in results if r is not None]
+    return []
