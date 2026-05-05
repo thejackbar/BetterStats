@@ -23,7 +23,7 @@ services:
       PLAYHQ_BASE_URL: https://api.playhq.com
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
