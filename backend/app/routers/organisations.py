@@ -15,6 +15,7 @@ router = APIRouter(prefix="/organisations", tags=["organisations"])
 
 class OnboardRequest(BaseModel):
     org_id: str
+    org_name: str = ""
 
 
 class OrganisationOut(BaseModel):
@@ -26,6 +27,14 @@ class OrganisationOut(BaseModel):
         from_attributes = True
 
 
+@router.get("/search")
+async def search_organisations(q: str = ""):
+    if not q or len(q.strip()) < 2:
+        return []
+    results = await playhq_client.search_organisations(q.strip())
+    return results
+
+
 @router.post("/onboard", status_code=202)
 async def onboard_organisation(
     data: OnboardRequest,
@@ -34,7 +43,10 @@ async def onboard_organisation(
 ):
     org_data = await playhq_client.get_organisation(data.org_id)
     if not org_data:
-        raise HTTPException(status_code=404, detail="Organisation not found in PlayHQ")
+        raise HTTPException(status_code=404, detail="Organisation not found")
+
+    name = data.org_name.strip() or org_data.get("name") or data.org_id
+    org_data["name"] = name
 
     await upsert_organisation(db, org_data)
     background_tasks.add_task(sync_organisation, data.org_id)
@@ -42,7 +54,7 @@ async def onboard_organisation(
     return {
         "status": "sync_started",
         "org_id": data.org_id,
-        "name": org_data.get("name"),
+        "name": name,
     }
 
 

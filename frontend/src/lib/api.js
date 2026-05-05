@@ -25,8 +25,9 @@ export const api = {
   me: () => request('/auth/me'),
 
   // Organisations
-  onboard: (orgId) =>
-    request('/organisations/onboard', { method: 'POST', body: JSON.stringify({ org_id: orgId }) }),
+  searchOrgs: (q) => request(`/organisations/search?q=${encodeURIComponent(q)}`),
+  onboard: (orgId, orgName = '') =>
+    request('/organisations/onboard', { method: 'POST', body: JSON.stringify({ org_id: orgId, org_name: orgName }) }),
   listOrgs: () => request('/organisations'),
   getOrg: (orgId) => request(`/organisations/${orgId}`),
   getOrgSeasons: (orgId) => request(`/organisations/${orgId}/seasons`),
