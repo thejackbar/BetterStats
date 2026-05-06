@@ -220,7 +220,15 @@ async def get_player_milestones(session: AsyncSession, player_id: str) -> list[d
                 m.game_id
             FROM milestones m
             WHERE m.player_id = :pid
-            ORDER BY m.milestone_type, m.milestone_value
+            ORDER BY
+                CASE m.milestone_type
+                    WHEN 'runs' THEN 1
+                    WHEN 'wickets' THEN 2
+                    WHEN 'matches' THEN 3
+                    WHEN 'catches' THEN 4
+                    ELSE 5
+                END,
+                m.milestone_value DESC
         """),
         {"pid": player_id}
     )
@@ -246,7 +254,9 @@ async def get_upcoming_milestones_for_org(
                 p.id AS player_id,
                 p.name,
                 COALESCE(SUM(pss.runs), 0) AS career_runs,
-                COALESCE(SUM(pss.wickets), 0) AS career_wickets
+                COALESCE(SUM(pss.wickets), 0) AS career_wickets,
+                COALESCE(SUM(pss.matches), 0) AS career_matches,
+                COALESCE(SUM(pss.catches), 0) AS career_catches
             FROM players p
             LEFT JOIN player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
@@ -257,41 +267,66 @@ async def get_upcoming_milestones_for_org(
     )
     rows = [dict(r) for r in result.mappings()]
 
-    RUN_MILESTONES = [50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 5000]
-    WICKET_MILESTONES = [10, 25, 50, 75, 100, 150, 200]
+    RUN_MILESTONES = [
+        50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000,
+        6000, 7000, 8000, 9000, 10000, 12500, 15000, 17500, 20000,
+        25000, 30000, 35000, 40000, 45000, 50000,
+    ]
+    WICKET_MILESTONES = [
+        10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500,
+        600, 700, 800, 900, 1000, 1500, 2000, 2500, 3000, 4000, 5000,
+    ]
+    MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000]
+    CATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000]
+
+    def next_milestone(current, milestones):
+        for m in milestones:
+            if current < m:
+                return m
+        return None
+
+    # Score formula: milestone_value² / needed
+    # Heavily weights milestone size so 500-from-9000 beats 1-from-100
+    def importance_score(target, needed):
+        return (target ** 2) / (needed + 1)
 
     upcoming = []
     for row in rows:
         runs = int(row["career_runs"] or 0)
         wickets = int(row["career_wickets"] or 0)
+        matches = int(row["career_matches"] or 0)
+        catches = int(row["career_catches"] or 0)
         player_id = str(row["player_id"])
         name = row["name"]
 
-        for m in RUN_MILESTONES:
-            if runs < m:
-                upcoming.append({
-                    "player_id": player_id,
-                    "name": name,
-                    "type": "runs",
-                    "current": runs,
-                    "target": m,
-                    "needed": m - runs,
-                })
-                break
+        CATEGORY_MAP = {
+            "runs": "batting",
+            "wickets": "bowling",
+            "matches": "matches",
+            "catches": "fielding",
+        }
+        for stat, current, milestones in [
+            ("runs", runs, RUN_MILESTONES),
+            ("wickets", wickets, WICKET_MILESTONES),
+            ("matches", matches, MATCH_MILESTONES),
+            ("catches", catches, CATCH_MILESTONES),
+        ]:
+            target = next_milestone(current, milestones)
+            if target is None:
+                continue
+            needed = target - current
+            upcoming.append({
+                "player_id": player_id,
+                "name": name,
+                "type": stat,
+                "category": CATEGORY_MAP[stat],
+                "current": current,
+                "target": target,
+                "needed": needed,
+                "score": importance_score(target, needed),
+            })
 
-        for m in WICKET_MILESTONES:
-            if wickets < m:
-                upcoming.append({
-                    "player_id": player_id,
-                    "name": name,
-                    "type": "wickets",
-                    "current": wickets,
-                    "target": m,
-                    "needed": m - wickets,
-                })
-                break
-
-    upcoming.sort(key=lambda x: x["needed"])
+    upcoming.sort(key=lambda x: x["score"], reverse=True)
     return upcoming[:limit]
 
 

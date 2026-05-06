@@ -115,44 +115,58 @@ function UpcomingFixtures({ fixtures, loading }) {
   )
 }
 
-const MILESTONE_ICONS = { runs: '🏏', wickets: '⚡', matches: '📅', catches: '🤝' }
+const MILESTONE_ICONS = { runs: '🏸', wickets: '⚡', matches: '📅', catches: '🤝' }
+const CATEGORY_LABELS = { batting: 'Batting', bowling: 'Bowling', fielding: 'Fielding', matches: 'Matches Played' }
+const CATEGORY_ORDER = ['batting', 'bowling', 'fielding', 'matches']
+
+function MilestoneCard({ m }) {
+  const pct = Math.round((m.current / m.target) * 100)
+  return (
+    <Link to={`/players/${m.player_id}`} className="block hover:opacity-80 transition-opacity">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-base">{MILESTONE_ICONS[m.type] || '🎯'}</span>
+          <span className="text-sm text-white font-medium truncate">{m.name}</span>
+        </div>
+        <span className="text-xs text-slate-400 ml-2 whitespace-nowrap">
+          <span className="stat-number text-accent font-bold">{m.needed.toLocaleString()}</span> {m.type} to go
+        </span>
+      </div>
+      <div className="h-1.5 bg-navy-700 rounded-full overflow-hidden">
+        <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="flex justify-between mt-0.5">
+        <span className="text-xs text-slate-600">{m.current.toLocaleString()} {m.type}</span>
+        <span className="text-xs text-slate-600">{m.target.toLocaleString()}</span>
+      </div>
+    </Link>
+  )
+}
 
 function UpcomingMilestones({ milestones, loading }) {
   if (loading) return <LoadingSpinner size="sm" />
   if (!milestones.length) return <p className="text-slate-500 text-sm py-4">No upcoming milestones.</p>
 
+  const grouped = {}
+  for (const m of milestones) {
+    const cat = m.category || 'batting'
+    if (!grouped[cat]) grouped[cat] = []
+    grouped[cat].push(m)
+  }
+  const categories = CATEGORY_ORDER.filter(c => grouped[c])
+
   return (
-    <div className="space-y-2">
-      {milestones.slice(0, 8).map((m, i) => {
-        const pct = Math.round((m.current / m.target) * 100)
-        return (
-          <Link
-            key={i}
-            to={`/players/${m.player_id}`}
-            className="block hover:opacity-80 transition-opacity"
-          >
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-base">{MILESTONE_ICONS[m.type] || '🎯'}</span>
-                <span className="text-sm text-white font-medium truncate">{m.name}</span>
-              </div>
-              <span className="text-xs text-slate-400 ml-2 whitespace-nowrap">
-                <span className="stat-number text-accent font-bold">{m.needed}</span> {m.type} to go
-              </span>
-            </div>
-            <div className="h-1.5 bg-navy-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-accent rounded-full transition-all"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            <div className="flex justify-between mt-0.5">
-              <span className="text-xs text-slate-600">{m.current.toLocaleString()} {m.type}</span>
-              <span className="text-xs text-slate-600">{m.target.toLocaleString()}</span>
-            </div>
-          </Link>
-        )
-      })}
+    <div className="space-y-6">
+      {categories.map(cat => (
+        <div key={cat}>
+          <h4 className="section-label text-xs mb-3">{CATEGORY_LABELS[cat] || cat}</h4>
+          <div className="space-y-3">
+            {grouped[cat].slice(0, 5).map((m, i) => (
+              <MilestoneCard key={i} m={m} />
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -197,7 +211,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!orgId) return
-    api.getUpcomingMilestones(orgId)
+    api.getUpcomingMilestones(orgId, 80)
       .then(setMilestones)
       .catch(() => setMilestones([]))
       .finally(() => setMilestonesLoading(false))
@@ -451,7 +465,7 @@ export default function Dashboard() {
       <div className="card p-5 mb-6">
         <div className="flex items-center justify-between mb-5">
           <h2 className="display-heading text-xl text-white">UPCOMING MILESTONES</h2>
-          <span className="section-label">Closest first</span>
+          <span className="section-label">By importance</span>
         </div>
         <UpcomingMilestones milestones={milestones} loading={milestonesLoading} />
       </div>
