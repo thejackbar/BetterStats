@@ -305,7 +305,7 @@ _SCRAPE_HEADERS = {
 
 
 async def _scrape_playhq_page(game_url: str, fixture_id: str) -> dict:
-    """Fetch the PlayHQ scorecard page and extract innings data from __NEXT_DATA__."""
+    """Fetch the PlayHQ scorecard page and extract innings data."""
     scorecard_url = game_url.rstrip("/")
     if not scorecard_url.endswith("/scorecard"):
         scorecard_url += "/scorecard"
@@ -314,27 +314,53 @@ async def _scrape_playhq_page(game_url: str, fixture_id: str) -> dict:
         r = await client.get(scorecard_url, headers=_SCRAPE_HEADERS, timeout=20.0)
         r.raise_for_status()
 
-    m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', r.text, re.DOTALL)
-    if not m:
-        logger.warning(f"PlayHQ: no __NEXT_DATA__ found for {fixture_id} at {scorecard_url}")
-        return {"innings": []}
+    html = r.text
 
-    next_data = json.loads(m.group(1))
-    page_props = next_data.get("props", {}).get("pageProps", {})
-    logger.info(f"PlayHQ __NEXT_DATA__ pageProps keys for {fixture_id}: {list(page_props.keys())}")
+    # Log a snippet to understand the page structure
+    script_tags = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
+    logger.info(f"PlayHQ page for {fixture_id}: {len(html)} bytes, {len(script_tags)} script tags")
+    # Log first 500 chars to understand SPA framework
+    logger.info(f"PlayHQ page head snippet: {html[:500]!r}")
 
-    # Try common locations for game/fixture data
-    game_data = (
-        page_props.get("game")
-        or page_props.get("fixture")
-        or page_props.get("match")
-        or page_props.get("data")
-        or {}
-    )
-    if game_data:
-        logger.info(f"PlayHQ game_data keys: {list(game_data.keys())}")
+    # Try __NEXT_DATA__ (Next.js SSR)
+    m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.DOTALL)
+    if m:
+        next_data = json.loads(m.group(1))
+        page_props = next_data.get("props", {}).get("pageProps", {})
+        logger.info(f"PlayHQ __NEXT_DATA__ pageProps keys for {fixture_id}: {list(page_props.keys())}")
+        game_data = (
+            page_props.get("game") or page_props.get("fixture")
+            or page_props.get("match") or page_props.get("data") or {}
+        )
+        if game_data:
+            logger.info(f"PlayHQ game_data keys: {list(game_data.keys())}")
+        return _parse_scorecard(game_data)
 
-    return _parse_scorecard(game_data)
+    # Try other common embedded JSON patterns
+    for pattern_name, pattern in [
+        ("__INITIAL_STATE__", r'window\.__INITIAL_STATE__\s*=\s*({.*?});'),
+        ("__PRELOADED_STATE__", r'window\.__PRELOADED_STATE__\s*=\s*({.*?});'),
+        ("__APP_STATE__", r'window\.__APP_STATE__\s*=\s*({.*?});'),
+        ("nuxt_data", r'window\.__NUXT__\s*=\s*\((.*?)\)'),
+    ]:
+        m2 = re.search(pattern, html, re.DOTALL)
+        if m2:
+            logger.info(f"PlayHQ: found {pattern_name} for {fixture_id}")
+            try:
+                state = json.loads(m2.group(1))
+                logger.info(f"PlayHQ {pattern_name} top-level keys: {list(state.keys()) if isinstance(state, dict) else type(state)}")
+            except Exception:
+                logger.info(f"PlayHQ: {pattern_name} found but not valid JSON")
+            break
+
+    # Log any JSON-like script content for debugging
+    for tag in script_tags[:5]:
+        tag = tag.strip()
+        if tag.startswith('{') or tag.startswith('['):
+            logger.info(f"PlayHQ inline JSON script (first 200): {tag[:200]!r}")
+
+    logger.warning(f"PlayHQ: no embedded scorecard data found for {fixture_id} at {scorecard_url}")
+    return {"innings": []}
 
 
 async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: str = "") -> dict:
