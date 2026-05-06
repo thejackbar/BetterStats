@@ -124,7 +124,21 @@ async def get_org_summary(
     grade_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    return await get_club_summary(db, org_id, season_id, grade_id)
+    summary = await get_club_summary(db, org_id, season_id, grade_id)
+    org = await db.get(Organisation, uuid.UUID(org_id))
+    if org and org.playhq_id:
+        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
+        final = [g for g in all_games if g.get("status") == "FINAL" and g.get("result")]
+        wins = sum(1 for g in final if g.get("result") == "WIN")
+        losses = sum(1 for g in final if g.get("result") == "LOSS")
+        draws = sum(1 for g in final if g.get("result") in ("DRAW", "TIE"))
+        total = len(final)
+        summary["total_games"] = total
+        summary["wins"] = wins
+        summary["losses"] = losses
+        summary["draws"] = draws
+        summary["win_rate"] = round(wins / total * 100, 1) if total > 0 else 0
+    return summary
 
 
 @router.get("/{org_id}/fixtures")

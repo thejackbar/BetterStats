@@ -109,6 +109,23 @@ def _parse_game(game: dict, grade_name: str, season_name: str, keyword: str) -> 
         "round": (game.get("round") or {}).get("name"),
         "venue": venue.get("name"),
         "url": game.get("url"),
+        "competitors": [
+            {
+                "name": c.get("name", ""),
+                "is_home": c.get("isHomeTeam", False),
+                "outcome": c.get("outcome"),
+                "score": c.get("scoreTotal"),
+                "innings": [
+                    {
+                        "innings_number": inn.get("inningsNumber"),
+                        "score": inn.get("scoreTotal"),
+                        "declared": inn.get("isDeclared", False),
+                    }
+                    for inn in (c.get("innings") or [])
+                ],
+            }
+            for c in competitors
+        ],
     }
 
 
