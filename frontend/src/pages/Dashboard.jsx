@@ -144,6 +144,8 @@ function MilestoneCard({ m }) {
 }
 
 function UpcomingMilestones({ milestones, loading }) {
+  const [activeTab, setActiveTab] = useState('batting')
+
   if (loading) return <LoadingSpinner size="sm" />
   if (!milestones.length) return <p className="text-slate-500 text-sm py-4">No upcoming milestones.</p>
 
@@ -153,20 +155,32 @@ function UpcomingMilestones({ milestones, loading }) {
     if (!grouped[cat]) grouped[cat] = []
     grouped[cat].push(m)
   }
-  const categories = CATEGORY_ORDER.filter(c => grouped[c])
+  const availableTabs = CATEGORY_ORDER.filter(c => grouped[c])
+  const tab = availableTabs.includes(activeTab) ? activeTab : (availableTabs[0] || 'batting')
 
   return (
-    <div className="space-y-6">
-      {categories.map(cat => (
-        <div key={cat}>
-          <h4 className="section-label text-xs mb-3">{CATEGORY_LABELS[cat] || cat}</h4>
-          <div className="space-y-3">
-            {grouped[cat].slice(0, 5).map((m, i) => (
-              <MilestoneCard key={i} m={m} />
-            ))}
-          </div>
-        </div>
-      ))}
+    <div>
+      <div className="flex gap-1 mb-4 border-b border-navy-700">
+        {availableTabs.map(cat => (
+          <button
+            key={cat}
+            onClick={() => setActiveTab(cat)}
+            className={`px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
+              tab === cat
+                ? 'border-accent text-accent'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            {CATEGORY_LABELS[cat]}
+            <span className="ml-1.5 text-slate-600 font-mono">{grouped[cat]?.length || 0}</span>
+          </button>
+        ))}
+      </div>
+      <div className="space-y-3">
+        {(grouped[tab] || []).map((m, i) => (
+          <MilestoneCard key={i} m={m} />
+        ))}
+      </div>
     </div>
   )
 }

@@ -327,7 +327,17 @@ async def get_upcoming_milestones_for_org(
             })
 
     upcoming.sort(key=lambda x: x["score"], reverse=True)
-    return upcoming[:limit]
+
+    # Return top (limit // 4) per category so no single stat dominates
+    per_cat = max(5, limit // 4)
+    counts: dict = {}
+    result = []
+    for item in upcoming:
+        cat = item["category"]
+        if counts.get(cat, 0) < per_cat:
+            result.append(item)
+            counts[cat] = counts.get(cat, 0) + 1
+    return result
 
 
 async def get_player_activity(session: AsyncSession, player_id: str) -> dict:
