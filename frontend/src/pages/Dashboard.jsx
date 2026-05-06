@@ -306,6 +306,8 @@ export default function Dashboard() {
   const [achievedLoading, setAchievedLoading] = useState(true)
   const [fixturesLoading, setFixturesLoading] = useState(true)
   const [activePanel, setActivePanel] = useState(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncDone, setSyncDone] = useState(false)
 
   useEffect(() => {
     if (!orgId) return
@@ -358,10 +360,35 @@ export default function Dashboard() {
             <Link to={`/leaderboard/${orgId}`} className="btn-primary">Leaderboard</Link>
             <Link to={`/compare/${orgId}`} className="btn-ghost border border-navy-600">Compare</Link>
             <button
-              onClick={() => api.triggerSync(orgId)}
-              className="btn-ghost border border-navy-600"
+              onClick={async () => {
+                if (syncing) return
+                setSyncing(true)
+                setSyncDone(false)
+                try {
+                  await api.triggerSync(orgId)
+                  await new Promise(r => setTimeout(r, 8000))
+                  setSyncDone(true)
+                  setTimeout(() => setSyncDone(false), 3000)
+                } finally {
+                  setSyncing(false)
+                }
+              }}
+              disabled={syncing}
+              className="btn-ghost border border-navy-600 flex items-center gap-2 disabled:opacity-60"
             >
-              Sync ↻
+              {syncing ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
+                  </svg>
+                  Syncing…
+                </>
+              ) : syncDone ? (
+                <>✓ Synced</>
+              ) : (
+                <>Sync ↻</>
+              )}
             </button>
           </div>
         </div>
@@ -500,7 +527,7 @@ export default function Dashboard() {
                           <td className="table-cell stat-number text-right text-slate-300">{p.economy ?? '—'}</td>
                           <td className="table-cell stat-number text-right text-slate-300">{p.best_figures_wickets ?? '—'}</td>
                         </tr>
-      ))}
+                      ))}
                     </tbody>
                   </table>
                 </div>
