@@ -132,7 +132,7 @@ async def get_org_games(playhq_id: str, org_name: str) -> list:
             seen_ids.add(sid)
             unique_seasons.append(s)
 
-    recent_seasons = unique_seasons[:6]
+    recent_seasons = unique_seasons[:12]
     if not recent_seasons:
         return []
     logger.info(f"PlayHQ: fetching {len(recent_seasons)} seasons for {playhq_id}: {[s.get('name') for s in recent_seasons]}")
