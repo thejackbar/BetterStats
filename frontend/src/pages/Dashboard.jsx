@@ -115,7 +115,7 @@ function UpcomingFixtures({ fixtures, loading }) {
   )
 }
 
-const MILESTONE_ICONS = { runs: '🏸', wickets: '⚡', matches: '📅', catches: '🤝' }
+const MILESTONE_ICONS = { runs: '🏏', wickets: '⚡', matches: '📅', catches: '🤝' }
 const CATEGORY_LABELS = { batting: 'Batting', bowling: 'Bowling', fielding: 'Fielding', matches: 'Matches Played' }
 const CATEGORY_ORDER = ['batting', 'bowling', 'fielding', 'matches']
 
@@ -145,6 +145,9 @@ function MilestoneCard({ m }) {
 
 function AchievedMilestoneCard({ m }) {
   const overBy = m.current - m.milestone
+  const dateLabel = m.achieved_at
+    ? new Date(m.achieved_at + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+    : m.season_name || null
   return (
     <Link to={`/players/${m.player_id}`} className="block hover:opacity-80 transition-opacity">
       <div className="flex items-center justify-between">
@@ -159,7 +162,10 @@ function AchievedMilestoneCard({ m }) {
       </div>
       <div className="flex justify-between mt-0.5">
         <span className="text-xs text-slate-500">Career total: {m.current.toLocaleString()}</span>
-        {overBy > 0 && <span className="text-xs text-slate-600">+{overBy.toLocaleString()} past</span>}
+        <span className="text-xs text-slate-600">
+          {dateLabel && `${m.achieved_at ? '' : 'Season: '}${dateLabel}`}
+          {overBy > 0 && ` · +${overBy.toLocaleString()} past`}
+        </span>
       </div>
     </Link>
   )
@@ -494,7 +500,7 @@ export default function Dashboard() {
                           <td className="table-cell stat-number text-right text-slate-300">{p.economy ?? '—'}</td>
                           <td className="table-cell stat-number text-right text-slate-300">{p.best_figures_wickets ?? '—'}</td>
                         </tr>
-                      ))}
+      ))}
                     </tbody>
                   </table>
                 </div>

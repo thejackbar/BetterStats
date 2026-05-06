@@ -387,6 +387,22 @@ async def get_recently_achieved_milestones_for_org(
     # Safe to interpolate — IDs are UUIDs from our own DB query
     sid_list = ", ".join(f"'{s['id']}'" for s in recent_seasons)
 
+    # Fetch recorded milestone dates for active players (set by sync when first detected)
+    dates_result = await session.execute(
+        text(f"""
+            SELECT player_id, milestone_type, milestone_value, achieved_at
+            FROM milestones
+            WHERE player_id IN (
+                SELECT DISTINCT pss.player_id FROM player_season_stats pss
+                WHERE pss.season_id IN ({sid_list})
+            ) AND achieved_at IS NOT NULL
+        """)
+    )
+    milestone_date_map = {
+        (str(r["player_id"]), r["milestone_type"], int(r["milestone_value"])): r["achieved_at"]
+        for r in dates_result.mappings()
+    }
+
     data_result = await session.execute(
         text(f"""
             WITH active_players AS (
@@ -492,6 +508,7 @@ async def get_recently_achieved_milestones_for_org(
                 after = before + ss.get(stat, 0)
                 for m in milestones:
                     if before < m <= after:
+                        achieved_at = milestone_date_map.get((pid, stat, m))
                         achieved.append({
                             "player_id": pid,
                             "name": pdata["name"],
@@ -501,12 +518,18 @@ async def get_recently_achieved_milestones_for_org(
                             "current": career_total[stat],
                             "season_year": season["year"] or 0,
                             "season_name": season["name"],
+                            "achieved_at": achieved_at.isoformat() if achieved_at else None,
                         })
             for stat in running:
                 running[stat] += ss.get(stat, 0)
 
-    # Most recent season first, then largest milestone within same season
-    achieved.sort(key=lambda x: (-(x["season_year"]), -x["milestone"]))
+    # Dated entries first (most recent date first), then undated by season year desc
+    achieved.sort(key=lambda x: (
+        0 if x["achieved_at"] else 1,
+        -(int(x["achieved_at"].replace("-", "")) if x["achieved_at"] else 0),
+        -x["season_year"],
+        -x["milestone"],
+    ))
     return achieved
 
 

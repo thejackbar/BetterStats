@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -243,32 +243,33 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
 
         new_milestones = []
 
+        today = date.today()
         for threshold in _RUN_MILESTONES:
             if total_runs >= threshold and ("runs", threshold) not in existing:
                 new_milestones.append(Milestone(
                     player_id=pid, milestone_type="runs", milestone_value=threshold,
-                    detail=f"{threshold:,} career runs",
+                    detail=f"{threshold:,} career runs", achieved_at=today,
                 ))
 
         for threshold in _WICKET_MILESTONES:
             if total_wickets >= threshold and ("wickets", threshold) not in existing:
                 new_milestones.append(Milestone(
                     player_id=pid, milestone_type="wickets", milestone_value=threshold,
-                    detail=f"{threshold} career wickets",
+                    detail=f"{threshold} career wickets", achieved_at=today,
                 ))
 
         for threshold in _MATCH_MILESTONES:
             if total_matches >= threshold and ("matches", threshold) not in existing:
                 new_milestones.append(Milestone(
                     player_id=pid, milestone_type="matches", milestone_value=threshold,
-                    detail=f"{threshold} career matches",
+                    detail=f"{threshold} career matches", achieved_at=today,
                 ))
 
         for threshold in _CATCH_MILESTONES:
             if total_catches >= threshold and ("catches", threshold) not in existing:
                 new_milestones.append(Milestone(
                     player_id=pid, milestone_type="catches", milestone_value=threshold,
-                    detail=f"{threshold} career catches",
+                    detail=f"{threshold} career catches", achieved_at=today,
                 ))
 
         for m in new_milestones:
