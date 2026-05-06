@@ -91,6 +91,113 @@ function CompetitorCard({ competitor, isWinner }) {
   )
 }
 
+function BattingTable({ rows }) {
+  if (!rows || rows.length === 0) return null
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[480px]">
+        <thead>
+          <tr className="border-b border-navy-700">
+            <th className="text-left text-xs text-slate-500 font-medium pb-2 pr-3 w-1/4">Batsman</th>
+            <th className="text-left text-xs text-slate-500 font-medium pb-2 pr-3 w-1/4">How Out</th>
+            <th className="text-left text-xs text-slate-500 font-medium pb-2 pr-3 w-1/4">Bowler</th>
+            <th className="text-right text-xs text-slate-500 font-medium pb-2 pr-3">R</th>
+            <th className="text-right text-xs text-slate-500 font-medium pb-2 pr-3">B</th>
+            <th className="text-right text-xs text-slate-500 font-medium pb-2 pr-3">4s</th>
+            <th className="text-right text-xs text-slate-500 font-medium pb-2">6s</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((b, i) => (
+            <tr key={i} className="border-b border-navy-800/50 hover:bg-navy-800/20">
+              <td className={clsx('py-1.5 pr-3 font-medium', b.not_out ? 'text-accent' : 'text-white')}>
+                {b.name || '—'}
+                {b.not_out && <span className="text-xs text-slate-500 ml-1">*</span>}
+              </td>
+              <td className="py-1.5 pr-3 text-slate-400">{b.how_out || (b.not_out ? 'not out' : '—')}</td>
+              <td className="py-1.5 pr-3 text-slate-400">{b.bowled_by || ''}</td>
+              <td className={clsx('py-1.5 pr-3 text-right font-mono font-bold', b.not_out ? 'text-accent' : 'text-white')}>
+                {b.runs ?? '—'}
+              </td>
+              <td className="py-1.5 pr-3 text-right font-mono text-slate-400">{b.balls ?? '—'}</td>
+              <td className="py-1.5 pr-3 text-right font-mono text-slate-400">{b.fours ?? '—'}</td>
+              <td className="py-1.5 text-right font-mono text-slate-400">{b.sixes ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function BowlingTable({ rows }) {
+  if (!rows || rows.length === 0) return null
+  return (
+    <div className="overflow-x-auto mt-4">
+      <table className="w-full text-sm min-w-[400px]">
+        <thead>
+          <tr className="border-b border-navy-700">
+            <th className="text-left text-xs text-slate-500 font-medium pb-2 pr-3 w-2/5">Bowler</th>
+            <th className="text-right text-xs text-slate-500 font-medium pb-2 pr-3">O</th>
+            <th className="text-right text-xs text-slate-500 font-medium pb-2 pr-3">M</th>
+            <th className="text-right text-xs text-slate-500 font-medium pb-2 pr-3">R</th>
+            <th className="text-right text-xs text-slate-500 font-medium pb-2 pr-3">W</th>
+            <th className="text-right text-xs text-slate-500 font-medium pb-2 pr-3">Wd</th>
+            <th className="text-right text-xs text-slate-500 font-medium pb-2">Nb</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((b, i) => (
+            <tr key={i} className="border-b border-navy-800/50 hover:bg-navy-800/20">
+              <td className="py-1.5 pr-3 text-white font-medium">{b.name || '—'}</td>
+              <td className="py-1.5 pr-3 text-right font-mono text-slate-300">{b.overs ?? '—'}</td>
+              <td className="py-1.5 pr-3 text-right font-mono text-slate-400">{b.maidens ?? '—'}</td>
+              <td className="py-1.5 pr-3 text-right font-mono text-slate-300">{b.runs ?? '—'}</td>
+              <td className={clsx('py-1.5 pr-3 text-right font-mono font-bold', b.wickets > 0 ? 'text-accent' : 'text-white')}>
+                {b.wickets ?? '—'}
+              </td>
+              <td className="py-1.5 pr-3 text-right font-mono text-slate-500">{b.wides ?? '—'}</td>
+              <td className="py-1.5 text-right font-mono text-slate-500">{b.no_balls ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function InningsCard({ innings }) {
+  const wkt = innings.total_wickets
+  const totalStr = innings.total_runs != null
+    ? `${wkt != null && wkt !== 10 ? wkt + '/' : ''}${innings.total_runs}`
+    : null
+
+  return (
+    <div className="card p-5 mb-4">
+      <div className="flex items-baseline justify-between mb-4">
+        <h4 className="display-heading text-sm text-white">
+          {innings.batting_team || `Innings ${innings.innings_number}`}
+          {innings.innings_number > 1 && (
+            <span className="text-slate-500 font-sans font-normal text-xs ml-2">
+              {innings.innings_number === 2 ? '2nd' : innings.innings_number === 3 ? '3rd' : `${innings.innings_number}th`} innings
+            </span>
+          )}
+        </h4>
+        <div className="text-right shrink-0">
+          {totalStr && <span className="stat-number text-2xl font-bold text-accent">{totalStr}</span>}
+          {innings.overs && <span className="text-slate-500 text-xs ml-2">({innings.overs} ov)</span>}
+          {innings.extras != null && innings.extras > 0 && (
+            <span className="text-slate-500 text-xs ml-2">+{innings.extras} extras</span>
+          )}
+        </div>
+      </div>
+
+      <BattingTable rows={innings.batting} />
+      <BowlingTable rows={innings.bowling} />
+    </div>
+  )
+}
+
 export default function MatchOverview() {
   const { gameId } = useParams()
   const [searchParams] = useSearchParams()
@@ -99,6 +206,10 @@ export default function MatchOverview() {
   const [game, setGame] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  const [scorecard, setScorecard] = useState(null)
+  const [scorecardLoading, setScorecardLoading] = useState(false)
+  const [scorecardError, setScorecardError] = useState(null)
 
   useEffect(() => {
     if (!orgId) {
@@ -111,6 +222,18 @@ export default function MatchOverview() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [gameId, orgId])
+
+  useEffect(() => {
+    if (!game || !orgId) return
+    setScorecardLoading(true)
+    api.getPlayHQScorecard(orgId, gameId)
+      .then(data => {
+        if (data?.innings?.length > 0) setScorecard(data)
+        else setScorecardError('No scorecard data available')
+      })
+      .catch(e => setScorecardError(e.message))
+      .finally(() => setScorecardLoading(false))
+  }, [game, gameId, orgId])
 
   if (loading) return <LoadingSpinner message="Loading match…" />
   if (error) return (
@@ -135,7 +258,7 @@ export default function MatchOverview() {
 
       <ResultBanner game={game} />
 
-      {/* Scorecard */}
+      {/* Team totals */}
       {hasScores && (
         <div className="mb-5">
           <h3 className="display-heading text-base text-white mb-3">SCORECARD</h3>
@@ -167,6 +290,27 @@ export default function MatchOverview() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Full innings scorecard */}
+      {scorecardLoading && (
+        <div className="card p-5 mb-4 flex items-center gap-3 text-slate-400">
+          <svg className="w-4 h-4 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+          </svg>
+          <span className="text-sm">Loading batting &amp; bowling figures…</span>
+        </div>
+      )}
+
+      {scorecard && scorecard.innings.map((inn, i) => (
+        <InningsCard key={i} innings={inn} />
+      ))}
+
+      {scorecardError && !scorecardLoading && (
+        <div className="card p-4 mb-4 border-navy-700/50">
+          <p className="text-xs text-slate-500">Batting &amp; bowling figures not available for this match.</p>
         </div>
       )}
 
