@@ -304,8 +304,47 @@ _SCRAPE_HEADERS = {
 }
 
 
+async def _fetch_playhq_config() -> dict:
+    """Fetch /config.js from www.playhq.com to discover the API base URL."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            r = await client.get("https://www.playhq.com/config.js", headers=_SCRAPE_HEADERS, timeout=10.0)
+            r.raise_for_status()
+        logger.info(f"PlayHQ config.js ({len(r.text)} bytes): {r.text[:1000]!r}")
+        # Parse window.__APP_CONFIG__ = {...}
+        m = re.search(r'window\.__APP_CONFIG__\s*=\s*({.*?})\s*;', r.text, re.DOTALL)
+        if m:
+            return json.loads(m.group(1))
+    except Exception as e:
+        logger.warning(f"PlayHQ: failed to fetch config.js: {e}")
+    return {}
+
+
+async def _probe_api_scorecard(fixture_id: str) -> dict:
+    """Try known API endpoint patterns for a fixture scorecard."""
+    candidates = [
+        f"{BASE_URL}/v2/fixtures/{fixture_id}",
+        f"{BASE_URL}/v2/fixtures/{fixture_id}/scorecard",
+        f"{BASE_URL}/v1/matches/{fixture_id}",
+        f"{BASE_URL}/v1/matches/{fixture_id}/scorecard",
+        f"{BASE_URL}/v1/games/{fixture_id}/scorecard",
+    ]
+    async with httpx.AsyncClient() as client:
+        for url in candidates:
+            try:
+                r = await client.get(url, headers=_headers(), timeout=TIMEOUT)
+                logger.info(f"PlayHQ probe {url} → {r.status_code}")
+                if r.status_code == 200:
+                    data = r.json()
+                    logger.info(f"PlayHQ probe success {url}, keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+                    return _parse_scorecard(data)
+            except Exception as e:
+                logger.info(f"PlayHQ probe {url} error: {e}")
+    return {"innings": []}
+
+
 async def _scrape_playhq_page(game_url: str, fixture_id: str) -> dict:
-    """Fetch the PlayHQ scorecard page and extract innings data."""
+    """Fetch the PlayHQ scorecard page; since it's a pure SPA shell, probe API endpoints."""
     scorecard_url = game_url.rstrip("/")
     if not scorecard_url.endswith("/scorecard"):
         scorecard_url += "/scorecard"
@@ -315,52 +354,18 @@ async def _scrape_playhq_page(game_url: str, fixture_id: str) -> dict:
         r.raise_for_status()
 
     html = r.text
+    logger.info(f"PlayHQ page for {fixture_id}: {len(html)} bytes — pure SPA, full HTML: {html!r}")
 
-    # Log a snippet to understand the page structure
-    script_tags = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
-    logger.info(f"PlayHQ page for {fixture_id}: {len(html)} bytes, {len(script_tags)} script tags")
-    # Log first 500 chars to understand SPA framework
-    logger.info(f"PlayHQ page head snippet: {html[:500]!r}")
+    # Fetch /config.js to discover API base URL (one-time, cached by caller)
+    config = await _fetch_playhq_config()
+    if config:
+        logger.info(f"PlayHQ __APP_CONFIG__ keys: {list(config.keys())}")
+        for k, v in config.items():
+            if isinstance(v, str) and ("api" in k.lower() or "url" in k.lower() or "base" in k.lower()):
+                logger.info(f"PlayHQ __APP_CONFIG__.{k} = {v!r}")
 
-    # Try __NEXT_DATA__ (Next.js SSR)
-    m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.DOTALL)
-    if m:
-        next_data = json.loads(m.group(1))
-        page_props = next_data.get("props", {}).get("pageProps", {})
-        logger.info(f"PlayHQ __NEXT_DATA__ pageProps keys for {fixture_id}: {list(page_props.keys())}")
-        game_data = (
-            page_props.get("game") or page_props.get("fixture")
-            or page_props.get("match") or page_props.get("data") or {}
-        )
-        if game_data:
-            logger.info(f"PlayHQ game_data keys: {list(game_data.keys())}")
-        return _parse_scorecard(game_data)
-
-    # Try other common embedded JSON patterns
-    for pattern_name, pattern in [
-        ("__INITIAL_STATE__", r'window\.__INITIAL_STATE__\s*=\s*({.*?});'),
-        ("__PRELOADED_STATE__", r'window\.__PRELOADED_STATE__\s*=\s*({.*?});'),
-        ("__APP_STATE__", r'window\.__APP_STATE__\s*=\s*({.*?});'),
-        ("nuxt_data", r'window\.__NUXT__\s*=\s*\((.*?)\)'),
-    ]:
-        m2 = re.search(pattern, html, re.DOTALL)
-        if m2:
-            logger.info(f"PlayHQ: found {pattern_name} for {fixture_id}")
-            try:
-                state = json.loads(m2.group(1))
-                logger.info(f"PlayHQ {pattern_name} top-level keys: {list(state.keys()) if isinstance(state, dict) else type(state)}")
-            except Exception:
-                logger.info(f"PlayHQ: {pattern_name} found but not valid JSON")
-            break
-
-    # Log any JSON-like script content for debugging
-    for tag in script_tags[:5]:
-        tag = tag.strip()
-        if tag.startswith('{') or tag.startswith('['):
-            logger.info(f"PlayHQ inline JSON script (first 200): {tag[:200]!r}")
-
-    logger.warning(f"PlayHQ: no embedded scorecard data found for {fixture_id} at {scorecard_url}")
-    return {"innings": []}
+    # Probe known API endpoint patterns
+    return await _probe_api_scorecard(fixture_id)
 
 
 async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: str = "") -> dict:
