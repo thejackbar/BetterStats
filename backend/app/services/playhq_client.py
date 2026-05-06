@@ -126,7 +126,7 @@ async def get_fielding_stats(org_id: str, season_id: str) -> list:
     )
 
 
-# Stubs retained for backward compatibility
+# Stubs retained for backward compatibility with sync.py — will be removed in next refactor
 async def get_grades(season_id: str) -> list:
     return []
 
