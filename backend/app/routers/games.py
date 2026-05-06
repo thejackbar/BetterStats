@@ -2,7 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, get_db
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
@@ -64,8 +67,9 @@ async def get_playhq_game(
     if not org or not org.playhq_id:
         raise HTTPException(status_code=404, detail="Organisation not found or no PlayHQ ID")
     all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
-    game = next((g for g in all_games if g.get("id") == playhq_game_id), None)
+    game = next((g for g in all_games if str(g.get("id", "")) == playhq_game_id), None)
     if not game:
+        logger.warning(f"PlayHQ game {playhq_game_id!r} not found in {len(all_games)} games for org {org.id}")
         raise HTTPException(status_code=404, detail="Game not found")
     return game
 
