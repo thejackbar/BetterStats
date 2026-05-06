@@ -304,68 +304,140 @@ _SCRAPE_HEADERS = {
 }
 
 
-async def _fetch_playhq_config() -> dict:
-    """Fetch /config.js from www.playhq.com to discover the API base URL."""
+_playhq_graph_endpoint: str = ""
+
+
+async def _get_graph_endpoint() -> str:
+    """Return the PlayHQ GraphQL endpoint URL from /config.js (cached in module var)."""
+    global _playhq_graph_endpoint
+    if _playhq_graph_endpoint:
+        return _playhq_graph_endpoint
     try:
         async with httpx.AsyncClient(follow_redirects=True) as client:
             r = await client.get("https://www.playhq.com/config.js", headers=_SCRAPE_HEADERS, timeout=10.0)
             r.raise_for_status()
-        logger.info(f"PlayHQ config.js ({len(r.text)} bytes): {r.text[:1000]!r}")
-        # Parse window.__APP_CONFIG__ = {...}
         m = re.search(r'window\.__APP_CONFIG__\s*=\s*({.*?})\s*;', r.text, re.DOTALL)
         if m:
-            return json.loads(m.group(1))
+            config = json.loads(m.group(1))
+            logger.info(f"PlayHQ __APP_CONFIG__ all values: { {k: v for k, v in config.items()} }")
+            _playhq_graph_endpoint = config.get("GRAPH_ENDPOINT", "")
+            logger.info(f"PlayHQ GRAPH_ENDPOINT = {_playhq_graph_endpoint!r}")
     except Exception as e:
         logger.warning(f"PlayHQ: failed to fetch config.js: {e}")
-    return {}
+    return _playhq_graph_endpoint
 
 
-async def _probe_api_scorecard(fixture_id: str) -> dict:
-    """Try known API endpoint patterns for a fixture scorecard."""
-    candidates = [
-        f"{BASE_URL}/v2/fixtures/{fixture_id}",
-        f"{BASE_URL}/v2/fixtures/{fixture_id}/scorecard",
-        f"{BASE_URL}/v1/matches/{fixture_id}",
-        f"{BASE_URL}/v1/matches/{fixture_id}/scorecard",
-        f"{BASE_URL}/v1/games/{fixture_id}/scorecard",
-    ]
+_GQL_SCORECARD = """
+query FixtureScorecard($fixtureId: ID!) {
+  fixture(id: $fixtureId) {
+    id
+    innings {
+      inningsNumber
+      battingTeam { name }
+      totalRuns
+      totalWickets
+      overs
+      extras { total byes legByes wides noBalls penalties }
+      batting {
+        player { name }
+        batterStatus
+        runs
+        balls
+        fours
+        sixes
+        dismissal { dismissalType bowler { name } fielder { name } catcher { name } }
+      }
+      bowling {
+        player { name }
+        overs
+        maidens
+        runs
+        wickets
+        wides
+        noBalls
+      }
+    }
+  }
+}
+"""
+
+_GQL_SCORECARD_GAME = """
+query GameScorecard($id: ID!) {
+  game(id: $id) {
+    id
+    innings {
+      inningsNumber
+      battingTeam { name }
+      totalRuns
+      totalWickets
+      overs
+      extras { total byes legByes wides noBalls penalties }
+      batting {
+        player { name }
+        batterStatus
+        runs
+        balls
+        fours
+        sixes
+        dismissal { dismissalType bowler { name } fielder { name } catcher { name } }
+      }
+      bowling {
+        player { name }
+        overs
+        maidens
+        runs
+        wickets
+        wides
+        noBalls
+      }
+    }
+  }
+}
+"""
+
+
+async def _query_graphql_scorecard(fixture_id: str) -> dict:
+    """Query the PlayHQ GraphQL endpoint for scorecard data."""
+    endpoint = await _get_graph_endpoint()
+    if not endpoint:
+        logger.warning("PlayHQ: no GRAPH_ENDPOINT available")
+        return {"innings": []}
+
+    gql_headers = {
+        "Content-Type": "application/json",
+        "x-api-key": settings.playhq_api_key or PUBLIC_API_KEY,
+        "x-phq-tenant": TENANT,
+        "Origin": "https://www.playhq.com",
+        "Referer": "https://www.playhq.com/",
+    }
+
     async with httpx.AsyncClient() as client:
-        for url in candidates:
+        for query_name, query, var_key in [
+            ("fixture", _GQL_SCORECARD, "fixtureId"),
+            ("game", _GQL_SCORECARD_GAME, "id"),
+        ]:
             try:
-                r = await client.get(url, headers=_headers(), timeout=TIMEOUT)
-                logger.info(f"PlayHQ probe {url} → {r.status_code}")
+                payload = {"query": query, "variables": {var_key: fixture_id}}
+                r = await client.post(endpoint, json=payload, headers=gql_headers, timeout=TIMEOUT)
+                logger.info(f"PlayHQ GraphQL {query_name} → {r.status_code}")
                 if r.status_code == 200:
-                    data = r.json()
-                    logger.info(f"PlayHQ probe success {url}, keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
-                    return _parse_scorecard(data)
+                    body = r.json()
+                    errors = body.get("errors")
+                    data = body.get("data") or {}
+                    logger.info(f"PlayHQ GraphQL {query_name} data keys: {list(data.keys())}, errors: {errors}")
+                    game_data = data.get("fixture") or data.get("game") or {}
+                    if game_data:
+                        logger.info(f"PlayHQ GraphQL {query_name} object keys: {list(game_data.keys())}")
+                        return _parse_scorecard(game_data)
             except Exception as e:
-                logger.info(f"PlayHQ probe {url} error: {e}")
+                logger.warning(f"PlayHQ GraphQL {query_name} error: {e}")
+
     return {"innings": []}
 
 
 async def _scrape_playhq_page(game_url: str, fixture_id: str) -> dict:
-    """Fetch the PlayHQ scorecard page; since it's a pure SPA shell, probe API endpoints."""
-    scorecard_url = game_url.rstrip("/")
-    if not scorecard_url.endswith("/scorecard"):
-        scorecard_url += "/scorecard"
-
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        r = await client.get(scorecard_url, headers=_SCRAPE_HEADERS, timeout=20.0)
-        r.raise_for_status()
-
-    html = r.text
-    logger.info(f"PlayHQ page for {fixture_id}: {len(html)} bytes — pure SPA, full HTML: {html!r}")
-
-    # Fetch /config.js to discover API base URL (one-time, cached by caller)
-    config = await _fetch_playhq_config()
-    if config:
-        logger.info(f"PlayHQ __APP_CONFIG__ keys: {list(config.keys())}")
-        for k, v in config.items():
-            if isinstance(v, str) and ("api" in k.lower() or "url" in k.lower() or "base" in k.lower()):
-                logger.info(f"PlayHQ __APP_CONFIG__.{k} = {v!r}")
-
-    # Probe known API endpoint patterns
-    return await _probe_api_scorecard(fixture_id)
+    """Query PlayHQ GraphQL endpoint for scorecard data."""
+    return await _query_graphql_scorecard(fixture_id)
 
 
 async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: str = "") -> dict:
