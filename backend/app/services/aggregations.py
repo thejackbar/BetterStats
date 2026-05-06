@@ -362,20 +362,21 @@ async def get_recently_achieved_milestones_for_org(
 ) -> list[dict]:
     result = await session.execute(
         text("""
-            WITH current_season AS (
+            WITH recent_seasons AS (
                 SELECT s.id
                 FROM seasons s
                 JOIN player_season_stats pss ON pss.season_id = s.id
                 JOIN players p ON p.id = pss.player_id
                 WHERE p.organisation_id = :org_id
+                  AND s.name NOT ILIKE '%winter%'
                 GROUP BY s.id, s.year, s.name
                 ORDER BY s.year DESC NULLS LAST, s.name DESC
-                LIMIT 1
+                LIMIT 3
             ),
-            active_this_season AS (
+            active_players AS (
                 SELECT DISTINCT pss.player_id
                 FROM player_season_stats pss
-                WHERE pss.season_id IN (SELECT id FROM current_season)
+                WHERE pss.season_id IN (SELECT id FROM recent_seasons)
             ),
             career_totals AS (
                 SELECT
@@ -388,7 +389,7 @@ async def get_recently_achieved_milestones_for_org(
                 FROM players p
                 LEFT JOIN player_season_stats pss ON pss.player_id = p.id
                 WHERE p.organisation_id = :org_id
-                  AND p.id IN (SELECT player_id FROM active_this_season)
+                  AND p.id IN (SELECT player_id FROM active_players)
                 GROUP BY p.id, p.name
             ),
             prior_totals AS (
@@ -400,9 +401,9 @@ async def get_recently_achieved_milestones_for_org(
                     COALESCE(SUM(pss.catches), 0) AS prior_catches
                 FROM players p
                 LEFT JOIN player_season_stats pss ON pss.player_id = p.id
-                    AND pss.season_id NOT IN (SELECT id FROM current_season)
+                    AND pss.season_id NOT IN (SELECT id FROM recent_seasons)
                 WHERE p.organisation_id = :org_id
-                  AND p.id IN (SELECT player_id FROM active_this_season)
+                  AND p.id IN (SELECT player_id FROM active_players)
                 GROUP BY p.id
             )
             SELECT
