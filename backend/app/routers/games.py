@@ -74,6 +74,23 @@ async def get_playhq_game(
     return game
 
 
+@router.get("/playhq/{playhq_game_id}/scorecard")
+async def get_playhq_scorecard(
+    playhq_game_id: str,
+    org_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    org = await db.get(Organisation, uuid.UUID(org_id))
+    if not org or not org.playhq_id:
+        raise HTTPException(status_code=404, detail="Organisation not found or no PlayHQ ID")
+    try:
+        scorecard = await playhq_partner_client.get_fixture_scorecard(playhq_game_id)
+    except Exception as e:
+        logger.warning(f"PlayHQ scorecard fetch failed for {playhq_game_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"PlayHQ scorecard unavailable: {e}")
+    return scorecard
+
+
 @router.get("/{game_id}/scorecard")
 async def get_scorecard(game_id: str, db: AsyncSession = Depends(get_db)):
     game = await db.get(Game, uuid.UUID(game_id))
