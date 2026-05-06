@@ -77,7 +77,15 @@ async def get_grade_games(grade_id: str) -> list:
     if cached is not None:
         return cached
     data = await _get(f"{BASE_URL}/v1/grades/{grade_id}/games")
-    return _set_cached(key, data.get("data", []))
+    games = data.get("data", [])
+    if games:
+        g = games[0]
+        logger.info(f"PlayHQ game top-level keys: {list(g.keys())}")
+        for c in (g.get("competitors") or [])[:1]:
+            logger.info(f"PlayHQ competitor keys: {list(c.keys())}")
+            for inn in (c.get("innings") or [])[:1]:
+                logger.info(f"PlayHQ competitor innings keys: {list(inn.keys())}")
+    return _set_cached(key, games)
 
 
 def _outcome_to_result(outcome: str) -> Optional[str]:
@@ -309,7 +317,13 @@ async def get_fixture_scorecard(fixture_id: str, grade_id: str = "") -> dict:
             r.raise_for_status()
             data = r.json()
 
-    logger.debug(f"PlayHQ scorecard raw keys for {fixture_id}: {list((data.get('data') or data).keys())}")
+    top = data.get("data") or data
+    logger.info(f"PlayHQ scorecard raw top-level keys for {fixture_id}: {list(top.keys())}")
+    if "competitors" in top:
+        for c in (top.get("competitors") or [])[:1]:
+            logger.info(f"PlayHQ scorecard competitor keys: {list(c.keys())}")
+            for inn in (c.get("innings") or [])[:1]:
+                logger.info(f"PlayHQ scorecard innings keys: {list(inn.keys())}")
     result = _parse_scorecard(data)
     _scorecard_cache[key] = (time.time(), result)
     return result
