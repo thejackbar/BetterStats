@@ -8,7 +8,10 @@ async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, { ...options, headers })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || `HTTP ${res.status}`)
+    const detail = Array.isArray(err.detail)
+      ? err.detail.map(e => e.msg || JSON.stringify(e)).join(', ')
+      : (typeof err.detail === 'string' ? err.detail : `HTTP ${res.status}`)
+    throw new Error(detail)
   }
   return res.json()
 }
