@@ -225,7 +225,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!orgId) return
-    api.getUpcomingMilestones(orgId, 80)
+    api.getUpcomingMilestones(orgId, 40)
       .then(setMilestones)
       .catch(() => setMilestones([]))
       .finally(() => setMilestonesLoading(false))

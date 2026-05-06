@@ -250,6 +250,21 @@ async def get_upcoming_milestones_for_org(
 ) -> list[dict]:
     result = await session.execute(
         text("""
+            WITH recent_seasons AS (
+                SELECT s.id
+                FROM seasons s
+                JOIN player_season_stats pss ON pss.season_id = s.id
+                JOIN players p ON p.id = pss.player_id
+                WHERE p.organisation_id = :org_id
+                GROUP BY s.id, s.year, s.name
+                ORDER BY s.year DESC NULLS LAST, s.name DESC
+                LIMIT 3
+            ),
+            active_players AS (
+                SELECT DISTINCT pss.player_id
+                FROM player_season_stats pss
+                WHERE pss.season_id IN (SELECT id FROM recent_seasons)
+            )
             SELECT
                 p.id AS player_id,
                 p.name,
@@ -260,6 +275,7 @@ async def get_upcoming_milestones_for_org(
             FROM players p
             LEFT JOIN player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
+              AND p.id IN (SELECT player_id FROM active_players)
             GROUP BY p.id, p.name
             HAVING COALESCE(SUM(pss.runs), 0) > 0 OR COALESCE(SUM(pss.wickets), 0) > 0
         """),
@@ -328,8 +344,8 @@ async def get_upcoming_milestones_for_org(
 
     upcoming.sort(key=lambda x: x["score"], reverse=True)
 
-    # Return top (limit // 4) per category so no single stat dominates
-    per_cat = max(5, limit // 4)
+    # Return top 10 per category so no single stat dominates and lists stay short
+    per_cat = 10
     counts: dict = {}
     result = []
     for item in upcoming:
