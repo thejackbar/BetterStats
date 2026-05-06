@@ -129,6 +129,14 @@ async def get_org_summary(
     if org and org.playhq_id:
         all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
         final = [g for g in all_games if g.get("status") == "FINAL" and g.get("result")]
+        if season_id:
+            season_obj = await db.get(Season, uuid.UUID(season_id))
+            if season_obj:
+                final = [g for g in final if g.get("season") == season_obj.name]
+        if grade_id:
+            grade_obj = await db.get(Grade, uuid.UUID(grade_id))
+            if grade_obj:
+                final = [g for g in final if (g.get("grade") or {}).get("name") == grade_obj.name]
         wins = sum(1 for g in final if g.get("result") == "WIN")
         losses = sum(1 for g in final if g.get("result") == "LOSS")
         draws = sum(1 for g in final if g.get("result") in ("DRAW", "TIE"))
