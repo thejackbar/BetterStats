@@ -344,8 +344,8 @@ async def get_upcoming_milestones_for_org(
 
     upcoming.sort(key=lambda x: x["score"], reverse=True)
 
-    # Return top 10 per category so no single stat dominates and lists stay short
-    per_cat = 10
+    # Return top 50 per category — frontend handles pagination
+    per_cat = 50
     counts: dict = {}
     result = []
     for item in upcoming:
