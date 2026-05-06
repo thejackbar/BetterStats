@@ -356,6 +356,126 @@ async def get_upcoming_milestones_for_org(
     return result
 
 
+async def get_recently_achieved_milestones_for_org(
+    session: AsyncSession,
+    org_id: str,
+) -> list[dict]:
+    result = await session.execute(
+        text("""
+            WITH current_season AS (
+                SELECT s.id
+                FROM seasons s
+                JOIN player_season_stats pss ON pss.season_id = s.id
+                JOIN players p ON p.id = pss.player_id
+                WHERE p.organisation_id = :org_id
+                GROUP BY s.id, s.year, s.name
+                ORDER BY s.year DESC NULLS LAST, s.name DESC
+                LIMIT 1
+            ),
+            active_this_season AS (
+                SELECT DISTINCT pss.player_id
+                FROM player_season_stats pss
+                WHERE pss.season_id IN (SELECT id FROM current_season)
+            ),
+            career_totals AS (
+                SELECT
+                    p.id AS player_id,
+                    p.name,
+                    COALESCE(SUM(pss.runs), 0) AS career_runs,
+                    COALESCE(SUM(pss.wickets), 0) AS career_wickets,
+                    COALESCE(SUM(pss.matches), 0) AS career_matches,
+                    COALESCE(SUM(pss.catches), 0) AS career_catches
+                FROM players p
+                LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+                WHERE p.organisation_id = :org_id
+                  AND p.id IN (SELECT player_id FROM active_this_season)
+                GROUP BY p.id, p.name
+            ),
+            prior_totals AS (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(SUM(pss.runs), 0) AS prior_runs,
+                    COALESCE(SUM(pss.wickets), 0) AS prior_wickets,
+                    COALESCE(SUM(pss.matches), 0) AS prior_matches,
+                    COALESCE(SUM(pss.catches), 0) AS prior_catches
+                FROM players p
+                LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+                    AND pss.season_id NOT IN (SELECT id FROM current_season)
+                WHERE p.organisation_id = :org_id
+                  AND p.id IN (SELECT player_id FROM active_this_season)
+                GROUP BY p.id
+            )
+            SELECT
+                ct.player_id,
+                ct.name,
+                ct.career_runs, pt.prior_runs,
+                ct.career_wickets, pt.prior_wickets,
+                ct.career_matches, pt.prior_matches,
+                ct.career_catches, pt.prior_catches
+            FROM career_totals ct
+            JOIN prior_totals pt ON pt.player_id = ct.player_id
+        """),
+        {"org_id": org_id}
+    )
+    rows = [dict(r) for r in result.mappings()]
+
+    RUN_MILESTONES = [
+        50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000,
+        6000, 7000, 8000, 9000, 10000, 12500, 15000, 17500, 20000,
+        25000, 30000, 35000, 40000, 45000, 50000,
+    ]
+    WICKET_MILESTONES = [
+        10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500,
+        600, 700, 800, 900, 1000, 1500, 2000, 2500, 3000, 4000, 5000,
+    ]
+    MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000]
+    CATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000]
+
+    CATEGORY_MAP = {
+        "runs": "batting",
+        "wickets": "bowling",
+        "matches": "matches",
+        "catches": "fielding",
+    }
+
+    achieved = []
+    for row in rows:
+        career = {
+            "runs": int(row["career_runs"] or 0),
+            "wickets": int(row["career_wickets"] or 0),
+            "matches": int(row["career_matches"] or 0),
+            "catches": int(row["career_catches"] or 0),
+        }
+        prior = {
+            "runs": int(row["prior_runs"] or 0),
+            "wickets": int(row["prior_wickets"] or 0),
+            "matches": int(row["prior_matches"] or 0),
+            "catches": int(row["prior_catches"] or 0),
+        }
+        player_id = str(row["player_id"])
+        name = row["name"]
+
+        for stat, milestones in [
+            ("runs", RUN_MILESTONES),
+            ("wickets", WICKET_MILESTONES),
+            ("matches", MATCH_MILESTONES),
+            ("catches", CATCH_MILESTONES),
+        ]:
+            for m in milestones:
+                if prior[stat] < m <= career[stat]:
+                    achieved.append({
+                        "player_id": player_id,
+                        "name": name,
+                        "type": stat,
+                        "category": CATEGORY_MAP[stat],
+                        "milestone": m,
+                        "current": career[stat],
+                    })
+
+    achieved.sort(key=lambda x: x["milestone"], reverse=True)
+    return achieved
+
+
 async def get_player_activity(session: AsyncSession, player_id: str) -> dict:
     result = await session.execute(
         text("""

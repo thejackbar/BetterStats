@@ -143,11 +143,34 @@ function MilestoneCard({ m }) {
   )
 }
 
-function UpcomingMilestones({ milestones, loading }) {
-  const [activeTab, setActiveTab] = useState('batting')
+function AchievedMilestoneCard({ m }) {
+  const overBy = m.current - m.milestone
+  return (
+    <Link to={`/players/${m.player_id}`} className="block hover:opacity-80 transition-opacity">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-base">{MILESTONE_ICONS[m.type] || '🏆'}</span>
+          <span className="text-sm text-white font-medium truncate">{m.name}</span>
+        </div>
+        <div className="ml-2 text-right whitespace-nowrap">
+          <span className="stat-number text-accent font-bold">{m.milestone.toLocaleString()}</span>
+          <span className="text-xs text-slate-400 ml-1">{m.type}</span>
+        </div>
+      </div>
+      <div className="flex justify-between mt-0.5">
+        <span className="text-xs text-slate-500">Career total: {m.current.toLocaleString()}</span>
+        {overBy > 0 && <span className="text-xs text-slate-600">+{overBy.toLocaleString()} past</span>}
+      </div>
+    </Link>
+  )
+}
 
-  if (loading) return <LoadingSpinner size="sm" />
-  if (!milestones.length) return <p className="text-slate-500 text-sm py-4">No upcoming milestones.</p>
+function UpcomingMilestones({ milestones, achieved, loading, achievedLoading }) {
+  const [activeTab, setActiveTab] = useState('batting')
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(10)
+
+  if (loading && achievedLoading) return <LoadingSpinner size="sm" />
 
   const grouped = {}
   for (const m of milestones) {
@@ -155,32 +178,99 @@ function UpcomingMilestones({ milestones, loading }) {
     if (!grouped[cat]) grouped[cat] = []
     grouped[cat].push(m)
   }
-  const availableTabs = CATEGORY_ORDER.filter(c => grouped[c])
-  const tab = availableTabs.includes(activeTab) ? activeTab : (availableTabs[0] || 'batting')
+
+  const upcomingTabs = CATEGORY_ORDER.filter(c => grouped[c])
+  const allTabs = achieved.length > 0 ? [...upcomingTabs, 'achieved'] : upcomingTabs
+  const tab = allTabs.includes(activeTab) ? activeTab : (allTabs[0] || 'batting')
+  const isAchievedTab = tab === 'achieved'
+  const items = isAchievedTab ? achieved : (grouped[tab] || [])
+  const totalPages = Math.max(1, Math.ceil(items.length / perPage))
+  const safePage = Math.min(page, totalPages)
+  const pageItems = items.slice((safePage - 1) * perPage, safePage * perPage)
+
+  if (!allTabs.length) return <p className="text-slate-500 text-sm py-4">No milestones found.</p>
+
+  const switchTab = (cat) => { setActiveTab(cat); setPage(1) }
+  const changePerPage = (n) => { setPerPage(n); setPage(1) }
+
+  const tabLoading = isAchievedTab ? achievedLoading : loading
 
   return (
     <div>
-      <div className="flex gap-1 mb-4 border-b border-navy-700">
-        {availableTabs.map(cat => (
-          <button
-            key={cat}
-            onClick={() => setActiveTab(cat)}
-            className={`px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
-              tab === cat
-                ? 'border-accent text-accent'
-                : 'border-transparent text-slate-400 hover:text-white'
-            }`}
-          >
-            {CATEGORY_LABELS[cat]}
-            <span className="ml-1.5 text-slate-600 font-mono">{grouped[cat]?.length || 0}</span>
-          </button>
-        ))}
+      <div className="flex items-center justify-between border-b border-navy-700 mb-4 flex-wrap gap-y-2">
+        <div className="flex gap-1 flex-wrap">
+          {allTabs.map(cat => (
+            <button
+              key={cat}
+              onClick={() => switchTab(cat)}
+              className={`px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
+                tab === cat
+                  ? 'border-accent text-accent'
+                  : 'border-transparent text-slate-400 hover:text-white'
+              }`}
+            >
+              {cat === 'achieved' ? '🏆 Recently Achieved' : CATEGORY_LABELS[cat]}
+              <span className="ml-1.5 text-slate-600 font-mono">
+                {cat === 'achieved' ? achieved.length : (grouped[cat]?.length || 0)}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 pb-1">
+          <span className="text-xs text-slate-500">Show</span>
+          {[10, 25, 50].map(n => (
+            <button
+              key={n}
+              onClick={() => changePerPage(n)}
+              className={`text-xs px-2 py-1 rounded transition-colors ${
+                perPage === n ? 'bg-accent text-navy-950 font-bold' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="space-y-3">
-        {(grouped[tab] || []).map((m, i) => (
-          <MilestoneCard key={i} m={m} />
-        ))}
-      </div>
+
+      {tabLoading ? <LoadingSpinner size="sm" /> : (
+        <>
+          <div className="space-y-3">
+            {pageItems.length === 0
+              ? <p className="text-slate-500 text-sm py-4">
+                  {isAchievedTab ? 'No milestones achieved this season.' : 'No upcoming milestones.'}
+                </p>
+              : pageItems.map((m, i) => (
+                  isAchievedTab
+                    ? <AchievedMilestoneCard key={i} m={m} />
+                    : <MilestoneCard key={i} m={m} />
+                ))
+            }
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4 pt-3 border-t border-navy-700">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={safePage === 1}
+                className="text-xs text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed px-2 py-1"
+              >
+                ← Prev
+              </button>
+              <span className="text-xs text-slate-500 font-mono">
+                {safePage} / {totalPages}
+                <span className="ml-2 text-slate-600">({items.length} total)</span>
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={safePage === totalPages}
+                className="text-xs text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed px-2 py-1"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -203,9 +293,11 @@ export default function Dashboard() {
   const [topBowlers, setTopBowlers] = useState([])
   const [summary, setSummary] = useState(null)
   const [milestones, setMilestones] = useState([])
+  const [achievedMilestones, setAchievedMilestones] = useState([])
   const [fixtures, setFixtures] = useState([])
   const [statsLoading, setStatsLoading] = useState(true)
   const [milestonesLoading, setMilestonesLoading] = useState(true)
+  const [achievedLoading, setAchievedLoading] = useState(true)
   const [fixturesLoading, setFixturesLoading] = useState(true)
   const [activePanel, setActivePanel] = useState(null)
 
@@ -225,10 +317,14 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!orgId) return
-    api.getUpcomingMilestones(orgId, 40)
+    api.getUpcomingMilestones(orgId, 200)
       .then(setMilestones)
       .catch(() => setMilestones([]))
       .finally(() => setMilestonesLoading(false))
+    api.getRecentlyAchievedMilestones(orgId)
+      .then(setAchievedMilestones)
+      .catch(() => setAchievedMilestones([]))
+      .finally(() => setAchievedLoading(false))
     api.getOrgFixtures(orgId)
       .then(setFixtures)
       .catch(() => setFixtures([]))
@@ -475,13 +571,18 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Upcoming milestones */}
+      {/* Milestones */}
       <div className="card p-5 mb-6">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="display-heading text-xl text-white">UPCOMING MILESTONES</h2>
-          <span className="section-label">By importance</span>
+          <h2 className="display-heading text-xl text-white">MILESTONES</h2>
+          <span className="section-label">Closest first</span>
         </div>
-        <UpcomingMilestones milestones={milestones} loading={milestonesLoading} />
+        <UpcomingMilestones
+          milestones={milestones}
+          achieved={achievedMilestones}
+          loading={milestonesLoading}
+          achievedLoading={achievedLoading}
+        />
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">

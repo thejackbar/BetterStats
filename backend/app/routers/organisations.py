@@ -8,7 +8,7 @@ from datetime import date
 from app.models.db import Organisation, Season, Grade, get_db
 from app.services import playhq_client
 from app.services.sync import sync_organisation, upsert_organisation
-from app.services.aggregations import get_upcoming_milestones_for_org, get_club_summary
+from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
@@ -104,6 +104,15 @@ async def get_upcoming_milestones(
     db: AsyncSession = Depends(get_db),
 ):
     rows = await get_upcoming_milestones_for_org(db, org_id, limit)
+    return rows
+
+
+@router.get("/{org_id}/recently-achieved-milestones")
+async def get_recently_achieved_milestones(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    rows = await get_recently_achieved_milestones_for_org(db, org_id)
     return rows
 
 

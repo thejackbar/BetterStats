@@ -44,6 +44,8 @@ export const api = {
   },
   getUpcomingMilestones: (orgId, limit = 20) =>
     request(`/organisations/${orgId}/upcoming-milestones?limit=${limit}`),
+  getRecentlyAchievedMilestones: (orgId) =>
+    request(`/organisations/${orgId}/recently-achieved-milestones`),
   getOrgFixtures: (orgId) => request(`/organisations/${orgId}/fixtures`),
 
   // Players
