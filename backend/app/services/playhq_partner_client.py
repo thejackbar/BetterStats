@@ -84,7 +84,7 @@ def _outcome_to_result(outcome: str) -> Optional[str]:
     return {"WON": "WIN", "LOST": "LOSS", "DREW": "DRAW", "TIE": "DRAW"}.get(outcome)
 
 
-def _parse_game(game: dict, grade_name: str, season_name: str, keyword: str) -> Optional[dict]:
+def _parse_game(game: dict, grade_name: str, grade_id: str, season_name: str, keyword: str) -> Optional[dict]:
     competitors = game.get("competitors", [])
     our_teams = [c for c in competitors if keyword and keyword in c.get("name", "").lower()]
     if not our_teams:
@@ -109,6 +109,7 @@ def _parse_game(game: dict, grade_name: str, season_name: str, keyword: str) -> 
         "result": _outcome_to_result(our_team.get("outcome", "")),
         "winning_team": winner,
         "grade": {"name": grade_name},
+        "grade_id": grade_id,
         "season": season_name,
         "round": (game.get("round") or {}).get("name"),
         "venue": venue.get("name"),
@@ -190,8 +191,9 @@ async def get_org_games(playhq_id: str, org_name: str) -> list:
             continue
         grade, season_name = grade_season_pairs[i]
         grade_name = grade.get("name", "")
+        grade_id = grade.get("id", "")
         for game in games:
-            parsed = _parse_game(game, grade_name, season_name, keyword)
+            parsed = _parse_game(game, grade_name, grade_id, season_name, keyword)
             if parsed:
                 all_games.append(parsed)
 
@@ -285,26 +287,29 @@ def _parse_scorecard(data: dict) -> dict:
     return {"innings": innings_out}
 
 
-async def get_fixture_scorecard(fixture_id: str) -> dict:
+async def get_fixture_scorecard(fixture_id: str, grade_id: str = "") -> dict:
     key = f"scorecard:{fixture_id}"
     if key in _scorecard_cache:
         ts, val = _scorecard_cache[key]
         if time.time() - ts < SCORECARD_CACHE_TTL:
             return val
 
+    url = (
+        f"{BASE_URL}/v1/grades/{grade_id}/games/{fixture_id}"
+        if grade_id
+        else f"{BASE_URL}/v1/fixtures/{fixture_id}"
+    )
+
     async with _SEMAPHORE:
         async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{BASE_URL}/v1/fixtures/{fixture_id}",
-                headers=_headers(),
-                timeout=TIMEOUT,
-            )
+            r = await client.get(url, headers=_headers(), timeout=TIMEOUT)
             if r.status_code == 429:
                 await asyncio.sleep(1.0)
-                r = await client.get(f"{BASE_URL}/v1/fixtures/{fixture_id}", headers=_headers(), timeout=TIMEOUT)
+                r = await client.get(url, headers=_headers(), timeout=TIMEOUT)
             r.raise_for_status()
             data = r.json()
 
+    logger.debug(f"PlayHQ scorecard raw keys for {fixture_id}: {list((data.get('data') or data).keys())}")
     result = _parse_scorecard(data)
     _scorecard_cache[key] = (time.time(), result)
     return result
