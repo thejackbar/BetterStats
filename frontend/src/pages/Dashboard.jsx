@@ -76,14 +76,14 @@ function RecentResults({ games, loading }) {
                 )}
               </div>
             </div>
-          <div className="flex items-center gap-3 ml-4">
-            <ResultBadge result={game.result} />
-            {game.url && (
-              <svg className="w-4 h-4 text-slate-600 group-hover:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            )}
-          </div>
+            <div className="flex items-center gap-3 ml-4">
+              <ResultBadge result={game.result} />
+              {game.url && (
+                <svg className="w-4 h-4 text-slate-600 group-hover:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              )}
+            </div>
           </>
         )
         return game.url ? (
@@ -341,8 +341,8 @@ export default function Dashboard() {
       .finally(() => setMilestonesLoading(false))
     api.getRecentlyAchievedMilestones(orgId)
       .then(setAchievedMilestones)
-      .catch(() => setAchievedMilestones([])
-      .finally(() => setAchievedLoading(false)))
+      .catch(() => setAchievedMilestones([]))
+      .finally(() => setAchievedLoading(false))
     api.getOrgFixtures(orgId)
       .then(setFixtures)
       .catch(() => setFixtures([]))
