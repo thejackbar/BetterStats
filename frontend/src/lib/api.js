@@ -77,6 +77,7 @@ export const api = {
     return request(`/games?${params}`)
   },
   getScorecard: (gameId) => request(`/games/${gameId}/scorecard`),
+  getPlayHQGame: (orgId, gameId) => request(`/games/playhq/${gameId}?org_id=${encodeURIComponent(orgId)}`),
 
   // Leaderboard
   battingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit } = {}) => {

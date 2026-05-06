@@ -54,6 +54,22 @@ async def list_games(
     ]
 
 
+@router.get("/playhq/{playhq_game_id}")
+async def get_playhq_game(
+    playhq_game_id: str,
+    org_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    org = await db.get(Organisation, uuid.UUID(org_id))
+    if not org or not org.playhq_id:
+        raise HTTPException(status_code=404, detail="Organisation not found or no PlayHQ ID")
+    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
+    game = next((g for g in all_games if g.get("id") == playhq_game_id), None)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+    return game
+
+
 @router.get("/{game_id}/scorecard")
 async def get_scorecard(game_id: str, db: AsyncSession = Depends(get_db)):
     game = await db.get(Game, uuid.UUID(game_id))
