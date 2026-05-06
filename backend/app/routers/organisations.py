@@ -77,7 +77,7 @@ async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Season)
         .where(Season.organisation_id == uuid.UUID(org_id))
-        .order_by(Season.year.desc())
+        .order_by(Season.year.desc().nullslast(), Season.name.desc())
     )
     seasons = result.scalars().all()
     return [
@@ -123,7 +123,7 @@ async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Season)
         .where(Season.organisation_id == uuid.UUID(org_id))
-        .order_by(Season.year.desc())
+        .order_by(Season.year.desc().nullslast(), Season.name.desc())
         .limit(2)
     )
     seasons = result.scalars().all()
