@@ -126,10 +126,25 @@ async def sync_organisation(org_id_str: str) -> dict:
                 bowl = pdata.get("bowling", {})
                 field = pdata.get("fielding", {})
 
+                # Derive overs from balls (cricket notation: 7 balls = 1.1 overs)
+                bowling_balls = bowl.get("bowlingBalls") or 0
+                full_overs = bowling_balls // 6
+                extra_balls = bowling_balls % 6
+                cricket_overs = full_overs + extra_balls / 10.0
+
+                # Best bowling figures is a string like "4-13"
+                best_figures = bowl.get("bowlingBestInnings") or ""
+                best_wkts = None
+                if best_figures and "-" in best_figures:
+                    try:
+                        best_wkts = int(best_figures.split("-")[0])
+                    except ValueError:
+                        best_wkts = None
+
                 row = PlayerSeasonStats(
                     player_id=pid,
                     season_id=season_id,
-                    matches=bat.get("matches") or bowl.get("matches") or 0,
+                    matches=bat.get("matches") or bowl.get("matches") or field.get("matches") or 0,
                     batting_innings=bat.get("battingInnings") or 0,
                     runs=bat.get("battingAggregate") or 0,
                     not_outs=bat.get("battingNotOuts") or 0,
@@ -146,14 +161,24 @@ async def sync_organisation(org_id_str: str) -> dict:
                     batting_minutes=bat.get("battingMinutes") or 0,
                     bowling_innings=bowl.get("bowlingInnings") or 0,
                     wickets=bowl.get("bowlingWickets") or 0,
-                    overs=bowl.get("bowlingOvers") or 0,
+                    overs=cricket_overs,
+                    bowling_balls=bowling_balls,
                     runs_conceded=bowl.get("bowlingRuns") or 0,
                     maidens=bowl.get("bowlingMaidens") or 0,
-                    bowling_economy=bowl.get("bowlingEconomy"),
+                    bowling_economy=bowl.get("bowlingEconomyRate"),
                     bowling_average=bowl.get("bowlingAverage"),
-                    best_bowling_wickets=bowl.get("bowlingBestWickets"),
-                    catches=field.get("fieldingCatches") or 0,
+                    bowling_strike_rate=bowl.get("bowlingStrikeRate"),
+                    best_bowling_wickets=best_wkts,
+                    best_bowling_figures=best_figures or None,
+                    five_wicket_innings=bowl.get("bowling5WIs") or 0,
+                    wides=bowl.get("bowlingWides") or 0,
+                    no_balls=bowl.get("bowlingNoBalls") or 0,
+                    catches=field.get("fieldingTotalCatches") or 0,
+                    catches_wk=field.get("fieldingCatchesWK") or 0,
+                    catches_non_wk=field.get("fieldingCatchesNonWK") or 0,
                     run_outs=field.get("fieldingRunOuts") or 0,
+                    assisted_run_outs=field.get("fieldingAssistedRunOuts") or 0,
+                    unassisted_run_outs=field.get("fieldingUnassistedRunOuts") or 0,
                     stumpings=field.get("fieldingStumpings") or 0,
                 )
                 session.add(row)

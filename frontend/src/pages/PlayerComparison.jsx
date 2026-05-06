@@ -160,30 +160,22 @@ export default function PlayerComparison() {
   useEffect(() => {
     if (!player1) { setStats1(null); setBat1(null); setBowl1(null); setField1(null); return }
     setLoading1(true)
-    Promise.all([
-      api.battingLeaderboard(orgId, { limit: 100 }),
-      api.bowlingLeaderboard(orgId, { limit: 100 }),
-      api.fieldingLeaderboard(orgId, { limit: 100 }),
-    ]).then(([bat, bowl, field]) => {
-      setBat1(bat.find(r => r.player_id === player1.id) || {})
-      setBowl1(bowl.find(r => r.player_id === player1.id) || {})
-      setField1(field.find(r => r.player_id === player1.id) || {})
+    api.getPlayerStats(player1.id).then(data => {
+      setBat1(data.career_batting || {})
+      setBowl1(data.career_bowling || {})
+      setField1(data.career_fielding || {})
     }).catch(() => {}).finally(() => setLoading1(false))
-  }, [player1, orgId])
+  }, [player1])
 
   useEffect(() => {
     if (!player2) { setStats2(null); setBat2(null); setBowl2(null); setField2(null); return }
     setLoading2(true)
-    Promise.all([
-      api.battingLeaderboard(orgId, { limit: 100 }),
-      api.bowlingLeaderboard(orgId, { limit: 100 }),
-      api.fieldingLeaderboard(orgId, { limit: 100 }),
-    ]).then(([bat, bowl, field]) => {
-      setBat2(bat.find(r => r.player_id === player2.id) || {})
-      setBowl2(bowl.find(r => r.player_id === player2.id) || {})
-      setField2(field.find(r => r.player_id === player2.id) || {})
+    api.getPlayerStats(player2.id).then(data => {
+      setBat2(data.career_batting || {})
+      setBowl2(data.career_bowling || {})
+      setField2(data.career_fielding || {})
     }).catch(() => {}).finally(() => setLoading2(false))
-  }, [player2, orgId])
+  }, [player2])
 
   const showComparison = player1 && player2
 
