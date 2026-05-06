@@ -327,73 +327,7 @@ async def _get_graph_endpoint() -> str:
     return _playhq_graph_endpoint
 
 
-_GQL_SCORECARD = """
-query FixtureScorecard($fixtureId: ID!) {
-  fixture(id: $fixtureId) {
-    id
-    innings {
-      inningsNumber
-      battingTeam { name }
-      totalRuns
-      totalWickets
-      overs
-      extras { total byes legByes wides noBalls penalties }
-      batting {
-        player { name }
-        batterStatus
-        runs
-        balls
-        fours
-        sixes
-        dismissal { dismissalType bowler { name } fielder { name } catcher { name } }
-      }
-      bowling {
-        player { name }
-        overs
-        maidens
-        runs
-        wickets
-        wides
-        noBalls
-      }
-    }
-  }
-}
-"""
-
-_GQL_SCORECARD_GAME = """
-query GameScorecard($id: ID!) {
-  game(id: $id) {
-    id
-    innings {
-      inningsNumber
-      battingTeam { name }
-      totalRuns
-      totalWickets
-      overs
-      extras { total byes legByes wides noBalls penalties }
-      batting {
-        player { name }
-        batterStatus
-        runs
-        balls
-        fours
-        sixes
-        dismissal { dismissalType bowler { name } fielder { name } catcher { name } }
-      }
-      bowling {
-        player { name }
-        overs
-        maidens
-        runs
-        wickets
-        wides
-        noBalls
-      }
-    }
-  }
-}
-"""
+_GQL_INTROSPECT = "{ __schema { queryType { fields { name args { name type { name kind ofType { name kind } } } } } } }"
 
 
 async def _query_graphql_scorecard(fixture_id: str) -> dict:
@@ -412,25 +346,25 @@ async def _query_graphql_scorecard(fixture_id: str) -> dict:
     }
 
     async with httpx.AsyncClient() as client:
-        for query_name, query, var_key in [
-            ("fixture", _GQL_SCORECARD, "fixtureId"),
-            ("game", _GQL_SCORECARD_GAME, "id"),
-        ]:
-            try:
-                payload = {"query": query, "variables": {var_key: fixture_id}}
-                r = await client.post(endpoint, json=payload, headers=gql_headers, timeout=TIMEOUT)
-                logger.info(f"PlayHQ GraphQL {query_name} → {r.status_code}, body: {r.text[:500]!r}")
-                if r.status_code == 200:
-                    body = r.json()
-                    errors = body.get("errors")
-                    data = body.get("data") or {}
-                    logger.info(f"PlayHQ GraphQL {query_name} data keys: {list(data.keys())}, errors: {errors}")
-                    game_data = data.get("fixture") or data.get("game") or {}
-                    if game_data:
-                        logger.info(f"PlayHQ GraphQL {query_name} object keys: {list(game_data.keys())}")
-                        return _parse_scorecard(game_data)
-            except Exception as e:
-                logger.warning(f"PlayHQ GraphQL {query_name} error: {e}")
+        # Introspect to find available query fields
+        try:
+            r = await client.post(endpoint, json={"query": _GQL_INTROSPECT}, headers=gql_headers, timeout=TIMEOUT)
+            logger.info(f"PlayHQ GraphQL introspect → {r.status_code}")
+            if r.status_code == 200:
+                body = r.json()
+                fields = (body.get("data") or {}).get("__schema", {}).get("queryType", {}).get("fields", [])
+                field_names = [f["name"] for f in fields]
+                logger.info(f"PlayHQ GraphQL query fields: {field_names}")
+                # Log any field that might relate to a game/fixture/match/scorecard
+                for f in fields:
+                    name = f["name"]
+                    if any(kw in name.lower() for kw in ["game", "fixture", "match", "score", "innings"]):
+                        args = [f"{a['name']}:{(a['type'].get('name') or a['type'].get('ofType',{}).get('name','?'))}" for a in f.get("args", [])]
+                        logger.info(f"PlayHQ GQL candidate field: {name}({', '.join(args)})")
+            else:
+                logger.info(f"PlayHQ GraphQL introspect body: {r.text[:300]!r}")
+        except Exception as e:
+            logger.warning(f"PlayHQ GraphQL introspect error: {e}")
 
     return {"innings": []}
 
