@@ -118,7 +118,7 @@ def _parse_game(game: dict, grade_name: str, season_name: str, keyword: str) -> 
 
 
 async def get_org_games(playhq_id: str, org_name: str) -> list:
-    """Fetch all recent games for an org across its 2 most recent seasons."""
+    """Fetch all recent games for an org across its most recent seasons."""
     if not settings.playhq_api_key or not playhq_id:
         return []
 
@@ -128,9 +128,10 @@ async def get_org_games(playhq_id: str, org_name: str) -> list:
         logger.warning(f"PlayHQ: failed to get seasons for {playhq_id}: {e}")
         return []
 
-    recent_seasons = seasons[:2]
+    recent_seasons = seasons[:6]
     if not recent_seasons:
         return []
+    logger.info(f"PlayHQ: fetching games across {len(recent_seasons)} seasons for org {playhq_id}: {[s.get('name') for s in recent_seasons]}")
 
     # Fetch grades for all recent seasons concurrently
     grade_results = await asyncio.gather(
