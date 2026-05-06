@@ -1,71 +1,131 @@
 import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis,
+  CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from 'recharts'
 import { api } from '../lib/api'
+import { usePlayerStats } from '../hooks/usePlayerStats'
+import StatCard from '../components/StatCard'
+import TrendChart from '../components/TrendChart'
+import RunsChart from '../components/RunsChart'
 import LoadingSpinner from '../components/LoadingSpinner'
 import clsx from 'clsx'
 
-const TABS = ['batting', 'bowling', 'analysis', 'milestones', 'partnerships']
+const TABS = ['batting', 'bowling', 'analysis', 'milestones']
 
-function usePlayerStats(playerId, { seasonId } = {}) {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    if (!playerId) return
-    setLoading(true)
-    api.getPlayerStats(playerId, { seasonId })
-      .then(setData)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [playerId, seasonId])
-
-  return { data, loading, error }
+function daysSince(dateStr) {
+  if (!dateStr) return null
+  const diff = Math.floor((new Date() - new Date(dateStr)) / (1000 * 60 * 60 * 24))
+  return diff
 }
 
-function StatCard({ label, value, accent, sub }) {
+function formatDaysSince(days) {
+  if (days === null) return '—'
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  if (days < 7) return `${days}d ago`
+  if (days < 30) return `${Math.floor(days / 7)}w ago`
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`
+  return `${Math.floor(days / 365)}y ago`
+}
+
+function ActivityBadge({ label, value, sub, accent = false }) {
   return (
-    <div className={clsx('card p-4 text-center', accent && 'border-accent/40')}>
-      <div className={clsx('stat-number text-2xl font-bold', accent ? 'text-accent' : 'text-white')}>
+    <div className={clsx(
+      'bg-navy-800 border rounded-xl p-4 flex flex-col gap-1',
+      accent ? 'border-accent/30' : 'border-navy-700'
+    )}>
+      <span className="section-label">{label}</span>
+      <span className={clsx('stat-number font-bold text-lg leading-tight', accent ? 'text-accent' : 'text-white')}>
         {value ?? '—'}
-      </div>
-      <div className="text-xs text-slate-500 mt-1 uppercase tracking-wider">{label}</div>
-      {sub && <div className="text-xs text-slate-600 mt-0.5">{sub}</div>}
+      </span>
+      {sub && <span className="text-xs text-slate-500">{sub}</span>}
     </div>
   )
 }
 
-function SectionTitle({ children }) {
+function UpcomingMilestonesSection({ data }) {
+  if (!data?.length) return null
+  const ICONS = { runs: '🏏', wickets: '⚡', matches: '📅' }
   return (
-    <div className="flex items-center gap-3 mb-4">
-      <div className="accent-bar" />
-      <h3 className="display-heading text-lg text-slate-300 uppercase tracking-wider">{children}</h3>
+    <div className="mb-8">
+      <h3 className="display-heading text-lg text-white mb-4">CHASING</h3>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {data.map((m, i) => {
+          const pct = Math.round((m.current / m.target) * 100)
+          return (
+            <div key={i} className="bg-navy-800 border border-navy-700 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-slate-400 flex items-center gap-1.5">
+                  <span>{ICONS[m.type] || '🎯'}</span>
+                  {m.target.toLocaleString()} {m.type}
+                </span>
+                <span className="text-xs text-accent font-mono font-bold">{m.needed} to go</span>
+              </div>
+              <div className="h-2 bg-navy-700 rounded-full overflow-hidden mb-1">
+                <div className="h-full bg-accent rounded-full" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="flex justify-between">
+                <span className="text-xs text-slate-600">{m.current.toLocaleString()}</span>
+                <span className="text-xs text-slate-600">{pct}%</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
 
-function DataTable({ columns, rows }) {
-  if (!rows?.length) return <p className="text-slate-500 text-sm px-4 py-4">No data available</p>
+function SeasonBattingTable({ data }) {
+  if (!data?.length) return <p className="text-slate-500 text-sm px-5 py-4">No batting data.</p>
   return (
     <div className="overflow-x-auto">
-      <table className="w-full">
+      <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-navy-700">
-            {columns.map(col => (
-              <th key={col.key} className="table-header text-right first:text-left px-4 py-2.5">
-                {col.label}
-              </th>
-            ))}
+            <th className="table-header">Season</th>
+            <th className="table-header text-right">Mat</th>
+            <th className="table-header text-right">Inn</th>
+            <th className="table-header text-right">Runs</th>
+            <th className="table-header text-right">Avg</th>
+            <th className="table-header text-right">HS</th>
+            <th className="table-header text-right">SR</th>
+            <th className="table-header text-right">50s</th>
+            <th className="table-header text-right">100s</th>
+            <th className="table-header text-right">6s</th>
+            <th className="table-header text-right">4s</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} className="border-b border-navy-700/50 hover:bg-navy-800/30 transition-colors">
-              {columns.map(col => (
-                <td key={col.key} className={clsx('px-4 py-2.5', col.accent ? 'stat-number text-white font-semibold' : 'text-slate-300')}>
-                  {row[col.key] ?? '—'}
-                </td>
-              ))}
+          {data.map((row, i) => (
+            <tr key={i} className="table-row">
+              <td className="table-cell text-white font-medium">{row.season_name}</td>
+              <td className="table-cell stat-number text-right text-slate-400">{row.matches ?? '—'}</td>
+              <td className="table-cell stat-number text-right text-slate-400">{row.batting_innings ?? '—'}</td>
+              <td className="table-cell text-right">
+                <span className={clsx('stat-number font-bold',
+                  row.total_runs >= 500 ? 'text-amber-cricket' : row.total_runs >= 200 ? 'text-accent' : 'text-white'
+                )}>
+                  {row.total_runs ?? '—'}
+                </span>
+              </td>
+              <td className="table-cell stat-number text-right text-slate-300">
+                {row.batting_average != null ? Number(row.batting_average).toFixed(1) : '—'}
+              </td>
+              <td className="table-cell stat-number text-right text-slate-300">{row.high_score ?? '—'}</td>
+              <td className="table-cell stat-number text-right text-slate-400">
+                {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
+              </td>
+              <td className="table-cell stat-number text-right text-slate-300">{row.fifties || '—'}</td>
+              <td className="table-cell stat-number text-right">
+                <span className={row.hundreds > 0 ? 'text-amber-cricket font-bold' : 'text-slate-300'}>
+                  {row.hundreds || '—'}
+                </span>
+              </td>
+              <td className="table-cell stat-number text-right text-slate-400">{row.total_sixes || '—'}</td>
+              <td className="table-cell stat-number text-right text-slate-400">{row.total_fours || '—'}</td>
             </tr>
           ))}
         </tbody>
@@ -74,55 +134,88 @@ function DataTable({ columns, rows }) {
   )
 }
 
-const POSITION_COLS = [
-  { key: 'batting_position', label: 'Position' },
-  { key: 'innings', label: 'Innings' },
-  { key: 'runs', label: 'Runs', accent: true },
-  { key: 'average', label: 'Average' },
-  { key: 'strike_rate', label: 'SR' },
-  { key: 'high_score', label: 'HS' },
-]
+function SeasonBowlingTable({ data }) {
+  const hasAnyWickets = data?.some(r => (r.total_wickets ?? 0) > 0)
+  if (!hasAnyWickets) return <p className="text-slate-500 text-sm px-5 py-4">No bowling data.</p>
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-navy-700">
+            <th className="table-header">Season</th>
+            <th className="table-header text-right">Mat</th>
+            <th className="table-header text-right">O</th>
+            <th className="table-header text-right">M</th>
+            <th className="table-header text-right">R</th>
+            <th className="table-header text-right">W</th>
+            <th className="table-header text-right">Avg</th>
+            <th className="table-header text-right">Econ</th>
+            <th className="table-header text-right">Best</th>
+            <th className="table-header text-right">5W</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.filter(r => (r.total_wickets ?? 0) > 0 || (r.total_overs ?? 0) > 0).map((row, i) => (
+            <tr key={i} className="table-row">
+              <td className="table-cell text-white font-medium">{row.season_name}</td>
+              <td className="table-cell stat-number text-right text-slate-400">{row.matches ?? '—'}</td>
+              <td className="table-cell stat-number text-right text-slate-400">{row.total_overs ?? '—'}</td>
+              <td className="table-cell stat-number text-right text-slate-400">{row.total_maidens ?? '—'}</td>
+              <td className="table-cell stat-number text-right text-slate-300">{row.total_runs ?? '—'}</td>
+              <td className="table-cell text-right">
+                <span className={clsx('stat-number font-bold',
+                  row.total_wickets >= 50 ? 'text-amber-cricket' : row.total_wickets >= 20 ? 'text-accent' : 'text-white'
+                )}>
+                  {row.total_wickets ?? '—'}
+                </span>
+              </td>
+              <td className="table-cell stat-number text-right text-slate-300">
+                {row.bowling_average != null ? Number(row.bowling_average).toFixed(1) : '—'}
+              </td>
+              <td className="table-cell stat-number text-right text-slate-300">
+                {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
+              </td>
+              <td className="table-cell stat-number text-right text-slate-300">
+                {row.best_bowling_figures || (row.best_bowling_wickets > 0 ? `${row.best_bowling_wickets}w` : '—')}
+              </td>
+              <td className="table-cell stat-number text-right">
+                <span className={row.five_fors > 0 ? 'text-amber-cricket font-bold' : 'text-slate-400'}>
+                  {row.five_fors || '—'}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
 
-const GRADE_COLS = [
-  { key: 'grade_name', label: 'Grade' },
-  { key: 'innings', label: 'Innings' },
-  { key: 'runs', label: 'Runs', accent: true },
-  { key: 'average', label: 'Average' },
-  { key: 'wickets', label: 'Wkts' },
-  { key: 'bowling_average', label: 'Bowl Avg' },
-]
-
-const SEASON_BAT_COLS = [
-  { key: 'season_name', label: 'Season' },
-  { key: 'matches', label: 'M' },
-  { key: 'batting_innings', label: 'Inn' },
-  { key: 'total_runs', label: 'Runs', accent: true },
-  { key: 'high_score', label: 'HS' },
-  { key: 'batting_average', label: 'Avg' },
-  { key: 'strike_rate', label: 'SR' },
-  { key: 'fifties', label: '50s' },
-  { key: 'hundreds', label: '100s' },
-]
-
-const SEASON_BOWL_COLS = [
-  { key: 'season_name', label: 'Season' },
-  { key: 'total_wickets', label: 'Wkts', accent: true },
-  { key: 'total_overs', label: 'Overs' },
-  { key: 'economy', label: 'Econ' },
-  { key: 'bowling_average', label: 'Avg' },
-  { key: 'best_bowling_figures', label: 'Best' },
-  { key: 'five_fors', label: '5W' },
-]
-
-const PARTNERSHIP_COLS = [
-  { key: 'partner_name', label: 'Partner' },
-  { key: 'runs', label: 'Partnership', accent: true },
-  { key: 'player_runs', label: 'My Runs' },
-  { key: 'balls', label: 'Balls' },
-]
+function SeasonChart({ data }) {
+  if (!data?.length) return <p className="text-slate-500 text-sm">No season data</p>
+  const chartData = [...data].reverse()
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+        <XAxis dataKey="season_name" tick={{ fill: '#64748b', fontSize: 11 }} />
+        <YAxis yAxisId="left" tick={{ fill: '#64748b', fontSize: 11 }} />
+        <YAxis yAxisId="right" orientation="right" tick={{ fill: '#64748b', fontSize: 11 }} />
+        <Tooltip
+          contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }}
+          labelStyle={{ color: '#94a3b8' }}
+          itemStyle={{ color: '#fff' }}
+        />
+        <Legend wrapperStyle={{ color: '#94a3b8', fontSize: 12 }} />
+        <Bar yAxisId="left" dataKey="total_runs" name="Runs" fill="#16c784" radius={[3, 3, 0, 0]} />
+        <Bar yAxisId="right" dataKey="total_wickets" name="Wickets" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
 
 function MilestoneTimeline({ data }) {
-  if (!data?.length) return <p className="text-slate-500 text-sm px-4 py-4">No milestones recorded yet</p>
+  if (!data?.length) return <p className="text-slate-500 text-sm px-4 py-4">No milestones recorded yet.</p>
 
   const grouped = data.reduce((acc, m) => {
     const key = m.milestone_type
@@ -170,69 +263,81 @@ export default function PlayerProfile() {
   const [seasons, setSeasons] = useState([])
   const { data, loading, error } = usePlayerStats(playerId, { seasonId })
 
-  const [dismissals, setDismissals] = useState(null)
-  const [byPosition, setByPosition] = useState(null)
-  const [byGrade, setByGrade] = useState(null)
-  const [seasonStats, setSeasonStats] = useState(null)
+  const [activity, setActivity] = useState(null)
+  const [upcomingMilestones, setUpcomingMilestones] = useState(null)
   const [milestones, setMilestones] = useState(null)
-  const [partnerships, setPartnerships] = useState(null)
+  const [seasonStats, setSeasonStats] = useState(null)
 
+  // Load season stats and activity eagerly on mount
   useEffect(() => {
     if (!playerId) return
-    api.getPlayerSeasons(playerId).then(setSeasons).catch(() => {})
+    api.getPlayerSeasons(playerId).then(setSeasonStats).catch(() => setSeasonStats([]))
+    api.getPlayerActivity(playerId).then(setActivity).catch(() => setActivity({}))
+    api.getPlayerUpcomingMilestones(playerId).then(setUpcomingMilestones).catch(() => setUpcomingMilestones([]))
   }, [playerId])
 
-  const player = data?.player
-  const cbat = data?.career_batting
-  const cbw = data?.career_bowling
-  const cfield = data?.career_fielding
-  const activity = data?.activity
-
-  const badgeMilestones = []
-  if (cbat?.total_runs >= 1000) badgeMilestones.push(`${cbat.total_runs.toLocaleString()} runs`)
-  if (cbw?.total_wickets >= 50) badgeMilestones.push(`${cbw.total_wickets} wickets`)
-  if (cbw?.best_figures_wickets >= 5) badgeMilestones.push(`${cbw.best_figures_wickets}-wicket haul`)
-
   useEffect(() => {
-    const t = tab
-    if (t === 'analysis') {
-      if (!dismissals) api.getPlayerDismissals(playerId).then(setDismissals).catch(() => setDismissals([]))
-      if (!byPosition) api.getPlayerByPosition(playerId).then(setByPosition).catch(() => setByPosition([]))
-      if (!byGrade) api.getPlayerByGrade(playerId).then(setByGrade).catch(() => setByGrade([]))
-      if (!seasonStats) api.getPlayerSeasons(playerId).then(setSeasonStats).catch(() => setSeasonStats([]))
-    } else if (t === 'milestones') {
-      if (!milestones) api.getPlayerMilestones(playerId).then(setMilestones).catch(() => setMilestones([]))
-    } else if (t === 'partnerships') {
-      if (!partnerships) api.getPlayerPartnerships(playerId).then(setPartnerships).catch(() => setPartnerships([]))
-    }
-  }, [playerId, dismissals, byPosition, byGrade, seasonStats, milestones, partnerships])
+    if (!data?.player?.organisation_id) return
+    api.getOrgSeasons(data.player.organisation_id).then(setSeasons).catch(() => {})
+  }, [data?.player?.organisation_id])
 
-  if (loading) return <LoadingSpinner message="Loading player profile…" />
-  if (error) return <div className="text-red-400 p-8">{error}</div>
+  const handleTabChange = useCallback((t) => {
+    setTab(t)
+    if (t === 'milestones' && milestones === null) {
+      api.getPlayerMilestones(playerId).then(setMilestones).catch(() => setMilestones([]))
+    }
+  }, [playerId, milestones])
+
+  if (loading) return <LoadingSpinner message="Loading player stats…" />
+  if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-red-400">Error: {error}</div>
   if (!data) return null
 
+  const { player, career_batting: cb, career_bowling: cbw, career_fielding: cf } = data
+
+  const badgeMilestones = []
+  if (cb?.hundreds > 0) badgeMilestones.push(`${cb.hundreds} ${cb.hundreds === 1 ? 'century' : 'centuries'}`)
+  if (cb?.fifties > 0) badgeMilestones.push(`${cb.fifties} ${cb.fifties === 1 ? 'fifty' : 'fifties'}`)
+  if (cbw?.total_wickets >= 5) badgeMilestones.push(`${cbw.total_wickets} career wickets`)
+  if (cbw?.best_figures_wickets >= 5) badgeMilestones.push(`${cbw.best_figures_wickets}-wicket haul`)
+
+  const lastGameDays = activity ? daysSince(activity.last_game_date) : null
+  const lastWicketDays = activity ? daysSince(activity.last_wicket_date) : null
+  const lastDuckDays = activity ? daysSince(activity.last_duck_date) : null
+
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      {/* Header */}
+    <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* Player header */}
       <div className="mb-8">
-        <div className="accent-bar mb-3" />
+        <div className="accent-bar mb-4" />
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="display-heading text-4xl md:text-5xl text-white">{player?.name?.toUpperCase()}</h1>
+            <h1 className="display-heading text-5xl md:text-6xl text-white leading-none">
+              {player.name.toUpperCase()}
+            </h1>
             {badgeMilestones.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-2">
-                {badgeMilestones.map((b, i) => (
-                  <span key={i} className="text-xs bg-accent/20 text-accent border border-accent/30 rounded-full px-2 py-0.5">{b}</span>
+              <div className="flex flex-wrap gap-2 mt-3">
+                {badgeMilestones.map(m => (
+                  <span key={m} className="badge bg-accent/10 text-accent">{m}</span>
                 ))}
               </div>
             )}
           </div>
-          <div className="flex gap-2 flex-wrap">
-            {player && !player.claimed && (
-              <button
-                onClick={() => api.claimPlayer(playerId).catch(() => {})}
-                className="btn-ghost border border-accent/40 text-accent text-sm"
+          <div className="flex items-center gap-3 flex-wrap">
+            {seasons.length > 0 && (
+              <select
+                value={seasonId || ''}
+                onChange={e => setSeasonId(e.target.value || null)}
+                className="bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent"
               >
+                <option value="">Career</option>
+                {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            )}
+            <Link to={`/players/${playerId}/share`} className="btn-ghost border border-navy-600 text-xs">
+              Share ↗
+            </Link>
+            {!player.claimed && (
+              <button onClick={() => api.claimPlayer(playerId)} className="btn-primary text-xs">
                 Claim Profile
               </button>
             )}
@@ -240,175 +345,145 @@ export default function PlayerProfile() {
         </div>
       </div>
 
-      {/* Upcoming milestones */}
-      <div className="mb-6">
-        <UpcomingMilestonesBar playerId={playerId} />
-      </div>
+      {/* Upcoming milestones progress bars */}
+      {upcomingMilestones !== null && upcomingMilestones.length > 0 && (
+        <UpcomingMilestonesSection data={upcomingMilestones} />
+      )}
 
-      {/* Career summary tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-        <StatCard label="Career Runs" value={cbat?.total_runs?.toLocaleString()} accent />
-        <StatCard label="Average" value={cbat?.average} />
-        <StatCard label="Wickets" value={cbw?.total_wickets} accent />
+      {/* Activity strip */}
+      {activity && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
+          <ActivityBadge
+            label="Last Played"
+            value={formatDaysSince(lastGameDays)}
+            sub={activity.last_game_date || undefined}
+            accent={lastGameDays !== null && lastGameDays < 14}
+          />
+          <ActivityBadge
+            label="Last Wicket"
+            value={lastWicketDays !== null ? formatDaysSince(lastWicketDays) : 'No wickets'}
+            sub={activity.last_wicket_date || undefined}
+          />
+          <ActivityBadge
+            label="Last Duck"
+            value={lastDuckDays !== null ? formatDaysSince(lastDuckDays) : 'No ducks'}
+            sub={activity.total_ducks > 0 ? `${activity.total_ducks} career ducks` : 'Duck-free!'}
+          />
+          <ActivityBadge label="Career 6s" value={activity.total_sixes?.toLocaleString()} accent />
+          <ActivityBadge label="Career 4s" value={activity.total_fours?.toLocaleString()} />
+          <ActivityBadge
+            label="Best Spell"
+            value={activity.best_bowling_figures || (activity.best_spell_wickets > 0 ? `${activity.best_spell_wickets}w` : '—')}
+            sub={activity.total_wickets > 0 ? `${activity.total_wickets} career wkts` : undefined}
+          />
+        </div>
+      )}
+
+      {/* Career stat cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-10">
+        <StatCard label="Innings" value={cb?.innings ?? '—'} />
+        <StatCard label="Runs" value={cb?.total_runs ?? '—'} accent />
+        <StatCard label="Average" value={cb?.average ?? '—'} />
+        <StatCard label="High Score" value={cb?.high_score != null ? cb.high_score : '—'} />
+        <StatCard label="Strike Rate" value={cb?.strike_rate ?? '—'} />
+        <StatCard label="Wickets" value={cbw?.total_wickets ?? '—'} />
         <StatCard label="Economy" value={cbw?.economy ?? '—'} />
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-navy-700 overflow-x-auto">
+      <div className="flex flex-wrap gap-1 mb-4 border-b border-navy-700">
         {TABS.map(t => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => handleTabChange(t)}
             className={clsx(
-              'px-4 py-2.5 text-xs uppercase tracking-widest font-medium transition-colors whitespace-nowrap',
+              'px-4 py-2.5 text-sm font-semibold uppercase tracking-wider transition-colors border-b-2 -mb-px',
               tab === t
-                ? 'text-accent border-b-2 border-accent'
-                : 'text-slate-500 hover:text-slate-300'
+                ? 'text-accent border-accent'
+                : 'text-slate-500 border-transparent hover:text-white'
             )}
           >
             {t}
           </button>
         ))}
+        {cf && (
+          <div className="ml-auto flex items-center gap-4 pb-2 text-sm text-slate-400">
+            <span>Catches: <strong className="text-white stat-number">{cf.total_catches ?? 0}</strong></span>
+            <span>Run outs: <strong className="text-white stat-number">{cf.total_run_outs ?? 0}</strong></span>
+            {cf.total_stumpings > 0 && <span>Stumpings: <strong className="text-white stat-number">{cf.total_stumpings}</strong></span>}
+          </div>
+        )}
       </div>
 
-      {/* Batting tab */}
-      {tab === 'batting' && (
-        <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <StatCard label="Innings" value={cbat?.innings} />
-            <StatCard label="Highest Score" value={cbat?.high_score} />
-            <StatCard label="Strike Rate" value={cbat?.strike_rate} />
-            <StatCard label="Not Outs" value={cbat?.innings != null ? (cbat.innings - (cbat.innings - (cbat?.total_runs > 0 ? 1 : 0))) : null} />
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-            <StatCard label="50s" value={cbat?.fifties} />
-            <StatCard label="100s" value={cbat?.hundreds} />
-            <StatCard label="Fours" value={cbat?.total_fours} />
-            <StatCard label="Sixes" value={cbat?.total_sixes} />
-          </div>
-
-          <div className="card overflow-hidden mb-4">
-            <div className="px-5 py-4 border-b border-navy-700">
-              <SectionTitle>Season by Season — Batting</SectionTitle>
+      {/* Tab content */}
+      <div className="card overflow-hidden">
+        {tab === 'batting' && (
+          <>
+            <div className="px-5 py-4 border-b border-navy-700 flex items-center justify-between">
+              <h3 className="display-heading text-lg text-white">BATTING BY SEASON</h3>
+              <span className="section-label">{seasonStats?.length ?? 0} seasons</span>
             </div>
             {seasonStats === null
-              ? <p className="text-slate-500 text-sm px-4 py-4">Select Analysis tab to load</p>
-              : <DataTable columns={SEASON_BAT_COLS} rows={seasonStats} />
+              ? <div className="p-5"><LoadingSpinner size="sm" /></div>
+              : <SeasonBattingTable data={seasonStats} />
             }
-          </div>
-        </>
-      )}
+            {/* Form charts if we have recent data */}
+            {seasonStats !== null && seasonStats.length > 0 && (
+              <div className="px-5 pt-4 pb-5 border-t border-navy-700">
+                <h4 className="display-heading text-sm text-slate-400 mb-4">RUNS TREND</h4>
+                <SeasonChart data={seasonStats} />
+              </div>
+            )}
+          </>
+        )}
 
-      {/* Bowling tab */}
-      {tab === 'bowling' && (
-        <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <StatCard label="Wickets" value={cbw?.total_wickets} accent />
-            <StatCard label="Average" value={cbw?.average} />
-            <StatCard label="Economy" value={cbw?.economy} />
-            <StatCard label="Best Figures" value={cbw?.best_bowling_figures ?? (cbw?.best_figures_wickets ? `${cbw.best_figures_wickets} wkts` : '—')} />
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-            <StatCard label="Overs" value={cbw?.total_overs} />
-            <StatCard label="Maidens" value={cbw?.total_maidens} />
-            <StatCard label="Runs Conceded" value={cbw?.total_runs} />
-            <StatCard label="Five-fors" value={cbw?.five_fors} />
-          </div>
-
-          <div className="card overflow-hidden mb-4">
-            <div className="px-5 py-4 border-b border-navy-700">
-              <SectionTitle>Season by Season — Bowling</SectionTitle>
+        {tab === 'bowling' && (
+          <>
+            <div className="px-5 py-4 border-b border-navy-700 flex items-center justify-between">
+              <h3 className="display-heading text-lg text-white">BOWLING BY SEASON</h3>
             </div>
             {seasonStats === null
-              ? <p className="text-slate-500 text-sm px-4 py-4">Select Analysis tab to load</p>
-              : <DataTable columns={SEASON_BOWL_COLS} rows={seasonStats} />
+              ? <div className="p-5"><LoadingSpinner size="sm" /></div>
+              : <SeasonBowlingTable data={seasonStats} />
             }
-          </div>
-        </>
-      )}
+          </>
+        )}
 
-      {/* Analysis tab */}
-      {tab === 'analysis' && (
-        <>
-          <div className="card overflow-hidden mb-4">
-            <div className="px-5 py-4 border-b border-navy-700">
-              <SectionTitle>Season by Season — Batting</SectionTitle>
+        {tab === 'analysis' && (
+          <div className="p-5 space-y-8">
+            <div>
+              <h3 className="display-heading text-lg text-white mb-4">SEASON BY SEASON</h3>
+              {seasonStats === null
+                ? <LoadingSpinner size="sm" />
+                : <SeasonChart data={seasonStats} />
+              }
             </div>
-            {!seasonStats ? <LoadingSpinner /> : <DataTable columns={SEASON_BAT_COLS} rows={seasonStats} />}
-          </div>
-          <div className="card overflow-hidden mb-4">
-            <div className="px-5 py-4 border-b border-navy-700">
-              <SectionTitle>Season by Season — Bowling</SectionTitle>
+            {seasonStats !== null && seasonStats.length > 0 && (
+              <div>
+                <h3 className="display-heading text-lg text-white mb-4">FULL SEASON HISTORY</h3>
+                <SeasonBattingTable data={seasonStats} />
+              </div>
+            )}
+            <div className="rounded-lg border border-navy-700 p-4 text-center">
+              <p className="text-slate-500 text-sm">
+                Dismissal breakdown, by-position, and partnership analysis require game-level data which is not available at the current API tier.
+              </p>
             </div>
-            {!seasonStats ? <LoadingSpinner /> : <DataTable columns={SEASON_BOWL_COLS} rows={seasonStats} />}
           </div>
-          <div className="card overflow-hidden mb-4">
-            <div className="px-5 py-4 border-b border-navy-700">
-              <SectionTitle>Batting by Position</SectionTitle>
-            </div>
-            {!byPosition ? <LoadingSpinner /> : <DataTable columns={POSITION_COLS} rows={byPosition} />}
-          </div>
-          <div className="card overflow-hidden mb-4">
-            <div className="px-5 py-4 border-b border-navy-700">
-              <SectionTitle>Performance by Grade</SectionTitle>
-            </div>
-            {!byGrade ? <LoadingSpinner /> : <DataTable columns={GRADE_COLS} rows={byGrade} />}
-          </div>
-        </>
-      )}
+        )}
 
-      {/* Milestones tab */}
-      {tab === 'milestones' && (
-        <>
-          <div className="card overflow-hidden">
+        {tab === 'milestones' && (
+          <>
             <div className="px-5 py-4 border-b border-navy-700">
-              <SectionTitle>Career Milestones</SectionTitle>
+              <h3 className="display-heading text-lg text-white">CAREER MILESTONES</h3>
             </div>
             {milestones === null
-              ? <LoadingSpinner />
+              ? <p className="text-slate-500 text-sm px-5 py-4">Loading…</p>
               : <MilestoneTimeline data={milestones} />
             }
-          </div>
-        </>
-      )}
-
-      {/* Partnerships tab */}
-      {tab === 'partnerships' && (
-        <>
-          <div className="px-5 py-4 border-b border-navy-700"></div>
-          <div className="card overflow-hidden">
-            <div className="px-5 py-4 border-b border-navy-700">
-              <SectionTitle>Batting Partnerships</SectionTitle>
-            </div>
-            {partnerships === null
-              ? <LoadingSpinner />
-              : <DataTable columns={PARTNERSHIP_COLS} rows={partnerships} />
-            }
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-function UpcomingMilestonesBar({ playerId }) {
-  const [upcoming, setUpcoming] = useState([])
-
-  useEffect(() => {
-    api.getPlayerUpcomingMilestones(playerId).then(setUpcoming).catch(() => {})
-  }, [playerId])
-
-  if (!upcoming.length) return null
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {upcoming.slice(0, 4).map((m, i) => (
-        <div key={i} className="card px-3 py-2 flex items-center gap-2 border-navy-700">
-          <span className="text-slate-400 text-xs uppercase tracking-wider">{m.type}</span>
-          <span className="text-white stat-number text-sm font-bold">{m.target.toLocaleString()}</span>
-          <span className="text-slate-500 text-xs">{m.needed} to go</span>
-        </div>
-      ))}
+          </>
+        )}
+      </div>
     </div>
   )
 }
