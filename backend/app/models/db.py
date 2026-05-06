@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, String, Boolean, Integer, Numeric, Date, Text, ForeignKey,
-    TIMESTAMP, JSON
+    TIMESTAMP, JSON, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -58,6 +58,7 @@ class Season(Base):
 
     organisation = relationship("Organisation", back_populates="seasons")
     grades = relationship("Grade", back_populates="season")
+    player_stats = relationship("PlayerSeasonStats", back_populates="season")
 
 
 class Grade(Base):
@@ -86,6 +87,7 @@ class Player(Base):
     bowling_spells = relationship("BowlingSpell", back_populates="player")
     fielding_stats = relationship("FieldingStat", back_populates="player")
     milestones = relationship("Milestone", back_populates="player")
+    season_stats = relationship("PlayerSeasonStats", back_populates="player")
 
 
 class Game(Base):
@@ -208,3 +210,44 @@ class Milestone(Base):
 
     player = relationship("Player", back_populates="milestones")
     game = relationship("Game")
+
+
+class PlayerSeasonStats(Base):
+    __tablename__ = "player_season_stats"
+    __table_args__ = (UniqueConstraint("player_id", "season_id", name="uq_player_season"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="CASCADE"), nullable=False)
+    # Batting
+    matches = Column(Integer, default=0)
+    batting_innings = Column(Integer, default=0)
+    runs = Column(Integer, default=0)
+    not_outs = Column(Integer, default=0)
+    balls_faced = Column(Integer, default=0)
+    fifties = Column(Integer, default=0)
+    hundreds = Column(Integer, default=0)
+    ducks = Column(Integer, default=0)
+    high_score = Column(Integer)
+    is_hs_not_out = Column(Boolean, default=False)
+    batting_average = Column(Numeric(8, 2))
+    batting_strike_rate = Column(Numeric(8, 2))
+    fours = Column(Integer, default=0)
+    sixes = Column(Integer, default=0)
+    batting_minutes = Column(Integer, default=0)
+    # Bowling
+    bowling_innings = Column(Integer, default=0)
+    wickets = Column(Integer, default=0)
+    overs = Column(Numeric(8, 1), default=0)
+    runs_conceded = Column(Integer, default=0)
+    maidens = Column(Integer, default=0)
+    bowling_economy = Column(Numeric(6, 2))
+    bowling_average = Column(Numeric(8, 2))
+    best_bowling_wickets = Column(Integer)
+    # Fielding
+    catches = Column(Integer, default=0)
+    run_outs = Column(Integer, default=0)
+    stumpings = Column(Integer, default=0)
+
+    player = relationship("Player", back_populates="season_stats")
+    season = relationship("Season", back_populates="player_stats")

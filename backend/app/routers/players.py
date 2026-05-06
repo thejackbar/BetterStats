@@ -149,24 +149,20 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     MATCH_MILESTONES = [10, 25, 50, 100, 150, 200]
 
     from sqlalchemy import text
-    run_res = await db.execute(
-        text("SELECT COALESCE(SUM(runs),0) FROM batting_innings WHERE player_id=:pid"),
+    agg_res = await db.execute(
+        text("""
+            SELECT
+                COALESCE(SUM(runs), 0) AS total_runs,
+                COALESCE(SUM(wickets), 0) AS total_wickets,
+                COALESCE(SUM(matches), 0) AS total_matches
+            FROM player_season_stats WHERE player_id=:pid
+        """),
         {"pid": player_id}
     )
-    wkt_res = await db.execute(
-        text("SELECT COALESCE(SUM(wickets),0) FROM bowling_spells WHERE player_id=:pid"),
-        {"pid": player_id}
-    )
-    match_res = await db.execute(
-        text("""SELECT COUNT(DISTINCT game_id) FROM (
-            SELECT game_id FROM batting_innings WHERE player_id=:pid
-            UNION SELECT game_id FROM bowling_spells WHERE player_id=:pid
-        ) t"""),
-        {"pid": player_id}
-    )
-    total_runs = int(run_res.scalar() or 0)
-    total_wickets = int(wkt_res.scalar() or 0)
-    total_matches = int(match_res.scalar() or 0)
+    agg = dict(agg_res.mappings().first() or {})
+    total_runs = int(agg.get("total_runs") or 0)
+    total_wickets = int(agg.get("total_wickets") or 0)
+    total_matches = int(agg.get("total_matches") or 0)
 
     upcoming = []
     for m in RUN_MILESTONES:
