@@ -1,6 +1,8 @@
 import asyncio
 import httpx
+import json
 import logging
+import re
 import time
 from typing import Optional
 
@@ -11,8 +13,8 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.playhq.com"
 TENANT = "ca"
 TIMEOUT = 15.0
-CACHE_TTL = 300  # 5 minutes
 SCORECARD_CACHE_TTL = 1800  # 30 minutes — final results don't change
+CACHE_TTL = 300  # 5 minutes
 _SEMAPHORE = asyncio.Semaphore(4)  # max 4 concurrent PlayHQ requests
 
 _cache: dict[str, tuple[float, list]] = {}
@@ -295,35 +297,60 @@ def _parse_scorecard(data: dict) -> dict:
     return {"innings": innings_out}
 
 
-async def get_fixture_scorecard(fixture_id: str, grade_id: str = "") -> dict:
+_SCRAPE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-AU,en;q=0.9",
+}
+
+
+async def _scrape_playhq_page(game_url: str, fixture_id: str) -> dict:
+    """Fetch the PlayHQ scorecard page and extract innings data from __NEXT_DATA__."""
+    scorecard_url = game_url.rstrip("/")
+    if not scorecard_url.endswith("/scorecard"):
+        scorecard_url += "/scorecard"
+
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        r = await client.get(scorecard_url, headers=_SCRAPE_HEADERS, timeout=20.0)
+        r.raise_for_status()
+
+    m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', r.text, re.DOTALL)
+    if not m:
+        logger.warning(f"PlayHQ: no __NEXT_DATA__ found for {fixture_id} at {scorecard_url}")
+        return {"innings": []}
+
+    next_data = json.loads(m.group(1))
+    page_props = next_data.get("props", {}).get("pageProps", {})
+    logger.info(f"PlayHQ __NEXT_DATA__ pageProps keys for {fixture_id}: {list(page_props.keys())}")
+
+    # Try common locations for game/fixture data
+    game_data = (
+        page_props.get("game")
+        or page_props.get("fixture")
+        or page_props.get("match")
+        or page_props.get("data")
+        or {}
+    )
+    if game_data:
+        logger.info(f"PlayHQ game_data keys: {list(game_data.keys())}")
+
+    return _parse_scorecard(game_data)
+
+
+async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: str = "") -> dict:
     key = f"scorecard:{fixture_id}"
     if key in _scorecard_cache:
         ts, val = _scorecard_cache[key]
         if time.time() - ts < SCORECARD_CACHE_TTL:
             return val
 
-    url = (
-        f"{BASE_URL}/v1/grades/{grade_id}/games/{fixture_id}"
-        if grade_id
-        else f"{BASE_URL}/v1/fixtures/{fixture_id}"
-    )
+    result: dict = {"innings": []}
 
-    async with _SEMAPHORE:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, headers=_headers(), timeout=TIMEOUT)
-            if r.status_code == 429:
-                await asyncio.sleep(1.0)
-                r = await client.get(url, headers=_headers(), timeout=TIMEOUT)
-            r.raise_for_status()
-            data = r.json()
+    if game_url:
+        try:
+            result = await _scrape_playhq_page(game_url, fixture_id)
+        except Exception as e:
+            logger.warning(f"PlayHQ page scrape failed for {fixture_id}: {e}")
 
-    top = data.get("data") or data
-    logger.info(f"PlayHQ scorecard raw top-level keys for {fixture_id}: {list(top.keys())}")
-    if "competitors" in top:
-        for c in (top.get("competitors") or [])[:1]:
-            logger.info(f"PlayHQ scorecard competitor keys: {list(c.keys())}")
-            for inn in (c.get("innings") or [])[:1]:
-                logger.info(f"PlayHQ scorecard innings keys: {list(inn.keys())}")
-    result = _parse_scorecard(data)
     _scorecard_cache[key] = (time.time(), result)
     return result
