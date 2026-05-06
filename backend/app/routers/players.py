@@ -143,7 +143,6 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    # Return upcoming milestones just for this player
     RUN_MILESTONES = [50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 5000]
     WICKET_MILESTONES = [10, 25, 50, 75, 100, 150, 200]
     MATCH_MILESTONES = [10, 25, 50, 100, 150, 200]
