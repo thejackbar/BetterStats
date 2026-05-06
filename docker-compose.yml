@@ -21,7 +21,7 @@ services:
       SYNC_DATABASE_URL: postgresql://cricket:${DB_PASSWORD}@db/betterstats
       SECRET_KEY: ${SECRET_KEY}
       PLAYHQ_BASE_URL: https://grassrootsapiproxy.cricket.com.au
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -32,7 +32,7 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "3000:80"
+      - "3001:80"
     depends_on:
       - backend
     restart: unless-stopped
