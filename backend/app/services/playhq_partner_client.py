@@ -419,7 +419,7 @@ async def _query_graphql_scorecard(fixture_id: str) -> dict:
             try:
                 payload = {"query": query, "variables": {var_key: fixture_id}}
                 r = await client.post(endpoint, json=payload, headers=gql_headers, timeout=TIMEOUT)
-                logger.info(f"PlayHQ GraphQL {query_name} → {r.status_code}")
+                logger.info(f"PlayHQ GraphQL {query_name} → {r.status_code}, body: {r.text[:500]!r}")
                 if r.status_code == 200:
                     body = r.json()
                     errors = body.get("errors")
