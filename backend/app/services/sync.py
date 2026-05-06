@@ -52,6 +52,14 @@ async def sync_organisation(org_id_str: str) -> dict:
         org = await upsert_organisation(session, org_data)
         org_id = org.id
 
+        # Populate PlayHQ native ID if not already stored
+        if not org.playhq_id:
+            playhq_id = await playhq_client.lookup_playhq_id(org_id_str, org.name)
+            if playhq_id:
+                org.playhq_id = playhq_id
+                await session.commit()
+                logger.info(f"Stored playhq_id {playhq_id} for org {org_id_str}")
+
         seasons = await playhq_client.get_seasons(org_id_str)
         logger.info(f"Found {len(seasons)} seasons")
 

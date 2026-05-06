@@ -41,6 +41,7 @@ class Organisation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True)
     name = Column(Text, nullable=False)
     short_name = Column(Text)
+    playhq_id = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     seasons = relationship("Season", back_populates="organisation")

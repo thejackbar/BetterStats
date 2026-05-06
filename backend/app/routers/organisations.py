@@ -9,6 +9,7 @@ from app.models.db import Organisation, Season, Grade, get_db
 from app.services import playhq_client
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
+from app.services import playhq_partner_client
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
@@ -128,54 +129,30 @@ async def get_org_summary(
 
 @router.get("/{org_id}/fixtures")
 async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
-    """Fetch upcoming fixtures from PlayHQ for the org's most recent season."""
-    result = await db.execute(
-        select(Season)
-        .where(Season.organisation_id == uuid.UUID(org_id))
-        .order_by(Season.year.desc().nullslast(), Season.name.desc())
-        .limit(2)
-    )
-    seasons = result.scalars().all()
-    if not seasons:
+    """Fetch upcoming fixtures from the PlayHQ partner API."""
+    org = await db.get(Organisation, uuid.UUID(org_id))
+    if not org or not org.playhq_id:
         return []
 
+    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
     today = date.today()
-    upcoming = []
 
-    for season in seasons:
-        grades_result = await db.execute(
-            select(Grade).where(Grade.season_id == season.id)
-        )
-        grades = grades_result.scalars().all()
-
-        for grade in grades:
-            try:
-                fixtures = await playhq_client.get_fixtures(str(grade.id))
-                for f in fixtures:
-                    dt_raw = f.get("dateTime") or f.get("date") or f.get("scheduledDate")
-                    if not dt_raw:
-                        continue
-                    try:
-                        from datetime import datetime
-                        fixture_date = datetime.fromisoformat(
-                            dt_raw.replace("Z", "+00:00")
-                        ).date()
-                    except ValueError:
-                        continue
-                    if fixture_date >= today:
-                        upcoming.append({
-                            "id": f.get("id"),
-                            "home_team": (f.get("homeTeam") or {}).get("name", ""),
-                            "away_team": (f.get("awayTeam") or {}).get("name", ""),
-                            "date": fixture_date.isoformat(),
-                            "grade": grade.name,
-                            "season": season.name,
-                            "venue": (f.get("venue") or {}).get("name", ""),
-                        })
-            except Exception:
-                continue
-
-    upcoming.sort(key=lambda x: x["date"])
+    upcoming = [
+        {
+            "id": g["id"],
+            "home_team": g["home_team"],
+            "away_team": g["away_team"],
+            "date": g["played_at"],
+            "time": g.get("time"),
+            "grade": (g.get("grade") or {}).get("name", ""),
+            "season": g.get("season", ""),
+            "round": g.get("round"),
+            "venue": g.get("venue"),
+        }
+        for g in all_games
+        if g.get("status") != "FINAL" and g.get("played_at") and g["played_at"] >= today.isoformat()
+    ]
+    upcoming.sort(key=lambda x: (x["date"], x.get("time") or ""))
     return upcoming[:20]
 
 

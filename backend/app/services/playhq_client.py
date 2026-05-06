@@ -131,7 +131,23 @@ async def get_fielding_stats(org_id: str, season_id: str) -> list:
     )
 
 
-# Stubs retained for backward compatibility with sync.py — will be removed in next refactor
+async def lookup_playhq_id(org_guid: str, org_name: str) -> Optional[str]:
+    """Search the grassroots API to find the PlayHQ native ID for an org GUID."""
+    first_word = (org_name or "").split()[0] if org_name else ""
+    if not first_word:
+        return None
+    try:
+        orgs = await search_organisations(first_word)
+        for o in orgs:
+            guid = str(o.get("organisationGuid") or o.get("id") or "")
+            if guid.lower() == org_guid.lower():
+                return o.get("playHQId")
+    except Exception as e:
+        logger.warning(f"lookup_playhq_id failed for {org_guid}: {e}")
+    return None
+
+
+# Stubs retained for backward compatibility
 async def get_grades(season_id: str) -> list:
     return []
 

@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
     playhq_base_url: str = "https://grassrootsapiproxy.cricket.com.au"
+    playhq_api_key: str = ""
     cors_origins: str = "http://localhost:3000"
 
     @property

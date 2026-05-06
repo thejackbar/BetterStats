@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from sqlalchemy import text
+    from app.models.db import engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS playhq_id TEXT"
+        ))
     start_scheduler()
     logger.info("BetterStats API started")
     yield

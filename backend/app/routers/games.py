@@ -4,8 +4,9 @@ from sqlalchemy import select
 from typing import Optional
 import uuid
 
-from app.models.db import Game, Grade, Season, BattingInnings, BowlingSpell, FieldingStat, Player, get_db
+from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, get_db
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
+from app.services import playhq_partner_client
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -18,6 +19,14 @@ async def list_games(
     limit: int = Query(20, le=100),
     db: AsyncSession = Depends(get_db),
 ):
+    org = await db.get(Organisation, uuid.UUID(org_id))
+    if org and org.playhq_id:
+        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
+        recent = [g for g in all_games if g.get("status") == "FINAL" and g.get("played_at")]
+        recent.sort(key=lambda x: x["played_at"], reverse=True)
+        return recent[:limit]
+
+    # Fallback: DB query (empty for most installs until games are synced)
     query = (
         select(Game, Grade, Season)
         .join(Grade, Grade.id == Game.grade_id)
@@ -28,13 +37,10 @@ async def list_games(
         query = query.where(Season.id == uuid.UUID(season_id))
     if grade_id:
         query = query.where(Grade.id == uuid.UUID(grade_id))
-
     query = query.order_by(Game.played_at.desc()).limit(limit)
     result = await db.execute(query)
-
-    games = []
-    for game, grade, season in result.all():
-        games.append({
+    return [
+        {
             "id": str(game.id),
             "played_at": game.played_at.isoformat() if game.played_at else None,
             "home_team": game.home_team,
@@ -43,8 +49,9 @@ async def list_games(
             "winning_team": game.winning_team,
             "grade": {"id": str(grade.id), "name": grade.name},
             "season": {"id": str(season.id), "name": season.name, "year": season.year},
-        })
-    return games
+        }
+        for game, grade, season in result.all()
+    ]
 
 
 @router.get("/{game_id}/scorecard")
