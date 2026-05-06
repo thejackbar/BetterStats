@@ -83,14 +83,13 @@ async def get_playhq_scorecard(
     org = await db.get(Organisation, uuid.UUID(org_id))
     if not org or not org.playhq_id:
         raise HTTPException(status_code=404, detail="Organisation not found or no PlayHQ ID")
-    # Resolve grade_id from cached game list so scorecard uses the correct endpoint
     all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
     matched = next((g for g in all_games if str(g.get("id", "")) == playhq_game_id), None)
-    grade_id = matched.get("grade_id", "") if matched else ""
+    game_url = matched.get("url", "") if matched else ""
     try:
-        scorecard = await playhq_partner_client.get_fixture_scorecard(playhq_game_id, grade_id)
+        scorecard = await playhq_partner_client.get_fixture_scorecard(playhq_game_id, game_url=game_url)
     except Exception as e:
-        logger.warning(f"PlayHQ scorecard fetch failed for {playhq_game_id} (grade {grade_id}): {e}")
+        logger.warning(f"PlayHQ scorecard fetch failed for {playhq_game_id}: {e}")
         raise HTTPException(status_code=502, detail=f"PlayHQ scorecard unavailable: {e}")
     return scorecard
 
