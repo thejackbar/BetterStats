@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS fall_of_wickets (
     id SERIAL PRIMARY KEY,
     game_id UUID REFERENCES games(id) ON DELETE CASCADE,
     innings_number INT NOT NULL,        -- 1 or 2
-    wicket_number INT NOT NULL,         -- 1–10
+    wicket_number INT NOT NULL,         -- 1-10
     score_at_fall INT,
     overs_at_fall NUMERIC(5,1),
     player_id UUID REFERENCES players(id) ON DELETE SET NULL

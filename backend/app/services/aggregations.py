@@ -88,6 +88,7 @@ async def get_player_batting_innings(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
 ) -> list[dict]:
+    # Game-level innings data not available from season-aggregate API
     return []
 
 
@@ -97,6 +98,7 @@ async def get_player_bowling_spells(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
 ) -> list[dict]:
+    # Game-level bowling data not available from season-aggregate API
     return []
 
 
