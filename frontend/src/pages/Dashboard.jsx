@@ -54,49 +54,39 @@ function ClickableStatCard({ label, value, sub, accent = false, active = false, 
   )
 }
 
-function RecentResults({ games, loading }) {
+function RecentResults({ games, loading, orgId }) {
   if (loading) return <LoadingSpinner size="sm" />
   if (!games.length) return <p className="text-slate-500 text-sm py-4">No recent games found.</p>
 
   return (
     <div className="divide-y divide-navy-700">
-      {games.map(game => {
-        const inner = (
-          <>
-            <div className="min-w-0">
-              <div className="text-sm text-white font-medium truncate">
-                {game.home_team} <span className="text-slate-500">vs</span> {game.away_team}
-              </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-slate-500">{game.grade?.name}</span>
-                {game.played_at && (
-                  <span className="text-xs text-slate-600">
-                    {new Date(game.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </span>
-                )}
-              </div>
+      {games.map(game => (
+        <Link
+          key={game.id}
+          to={`/match/${game.id}?org=${orgId}`}
+          className="flex items-center justify-between py-3 px-1 hover:bg-navy-700/30 transition-colors group"
+        >
+          <div className="min-w-0">
+            <div className="text-sm text-white font-medium truncate">
+              {game.home_team} <span className="text-slate-500">vs</span> {game.away_team}
             </div>
-            <div className="flex items-center gap-3 ml-4">
-              <ResultBadge result={game.result} />
-              {game.url && (
-                <svg className="w-4 h-4 text-slate-600 group-hover:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs text-slate-500">{game.grade?.name}</span>
+              {game.played_at && (
+                <span className="text-xs text-slate-600">
+                  {new Date(game.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </span>
               )}
             </div>
-          </>
-        )
-        return game.url ? (
-          <a key={game.id} href={game.url} target="_blank" rel="noopener noreferrer"
-            className="flex items-center justify-between py-3 px-1 hover:bg-navy-700/30 transition-colors group">
-            {inner}
-          </a>
-        ) : (
-          <div key={game.id} className="flex items-center justify-between py-3 px-1">
-            {inner}
           </div>
-        )
-      })}
+          <div className="flex items-center gap-3 ml-4">
+            <ResultBadge result={game.result} />
+            <svg className="w-4 h-4 text-slate-600 group-hover:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </Link>
+      ))}
     </div>
   )
 }
@@ -602,7 +592,7 @@ export default function Dashboard() {
             <h2 className="display-heading text-xl text-white">RECENT RESULTS</h2>
             <span className="section-label">Last {games.length}</span>
           </div>
-          <RecentResults games={games} loading={gamesLoading} />
+          <RecentResults games={games} loading={gamesLoading} orgId={orgId} />
         </div>
 
         {/* Upcoming fixtures */}
