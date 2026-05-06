@@ -360,10 +360,13 @@ async def get_recently_achieved_milestones_for_org(
     session: AsyncSession,
     org_id: str,
 ) -> list[dict]:
-    result = await session.execute(
+    # Fetch the 3 most recent non-Winter seasons, returned oldest-first so we can
+    # simulate cumulative totals season-by-season to pinpoint when each milestone crossed.
+    seasons_result = await session.execute(
         text("""
-            WITH recent_seasons AS (
-                SELECT s.id
+            SELECT sub.id, sub.year, sub.name
+            FROM (
+                SELECT s.id, s.year, s.name
                 FROM seasons s
                 JOIN player_season_stats pss ON pss.season_id = s.id
                 JOIN players p ON p.id = pss.player_id
@@ -372,53 +375,79 @@ async def get_recently_achieved_milestones_for_org(
                 GROUP BY s.id, s.year, s.name
                 ORDER BY s.year DESC NULLS LAST, s.name DESC
                 LIMIT 3
-            ),
-            active_players AS (
+            ) sub
+            ORDER BY sub.year ASC NULLS LAST, sub.name ASC
+        """),
+        {"org_id": org_id}
+    )
+    recent_seasons = [dict(r) for r in seasons_result.mappings()]
+    if not recent_seasons:
+        return []
+
+    # Safe to interpolate — IDs are UUIDs from our own DB query
+    sid_list = ", ".join(f"'{s['id']}'" for s in recent_seasons)
+
+    data_result = await session.execute(
+        text(f"""
+            WITH active_players AS (
                 SELECT DISTINCT pss.player_id
                 FROM player_season_stats pss
-                WHERE pss.season_id IN (SELECT id FROM recent_seasons)
-            ),
-            career_totals AS (
-                SELECT
-                    p.id AS player_id,
-                    p.name,
-                    COALESCE(SUM(pss.runs), 0) AS career_runs,
-                    COALESCE(SUM(pss.wickets), 0) AS career_wickets,
-                    COALESCE(SUM(pss.matches), 0) AS career_matches,
-                    COALESCE(SUM(pss.catches), 0) AS career_catches
-                FROM players p
-                LEFT JOIN player_season_stats pss ON pss.player_id = p.id
-                WHERE p.organisation_id = :org_id
-                  AND p.id IN (SELECT player_id FROM active_players)
-                GROUP BY p.id, p.name
+                WHERE pss.season_id IN ({sid_list})
             ),
             prior_totals AS (
                 SELECT
                     p.id AS player_id,
+                    p.name,
                     COALESCE(SUM(pss.runs), 0) AS prior_runs,
                     COALESCE(SUM(pss.wickets), 0) AS prior_wickets,
                     COALESCE(SUM(pss.matches), 0) AS prior_matches,
                     COALESCE(SUM(pss.catches), 0) AS prior_catches
                 FROM players p
                 LEFT JOIN player_season_stats pss ON pss.player_id = p.id
-                    AND pss.season_id NOT IN (SELECT id FROM recent_seasons)
+                    AND pss.season_id NOT IN ({sid_list})
                 WHERE p.organisation_id = :org_id
                   AND p.id IN (SELECT player_id FROM active_players)
-                GROUP BY p.id
+                GROUP BY p.id, p.name
             )
             SELECT
-                ct.player_id,
-                ct.name,
-                ct.career_runs, pt.prior_runs,
-                ct.career_wickets, pt.prior_wickets,
-                ct.career_matches, pt.prior_matches,
-                ct.career_catches, pt.prior_catches
-            FROM career_totals ct
-            JOIN prior_totals pt ON pt.player_id = ct.player_id
+                pt.player_id,
+                pt.name,
+                pt.prior_runs, pt.prior_wickets, pt.prior_matches, pt.prior_catches,
+                pss.season_id,
+                COALESCE(pss.runs, 0) AS season_runs,
+                COALESCE(pss.wickets, 0) AS season_wickets,
+                COALESCE(pss.matches, 0) AS season_matches,
+                COALESCE(pss.catches, 0) AS season_catches
+            FROM prior_totals pt
+            LEFT JOIN player_season_stats pss ON pss.player_id = pt.player_id
+                AND pss.season_id IN ({sid_list})
         """),
         {"org_id": org_id}
     )
-    rows = [dict(r) for r in result.mappings()]
+    rows = [dict(r) for r in data_result.mappings()]
+
+    # Group per-season stats by player
+    player_data: dict = {}
+    for row in rows:
+        pid = str(row["player_id"])
+        if pid not in player_data:
+            player_data[pid] = {
+                "name": row["name"],
+                "prior": {
+                    "runs": int(row["prior_runs"] or 0),
+                    "wickets": int(row["prior_wickets"] or 0),
+                    "matches": int(row["prior_matches"] or 0),
+                    "catches": int(row["prior_catches"] or 0),
+                },
+                "seasons": {},
+            }
+        if row["season_id"]:
+            player_data[pid]["seasons"][str(row["season_id"])] = {
+                "runs": int(row["season_runs"] or 0),
+                "wickets": int(row["season_wickets"] or 0),
+                "matches": int(row["season_matches"] or 0),
+                "catches": int(row["season_catches"] or 0),
+            }
 
     RUN_MILESTONES = [
         50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000,
@@ -438,42 +467,46 @@ async def get_recently_achieved_milestones_for_org(
         "matches": "matches",
         "catches": "fielding",
     }
+    MILESTONE_LISTS = {
+        "runs": RUN_MILESTONES,
+        "wickets": WICKET_MILESTONES,
+        "matches": MATCH_MILESTONES,
+        "catches": CATCH_MILESTONES,
+    }
 
     achieved = []
-    for row in rows:
-        career = {
-            "runs": int(row["career_runs"] or 0),
-            "wickets": int(row["career_wickets"] or 0),
-            "matches": int(row["career_matches"] or 0),
-            "catches": int(row["career_catches"] or 0),
-        }
-        prior = {
-            "runs": int(row["prior_runs"] or 0),
-            "wickets": int(row["prior_wickets"] or 0),
-            "matches": int(row["prior_matches"] or 0),
-            "catches": int(row["prior_catches"] or 0),
-        }
-        player_id = str(row["player_id"])
-        name = row["name"]
+    for pid, pdata in player_data.items():
+        # Pre-compute all-time career total for display
+        career_total = dict(pdata["prior"])
+        for s in recent_seasons:
+            ss = pdata["seasons"].get(str(s["id"]), {})
+            for stat in career_total:
+                career_total[stat] += ss.get(stat, 0)
 
-        for stat, milestones in [
-            ("runs", RUN_MILESTONES),
-            ("wickets", WICKET_MILESTONES),
-            ("matches", MATCH_MILESTONES),
-            ("catches", CATCH_MILESTONES),
-        ]:
-            for m in milestones:
-                if prior[stat] < m <= career[stat]:
-                    achieved.append({
-                        "player_id": player_id,
-                        "name": name,
-                        "type": stat,
-                        "category": CATEGORY_MAP[stat],
-                        "milestone": m,
-                        "current": career[stat],
-                    })
+        # Simulate cumulative totals oldest→newest to find which season each milestone crossed
+        running = dict(pdata["prior"])
+        for season in recent_seasons:
+            ss = pdata["seasons"].get(str(season["id"]), {})
+            for stat, milestones in MILESTONE_LISTS.items():
+                before = running[stat]
+                after = before + ss.get(stat, 0)
+                for m in milestones:
+                    if before < m <= after:
+                        achieved.append({
+                            "player_id": pid,
+                            "name": pdata["name"],
+                            "type": stat,
+                            "category": CATEGORY_MAP[stat],
+                            "milestone": m,
+                            "current": career_total[stat],
+                            "season_year": season["year"] or 0,
+                            "season_name": season["name"],
+                        })
+            for stat in running:
+                running[stat] += ss.get(stat, 0)
 
-    achieved.sort(key=lambda x: x["milestone"], reverse=True)
+    # Most recent season first, then largest milestone within same season
+    achieved.sort(key=lambda x: (-(x["season_year"]), -x["milestone"]))
     return achieved
 
 
