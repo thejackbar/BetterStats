@@ -43,7 +43,11 @@ async def list_games(
 ):
     org = await db.get(Organisation, uuid.UUID(org_id))
     if org and org.playhq_id:
-        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
+        db_seasons_res = await db.execute(
+            select(Season).where(Season.organisation_id == uuid.UUID(org_id))
+        )
+        db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
+        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons)
         recent = [g for g in all_games if g.get("status") == "FINAL" and g.get("played_at")]
         if season_id:
             season_obj = await db.get(Season, uuid.UUID(season_id))
@@ -93,7 +97,11 @@ async def get_playhq_game(
     org = await db.get(Organisation, uuid.UUID(org_id))
     if not org or not org.playhq_id:
         raise HTTPException(status_code=404, detail="Organisation not found or no PlayHQ ID")
-    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
+    db_seasons_res = await db.execute(
+        select(Season).where(Season.organisation_id == org.id)
+    )
+    db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
+    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons)
     game = next((g for g in all_games if str(g.get("id", "")) == playhq_game_id), None)
     if not game:
         logger.warning(f"PlayHQ game {playhq_game_id!r} not found in {len(all_games)} games for org {org.id}")
@@ -110,7 +118,11 @@ async def get_playhq_scorecard(
     org = await db.get(Organisation, uuid.UUID(org_id))
     if not org or not org.playhq_id:
         raise HTTPException(status_code=404, detail="Organisation not found or no PlayHQ ID")
-    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
+    db_seasons_res = await db.execute(
+        select(Season).where(Season.organisation_id == org.id)
+    )
+    db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
+    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons)
     matched = next((g for g in all_games if str(g.get("id", "")) == playhq_game_id), None)
     game_url = matched.get("url", "") if matched else ""
     try:

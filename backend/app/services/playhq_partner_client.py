@@ -88,8 +88,12 @@ async def get_season_grades(season_id: str) -> list:
     cached = _get_cached(key)
     if cached is not None:
         return cached
-    data = await _get(f"{BASE_URL}/v1/seasons/{season_id}/grades")
-    return _set_cached(key, data.get("data", []))
+    try:
+        data = await _get(f"{BASE_URL}/v1/seasons/{season_id}/grades")
+        return _set_cached(key, data.get("data", []))
+    except Exception as e:
+        logger.debug(f"PlayHQ: grades fetch failed for season {season_id}: {e}")
+        return _set_cached(key, [])
 
 
 async def get_grade_games(grade_id: str) -> list:
@@ -156,29 +160,42 @@ def _parse_game(game: dict, grade_name: str, grade_id: str, season_name: str, ke
     }
 
 
-async def get_org_games(playhq_id: str, org_name: str) -> list:
-    """Fetch all games for an org across all available seasons."""
+async def get_org_games(playhq_id: str, org_name: str, db_seasons: list[dict] | None = None) -> list:
+    """Fetch all games for an org.
+
+    Combines seasons from the partner API with any additional season IDs
+    supplied from the DB (db_seasons = list of {"id": str, "name": str}).
+    The partner API only exposes recent seasons; supplying DB season IDs
+    lets us reach historical data whose IDs are shared across CA systems.
+    """
     if not settings.playhq_api_key or not playhq_id:
         return []
 
+    # Seasons from partner API
     try:
-        seasons = await get_org_seasons(playhq_id)
+        api_seasons = await get_org_seasons(playhq_id)
     except Exception as e:
         logger.warning(f"PlayHQ: failed to get seasons for {playhq_id}: {e}")
-        return []
+        api_seasons = []
 
-    # Deduplicate seasons by ID (API can return same season for different competitions)
+    # Merge with DB seasons, deduplicating by ID
     seen_ids: set[str] = set()
-    unique_seasons = []
-    for s in seasons:
+    unique_seasons: list[dict] = []
+    for s in api_seasons:
         sid = s.get("id")
         if sid and sid not in seen_ids:
             seen_ids.add(sid)
-            unique_seasons.append(s)
+            unique_seasons.append({"id": sid, "name": s.get("name", "")})
+
+    for s in (db_seasons or []):
+        sid = str(s.get("id", ""))
+        if sid and sid not in seen_ids:
+            seen_ids.add(sid)
+            unique_seasons.append({"id": sid, "name": s.get("name", "")})
 
     if not unique_seasons:
         return []
-    logger.info(f"PlayHQ: fetching {len(unique_seasons)} seasons for {playhq_id}: {[s.get('name') for s in unique_seasons]}")
+    logger.info(f"PlayHQ: fetching {len(unique_seasons)} seasons for {playhq_id}: {[s['name'] for s in unique_seasons]}")
 
     # Fetch grades for all seasons concurrently (semaphore limits rate)
     grade_results = await asyncio.gather(

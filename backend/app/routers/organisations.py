@@ -138,7 +138,11 @@ async def get_org_summary(
     summary = await get_club_summary(db, org_id, season_id, grade_id)
     org = await db.get(Organisation, uuid.UUID(org_id))
     if org and org.playhq_id:
-        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
+        db_seasons_res = await db.execute(
+            select(Season).where(Season.organisation_id == uuid.UUID(org_id))
+        )
+        db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
+        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons)
         final = [g for g in all_games if g.get("status") == "FINAL" and g.get("result")]
         if season_id:
             season_obj = await db.get(Season, uuid.UUID(season_id))
@@ -167,7 +171,11 @@ async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
     if not org or not org.playhq_id:
         return []
 
-    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
+    db_seasons_res = await db.execute(
+        select(Season).where(Season.organisation_id == uuid.UUID(org_id))
+    )
+    db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
+    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons)
     today = date.today()
 
     upcoming = [
