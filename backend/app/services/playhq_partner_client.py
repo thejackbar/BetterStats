@@ -327,51 +327,54 @@ async def _get_graph_endpoint() -> str:
     return _playhq_graph_endpoint
 
 
-_GQL_INTROSPECT = "{ __schema { queryType { fields { name args { name type { name kind ofType { name kind } } } } } } }"
+async def _find_gql_queries_in_bundle(game_url: str) -> None:
+    """Fetch the SPA JS bundle and extract GraphQL query field names."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            # Fetch HTML to get current bundle URL
+            r = await client.get(game_url, headers=_SCRAPE_HEADERS, timeout=15.0)
+            html = r.text
+            # Find JS bundle script src
+            srcs = re.findall(r'<script[^>]+src="(/assets/[^"]+\.js)"', html)
+            logger.info(f"PlayHQ SPA script srcs: {srcs}")
+            for src in srcs[:3]:
+                bundle_url = f"https://www.playhq.com{src}"
+                rb = await client.get(bundle_url, headers=_SCRAPE_HEADERS, timeout=30.0)
+                js = rb.text
+                logger.info(f"PlayHQ bundle {src}: {len(js)} bytes")
+                # Extract everything that looks like a GQL query/mutation field
+                # Look for patterns: `query NAME($x: T) { FIELD(` or similar
+                gql_queries = re.findall(r'query\s+\w+[^{]*\{\s*(\w+)\s*[\(\{]', js)
+                gql_mutations = re.findall(r'mutation\s+\w+[^{]*\{\s*(\w+)\s*[\(\{]', js)
+                # Also look for inline query strings with "innings" keyword
+                innings_ctx = [js[max(0, m.start()-100):m.start()+100] for m in re.finditer(r'innings', js)]
+                if gql_queries:
+                    logger.info(f"PlayHQ bundle GQL query fields: {sorted(set(gql_queries))}")
+                if gql_mutations:
+                    logger.info(f"PlayHQ bundle GQL mutation fields: {sorted(set(gql_mutations))}")
+                for ctx in innings_ctx[:3]:
+                    logger.info(f"PlayHQ bundle 'innings' context: {ctx!r}")
+    except Exception as e:
+        logger.warning(f"PlayHQ bundle scan error: {e}")
 
 
-async def _query_graphql_scorecard(fixture_id: str) -> dict:
+async def _query_graphql_scorecard(fixture_id: str, game_url: str = "") -> dict:
     """Query the PlayHQ GraphQL endpoint for scorecard data."""
     endpoint = await _get_graph_endpoint()
     if not endpoint:
         logger.warning("PlayHQ: no GRAPH_ENDPOINT available")
         return {"innings": []}
 
-    gql_headers = {
-        "Content-Type": "application/json",
-        "x-api-key": settings.playhq_api_key or PUBLIC_API_KEY,
-        "x-phq-tenant": TENANT,
-        "Origin": "https://www.playhq.com",
-        "Referer": "https://www.playhq.com/",
-    }
-
-    async with httpx.AsyncClient() as client:
-        # Introspect to find available query fields
-        try:
-            r = await client.post(endpoint, json={"query": _GQL_INTROSPECT}, headers=gql_headers, timeout=TIMEOUT)
-            logger.info(f"PlayHQ GraphQL introspect → {r.status_code}")
-            if r.status_code == 200:
-                body = r.json()
-                fields = (body.get("data") or {}).get("__schema", {}).get("queryType", {}).get("fields", [])
-                field_names = [f["name"] for f in fields]
-                logger.info(f"PlayHQ GraphQL query fields: {field_names}")
-                # Log any field that might relate to a game/fixture/match/scorecard
-                for f in fields:
-                    name = f["name"]
-                    if any(kw in name.lower() for kw in ["game", "fixture", "match", "score", "innings"]):
-                        args = [f"{a['name']}:{(a['type'].get('name') or a['type'].get('ofType',{}).get('name','?'))}" for a in f.get("args", [])]
-                        logger.info(f"PlayHQ GQL candidate field: {name}({', '.join(args)})")
-            else:
-                logger.info(f"PlayHQ GraphQL introspect body: {r.text[:300]!r}")
-        except Exception as e:
-            logger.warning(f"PlayHQ GraphQL introspect error: {e}")
+    # Scan JS bundle to find the correct query field names
+    if game_url:
+        await _find_gql_queries_in_bundle(game_url)
 
     return {"innings": []}
 
 
 async def _scrape_playhq_page(game_url: str, fixture_id: str) -> dict:
     """Query PlayHQ GraphQL endpoint for scorecard data."""
-    return await _query_graphql_scorecard(fixture_id)
+    return await _query_graphql_scorecard(fixture_id, game_url=game_url)
 
 
 async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: str = "") -> dict:
