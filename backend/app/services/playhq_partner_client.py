@@ -190,7 +190,7 @@ async def get_org_games(
     if cached is not None:
         return cached
 
-    # ── Discover seasons ──────────────────────────────────────────────────
+    # ── Discover seasons ──────────────────────────────────────────────────────
     try:
         api_seasons = await get_org_seasons(playhq_id)
     except Exception as e:
@@ -220,7 +220,7 @@ async def get_org_games(
 
     logger.info(f"PlayHQ: {len(unique_seasons)} seasons to probe for {playhq_id}: {[s['name'] for s in unique_seasons[:10]]}")
 
-    # ── Discover grades via season IDs (cached per season) ───────────────
+    # ── Discover grades via season IDs (cached per season) ─────────────────────
     season_grade_results = await asyncio.gather(
         *[get_season_grades(s["id"]) for s in unique_seasons],
         return_exceptions=True,
@@ -496,11 +496,6 @@ def _parse_summary_rest(data: dict) -> dict:
     appearances_by_id = {a["id"]: a for a in (data.get("appearances") or [])}
     teams = data.get("teams") or []
 
-    periods_by_name: dict[str, list] = {}
-    for period in (data.get("periods") or []):
-        name = period.get("name", "")
-        periods_by_name.setdefault(name, []).append(period)
-
     def player_name(pid: str) -> str:
         p = appearances_by_id.get(pid) or {}
         return f"{p.get('firstName', '')} {p.get('lastName', '')}".strip() or pid
@@ -542,9 +537,35 @@ def _parse_summary_rest(data: dict) -> dict:
             parts.append(f"b {bowler}")
         return " ".join(parts)
 
+    # Normalize period names: "First Innings" → "FIRST_INNINGS" etc.
+    def _canon(name: str) -> str:
+        return name.upper().replace(" ", "_").strip("_")
+
+    normalized_by_canon: dict[str, list] = {}
+    ordered_canons: list[str] = []
+    for period in (data.get("periods") or []):
+        raw = period.get("name", "")
+        canon = _canon(raw)
+        if canon not in normalized_by_canon:
+            ordered_canons.append(canon)
+        normalized_by_canon.setdefault(canon, []).append(period)
+
+    logger.info(f"REST scorecard periods: {ordered_canons}")
+
+    # Produce innings in _PERIOD_ORDER first, then any leftover unknown names
+    seen_canons: set[str] = set()
+    innings_order: list[str] = []
+    for name in _PERIOD_ORDER:
+        if name in normalized_by_canon:
+            innings_order.append(name)
+            seen_canons.add(name)
+    for canon in ordered_canons:
+        if canon not in seen_canons:
+            innings_order.append(canon)
+
     innings_out = []
-    for inn_num, period_name in enumerate(_PERIOD_ORDER, 1):
-        periods = periods_by_name.get(period_name)
+    for inn_num, period_name in enumerate(innings_order, 1):
+        periods = normalized_by_canon.get(period_name)
         if not periods:
             continue
 
