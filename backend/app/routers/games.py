@@ -14,6 +14,25 @@ from app.services import playhq_partner_client
 router = APIRouter(prefix="/games", tags=["games"])
 
 
+def _filter_by_season(games: list, season_obj) -> list:
+    """Filter PlayHQ partner API games to those matching a DB Season.
+    Tries exact name match first, falls back to year-range match so that
+    cross-year seasons (e.g. Summer 2024/25 spans Oct 2024 – Mar 2025) still work.
+    """
+    name = (season_obj.name or "").strip().lower()
+    by_name = [g for g in games if g.get("season", "").strip().lower() == name]
+    if by_name:
+        return by_name
+    # Fallback: match by the season's start year — games played in year Y or Y+1
+    year = season_obj.year
+    if year:
+        return [
+            g for g in games
+            if g.get("played_at", "")[:4] in (str(year), str(year + 1))
+        ]
+    return []
+
+
 @router.get("")
 async def list_games(
     org_id: str,
@@ -26,6 +45,14 @@ async def list_games(
     if org and org.playhq_id:
         all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
         recent = [g for g in all_games if g.get("status") == "FINAL" and g.get("played_at")]
+        if season_id:
+            season_obj = await db.get(Season, uuid.UUID(season_id))
+            if season_obj:
+                recent = _filter_by_season(recent, season_obj)
+        if grade_id:
+            grade_obj = await db.get(Grade, uuid.UUID(grade_id))
+            if grade_obj:
+                recent = [g for g in recent if (g.get("grade") or {}).get("name", "").strip().lower() == grade_obj.name.strip().lower()]
         recent.sort(key=lambda x: x["played_at"], reverse=True)
         return recent[:limit]
 
