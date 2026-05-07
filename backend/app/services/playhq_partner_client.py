@@ -310,12 +310,7 @@ def _parse_scorecard_statistics(game_data: dict) -> dict:
     for period_val, inn_num in sorted(all_periods.items(), key=lambda x: x[1]):
         period_label = period_val.replace("_", " ").title()
 
-<<<<<<< HEAD
-        # Determine batting team: home bats first innings, away bats second (T20/one-day convention)
-        # Determine by which team has batting stats for this period
-=======
         # Determine batting team by which team has batting stats for this period
->>>>>>> origin/main
         batting_team_name = ""
         batting_side = None
 
@@ -381,10 +376,6 @@ def _parse_scorecard_statistics(game_data: dict) -> dict:
                 maidens = _stat_val(pstats, "MAIDENS", "MAIDEN")
                 wides = _stat_val(pstats, "WIDES", "WIDE")
                 no_balls = _stat_val(pstats, "NO_BALLS", "NO_BALL", "NOBALLS")
-<<<<<<< HEAD
-                # Overs: legal balls / balls_per_over
-=======
->>>>>>> origin/main
                 legal_balls = _stat_val(pstats, "LEGAL_BALLS", "LEGAL_BALL", "BALLS_BOWLED", "BALLS")
                 overs_val = _stat_val(pstats, "OVERS", "OVER")
                 if overs_val is None and legal_balls is not None:
@@ -449,11 +440,7 @@ async def _get_graph_endpoint() -> str:
     return _playhq_graph_endpoint
 
 
-<<<<<<< HEAD
 
-
-=======
->>>>>>> origin/main
 _GQL_DISCOVER_GAME = """
 query DiscoverGame($gameId: ID!) {
   discoverGame(gameID: $gameId) {
@@ -579,10 +566,7 @@ async def _query_graphql_scorecard(fixture_id: str) -> dict:
     return {"innings": []}
 
 
-<<<<<<< HEAD
 
-=======
->>>>>>> origin/main
 async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: str = "") -> dict:
     key = f"scorecard:{fixture_id}"
     if key in _scorecard_cache:
