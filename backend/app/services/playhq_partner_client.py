@@ -60,8 +60,27 @@ async def get_org_seasons(playhq_id: str) -> list:
     cached = _get_cached(key)
     if cached is not None:
         return cached
-    data = await _get(f"{BASE_URL}/v1/organisations/{playhq_id}/seasons")
-    return _set_cached(key, data.get("data", []))
+
+    all_seasons = []
+    page = 1
+    while True:
+        url = f"{BASE_URL}/v1/organisations/{playhq_id}/seasons?page={page}&size=50"
+        data = await _get(url)
+        batch = data.get("data", [])
+        all_seasons.extend(batch)
+        links = data.get("links") or {}
+        meta = data.get("meta") or {}
+        # JSON:API cursor pagination
+        if links.get("next"):
+            page += 1
+        # Offset pagination guard: stop if batch is smaller than requested size
+        elif len(batch) < 50 or not batch:
+            break
+        else:
+            page += 1
+
+    logger.info(f"PlayHQ partner: got {len(all_seasons)} seasons for org {playhq_id}")
+    return _set_cached(key, all_seasons)
 
 
 async def get_season_grades(season_id: str) -> list:

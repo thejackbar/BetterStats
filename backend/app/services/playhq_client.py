@@ -55,19 +55,31 @@ async def get_organisation(org_id: str) -> Optional[dict]:
 
 
 async def get_seasons(org_id: str) -> list:
+    all_seasons: list = []
+    offset = 1
+    limit = 100
     async with httpx.AsyncClient() as client:
-        try:
-            r = await client.get(
-                f"{BASE_URL}/fixturesladders/organisations/{org_id}/seasons",
-                params=_base_params(),
-                timeout=DEFAULT_TIMEOUT,
-            )
-            r.raise_for_status()
-            data = r.json()
-            return data.get("data", data.get("seasons", data if isinstance(data, list) else []))
-        except Exception as e:
-            logger.warning(f"get_seasons failed for {org_id}: {e}")
-            return []
+        while True:
+            try:
+                r = await client.get(
+                    f"{BASE_URL}/fixturesladders/organisations/{org_id}/seasons",
+                    params=_base_params({"offset": offset, "limit": limit}),
+                    timeout=DEFAULT_TIMEOUT,
+                )
+                r.raise_for_status()
+                data = r.json()
+                batch = data.get("data", data.get("seasons", data if isinstance(data, list) else []))
+                if not batch:
+                    break
+                all_seasons.extend(batch)
+                if len(batch) < limit:
+                    break
+                offset += limit
+            except Exception as e:
+                logger.warning(f"get_seasons failed for {org_id} at offset={offset}: {e}")
+                break
+    logger.info(f"Grassroots API: got {len(all_seasons)} seasons for org {org_id}")
+    return all_seasons
 
 
 async def get_teams(org_id: str, season_id: str) -> list:
