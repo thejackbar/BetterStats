@@ -79,7 +79,7 @@ function BattingTab({ data }) {
           <thead><tr className="border-b border-navy-700">
             <th className="table-header">Player</th>
             <th className="table-header text-right">Score</th>
-            <th className="table-header">Match</th>
+            <th className="table-header">Season</th>
           </tr></thead>
           <tbody>{data.top_high_scores?.map((r, i) => (
             <tr key={i} className="table-row">
@@ -89,7 +89,7 @@ function BattingTab({ data }) {
                   {r.runs}{r.not_out ? '*' : ''}
                 </span>
               </td>
-              <td className="table-cell text-xs text-slate-500">{fmtDate(r.played_at)}</td>
+              <td className="table-cell text-xs text-slate-500">{r.season_name}</td>
             </tr>
           ))}</tbody>
         </table>
@@ -237,7 +237,7 @@ function BowlingTab({ data }) {
           <thead><tr className="border-b border-navy-700">
             <th className="table-header">Player</th>
             <th className="table-header text-right">Figures</th>
-            <th className="table-header">Match</th>
+            <th className="table-header">Season</th>
           </tr></thead>
           <tbody>{data.best_innings_figures?.map((r, i) => (
             <tr key={i} className="table-row">
@@ -247,7 +247,7 @@ function BowlingTab({ data }) {
                   {r.wickets}/{r.runs}
                 </span>
               </td>
-              <td className="table-cell text-xs text-slate-500">{fmtDate(r.played_at)}</td>
+              <td className="table-cell text-xs text-slate-500">{r.season_name}</td>
             </tr>
           ))}</tbody>
         </table>

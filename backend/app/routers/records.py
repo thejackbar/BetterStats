@@ -56,14 +56,16 @@ async def get_records(
 
     top_high_scores = await q("""
         SELECT p.id::text AS player_id, p.name,
-               bi.runs, bi.not_out, bi.batting_position,
-               g.played_at::text, g.home_team, g.away_team
-        FROM batting_innings bi
-        JOIN players p ON p.id = bi.player_id
-        JOIN games g ON g.id = bi.game_id
-        """ + season_join + """
-        WHERE p.organisation_id = :org_id AND bi.runs IS NOT NULL
-        ORDER BY bi.runs DESC, bi.not_out DESC LIMIT :limit
+               CAST(REPLACE(pss.high_score, '*', '') AS INTEGER) AS runs,
+               (pss.high_score LIKE '%*' OR pss.is_hs_not_out)  AS not_out,
+               s.name AS season_name
+        FROM player_season_stats pss
+        JOIN players p ON p.id = pss.player_id
+        JOIN seasons s ON s.id = pss.season_id
+        """ + ("WHERE p.organisation_id = :org_id AND pss.season_id = :season_id" if season_id else
+               "WHERE p.organisation_id = :org_id") + """
+          AND pss.high_score IS NOT NULL AND pss.high_score ~ '^[0-9]'
+        ORDER BY CAST(REPLACE(pss.high_score, '*', '') AS INTEGER) DESC LIMIT :limit
     """)
 
     top_batting_avg = await q("""
@@ -169,14 +171,20 @@ async def get_records(
 
     best_innings_figures = await q("""
         SELECT p.id::text AS player_id, p.name,
-               bs.wickets, bs.runs, bs.overs::text,
-               g.played_at::text, g.home_team, g.away_team
-        FROM bowling_spells bs
-        JOIN players p ON p.id = bs.player_id
-        JOIN games g ON g.id = bs.game_id
-        """ + season_join + """
-        WHERE p.organisation_id = :org_id AND bs.wickets IS NOT NULL
-        ORDER BY bs.wickets DESC, bs.runs ASC LIMIT :limit
+               SPLIT_PART(pss.best_bowling_figures, '-', 1)::integer AS wickets,
+               SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer AS runs,
+               s.name AS season_name
+        FROM player_season_stats pss
+        JOIN players p ON p.id = pss.player_id
+        JOIN seasons s ON s.id = pss.season_id
+        """ + ("WHERE p.organisation_id = :org_id AND pss.season_id = :season_id" if season_id else
+               "WHERE p.organisation_id = :org_id") + """
+          AND pss.best_bowling_figures IS NOT NULL
+          AND pss.best_bowling_figures LIKE '%-%'
+          AND pss.best_bowling_wickets > 0
+        ORDER BY pss.best_bowling_wickets DESC,
+                 SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer ASC
+        LIMIT :limit
     """)
 
     top_bowling_avg = await q("""
