@@ -312,14 +312,18 @@ export default function Dashboard() {
   useEffect(() => {
     if (!orgId) return
     setStatsLoading(true)
-    Promise.all([
+    Promise.allSettled([
       api.listPlayers(orgId),
       api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5 }),
       api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5 }),
       api.getOrgSummary(orgId, { seasonId: selectedSeason, gradeId: selectedGrade }),
     ])
-      .then(([p, b, bw, s]) => { setPlayers(p); setTopBatters(b); setTopBowlers(bw); setSummary(s) })
-      .catch(() => {})
+      .then(([p, b, bw, s]) => {
+        if (p.status === 'fulfilled') setPlayers(p.value)
+        if (b.status === 'fulfilled') setTopBatters(b.value)
+        if (bw.status === 'fulfilled') setTopBowlers(bw.value)
+        if (s.status === 'fulfilled') setSummary(s.value)
+      })
       .finally(() => setStatsLoading(false))
   }, [orgId, selectedSeason, selectedGrade])
 

@@ -69,11 +69,8 @@ async def get_org_seasons(playhq_id: str) -> list:
         batch = data.get("data", [])
         all_seasons.extend(batch)
         links = data.get("links") or {}
-        meta = data.get("meta") or {}
-        # JSON:API cursor pagination
         if links.get("next"):
             page += 1
-        # Offset pagination guard: stop if batch is smaller than requested size
         elif len(batch) < 50 or not batch:
             break
         else:
@@ -166,17 +163,17 @@ async def get_org_games(
     db_seasons: list[dict] | None = None,
     grassroots_org_id: str = "",
 ) -> list:
-    """Fetch all games for an org across all discoverable seasons/grades.
-
-    Uses three grade-discovery strategies in parallel, deduplicating by grade ID:
-    1. Partner API seasons endpoint (recent seasons only)
-    2. Partner API org-grades endpoint (may return all historical grades)
-    3. Grassroots fixturesladders API grades per DB season (same UUID space as PlayHQ)
-    """
+    """Fetch all games for an org across all discoverable seasons/grades."""
     if not settings.playhq_api_key or not playhq_id:
         return []
 
-    # ── Strategy 1: partner API seasons → grades ───────────────────────────
+    # Full result cache — avoids repeating the expensive multi-API fan-out
+    cache_key = f"org_games:{playhq_id}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    # ── Discover seasons ──────────────────────────────────────────────────
     try:
         api_seasons = await get_org_seasons(playhq_id)
     except Exception as e:
@@ -198,14 +195,15 @@ async def get_org_games(
     for s in (db_seasons or []):
         db_name = (s.get("name") or "").strip().lower()
         if api_name_to_id.get(db_name):
-            continue  # already covered by the partner API version
+            continue
         db_sid = str(s.get("id", ""))
         if db_sid and db_sid not in seen_season_ids:
             seen_season_ids.add(db_sid)
             unique_seasons.append({"id": db_sid, "name": s.get("name", "")})
 
-    logger.info(f"PlayHQ: {len(unique_seasons)} seasons to probe for {playhq_id}")
+    logger.info(f"PlayHQ: {len(unique_seasons)} seasons to probe for {playhq_id}: {[s['name'] for s in unique_seasons[:10]]}")
 
+    # ── Discover grades via season IDs (cached per season) ───────────────
     season_grade_results = await asyncio.gather(
         *[get_season_grades(s["id"]) for s in unique_seasons],
         return_exceptions=True,
@@ -223,7 +221,7 @@ async def get_org_games(
                     seen_grade_ids.add(gid)
                     grade_season_pairs.append((g, season_name))
 
-    # ── Strategy 2: partner API org-level grades endpoint ──────────────────
+    # ── Also try org-level grades endpoint (may return all historical grades) ─
     try:
         org_grades_data = await _get(f"{BASE_URL}/v1/organisations/{playhq_id}/grades")
         org_grades = org_grades_data.get("data", [])
@@ -237,33 +235,13 @@ async def get_org_games(
     except Exception as e:
         logger.debug(f"PlayHQ: org-grades endpoint unavailable for {playhq_id}: {e}")
 
-    # ── Strategy 3: Grassroots fixturesladders grades per DB season ────────
-    if grassroots_org_id and db_seasons:
-        from app.services import playhq_client as _gc
-        gr_results = await asyncio.gather(
-            *[_gc.get_grades(grassroots_org_id, s["id"]) for s in db_seasons],
-            return_exceptions=True,
-        )
-        added = 0
-        for i, grades in enumerate(gr_results):
-            if isinstance(grades, list):
-                season_name = db_seasons[i].get("name", "")
-                for g in grades:
-                    gid = g.get("id", "")
-                    if gid and gid not in seen_grade_ids:
-                        seen_grade_ids.add(gid)
-                        grade_season_pairs.append(({"id": gid, "name": g.get("name", "")}, season_name))
-                        added += 1
-        if added:
-            logger.info(f"PlayHQ: Grassroots grades added {added} new grades for {playhq_id}")
-
     if not grade_season_pairs:
-        logger.info(f"PlayHQ: no grades found via any strategy for {playhq_id}")
-        return []
+        logger.info(f"PlayHQ: no grades found for {playhq_id}")
+        return _set_cached(cache_key, [])
 
-    logger.info(f"PlayHQ: fetching games for {len(grade_season_pairs)} grades across all seasons")
+    logger.info(f"PlayHQ: fetching games for {len(grade_season_pairs)} grades")
 
-    # Fetch games for all grades concurrently (semaphore limits rate)
+    # ── Fetch games for all grades concurrently (semaphore limits rate) ───
     game_results = await asyncio.gather(
         *[get_grade_games(g["id"]) for g, _ in grade_season_pairs],
         return_exceptions=True,
@@ -285,7 +263,7 @@ async def get_org_games(
             if parsed:
                 all_games.append(parsed)
 
-    return all_games
+    return _set_cached(cache_key, all_games)
 
 
 def _player_name_from_gql(player: dict) -> str:
@@ -506,7 +484,6 @@ async def _get_graph_endpoint() -> str:
     return _playhq_graph_endpoint
 
 
-
 _GQL_DISCOVER_GAME = """
 query DiscoverGame($gameId: ID!) {
   discoverGame(gameID: $gameId) {
@@ -630,7 +607,6 @@ async def _query_graphql_scorecard(fixture_id: str) -> dict:
             logger.warning(f"PlayHQ discoverGame error: {e}")
 
     return {"innings": []}
-
 
 
 async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: str = "") -> dict:
