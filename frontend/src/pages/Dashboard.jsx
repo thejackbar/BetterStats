@@ -63,7 +63,7 @@ function RecentResults({ games, loading, orgId }) {
       {games.map(game => (
         <Link
           key={game.id}
-          to={`/match/${game.id}?org=${orgId}`}
+          to={`/scorecards/${game.id}?org=${orgId}`}
           className="flex items-center justify-between py-3 px-1 hover:bg-navy-700/30 transition-colors group"
         >
           <div className="min-w-0">

@@ -130,6 +130,20 @@ async def get_playhq_scorecard(
     except Exception as e:
         logger.warning(f"PlayHQ scorecard fetch failed for {playhq_game_id}: {e}")
         raise HTTPException(status_code=502, detail=f"PlayHQ scorecard unavailable: {e}")
+    if matched:
+        scorecard["game"] = {
+            "id": matched.get("id"),
+            "home_team": matched.get("home_team"),
+            "away_team": matched.get("away_team"),
+            "result": matched.get("result"),
+            "winning_team": matched.get("winning_team"),
+            "played_at": matched.get("played_at"),
+            "grade": matched.get("grade"),
+            "season": matched.get("season"),
+            "round": matched.get("round"),
+            "venue": matched.get("venue"),
+            "competitors": matched.get("competitors", []),
+        }
     return scorecard
 
 
