@@ -462,7 +462,7 @@ query DiscoverGame($id: ID!) {
 }
 """
 
-_GQL_DISCOVER_GAME_MINIMAL = "query DiscoverGame($id: ID!) { discoverGame(id: $id) { id status } }"
+_GQL_DISCOVER_GAME_MINIMAL = "{ discoverGame { id } }"
 
 
 async def _query_graphql_scorecard(fixture_id: str, game_url: str = "") -> dict:
@@ -483,8 +483,8 @@ async def _query_graphql_scorecard(fixture_id: str, game_url: str = "") -> dict:
     async with httpx.AsyncClient() as client:
         # Try minimal query first to confirm field exists and ID format
         try:
-            r = await client.post(endpoint, json={"query": _GQL_DISCOVER_GAME_MINIMAL, "variables": {"id": fixture_id}}, headers=gql_headers, timeout=TIMEOUT)
-            logger.info(f"PlayHQ discoverGame minimal → {r.status_code}, body: {r.text[:400]!r}")
+            r = await client.post(endpoint, json={"query": _GQL_DISCOVER_GAME_MINIMAL}, headers=gql_headers, timeout=TIMEOUT)
+            logger.info(f"PlayHQ discoverGame arg-probe → {r.status_code}, body: {r.text[:600]!r}")
         except Exception as e:
             logger.warning(f"PlayHQ discoverGame minimal error: {e}")
             return {"innings": []}
