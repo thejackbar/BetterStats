@@ -14,6 +14,17 @@ from app.services import playhq_partner_client
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
 
+def _filter_by_season(games: list, season_obj) -> list:
+    name = (season_obj.name or "").strip().lower()
+    by_name = [g for g in games if g.get("season", "").strip().lower() == name]
+    if by_name:
+        return by_name
+    year = season_obj.year
+    if year:
+        return [g for g in games if g.get("played_at", "")[:4] in (str(year), str(year + 1))]
+    return []
+
+
 class OnboardRequest(BaseModel):
     org_id: str
     org_name: str = ""
@@ -132,11 +143,11 @@ async def get_org_summary(
         if season_id:
             season_obj = await db.get(Season, uuid.UUID(season_id))
             if season_obj:
-                final = [g for g in final if g.get("season") == season_obj.name]
+                final = _filter_by_season(final, season_obj)
         if grade_id:
             grade_obj = await db.get(Grade, uuid.UUID(grade_id))
             if grade_obj:
-                final = [g for g in final if (g.get("grade") or {}).get("name") == grade_obj.name]
+                final = [g for g in final if (g.get("grade") or {}).get("name", "").strip().lower() == grade_obj.name.strip().lower()]
         wins = sum(1 for g in final if g.get("result") == "WIN")
         losses = sum(1 for g in final if g.get("result") == "LOSS")
         draws = sum(1 for g in final if g.get("result") in ("DRAW", "TIE"))
