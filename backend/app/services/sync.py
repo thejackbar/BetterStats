@@ -5,6 +5,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
+from sqlalchemy.sql import func
 
 from app.models.db import (
     Organisation, Season, Player,
@@ -204,8 +205,112 @@ async def sync_organisation(org_id_str: str) -> dict:
         if all_player_ids:
             await _compute_milestones(session, all_player_ids, org_id)
 
+        # Backfill PlayHQ player IDs via game appearance data
+        if org.playhq_id:
+            try:
+                from app.services import playhq_partner_client
+                db_seasons_res2 = await session.execute(
+                    select(Season).where(Season.organisation_id == org_id)
+                )
+                db_seasons_list = [
+                    {"id": str(s.id), "name": s.name}
+                    for s in db_seasons_res2.scalars().all()
+                ]
+                all_games = await playhq_partner_client.get_org_games(
+                    org.playhq_id, org.name,
+                    db_seasons=db_seasons_list,
+                    grassroots_org_id=org_id_str,
+                )
+                await _backfill_player_playhq_ids(session, org, all_games)
+            except Exception as e:
+                logger.warning(f"PlayHQ ID backfill failed for org {org_id_str}: {e}")
+
         logger.info(f"Sync complete: {stats}")
         return stats
+
+
+async def _backfill_player_playhq_ids(
+    session: AsyncSession,
+    org: Organisation,
+    all_games: list,
+) -> int:
+    """Stamp playhq_id onto Player rows using game appearance data from the Partner API.
+
+    For each FINAL game (most recent first, capped at 50):
+    - Appearances belonging to the org's teams get upserted:
+      - Existing player with this playhq_id → skip
+      - Existing player with matching name but no playhq_id → stamp the ID
+      - Otherwise → create a new Player row with the PlayHQ ID
+    Opposition appearances are ignored — they surface by name only in scorecards.
+    """
+    from app.services import playhq_partner_client
+
+    keyword = org.name.split()[0].lower() if org.name else ""
+    final_games = [g for g in all_games if g.get("status") == "FINAL"]
+    final_games.sort(key=lambda g: g.get("played_at") or "", reverse=True)
+
+    stamped = 0
+    for game in final_games[:50]:
+        game_id = game.get("id")
+        if not game_id:
+            continue
+        try:
+            appearances, teams = await playhq_partner_client.get_game_appearances(game_id)
+        except Exception as e:
+            logger.warning(f"Backfill: appearances fetch failed for {game_id}: {e}")
+            continue
+
+        our_team_ids = {
+            t["id"] for t in teams
+            if keyword and keyword in t.get("name", "").lower()
+        }
+
+        for app in appearances:
+            phq_id = app.get("id")
+            team_id = app.get("teamId")
+            if not phq_id or team_id not in our_team_ids:
+                continue
+
+            first = app.get("firstName", "")
+            last = app.get("lastName", "")
+            full_name = f"{first} {last}".strip()
+            if not full_name:
+                continue
+
+            # Already stamped?
+            existing_res = await session.execute(
+                select(Player).where(
+                    Player.organisation_id == org.id,
+                    Player.playhq_id == phq_id,
+                )
+            )
+            if existing_res.scalar_one_or_none():
+                continue
+
+            # Match by exact (case-insensitive) name on an unstamped row
+            name_res = await session.execute(
+                select(Player).where(
+                    Player.organisation_id == org.id,
+                    func.lower(Player.name) == full_name.lower(),
+                    Player.playhq_id.is_(None),
+                )
+            )
+            player = name_res.scalar_one_or_none()
+            if player:
+                player.playhq_id = phq_id
+            else:
+                session.add(Player(
+                    id=uuid.uuid4(),
+                    name=full_name,
+                    organisation_id=org.id,
+                    playhq_id=phq_id,
+                ))
+            stamped += 1
+
+        await session.commit()
+
+    logger.info(f"Backfill: stamped/created {stamped} player PlayHQ IDs for org {org.id}")
+    return stamped
 
 
 _RUN_MILESTONES = [50, 100, 250, 500, 1000, 2000, 3000, 5000]

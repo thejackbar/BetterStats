@@ -19,6 +19,8 @@ _SEMAPHORE = asyncio.Semaphore(4)  # max 4 concurrent PlayHQ requests
 
 _cache: dict[str, tuple[float, list]] = {}
 _scorecard_cache: dict[str, tuple[float, dict]] = {}
+_appearances_cache: dict[str, tuple[float, tuple]] = {}
+APPEARANCES_CACHE_TTL = 86400  # 24 hours — FINAL game appearances never change
 
 PUBLIC_API_KEY = "6e02cae8-e3f0-4846-b024-4072716f1c60"
 
@@ -583,6 +585,7 @@ def _parse_summary_rest(data: dict) -> dict:
                         sr = round(runs / balls * 100, 1) if runs is not None and balls else None
                         batting_rows.append({
                             "name": player_name(pid),
+                            "playhq_appearance_id": pid,
                             "how_out": format_how_out(pid, status, shared),
                             "runs": runs if status != "DID_NOT_BAT" else None,
                             "balls": balls if status != "DID_NOT_BAT" else None,
@@ -611,6 +614,7 @@ def _parse_summary_rest(data: dict) -> dict:
                         if any(v is not None for v in [wickets, runs_c, overs]):
                             bowling_rows.append({
                                 "name": player_name(pid),
+                                "playhq_appearance_id": pid,
                                 "overs": str(overs) if overs is not None else None,
                                 "maidens": maidens,
                                 "runs": runs_c,
@@ -810,6 +814,26 @@ async def _query_graphql_scorecard(fixture_id: str) -> dict:
             logger.warning(f"PlayHQ discoverGame error: {e}")
 
     return {"innings": []}
+
+
+async def get_game_appearances(fixture_id: str) -> tuple[list, list]:
+    """Return (appearances, teams) from /v2/games/{id}/summary raw data.
+    Cached for 24 hours — FINAL game appearances never change.
+    """
+    key = f"appearances:{fixture_id}"
+    if key in _appearances_cache:
+        ts, val = _appearances_cache[key]
+        if time.time() - ts < APPEARANCES_CACHE_TTL:
+            return val
+    try:
+        raw = await _get(f"{BASE_URL}/v2/games/{fixture_id}/summary")
+        data = raw.get("data") or {}
+        result = (data.get("appearances") or [], data.get("teams") or [])
+    except Exception as e:
+        logger.warning(f"PlayHQ: get_game_appearances failed for {fixture_id}: {e}")
+        result = ([], [])
+    _appearances_cache[key] = (time.time(), result)
+    return result
 
 
 async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: str = "") -> dict:

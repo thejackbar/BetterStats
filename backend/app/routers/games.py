@@ -14,6 +14,33 @@ from app.services import playhq_partner_client
 router = APIRouter(prefix="/games", tags=["games"])
 
 
+async def _enrich_scorecard_player_ids(
+    scorecard: dict,
+    org: Organisation,
+    db: AsyncSession,
+) -> None:
+    """Add player_id to batting/bowling rows whose playhq_appearance_id matches a DB Player."""
+    appearance_ids = set()
+    for innings in (scorecard.get("innings") or []):
+        for row in innings.get("batting", []) + innings.get("bowling", []):
+            if row.get("playhq_appearance_id"):
+                appearance_ids.add(row["playhq_appearance_id"])
+    if not appearance_ids:
+        return
+    result = await db.execute(
+        select(Player).where(
+            Player.organisation_id == org.id,
+            Player.playhq_id.in_(appearance_ids),
+        )
+    )
+    playhq_to_db: dict[str, str] = {p.playhq_id: str(p.id) for p in result.scalars().all()}
+    for innings in (scorecard.get("innings") or []):
+        for row in innings.get("batting", []) + innings.get("bowling", []):
+            phq_id = row.get("playhq_appearance_id")
+            if phq_id:
+                row["player_id"] = playhq_to_db.get(phq_id)
+
+
 def _filter_by_season(games: list, season_obj) -> list:
     """Filter PlayHQ partner API games to those matching a DB Season.
     Tries exact name match first, falls back to year-range match so that
@@ -130,6 +157,7 @@ async def get_playhq_scorecard(
     except Exception as e:
         logger.warning(f"PlayHQ scorecard fetch failed for {playhq_game_id}: {e}")
         raise HTTPException(status_code=502, detail=f"PlayHQ scorecard unavailable: {e}")
+    await _enrich_scorecard_player_ids(scorecard, org, db)
     if matched:
         scorecard["game"] = {
             "id": matched.get("id"),

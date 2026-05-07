@@ -75,10 +75,14 @@ class Grade(Base):
 
 class Player(Base):
     __tablename__ = "players"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "playhq_id", name="uq_player_org_playhq_id"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     name = Column(Text, nullable=False)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"))
+    playhq_id = Column(Text, nullable=True)
     claimed = Column(Boolean, default=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 

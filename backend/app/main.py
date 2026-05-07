@@ -23,6 +23,13 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS playhq_id TEXT"
         ))
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS playhq_id TEXT"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_player_org_playhq_id "
+            "ON players(organisation_id, playhq_id) WHERE playhq_id IS NOT NULL"
+        ))
     start_scheduler()
     logger.info("BetterStats API started")
     yield
