@@ -80,13 +80,6 @@ async def get_grade_games(grade_id: str) -> list:
         return cached
     data = await _get(f"{BASE_URL}/v1/grades/{grade_id}/games")
     games = data.get("data", [])
-    if games:
-        g = games[0]
-        logger.info(f"PlayHQ game top-level keys: {list(g.keys())}")
-        for c in (g.get("competitors") or [])[:1]:
-            logger.info(f"PlayHQ competitor keys: {list(c.keys())}")
-            for inn in (c.get("innings") or [])[:1]:
-                logger.info(f"PlayHQ competitor innings keys: {list(inn.keys())}")
     return _set_cached(key, games)
 
 
@@ -210,86 +203,190 @@ async def get_org_games(playhq_id: str, org_name: str) -> list:
     return all_games
 
 
-def _dismissal_text(bat: dict) -> tuple[str, str]:
-    """Return (how_out_label, bowler_name) from a batting entry."""
-    status = bat.get("batterStatus") or bat.get("status") or ""
-    dismissal = bat.get("dismissal") or {}
-    dtype = (dismissal.get("dismissalType") or dismissal.get("type") or status).upper()
 
-    if "NOT_OUT" in dtype or status == "NOT_OUT":
-        return "Not Out", ""
-
-    bowled_by = (dismissal.get("bowler") or {}).get("name") or ""
-    fielder = (dismissal.get("fielder") or {}).get("name") or ""
-    catcher = (dismissal.get("catcher") or {}).get("name") or ""
-    fielder_name = fielder or catcher
-
-    if "CAUGHT" in dtype:
-        how = f"c {fielder_name}" if fielder_name else "c"
-        return how, f"b {bowled_by}" if bowled_by else ""
-    if "BOWLED" in dtype:
-        return "", f"b {bowled_by}" if bowled_by else ""
-    if "LBW" in dtype:
-        return "lbw", f"b {bowled_by}" if bowled_by else ""
-    if "RUN_OUT" in dtype or "RUNOUT" in dtype:
-        return "run out", ""
-    if "STUMPED" in dtype:
-        return f"st {fielder_name}" if fielder_name else "st", f"b {bowled_by}" if bowled_by else ""
-    if "HIT_WICKET" in dtype:
-        return "hit wicket", f"b {bowled_by}" if bowled_by else ""
-    if dtype:
-        return dtype.lower().replace("_", " "), f"b {bowled_by}" if bowled_by else ""
-    return "", ""
+def _player_name_from_gql(player: dict) -> str:
+    """Extract display name from a DiscoverParticipant / DiscoverAnonymousParticipant / DiscoverRegularFillInPlayer."""
+    if not player:
+        return ""
+    profile = player.get("profile") or {}
+    first = profile.get("firstName", "")
+    last = profile.get("lastName", "")
+    if first or last:
+        return f"{first} {last}".strip()
+    return player.get("name", "")
 
 
-def _parse_scorecard(data: dict) -> dict:
-    fixture = data.get("data") or data
-    innings_raw = fixture.get("innings") or []
+def _stat_val(stats: list, *type_values: str) -> Optional[int]:
+    """Return first matching statistic count from a periodStatistics.statistics list."""
+    for s in stats:
+        tv = (s.get("type") or {}).get("value", "")
+        if tv in type_values:
+            return s.get("count")
+    return None
+
+
+def _parse_scorecard_statistics(game_data: dict) -> dict:
+    """
+    Convert discoverGame statistics response into innings/batting/bowling format.
+
+    PlayHQ uses a generic statistics model:
+    - statistics.home/away.players[].periodStatistics — per-player per-period stats
+    - period.value: FIRST_INNINGS, SECOND_INNINGS, etc.
+    - type: BATTING or BOWLING
+    - statistics[].type.value: individual stat identifiers (e.g. RUNS_SCORED, BALLS_FACED)
+    - shared[]: dismissal/wicket events with dismissalType and players
+    """
+    stats = game_data.get("statistics") or {}
+    shared = stats.get("shared") or []
+    home_team = _player_name_from_gql(game_data.get("home") or {}) or (game_data.get("home") or {}).get("name", "")
+    away_team = _player_name_from_gql(game_data.get("away") or {}) or (game_data.get("away") or {}).get("name", "")
+
+    # Log raw stats for debugging
+    logger.info(f"PlayHQ discoverGame statistics keys: home_players={len((stats.get('home') or {}).get('players') or [])}, away_players={len((stats.get('away') or {}).get('players') or [])}, shared={len(shared)}")
+    if shared:
+        logger.info(f"PlayHQ shared[0] sample: {shared[0]!r}")
+    home_players = (stats.get("home") or {}).get("players") or []
+    if home_players and (home_players[0].get("periodStatistics") or []):
+        ps = home_players[0]["periodStatistics"][0]
+        logger.info(f"PlayHQ periodStatistics[0] sample: period={ps.get('period')}, type={ps.get('type')}, stats={ps.get('statistics')!r}")
+
+    # Collect per-period score totals from result
+    result = game_data.get("result") or {}
+    period_scores: dict[str, dict] = {}  # period_value → {home_score, away_score, home_wickets, away_wickets}
+    for side_key in ("home", "away"):
+        side = result.get(side_key) or {}
+        for period_entry in (side.get("periods") or []):
+            pv = (period_entry.get("period") or {}).get("value", "")
+            if not pv:
+                continue
+            if pv not in period_scores:
+                period_scores[pv] = {}
+            for s in (period_entry.get("statistics") or []):
+                tv = (s.get("type") or {}).get("value", "")
+                count = s.get("count")
+                if "RUNS" in tv or "SCORE" in tv:
+                    period_scores[pv][f"{side_key}_score"] = count
+                elif "WICKET" in tv:
+                    period_scores[pv][f"{side_key}_wickets"] = count
+
+    # Build innings list from player periodStatistics
+    # Gather all distinct periods across all players
+    all_periods: dict[str, int] = {}  # period_value → order index (FIRST_INNINGS=1, SECOND_INNINGS=2, ...)
+    _PERIOD_ORDER = ["FIRST_INNINGS", "SECOND_INNINGS", "THIRD_INNINGS", "FOURTH_INNINGS", "SUPER_OVER"]
+    for team_key in ("home", "away"):
+        for p in (stats.get(team_key) or {}).get("players") or []:
+            for ps in (p.get("periodStatistics") or []):
+                pv = (ps.get("period") or {}).get("value", "")
+                if pv and "INNINGS" in pv or "SUPER_OVER" in pv:
+                    if pv not in all_periods:
+                        try:
+                            all_periods[pv] = _PERIOD_ORDER.index(pv) + 1
+                        except ValueError:
+                            all_periods[pv] = len(all_periods) + 1
+
+    if not all_periods:
+        logger.info("PlayHQ discoverGame: no innings periods found in player statistics")
+        return {"innings": [], "_raw": game_data}
+
     innings_out = []
+    for period_val, inn_num in sorted(all_periods.items(), key=lambda x: x[1]):
+        period_label = period_val.replace("_", " ").title()
 
-    for inn in innings_raw:
-        batting_team = (inn.get("battingTeam") or inn.get("homeTeam") or {}).get("name", "")
-        extras = inn.get("extras") or {}
-        extras_total = extras.get("total") or extras.get("byes", 0) + extras.get("legByes", 0) + extras.get("wides", 0) + extras.get("noBalls", 0) + extras.get("penalties", 0)
+        # Determine batting team: home bats first innings, away bats second (T20/one-day convention)
+        # Determine by which team has batting stats for this period
+        batting_team_name = ""
+        batting_side = None
 
+        for side_key in ("home", "away"):
+            side_players = (stats.get(side_key) or {}).get("players") or []
+            for p in side_players:
+                for ps in (p.get("periodStatistics") or []):
+                    pv2 = (ps.get("period") or {}).get("value", "")
+                    if pv2 == period_val and ps.get("type") == "BATTING":
+                        batting_side = side_key
+                        batting_team_name = home_team if side_key == "home" else away_team
+                        break
+                if batting_side:
+                    break
+            if batting_side:
+                break
+
+        bowling_side = "away" if batting_side == "home" else "home"
+
+        # Batting rows
         batting_rows = []
-        for bat in (inn.get("batting") or []):
-            player_name = (bat.get("player") or bat.get("batter") or {}).get("name", "")
-            how_out, bowled_by = _dismissal_text(bat)
-            status = bat.get("batterStatus") or bat.get("status") or ""
-            not_out = "NOT_OUT" in status.upper() or how_out == "Not Out"
-            batting_rows.append({
-                "name": player_name,
-                "how_out": how_out,
-                "bowled_by": bowled_by,
-                "runs": bat.get("runs"),
-                "balls": bat.get("balls") or bat.get("ballsFaced"),
-                "fours": bat.get("fours"),
-                "sixes": bat.get("sixes"),
-                "not_out": not_out,
-            })
+        batting_players = (stats.get(batting_side) or {}).get("players") if batting_side else []
+        for p in (batting_players or []):
+            player_name = _player_name_from_gql(p.get("player") or {})
+            for ps in (p.get("periodStatistics") or []):
+                if (ps.get("period") or {}).get("value") != period_val:
+                    continue
+                if ps.get("type") != "BATTING":
+                    continue
+                pstats = ps.get("statistics") or []
+                runs = _stat_val(pstats, "RUNS_SCORED", "RUNS", "RUN")
+                balls = _stat_val(pstats, "BALLS_FACED", "BALLS", "BALL")
+                fours = _stat_val(pstats, "FOURS", "FOUR", "BOUNDARIES")
+                sixes = _stat_val(pstats, "SIXES", "SIX")
+                status = ps.get("status") or ""
+                not_out = "NOT_OUT" in status.upper() or status.upper() == "NOT OUT"
+                batting_rows.append({
+                    "name": player_name,
+                    "how_out": "" if not_out else status.lower().replace("_", " "),
+                    "bowled_by": "",
+                    "runs": runs,
+                    "balls": balls,
+                    "fours": fours,
+                    "sixes": sixes,
+                    "not_out": not_out,
+                    "display_order": ps.get("displayOrder", 99),
+                })
+        batting_rows.sort(key=lambda x: x.pop("display_order", 99))
 
+        # Bowling rows
         bowling_rows = []
-        for bowl in (inn.get("bowling") or []):
-            player_name = (bowl.get("player") or bowl.get("bowler") or {}).get("name", "")
-            overs_val = bowl.get("overs") or bowl.get("oversBowled")
-            bowling_rows.append({
-                "name": player_name,
-                "overs": overs_val,
-                "maidens": bowl.get("maidens"),
-                "runs": bowl.get("runs") or bowl.get("runsConceded"),
-                "wickets": bowl.get("wickets"),
-                "wides": bowl.get("wides"),
-                "no_balls": bowl.get("noBalls"),
-            })
+        bowling_players = (stats.get(bowling_side) or {}).get("players") if bowling_side else []
+        for p in (bowling_players or []):
+            player_name = _player_name_from_gql(p.get("player") or {})
+            for ps in (p.get("periodStatistics") or []):
+                if (ps.get("period") or {}).get("value") != period_val:
+                    continue
+                if ps.get("type") != "BOWLING":
+                    continue
+                pstats = ps.get("statistics") or []
+                wickets = _stat_val(pstats, "WICKETS", "WICKET", "WICKETS_TAKEN")
+                runs = _stat_val(pstats, "RUNS_CONCEDED", "RUNS", "RUN")
+                maidens = _stat_val(pstats, "MAIDENS", "MAIDEN")
+                wides = _stat_val(pstats, "WIDES", "WIDE")
+                no_balls = _stat_val(pstats, "NO_BALLS", "NO_BALL", "NOBALLS")
+                # Overs: legal balls / balls_per_over
+                legal_balls = _stat_val(pstats, "LEGAL_BALLS", "LEGAL_BALL", "BALLS_BOWLED", "BALLS")
+                overs_val = _stat_val(pstats, "OVERS", "OVER")
+                if overs_val is None and legal_balls is not None:
+                    overs_val = f"{legal_balls // 6}.{legal_balls % 6}"
+                bowling_rows.append({
+                    "name": player_name,
+                    "overs": overs_val,
+                    "maidens": maidens,
+                    "runs": runs,
+                    "wickets": wickets,
+                    "wides": wides,
+                    "no_balls": no_balls,
+                    "display_order": ps.get("displayOrder", 99),
+                })
+        bowling_rows.sort(key=lambda x: x.pop("display_order", 99))
+
+        ps_info = period_scores.get(period_val) or {}
+        total_runs = ps_info.get(f"{batting_side}_score") if batting_side else None
+        total_wickets = ps_info.get(f"{batting_side}_wickets") if batting_side else None
 
         innings_out.append({
-            "innings_number": inn.get("inningsNumber", len(innings_out) + 1),
-            "batting_team": batting_team,
-            "total_runs": inn.get("totalRuns") or inn.get("runs"),
-            "total_wickets": inn.get("totalWickets") or inn.get("wickets"),
-            "overs": inn.get("overs") or inn.get("oversBowled"),
-            "extras": extras_total,
+            "innings_number": inn_num,
+            "batting_team": batting_team_name,
+            "total_runs": total_runs,
+            "total_wickets": total_wickets,
+            "overs": None,
+            "extras": None,
             "batting": batting_rows,
             "bowling": bowling_rows,
         })
@@ -327,145 +424,96 @@ async def _get_graph_endpoint() -> str:
     return _playhq_graph_endpoint
 
 
-_GQL_SCORECARD = """
-query FixtureScorecard($fixtureId: ID!) {
-  fixture(id: $fixtureId) {
-    id
-    innings {
-      inningsNumber
-      battingTeam { name }
-      totalRuns
-      totalWickets
-      overs
-      extras { total byes legByes wides noBalls penalties }
-      batting {
-        player { name }
-        batterStatus
-        runs
-        balls
-        fours
-        sixes
-        dismissal { dismissalType bowler { name } fielder { name } catcher { name } }
-      }
-      bowling {
-        player { name }
-        overs
-        maidens
-        runs
-        wickets
-        wides
-        noBalls
-      }
-    }
-  }
-}
-"""
-
-_GQL_SCORECARD_GAME = """
-query GameScorecard($id: ID!) {
-  game(id: $id) {
-    id
-    innings {
-      inningsNumber
-      battingTeam { name }
-      totalRuns
-      totalWickets
-      overs
-      extras { total byes legByes wides noBalls penalties }
-      batting {
-        player { name }
-        batterStatus
-        runs
-        balls
-        fours
-        sixes
-        dismissal { dismissalType bowler { name } fielder { name } catcher { name } }
-      }
-      bowling {
-        player { name }
-        overs
-        maidens
-        runs
-        wickets
-        wides
-        noBalls
-      }
-    }
-  }
-}
-"""
-
-
-async def _find_gql_queries_in_bundle(game_url: str) -> None:
-    """Fetch the SPA JS bundle and extract GraphQL query field names."""
-    try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            # Fetch HTML to get current bundle URL
-            r = await client.get(game_url, headers=_SCRAPE_HEADERS, timeout=15.0)
-            html = r.text
-            # Find JS bundle script src
-            srcs = re.findall(r'<script[^>]+src="(/assets/[^"]+\.js)"', html)
-            logger.info(f"PlayHQ SPA script srcs: {srcs}")
-            for src in srcs[:3]:
-                bundle_url = f"https://www.playhq.com{src}"
-                rb = await client.get(bundle_url, headers=_SCRAPE_HEADERS, timeout=30.0)
-                js = rb.text
-                logger.info(f"PlayHQ bundle {src}: {len(js)} bytes")
-                # Extract everything that looks like a GQL query/mutation field
-                # Look for patterns: `query NAME($x: T) { FIELD(` or similar
-                gql_queries = re.findall(r'query\s+\w+[^{]*\{\s*(\w+)\s*[\(\{]', js)
-                gql_mutations = re.findall(r'mutation\s+\w+[^{]*\{\s*(\w+)\s*[\(\{]', js)
-                # Also look for inline query strings with "innings" keyword
-                innings_ctx = [js[max(0, m.start()-100):m.start()+100] for m in re.finditer(r'innings', js)]
-                if gql_queries:
-                    logger.info(f"PlayHQ bundle GQL query fields: {sorted(set(gql_queries))}")
-                if gql_mutations:
-                    logger.info(f"PlayHQ bundle GQL mutation fields: {sorted(set(gql_mutations))}")
-                for ctx in innings_ctx[:3]:
-                    logger.info(f"PlayHQ bundle 'innings' context: {ctx!r}")
-    except Exception as e:
-        logger.warning(f"PlayHQ bundle scan error: {e}")
 
 
 _GQL_DISCOVER_GAME = """
-query DiscoverGame($id: ID!) {
-  discoverGame(id: $id) {
+query DiscoverGame($gameId: ID!) {
+  discoverGame(gameID: $gameId) {
     id
-    status
-    innings {
-      inningsNumber
-      battingTeam { name }
-      totalRuns
-      totalWickets
-      overs
-      extras { total byes legByes wides noBalls penalties }
-      batting {
-        player { name }
-        batterStatus
-        runs
-        balls
-        fours
-        sixes
-        dismissal { dismissalType bowler { name } fielder { name } catcher { name } }
+    status { name value }
+    result {
+      home {
+        score
+        periods {
+          period { label shortName value }
+          type
+          closureStatus
+          statistics { count type { label value } }
+        }
       }
-      bowling {
-        player { name }
-        overs
-        maidens
-        runs
-        wickets
-        wides
-        noBalls
+      away {
+        score
+        periods {
+          period { label shortName value }
+          type
+          closureStatus
+          statistics { count type { label value } }
+        }
       }
+    }
+    statistics {
+      home {
+        players {
+          player {
+            ... on DiscoverParticipant {
+              id
+              profile { id firstName lastName }
+            }
+            ... on DiscoverAnonymousParticipant { id name }
+            ... on DiscoverRegularFillInPlayer { id name }
+          }
+          periodStatistics {
+            period { label shortName value }
+            type
+            statistics { type { value label shortName } count details { value } }
+            status
+            displayOrder
+          }
+        }
+      }
+      away {
+        players {
+          player {
+            ... on DiscoverParticipant {
+              id
+              profile { id firstName lastName }
+            }
+            ... on DiscoverAnonymousParticipant { id name }
+            ... on DiscoverRegularFillInPlayer { id name }
+          }
+          periodStatistics {
+            period { label shortName value }
+            type
+            statistics { type { value label shortName } count details { value } }
+            status
+            displayOrder
+          }
+        }
+      }
+      shared {
+        period { label shortName value }
+        type
+        statistics { count type { value label } }
+        side
+        players { playerID teamID role }
+        dismissalType
+        displayOrder
+      }
+    }
+    home {
+      ... on DiscoverTeam { id name }
+      ... on ProvisionalTeam { name }
+    }
+    away {
+      ... on DiscoverTeam { id name }
+      ... on ProvisionalTeam { name }
     }
   }
 }
 """
 
-_GQL_DISCOVER_GAME_MINIMAL = "{ discoverGame { id } }"
 
-
-async def _query_graphql_scorecard(fixture_id: str, game_url: str = "") -> dict:
+async def _query_graphql_scorecard(fixture_id: str) -> dict:
     """Query the PlayHQ GraphQL endpoint for scorecard data using discoverGame."""
     endpoint = await _get_graph_endpoint()
     if not endpoint:
@@ -481,46 +529,27 @@ async def _query_graphql_scorecard(fixture_id: str, game_url: str = "") -> dict:
     }
 
     async with httpx.AsyncClient() as client:
-        # Try minimal query first to confirm field exists and ID format
         try:
-            r = await client.post(endpoint, json={"query": _GQL_DISCOVER_GAME_MINIMAL}, headers=gql_headers, timeout=TIMEOUT)
-            logger.info(f"PlayHQ discoverGame arg-probe → {r.status_code}, body: {r.text[:600]!r}")
-        except Exception as e:
-            logger.warning(f"PlayHQ discoverGame minimal error: {e}")
-            return {"innings": []}
-
-        if r.status_code != 200:
-            return {"innings": []}
-
-        body = r.json()
-        errors = body.get("errors")
-        if errors:
-            logger.warning(f"PlayHQ discoverGame errors: {errors}")
-            return {"innings": []}
-
-        game_stub = (body.get("data") or {}).get("discoverGame") or {}
-        logger.info(f"PlayHQ discoverGame stub: {game_stub}")
-
-        # Full query with innings
-        try:
-            r2 = await client.post(endpoint, json={"query": _GQL_DISCOVER_GAME, "variables": {"id": fixture_id}}, headers=gql_headers, timeout=TIMEOUT)
-            logger.info(f"PlayHQ discoverGame full → {r2.status_code}, body: {r2.text[:800]!r}")
-            if r2.status_code == 200:
-                body2 = r2.json()
-                errors2 = body2.get("errors")
-                game_data = (body2.get("data") or {}).get("discoverGame") or {}
-                logger.info(f"PlayHQ discoverGame full keys: {list(game_data.keys()) if game_data else 'none'}, errors: {errors2}")
+            r = await client.post(
+                endpoint,
+                json={"query": _GQL_DISCOVER_GAME, "variables": {"gameId": fixture_id}},
+                headers=gql_headers,
+                timeout=TIMEOUT,
+            )
+            logger.info(f"PlayHQ discoverGame → {r.status_code}, body: {r.text[:1200]!r}")
+            if r.status_code == 200:
+                body = r.json()
+                errors = body.get("errors")
+                if errors:
+                    logger.warning(f"PlayHQ discoverGame errors: {errors}")
+                game_data = (body.get("data") or {}).get("discoverGame") or {}
                 if game_data:
-                    return _parse_scorecard(game_data)
+                    return _parse_scorecard_statistics(game_data)
         except Exception as e:
-            logger.warning(f"PlayHQ discoverGame full error: {e}")
+            logger.warning(f"PlayHQ discoverGame error: {e}")
 
     return {"innings": []}
 
-
-async def _scrape_playhq_page(game_url: str, fixture_id: str) -> dict:
-    """Query PlayHQ GraphQL endpoint for scorecard data."""
-    return await _query_graphql_scorecard(fixture_id, game_url=game_url)
 
 
 async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: str = "") -> dict:
@@ -532,11 +561,10 @@ async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: s
 
     result: dict = {"innings": []}
 
-    if game_url:
-        try:
-            result = await _scrape_playhq_page(game_url, fixture_id)
-        except Exception as e:
-            logger.warning(f"PlayHQ page scrape failed for {fixture_id}: {e}")
+    try:
+        result = await _query_graphql_scorecard(fixture_id)
+    except Exception as e:
+        logger.warning(f"PlayHQ scorecard fetch failed for {fixture_id}: {e}")
 
     _scorecard_cache[key] = (time.time(), result)
     return result
