@@ -331,10 +331,8 @@ async def _find_gql_queries_in_bundle(game_url: str) -> None:
     """Fetch the SPA JS bundle and extract GraphQL query field names."""
     try:
         async with httpx.AsyncClient(follow_redirects=True) as client:
-            # Fetch HTML to get current bundle URL
             r = await client.get(game_url, headers=_SCRAPE_HEADERS, timeout=15.0)
             html = r.text
-            # Find JS bundle script src
             srcs = re.findall(r'<script[^>]+src="(/assets/[^"]+\.js)"', html)
             logger.info(f"PlayHQ SPA script srcs: {srcs}")
             for src in srcs[:3]:
@@ -342,11 +340,8 @@ async def _find_gql_queries_in_bundle(game_url: str) -> None:
                 rb = await client.get(bundle_url, headers=_SCRAPE_HEADERS, timeout=30.0)
                 js = rb.text
                 logger.info(f"PlayHQ bundle {src}: {len(js)} bytes")
-                # Extract everything that looks like a GQL query/mutation field
-                # Look for patterns: `query NAME($x: T) { FIELD(` or similar
                 gql_queries = re.findall(r'query\s+\w+[^{]*\{\s*(\w+)\s*[\(\{]', js)
                 gql_mutations = re.findall(r'mutation\s+\w+[^{]*\{\s*(\w+)\s*[\(\{]', js)
-                # Also look for inline query strings with "innings" keyword
                 innings_ctx = [js[max(0, m.start()-100):m.start()+100] for m in re.finditer(r'innings', js)]
                 if gql_queries:
                     logger.info(f"PlayHQ bundle GQL query fields: {sorted(set(gql_queries))}")
@@ -358,16 +353,93 @@ async def _find_gql_queries_in_bundle(game_url: str) -> None:
         logger.warning(f"PlayHQ bundle scan error: {e}")
 
 
+_GQL_DISCOVER_GAME = """
+query DiscoverGame($id: ID!) {
+  discoverGame(id: $id) {
+    id
+    status
+    innings {
+      inningsNumber
+      battingTeam { name }
+      totalRuns
+      totalWickets
+      overs
+      extras { total byes legByes wides noBalls penalties }
+      batting {
+        player { name }
+        batterStatus
+        runs
+        balls
+        fours
+        sixes
+        dismissal { dismissalType bowler { name } fielder { name } catcher { name } }
+      }
+      bowling {
+        player { name }
+        overs
+        maidens
+        runs
+        wickets
+        wides
+        noBalls
+      }
+    }
+  }
+}
+"""
+
+_GQL_DISCOVER_GAME_MINIMAL = "query DiscoverGame($id: ID!) { discoverGame(id: $id) { id status } }"
+
+
 async def _query_graphql_scorecard(fixture_id: str, game_url: str = "") -> dict:
-    """Query the PlayHQ GraphQL endpoint for scorecard data."""
+    """Query the PlayHQ GraphQL endpoint for scorecard data using discoverGame."""
     endpoint = await _get_graph_endpoint()
     if not endpoint:
         logger.warning("PlayHQ: no GRAPH_ENDPOINT available")
         return {"innings": []}
 
-    # Scan JS bundle to find the correct query field names
-    if game_url:
-        await _find_gql_queries_in_bundle(game_url)
+    gql_headers = {
+        "Content-Type": "application/json",
+        "x-api-key": settings.playhq_api_key or PUBLIC_API_KEY,
+        "x-phq-tenant": TENANT,
+        "Origin": "https://www.playhq.com",
+        "Referer": "https://www.playhq.com/",
+    }
+
+    async with httpx.AsyncClient() as client:
+        # Try minimal query first to confirm field exists and ID format
+        try:
+            r = await client.post(endpoint, json={"query": _GQL_DISCOVER_GAME_MINIMAL, "variables": {"id": fixture_id}}, headers=gql_headers, timeout=TIMEOUT)
+            logger.info(f"PlayHQ discoverGame minimal → {r.status_code}, body: {r.text[:400]!r}")
+        except Exception as e:
+            logger.warning(f"PlayHQ discoverGame minimal error: {e}")
+            return {"innings": []}
+
+        if r.status_code != 200:
+            return {"innings": []}
+
+        body = r.json()
+        errors = body.get("errors")
+        if errors:
+            logger.warning(f"PlayHQ discoverGame errors: {errors}")
+            return {"innings": []}
+
+        game_stub = (body.get("data") or {}).get("discoverGame") or {}
+        logger.info(f"PlayHQ discoverGame stub: {game_stub}")
+
+        # Full query with innings
+        try:
+            r2 = await client.post(endpoint, json={"query": _GQL_DISCOVER_GAME, "variables": {"id": fixture_id}}, headers=gql_headers, timeout=TIMEOUT)
+            logger.info(f"PlayHQ discoverGame full → {r2.status_code}, body: {r2.text[:800]!r}")
+            if r2.status_code == 200:
+                body2 = r2.json()
+                errors2 = body2.get("errors")
+                game_data = (body2.get("data") or {}).get("discoverGame") or {}
+                logger.info(f"PlayHQ discoverGame full keys: {list(game_data.keys()) if game_data else 'none'}, errors: {errors2}")
+                if game_data:
+                    return _parse_scorecard(game_data)
+        except Exception as e:
+            logger.warning(f"PlayHQ discoverGame full error: {e}")
 
     return {"innings": []}
 
