@@ -22,7 +22,7 @@ function opponent(row) {
   return row.home_team && row.away_team ? `${row.home_team} v ${row.away_team}` : null
 }
 
-// ── Shared sub-components ─────────────────────────────────────────────────────
+// ── Shared sub-components ──────────────────────────────────────────────────
 
 function RecordCard({ title, children, empty }) {
   return (
@@ -48,7 +48,7 @@ function RankBadge({ rank }) {
   return <span className={clsx('text-xs font-mono w-5 inline-block text-right mr-2', cls)}>{rank}</span>
 }
 
-// ── Batting tab ───────────────────────────────────────────────────────────────
+// ── Batting tab ──────────────────────────────────────────────────────
 
 function BattingTab({ data }) {
   return (
@@ -79,7 +79,7 @@ function BattingTab({ data }) {
           <thead><tr className="border-b border-navy-700">
             <th className="table-header">Player</th>
             <th className="table-header text-right">Score</th>
-            <th className="table-header">Match</th>
+            <th className="table-header">Season</th>
           </tr></thead>
           <tbody>{data.top_high_scores?.map((r, i) => (
             <tr key={i} className="table-row">
@@ -89,7 +89,7 @@ function BattingTab({ data }) {
                   {r.runs}{r.not_out ? '*' : ''}
                 </span>
               </td>
-              <td className="table-cell text-xs text-slate-500">{fmtDate(r.played_at)}</td>
+              <td className="table-cell text-xs text-slate-500">{r.season_name}</td>
             </tr>
           ))}</tbody>
         </table>
@@ -206,7 +206,7 @@ function BattingTab({ data }) {
   )
 }
 
-// ── Bowling tab ───────────────────────────────────────────────────────────────
+// ── Bowling tab ──────────────────────────────────────────────────────
 
 function BowlingTab({ data }) {
   return (
@@ -237,7 +237,7 @@ function BowlingTab({ data }) {
           <thead><tr className="border-b border-navy-700">
             <th className="table-header">Player</th>
             <th className="table-header text-right">Figures</th>
-            <th className="table-header">Match</th>
+            <th className="table-header">Season</th>
           </tr></thead>
           <tbody>{data.best_innings_figures?.map((r, i) => (
             <tr key={i} className="table-row">
@@ -247,7 +247,7 @@ function BowlingTab({ data }) {
                   {r.wickets}/{r.runs}
                 </span>
               </td>
-              <td className="table-cell text-xs text-slate-500">{fmtDate(r.played_at)}</td>
+              <td className="table-cell text-xs text-slate-500">{r.season_name}</td>
             </tr>
           ))}</tbody>
         </table>
@@ -326,7 +326,7 @@ function BowlingTab({ data }) {
   )
 }
 
-// ── Partnerships tab ──────────────────────────────────────────────────────────
+// ── Partnerships tab ──────────────────────────────────────────────────
 
 function PartnershipRow({ r, rank }) {
   const b1 = r.batter1_name || 'Unknown'
@@ -419,7 +419,7 @@ function PartnershipsTab({ data }) {
   )
 }
 
-// ── Team tab ──────────────────────────────────────────────────────────────────
+// ── Team tab ──────────────────────────────────────────────────────
 
 function TeamTab({ data }) {
   return (
@@ -482,7 +482,7 @@ function TeamTab({ data }) {
   )
 }
 
-// ── Season selector ───────────────────────────────────────────────────────────
+// ── Season selector ────────────────────────────────────────────────────
 
 function SeasonFilter({ seasons, seasonId, onChange }) {
   return (
@@ -499,7 +499,7 @@ function SeasonFilter({ seasons, seasonId, onChange }) {
   )
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Main page ───────────────────────────────────────────────────────────
 
 export default function Records() {
   const { orgId } = useParams()
