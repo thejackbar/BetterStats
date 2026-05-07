@@ -438,8 +438,10 @@ export default function Dashboard() {
         <div className="lg:col-span-2">
           <ClickableStatCard
             label="Players"
-            value={players.length}
-            sub={`${seasons.length} seasons`}
+            value={summary ? summary.total_players : players.length}
+            sub={selectedSeason
+              ? (summary ? `${summary.total_players} this season` : null)
+              : `${summary ? summary.seasons : seasons.length} seasons`}
             active={activePanel === 'players'}
             onClick={() => setActivePanel(p => p === 'players' ? null : 'players')}
           />

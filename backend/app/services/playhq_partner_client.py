@@ -178,9 +178,18 @@ async def get_org_games(playhq_id: str, org_name: str, db_seasons: list[dict] | 
         logger.warning(f"PlayHQ: failed to get seasons for {playhq_id}: {e}")
         api_seasons = []
 
-    # Merge with DB seasons, deduplicating by ID
+    # Build a name→id map from the partner API seasons (these are the authoritative IDs)
+    api_name_to_id: dict[str, str] = {}
+    for s in api_seasons:
+        sid = s.get("id")
+        name = (s.get("name") or "").strip().lower()
+        if sid and name:
+            api_name_to_id[name] = sid
+
+    # Deduplicate by partner API ID, using name-matching to map DB seasons to partner IDs
     seen_ids: set[str] = set()
     unique_seasons: list[dict] = []
+
     for s in api_seasons:
         sid = s.get("id")
         if sid and sid not in seen_ids:
@@ -188,10 +197,16 @@ async def get_org_games(playhq_id: str, org_name: str, db_seasons: list[dict] | 
             unique_seasons.append({"id": sid, "name": s.get("name", "")})
 
     for s in (db_seasons or []):
-        sid = str(s.get("id", ""))
-        if sid and sid not in seen_ids:
-            seen_ids.add(sid)
-            unique_seasons.append({"id": sid, "name": s.get("name", "")})
+        db_name = (s.get("name") or "").strip().lower()
+        # Prefer the partner API's own ID for this season if names match
+        matched_id = api_name_to_id.get(db_name)
+        if matched_id:
+            continue  # already included via api_seasons above
+        # Try the DB season ID directly — works when both systems share UUIDs
+        db_sid = str(s.get("id", ""))
+        if db_sid and db_sid not in seen_ids:
+            seen_ids.add(db_sid)
+            unique_seasons.append({"id": db_sid, "name": s.get("name", "")})
 
     if not unique_seasons:
         return []
