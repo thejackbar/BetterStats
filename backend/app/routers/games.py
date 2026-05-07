@@ -130,6 +130,8 @@ async def get_playhq_scorecard(
     except Exception as e:
         logger.warning(f"PlayHQ scorecard fetch failed for {playhq_game_id}: {e}")
         raise HTTPException(status_code=502, detail=f"PlayHQ scorecard unavailable: {e}")
+
+    # Attach game metadata
     if matched:
         scorecard["game"] = {
             "id": matched.get("id"),
@@ -144,6 +146,21 @@ async def get_playhq_scorecard(
             "venue": matched.get("venue"),
             "competitors": matched.get("competitors", []),
         }
+
+    # Match player names to DB player IDs so the frontend can link to profiles
+    players_res = await db.execute(
+        select(Player).where(Player.organisation_id == org.id)
+    )
+    name_to_id = {
+        p.name.lower().strip(): str(p.id)
+        for p in players_res.scalars().all()
+    }
+    for innings in scorecard.get("innings", []):
+        for row in innings.get("batting", []):
+            row["player_id"] = name_to_id.get(row.get("name", "").lower().strip())
+        for row in innings.get("bowling", []):
+            row["player_id"] = name_to_id.get(row.get("name", "").lower().strip())
+
     return scorecard
 
 

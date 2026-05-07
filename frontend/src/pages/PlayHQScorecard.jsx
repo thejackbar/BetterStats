@@ -4,7 +4,7 @@ import { api } from '../lib/api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import clsx from 'clsx'
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(iso) {
   if (!iso) return null
@@ -19,10 +19,6 @@ function ResultBanner({ game, toss }) {
   if (!game) return null
   const isWin = game.result === 'WIN'
   const isDraw = ['DRAW', 'TIE', 'NO_RESULT'].includes(game.result)
-
-  // Build a match-result string from competitors if available
-  const winnerComp = (game.competitors || []).find(c => c.outcome === 'WON')
-  const loserComp  = (game.competitors || []).find(c => c.outcome === 'LOST')
 
   return (
     <div className={clsx(
@@ -56,7 +52,6 @@ function ResultBanner({ game, toss }) {
         </div>
 
         <div className="text-right shrink-0">
-          {/* Innings score summary from competitors */}
           {(game.competitors || []).map((c, i) => (
             <div key={i} className="mb-1">
               <span className="text-xs text-slate-400 mr-2">{c.name}</span>
@@ -85,24 +80,19 @@ function ResultBanner({ game, toss }) {
   )
 }
 
-// ── Innings score header ──────────────────────────────────────────────────────
+// ── Score summary line ────────────────────────────────────────────────────────
 
-function InningsHeader({ innings }) {
+function ScoreLine({ innings }) {
   const runs = innings.total_runs ?? innings.batting.reduce((s, r) => s + (r.runs ?? 0), 0)
   const wickets = innings.total_wickets ?? innings.batting.filter(r => !r.not_out && !r.did_not_bat).length
-  const overs = innings.overs
-  const extras = innings.extras
-
   return (
-    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-      <span className="stat-number text-white font-bold text-xl">
-        {runs}/{wickets}
-      </span>
-      {overs != null && (
-        <span className="text-slate-400 text-sm">({overs} ov)</span>
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <span className="stat-number text-white font-bold text-xl">{runs}/{wickets}</span>
+      {innings.overs != null && (
+        <span className="text-slate-400 text-sm">({innings.overs} ov)</span>
       )}
-      {extras != null && (
-        <span className="text-slate-500 text-xs">Extras: {extras}</span>
+      {innings.extras != null && (
+        <span className="text-slate-500 text-xs">Extras: {innings.extras}</span>
       )}
     </div>
   )
@@ -122,7 +112,7 @@ function BattingTable({ batting = [] }) {
         <thead>
           <tr className="border-b border-navy-700">
             <th className="table-header">Batter</th>
-            <th className="table-header text-slate-500 font-normal normal-case tracking-normal">Dismissal</th>
+            <th className="table-header text-slate-500 font-normal normal-case tracking-normal min-w-[120px]">Dismissal</th>
             <th className="table-header text-right">R</th>
             <th className="table-header text-right">B</th>
             <th className="table-header text-right">4s</th>
@@ -133,7 +123,15 @@ function BattingTable({ batting = [] }) {
         <tbody>
           {batted.map((row, i) => (
             <tr key={i} className="table-row">
-              <td className="table-cell font-medium text-white">{row.name}</td>
+              <td className="table-cell font-medium">
+                {row.player_id ? (
+                  <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors">
+                    {row.name}
+                  </Link>
+                ) : (
+                  <span className="text-white">{row.name}</span>
+                )}
+              </td>
               <td className="table-cell text-slate-400 text-xs">
                 {row.how_out || (row.not_out ? 'not out' : '—')}
               </td>
@@ -194,7 +192,15 @@ function BowlingTable({ bowling = [] }) {
         <tbody>
           {bowling.map((row, i) => (
             <tr key={i} className="table-row">
-              <td className="table-cell font-medium text-white">{row.name}</td>
+              <td className="table-cell font-medium">
+                {row.player_id ? (
+                  <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors">
+                    {row.name}
+                  </Link>
+                ) : (
+                  <span className="text-white">{row.name}</span>
+                )}
+              </td>
               <td className="table-cell stat-number text-right text-slate-300">{row.overs ?? '—'}</td>
               <td className="table-cell stat-number text-right text-slate-400">{row.maidens ?? '—'}</td>
               <td className="table-cell stat-number text-right text-slate-300">{row.runs ?? '—'}</td>
@@ -221,69 +227,43 @@ function BowlingTable({ bowling = [] }) {
   )
 }
 
-// ── Innings block ─────────────────────────────────────────────────────────────
+// ── Single innings card ───────────────────────────────────────────────────────
 
-function InningsBlock({ innings, accentTitle }) {
-  const [showBowling, setShowBowling] = useState(false)
-  const label = innings.batting_team
-    ? `${innings.batting_team.toUpperCase()} — INNINGS ${innings.innings_number}`
-    : `INNINGS ${innings.innings_number}`
+function InningsCard({ innings, accentTitle }) {
+  const label = innings.batting_team || `Innings ${innings.innings_number}`
 
   return (
-    <div className="card overflow-hidden">
-      <div className="px-5 py-4 border-b border-navy-700 flex items-center justify-between">
-        <div>
-          <h3 className={clsx('display-heading text-xl', accentTitle ? 'text-accent' : 'text-white')}>
-            {label}
-          </h3>
-          {innings.bowling_team && (
-            <p className="text-slate-500 text-xs mt-0.5">Bowling: {innings.bowling_team}</p>
-          )}
+    <div className="card overflow-hidden flex flex-col">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-navy-700">
+        <h3 className={clsx('display-heading text-lg', accentTitle ? 'text-accent' : 'text-white')}>
+          {label.toUpperCase()}
+        </h3>
+        {innings.bowling_team && (
+          <p className="text-slate-500 text-xs mt-0.5">Bowling: {innings.bowling_team}</p>
+        )}
+        <div className="mt-2">
+          <ScoreLine innings={innings} />
         </div>
-        <InningsHeader innings={innings} />
       </div>
 
-      <div>
-        <div className="px-4 py-2 bg-navy-800/40 border-b border-navy-700/50">
+      {/* Batting */}
+      <div className="border-b border-navy-700/60">
+        <div className="px-4 py-1.5 bg-navy-800/40">
           <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Batting</span>
         </div>
         <BattingTable batting={innings.batting} />
       </div>
 
+      {/* Bowling — always visible */}
       {innings.bowling.length > 0 && (
         <div>
-          <button
-            onClick={() => setShowBowling(s => !s)}
-            className="w-full px-4 py-2 bg-navy-800/40 border-t border-navy-700/50 flex items-center justify-between hover:bg-navy-700/30 transition-colors"
-          >
+          <div className="px-4 py-1.5 bg-navy-800/40 border-b border-navy-700/60">
             <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Bowling</span>
-            <svg
-              className={clsx('w-4 h-4 text-slate-500 transition-transform', showBowling && 'rotate-180')}
-              fill="none" stroke="currentColor" viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {showBowling && <BowlingTable bowling={innings.bowling} />}
+          </div>
+          <BowlingTable bowling={innings.bowling} />
         </div>
       )}
-    </div>
-  )
-}
-
-// ── Match summary strip ───────────────────────────────────────────────────────
-
-function MatchSummaryStrip({ innings }) {
-  if (innings.length < 2) return null
-  return (
-    <div className="grid grid-cols-2 gap-3 mb-6">
-      {innings.map(inn => (
-        <div key={inn.innings_number} className="card p-3 text-center">
-          <p className="section-label mb-1">Innings {inn.innings_number}</p>
-          <p className="text-white text-sm font-medium truncate mb-1">{inn.batting_team}</p>
-          <InningsHeader innings={inn} />
-        </div>
-      ))}
     </div>
   )
 }
@@ -331,7 +311,9 @@ export default function PlayHQScorecard() {
       <div className="max-w-5xl mx-auto px-4 py-16 text-center">
         <p className="text-slate-400 text-lg mb-2">Scorecard not available</p>
         <p className="text-slate-600 text-sm mb-6">
-          {status === 'FINAL' ? 'The match is complete but scorecard data could not be loaded.' : 'This match may not have started yet or data is still being processed.'}
+          {status === 'FINAL'
+            ? 'The match is complete but scorecard data could not be loaded.'
+            : 'This match may not have started yet or data is still being processed.'}
         </p>
         {orgId && (
           <Link to={`/dashboard/${orgId}`} className="text-accent text-sm hover:underline">
@@ -342,8 +324,10 @@ export default function PlayHQScorecard() {
     )
   }
 
+  const isTwoInnings = innings.length >= 2
+
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8">
       {orgId && (
         <Link to={`/dashboard/${orgId}`} className="text-slate-500 text-sm hover:text-accent transition-colors mb-6 block">
           ← Back to dashboard
@@ -351,13 +335,20 @@ export default function PlayHQScorecard() {
       )}
 
       <ResultBanner game={game} toss={toss} />
-      <MatchSummaryStrip innings={innings} />
 
-      <div className="space-y-6">
-        {innings.map((inn, i) => (
-          <InningsBlock key={inn.innings_number} innings={inn} accentTitle={i === 0} />
-        ))}
-      </div>
+      {/* Two-innings: side-by-side on large screens */}
+      {isTwoInnings ? (
+        <div className="grid lg:grid-cols-2 gap-6">
+          {innings.map((inn, i) => (
+            <InningsCard key={inn.innings_number} innings={inn} accentTitle={i === 0} />
+          ))}
+        </div>
+      ) : (
+        /* Single innings: full width */
+        innings.map((inn, i) => (
+          <InningsCard key={inn.innings_number} innings={inn} accentTitle={i === 0} />
+        ))
+      )}
     </div>
   )
 }
