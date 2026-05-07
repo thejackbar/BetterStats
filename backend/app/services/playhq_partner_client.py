@@ -155,7 +155,6 @@ async def get_org_games(playhq_id: str, org_name: str) -> list:
         logger.warning(f"PlayHQ: failed to get seasons for {playhq_id}: {e}")
         return []
 
-    # Deduplicate seasons by ID (API can return same season for different competitions)
     seen_ids: set[str] = set()
     unique_seasons = []
     for s in seasons:
@@ -169,7 +168,6 @@ async def get_org_games(playhq_id: str, org_name: str) -> list:
         return []
     logger.info(f"PlayHQ: fetching {len(recent_seasons)} seasons for {playhq_id}: {[s.get('name') for s in recent_seasons]}")
 
-    # Fetch grades for all seasons concurrently (semaphore limits rate)
     grade_results = await asyncio.gather(
         *[get_season_grades(s["id"]) for s in recent_seasons],
         return_exceptions=True,
@@ -185,7 +183,6 @@ async def get_org_games(playhq_id: str, org_name: str) -> list:
     if not grade_season_pairs:
         return []
 
-    # Fetch games for all grades concurrently (semaphore limits rate)
     game_results = await asyncio.gather(
         *[get_grade_games(g["id"]) for g, _ in grade_season_pairs],
         return_exceptions=True,
@@ -319,7 +316,6 @@ async def _get_graph_endpoint() -> str:
         m = re.search(r'window\.__APP_CONFIG__\s*=\s*({.*?})\s*;', r.text, re.DOTALL)
         if m:
             config = json.loads(m.group(1))
-            logger.info(f"PlayHQ __APP_CONFIG__ all values: { {k: v for k, v in config.items()} }")
             _playhq_graph_endpoint = config.get("GRAPH_ENDPOINT", "")
             logger.info(f"PlayHQ GRAPH_ENDPOINT = {_playhq_graph_endpoint!r}")
     except Exception as e:
@@ -334,21 +330,15 @@ async def _find_gql_queries_in_bundle(game_url: str) -> None:
             r = await client.get(game_url, headers=_SCRAPE_HEADERS, timeout=15.0)
             html = r.text
             srcs = re.findall(r'<script[^>]+src="(/assets/[^"]+\.js)"', html)
-            logger.info(f"PlayHQ SPA script srcs: {srcs}")
             for src in srcs[:3]:
                 bundle_url = f"https://www.playhq.com{src}"
                 rb = await client.get(bundle_url, headers=_SCRAPE_HEADERS, timeout=30.0)
                 js = rb.text
-                logger.info(f"PlayHQ bundle {src}: {len(js)} bytes")
                 gql_queries = re.findall(r'query\s+\w+[^{]*\{\s*(\w+)\s*[\(\{]', js)
-                gql_mutations = re.findall(r'mutation\s+\w+[^{]*\{\s*(\w+)\s*[\(\{]', js)
-                innings_ctx = [js[max(0, m.start()-100):m.start()+100] for m in re.finditer(r'innings', js)]
                 if gql_queries:
                     logger.info(f"PlayHQ bundle GQL query fields: {sorted(set(gql_queries))}")
-                if gql_mutations:
-                    logger.info(f"PlayHQ bundle GQL mutation fields: {sorted(set(gql_mutations))}")
-                for ctx in innings_ctx[:3]:
-                    logger.info(f"PlayHQ bundle 'innings' context: {ctx!r}")
+                for ctx in [js[max(0, m.start()-150):m.start()+150] for m in re.finditer(r'discoverGame', js)][:3]:
+                    logger.info(f"PlayHQ bundle discoverGame context: {ctx!r}")
     except Exception as e:
         logger.warning(f"PlayHQ bundle scan error: {e}")
 
@@ -357,7 +347,6 @@ _GQL_DISCOVER_GAME = """
 query DiscoverGame($id: ID!) {
   discoverGame(id: $id) {
     id
-    status
     innings {
       inningsNumber
       battingTeam { name }
@@ -388,7 +377,7 @@ query DiscoverGame($id: ID!) {
 }
 """
 
-_GQL_DISCOVER_GAME_MINIMAL = "query DiscoverGame($id: ID!) { discoverGame(id: $id) { id status } }"
+_GQL_DISCOVER_GAME_MINIMAL = "{ discoverGame { id } }"
 
 
 async def _query_graphql_scorecard(fixture_id: str, game_url: str = "") -> dict:
@@ -407,10 +396,10 @@ async def _query_graphql_scorecard(fixture_id: str, game_url: str = "") -> dict:
     }
 
     async with httpx.AsyncClient() as client:
-        # Try minimal query first to confirm field exists and ID format
+        # Send bare query to reveal required argument name from error message
         try:
-            r = await client.post(endpoint, json={"query": _GQL_DISCOVER_GAME_MINIMAL, "variables": {"id": fixture_id}}, headers=gql_headers, timeout=TIMEOUT)
-            logger.info(f"PlayHQ discoverGame minimal → {r.status_code}, body: {r.text[:400]!r}")
+            r = await client.post(endpoint, json={"query": _GQL_DISCOVER_GAME_MINIMAL}, headers=gql_headers, timeout=TIMEOUT)
+            logger.info(f"PlayHQ discoverGame arg-probe → {r.status_code}, body: {r.text[:600]!r}")
         except Exception as e:
             logger.warning(f"PlayHQ discoverGame minimal error: {e}")
             return {"innings": []}
