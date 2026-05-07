@@ -22,6 +22,21 @@ _scorecard_cache: dict[str, tuple[float, dict]] = {}
 
 PUBLIC_API_KEY = "6e02cae8-e3f0-4846-b024-4072716f1c60"
 
+_PERIOD_ORDER = ["FIRST_INNINGS", "SECOND_INNINGS", "THIRD_INNINGS", "FOURTH_INNINGS", "SUPER_OVER"]
+
+_HOW_OUT = {
+    "CAUGHT": "c",
+    "BOWLED": "b",
+    "LEG_BEFORE_WICKET": "lbw",
+    "STUMPED": "st",
+    "RUN_OUT": "run out",
+    "HIT_BALL_TWICE": "hit the ball twice",
+    "HIT_WICKET": "hit wicket",
+    "OBSTRUCTING_THE_FIELD": "obstructing the field",
+    "TIMED_OUT": "timed out",
+    "RETIRED_HURT": "retired hurt",
+}
+
 
 def _headers() -> dict:
     return {
@@ -454,6 +469,194 @@ def _parse_scorecard_statistics(game_data: dict) -> dict:
     return {"innings": innings_out}
 
 
+def _stat_map(statistics: list) -> dict:
+    return {s.get("type"): s.get("value") for s in (statistics or [])}
+
+
+def _overs_str(balls: Optional[int]) -> Optional[str]:
+    if balls is None:
+        return None
+    return f"{balls // 6}.{balls % 6}"
+
+
+def _economy(runs: Optional[int], overs_str: Optional[str]) -> Optional[float]:
+    if runs is None or not overs_str:
+        return None
+    try:
+        whole, part = (overs_str.split(".") + ["0"])[:2]
+        dec = int(whole) + int(part) / 6
+        return round(runs / dec, 2) if dec > 0 else None
+    except Exception:
+        return None
+
+
+def _parse_summary_rest(data: dict) -> dict:
+    appearances_by_id = {a["id"]: a for a in (data.get("appearances") or [])}
+    teams = data.get("teams") or []
+
+    periods_by_name: dict[str, list] = {}
+    for period in (data.get("periods") or []):
+        name = period.get("name", "")
+        periods_by_name.setdefault(name, []).append(period)
+
+    def player_name(pid: str) -> str:
+        p = appearances_by_id.get(pid) or {}
+        return f"{p.get('firstName', '')} {p.get('lastName', '')}".strip() or pid
+
+    def team_name(tid: str) -> str:
+        return next((t.get("name", "") for t in teams if t.get("id") == tid), "")
+
+    def get_shared_stats(batsman_id: str, all_shared: list) -> dict:
+        for entry in all_shared:
+            apps = entry.get("appearances") or []
+            if any(a.get("role") == "BATTING" and a.get("id") == batsman_id for a in apps):
+                bowling_app = next((a for a in apps if a.get("role") == "BOWLING"), None)
+                fielder_app = next((a for a in apps if a.get("role") == "FIELDING"), None)
+                return {
+                    "how": entry.get("type"),
+                    "bowler": player_name(bowling_app["id"]) if bowling_app else None,
+                    "fielder": player_name(fielder_app["id"]) if fielder_app else None,
+                }
+        return {}
+
+    def format_how_out(pid: str, status: str, shared: dict) -> str:
+        if status == "NOT_OUT":
+            return "not out"
+        if status in ("DID_NOT_BAT", ""):
+            return ""
+        how = shared.get("how")
+        if not how:
+            return status.replace("_", " ").lower()
+        if how == "BOWLED":
+            bowler = shared.get("bowler")
+            return f"b {bowler}" if bowler else "b"
+        prefix = _HOW_OUT.get(how, how.replace("_", " ").lower())
+        parts = [prefix]
+        fielder = shared.get("fielder")
+        bowler = shared.get("bowler")
+        if fielder:
+            parts.append(fielder)
+        if bowler and how not in ("RUN_OUT", "HIT_BALL_TWICE", "HIT_WICKET", "OBSTRUCTING_THE_FIELD"):
+            parts.append(f"b {bowler}")
+        return " ".join(parts)
+
+    innings_out = []
+    for inn_num, period_name in enumerate(_PERIOD_ORDER, 1):
+        periods = periods_by_name.get(period_name)
+        if not periods:
+            continue
+
+        batting_team_id = bowling_team_id = None
+        for period in periods:
+            for team_data in (period.get("teams") or []):
+                if team_data.get("discipline") == "BATTING":
+                    batting_team_id = team_data.get("id")
+                elif team_data.get("discipline") == "BOWLING":
+                    bowling_team_id = team_data.get("id")
+
+        all_shared = []
+        for period in periods:
+            all_shared.extend(period.get("sharedStatistics") or [])
+
+        batting_rows = []
+        team_batting_stats: dict = {}
+        bowling_rows = []
+
+        for period in periods:
+            for team_data in (period.get("teams") or []):
+                discipline = team_data.get("discipline")
+                tid = team_data.get("id")
+
+                if discipline == "BATTING" and tid == batting_team_id:
+                    team_batting_stats = _stat_map(team_data.get("statistics") or [])
+                    sorted_apps = sorted(
+                        team_data.get("appearances") or [],
+                        key=lambda a: a.get("displayOrder", 99),
+                    )
+                    for app in sorted_apps:
+                        pid = app.get("id") or app.get("appearanceId", "")
+                        stats = _stat_map(app.get("statistics") or [])
+                        status = app.get("status", "")
+                        shared = get_shared_stats(pid, all_shared)
+                        runs = stats.get("TOTAL_RUNS")
+                        balls = stats.get("BALLS_FACED")
+                        sr = round(runs / balls * 100, 1) if runs is not None and balls else None
+                        batting_rows.append({
+                            "name": player_name(pid),
+                            "how_out": format_how_out(pid, status, shared),
+                            "runs": runs if status != "DID_NOT_BAT" else None,
+                            "balls": balls if status != "DID_NOT_BAT" else None,
+                            "fours": stats.get("FOURS"),
+                            "sixes": stats.get("SIXES"),
+                            "not_out": status == "NOT_OUT",
+                            "did_not_bat": status == "DID_NOT_BAT",
+                            "strike_rate": sr,
+                        })
+
+                elif discipline == "BOWLING" and tid == bowling_team_id:
+                    sorted_apps = sorted(
+                        team_data.get("appearances") or [],
+                        key=lambda a: a.get("displayOrder", 99),
+                    )
+                    for app in sorted_apps:
+                        pid = app.get("id") or app.get("appearanceId", "")
+                        stats = _stat_map(app.get("statistics") or [])
+                        wickets = stats.get("WICKETS") or stats.get("TOTAL_WICKETS") or stats.get("WICKETS_TAKEN")
+                        runs_c = stats.get("RUNS_CONCEDED") or stats.get("RUNS")
+                        maidens = stats.get("MAIDENS")
+                        wides = stats.get("WIDES")
+                        no_balls = stats.get("NO_BALLS")
+                        balls_bowled = stats.get("BALLS_BOWLED") or stats.get("LEGAL_BALLS")
+                        overs = stats.get("OVERS") or (_overs_str(balls_bowled) if balls_bowled is not None else None)
+                        if any(v is not None for v in [wickets, runs_c, overs]):
+                            bowling_rows.append({
+                                "name": player_name(pid),
+                                "overs": str(overs) if overs is not None else None,
+                                "maidens": maidens,
+                                "runs": runs_c,
+                                "wickets": wickets,
+                                "wides": wides,
+                                "no_balls": no_balls,
+                                "economy": _economy(runs_c, str(overs) if overs is not None else None),
+                            })
+
+        innings_out.append({
+            "innings_number": inn_num,
+            "batting_team": team_name(batting_team_id) if batting_team_id else "",
+            "bowling_team": team_name(bowling_team_id) if bowling_team_id else "",
+            "total_runs": team_batting_stats.get("TOTAL_SCORE"),
+            "total_wickets": team_batting_stats.get("TOTAL_OUTS"),
+            "overs": team_batting_stats.get("TOTAL_OVERS"),
+            "extras": team_batting_stats.get("TOTAL_EXTRAS"),
+            "batting": batting_rows,
+            "bowling": bowling_rows,
+        })
+
+    coin_toss = data.get("coinToss") or {}
+    toss_winner_id = coin_toss.get("winningTeamId")
+    toss_pref = coin_toss.get("preference")
+    toss_result = None
+    if toss_winner_id and toss_pref:
+        winner = team_name(toss_winner_id)
+        if winner:
+            action = "bat" if toss_pref == "BAT" else "bowl"
+            toss_result = f"{winner} won the toss and elected to {action}"
+
+    return {
+        "innings": innings_out,
+        "toss": toss_result,
+        "status": data.get("status"),
+    }
+
+
+async def _get_game_summary_rest(fixture_id: str) -> dict:
+    raw = await _get(f"{BASE_URL}/v2/games/{fixture_id}/summary")
+    data = raw.get("data") or {}
+    if not data:
+        return {"innings": []}
+    return _parse_summary_rest(data)
+
+
 _SCRAPE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -618,10 +821,21 @@ async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: s
 
     result: dict = {"innings": []}
 
+    # Try REST summary API first — richer dismissal data, no endpoint scraping needed
+    try:
+        rest_result = await _get_game_summary_rest(fixture_id)
+        if rest_result.get("innings"):
+            result = rest_result
+            _scorecard_cache[key] = (time.time(), result)
+            return result
+    except Exception as e:
+        logger.warning(f"PlayHQ REST summary failed for {fixture_id}: {e}")
+
+    # Fallback: GraphQL discoverGame
     try:
         result = await _query_graphql_scorecard(fixture_id)
     except Exception as e:
-        logger.warning(f"PlayHQ scorecard fetch failed for {fixture_id}: {e}")
+        logger.warning(f"PlayHQ GraphQL scorecard failed for {fixture_id}: {e}")
 
     _scorecard_cache[key] = (time.time(), result)
     return result
