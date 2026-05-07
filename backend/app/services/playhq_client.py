@@ -82,6 +82,24 @@ async def get_seasons(org_id: str) -> list:
     return all_seasons
 
 
+async def get_grades(org_id: str, season_id: str) -> list:
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.get(
+                f"{BASE_URL}/fixturesladders/organisations/{org_id}/grades",
+                params=_base_params({"seasonId": season_id}),
+                timeout=DEFAULT_TIMEOUT,
+            )
+            r.raise_for_status()
+            data = r.json()
+            grades = data.get("data", data.get("grades", data if isinstance(data, list) else []))
+            logger.debug(f"get_grades org={org_id} season={season_id}: {len(grades)} grades")
+            return grades
+        except Exception as e:
+            logger.debug(f"get_grades failed for org={org_id} season={season_id}: {e}")
+            return []
+
+
 async def get_teams(org_id: str, season_id: str) -> list:
     async with httpx.AsyncClient() as client:
         try:

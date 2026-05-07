@@ -160,73 +160,108 @@ def _parse_game(game: dict, grade_name: str, grade_id: str, season_name: str, ke
     }
 
 
-async def get_org_games(playhq_id: str, org_name: str, db_seasons: list[dict] | None = None) -> list:
-    """Fetch all games for an org.
+async def get_org_games(
+    playhq_id: str,
+    org_name: str,
+    db_seasons: list[dict] | None = None,
+    grassroots_org_id: str = "",
+) -> list:
+    """Fetch all games for an org across all discoverable seasons/grades.
 
-    Combines seasons from the partner API with any additional season IDs
-    supplied from the DB (db_seasons = list of {"id": str, "name": str}).
-    The partner API only exposes recent seasons; supplying DB season IDs
-    lets us reach historical data whose IDs are shared across CA systems.
+    Uses three grade-discovery strategies in parallel, deduplicating by grade ID:
+    1. Partner API seasons endpoint (recent seasons only)
+    2. Partner API org-grades endpoint (may return all historical grades)
+    3. Grassroots fixturesladders API grades per DB season (same UUID space as PlayHQ)
     """
     if not settings.playhq_api_key or not playhq_id:
         return []
 
-    # Seasons from partner API
+    # ── Strategy 1: partner API seasons → grades ───────────────────────────
     try:
         api_seasons = await get_org_seasons(playhq_id)
     except Exception as e:
         logger.warning(f"PlayHQ: failed to get seasons for {playhq_id}: {e}")
         api_seasons = []
 
-    # Build a name→id map from the partner API seasons (these are the authoritative IDs)
-    api_name_to_id: dict[str, str] = {}
-    for s in api_seasons:
-        sid = s.get("id")
-        name = (s.get("name") or "").strip().lower()
-        if sid and name:
-            api_name_to_id[name] = sid
+    api_name_to_id: dict[str, str] = {
+        (s.get("name") or "").strip().lower(): s["id"]
+        for s in api_seasons if s.get("id")
+    }
 
-    # Deduplicate by partner API ID, using name-matching to map DB seasons to partner IDs
-    seen_ids: set[str] = set()
+    seen_season_ids: set[str] = set()
     unique_seasons: list[dict] = []
-
     for s in api_seasons:
         sid = s.get("id")
-        if sid and sid not in seen_ids:
-            seen_ids.add(sid)
+        if sid and sid not in seen_season_ids:
+            seen_season_ids.add(sid)
             unique_seasons.append({"id": sid, "name": s.get("name", "")})
-
     for s in (db_seasons or []):
         db_name = (s.get("name") or "").strip().lower()
-        # Prefer the partner API's own ID for this season if names match
-        matched_id = api_name_to_id.get(db_name)
-        if matched_id:
-            continue  # already included via api_seasons above
-        # Try the DB season ID directly — works when both systems share UUIDs
+        if api_name_to_id.get(db_name):
+            continue  # already covered by the partner API version
         db_sid = str(s.get("id", ""))
-        if db_sid and db_sid not in seen_ids:
-            seen_ids.add(db_sid)
+        if db_sid and db_sid not in seen_season_ids:
+            seen_season_ids.add(db_sid)
             unique_seasons.append({"id": db_sid, "name": s.get("name", "")})
 
-    if not unique_seasons:
-        return []
-    logger.info(f"PlayHQ: fetching {len(unique_seasons)} seasons for {playhq_id}: {[s['name'] for s in unique_seasons]}")
+    logger.info(f"PlayHQ: {len(unique_seasons)} seasons to probe for {playhq_id}")
 
-    # Fetch grades for all seasons concurrently (semaphore limits rate)
-    grade_results = await asyncio.gather(
+    season_grade_results = await asyncio.gather(
         *[get_season_grades(s["id"]) for s in unique_seasons],
         return_exceptions=True,
     )
 
+    seen_grade_ids: set[str] = set()
     grade_season_pairs: list[tuple[dict, str]] = []
-    for i, grades in enumerate(grade_results):
+
+    for i, grades in enumerate(season_grade_results):
         if isinstance(grades, list):
             season_name = unique_seasons[i].get("name", "")
             for g in grades:
+                gid = g.get("id", "")
+                if gid and gid not in seen_grade_ids:
+                    seen_grade_ids.add(gid)
+                    grade_season_pairs.append((g, season_name))
+
+    # ── Strategy 2: partner API org-level grades endpoint ──────────────────
+    try:
+        org_grades_data = await _get(f"{BASE_URL}/v1/organisations/{playhq_id}/grades")
+        org_grades = org_grades_data.get("data", [])
+        logger.info(f"PlayHQ: org-grades endpoint returned {len(org_grades)} grades for {playhq_id}")
+        for g in org_grades:
+            gid = g.get("id", "")
+            if gid and gid not in seen_grade_ids:
+                seen_grade_ids.add(gid)
+                season_name = (g.get("season") or {}).get("name", "")
                 grade_season_pairs.append((g, season_name))
+    except Exception as e:
+        logger.debug(f"PlayHQ: org-grades endpoint unavailable for {playhq_id}: {e}")
+
+    # ── Strategy 3: Grassroots fixturesladders grades per DB season ────────
+    if grassroots_org_id and db_seasons:
+        from app.services import playhq_client as _gc
+        gr_results = await asyncio.gather(
+            *[_gc.get_grades(grassroots_org_id, s["id"]) for s in db_seasons],
+            return_exceptions=True,
+        )
+        added = 0
+        for i, grades in enumerate(gr_results):
+            if isinstance(grades, list):
+                season_name = db_seasons[i].get("name", "")
+                for g in grades:
+                    gid = g.get("id", "")
+                    if gid and gid not in seen_grade_ids:
+                        seen_grade_ids.add(gid)
+                        grade_season_pairs.append(({"id": gid, "name": g.get("name", "")}, season_name))
+                        added += 1
+        if added:
+            logger.info(f"PlayHQ: Grassroots grades added {added} new grades for {playhq_id}")
 
     if not grade_season_pairs:
+        logger.info(f"PlayHQ: no grades found via any strategy for {playhq_id}")
         return []
+
+    logger.info(f"PlayHQ: fetching games for {len(grade_season_pairs)} grades across all seasons")
 
     # Fetch games for all grades concurrently (semaphore limits rate)
     game_results = await asyncio.gather(

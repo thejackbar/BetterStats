@@ -142,7 +142,7 @@ async def get_org_summary(
             select(Season).where(Season.organisation_id == uuid.UUID(org_id))
         )
         db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
-        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons)
+        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons, grassroots_org_id=str(org.id))
         final = [g for g in all_games if g.get("status") == "FINAL" and g.get("result")]
         if season_id:
             season_obj = await db.get(Season, uuid.UUID(season_id))
@@ -175,7 +175,7 @@ async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
         select(Season).where(Season.organisation_id == uuid.UUID(org_id))
     )
     db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
-    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons)
+    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons, grassroots_org_id=str(org.id))
     today = date.today()
 
     upcoming = [
