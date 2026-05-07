@@ -157,7 +157,7 @@ def _parse_game(game: dict, grade_name: str, grade_id: str, season_name: str, ke
 
 
 async def get_org_games(playhq_id: str, org_name: str) -> list:
-    """Fetch all recent games for an org across its most recent seasons."""
+    """Fetch all games for an org across all available seasons."""
     if not settings.playhq_api_key or not playhq_id:
         return []
 
@@ -176,21 +176,20 @@ async def get_org_games(playhq_id: str, org_name: str) -> list:
             seen_ids.add(sid)
             unique_seasons.append(s)
 
-    recent_seasons = unique_seasons[:12]
-    if not recent_seasons:
+    if not unique_seasons:
         return []
-    logger.info(f"PlayHQ: fetching {len(recent_seasons)} seasons for {playhq_id}: {[s.get('name') for s in recent_seasons]}")
+    logger.info(f"PlayHQ: fetching {len(unique_seasons)} seasons for {playhq_id}: {[s.get('name') for s in unique_seasons]}")
 
     # Fetch grades for all seasons concurrently (semaphore limits rate)
     grade_results = await asyncio.gather(
-        *[get_season_grades(s["id"]) for s in recent_seasons],
+        *[get_season_grades(s["id"]) for s in unique_seasons],
         return_exceptions=True,
     )
 
     grade_season_pairs: list[tuple[dict, str]] = []
     for i, grades in enumerate(grade_results):
         if isinstance(grades, list):
-            season_name = recent_seasons[i].get("name", "")
+            season_name = unique_seasons[i].get("name", "")
             for g in grades:
                 grade_season_pairs.append((g, season_name))
 
