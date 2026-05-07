@@ -54,32 +54,6 @@ function ClickableStatCard({ label, value, sub, accent = false, active = false, 
   )
 }
 
-function InningsScores({ competitors = [] }) {
-  const hasScores = competitors.some(c => c.innings?.some(i => i.score != null) || c.score != null)
-  if (!hasScores) return null
-  return (
-    <div className="mt-1 space-y-0.5">
-      {competitors.map((c, i) => {
-        const scores = c.innings?.length
-          ? c.innings.map((inn, j) => (
-              <span key={j} className="font-mono text-white">
-                {inn.score ?? '—'}{inn.declared ? 'd' : ''}
-                {j < c.innings.length - 1 ? <span className="text-slate-600 mx-0.5">&amp;</span> : null}
-              </span>
-            ))
-          : c.score != null ? [<span key={0} className="font-mono text-white">{c.score}</span>] : null
-        if (!scores) return null
-        return (
-          <div key={i} className="flex items-center gap-1.5 text-xs">
-            <span className="text-slate-500 truncate max-w-[100px]">{c.name}</span>
-            <span>{scores}</span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 function RecentResults({ games, loading, orgId }) {
   if (loading) return <LoadingSpinner size="sm" />
   if (!games.length) return <p className="text-slate-500 text-sm py-4">No recent games found.</p>
@@ -104,7 +78,6 @@ function RecentResults({ games, loading, orgId }) {
                 </span>
               )}
             </div>
-            <InningsScores competitors={game.competitors} />
           </div>
           <div className="flex items-center gap-3 ml-4 shrink-0">
             <ResultBadge result={game.result} />
