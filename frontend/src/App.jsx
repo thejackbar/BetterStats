@@ -9,6 +9,7 @@ import Leaderboard from './pages/Leaderboard'
 import MatchScorecard from './pages/MatchScorecard'
 import MatchOverview from './pages/MatchOverview'
 import PlayHQScorecard from './pages/PlayHQScorecard'
+import Records from './pages/Records'
 import Onboard from './pages/Onboard'
 import ShareCard from './pages/ShareCard'
 
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/games/:gameId" element={<MatchScorecard />} />
         <Route path="/match/:gameId" element={<MatchOverview />} />
         <Route path="/scorecards/:gameId" element={<PlayHQScorecard />} />
+        <Route path="/records/:orgId" element={<Records />} />
         <Route path="/onboard" element={<Onboard />} />
       </Routes>
     </div>

@@ -80,6 +80,13 @@ export const api = {
   getPlayHQGame: (orgId, gameId) => request(`/games/playhq/${gameId}?org_id=${encodeURIComponent(orgId)}`),
   getPlayHQScorecard: (orgId, gameId) => request(`/games/playhq/${gameId}/scorecard?org_id=${encodeURIComponent(orgId)}`),
 
+  // Records
+  getRecords: (orgId, { seasonId } = {}) => {
+    const params = new URLSearchParams()
+    if (seasonId) params.set('season_id', seasonId)
+    return request(`/records/${orgId}?${params}`)
+  },
+
   // Leaderboard
   battingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })

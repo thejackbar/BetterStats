@@ -8,7 +8,8 @@ from sqlalchemy import select, delete
 from sqlalchemy.sql import func
 
 from app.models.db import (
-    Organisation, Season, Player,
+    Organisation, Season, Grade, Game, Player,
+    BattingInnings, BowlingSpell, FallOfWicket, Partnership,
     PlayerSeasonStats, Milestone, async_session_maker
 )
 from app.services import playhq_client
@@ -205,7 +206,7 @@ async def sync_organisation(org_id_str: str) -> dict:
         if all_player_ids:
             await _compute_milestones(session, all_player_ids, org_id)
 
-        # Backfill PlayHQ player IDs via game appearance data
+        # Backfill PlayHQ player IDs + full game-level data
         if org.playhq_id:
             try:
                 from app.services import playhq_partner_client
@@ -222,11 +223,239 @@ async def sync_organisation(org_id_str: str) -> dict:
                     grassroots_org_id=org_id_str,
                 )
                 await _backfill_player_playhq_ids(session, org, all_games)
+                await sync_game_level_data(session, org, all_games)
             except Exception as e:
-                logger.warning(f"PlayHQ ID backfill failed for org {org_id_str}: {e}")
+                logger.warning(f"PlayHQ game sync failed for org {org_id_str}: {e}")
 
         logger.info(f"Sync complete: {stats}")
         return stats
+
+
+def _derive_partnerships(
+    batting_rows: list,
+    fow_rows: list,
+    playhq_to_player_id: dict,
+) -> list:
+    """Derive per-wicket partnership data from batting order + fall of wickets."""
+    if len(batting_rows) < 2:
+        return []
+
+    batters = sorted(batting_rows, key=lambda r: r.get("batting_position") or 99)
+    at_crease = list(batters[:2])
+    next_in = 2
+    prev_score = 0
+    result = []
+
+    for fow in sorted(fow_rows, key=lambda f: f.get("wicket_number") or 99):
+        wkt = fow.get("wicket_number") or len(result) + 1
+        score = fow.get("score_at_fall")
+        dismissed_phq = fow.get("batter_playhq_id")
+
+        b1 = at_crease[0] if len(at_crease) > 0 else None
+        b2 = at_crease[1] if len(at_crease) > 1 else None
+
+        result.append({
+            "wicket_number": wkt,
+            "batter1_id": playhq_to_player_id.get(b1["playhq_appearance_id"]) if b1 else None,
+            "batter2_id": playhq_to_player_id.get(b2["playhq_appearance_id"]) if b2 else None,
+            "batter1_runs": b1.get("runs") if b1 else None,
+            "batter2_runs": b2.get("runs") if b2 else None,
+            "runs": (score - prev_score) if score is not None else None,
+        })
+
+        if dismissed_phq:
+            at_crease = [b for b in at_crease if b.get("playhq_appearance_id") != dismissed_phq]
+        elif at_crease:
+            at_crease.pop()
+
+        if next_in < len(batters):
+            at_crease.append(batters[next_in])
+            next_in += 1
+
+        if score is not None:
+            prev_score = score
+
+    return result
+
+
+async def sync_game_level_data(
+    session: AsyncSession,
+    org: Organisation,
+    all_games: list,
+) -> dict:
+    """Store game-level batting/bowling/partnership rows from PlayHQ scorecards.
+
+    Uses PlayHQ game/grade UUIDs as DB primary keys so the function is fully
+    idempotent — games already in the DB are skipped.
+    """
+    from app.services import playhq_partner_client
+    from datetime import date as date_cls
+
+    stats = {"games_new": 0, "batting": 0, "bowling": 0, "partnerships": 0}
+
+    final_games = [g for g in all_games if g.get("status") == "FINAL"]
+
+    # Season name → DB Season lookup
+    seasons_res = await session.execute(
+        select(Season).where(Season.organisation_id == org.id)
+    )
+    season_by_name = {s.name.strip().lower(): s for s in seasons_res.scalars().all()}
+
+    # playhq_id → DB player UUID lookup (populated by backfill)
+    players_res = await session.execute(
+        select(Player).where(
+            Player.organisation_id == org.id,
+            Player.playhq_id.isnot(None),
+        )
+    )
+    phq_to_pid: dict[str, uuid.UUID] = {p.playhq_id: p.id for p in players_res.scalars().all()}
+
+    for game_data in final_games:
+        game_id_str = game_data.get("id")
+        if not game_id_str:
+            continue
+        try:
+            game_uuid = uuid.UUID(game_id_str)
+        except ValueError:
+            continue
+
+        # Idempotent — skip already-stored games
+        if await session.get(Game, game_uuid):
+            continue
+
+        # Resolve Season by name (fallback: year match)
+        s_name = (game_data.get("season") or "").strip().lower()
+        season = season_by_name.get(s_name)
+        if not season:
+            played_str = game_data.get("played_at", "")
+            year = played_str[:4] if played_str else ""
+            season = next(
+                (s for s in season_by_name.values()
+                 if str(s.year) == year or str((s.year or 0) + 1) == year),
+                None,
+            )
+        if not season:
+            continue
+
+        # Resolve/create Grade using PlayHQ grade UUID
+        grade_phq = game_data.get("grade_id", "")
+        try:
+            grade_uuid = uuid.UUID(grade_phq)
+        except ValueError:
+            continue
+
+        grade = await session.get(Grade, grade_uuid)
+        if not grade:
+            grade_name = (game_data.get("grade") or {}).get("name", "Unknown Grade")
+            grade = Grade(id=grade_uuid, season_id=season.id, name=grade_name, playhq_id=grade_phq)
+            session.add(grade)
+            await session.flush()
+
+        # Create Game row
+        played_at = None
+        try:
+            played_at = date_cls.fromisoformat(game_data["played_at"]) if game_data.get("played_at") else None
+        except ValueError:
+            pass
+
+        game_obj = Game(
+            id=game_uuid,
+            grade_id=grade.id,
+            played_at=played_at,
+            home_team=game_data.get("home_team", ""),
+            away_team=game_data.get("away_team", ""),
+            result=game_data.get("result"),
+            winning_team=game_data.get("winning_team"),
+        )
+        session.add(game_obj)
+        await session.flush()
+
+        # Fetch scorecard
+        try:
+            scorecard = await playhq_partner_client.get_fixture_scorecard(
+                game_id_str, game_url=game_data.get("url", "")
+            )
+        except Exception as e:
+            logger.warning(f"GameSync: scorecard fetch failed for {game_id_str}: {e}")
+            await session.rollback()
+            continue
+
+        for innings in (scorecard.get("innings") or []):
+            inn_num = innings.get("innings_number", 1)
+
+            for row in innings.get("batting", []):
+                pid = phq_to_pid.get(row.get("playhq_appearance_id") or "")
+                if not pid:
+                    continue
+                session.add(BattingInnings(
+                    game_id=game_uuid,
+                    player_id=pid,
+                    innings_number=inn_num,
+                    runs=row.get("runs"),
+                    balls=row.get("balls"),
+                    fours=row.get("fours"),
+                    sixes=row.get("sixes"),
+                    not_out=row.get("not_out", False),
+                    dismissal_type=row.get("how_out") or None,
+                    batting_position=row.get("batting_position"),
+                ))
+                stats["batting"] += 1
+
+            for row in innings.get("bowling", []):
+                pid = phq_to_pid.get(row.get("playhq_appearance_id") or "")
+                if not pid:
+                    continue
+                overs_val = None
+                try:
+                    overs_val = float(row["overs"]) if row.get("overs") is not None else None
+                except (ValueError, TypeError):
+                    pass
+                session.add(BowlingSpell(
+                    game_id=game_uuid,
+                    player_id=pid,
+                    innings_number=inn_num,
+                    overs=overs_val,
+                    maidens=row.get("maidens"),
+                    runs=row.get("runs"),
+                    wickets=row.get("wickets"),
+                    wides=row.get("wides"),
+                    no_balls=row.get("no_balls"),
+                    economy=row.get("economy"),
+                ))
+                stats["bowling"] += 1
+
+            for fow in (innings.get("fall_of_wickets") or []):
+                pid = phq_to_pid.get(fow.get("batter_playhq_id") or "")
+                session.add(FallOfWicket(
+                    game_id=game_uuid,
+                    innings_number=inn_num,
+                    wicket_number=fow.get("wicket_number", 1),
+                    score_at_fall=fow.get("score_at_fall"),
+                    overs_at_fall=fow.get("overs_at_fall"),
+                    player_id=pid,
+                ))
+
+            batting_with_pos = [r for r in innings.get("batting", []) if r.get("batting_position")]
+            fow_data = innings.get("fall_of_wickets") or []
+            for p in _derive_partnerships(batting_with_pos, fow_data, phq_to_pid):
+                if p.get("batter1_id") or p.get("batter2_id"):
+                    session.add(Partnership(
+                        game_id=game_uuid,
+                        innings_number=inn_num,
+                        wicket_number=p["wicket_number"],
+                        batter1_id=p.get("batter1_id"),
+                        batter2_id=p.get("batter2_id"),
+                        runs=p.get("runs") or 0,
+                        batter1_runs=p.get("batter1_runs"),
+                        batter2_runs=p.get("batter2_runs"),
+                    ))
+                    stats["partnerships"] += 1
+
+        await session.commit()
+        stats["games_new"] += 1
+
+    logger.info(f"GameSync: {stats} for org {org.id}")
+    return stats
 
 
 async def _backfill_player_playhq_ids(

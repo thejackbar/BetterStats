@@ -577,6 +577,7 @@ def _parse_summary_rest(data: dict) -> dict:
                     )
                     for app in sorted_apps:
                         pid = app.get("id") or app.get("appearanceId", "")
+                        batting_position = app.get("displayOrder")
                         stats = _stat_map(app.get("statistics") or [])
                         status = app.get("status", "")
                         shared = get_shared_stats(pid, all_shared)
@@ -586,6 +587,7 @@ def _parse_summary_rest(data: dict) -> dict:
                         batting_rows.append({
                             "name": player_name(pid),
                             "playhq_appearance_id": pid,
+                            "batting_position": batting_position,
                             "how_out": format_how_out(pid, status, shared),
                             "runs": runs if status != "DID_NOT_BAT" else None,
                             "balls": balls if status != "DID_NOT_BAT" else None,
@@ -624,6 +626,23 @@ def _parse_summary_rest(data: dict) -> dict:
                                 "economy": _economy(runs_c, str(overs) if overs is not None else None),
                             })
 
+        # Extract fall of wickets from shared statistics (one entry per wicket event)
+        fow_out = []
+        for entry in sorted(all_shared, key=lambda e: e.get("displayOrder") or 99):
+            apps = entry.get("appearances") or []
+            bat_app = next((a for a in apps if a.get("role") == "BATTING"), None)
+            if not bat_app:
+                continue
+            fow_stats = _stat_map(entry.get("statistics") or [])
+            score = (fow_stats.get("FALL_OF_WICKET_SCORE") or fow_stats.get("SCORE")
+                     or fow_stats.get("BATTING_TOTAL") or fow_stats.get("RUNS"))
+            fow_out.append({
+                "wicket_number": entry.get("displayOrder"),
+                "batter_playhq_id": bat_app.get("id"),
+                "score_at_fall": score,
+                "overs_at_fall": fow_stats.get("OVERS_AT_FALL") or fow_stats.get("OVERS"),
+            })
+
         innings_out.append({
             "innings_number": inn_num,
             "batting_team": team_name(batting_team_id) if batting_team_id else "",
@@ -634,6 +653,7 @@ def _parse_summary_rest(data: dict) -> dict:
             "extras": team_batting_stats.get("TOTAL_EXTRAS"),
             "batting": batting_rows,
             "bowling": bowling_rows,
+            "fall_of_wickets": fow_out,
         })
 
     coin_toss = data.get("coinToss") or {}

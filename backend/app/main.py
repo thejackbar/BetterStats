@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
-from app.routers import auth, organisations, players, games, webhooks, leaderboard
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -29,6 +29,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_player_org_playhq_id "
             "ON players(organisation_id, playhq_id) WHERE playhq_id IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE grades ADD COLUMN IF NOT EXISTS playhq_id TEXT"
         ))
     start_scheduler()
     logger.info("BetterStats API started")
@@ -57,6 +60,7 @@ app.include_router(organisations.router)
 app.include_router(players.router)
 app.include_router(games.router)
 app.include_router(leaderboard.router)
+app.include_router(records.router)
 app.include_router(webhooks.router)
 
 
