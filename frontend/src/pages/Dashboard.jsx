@@ -70,7 +70,7 @@ function RecentResults({ games, loading, orgId }) {
         {visible.map(game => (
           <Link
             key={game.id}
-            to={`/games/${game.id}`}
+            to={`/games/${game.id}?org=${orgId}`}
             className="flex items-center justify-between py-2 px-1 hover:bg-navy-700/20 transition-colors group"
           >
             <div className="min-w-0">
@@ -495,7 +495,7 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Summary stat tiles — clickable */}
+      {/* Summary stat tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
         {selectedSeason && (
           <div className="lg:col-span-2">
@@ -732,7 +732,7 @@ export default function Dashboard() {
       {/* Best Performances */}
       <BestPerformances orgId={orgId} seasons={seasons} selectedSeason={selectedSeason} clubSlug={clubSlug} />
 
-      {/* Recent Results + Upcoming Fixtures — compact */}
+      {/* Recent Results + Upcoming Fixtures */}
       <div className="grid lg:grid-cols-3 gap-4 mb-6">
         <div className="lg:col-span-2 card p-4">
           <div className="flex items-center justify-between mb-2">
