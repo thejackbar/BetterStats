@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -520,6 +520,7 @@ export default function PlayerProfile() {
   const [milestones, setMilestones] = useState(null)
   const [seasonStats, setSeasonStats] = useState(null)
   const [achievementsLoaded, setAchievementsLoaded] = useState(false)
+  const [headerAchievements, setHeaderAchievements] = useState([])
 
   // Load season stats and activity eagerly on mount
   useEffect(() => {
@@ -532,10 +533,13 @@ export default function PlayerProfile() {
   useEffect(() => {
     if (!data?.player?.organisation_id) return
     api.getOrgSeasons(data.player.organisation_id).then(setSeasons).catch(() => {})
-    // Make org available to Navbar when browsing a player profile directly
     sessionStorage.setItem('bs_last_org_id', data.player.organisation_id)
     window.dispatchEvent(new CustomEvent('bs_org_changed'))
-  }, [data?.player?.organisation_id])
+    // Load achievements for header display
+    api.listAchievements(data.player.organisation_id, { playerId })
+      .then(list => setHeaderAchievements(list || []))
+      .catch(() => {})
+  }, [data?.player?.organisation_id, playerId])
 
   const handleTabChange = useCallback((t) => {
     setTab(t)
@@ -551,15 +555,26 @@ export default function PlayerProfile() {
 
   const { player, career_batting: cb, career_bowling: cbw, career_fielding: cf } = data
 
+  // When a season is selected, derive display stats from seasonStats row
+  const displayBatting = useMemo(() => {
+    if (!seasonId || !seasonStats?.length) return cb
+    const s = seasonStats.find(r => r.season_id === seasonId)
+    if (!s) return cb
+    return { matches: s.matches, innings: s.batting_innings, total_runs: s.total_runs, average: s.batting_average, high_score: s.high_score, strike_rate: s.strike_rate, hundreds: s.hundreds, fifties: s.fifties }
+  }, [seasonId, seasonStats, cb])
+
+  const displayBowling = useMemo(() => {
+    if (!seasonId || !seasonStats?.length) return cbw
+    const s = seasonStats.find(r => r.season_id === seasonId)
+    if (!s) return cbw
+    return { total_wickets: s.total_wickets, economy: s.economy, best_bowling_figures: s.best_bowling_figures, best_figures_wickets: s.best_bowling_wickets }
+  }, [seasonId, seasonStats, cbw])
+
   const badgeMilestones = []
   if (cb?.hundreds > 0) badgeMilestones.push(`${cb.hundreds} ${cb.hundreds === 1 ? 'century' : 'centuries'}`)
   if (cb?.fifties > 0) badgeMilestones.push(`${cb.fifties} ${cb.fifties === 1 ? 'fifty' : 'fifties'}`)
   if (cbw?.total_wickets >= 5) badgeMilestones.push(`${cbw.total_wickets} career wickets`)
   if (cbw?.best_figures_wickets >= 5) badgeMilestones.push(`${cbw.best_figures_wickets}-wicket haul`)
-
-  const lastGameDays = activity ? daysSince(activity.last_game_date) : null
-  const lastWicketDays = activity ? daysSince(activity.last_wicket_date) : null
-  const lastDuckDays = activity ? daysSince(activity.last_duck_date) : null
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -575,6 +590,15 @@ export default function PlayerProfile() {
               <div className="flex flex-wrap gap-2 mt-3">
                 {badgeMilestones.map(m => (
                   <span key={m} className="badge bg-accent/10 text-accent">{m}</span>
+                ))}
+              </div>
+            )}
+            {headerAchievements.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {headerAchievements.slice(0, 6).map(a => (
+                  <span key={a.id} className="badge bg-navy-700 text-slate-300 border border-navy-600">
+                    {a.subcategory || a.category}{a.achievement ? ` — ${a.achievement}` : ''}{a.season_end ? ` (${a.season_end})` : a.season ? ` (${a.season})` : ''}
+                  </span>
                 ))}
               </div>
             )}
@@ -607,44 +631,16 @@ export default function PlayerProfile() {
         <UpcomingMilestonesSection data={upcomingMilestones} />
       )}
 
-      {/* Activity strip */}
-      {activity && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
-          <ActivityBadge
-            label="Last Played"
-            value={formatDaysSince(lastGameDays)}
-            sub={activity.last_game_date || undefined}
-            accent={lastGameDays !== null && lastGameDays < 14}
-          />
-          <ActivityBadge
-            label="Last Wicket"
-            value={lastWicketDays !== null ? formatDaysSince(lastWicketDays) : 'No wickets'}
-            sub={activity.last_wicket_date || undefined}
-          />
-          <ActivityBadge
-            label="Last Duck"
-            value={lastDuckDays !== null ? formatDaysSince(lastDuckDays) : 'No ducks'}
-            sub={activity.total_ducks > 0 ? `${activity.total_ducks} career ducks` : 'Duck-free!'}
-          />
-          <ActivityBadge label="Career 6s" value={activity.total_sixes?.toLocaleString()} accent />
-          <ActivityBadge label="Career 4s" value={activity.total_fours?.toLocaleString()} />
-          <ActivityBadge
-            label="Best Spell"
-            value={activity.best_bowling_figures || (activity.best_spell_wickets > 0 ? `${activity.best_spell_wickets}w` : '—')}
-            sub={activity.total_wickets > 0 ? `${activity.total_wickets} career wkts` : undefined}
-          />
-        </div>
-      )}
-
-      {/* Career stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-10">
-        <StatCard label="Innings" value={cb?.innings ?? '—'} />
-        <StatCard label="Runs" value={cb?.total_runs ?? '—'} accent />
-        <StatCard label="Average" value={cb?.average ?? '—'} />
-        <StatCard label="High Score" value={cb?.high_score != null ? cb.high_score : '—'} />
-        <StatCard label="Strike Rate" value={cb?.strike_rate ?? '—'} />
-        <StatCard label="Wickets" value={cbw?.total_wickets ?? '—'} />
-        <StatCard label="Economy" value={cbw?.economy ?? '—'} />
+      {/* Stat cards — season-aware */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-10">
+        <StatCard label="Matches" value={seasonId ? (displayBatting?.matches ?? '—') : (cb?.games ?? '—')} />
+        <StatCard label="Innings" value={displayBatting?.innings ?? '—'} />
+        <StatCard label="Runs" value={displayBatting?.total_runs ?? '—'} accent />
+        <StatCard label="Average" value={displayBatting?.average ?? '—'} />
+        <StatCard label="High Score" value={displayBatting?.high_score != null ? displayBatting.high_score : '—'} />
+        <StatCard label="Wickets" value={displayBowling?.total_wickets ?? '—'} />
+        <StatCard label="Economy" value={displayBowling?.economy ?? '—'} />
+        <StatCard label="Best Spell" value={displayBowling?.best_bowling_figures ?? cbw?.best_bowling_figures ?? '—'} />
       </div>
 
       {/* Tabs */}
