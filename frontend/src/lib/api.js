@@ -65,6 +65,8 @@ export const api = {
   getPlayerPartnerships: (playerId) => request(`/players/${playerId}/partnerships`),
   getPlayerActivity: (playerId) => request(`/players/${playerId}/activity`),
   getPlayerUpcomingMilestones: (playerId) => request(`/players/${playerId}/upcoming-milestones`),
+  renamePlayer: (playerId, name) =>
+    request(`/players/${playerId}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   claimPlayer: (playerId) =>
     request(`/players/${playerId}/claim`, { method: 'POST' }),
 

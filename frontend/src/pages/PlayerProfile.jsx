@@ -520,6 +520,11 @@ export default function PlayerProfile() {
   const [milestones, setMilestones] = useState(null)
   const [seasonStats, setSeasonStats] = useState(null)
   const [achievementsLoaded, setAchievementsLoaded] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [renameSaving, setRenameSaving] = useState(false)
+  const [renameError, setRenameError] = useState(null)
+  const [displayName, setDisplayName] = useState(null)
 
   // Load season stats and activity eagerly on mount
   useEffect(() => {
@@ -545,11 +550,28 @@ export default function PlayerProfile() {
     if (t === 'achievements') setAchievementsLoaded(true)
   }, [playerId, milestones])
 
+  const handleRenameSubmit = async () => {
+    const trimmed = renameValue.trim()
+    if (!trimmed) return
+    setRenameSaving(true)
+    setRenameError(null)
+    try {
+      await api.renamePlayer(playerId, trimmed)
+      setDisplayName(trimmed)
+      setRenaming(false)
+    } catch (e) {
+      setRenameError(e.message)
+    } finally {
+      setRenameSaving(false)
+    }
+  }
+
   if (loading) return <LoadingSpinner message="Loading player stats…" />
   if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-red-400">Error: {error}</div>
   if (!data) return null
 
   const { player, career_batting: cb, career_bowling: cbw, career_fielding: cf } = data
+  const currentName = displayName ?? player.name
 
   const badgeMilestones = []
   if (cb?.hundreds > 0) badgeMilestones.push(`${cb.hundreds} ${cb.hundreds === 1 ? 'century' : 'centuries'}`)
@@ -568,9 +590,37 @@ export default function PlayerProfile() {
         <div className="accent-bar mb-4" />
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="display-heading text-5xl md:text-6xl text-white leading-none">
-              {player.name.toUpperCase()}
-            </h1>
+            {renaming ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={e => setRenameValue(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') setRenaming(false) }}
+                  className="bg-navy-800 border border-accent text-white font-display font-bold text-3xl md:text-4xl uppercase tracking-wider rounded-lg px-3 py-1 focus:outline-none w-80"
+                />
+                <button onClick={handleRenameSubmit} disabled={renameSaving} className="btn-primary text-sm">
+                  {renameSaving ? 'Saving…' : 'Save'}
+                </button>
+                <button onClick={() => setRenaming(false)} className="btn-ghost text-sm">Cancel</button>
+                {renameError && <span className="text-red-400 text-xs">{renameError}</span>}
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 group">
+                <h1 className="display-heading text-5xl md:text-6xl text-white leading-none">
+                  {currentName.toUpperCase()}
+                </h1>
+                <button
+                  onClick={() => { setRenameValue(currentName); setRenaming(true); setRenameError(null) }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-white p-1 rounded"
+                  title="Rename player"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+              </div>
+            )}
             {badgeMilestones.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-3">
                 {badgeMilestones.map(m => (
