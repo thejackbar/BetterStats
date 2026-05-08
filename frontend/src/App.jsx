@@ -13,6 +13,7 @@ import Records from './pages/Records'
 import Onboard from './pages/Onboard'
 import ShareCard from './pages/ShareCard'
 import MergeTools from './pages/MergeTools'
+import AchievementsAdmin from './pages/AchievementsAdmin'
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/records/:orgId" element={<Records />} />
         <Route path="/onboard" element={<Onboard />} />
         <Route path="/merge/:orgId" element={<MergeTools />} />
+        <Route path="/awards/:orgId" element={<AchievementsAdmin />} />
       </Routes>
     </div>
   )
