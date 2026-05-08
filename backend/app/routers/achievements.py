@@ -67,18 +67,38 @@ async def list_achievements(
     season: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    filters = ["org_id = :org_id"]
     params: dict = {"org_id": org_id}
+
     if player_id:
-        filters.append("player_id = :player_id")
-        params["player_id"] = player_id
+        # Also match unlinked rows (player_id IS NULL) where the name matches this player
+        player_name_result = await db.execute(
+            text("SELECT name FROM players WHERE id = :pid"),
+            {"pid": player_id},
+        )
+        player_row = player_name_result.mappings().first()
+        player_name_norm = _normalise(player_row["name"]) if player_row else None
+
+        if player_name_norm:
+            player_filter = (
+                "(player_id = :player_id OR "
+                "(player_id IS NULL AND lower(regexp_replace(player_name, '\\s+', ' ', 'g')) = :pname))"
+            )
+            params["player_id"] = player_id
+            params["pname"] = player_name_norm
+        else:
+            player_filter = "player_id = :player_id"
+            params["player_id"] = player_id
+
+        base_filter = f"org_id = :org_id AND {player_filter}"
+    else:
+        base_filter = "org_id = :org_id"
+
     if season:
-        filters.append("season = :season")
+        base_filter += " AND season = :season"
         params["season"] = season
 
-    where = " AND ".join(filters)
     rows = await db.execute(
-        text(f"SELECT * FROM player_achievements WHERE {where} ORDER BY season DESC NULLS LAST, category, id"),
+        text(f"SELECT * FROM player_achievements WHERE {base_filter} ORDER BY season DESC NULLS LAST, category, id"),
         params,
     )
     return [dict(r) for r in rows.mappings().all()]
