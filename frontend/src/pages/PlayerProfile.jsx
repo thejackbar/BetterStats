@@ -5,6 +5,7 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import { api } from '../lib/api'
+import { getSubcategories, getAchievements } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
 import StatCard from '../components/StatCard'
 import TrendChart from '../components/TrendChart'
@@ -18,7 +19,7 @@ const CATEGORY_ICONS = {
   'Club Award': '🏆',
   'Association Award': '🥇',
   'Office Bearer': '👔',
-  'Premiership': '🏸',
+  'Premiership': '🏏',
   'Hall of Fame': '⭐',
   'Life Membership': '🎖',
   'Milestone': '📍',
@@ -26,29 +27,67 @@ const CATEGORY_ICONS = {
 
 const CATEGORIES = ['Club Award', 'Association Award', 'Office Bearer', 'Premiership', 'Hall of Fame', 'Life Membership', 'Milestone']
 
-function AchievementsSection({ playerId, orgId }) {
+function AchievementsSection({ playerId, orgId, playerName }) {
   const [achievements, setAchievements] = useState(null)
+  const [seasons, setSeasons] = useState([])
   const [adding, setAdding] = useState(false)
   const [editId, setEditId] = useState(null)
   const [form, setForm] = useState({ season: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
+  const [customSubcat, setCustomSubcat] = useState(false)
+  const [customAchievement, setCustomAchievement] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     if (!orgId) return
     api.listAchievements(orgId, { playerId }).then(setAchievements).catch(() => setAchievements([]))
+    api.getOrgSeasons(orgId).then(data => setSeasons(data || [])).catch(() => {})
   }, [playerId, orgId])
+
+  const subcatOptions = getSubcategories(form.category)
+  const achievementOptions = getAchievements(form.category, form.subcategory)
 
   const openAdd = () => {
     setForm({ season: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
+    setCustomSubcat(false)
+    setCustomAchievement(false)
     setEditId(null)
     setAdding(true)
   }
 
   const openEdit = (a) => {
     setForm({ season: a.season || '', category: a.category, subcategory: a.subcategory || '', achievement: a.achievement, detail: a.detail || '' })
+    setCustomSubcat(false)
+    setCustomAchievement(false)
     setEditId(a.id)
     setAdding(true)
+  }
+
+  const setCategory = (cat) => {
+    setForm(f => ({ ...f, category: cat, subcategory: '', achievement: '' }))
+    setCustomSubcat(false)
+    setCustomAchievement(false)
+  }
+
+  const setSubcat = (val) => {
+    if (val === '__other__') {
+      setCustomSubcat(true)
+      setForm(f => ({ ...f, subcategory: '', achievement: '' }))
+    } else {
+      setCustomSubcat(false)
+      setForm(f => ({ ...f, subcategory: val, achievement: '' }))
+      setCustomAchievement(false)
+    }
+  }
+
+  const setAchievementVal = (val) => {
+    if (val === '__other__') {
+      setCustomAchievement(true)
+      setForm(f => ({ ...f, achievement: '' }))
+    } else {
+      setCustomAchievement(false)
+      setForm(f => ({ ...f, achievement: val }))
+    }
   }
 
   const handleSave = async () => {
@@ -59,7 +98,7 @@ function AchievementsSection({ playerId, orgId }) {
       if (editId) {
         await api.updateAchievement(editId, form)
       } else {
-        await api.createAchievement({ ...form, org_id: orgId, player_id: playerId, player_name: '' })
+        await api.createAchievement({ ...form, org_id: orgId, player_id: playerId, player_name: playerName || '' })
       }
       const updated = await api.listAchievements(orgId, { playerId })
       setAchievements(updated)
@@ -80,6 +119,8 @@ function AchievementsSection({ playerId, orgId }) {
 
   if (achievements === null) return <div className="p-5"><LoadingSpinner size="sm" /></div>
 
+  const inputCls = 'w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500'
+
   // Group by season then category
   const grouped = {}
   for (const a of achievements) {
@@ -88,7 +129,7 @@ function AchievementsSection({ playerId, orgId }) {
     if (!grouped[s][a.category]) grouped[s][a.category] = []
     grouped[s][a.category].push(a)
   }
-  const seasons = Object.keys(grouped).sort((a, b) => {
+  const groupedSeasons = Object.keys(grouped).sort((a, b) => {
     if (a === 'All Time') return 1
     if (b === 'All Time') return -1
     return b.localeCompare(a)
@@ -107,49 +148,57 @@ function AchievementsSection({ playerId, orgId }) {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
             <div>
               <label className="section-label mb-1 block">Season</label>
-              <input
-                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
-                placeholder="e.g. 2025_26"
-                value={form.season}
-                onChange={e => setForm(f => ({ ...f, season: e.target.value }))}
-              />
+              <select className={inputCls} value={form.season} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
+                <option value="">— All Time —</option>
+                {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
             </div>
             <div>
               <label className="section-label mb-1 block">Category *</label>
-              <select
-                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
-                value={form.category}
-                onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-              >
+              <select className={inputCls} value={form.category} onChange={e => setCategory(e.target.value)}>
                 {CATEGORIES.map(c => <option key={c}>{c}</option>)}
               </select>
             </div>
             <div>
               <label className="section-label mb-1 block">Subcategory / Grade</label>
-              <input
-                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
-                placeholder="e.g. 1st XI, WASTCA"
-                value={form.subcategory}
-                onChange={e => setForm(f => ({ ...f, subcategory: e.target.value }))}
-              />
+              {!customSubcat && subcatOptions.length > 0 ? (
+                <select className={inputCls} value={form.subcategory} onChange={e => setSubcat(e.target.value)}>
+                  <option value="">— Select —</option>
+                  {subcatOptions.map(s => <option key={s}>{s}</option>)}
+                  <option value="__other__">Other…</option>
+                </select>
+              ) : (
+                <div className="flex gap-1">
+                  <input className={inputCls} placeholder="e.g. 1st XI, WASTCA" value={form.subcategory}
+                    onChange={e => setForm(f => ({ ...f, subcategory: e.target.value, achievement: '' }))} />
+                  {customSubcat && (
+                    <button onClick={() => { setCustomSubcat(false); setForm(f => ({ ...f, subcategory: '' })) }} className="text-slate-500 hover:text-white px-1 text-lg">×</button>
+                  )}
+                </div>
+              )}
             </div>
             <div className="md:col-span-2">
               <label className="section-label mb-1 block">Achievement *</label>
-              <input
-                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
-                placeholder="e.g. Best & Fairest, President, Premiership"
-                value={form.achievement}
-                onChange={e => setForm(f => ({ ...f, achievement: e.target.value }))}
-              />
+              {!customAchievement && achievementOptions.length > 0 ? (
+                <select className={inputCls} value={form.achievement} onChange={e => setAchievementVal(e.target.value)}>
+                  <option value="">— Select —</option>
+                  {achievementOptions.map(a => <option key={a}>{a}</option>)}
+                  <option value="__other__">Other…</option>
+                </select>
+              ) : (
+                <div className="flex gap-1">
+                  <input className={inputCls} placeholder="e.g. Best & Fairest, President" value={form.achievement}
+                    onChange={e => setForm(f => ({ ...f, achievement: e.target.value }))} />
+                  {customAchievement && (
+                    <button onClick={() => { setCustomAchievement(false); setForm(f => ({ ...f, achievement: '' })) }} className="text-slate-500 hover:text-white px-1 text-lg">×</button>
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <label className="section-label mb-1 block">Detail</label>
-              <input
-                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
-                placeholder="e.g. 436 runs at 39.64"
-                value={form.detail}
-                onChange={e => setForm(f => ({ ...f, detail: e.target.value }))}
-              />
+              <input className={inputCls} placeholder="e.g. 436 runs at 39.64" value={form.detail}
+                onChange={e => setForm(f => ({ ...f, detail: e.target.value }))} />
             </div>
           </div>
           {error && <p className="text-red-400 text-xs mb-2">{error}</p>}
@@ -166,7 +215,7 @@ function AchievementsSection({ playerId, orgId }) {
         <p className="text-slate-500 text-sm px-5 py-8 text-center">No achievements recorded yet.</p>
       )}
 
-      {seasons.map(season => (
+      {groupedSeasons.map(season => (
         <div key={season} className="border-b border-navy-700 last:border-0">
           <div className="px-5 py-3 bg-navy-800/30">
             <span className="text-accent font-mono font-bold text-sm">{season.replace('_', '/')}</span>
@@ -174,7 +223,7 @@ function AchievementsSection({ playerId, orgId }) {
           {Object.entries(grouped[season]).map(([cat, items]) => (
             <div key={cat} className="px-5 py-3">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-base">{CATEGORY_ICONS[cat] || '🎅'}</span>
+                <span className="text-base">{CATEGORY_ICONS[cat] || '🏅'}</span>
                 <span className="section-label text-xs">{cat.toUpperCase()}</span>
               </div>
               <div className="space-y-1.5">
@@ -233,7 +282,7 @@ function ActivityBadge({ label, value, sub, accent = false }) {
 
 function UpcomingMilestonesSection({ data }) {
   if (!data?.length) return null
-  const ICONS = { runs: '🏸', wickets: '⚡', matches: '📅' }
+  const ICONS = { runs: '🏏', wickets: '⚡', matches: '📅' }
   return (
     <div className="mb-8">
       <h3 className="display-heading text-lg text-white mb-4">CHASING</h3>
@@ -673,7 +722,7 @@ export default function PlayerProfile() {
         )}
 
         {tab === 'achievements' && achievementsLoaded && (
-          <AchievementsSection playerId={playerId} orgId={player.organisation_id} />
+          <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.name} />
         )}
       </div>
     </div>
