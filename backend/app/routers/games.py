@@ -143,8 +143,13 @@ async def debug_playhq_scorecard(
 ):
     """Return raw PlayHQ REST period/team structure alongside parsed innings count."""
     from app.services.playhq_partner_client import BASE_URL, _get, _parse_summary_rest
-    raw = await _get(f"{BASE_URL}/v2/games/{playhq_game_id}/summary")
+    try:
+        raw = await _get(f"{BASE_URL}/v2/games/{playhq_game_id}/summary")
+    except Exception as e:
+        return {"error": str(e), "fixture_id": playhq_game_id, "hint": "PlayHQ API call failed — check fixture ID is a PlayHQ game ID, not an internal DB UUID"}
     data = raw.get("data") or {}
+    if not data:
+        return {"error": "PlayHQ returned empty data", "raw_keys": list(raw.keys()), "fixture_id": playhq_game_id}
     periods_summary = [
         {
             "name": p.get("name"),
@@ -155,8 +160,12 @@ async def debug_playhq_scorecard(
         }
         for p in (data.get("periods") or [])
     ]
-    parsed = _parse_summary_rest(data) if data else {"innings": []}
+    try:
+        parsed = _parse_summary_rest(data)
+    except Exception as e:
+        parsed = {"innings": [], "parse_error": str(e)}
     return {
+        "fixture_id": playhq_game_id,
         "periods_count": len(periods_summary),
         "periods": periods_summary,
         "teams_top_level": [{"id": t.get("id"), "name": t.get("name")} for t in (data.get("teams") or [])],
@@ -165,6 +174,7 @@ async def debug_playhq_scorecard(
             {"innings_number": inn["innings_number"], "batting_team": inn["batting_team"], "bowling_team": inn["bowling_team"], "batting_rows": len(inn["batting"]), "bowling_rows": len(inn["bowling"])}
             for inn in parsed.get("innings", [])
         ],
+        "parse_error": parsed.get("parse_error"),
     }
 
 
@@ -186,131 +196,97 @@ async def get_playhq_scorecard(
     game_url = matched.get("url", "") if matched else ""
     try:
         scorecard = await playhq_partner_client.get_fixture_scorecard(playhq_game_id, game_url=game_url)
+        await _enrich_scorecard_player_ids(scorecard, org, db)
+        return scorecard
     except Exception as e:
         logger.warning(f"PlayHQ scorecard fetch failed for {playhq_game_id}: {e}")
-        raise HTTPException(status_code=502, detail=f"PlayHQ scorecard unavailable: {e}")
-    await _enrich_scorecard_player_ids(scorecard, org, db)
-    if matched:
-        scorecard["game"] = {
-            "id": matched.get("id"),
-            "home_team": matched.get("home_team"),
-            "away_team": matched.get("away_team"),
-            "result": matched.get("result"),
-            "winning_team": matched.get("winning_team"),
-            "played_at": matched.get("played_at"),
-            "grade": matched.get("grade"),
-            "season": matched.get("season"),
-            "round": matched.get("round"),
-            "venue": matched.get("venue"),
-            "competitors": matched.get("competitors", []),
-        }
-    return scorecard
+        raise HTTPException(status_code=502, detail=f"Scorecard unavailable: {e}")
 
 
 @router.get("/{game_id}/scorecard")
-async def get_scorecard(game_id: str, db: AsyncSession = Depends(get_db)):
+async def get_scorecard(
+    game_id: str,
+    db: AsyncSession = Depends(get_db),
+):
     game = await db.get(Game, uuid.UUID(game_id))
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    # Derive innings-team mapping from raw_payload if available
-    innings_teams: dict[int, str] = {}
-    if game.raw_payload:
-        for inn in game.raw_payload.get("innings", []):
-            inn_num = inn.get("inningsNumber", 1)
-            team_name = (inn.get("team") or {}).get("name", "")
-            if team_name:
-                innings_teams[inn_num] = team_name
-
-    # Batting — ordered by innings_number then batting_position
-    bat_result = await db.execute(
-        select(BattingInnings, Player)
-        .join(Player, Player.id == BattingInnings.player_id)
-        .where(BattingInnings.game_id == uuid.UUID(game_id))
-        .order_by(BattingInnings.innings_number, BattingInnings.batting_position)
+    batting_res = await db.execute(
+        select(BattingInnings).where(BattingInnings.game_id == game.id)
     )
-    batting = [
-        {
-            "player_id": str(p.id),
-            "player_name": p.name,
-            "innings_number": bi.innings_number or 1,
+    batting_innings_list = batting_res.scalars().all()
+
+    bowling_res = await db.execute(
+        select(BowlingSpell).where(BowlingSpell.game_id == game.id)
+    )
+    bowling_spells = bowling_res.scalars().all()
+
+    fielding_res = await db.execute(
+        select(FieldingStat).where(FieldingStat.game_id == game.id)
+    )
+    fielding_stats = fielding_res.scalars().all()
+
+    innings_map = {}
+    for bi in batting_innings_list:
+        inn_num = bi.innings_number
+        if inn_num not in innings_map:
+            innings_map[inn_num] = {
+                "innings_number": inn_num,
+                "batting_team": bi.batting_team,
+                "bowling_team": bi.bowling_team,
+                "total_runs": bi.total_runs,
+                "total_wickets": bi.total_wickets,
+                "overs": bi.overs,
+                "extras": bi.extras,
+                "batting": [],
+                "bowling": [],
+            }
+        innings_map[inn_num]["batting"].append({
+            "name": bi.player_name,
+            "how_out": bi.how_out,
             "runs": bi.runs,
             "balls": bi.balls,
             "fours": bi.fours,
             "sixes": bi.sixes,
-            "strike_rate": float(bi.strike_rate) if bi.strike_rate else None,
-            "dismissal_type": bi.dismissal_type,
             "not_out": bi.not_out,
-            "batting_position": bi.batting_position,
-        }
-        for bi, p in bat_result.all()
-    ]
+        })
 
-    # Bowling — ordered by innings_number then wickets desc
-    bowl_result = await db.execute(
-        select(BowlingSpell, Player)
-        .join(Player, Player.id == BowlingSpell.player_id)
-        .where(BowlingSpell.game_id == uuid.UUID(game_id))
-        .order_by(BowlingSpell.innings_number, BowlingSpell.wickets.desc())
-    )
-    bowling = [
-        {
-            "player_id": str(p.id),
-            "player_name": p.name,
-            "innings_number": bs.innings_number or 1,
-            "overs": float(bs.overs) if bs.overs else None,
-            "maidens": bs.maidens,
-            "runs": bs.runs,
-            "wickets": bs.wickets,
-            "wides": bs.wides,
-            "no_balls": bs.no_balls,
-            "economy": float(bs.economy) if bs.economy else None,
-        }
-        for bs, p in bowl_result.all()
-    ]
+    for bs in bowling_spells:
+        inn_num = bs.innings_number
+        if inn_num in innings_map:
+            innings_map[inn_num]["bowling"].append({
+                "name": bs.player_name,
+                "overs": bs.overs,
+                "maidens": bs.maidens,
+                "runs": bs.runs,
+                "wickets": bs.wickets,
+                "wides": bs.wides,
+                "no_balls": bs.no_balls,
+            })
 
-    # Fielding
-    field_result = await db.execute(
-        select(FieldingStat, Player)
-        .join(Player, Player.id == FieldingStat.player_id)
-        .where(FieldingStat.game_id == uuid.UUID(game_id))
-    )
-    fielding = [
-        {
-            "player_id": str(p.id),
-            "player_name": p.name,
-            "catches": fs.catches,
-            "run_outs": fs.run_outs,
-            "stumpings": fs.stumpings,
-        }
-        for fs, p in field_result.all()
-    ]
-
-    fow = await get_game_fall_of_wickets(db, game_id)
-    partnerships = await get_game_partnerships(db, game_id)
-
-    grade = await db.get(Grade, game.grade_id)
-    season = await db.get(Season, grade.season_id) if grade else None
+    fow = await get_game_fall_of_wickets(db, game.id)
+    partnerships = await get_game_partnerships(db, game.id)
 
     return {
-        "id": str(game.id),
-        "played_at": game.played_at.isoformat() if game.played_at else None,
-        "home_team": game.home_team,
-        "away_team": game.away_team,
-        "result": game.result,
-        "winning_team": game.winning_team,
-        "innings_teams": innings_teams,
-        "grade": {"id": str(grade.id), "name": grade.name} if grade else None,
-        "season": {"id": str(season.id), "name": season.name} if season else None,
-        "batting": batting,
-        "bowling": bowling,
-        "fielding": fielding,
-        "fall_of_wickets": [
-            {k: str(v) if isinstance(v, uuid.UUID) else v for k, v in row.items()}
-            for row in fow
+        "game": {
+            "id": str(game.id),
+            "home_team": game.home_team,
+            "away_team": game.away_team,
+            "played_at": game.played_at.isoformat() if game.played_at else None,
+            "result": game.result,
+            "winning_team": game.winning_team,
+        },
+        "innings": [innings_map[k] for k in sorted(innings_map.keys())],
+        "fielding": [
+            {
+                "name": fs.player_name,
+                "catches": fs.catches,
+                "run_outs": fs.run_outs,
+                "stumpings": fs.stumpings,
+            }
+            for fs in fielding_stats
         ],
-        "partnerships": [
-            {k: str(v) if isinstance(v, uuid.UUID) else v for k, v in row.items()}
-            for row in partnerships
-        ],
+        "fall_of_wickets": fow,
+        "partnerships": partnerships,
     }
