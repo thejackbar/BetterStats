@@ -109,41 +109,17 @@ async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depe
     if grades:
         return [{"id": str(g.id), "name": g.name} for g in grades]
 
-    # No grades in DB yet — extract from get_org_games (same source that powers the dashboard)
-    org = await db.get(Organisation, uuid.UUID(org_id))
-    if not org or not org.playhq_id:
-        return []
-
-    season_obj = await db.get(Season, uuid.UUID(season_id))
-    season_name = season_obj.name.strip().lower() if season_obj else ""
-
-    db_seasons_res = await db.execute(
-        select(Season).where(Season.organisation_id == uuid.UUID(org_id))
-    )
-    db_seasons_list = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
-
+    # No grades in DB — try the cheap per-season PlayHQ endpoint (single call per season)
     try:
-        all_games = await playhq_partner_client.get_org_games(
-            org.playhq_id, org.name,
-            db_seasons=db_seasons_list,
-            grassroots_org_id=str(org.id),
-        )
-        seen: set[str] = set()
-        out: list[dict] = []
-        for game in all_games:
-            grade = game.get("grade") or {}
-            gid = grade.get("id")
-            gname = grade.get("name", "")
-            game_season = (game.get("season") or "").strip().lower()
-            if not gid or not gname or gid in seen:
-                continue
-            if season_name and game_season != season_name:
-                continue
-            seen.add(gid)
-            out.append({"id": gid, "name": gname})
-        return sorted(out, key=lambda x: x["name"])
+        api_grades = await playhq_partner_client.get_season_grades(season_id)
+        if api_grades:
+            return sorted(
+                [{"id": g["id"], "name": g.get("name", "")} for g in api_grades if g.get("id")],
+                key=lambda x: x["name"],
+            )
     except Exception:
-        return []
+        pass
+    return []
 
 
 @router.get("/{org_id}/upcoming-milestones")
