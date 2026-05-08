@@ -1,4 +1,4 @@
-import { useParams, useSearchParams, Link } from 'react-router-dom'
+import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -298,6 +298,7 @@ export default function MatchScorecard() {
   const { gameId } = useParams()
   const [searchParams] = useSearchParams()
   const orgId = searchParams.get('org')
+  const navigate = useNavigate()
   const [game, setGame] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -337,6 +338,12 @@ export default function MatchScorecard() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
+      <button
+        onClick={() => navigate(-1)}
+        className="flex items-center gap-1.5 text-slate-500 hover:text-white text-sm mb-5 transition-colors"
+      >
+        ← Back
+      </button>
       <MatchSummary game={game} />
 
       <div className="space-y-5">

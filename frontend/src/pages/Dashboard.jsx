@@ -70,7 +70,7 @@ function RecentResults({ games, loading, orgId }) {
         {visible.map(game => (
           <Link
             key={game.id}
-            to={`/scorecards/${game.id}?org=${orgId}`}
+            to={`/games/${game.id}`}
             className="flex items-center justify-between py-2 px-1 hover:bg-navy-700/20 transition-colors group"
           >
             <div className="min-w-0">
