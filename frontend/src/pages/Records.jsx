@@ -22,7 +22,7 @@ function opponent(row) {
   return row.home_team && row.away_team ? `${row.home_team} v ${row.away_team}` : null
 }
 
-// ── Shared sub-components ──────────────────────────────────────────────────
+// ── Shared sub-components ─────────────────────────────────────────────────────
 
 function RecordCard({ title, children, empty }) {
   return (
@@ -48,7 +48,7 @@ function RankBadge({ rank }) {
   return <span className={clsx('text-xs font-mono w-5 inline-block text-right mr-2', cls)}>{rank}</span>
 }
 
-// ── Batting tab ──────────────────────────────────────────────────────
+// ── Batting tab ───────────────────────────────────────────────────────────────
 
 function BattingTab({ data }) {
   return (
@@ -206,7 +206,7 @@ function BattingTab({ data }) {
   )
 }
 
-// ── Bowling tab ──────────────────────────────────────────────────────
+// ── Bowling tab ───────────────────────────────────────────────────────────────
 
 function BowlingTab({ data }) {
   return (
@@ -326,7 +326,7 @@ function BowlingTab({ data }) {
   )
 }
 
-// ── Partnerships tab ──────────────────────────────────────────────────
+// ── Partnerships tab ──────────────────────────────────────────────────────────
 
 function PartnershipRow({ r, rank }) {
   const b1 = r.batter1_name || 'Unknown'
@@ -419,7 +419,7 @@ function PartnershipsTab({ data }) {
   )
 }
 
-// ── Team tab ──────────────────────────────────────────────────────
+// ── Team tab ──────────────────────────────────────────────────────────────────
 
 function TeamTab({ data }) {
   return (
@@ -482,30 +482,46 @@ function TeamTab({ data }) {
   )
 }
 
-// ── Season selector ────────────────────────────────────────────────────
+// ── Filters ───────────────────────────────────────────────────────────────────
 
-function SeasonFilter({ seasons, seasonId, onChange }) {
+function FilterBar({ seasons, seasonId, onSeasonChange, grades, gradeId, onGradeChange }) {
   return (
-    <select
-      value={seasonId || ''}
-      onChange={e => onChange(e.target.value || null)}
-      className="bg-navy-800 border border-navy-600 text-slate-300 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent"
-    >
-      <option value="">All time</option>
-      {seasons.map(s => (
-        <option key={s.id} value={s.id}>{s.name}</option>
-      ))}
-    </select>
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        value={seasonId || ''}
+        onChange={e => onSeasonChange(e.target.value || null)}
+        className="bg-navy-800 border border-navy-600 text-slate-300 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent"
+      >
+        <option value="">All time</option>
+        {seasons.map(s => (
+          <option key={s.id} value={s.id}>{s.name}</option>
+        ))}
+      </select>
+      {seasonId && grades.length > 0 && (
+        <select
+          value={gradeId || ''}
+          onChange={e => onGradeChange(e.target.value || null)}
+          className="bg-navy-800 border border-navy-600 text-slate-300 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent"
+        >
+          <option value="">All grades</option>
+          {grades.map(g => (
+            <option key={g.id} value={g.id}>{g.name}</option>
+          ))}
+        </select>
+      )}
+    </div>
   )
 }
 
-// ── Main page ───────────────────────────────────────────────────────────
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Records() {
   const { orgId } = useParams()
   const [tab, setTab] = useState('batting')
   const [seasons, setSeasons] = useState([])
   const [seasonId, setSeasonId] = useState(null)
+  const [grades, setGrades] = useState([])
+  const [gradeId, setGradeId] = useState(null)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -515,13 +531,22 @@ export default function Records() {
   }, [orgId])
 
   useEffect(() => {
+    setGradeId(null)
+    if (seasonId) {
+      api.getRecordsGrades(orgId, seasonId).then(setGrades).catch(() => setGrades([]))
+    } else {
+      setGrades([])
+    }
+  }, [orgId, seasonId])
+
+  useEffect(() => {
     setLoading(true)
     setError(null)
-    api.getRecords(orgId, { seasonId })
+    api.getRecords(orgId, { seasonId, gradeId })
       .then(setData)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [orgId, seasonId])
+  }, [orgId, seasonId, gradeId])
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -531,7 +556,10 @@ export default function Records() {
           <h1 className="display-heading text-3xl text-white">Club Records</h1>
           <p className="text-slate-500 text-sm mt-1">All-time records &amp; statistical leaders</p>
         </div>
-        <SeasonFilter seasons={seasons} seasonId={seasonId} onChange={setSeasonId} />
+        <FilterBar
+          seasons={seasons} seasonId={seasonId} onSeasonChange={setSeasonId}
+          grades={grades} gradeId={gradeId} onGradeChange={setGradeId}
+        />
       </div>
 
       {/* Tabs */}

@@ -1,40 +1,67 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+from sqlalchemy import text, select
 import uuid
 
-from app.models.db import get_db
+from app.models.db import get_db, Grade
 
 router = APIRouter(prefix="/records", tags=["records"])
 
 _LIMIT = 25
 
 
-def _season_join(season_id: str | None) -> tuple[str, dict]:
-    """Return an extra JOIN + WHERE clause and params to filter by season."""
-    if not season_id:
-        return "", {}
-    return (
-        " JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id",
-        {"season_id": season_id},
+@router.get("/{org_id}/grades")
+async def get_records_grades(
+    org_id: str,
+    season_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return grades for the org, optionally scoped to a season."""
+    q = select(Grade).join(Grade.season).where(
+        Grade.season.has(organisation_id=uuid.UUID(org_id))
     )
+    if season_id:
+        q = q.where(Grade.season_id == uuid.UUID(season_id))
+    result = await db.execute(q.order_by(Grade.name))
+    grades = result.scalars().all()
+    return [{"id": str(g.id), "name": g.name, "season_id": str(g.season_id)} for g in grades]
 
 
 @router.get("/{org_id}")
 async def get_records(
     org_id: str,
     season_id: str | None = Query(None),
+    grade_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
+    # If grade_id supplied without season_id, resolve season from grade
+    if grade_id and not season_id:
+        grade = await db.get(Grade, uuid.UUID(grade_id))
+        if grade:
+            season_id = str(grade.season_id)
+
     p = {"org_id": org_id, "limit": _LIMIT}
-    season_join, season_params = _season_join(season_id)
-    p.update(season_params)
+    if season_id:
+        p["season_id"] = season_id
+    if grade_id:
+        p["grade_id"] = grade_id
+
+    # Clauses for game-level queries (partnerships) that already JOIN games g
+    game_season_clause = " JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id" if season_id else ""
+    game_grade_clause  = " AND g.grade_id = :grade_id" if grade_id else ""
+
+    # Clauses for top_pairs which has no pre-existing games join
+    pairs_game_join    = " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id" if season_id else ""
+    pairs_grade_clause = " AND g.grade_id = :grade_id" if grade_id else ""
+
+    # Inline WHERE additions for player_season_stats aggregate queries
+    pss_season_clause  = "AND pss.season_id = :season_id " if season_id else ""
 
     async def q(sql: str, params: dict | None = None) -> list[dict]:
         rows = await db.execute(text(sql), params or p)
         return [dict(r) for r in rows.mappings().all()]
 
-    # ── Batting ────────────────────────────────────────────────────
+    # ── Batting ──────────────────────────────────────────────────────────────
 
     top_career_runs = await q("""
         SELECT p.id::text AS player_id, p.name,
@@ -47,8 +74,8 @@ async def get_records(
                    NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.runs) > 0
         ORDER BY runs DESC LIMIT :limit
@@ -62,8 +89,8 @@ async def get_records(
         FROM player_season_stats pss
         JOIN players p ON p.id = pss.player_id
         JOIN seasons s ON s.id = pss.season_id
-        """ + ("WHERE p.organisation_id = :org_id AND pss.season_id = :season_id" if season_id else
-               "WHERE p.organisation_id = :org_id") + """
+        WHERE p.organisation_id = :org_id
+          """ + ("AND pss.season_id = :season_id " if season_id else "") + """
           AND pss.high_score IS NOT NULL AND pss.high_score > 0
         ORDER BY pss.high_score DESC LIMIT :limit
     """)
@@ -76,8 +103,8 @@ async def get_records(
                COALESCE(SUM(pss.batting_innings), 0) AS innings
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING (SUM(pss.batting_innings) - SUM(pss.not_outs)) >= 5
         ORDER BY average DESC LIMIT :limit
@@ -91,8 +118,8 @@ async def get_records(
                COALESCE(SUM(pss.batting_innings), 0) AS innings
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.balls_faced) >= 50
         ORDER BY strike_rate DESC LIMIT :limit
@@ -105,8 +132,8 @@ async def get_records(
                COALESCE(SUM(pss.runs), 0)     AS runs
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.fifties) > 0
         ORDER BY fifties DESC LIMIT :limit
@@ -118,8 +145,8 @@ async def get_records(
                COALESCE(SUM(pss.runs), 0)     AS runs
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.hundreds) > 0
         ORDER BY hundreds DESC LIMIT :limit
@@ -131,8 +158,8 @@ async def get_records(
                COALESCE(SUM(pss.batting_innings), 0) AS innings
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.ducks) > 0
         ORDER BY ducks DESC LIMIT :limit
@@ -146,10 +173,11 @@ async def get_records(
         JOIN players p ON p.id = pss.player_id
         JOIN seasons s ON s.id = pss.season_id
         WHERE p.organisation_id = :org_id AND pss.runs > 0
+          """ + ("AND pss.season_id = :season_id " if season_id else "") + """
         ORDER BY pss.runs DESC LIMIT :limit
     """)
 
-    # ── Bowling ────────────────────────────────────────────────────
+    # ── Bowling ──────────────────────────────────────────────────────────────
 
     top_career_wickets = await q("""
         SELECT p.id::text AS player_id, p.name,
@@ -162,8 +190,8 @@ async def get_records(
                    NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.wickets) > 0
         ORDER BY wickets DESC LIMIT :limit
@@ -177,8 +205,8 @@ async def get_records(
         FROM player_season_stats pss
         JOIN players p ON p.id = pss.player_id
         JOIN seasons s ON s.id = pss.season_id
-        """ + ("WHERE p.organisation_id = :org_id AND pss.season_id = :season_id" if season_id else
-               "WHERE p.organisation_id = :org_id") + """
+        WHERE p.organisation_id = :org_id
+          """ + ("AND pss.season_id = :season_id " if season_id else "") + """
           AND pss.best_bowling_figures IS NOT NULL
           AND pss.best_bowling_figures LIKE '%-%'
           AND pss.best_bowling_wickets > 0
@@ -195,8 +223,8 @@ async def get_records(
                COALESCE(SUM(pss.runs_conceded), 0) AS runs_conceded
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.wickets) >= 5
         ORDER BY average ASC LIMIT :limit
@@ -210,8 +238,8 @@ async def get_records(
                COALESCE(SUM(pss.overs), 0)   AS overs
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.bowling_balls) >= 60
         ORDER BY economy ASC LIMIT :limit
@@ -223,8 +251,8 @@ async def get_records(
                COALESCE(SUM(pss.wickets), 0)             AS wickets
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.five_wicket_innings) > 0
         ORDER BY five_fors DESC LIMIT :limit
@@ -238,10 +266,11 @@ async def get_records(
         JOIN players p ON p.id = pss.player_id
         JOIN seasons s ON s.id = pss.season_id
         WHERE p.organisation_id = :org_id AND pss.wickets > 0
+          """ + ("AND pss.season_id = :season_id " if season_id else "") + """
         ORDER BY pss.wickets DESC LIMIT :limit
     """)
 
-    # ── Partnerships ─────────────────────────────────────────────────
+    # ── Partnerships ─────────────────────────────────────────────────────────
 
     top_partnerships = await q("""
         SELECT
@@ -251,15 +280,15 @@ async def get_records(
             g.played_at::text, g.home_team, g.away_team
         FROM partnerships pt
         JOIN games g ON g.id = pt.game_id
+        """ + game_season_clause + """
         LEFT JOIN players p1 ON p1.id = pt.batter1_id
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
-        """ + season_join + """
         WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
+          """ + game_grade_clause + """
           AND pt.runs IS NOT NULL AND pt.runs > 0
         ORDER BY pt.runs DESC LIMIT :limit
     """)
 
-    # Top partnership per wicket number (1–10)
     partnerships_by_wicket_rows = await q("""
         SELECT
             p1.id::text AS batter1_id, p1.name AS batter1_name,
@@ -269,10 +298,11 @@ async def get_records(
             ROW_NUMBER() OVER (PARTITION BY pt.wicket_number ORDER BY pt.runs DESC) AS rn
         FROM partnerships pt
         JOIN games g ON g.id = pt.game_id
+        """ + game_season_clause + """
         LEFT JOIN players p1 ON p1.id = pt.batter1_id
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
-        """ + season_join + """
         WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
+          """ + game_grade_clause + """
           AND pt.runs IS NOT NULL AND pt.runs > 0 AND pt.wicket_number BETWEEN 1 AND 10
     """)
     by_wicket: dict[int, list] = {}
@@ -295,22 +325,23 @@ async def get_records(
         FROM partnerships pt
         JOIN players p1 ON p1.id = pt.batter1_id
         JOIN players p2 ON p2.id = pt.batter2_id
-        """ + (season_join.replace("JOIN games", "JOIN games g2 ON g2.id = pt.game_id JOIN games") if season_join else "") + """
+        """ + pairs_game_join + """
         WHERE p1.organisation_id = :org_id AND p2.organisation_id = :org_id
+          """ + pairs_grade_clause + """
         GROUP BY LEAST(p1.id::text, p2.id::text),
                  p1.id, p1.name, p2.id, p2.name
         ORDER BY total_runs DESC LIMIT :limit
     """)
 
-    # ── Team / fielding ──────────────────────────────────────────────────
+    # ── Team / fielding ───────────────────────────────────────────────────────
 
     most_matches = await q("""
         SELECT p.id::text AS player_id, p.name,
                COALESCE(SUM(pss.matches), 0) AS matches
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.matches) > 0
         ORDER BY matches DESC LIMIT :limit
@@ -324,8 +355,8 @@ async def get_records(
                COALESCE(SUM(pss.run_outs), 0)        AS run_outs
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.catches_non_wk + pss.catches_wk + pss.stumpings) > 0
         ORDER BY (SUM(pss.catches_non_wk) + SUM(pss.catches_wk) + SUM(pss.stumpings)) DESC
@@ -340,8 +371,8 @@ async def get_records(
                (COALESCE(SUM(pss.runs), 0) + COALESCE(SUM(pss.wickets), 0) * 20) AS score
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
-        """ + ("JOIN seasons s ON s.id = pss.season_id AND s.id = :season_id " if season_id else "") + """
         WHERE p.organisation_id = :org_id
+          """ + pss_season_clause + """
         GROUP BY p.id, p.name
         HAVING SUM(pss.runs) >= 100 AND SUM(pss.wickets) >= 5
         ORDER BY score DESC LIMIT :limit

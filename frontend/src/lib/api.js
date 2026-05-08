@@ -81,10 +81,16 @@ export const api = {
   getPlayHQScorecard: (orgId, gameId) => request(`/games/playhq/${gameId}/scorecard?org_id=${encodeURIComponent(orgId)}`),
 
   // Records
-  getRecords: (orgId, { seasonId } = {}) => {
+  getRecords: (orgId, { seasonId, gradeId } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
+    if (gradeId) params.set('grade_id', gradeId)
     return request(`/records/${orgId}?${params}`)
+  },
+  getRecordsGrades: (orgId, seasonId) => {
+    const params = new URLSearchParams()
+    if (seasonId) params.set('season_id', seasonId)
+    return request(`/records/${orgId}/grades?${params}`)
   },
 
   // Leaderboard
