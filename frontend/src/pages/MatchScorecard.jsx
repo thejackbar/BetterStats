@@ -304,11 +304,14 @@ export default function MatchScorecard() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    api.getScorecard(gameId)
+    const fetch = orgId
+      ? api.getPlayHQScorecard(orgId, gameId)
+      : api.getScorecard(gameId)
+    fetch
       .then(setGame)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [gameId])
+  }, [gameId, orgId])
 
   if (loading) return <LoadingSpinner message="Loading scorecard…" />
   if (error) return <div className="max-w-5xl mx-auto px-4 py-16 text-red-400">Error: {error}</div>

@@ -351,7 +351,8 @@ function PartnershipRow({ r, rank }) {
 
 function PartnershipsTab({ data }) {
   const byWicket = data.by_wicket || {}
-  const wktNumbers = Array.from({ length: 10 }, (_, i) => i + 1).filter(n => byWicket[n]?.length)
+  const wktNumbers = Array.from({ length: 10 }, (_, i) => i + 1).filter(n => byWicket[n]?.length || byWicket[String(n)]?.length)
+  const getWkt = n => byWicket[n] || byWicket[String(n)] || []
 
   return (
     <div className="space-y-5">
@@ -377,7 +378,7 @@ function PartnershipsTab({ data }) {
                   <span className="text-xs text-accent font-medium uppercase tracking-wider">{ORDINALS[wk-1]} Wicket</span>
                 </div>
                 <div className="divide-y divide-navy-700/50">
-                  {byWicket[wk].map((r, i) => (
+                  {getWkt(wk).map((r, i) => (
                     <div key={i} className="px-4 py-2">
                       <div className="text-xs text-white font-medium leading-snug">
                         {r.batter1_name} <span className="text-slate-600">&</span> {r.batter2_name}
