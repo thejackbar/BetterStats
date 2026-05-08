@@ -21,10 +21,8 @@ import argparse
 import uuid
 from datetime import datetime, timezone
 
+import bcrypt
 import psycopg2
-from passlib.context import CryptContext
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 DB_URL = os.environ.get("DATABASE_URL", "postgresql://cricket:cricket@localhost/betterstats").replace("postgresql+asyncpg://", "postgresql://")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "jack")
@@ -118,7 +116,7 @@ def main(dry_run: bool):
             print(f"  ✓ Updated organisation: slug='{CLUB_SLUG}', is_active=True")
 
             if create_user:
-                hashed = pwd_context.hash(ADMIN_PASSWORD)
+                hashed = bcrypt.hashpw(ADMIN_PASSWORD.encode(), bcrypt.gensalt()).decode()
                 cur.execute(
                     """INSERT INTO users (id, username, password_hash, display_name, created_at, updated_at)
                        VALUES (%s, %s, %s, %s, NOW(), NOW())""",
@@ -127,7 +125,7 @@ def main(dry_run: bool):
                 print(f"  ✓ Created user '{ADMIN_USERNAME}'")
             else:
                 # Update password for existing user
-                hashed = pwd_context.hash(ADMIN_PASSWORD)
+                hashed = bcrypt.hashpw(ADMIN_PASSWORD.encode(), bcrypt.gensalt()).decode()
                 cur.execute(
                     "UPDATE users SET password_hash = %s, updated_at = NOW() WHERE id = %s",
                     (hashed, user_id),
