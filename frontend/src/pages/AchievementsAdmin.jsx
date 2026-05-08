@@ -368,7 +368,7 @@ export default function AchievementsAdmin() {
     if (!grouped[s][a.category]) grouped[s][a.category] = []
     grouped[s][a.category].push(a)
   }
-  const seasons = Object.keys(grouped).sort((a, b) => {
+  const groupedSeasons = Object.keys(grouped).sort((a, b) => {
     if (a === 'All Time') return 1
     if (b === 'All Time') return -1
     return b.localeCompare(a)
@@ -426,7 +426,7 @@ export default function AchievementsAdmin() {
         </div>
       )}
 
-      {seasons.map(season => (
+      {groupedSeasons.map(season => (
         <div key={season} className="card mb-4 overflow-hidden">
           <div className="px-5 py-3 bg-navy-800/60 border-b border-navy-700">
             <span className="text-accent font-mono font-bold">{season === 'All Time' ? 'All Time' : season.replace('_', '/')}</span>
