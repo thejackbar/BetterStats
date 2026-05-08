@@ -497,7 +497,7 @@ function FilterBar({ seasons, seasonId, onSeasonChange, grades, gradeId, onGrade
           <option key={s.id} value={s.id}>{s.name}</option>
         ))}
       </select>
-      {seasonId && grades.length > 0 && (
+      {grades.length > 0 && (
         <select
           value={gradeId || ''}
           onChange={e => onGradeChange(e.target.value || null)}
@@ -535,7 +535,7 @@ export default function Records() {
     if (seasonId) {
       api.getSeasonGrades(orgId, seasonId).then(setGrades).catch(() => setGrades([]))
     } else {
-      setGrades([])
+      api.getRecordsGrades(orgId).then(setGrades).catch(() => setGrades([]))
     }
   }, [orgId, seasonId])
 
