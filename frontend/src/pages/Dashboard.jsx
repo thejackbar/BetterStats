@@ -57,63 +57,141 @@ function ClickableStatCard({ label, value, sub, accent = false, active = false, 
   )
 }
 
-function RecentResults({ games, loading, orgId }) {
-  if (loading) return <LoadingSpinner size="sm" />
-  if (!games.length) return <p className="text-slate-500 text-sm py-4">No recent games found.</p>
+const COMPACT_SHOW = 4
 
+function RecentResults({ games, loading, orgId }) {
+  const [expanded, setExpanded] = useState(false)
+  if (loading) return <LoadingSpinner size="sm" />
+  if (!games.length) return <p className="text-slate-500 text-sm py-2">No recent games found.</p>
+  const visible = expanded ? games : games.slice(0, COMPACT_SHOW)
   return (
-    <div className="divide-y divide-navy-700">
-      {games.map(game => (
-        <Link
-          key={game.id}
-          to={`/scorecards/${game.id}?org=${orgId}`}
-          className="flex items-center justify-between py-3 px-1 hover:bg-navy-700/30 transition-colors group"
-        >
-          <div className="min-w-0">
-            <div className="text-sm text-white font-medium truncate">
-              {game.home_team} <span className="text-slate-500">vs</span> {game.away_team}
+    <>
+      <div className="divide-y divide-navy-800">
+        {visible.map(game => (
+          <Link
+            key={game.id}
+            to={`/scorecards/${game.id}?org=${orgId}`}
+            className="flex items-center justify-between py-2 px-1 hover:bg-navy-700/20 transition-colors group"
+          >
+            <div className="min-w-0">
+              <div className="text-sm text-white truncate">
+                {game.home_team} <span className="text-slate-600">v</span> {game.away_team}
+              </div>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-xs text-slate-600">{game.grade?.name}</span>
+                {game.played_at && (
+                  <span className="text-xs text-slate-700">
+                    {new Date(game.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs text-slate-500">{game.grade?.name}</span>
-              {game.played_at && (
-                <span className="text-xs text-slate-600">
-                  {new Date(game.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-3 ml-4 shrink-0">
             <ResultBadge result={game.result} />
-            <svg className="w-4 h-4 text-slate-600 group-hover:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </div>
-        </Link>
-      ))}
-    </div>
+          </Link>
+        ))}
+      </div>
+      {games.length > COMPACT_SHOW && (
+        <button onClick={() => setExpanded(e => !e)} className="text-xs text-slate-500 hover:text-accent mt-2 transition-colors">
+          {expanded ? '↑ Show less' : `↓ Show ${games.length - COMPACT_SHOW} more`}
+        </button>
+      )}
+    </>
   )
 }
 
 function UpcomingFixtures({ fixtures, loading }) {
+  const [expanded, setExpanded] = useState(false)
   if (loading) return <LoadingSpinner size="sm" />
-  if (!fixtures.length) return <p className="text-slate-500 text-sm py-4">No upcoming fixtures found.</p>
+  if (!fixtures.length) return <p className="text-slate-500 text-sm py-2">No upcoming fixtures.</p>
+  const visible = expanded ? fixtures : fixtures.slice(0, COMPACT_SHOW)
+  return (
+    <>
+      <div className="divide-y divide-navy-800">
+        {visible.map((f, i) => (
+          <div key={f.id || i} className="py-2 px-1">
+            <div className="text-sm text-white">
+              {f.home_team} <span className="text-slate-600">v</span> {f.away_team}
+            </div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs text-slate-600">{f.grade}</span>
+              <span className="text-xs text-accent font-mono">
+                {new Date(f.date).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+      {fixtures.length > COMPACT_SHOW && (
+        <button onClick={() => setExpanded(e => !e)} className="text-xs text-slate-500 hover:text-accent mt-2 transition-colors">
+          {expanded ? '↑ Show less' : `↓ ${fixtures.length - COMPACT_SHOW} more`}
+        </button>
+      )}
+    </>
+  )
+}
+
+function BestPerformances({ orgId, seasons, selectedSeason, clubSlug }) {
+  const [records, setRecords] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [tab, setTab] = useState('batting')
+
+  useEffect(() => {
+    if (!orgId) return
+    setLoading(true)
+    api.getRecords(orgId, { seasonId: selectedSeason })
+      .then(setRecords)
+      .catch(() => setRecords(null))
+      .finally(() => setLoading(false))
+  }, [orgId, selectedSeason])
+
+  const batting = records?.top_high_scores?.slice(0, 5) || []
+  const bowling = records?.best_innings_figures?.slice(0, 5) || []
 
   return (
-    <div className="divide-y divide-navy-700">
-      {fixtures.map((f, i) => (
-        <div key={f.id || i} className="py-3 px-1">
-          <div className="text-sm text-white font-medium">
-            {f.home_team} <span className="text-slate-500">vs</span> {f.away_team}
+    <div className="card p-5 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="display-heading text-xl text-white">BEST PERFORMANCES</h2>
+        <Link to={`/${clubSlug}/records`} className="text-accent text-xs hover:underline">All records →</Link>
+      </div>
+      <div className="flex gap-1 mb-4 border-b border-navy-700">
+        {['batting', 'bowling'].map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors capitalize ${
+              tab === t ? 'border-accent text-accent' : 'border-transparent text-slate-400 hover:text-white'
+            }`}>{t}</button>
+        ))}
+      </div>
+      {loading ? <LoadingSpinner size="sm" /> : tab === 'batting' ? (
+        batting.length === 0 ? <p className="text-slate-500 text-sm">No data.</p> : (
+          <div className="space-y-1">
+            {batting.map((r, i) => (
+              <Link key={i} to={`/players/${r.player_id}`} className="flex items-center justify-between py-1.5 hover:opacity-80 transition-opacity">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-slate-600 font-mono text-xs w-4">{i + 1}</span>
+                  <span className="text-sm text-white truncate">{r.name}</span>
+                  <span className="text-xs text-slate-500">{r.season_name}</span>
+                </div>
+                <span className="stat-number text-accent font-bold ml-2">{r.runs}{r.not_out ? '*' : ''}</span>
+              </Link>
+            ))}
           </div>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-xs text-slate-500">{f.grade}</span>
-            <span className="text-xs text-accent font-mono">
-              {new Date(f.date).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}
-            </span>
-            {f.venue && <span className="text-xs text-slate-600 truncate">{f.venue}</span>}
+        )
+      ) : (
+        bowling.length === 0 ? <p className="text-slate-500 text-sm">No data.</p> : (
+          <div className="space-y-1">
+            {bowling.map((r, i) => (
+              <Link key={i} to={`/players/${r.player_id}`} className="flex items-center justify-between py-1.5 hover:opacity-80 transition-opacity">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-slate-600 font-mono text-xs w-4">{i + 1}</span>
+                  <span className="text-sm text-white truncate">{r.name}</span>
+                  <span className="text-xs text-slate-500">{r.season_name}</span>
+                </div>
+                <span className="stat-number text-accent font-bold ml-2">{r.wickets}/{r.runs}</span>
+              </Link>
+            ))}
           </div>
-        </div>
-      ))}
+        )
+      )}
     </div>
   )
 }
@@ -598,56 +676,21 @@ export default function Dashboard() {
         </div>
       )}
 
-      <SponsorBanner />
-
-      <div className="grid lg:grid-cols-3 gap-6 mb-6">
-        {/* Recent results */}
-        <div className="lg:col-span-2 card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="display-heading text-xl text-white">RECENT RESULTS</h2>
-            <span className="section-label">Last {games.length}</span>
-          </div>
-          <RecentResults games={games} loading={gamesLoading} orgId={orgId} />
-        </div>
-
-        {/* Upcoming fixtures */}
+      {/* Top Batters + Top Bowlers */}
+      <div className="grid md:grid-cols-2 gap-4 mb-6">
         <div className="card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="display-heading text-lg text-white">UPCOMING FIXTURES</h2>
-          </div>
-          <UpcomingFixtures fixtures={fixtures} loading={fixturesLoading} />
-        </div>
-      </div>
-
-      {/* Milestones */}
-      <div className="card p-5 mb-6">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="display-heading text-xl text-white">MILESTONES</h2>
-          <span className="section-label">Closest first</span>
-        </div>
-        <UpcomingMilestones
-          milestones={milestones}
-          achieved={achievedMilestones}
-          loading={milestonesLoading}
-          achievedLoading={achievedLoading}
-        />
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Top Batters quick view */}
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <h2 className="display-heading text-lg text-white">TOP BATTERS</h2>
             <Link to={`/${clubSlug}/leaderboard`} className="text-accent text-xs hover:underline">See all →</Link>
           </div>
           {statsLoading ? <LoadingSpinner size="sm" /> : topBatters.length === 0 ? (
             <p className="text-slate-500 text-sm">No data yet.</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1">
               {topBatters.map((p, i) => (
                 <Link key={p.player_id} to={`/players/${p.player_id}`} className="flex items-center justify-between py-1.5 hover:opacity-80 transition-opacity">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-slate-600 font-mono text-sm w-5">{i + 1}</span>
+                    <span className="text-slate-600 font-mono text-xs w-4">{i + 1}</span>
                     <span className="text-sm text-white truncate">{p.name}</span>
                   </div>
                   <div className="flex items-center gap-3 ml-2">
@@ -660,20 +703,19 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Top Bowlers quick view */}
         <div className="card p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <h2 className="display-heading text-lg text-white">TOP BOWLERS</h2>
             <Link to={`/${clubSlug}/leaderboard`} className="text-accent text-xs hover:underline">See all →</Link>
           </div>
           {statsLoading ? <LoadingSpinner size="sm" /> : topBowlers.length === 0 ? (
             <p className="text-slate-500 text-sm">No data yet.</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1">
               {topBowlers.map((p, i) => (
                 <Link key={p.player_id} to={`/players/${p.player_id}`} className="flex items-center justify-between py-1.5 hover:opacity-80 transition-opacity">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-slate-600 font-mono text-sm w-5">{i + 1}</span>
+                    <span className="text-slate-600 font-mono text-xs w-4">{i + 1}</span>
                     <span className="text-sm text-white truncate">{p.name}</span>
                   </div>
                   <div className="flex items-center gap-3 ml-2">
@@ -687,7 +729,41 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="mt-16 pt-6 border-t border-navy-800 text-center">
+      {/* Best Performances */}
+      <BestPerformances orgId={orgId} seasons={seasons} selectedSeason={selectedSeason} clubSlug={clubSlug} />
+
+      {/* Recent Results + Upcoming Fixtures — compact */}
+      <div className="grid lg:grid-cols-3 gap-4 mb-6">
+        <div className="lg:col-span-2 card p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="display-heading text-base text-white">RECENT RESULTS</h2>
+            <span className="section-label">{games.length} games</span>
+          </div>
+          <RecentResults games={games} loading={gamesLoading} orgId={orgId} />
+        </div>
+        <div className="card p-4">
+          <h2 className="display-heading text-base text-white mb-2">UPCOMING FIXTURES</h2>
+          <UpcomingFixtures fixtures={fixtures} loading={fixturesLoading} />
+        </div>
+      </div>
+
+      <SponsorBanner />
+
+      {/* Milestones */}
+      <div className="card p-5 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="display-heading text-xl text-white">MILESTONES</h2>
+          <span className="section-label">Closest first</span>
+        </div>
+        <UpcomingMilestones
+          milestones={milestones}
+          achieved={achievedMilestones}
+          loading={milestonesLoading}
+          achievedLoading={achievedLoading}
+        />
+      </div>
+
+      <div className="mt-12 pt-6 border-t border-navy-800 text-center">
         <p className="text-slate-700 text-xs">
           Powered by{' '}
           <a href="/" className="hover:text-slate-500 transition-colors">BetterStats</a>
