@@ -70,6 +70,7 @@ async def list_achievements(
     params: dict = {"org_id": org_id}
 
     if player_id:
+        # Also match unlinked rows (player_id IS NULL) where the name matches this player
         player_name_result = await db.execute(
             text("SELECT name FROM players WHERE id = :pid"),
             {"pid": player_id},
@@ -110,6 +111,7 @@ class AchievementCreate(BaseModel):
     player_id: Optional[str] = None
     player_name: str
     season: Optional[str] = None
+    season_end: Optional[str] = None
     category: str
     subcategory: Optional[str] = None
     achievement: str
@@ -125,8 +127,8 @@ async def create_achievement(body: AchievementCreate, db: AsyncSession = Depends
     result = await db.execute(
         text("""
             INSERT INTO player_achievements
-                (org_id, player_id, player_name, season, category, subcategory, achievement, detail)
-            VALUES (:org_id, :player_id, :player_name, :season, :category, :subcategory, :achievement, :detail)
+                (org_id, player_id, player_name, season, season_end, category, subcategory, achievement, detail)
+            VALUES (:org_id, :player_id, :player_name, :season, :season_end, :category, :subcategory, :achievement, :detail)
             RETURNING id
         """),
         {
@@ -134,6 +136,7 @@ async def create_achievement(body: AchievementCreate, db: AsyncSession = Depends
             "player_id": player_id,
             "player_name": body.player_name,
             "season": body.season or None,
+            "season_end": body.season_end or None,
             "category": body.category,
             "subcategory": body.subcategory or None,
             "achievement": body.achievement,
@@ -151,6 +154,7 @@ class AchievementUpdate(BaseModel):
     player_name: Optional[str] = None
     player_id: Optional[str] = None
     season: Optional[str] = None
+    season_end: Optional[str] = None
     category: Optional[str] = None
     subcategory: Optional[str] = None
     achievement: Optional[str] = None
@@ -165,7 +169,7 @@ async def update_achievement(
 ):
     sets = []
     params: dict = {"id": achievement_id}
-    for field in ["player_name", "player_id", "season", "category", "subcategory", "achievement", "detail"]:
+    for field in ["player_name", "player_id", "season", "season_end", "category", "subcategory", "achievement", "detail"]:
         val = getattr(body, field)
         if val is not None:
             sets.append(f"{field} = :{field}")
@@ -339,6 +343,7 @@ async def download_template():
         ws = wb.active
         ws.title = "Achievements"
 
+        # ── Main sheet headers ──
         headers = ["Season", "Category", "Subcategory", "Achievement", "Player Name", "Detail"]
         header_fill = PatternFill("solid", fgColor="1e3a5f")
         header_font = Font(bold=True, color="FFFFFF", size=11)
@@ -351,6 +356,7 @@ async def download_template():
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
+        # Instruction row
         instructions = [
             "e.g. 2025_26",
             "↓ Select from list",
@@ -373,19 +379,20 @@ async def download_template():
         for i, w in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
+        # ── Hidden Lists sheet ──
         lists_ws = wb.create_sheet("_Lists")
         lists_ws.sheet_state = "hidden"
 
-        cur = 1
+        cur = 1  # current row in Lists sheet
 
-        def add_named_list(name: str, items: list) -> str:
+        def add_named_list(name: str, items: list[str]) -> str:
             nonlocal cur
             start = cur
             for item in items:
                 lists_ws.cell(row=cur, column=1, value=item)
                 cur += 1
             end = cur - 1
-            cur += 1
+            cur += 1  # blank buffer row
             ref = f"'_Lists'!$A${start}:$A${end}"
             try:
                 dn = DefinedName(name=name, attr_text=ref)
@@ -394,18 +401,23 @@ async def download_template():
                 wb.defined_names[name] = DefinedName(name=name, attr_text=ref)
             return name
 
-        sub_range_names: dict = {}
+        # Category lookup table: col C = exact name, col D = range name
+        cat_lookup_start = 1
+        sub_range_names: dict[str, str] = {}
+
         for cat, subcats in ACHIEVEMENT_TREE.items():
             rn_sub = f"sub_{_rn(cat)}"
             sub_range_names[cat] = add_named_list(rn_sub, list(subcats.keys()))
 
-        ach_range_names: dict = {}
+        # Achievement lookup: keyed by "category|subcategory"
+        ach_range_names: dict[str, str] = {}
         for cat, subcats in ACHIEVEMENT_TREE.items():
             for subcat, achievements in subcats.items():
                 key = f"{cat}|{subcat}"
                 rn_ach = f"ach_{_rn(cat)}_{_rn(subcat)}"[:255]
                 ach_range_names[key] = add_named_list(rn_ach, achievements)
 
+        # Write category → range_name lookup into Lists col C, D
         cat_lkp_start = cur
         for i, (cat, rn) in enumerate(sub_range_names.items()):
             lists_ws.cell(row=cur + i, column=3, value=cat)
@@ -413,19 +425,23 @@ async def download_template():
         cat_lkp_end = cur + len(sub_range_names) - 1
         cur = cat_lkp_end + 2
 
+        # Write "cat|subcat" → range_name lookup into Lists col F, G
         ach_lkp_start = cur
         for i, (key, rn) in enumerate(ach_range_names.items()):
             lists_ws.cell(row=cur + i, column=6, value=key)
             lists_ws.cell(row=cur + i, column=7, value=rn)
         ach_lkp_end = cur + len(ach_range_names) - 1
 
+        # ── Data validations on main sheet ──
         DATA_ROWS = "3:1000"
 
-        cat_formula = ",".join(f'"{c}"' for c in CATEGORIES)
+        # Category: plain list
+        cat_formula = ",".join(f'"{ c}"' for c in CATEGORIES)
         dv_cat = DataValidation(type="list", formula1=cat_formula, allow_blank=True, showDropDown=False)
         dv_cat.sqref = f"B{DATA_ROWS}"
         ws.add_data_validation(dv_cat)
 
+        # Subcategory: INDIRECT via lookup table
         sub_lkp = f"'_Lists'!$C${cat_lkp_start}:$D${cat_lkp_end}"
         dv_sub = DataValidation(
             type="list",
@@ -436,6 +452,7 @@ async def download_template():
         dv_sub.sqref = f"C{DATA_ROWS}"
         ws.add_data_validation(dv_sub)
 
+        # Achievement: INDIRECT via lookup table keyed on "category|subcategory"
         ach_lkp = f"'_Lists'!$F${ach_lkp_start}:$G${ach_lkp_end}"
         dv_ach = DataValidation(
             type="list",
@@ -446,6 +463,7 @@ async def download_template():
         dv_ach.sqref = f"D{DATA_ROWS}"
         ws.add_data_validation(dv_ach)
 
+        # ── Example / starter rows ──
         example_fill = PatternFill("solid", fgColor="0d1f36")
         example_font = Font(color="64748b", italic=True, size=10)
         for r, row in enumerate(TEMPLATE_ROWS, 3):
@@ -454,6 +472,7 @@ async def download_template():
                 cell.fill = example_fill
                 cell.font = example_font
 
+        # ── Reference sheet ──
         ref_ws = wb.create_sheet("Reference")
         ref_ws.column_dimensions["A"].width = 22
         ref_ws.column_dimensions["B"].width = 28
@@ -463,6 +482,7 @@ async def download_template():
 
         hdr_font = Font(bold=True, color="FFFFFF", size=11)
         hdr_fill = PatternFill("solid", fgColor="1e3a5f")
+        subhdr_font = Font(bold=True, color="94a3b8", size=10)
 
         def ref_header(row, col, text):
             c = ref_ws.cell(row=row, column=col, value=text)
@@ -479,6 +499,7 @@ async def download_template():
         for i, cat in enumerate(CATEGORIES, 2):
             ref_ws.cell(row=i, column=2, value=cat).font = Font(size=10)
 
+        # Full category → subcategory → achievement tree
         ref_header(1, 4, "Category")
         ref_header(1, 5, "Subcategory → Achievements")
         ref_row = 2
@@ -516,7 +537,7 @@ async def download_template():
 
 # ─── Import (Excel or CSV) ───────────────────────────────────────────────────
 
-def _parse_xlsx(content: bytes) -> list:
+def _parse_xlsx(content: bytes) -> list[dict]:
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     ws = wb.active
@@ -533,7 +554,7 @@ def _parse_xlsx(content: bytes) -> list:
     return result
 
 
-def _parse_csv(content: bytes) -> list:
+def _parse_csv(content: bytes) -> list[dict]:
     text_content = content.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text_content))
     return [
@@ -584,6 +605,7 @@ async def import_achievements(
             skipped += 1
             continue
 
+        # Handle "Not awarded" or empty player entries
         if player_name.lower() in ("not awarded", "n/a", ""):
             skipped += 1
             continue

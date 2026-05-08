@@ -32,7 +32,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   const [seasons, setSeasons] = useState([])
   const [adding, setAdding] = useState(false)
   const [editId, setEditId] = useState(null)
-  const [form, setForm] = useState({ season: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
+  const [form, setForm] = useState({ season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
   const [customSubcat, setCustomSubcat] = useState(false)
   const [customAchievement, setCustomAchievement] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -48,7 +48,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   const achievementOptions = getAchievements(form.category, form.subcategory)
 
   const openAdd = () => {
-    setForm({ season: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
+    setForm({ season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
     setCustomSubcat(false)
     setCustomAchievement(false)
     setEditId(null)
@@ -56,7 +56,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   }
 
   const openEdit = (a) => {
-    setForm({ season: a.season || '', category: a.category, subcategory: a.subcategory || '', achievement: a.achievement, detail: a.detail || '' })
+    setForm({ season: a.season || '', season_end: a.season_end || '', category: a.category, subcategory: a.subcategory || '', achievement: a.achievement, detail: a.detail || '' })
     setCustomSubcat(false)
     setCustomAchievement(false)
     setEditId(a.id)
@@ -121,6 +121,9 @@ function AchievementsSection({ playerId, orgId, playerName }) {
 
   const inputCls = 'w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500'
 
+  const seasonMap = Object.fromEntries(seasons.map(s => [s.id, s.name]))
+  const seasonDisplay = (s) => !s || s === 'All Time' ? 'All Time' : (seasonMap[s] || s.replace(/_/g, '/'))
+
   // Group by season then category
   const grouped = {}
   for (const a of achievements) {
@@ -147,12 +150,21 @@ function AchievementsSection({ playerId, orgId, playerName }) {
           <h4 className="text-sm font-semibold text-white mb-3">{editId ? 'Edit Achievement' : 'Add Achievement'}</h4>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
             <div>
-              <label className="section-label mb-1 block">Season</label>
+              <label className="section-label mb-1 block">Season {form.category === 'Office Bearer' ? 'Start' : ''}</label>
               <select className={inputCls} value={form.season} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
                 <option value="">— All Time —</option>
                 {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
+            {form.category === 'Office Bearer' && (
+              <div>
+                <label className="section-label mb-1 block">Season End</label>
+                <select className={inputCls} value={form.season_end} onChange={e => setForm(f => ({ ...f, season_end: e.target.value }))}>
+                  <option value="">— Present —</option>
+                  {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <label className="section-label mb-1 block">Category *</label>
               <select className={inputCls} value={form.category} onChange={e => setCategory(e.target.value)}>
@@ -218,7 +230,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
       {groupedSeasons.map(season => (
         <div key={season} className="border-b border-navy-700 last:border-0">
           <div className="px-5 py-3 bg-navy-800/30">
-            <span className="text-accent font-mono font-bold text-sm">{season.replace('_', '/')}</span>
+            <span className="text-accent font-mono font-bold text-sm">{seasonDisplay(season)}</span>
           </div>
           {Object.entries(grouped[season]).map(([cat, items]) => (
             <div key={cat} className="px-5 py-3">
@@ -232,6 +244,11 @@ function AchievementsSection({ playerId, orgId, playerName }) {
                     <div className="flex-1 min-w-0">
                       <span className="text-white text-sm font-medium">{a.achievement}</span>
                       {a.subcategory && <span className="text-slate-500 text-sm"> — {a.subcategory}</span>}
+                      {a.season_end && (
+                        <span className="text-xs text-slate-500 ml-2 font-mono">
+                          {seasonDisplay(a.season)} — {seasonDisplay(a.season_end)}
+                        </span>
+                      )}
                       {a.detail && <span className="text-slate-400 text-xs ml-2">({a.detail})</span>}
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">

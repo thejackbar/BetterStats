@@ -19,6 +19,8 @@ const CATEGORY_ICONS = {
 
 const BASE = import.meta.env.VITE_API_URL || '/api'
 
+// ─── Player autocomplete ──────────────────────────────────────────────────────
+
 function PlayerAutocomplete({ players, value, onChange }) {
   const [query, setQuery] = useState(value || '')
   const [open, setOpen] = useState(false)
@@ -64,6 +66,8 @@ function PlayerAutocomplete({ players, value, onChange }) {
     </div>
   )
 }
+
+// ─── Import panel ────────────────────────────────────────────────────────────
 
 function ImportPanel({ orgId, onImported }) {
   const fileRef = useRef(null)
@@ -144,6 +148,8 @@ function ImportPanel({ orgId, onImported }) {
   )
 }
 
+// ─── Shared form fields (category / subcategory / achievement) ────────────────
+
 function AchievementFields({ form, setForm, seasons, inputCls }) {
   const [customSubcat, setCustomSubcat] = useState(false)
   const [customAchievement, setCustomAchievement] = useState(false)
@@ -170,12 +176,21 @@ function AchievementFields({ form, setForm, seasons, inputCls }) {
   return (
     <>
       <div>
-        <label className="section-label mb-1 block">Season</label>
+        <label className="section-label mb-1 block">Season {form.category === 'Office Bearer' ? 'Start' : ''}</label>
         <select className={inputCls} value={form.season} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
           <option value="">— All Time —</option>
           {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>
+      {form.category === 'Office Bearer' && (
+        <div>
+          <label className="section-label mb-1 block">Season End</label>
+          <select className={inputCls} value={form.season_end || ''} onChange={e => setForm(f => ({ ...f, season_end: e.target.value }))}>
+            <option value="">— Present —</option>
+            {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
       <div>
         <label className="section-label mb-1 block">Category *</label>
         <select className={inputCls} value={form.category} onChange={e => setCategory(e.target.value)}>
@@ -223,8 +238,10 @@ function AchievementFields({ form, setForm, seasons, inputCls }) {
   )
 }
 
+// ─── Add/edit form ────────────────────────────────────────────────────────────
+
 function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel }) {
-  const [form, setForm] = useState(initial || { season: '', category: 'Club Award', subcategory: '', achievement: '', player_name: '', player_id: null, detail: '' })
+  const [form, setForm] = useState(initial || { season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', player_name: '', player_id: null, detail: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
@@ -272,8 +289,10 @@ function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel })
   )
 }
 
+// ─── Bulk add panel ───────────────────────────────────────────────────────────
+
 function BulkAddPanel({ orgId, players, seasons, onSave, onCancel }) {
-  const [form, setForm] = useState({ season: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
+  const [form, setForm] = useState({ season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
   const [selectedPlayers, setSelectedPlayers] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -366,6 +385,8 @@ function BulkAddPanel({ orgId, players, seasons, onSave, onCancel }) {
   )
 }
 
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export default function AchievementsAdmin() {
   const { orgId } = useParams()
   const [achievements, setAchievements] = useState(null)
@@ -403,6 +424,7 @@ export default function AchievementsAdmin() {
 
   if (loading && !achievements) return <LoadingSpinner message="Loading achievements…" />
 
+  // Map season id → display name
   const seasonMap = Object.fromEntries(seasons.map(s => [s.id, s.name]))
   const seasonDisplay = (s) => s === 'All Time' ? 'All Time' : (seasonMap[s] || s.replace(/_/g, '/'))
 
@@ -461,6 +483,7 @@ export default function AchievementsAdmin() {
         <AchievementForm orgId={orgId} players={players} seasons={seasons} onSave={handleSaved} onCancel={() => setShowAdd(false)} />
       )}
 
+      {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-5">
         <input
           className="bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500 w-48"
@@ -495,6 +518,7 @@ export default function AchievementsAdmin() {
 
       {groupedSeasons.map(season => (
         <div key={season} className="mb-6">
+          {/* Season header */}
           <div className="flex items-center gap-3 mb-3">
             <span className="text-white font-semibold text-sm">{seasonDisplay(season)}</span>
             <span className="h-px flex-1 bg-navy-700" />
@@ -503,6 +527,7 @@ export default function AchievementsAdmin() {
             </span>
           </div>
 
+          {/* Categories */}
           {Object.entries(grouped[season]).map(([cat, items]) => (
             <div key={cat} className="card mb-3 overflow-hidden">
               <div className="px-4 py-2.5 bg-navy-800/60 border-b border-navy-700 flex items-center gap-2">
@@ -519,6 +544,11 @@ export default function AchievementsAdmin() {
                         <span className="text-slate-300 text-sm truncate">{a.achievement}</span>
                         {a.subcategory && (
                           <span className="text-xs text-slate-500 font-mono">{a.subcategory}</span>
+                        )}
+                        {a.season_end && (
+                          <span className="text-xs text-slate-500 font-mono">
+                            {seasonDisplay(a.season)} — {seasonDisplay(a.season_end)}
+                          </span>
                         )}
                         {a.detail && (
                           <span className="text-xs text-slate-400 italic">{a.detail}</span>
