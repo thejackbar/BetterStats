@@ -5,7 +5,7 @@ from sqlalchemy import text, select
 import uuid
 
 from app.models.db import get_db, Grade, Season, Organisation
-from app.services import playhq_partner_client
+from app.services import playhq_partner_client, playhq_client
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -48,18 +48,33 @@ async def get_records_grades(
         api_grades = []
 
     if not api_grades:
-        # Fall back to per-season endpoint (also cheap — one call per season in parallel)
-        results = await asyncio.gather(
+        # Partner API per-season fallback
+        partner_results = await asyncio.gather(
             *[playhq_partner_client.get_season_grades(str(s["id"])) for s in db_seasons_list],
             return_exceptions=True,
         )
         seen_ids: set[str] = set()
-        for s, res in zip(db_seasons_list, results):
+        for s, res in zip(db_seasons_list, partner_results):
             if isinstance(res, list):
                 for g in res:
                     gid = g.get("id")
                     if gid and gid not in seen_ids:
                         seen_ids.add(gid)
+                        api_grades.append({**g, "_season_id": s["id"]})
+
+    if not api_grades:
+        # Grassroots API fallback — uses the same org UUID and season UUIDs that power player stats
+        grassroots_results = await asyncio.gather(
+            *[playhq_client.get_grades(org_id, str(s["id"])) for s in db_seasons_list],
+            return_exceptions=True,
+        )
+        seen_ids2: set[str] = set()
+        for s, res in zip(db_seasons_list, grassroots_results):
+            if isinstance(res, list):
+                for g in res:
+                    gid = g.get("id")
+                    if gid and gid not in seen_ids2:
+                        seen_ids2.add(gid)
                         api_grades.append({**g, "_season_id": s["id"]})
 
     if not api_grades:

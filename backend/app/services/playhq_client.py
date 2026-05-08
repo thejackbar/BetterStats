@@ -177,11 +177,6 @@ async def lookup_playhq_id(org_guid: str, org_name: str) -> Optional[str]:
     return None
 
 
-# Stubs retained for backward compatibility
-async def get_grades(season_id: str) -> list:
-    return []
-
-
 async def get_fixtures(grade_id: str) -> list:
     return []
 
