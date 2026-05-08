@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
+import { ACHIEVEMENT_TREE, getSubcategories, getAchievements } from '../lib/achievementOptions'
 import LoadingSpinner from '../components/LoadingSpinner'
 import clsx from 'clsx'
 
@@ -17,6 +18,56 @@ const CATEGORY_ICONS = {
 }
 
 const BASE = import.meta.env.VITE_API_URL || '/api'
+
+// ─── Player autocomplete ──────────────────────────────────────────────────────
+
+function PlayerAutocomplete({ players, value, onChange }) {
+  const [query, setQuery] = useState(value || '')
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    setQuery(value || '')
+  }, [value])
+
+  useEffect(() => {
+    function handler(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const filtered = query.trim().length >= 1
+    ? players.filter(p => p.name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 10)
+    : []
+
+  return (
+    <div ref={ref} className="relative">
+      <input
+        type="text"
+        value={query}
+        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        placeholder="Full name"
+        className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 mt-1 w-full bg-navy-800 border border-navy-600 rounded-lg shadow-xl max-h-52 overflow-y-auto">
+          {filtered.map(p => (
+            <button
+              key={p.id}
+              onMouseDown={() => { setQuery(p.name); onChange(p.name); setOpen(false) }}
+              className="w-full text-left px-3 py-2 text-sm text-white hover:bg-navy-700 first:rounded-t-lg last:rounded-b-lg"
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ─── Import panel ────────────────────────────────────────────────────────────
 
@@ -103,10 +154,42 @@ function ImportPanel({ orgId, onImported }) {
 
 // ─── Add/edit form ────────────────────────────────────────────────────────────
 
-function AchievementForm({ orgId, initial, onSave, onCancel }) {
+function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel }) {
   const [form, setForm] = useState(initial || { season: '', category: 'Club Award', subcategory: '', achievement: '', player_name: '', detail: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [customSubcat, setCustomSubcat] = useState(false)
+  const [customAchievement, setCustomAchievement] = useState(false)
+
+  const subcatOptions = getSubcategories(form.category)
+  const achievementOptions = getAchievements(form.category, form.subcategory)
+
+  const setCategory = (cat) => {
+    setForm(f => ({ ...f, category: cat, subcategory: '', achievement: '' }))
+    setCustomSubcat(false)
+    setCustomAchievement(false)
+  }
+
+  const setSubcat = (val) => {
+    if (val === '__other__') {
+      setCustomSubcat(true)
+      setForm(f => ({ ...f, subcategory: '', achievement: '' }))
+    } else {
+      setCustomSubcat(false)
+      setForm(f => ({ ...f, subcategory: val, achievement: '' }))
+      setCustomAchievement(false)
+    }
+  }
+
+  const setAchievement = (val) => {
+    if (val === '__other__') {
+      setCustomAchievement(true)
+      setForm(f => ({ ...f, achievement: '' }))
+    } else {
+      setCustomAchievement(false)
+      setForm(f => ({ ...f, achievement: val }))
+    }
+  }
 
   const handleSave = async () => {
     if (!form.achievement.trim() || !form.player_name.trim()) {
@@ -129,60 +212,82 @@ function AchievementForm({ orgId, initial, onSave, onCancel }) {
     }
   }
 
+  const inputCls = 'w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500'
+  const selectCls = inputCls
+
   return (
     <div className="bg-navy-800/60 border border-navy-600 rounded-xl p-5 mb-4">
       <h3 className="text-sm font-semibold text-white mb-3">{initial?.id ? 'Edit Achievement' : 'Add Achievement'}</h3>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
         <div>
           <label className="section-label mb-1 block">Player Name *</label>
-          <input
-            className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
-            placeholder="Full name"
+          <PlayerAutocomplete
+            players={players}
             value={form.player_name}
-            onChange={e => setForm(f => ({ ...f, player_name: e.target.value }))}
+            onChange={v => setForm(f => ({ ...f, player_name: v }))}
           />
         </div>
         <div>
           <label className="section-label mb-1 block">Season</label>
-          <input
-            className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
-            placeholder="e.g. 2025_26"
-            value={form.season}
-            onChange={e => setForm(f => ({ ...f, season: e.target.value }))}
-          />
+          <select className={selectCls} value={form.season} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
+            <option value="">— All Time —</option>
+            {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
         </div>
         <div>
           <label className="section-label mb-1 block">Category *</label>
-          <select
-            className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
-            value={form.category}
-            onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-          >
+          <select className={selectCls} value={form.category} onChange={e => setCategory(e.target.value)}>
             {CATEGORIES.map(c => <option key={c}>{c}</option>)}
           </select>
         </div>
         <div>
           <label className="section-label mb-1 block">Subcategory / Grade</label>
-          <input
-            className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
-            placeholder="e.g. 1st XI, WASTCA, Executive Committee"
-            value={form.subcategory}
-            onChange={e => setForm(f => ({ ...f, subcategory: e.target.value }))}
-          />
+          {!customSubcat && subcatOptions.length > 0 ? (
+            <select className={selectCls} value={form.subcategory} onChange={e => setSubcat(e.target.value)}>
+              <option value="">— Select —</option>
+              {subcatOptions.map(s => <option key={s}>{s}</option>)}
+              <option value="__other__">Other…</option>
+            </select>
+          ) : (
+            <div className="flex gap-1">
+              <input
+                className={inputCls}
+                placeholder="e.g. 1st XI, WASTCA"
+                value={form.subcategory}
+                onChange={e => setForm(f => ({ ...f, subcategory: e.target.value, achievement: '' }))}
+              />
+              {customSubcat && (
+                <button onClick={() => { setCustomSubcat(false); setForm(f => ({ ...f, subcategory: '' })) }} className="text-slate-500 hover:text-white px-1 text-lg">×</button>
+              )}
+            </div>
+          )}
         </div>
         <div>
           <label className="section-label mb-1 block">Achievement *</label>
-          <input
-            className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
-            placeholder="e.g. Best & Fairest, President, Premiership"
-            value={form.achievement}
-            onChange={e => setForm(f => ({ ...f, achievement: e.target.value }))}
-          />
+          {!customAchievement && achievementOptions.length > 0 ? (
+            <select className={selectCls} value={form.achievement} onChange={e => setAchievement(e.target.value)}>
+              <option value="">— Select —</option>
+              {achievementOptions.map(a => <option key={a}>{a}</option>)}
+              <option value="__other__">Other…</option>
+            </select>
+          ) : (
+            <div className="flex gap-1">
+              <input
+                className={inputCls}
+                placeholder="e.g. Best & Fairest, President"
+                value={form.achievement}
+                onChange={e => setForm(f => ({ ...f, achievement: e.target.value }))}
+              />
+              {customAchievement && (
+                <button onClick={() => { setCustomAchievement(false); setForm(f => ({ ...f, achievement: '' })) }} className="text-slate-500 hover:text-white px-1 text-lg">×</button>
+              )}
+            </div>
+          )}
         </div>
         <div>
           <label className="section-label mb-1 block">Detail</label>
           <input
-            className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
+            className={inputCls}
             placeholder="e.g. 436 runs at 39.64, captain"
             value={form.detail}
             onChange={e => setForm(f => ({ ...f, detail: e.target.value }))}
@@ -203,6 +308,8 @@ function AchievementForm({ orgId, initial, onSave, onCancel }) {
 export default function AchievementsAdmin() {
   const { orgId } = useParams()
   const [achievements, setAchievements] = useState(null)
+  const [players, setPlayers] = useState([])
+  const [seasons, setSeasons] = useState([])
   const [loading, setLoading] = useState(true)
   const [filterSeason, setFilterSeason] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
@@ -221,7 +328,11 @@ export default function AchievementsAdmin() {
     })
   }
 
-  useEffect(() => { load() }, [orgId])
+  useEffect(() => {
+    load()
+    api.listPlayers(orgId).then(data => setPlayers(data || [])).catch(() => {})
+    api.getOrgSeasons(orgId).then(data => setSeasons(data || [])).catch(() => {})
+  }, [orgId])
 
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this achievement?')) return
@@ -279,7 +390,7 @@ export default function AchievementsAdmin() {
       <ImportPanel orgId={orgId} onImported={load} />
 
       {showAdd && !editItem && (
-        <AchievementForm orgId={orgId} onSave={handleSaved} onCancel={() => setShowAdd(false)} />
+        <AchievementForm orgId={orgId} players={players} seasons={seasons} onSave={handleSaved} onCancel={() => setShowAdd(false)} />
       )}
 
       {/* Filters */}
@@ -367,6 +478,8 @@ export default function AchievementsAdmin() {
                   <AchievementForm
                     orgId={orgId}
                     initial={editItem}
+                    players={players}
+                    seasons={seasons}
                     onSave={handleSaved}
                     onCancel={() => setEditItem(null)}
                   />
