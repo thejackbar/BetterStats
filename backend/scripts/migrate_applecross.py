@@ -32,6 +32,7 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 ADMIN_DISPLAY = os.environ.get("ADMIN_DISPLAY_NAME", "Jack")
 CLUB_SLUG = os.environ.get("CLUB_SLUG", "applecross")
 CLUB_NAME_MATCH = os.environ.get("CLUB_NAME_MATCH", "applecross")
+CLUB_ID = os.environ.get("CLUB_ID", "")
 
 
 def main(dry_run: bool):
@@ -46,21 +47,28 @@ def main(dry_run: bool):
     conn = psycopg2.connect(DB_URL)
     try:
         with conn.cursor() as cur:
-            # Find Applecross org
-            cur.execute(
-                "SELECT id, name, slug FROM organisations WHERE LOWER(name) LIKE %s OR LOWER(short_name) LIKE %s",
-                (f"%{CLUB_NAME_MATCH.lower()}%", f"%{CLUB_NAME_MATCH.lower()}%"),
-            )
-            orgs = cur.fetchall()
-            if not orgs:
-                print(f"ERROR: No organisation found matching '{CLUB_NAME_MATCH}'.")
-                sys.exit(1)
-            if len(orgs) > 1:
-                print("Multiple matches found:")
-                for o in orgs:
-                    print(f"  {o[0]}  {o[1]}  slug={o[2]}")
-                print("Set CLUB_NAME_MATCH to narrow down.")
-                sys.exit(1)
+            # Find org — by explicit ID or by name match
+            if CLUB_ID:
+                cur.execute("SELECT id, name, slug FROM organisations WHERE id = %s", (CLUB_ID,))
+                orgs = cur.fetchall()
+                if not orgs:
+                    print(f"ERROR: No organisation found with CLUB_ID='{CLUB_ID}'.")
+                    sys.exit(1)
+            else:
+                cur.execute(
+                    "SELECT id, name, slug FROM organisations WHERE LOWER(name) LIKE %s OR LOWER(short_name) LIKE %s",
+                    (f"%{CLUB_NAME_MATCH.lower()}%", f"%{CLUB_NAME_MATCH.lower()}%"),
+                )
+                orgs = cur.fetchall()
+                if not orgs:
+                    print(f"ERROR: No organisation found matching '{CLUB_NAME_MATCH}'.")
+                    sys.exit(1)
+                if len(orgs) > 1:
+                    print("Multiple matches found:")
+                    for o in orgs:
+                        print(f"  {o[0]}  {o[1]}  slug={o[2]}")
+                    print("Set CLUB_ID=<uuid> to target one directly.")
+                    sys.exit(1)
 
             org_id, org_name, existing_slug = orgs[0]
             print(f"Found org: {org_name} (id={org_id}, current_slug={existing_slug})")
