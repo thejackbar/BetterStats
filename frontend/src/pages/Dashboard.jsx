@@ -144,8 +144,8 @@ function BestPerformances({ orgId, seasons, selectedSeason, clubSlug }) {
       .finally(() => setLoading(false))
   }, [orgId, selectedSeason])
 
-  const batting = records?.top_high_scores?.slice(0, 5) || []
-  const bowling = records?.best_innings_figures?.slice(0, 5) || []
+  const batting = records?.batting?.top_high_scores?.slice(0, 5) || []
+  const bowling = records?.bowling?.best_innings_figures?.slice(0, 5) || []
 
   return (
     <div className="card p-5 mb-6">
