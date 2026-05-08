@@ -47,7 +47,7 @@ function PlayerAutocomplete({ players, value, onChange }) {
       <input
         type="text"
         value={query}
-        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true) }}
+        onChange={e => { setQuery(e.target.value); onChange({ name: e.target.value, id: null }); setOpen(true) }}
         onFocus={() => setOpen(true)}
         placeholder="Full name"
         className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
@@ -57,7 +57,7 @@ function PlayerAutocomplete({ players, value, onChange }) {
           {filtered.map(p => (
             <button
               key={p.id}
-              onMouseDown={() => { setQuery(p.name); onChange(p.name); setOpen(false) }}
+              onMouseDown={() => { setQuery(p.name); onChange({ name: p.name, id: p.id }); setOpen(false) }}
               className="w-full text-left px-3 py-2 text-sm text-white hover:bg-navy-700 first:rounded-t-lg last:rounded-b-lg"
             >
               {p.name}
@@ -155,7 +155,7 @@ function ImportPanel({ orgId, onImported }) {
 // ─── Add/edit form ────────────────────────────────────────────────────────────
 
 function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel }) {
-  const [form, setForm] = useState(initial || { season: '', category: 'Club Award', subcategory: '', achievement: '', player_name: '', detail: '' })
+  const [form, setForm] = useState(initial || { season: '', category: 'Club Award', subcategory: '', achievement: '', player_name: '', player_id: null, detail: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [customSubcat, setCustomSubcat] = useState(false)
@@ -202,7 +202,9 @@ function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel })
       if (initial?.id) {
         await api.updateAchievement(initial.id, form)
       } else {
-        await api.createAchievement({ ...form, org_id: orgId })
+        const payload = { ...form, org_id: orgId }
+        if (!payload.player_id) delete payload.player_id
+        await api.createAchievement(payload)
       }
       onSave()
     } catch (e) {
@@ -224,7 +226,7 @@ function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel })
           <PlayerAutocomplete
             players={players}
             value={form.player_name}
-            onChange={v => setForm(f => ({ ...f, player_name: v }))}
+            onChange={({ name, id }) => setForm(f => ({ ...f, player_name: name, player_id: id }))}
           />
         </div>
         <div>
@@ -468,7 +470,7 @@ export default function AchievementsAdmin() {
                           <div className="absolute" />
                         )}
                       </td>
-                    </tr>
+ postojoj    </tr>
                   ))}
                 </tbody>
               </table>
