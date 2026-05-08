@@ -106,7 +106,18 @@ async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depe
         .order_by(Grade.name)
     )
     grades = result.scalars().all()
-    return [{"id": str(g.id), "name": g.name} for g in grades]
+    if grades:
+        return [{"id": str(g.id), "name": g.name} for g in grades]
+
+    # No grades in DB yet — fetch live from PlayHQ using season UUID (same as PlayHQ season ID)
+    try:
+        api_grades = await playhq_partner_client.get_season_grades(season_id)
+        return sorted(
+            [{"id": g["id"], "name": g.get("name", "")} for g in api_grades if g.get("id")],
+            key=lambda x: x["name"],
+        )
+    except Exception:
+        return []
 
 
 @router.get("/{org_id}/upcoming-milestones")
