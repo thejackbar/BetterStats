@@ -58,7 +58,7 @@ async def _resolve_player(db: AsyncSession, player_name: str, org_id: str) -> Op
     return None
 
 
-# ─── GET list ────────────────────────────────────────────────────────────────
+# ─── GET list ────────────────────────────────────────────
 
 @router.get("")
 async def list_achievements(
@@ -70,6 +70,7 @@ async def list_achievements(
     params: dict = {"org_id": org_id}
 
     if player_id:
+        # Also match unlinked rows (player_id IS NULL) where the name matches this player
         player_name_result = await db.execute(
             text("SELECT name FROM players WHERE id = :pid"),
             {"pid": player_id},
@@ -103,7 +104,7 @@ async def list_achievements(
     return [dict(r) for r in rows.mappings().all()]
 
 
-# ─── POST create ─────────────────────────────────────────────────────────────
+# ─── POST create ───────────────────────────────────────────────
 
 class AchievementCreate(BaseModel):
     org_id: str
@@ -147,7 +148,7 @@ async def create_achievement(body: AchievementCreate, db: AsyncSession = Depends
     return {"id": new_id, "status": "created"}
 
 
-# ─── PUT update ──────────────────────────────────────────────────────────────
+# ─── PUT update ────────────────────────────────────────────────
 
 class AchievementUpdate(BaseModel):
     player_name: Optional[str] = None
@@ -183,7 +184,7 @@ async def update_achievement(
     return {"status": "updated"}
 
 
-# ─── DELETE ──────────────────────────────────────────────────────────────────
+# ─── DELETE ───────────────────────────────────────────────────────
 
 @router.delete("/{achievement_id}")
 async def delete_achievement(achievement_id: int, org_id: str = Query(...), db: AsyncSession = Depends(get_db)):
@@ -195,7 +196,7 @@ async def delete_achievement(achievement_id: int, org_id: str = Query(...), db: 
     return {"status": "deleted"}
 
 
-# ─── Achievement tree (mirrors frontend achievementOptions.js) ────────────────
+# ─── Achievement tree (mirrors frontend achievementOptions.js) ────────────────────
 
 _GRADE_AWARDS = [
     'Best & Fairest', 'Best Batter', 'Best Bowler', 'Batting Aggregate',
@@ -327,198 +328,26 @@ def _rn(s: str) -> str:
     return out[:255]
 
 
-# ─── Excel template download ─────────────────────────────────────────────────
+# ─── CSV template download ─────────────────────────────────────────────
 
 @router.get("/template")
 async def download_template():
-    try:
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-        from openpyxl.worksheet.datavalidation import DataValidation
-        from openpyxl.utils import get_column_letter
-        from openpyxl.workbook.defined_name import DefinedName
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Achievements"
-
-        headers = ["Season", "Category", "Subcategory", "Achievement", "Player Name", "Detail"]
-        header_fill = PatternFill("solid", fgColor="1e3a5f")
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        inst_fill = PatternFill("solid", fgColor="0a1628")
-        inst_font = Font(color="64748b", size=9, italic=True)
-
-        for col, h in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=h)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-
-        instructions = [
-            "e.g. 2025_26",
-            "↓ Select from list",
-            "↓ Depends on Category",
-            "↓ Depends on Subcategory",
-            "Exact player name",
-            "Optional notes",
-        ]
-        for col, inst in enumerate(instructions, 1):
-            cell = ws.cell(row=2, column=col, value=inst)
-            cell.fill = inst_fill
-            cell.font = inst_font
-            cell.alignment = Alignment(horizontal="center")
-
-        ws.row_dimensions[1].height = 20
-        ws.row_dimensions[2].height = 16
-        ws.freeze_panes = "A3"
-
-        col_widths = [13, 22, 28, 35, 28, 32]
-        for i, w in enumerate(col_widths, 1):
-            ws.column_dimensions[get_column_letter(i)].width = w
-
-        lists_ws = wb.create_sheet("_Lists")
-        lists_ws.sheet_state = "hidden"
-
-        cur = 1
-
-        def add_named_list(name: str, items: list) -> str:
-            nonlocal cur
-            start = cur
-            for item in items:
-                lists_ws.cell(row=cur, column=1, value=item)
-                cur += 1
-            end = cur - 1
-            cur += 1
-            ref = f"'_Lists'!$A${start}:$A${end}"
-            try:
-                dn = DefinedName(name=name, attr_text=ref)
-                wb.defined_names.add(dn)
-            except Exception:
-                wb.defined_names[name] = DefinedName(name=name, attr_text=ref)
-            return name
-
-        sub_range_names: dict = {}
-        for cat, subcats in ACHIEVEMENT_TREE.items():
-            rn_sub = f"sub_{_rn(cat)}"
-            sub_range_names[cat] = add_named_list(rn_sub, list(subcats.keys()))
-
-        ach_range_names: dict = {}
-        for cat, subcats in ACHIEVEMENT_TREE.items():
-            for subcat, achievements in subcats.items():
-                key = f"{cat}|{subcat}"
-                rn_ach = f"ach_{_rn(cat)}_{_rn(subcat)}"[:255]
-                ach_range_names[key] = add_named_list(rn_ach, achievements)
-
-        cat_lkp_start = cur
-        for i, (cat, rn) in enumerate(sub_range_names.items()):
-            lists_ws.cell(row=cur + i, column=3, value=cat)
-            lists_ws.cell(row=cur + i, column=4, value=rn)
-        cat_lkp_end = cur + len(sub_range_names) - 1
-        cur = cat_lkp_end + 2
-
-        ach_lkp_start = cur
-        for i, (key, rn) in enumerate(ach_range_names.items()):
-            lists_ws.cell(row=cur + i, column=6, value=key)
-            lists_ws.cell(row=cur + i, column=7, value=rn)
-        ach_lkp_end = cur + len(ach_range_names) - 1
-
-        DATA_ROWS = "3:1000"
-
-        cat_formula = ",".join(f'"{c}"' for c in CATEGORIES)
-        dv_cat = DataValidation(type="list", formula1=cat_formula, allow_blank=True, showDropDown=False)
-        dv_cat.sqref = f"B{DATA_ROWS}"
-        ws.add_data_validation(dv_cat)
-
-        sub_lkp = f"'_Lists'!$C${cat_lkp_start}:$D${cat_lkp_end}"
-        dv_sub = DataValidation(
-            type="list",
-            formula1=f"INDIRECT(VLOOKUP(B3,{sub_lkp},2,0))",
-            allow_blank=True,
-            showDropDown=False,
-        )
-        dv_sub.sqref = f"C{DATA_ROWS}"
-        ws.add_data_validation(dv_sub)
-
-        ach_lkp = f"'_Lists'!$F${ach_lkp_start}:$G${ach_lkp_end}"
-        dv_ach = DataValidation(
-            type="list",
-            formula1=f'INDIRECT(VLOOKUP(B3&"|"&C3,{ach_lkp},2,0))',
-            allow_blank=True,
-            showDropDown=False,
-        )
-        dv_ach.sqref = f"D{DATA_ROWS}"
-        ws.add_data_validation(dv_ach)
-
-        example_fill = PatternFill("solid", fgColor="0d1f36")
-        example_font = Font(color="64748b", italic=True, size=10)
-        for r, row in enumerate(TEMPLATE_ROWS, 3):
-            for c, val in enumerate(row, 1):
-                cell = ws.cell(row=r, column=c, value=val)
-                cell.fill = example_fill
-                cell.font = example_font
-
-        ref_ws = wb.create_sheet("Reference")
-        ref_ws.column_dimensions["A"].width = 22
-        ref_ws.column_dimensions["B"].width = 28
-        ref_ws.column_dimensions["C"].width = 38
-        ref_ws.column_dimensions["D"].width = 6
-        ref_ws.column_dimensions["E"].width = 38
-
-        hdr_font = Font(bold=True, color="FFFFFF", size=11)
-        hdr_fill = PatternFill("solid", fgColor="1e3a5f")
-
-        def ref_header(row, col, text):
-            c = ref_ws.cell(row=row, column=col, value=text)
-            c.font = hdr_font
-            c.fill = hdr_fill
-            c.alignment = Alignment(horizontal="center")
-
-        ref_header(1, 1, "Season Format")
-        ref_ws.cell(row=2, column=1, value="2025_26").font = Font(size=10)
-        ref_ws.cell(row=3, column=1, value="(year_year, underscore)").font = Font(color="64748b", italic=True, size=9)
-        ref_ws.cell(row=4, column=1, value="Leave blank = timeless").font = Font(color="64748b", italic=True, size=9)
-
-        ref_header(1, 2, "Categories")
-        for i, cat in enumerate(CATEGORIES, 2):
-            ref_ws.cell(row=i, column=2, value=cat).font = Font(size=10)
-
-        ref_header(1, 4, "Category")
-        ref_header(1, 5, "Subcategory → Achievements")
-        ref_row = 2
-        for cat, subcats in ACHIEVEMENT_TREE.items():
-            ref_ws.cell(row=ref_row, column=4, value=cat).font = Font(bold=True, size=10, color="e2e8f0")
-            ref_ws.cell(row=ref_row, column=4).fill = PatternFill("solid", fgColor="1e3a5f")
-            ref_row += 1
-            for subcat, achs in subcats.items():
-                ref_ws.cell(row=ref_row, column=4, value=f"  {subcat}").font = Font(bold=True, size=9, color="94a3b8")
-                ref_ws.cell(row=ref_row, column=5, value=", ".join(achs)).font = Font(size=9, color="64748b")
-                ref_row += 1
-            ref_row += 1
-
-        buf = io.BytesIO()
-        wb.save(buf)
-
-        return Response(
-            content=buf.getvalue(),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=achievements_template.xlsx"},
-        )
-    except ImportError:
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["Season", "Category", "Subcategory", "Achievement", "Player Name", "Detail"])
-        writer.writerows(TEMPLATE_ROWS)
-        output.seek(0)
-        return StreamingResponse(
-            iter([output.getvalue()]),
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=achievements_template.csv"},
-        )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Season", "Category", "Subcategory", "Achievement", "Player Name", "Detail"])
+    writer.writerows(TEMPLATE_ROWS)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=achievements_template.csv"},
+    )
 
 
-# ─── Import (Excel or CSV) ───────────────────────────────────────────────────
 
-def _parse_xlsx(content: bytes) -> list:
+
+# ─── Import (Excel or CSV) ─────────────────────────────────────────────
+
+def _parse_xlsx(content: bytes) -> list[dict]:
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     ws = wb.active
@@ -535,7 +364,7 @@ def _parse_xlsx(content: bytes) -> list:
     return result
 
 
-def _parse_csv(content: bytes) -> list:
+def _parse_csv(content: bytes) -> list[dict]:
     text_content = content.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text_content))
     return [
@@ -586,6 +415,7 @@ async def import_achievements(
             skipped += 1
             continue
 
+        # Handle "Not awarded" or empty player entries
         if player_name.lower() in ("not awarded", "n/a", ""):
             skipped += 1
             continue

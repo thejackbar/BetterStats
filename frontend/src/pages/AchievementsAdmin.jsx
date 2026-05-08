@@ -83,7 +83,7 @@ function ImportPanel({ orgId, onImported }) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'achievements_template.xlsx'
+    a.download = 'achievements_template.csv'
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -110,12 +110,11 @@ function ImportPanel({ orgId, onImported }) {
     <div className="card p-5 mb-6">
       <h2 className="display-heading text-lg text-white mb-4">BULK IMPORT</h2>
       <p className="text-slate-400 text-sm mb-4">
-        Download the template, fill in achievements using the column format, then upload. Player names are matched automatically.
-        The template includes cascading dropdown validation for Category, Subcategory, and Achievement columns.
+        Download the CSV template, fill in achievements using the column format, then upload. Player names are matched automatically.
       </p>
       <div className="flex flex-wrap gap-3 items-center">
         <button onClick={handleDownloadTemplate} className="btn-ghost border border-navy-600 text-sm flex items-center gap-2">
-          <span>⬇</span> Download Template (.xlsx)
+          <span>⬇</span> Download Template (.csv)
         </button>
         <label className={clsx('btn-primary text-sm cursor-pointer flex items-center gap-2', importing && 'opacity-50 pointer-events-none')}>
           <span>⬆</span> {importing ? 'Importing…' : 'Upload File (.xlsx / .csv)'}
