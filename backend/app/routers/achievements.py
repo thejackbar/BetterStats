@@ -111,6 +111,7 @@ class AchievementCreate(BaseModel):
     player_id: Optional[str] = None
     player_name: str
     season: Optional[str] = None
+    season_end: Optional[str] = None
     category: str
     subcategory: Optional[str] = None
     achievement: str
@@ -126,8 +127,8 @@ async def create_achievement(body: AchievementCreate, db: AsyncSession = Depends
     result = await db.execute(
         text("""
             INSERT INTO player_achievements
-                (org_id, player_id, player_name, season, category, subcategory, achievement, detail)
-            VALUES (:org_id, :player_id, :player_name, :season, :category, :subcategory, :achievement, :detail)
+                (org_id, player_id, player_name, season, season_end, category, subcategory, achievement, detail)
+            VALUES (:org_id, :player_id, :player_name, :season, :season_end, :category, :subcategory, :achievement, :detail)
             RETURNING id
         """),
         {
@@ -135,6 +136,7 @@ async def create_achievement(body: AchievementCreate, db: AsyncSession = Depends
             "player_id": player_id,
             "player_name": body.player_name,
             "season": body.season or None,
+            "season_end": body.season_end or None,
             "category": body.category,
             "subcategory": body.subcategory or None,
             "achievement": body.achievement,
@@ -152,6 +154,7 @@ class AchievementUpdate(BaseModel):
     player_name: Optional[str] = None
     player_id: Optional[str] = None
     season: Optional[str] = None
+    season_end: Optional[str] = None
     category: Optional[str] = None
     subcategory: Optional[str] = None
     achievement: Optional[str] = None
@@ -166,7 +169,7 @@ async def update_achievement(
 ):
     sets = []
     params: dict = {"id": achievement_id}
-    for field in ["player_name", "player_id", "season", "category", "subcategory", "achievement", "detail"]:
+    for field in ["player_name", "player_id", "season", "season_end", "category", "subcategory", "achievement", "detail"]:
         val = getattr(body, field)
         if val is not None:
             sets.append(f"{field} = :{field}")

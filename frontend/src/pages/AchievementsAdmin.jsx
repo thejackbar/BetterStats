@@ -176,12 +176,21 @@ function AchievementFields({ form, setForm, seasons, inputCls }) {
   return (
     <>
       <div>
-        <label className="section-label mb-1 block">Season</label>
+        <label className="section-label mb-1 block">Season {form.category === 'Office Bearer' ? 'Start' : ''}</label>
         <select className={inputCls} value={form.season} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
           <option value="">— All Time —</option>
           {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>
+      {form.category === 'Office Bearer' && (
+        <div>
+          <label className="section-label mb-1 block">Season End</label>
+          <select className={inputCls} value={form.season_end || ''} onChange={e => setForm(f => ({ ...f, season_end: e.target.value }))}>
+            <option value="">— Present —</option>
+            {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
       <div>
         <label className="section-label mb-1 block">Category *</label>
         <select className={inputCls} value={form.category} onChange={e => setCategory(e.target.value)}>
@@ -232,7 +241,7 @@ function AchievementFields({ form, setForm, seasons, inputCls }) {
 // ─── Add/edit form ────────────────────────────────────────────────────────────
 
 function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel }) {
-  const [form, setForm] = useState(initial || { season: '', category: 'Club Award', subcategory: '', achievement: '', player_name: '', player_id: null, detail: '' })
+  const [form, setForm] = useState(initial || { season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', player_name: '', player_id: null, detail: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
@@ -283,7 +292,7 @@ function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel })
 // ─── Bulk add panel ───────────────────────────────────────────────────────────
 
 function BulkAddPanel({ orgId, players, seasons, onSave, onCancel }) {
-  const [form, setForm] = useState({ season: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
+  const [form, setForm] = useState({ season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
   const [selectedPlayers, setSelectedPlayers] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -535,6 +544,11 @@ export default function AchievementsAdmin() {
                         <span className="text-slate-300 text-sm truncate">{a.achievement}</span>
                         {a.subcategory && (
                           <span className="text-xs text-slate-500 font-mono">{a.subcategory}</span>
+                        )}
+                        {a.season_end && (
+                          <span className="text-xs text-slate-500 font-mono">
+                            {seasonDisplay(a.season)} — {seasonDisplay(a.season_end)}
+                          </span>
                         )}
                         {a.detail && (
                           <span className="text-xs text-slate-400 italic">{a.detail}</span>
