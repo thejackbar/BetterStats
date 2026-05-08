@@ -533,7 +533,7 @@ export default function Records() {
   useEffect(() => {
     setGradeId(null)
     if (seasonId) {
-      api.getRecordsGrades(orgId, seasonId).then(setGrades).catch(() => setGrades([]))
+      api.getSeasonGrades(orgId, seasonId).then(setGrades).catch(() => setGrades([]))
     } else {
       setGrades([])
     }
