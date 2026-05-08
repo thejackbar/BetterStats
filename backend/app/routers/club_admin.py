@@ -3,17 +3,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
-from passlib.context import CryptContext
 from typing import Optional
 import uuid
 
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, get_db
 )
-from app.routers.auth import get_current_user, get_current_club, require_super_admin
+from app.routers.auth import get_current_user, get_current_club, require_super_admin, _hash_password
 
 router = APIRouter(prefix="/club-admin", tags=["club-admin"])
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +321,7 @@ async def create_user(
 
     user = User(
         username=username,
-        password_hash=pwd_context.hash(data.password),
+        password_hash=_hash_password(data.password),
         display_name=data.display_name,
     )
     db.add(user)
@@ -358,7 +356,7 @@ async def reset_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    user.password_hash = pwd_context.hash(data.new_password)
+    user.password_hash = _hash_password(data.new_password)
     user.failed_login_count = 0
     user.locked_until = None
     await db.commit()

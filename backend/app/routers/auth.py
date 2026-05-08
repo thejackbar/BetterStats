@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 from jose import JWTError, jwt
 from datetime import datetime, timedelta, timezone
 import uuid
@@ -12,7 +12,13 @@ from app.config.settings import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    return _bcrypt.checkpw(plain.encode(), hashed.encode())
+
+
+def _hash_password(plain: str) -> str:
+    return _bcrypt.hashpw(plain.encode(), _bcrypt.gensalt()).decode()
 
 COOKIE_NAME = "bs_session"
 MAX_FAILED_ATTEMPTS = 5
@@ -115,7 +121,7 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
     if user.locked_until and user.locked_until.replace(tzinfo=timezone.utc) > now:
         raise HTTPException(status_code=429, detail="Account temporarily locked. Try again later.")
 
-    if not pwd_context.verify(data.password, user.password_hash):
+    if not _verify_password(data.password, user.password_hash):
         user.failed_login_count = (user.failed_login_count or 0) + 1
         if user.failed_login_count >= MAX_FAILED_ATTEMPTS:
             user.locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
