@@ -521,6 +521,7 @@ export default function PlayerProfile() {
   const [seasonStats, setSeasonStats] = useState(null)
   const [achievementsLoaded, setAchievementsLoaded] = useState(false)
   const [headerAchievements, setHeaderAchievements] = useState([])
+  const [partnerships, setPartnerships] = useState(null)
 
   // Load season stats and activity eagerly on mount
   useEffect(() => {
@@ -547,7 +548,10 @@ export default function PlayerProfile() {
       api.getPlayerMilestones(playerId).then(setMilestones).catch(() => setMilestones([]))
     }
     if (t === 'achievements') setAchievementsLoaded(true)
-  }, [playerId, milestones])
+    if (t === 'analysis' && partnerships === null) {
+      api.getPlayerPartnerships(playerId).then(setPartnerships).catch(() => setPartnerships([]))
+    }
+  }, [playerId, milestones, partnerships])
 
   // Hooks must run before any early returns — derive display stats for stat cards
   const rawData = data
@@ -723,11 +727,47 @@ export default function PlayerProfile() {
                 <SeasonBattingTable data={seasonStats} />
               </div>
             )}
-            <div className="rounded-lg border border-navy-700 p-4 text-center">
-              <p className="text-slate-500 text-sm">
-                Dismissal breakdown, by-position, and partnership analysis require game-level data which is not available at the current API tier.
-              </p>
-            </div>
+            {partnerships === null ? (
+              <LoadingSpinner size="sm" />
+            ) : partnerships.length === 0 ? null : (
+              <div>
+                <h3 className="display-heading text-lg text-white mb-4">TOP PARTNERSHIPS</h3>
+                <div className="card overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-navy-700">
+                        <th className="table-header">Partner</th>
+                        <th className="table-header text-right">Runs</th>
+                        <th className="table-header text-right">Wkt</th>
+                        <th className="table-header text-right hidden sm:table-cell">Match</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {partnerships.slice(0, 20).map((p, i) => {
+                        const partnerId = p.batter1_id === playerId ? p.batter2_id : p.batter1_id
+                        const partnerName = p.batter1_id === playerId ? p.batter2_name : p.batter1_name
+                        const myRuns = p.batter1_id === playerId ? p.batter1_runs : p.batter2_runs
+                        return (
+                          <tr key={i} className="table-row">
+                            <td className="table-cell">
+                              {partnerId
+                                ? <Link to={`/players/${partnerId}`} className="text-white hover:text-accent transition-colors">{partnerName ?? '—'}</Link>
+                                : <span className="text-slate-400">{partnerName ?? '—'}</span>}
+                              {myRuns != null && <span className="text-slate-600 text-xs ml-1.5">({myRuns})</span>}
+                            </td>
+                            <td className="table-cell stat-number text-right font-bold text-accent">{p.runs ?? '—'}</td>
+                            <td className="table-cell stat-number text-right text-slate-400">{p.wicket_number ?? '—'}</td>
+                            <td className="table-cell text-right text-slate-600 text-xs hidden sm:table-cell">
+                              {p.home_team && p.away_team ? `${p.home_team} v ${p.away_team}` : '—'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

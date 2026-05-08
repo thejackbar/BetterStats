@@ -236,11 +236,54 @@ async def get_player_milestones(session: AsyncSession, player_id: str) -> list[d
 
 
 async def get_player_partnerships(session: AsyncSession, player_id: str) -> list[dict]:
-    return []
+    result = await session.execute(
+        text("""
+            SELECT
+                pt.wicket_number,
+                pt.innings_number,
+                pt.runs,
+                pt.balls,
+                pt.batter1_runs,
+                pt.batter2_runs,
+                p1.name AS batter1_name,
+                p2.name AS batter2_name,
+                pt.batter1_id::text,
+                pt.batter2_id::text,
+                g.home_team,
+                g.away_team,
+                g.played_at::text
+            FROM partnerships pt
+            JOIN games g ON g.id = pt.game_id
+            LEFT JOIN players p1 ON p1.id = pt.batter1_id
+            LEFT JOIN players p2 ON p2.id = pt.batter2_id
+            WHERE (pt.batter1_id = :pid OR pt.batter2_id = :pid)
+              AND pt.runs IS NOT NULL
+            ORDER BY pt.runs DESC
+            LIMIT 50
+        """),
+        {"pid": player_id},
+    )
+    return [dict(r) for r in result.mappings()]
 
 
 async def get_game_fall_of_wickets(session: AsyncSession, game_id: str) -> list[dict]:
-    return []
+    result = await session.execute(
+        text("""
+            SELECT
+                fow.wicket_number,
+                fow.innings_number,
+                fow.score_at_fall,
+                fow.overs_at_fall,
+                p.name AS player_name,
+                fow.player_id::text
+            FROM fall_of_wickets fow
+            LEFT JOIN players p ON p.id = fow.player_id
+            WHERE fow.game_id = :gid
+            ORDER BY fow.innings_number, fow.wicket_number
+        """),
+        {"gid": game_id},
+    )
+    return [dict(r) for r in result.mappings()]
 
 
 async def get_upcoming_milestones_for_org(
@@ -698,4 +741,25 @@ async def get_club_summary(
 
 
 async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dict]:
-    return []
+    result = await session.execute(
+        text("""
+            SELECT
+                pt.wicket_number,
+                pt.innings_number,
+                pt.runs,
+                pt.balls,
+                pt.batter1_runs,
+                pt.batter2_runs,
+                pt.batter1_id::text,
+                pt.batter2_id::text,
+                p1.name AS batter1_name,
+                p2.name AS batter2_name
+            FROM partnerships pt
+            LEFT JOIN players p1 ON p1.id = pt.batter1_id
+            LEFT JOIN players p2 ON p2.id = pt.batter2_id
+            WHERE pt.game_id = :gid
+            ORDER BY pt.innings_number, pt.wicket_number
+        """),
+        {"gid": game_id},
+    )
+    return [dict(r) for r in result.mappings()]
