@@ -1,13 +1,18 @@
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useMemo } from 'react'
 import { useClubData } from '../hooks/useClubData'
+import { useClub } from '../hooks/useClub'
 import { api } from '../lib/api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import ClubInactive from './ClubInactive'
 import clsx from 'clsx'
 
 export default function Players() {
-  const { orgId } = useParams()
+  const { clubSlug } = useParams()
+  const { orgId, inactive } = useClub(clubSlug)
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading: clubLoading } = useClubData(orgId)
+
+  if (inactive) return <ClubInactive />
 
   const [players, setPlayers] = useState([])
   const [battingStats, setBattingStats] = useState({})
@@ -52,8 +57,8 @@ export default function Players() {
             <h1 className="display-heading text-4xl md:text-5xl text-white">PLAYERS</h1>
           </div>
           <div className="flex gap-2">
-            <Link to={`/dashboard/${orgId}`} className="btn-ghost border border-navy-600 text-sm">← Dashboard</Link>
-            <Link to={`/compare/${orgId}`} className="btn-primary text-sm">Compare Players</Link>
+            <Link to={`/${clubSlug}/dashboard`} className="btn-ghost border border-navy-600 text-sm">← Dashboard</Link>
+            <Link to={`/${clubSlug}/compare`} className="btn-primary text-sm">Compare Players</Link>
           </div>
         </div>
       </div>

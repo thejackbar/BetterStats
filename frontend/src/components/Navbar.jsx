@@ -1,47 +1,38 @@
 import { Link, useLocation } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 
-const APPLECROSS_ORG_ID = import.meta.env.VITE_DEFAULT_ORG_ID || ''
-
-function useOrgId() {
+function useClubSlug() {
   const { pathname } = useLocation()
-  const [cachedOrg, setCachedOrg] = useState(() => sessionStorage.getItem('bs_last_org_id') || '')
-
-  useEffect(() => {
-    const handler = () => setCachedOrg(sessionStorage.getItem('bs_last_org_id') || '')
-    window.addEventListener('bs_org_changed', handler)
-    return () => window.removeEventListener('bs_org_changed', handler)
-  }, [])
-
-  const segments = pathname.split('/')
-  const idx = segments.findIndex(s => ['dashboard', 'leaderboard', 'compare', 'records', 'merge', 'awards'].includes(s))
-  if (idx !== -1 && segments[idx + 1]) return segments[idx + 1]
-  // players list: /players/:orgId/list
-  const listIdx = segments.indexOf('list')
-  if (listIdx > 1) return segments[listIdx - 1]
-  return APPLECROSS_ORG_ID || cachedOrg
+  const segments = pathname.split('/').filter(Boolean)
+  // Club pages: /:clubSlug/(dashboard|players|leaderboard|records|compare)
+  const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare']
+  if (segments.length >= 2 && CLUB_SECTIONS.includes(segments[1])) {
+    return segments[0]
+  }
+  return null
 }
 
 export default function Navbar() {
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
-  const orgId = useOrgId()
+  const clubSlug = useClubSlug()
 
-  const navLinks = orgId ? [
-    { to: `/dashboard/${orgId}`, label: 'Dashboard' },
-    { to: `/players/${orgId}/list`, label: 'Players' },
-    { to: `/leaderboard/${orgId}`, label: 'Leaderboard' },
-    { to: `/records/${orgId}`, label: 'Records' },
-    { to: `/compare/${orgId}`, label: 'Compare' },
-    { to: `/merge/${orgId}`, label: 'Merge' },
-    { to: `/awards/${orgId}`, label: 'Awards' },
+  // Don't render Navbar on admin, marketing, or login pages — they have their own nav
+  const SKIP_PATHS = ['/admin', '/login', '/features', '/pricing', '/about', '/contact', '/terms', '/privacy']
+  if (SKIP_PATHS.some(p => pathname.startsWith(p)) || pathname === '/') return null
+
+  const navLinks = clubSlug ? [
+    { to: `/${clubSlug}/dashboard`, label: 'Dashboard' },
+    { to: `/${clubSlug}/players`, label: 'Players' },
+    { to: `/${clubSlug}/leaderboard`, label: 'Leaderboard' },
+    { to: `/${clubSlug}/records`, label: 'Records' },
+    { to: `/${clubSlug}/compare`, label: 'Compare' },
   ] : []
 
   return (
     <nav className="bg-navy-900 border-b border-navy-700 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
-        {/* Logo */}
-        <Link to={orgId ? `/dashboard/${orgId}` : '/'} className="flex items-center gap-2 group">
+        <Link to={clubSlug ? `/${clubSlug}/dashboard` : '/'} className="flex items-center gap-2 group">
           <span className="w-6 h-6 rounded bg-accent flex items-center justify-center">
             <svg viewBox="0 0 24 24" className="w-4 h-4 fill-navy-950" xmlns="http://www.w3.org/2000/svg">
               <circle cx="12" cy="12" r="10" />
@@ -52,10 +43,9 @@ export default function Navbar() {
           <span className="font-display font-bold text-xl tracking-wider uppercase text-white group-hover:text-accent transition-colors">
             Better<span className="text-accent">Stats</span>
           </span>
-          <span className="text-slate-600 text-xs font-mono">v2.5.2</span>
+          <span className="text-slate-600 text-xs font-mono">v2.6.0.0</span>
         </Link>
 
-        {/* Desktop links */}
         <div className="hidden md:flex items-center gap-1">
           {navLinks.map(link => (
             <Link
@@ -66,10 +56,8 @@ export default function Navbar() {
               {link.label}
             </Link>
           ))}
-          {!orgId && <Link to="/onboard" className="btn-ghost">Join a Club</Link>}
         </div>
 
-        {/* Mobile hamburger */}
         <button
           className="md:hidden text-slate-400 hover:text-white p-2"
           onClick={() => setOpen(o => !o)}
@@ -84,7 +72,6 @@ export default function Navbar() {
         </button>
       </div>
 
-      {/* Mobile menu */}
       {open && (
         <div className="md:hidden border-t border-navy-700 bg-navy-900 px-4 py-3 flex flex-col gap-1">
           {navLinks.map(link => (
@@ -92,7 +79,6 @@ export default function Navbar() {
               {link.label}
             </Link>
           ))}
-          {!orgId && <Link to="/onboard" className="btn-ghost text-left" onClick={() => setOpen(false)}>Join a Club</Link>}
         </div>
       )}
     </nav>

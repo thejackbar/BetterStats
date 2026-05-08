@@ -1,40 +1,100 @@
-import { Routes, Route } from 'react-router-dom'
-import Navbar from './components/Navbar'
-import Home from './pages/Home'
+import { Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider } from './contexts/AuthContext'
+import ProtectedRoute from './components/ProtectedRoute'
+
+// Marketing
+import Landing from './pages/marketing/Landing'
+import Features from './pages/marketing/Features'
+import Pricing from './pages/marketing/Pricing'
+import About from './pages/marketing/About'
+import Contact from './pages/marketing/Contact'
+import Terms from './pages/marketing/Terms'
+import Privacy from './pages/marketing/Privacy'
+
+// Auth
+import Login from './pages/Login'
+
+// Admin
+import AdminDashboard from './pages/admin/AdminDashboard'
+import AdminPlayers from './pages/admin/AdminPlayers'
+import AdminGames from './pages/admin/AdminGames'
+import AdminSeasons from './pages/admin/AdminSeasons'
+import AdminSettings from './pages/admin/AdminSettings'
+import SuperClubs from './pages/admin/SuperClubs'
+import SuperUsers from './pages/admin/SuperUsers'
+
+// Admin wrappers for existing tools
+import AdminAwards from './pages/admin/AdminAwards'
+import AdminMerge from './pages/admin/AdminMerge'
+
+// Public club pages (slug-based)
 import Dashboard from './pages/Dashboard'
 import Players from './pages/Players'
 import PlayerProfile from './pages/PlayerProfile'
 import PlayerComparison from './pages/PlayerComparison'
 import Leaderboard from './pages/Leaderboard'
+import Records from './pages/Records'
+import ShareCard from './pages/ShareCard'
+
+// Game pages (game-level, UUID-based — no slug needed)
 import MatchScorecard from './pages/MatchScorecard'
 import MatchOverview from './pages/MatchOverview'
 import PlayHQScorecard from './pages/PlayHQScorecard'
-import Records from './pages/Records'
+
+// Misc
+import ClubInactive from './pages/ClubInactive'
 import Onboard from './pages/Onboard'
-import ShareCard from './pages/ShareCard'
-import MergeTools from './pages/MergeTools'
-import AchievementsAdmin from './pages/AchievementsAdmin'
+import Navbar from './components/Navbar'
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-navy-950">
-      <Navbar />
+    <AuthProvider>
+      <div className="min-h-screen bg-navy-950">
+        <Navbar />
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/dashboard/:orgId" element={<Dashboard />} />
-        <Route path="/players/:orgId/list" element={<Players />} />
-        <Route path="/players/:playerId" element={<PlayerProfile />} />
-        <Route path="/players/:playerId/share" element={<ShareCard />} />
-        <Route path="/compare/:orgId" element={<PlayerComparison />} />
-        <Route path="/leaderboard/:orgId" element={<Leaderboard />} />
+        {/* Marketing site */}
+        <Route path="/" element={<Landing />} />
+        <Route path="/features" element={<Features />} />
+        <Route path="/pricing" element={<Pricing />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/contact" element={<Contact />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
+
+        {/* Auth */}
+        <Route path="/login" element={<Login />} />
+
+        {/* Admin (protected) */}
+        <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/admin/players" element={<ProtectedRoute><AdminPlayers /></ProtectedRoute>} />
+        <Route path="/admin/games" element={<ProtectedRoute><AdminGames /></ProtectedRoute>} />
+        <Route path="/admin/seasons" element={<ProtectedRoute><AdminSeasons /></ProtectedRoute>} />
+        <Route path="/admin/awards" element={<ProtectedRoute><AdminAwards /></ProtectedRoute>} />
+        <Route path="/admin/merge" element={<ProtectedRoute><AdminMerge /></ProtectedRoute>} />
+        <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+        <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
+        <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
+
+        {/* Game-level pages (UUID in URL, club not needed in path) */}
         <Route path="/games/:gameId" element={<MatchScorecard />} />
         <Route path="/match/:gameId" element={<MatchOverview />} />
         <Route path="/scorecards/:gameId" element={<PlayHQScorecard />} />
-        <Route path="/records/:orgId" element={<Records />} />
+
+        {/* Public club pages (slug-based) */}
+        <Route path="/club-inactive" element={<ClubInactive />} />
         <Route path="/onboard" element={<Onboard />} />
-        <Route path="/merge/:orgId" element={<MergeTools />} />
-        <Route path="/awards/:orgId" element={<AchievementsAdmin />} />
+        <Route path="/:clubSlug/dashboard" element={<Dashboard />} />
+        <Route path="/:clubSlug/players" element={<Players />} />
+        <Route path="/:clubSlug/compare" element={<PlayerComparison />} />
+        <Route path="/:clubSlug/leaderboard" element={<Leaderboard />} />
+        <Route path="/:clubSlug/records" element={<Records />} />
+        <Route path="/players/:playerId" element={<PlayerProfile />} />
+        <Route path="/players/:playerId/share" element={<ShareCard />} />
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </div>
+      </div>
+    </AuthProvider>
   )
 }

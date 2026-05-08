@@ -1,11 +1,8 @@
 const BASE = import.meta.env.VITE_API_URL || '/api'
 
 async function request(path, options = {}) {
-  const token = localStorage.getItem('bs_token')
   const headers = { 'Content-Type': 'application/json', ...options.headers }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-
-  const res = await fetch(`${BASE}${path}`, { ...options, headers })
+  const res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include' })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     const detail = Array.isArray(err.detail)
@@ -17,17 +14,10 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  // Auth
-  register: (email, password) =>
-    request('/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) }),
-  login: (email, password) => {
-    const form = new URLSearchParams({ username: email, password })
-    return fetch(`${BASE}/auth/token`, { method: 'POST', body: form, headers: {} })
-      .then(r => r.json())
-  },
-  me: () => request('/auth/me'),
+  // Clubs (slug-based)
+  getClubBySlug: (slug) => request(`/clubs/${slug}`),
 
-  // Organisations
+  // Organisations (UUID-based, used internally once slug is resolved)
   searchOrgs: (q) => request(`/organisations/search?q=${encodeURIComponent(q)}`),
   onboard: (orgId, orgName = '') =>
     request('/organisations/onboard', { method: 'POST', body: JSON.stringify({ org_id: orgId, org_name: orgName }) }),
@@ -65,10 +55,6 @@ export const api = {
   getPlayerPartnerships: (playerId) => request(`/players/${playerId}/partnerships`),
   getPlayerActivity: (playerId) => request(`/players/${playerId}/activity`),
   getPlayerUpcomingMilestones: (playerId) => request(`/players/${playerId}/upcoming-milestones`),
-  renamePlayer: (playerId, name) =>
-    request(`/players/${playerId}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
-  claimPlayer: (playerId) =>
-    request(`/players/${playerId}/claim`, { method: 'POST' }),
 
   // Games
   listGames: (orgId, { seasonId, gradeId, limit } = {}) => {
@@ -102,6 +88,35 @@ export const api = {
       body: JSON.stringify({ merge_log_id: mergeLogId, org_id: orgId }),
     }),
 
+  // Club admin
+  adminListPlayers: () => request('/club-admin/players'),
+  adminPatchPlayer: (playerId, data) =>
+    request(`/club-admin/players/${playerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adminListSeasons: () => request('/club-admin/seasons'),
+  adminListGames: (seasonId) => {
+    const params = new URLSearchParams()
+    if (seasonId) params.set('season_id', seasonId)
+    return request(`/club-admin/games?${params}`)
+  },
+  adminGetSettings: () => request('/club-admin/settings'),
+  adminPatchSettings: (data) =>
+    request('/club-admin/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // Super admin
+  superListClubs: () => request('/club-admin/super/clubs'),
+  superCreateClub: (data) =>
+    request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
+  superPatchClub: (clubId, data) =>
+    request(`/club-admin/super/clubs/${clubId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superListUsers: () => request('/club-admin/super/users'),
+  superCreateUser: (data) =>
+    request('/club-admin/super/users', { method: 'POST', body: JSON.stringify(data) }),
+  superResetPassword: (userId, newPassword) =>
+    request(`/club-admin/super/users/${userId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ new_password: newPassword }),
+    }),
+
   // Achievements
   listAchievements: (orgId, { playerId, season } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
@@ -116,14 +131,15 @@ export const api = {
   deleteAchievement: (id, orgId) =>
     request(`/achievements/${id}?org_id=${orgId}`, { method: 'DELETE' }),
   downloadAchievementsTemplate: () =>
-    fetch(`${BASE}/achievements/template`),
+    fetch(`${BASE}/achievements/template`, { credentials: 'include' }),
   importAchievements: (orgId, file) => {
     const form = new FormData()
     form.append('file', file)
-    const token = localStorage.getItem('bs_token')
-    const headers = token ? { Authorization: `Bearer ${token}` } : {}
-    return fetch(`${BASE}/achievements/import?org_id=${orgId}`, { method: 'POST', body: form, headers })
-      .then(r => r.json())
+    return fetch(`${BASE}/achievements/import?org_id=${orgId}`, {
+      method: 'POST',
+      body: form,
+      credentials: 'include',
+    }).then(r => r.json())
   },
 
   // Records

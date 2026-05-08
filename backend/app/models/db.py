@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, String, Boolean, Integer, Numeric, Date, Text, ForeignKey,
+    Column, Boolean, Integer, Numeric, Date, Text, ForeignKey,
     TIMESTAMP, JSON, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -28,11 +28,17 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email = Column(Text, unique=True, nullable=False)
+    email = Column(Text, unique=True, nullable=True)
+    username = Column(Text, unique=True, nullable=True)
     password_hash = Column(Text)
+    display_name = Column(Text, nullable=True)
+    last_login_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    failed_login_count = Column(Integer, default=0, nullable=False)
+    locked_until = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-    players = relationship("Player", back_populates="user")
+    memberships = relationship("ClubMembership", back_populates="user")
 
 
 class Organisation(Base):
@@ -42,10 +48,34 @@ class Organisation(Base):
     name = Column(Text, nullable=False)
     short_name = Column(Text)
     playhq_id = Column(Text, nullable=True)
+    slug = Column(Text, unique=True, nullable=True)
+    is_active = Column(Boolean, default=False, nullable=False)
+    primary_color = Column(Text, default="#16c784", nullable=True)
+    accent_color = Column(Text, default="#243352", nullable=True)
+    logo_url = Column(Text, nullable=True)
+    hero_image_url = Column(Text, nullable=True)
+    theme_mode = Column(Text, default="auto", nullable=True)
+    contact_email = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     seasons = relationship("Season", back_populates="organisation")
     players = relationship("Player", back_populates="organisation")
+    memberships = relationship("ClubMembership", back_populates="club")
+
+
+class ClubMembership(Base):
+    __tablename__ = "club_memberships"
+    __table_args__ = (UniqueConstraint("club_id", "user_id", name="uq_club_membership"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    club_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role = Column(Text, default="club_admin", nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    club = relationship("Organisation", back_populates="memberships")
+    user = relationship("User", back_populates="memberships")
 
 
 class Season(Base):
@@ -82,18 +112,23 @@ class Player(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     name = Column(Text, nullable=False)
+    display_name_override = Column(Text, nullable=True)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"))
     playhq_id = Column(Text, nullable=True)
+    # claimed / user_id retained as columns but no longer used in business logic
     claimed = Column(Boolean, default=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True)
 
     organisation = relationship("Organisation", back_populates="players")
-    user = relationship("User", back_populates="players")
     batting_innings = relationship("BattingInnings", back_populates="player")
     bowling_spells = relationship("BowlingSpell", back_populates="player")
     fielding_stats = relationship("FieldingStat", back_populates="player")
     milestones = relationship("Milestone", back_populates="player")
     season_stats = relationship("PlayerSeasonStats", back_populates="player")
+
+    @property
+    def display_name(self) -> str:
+        return self.display_name_override or self.name
 
 
 class Game(Base):

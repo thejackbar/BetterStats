@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -117,6 +117,8 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(clubs.router)
+app.include_router(club_admin.router)
 app.include_router(organisations.router)
 app.include_router(players.router)
 app.include_router(games.router)

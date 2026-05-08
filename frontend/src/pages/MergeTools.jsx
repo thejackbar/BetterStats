@@ -391,8 +391,9 @@ function MergeHistory({ orgId, refreshKey }) {
   )
 }
 
-export default function MergeTools() {
-  const { orgId } = useParams()
+export default function MergeTools({ embeddedOrgId }) {
+  const params = useParams()
+  const orgId = embeddedOrgId || params.orgId
   const [candidates, setCandidates] = useState(null)
   const [skipped, setSkipped] = useState(new Set())
   const [loading, setLoading] = useState(true)

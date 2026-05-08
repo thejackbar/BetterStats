@@ -7,7 +7,8 @@ class Settings(BaseSettings):
     sync_database_url: str = "postgresql://cricket:cricket@db/betterstats"
     secret_key: str = "changeme-secret-key-32-chars-min"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
+    access_token_expire_minutes: int = 60 * 24 * 30  # 30 days
+    cookie_secure: bool = True  # set False in local dev
     playhq_base_url: str = "https://grassrootsapiproxy.cricket.com.au"
     playhq_api_key: str = ""
     cors_origins: str = "http://localhost:3000"

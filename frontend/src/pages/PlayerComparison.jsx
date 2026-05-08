@@ -1,7 +1,9 @@
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useMemo } from 'react'
+import { useClub } from '../hooks/useClub'
 import { api } from '../lib/api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import ClubInactive from './ClubInactive'
 import clsx from 'clsx'
 
 function PlayerSearch({ players, selected, onSelect, label }) {
@@ -137,7 +139,10 @@ function SectionHeader({ label }) {
 }
 
 export default function PlayerComparison() {
-  const { orgId } = useParams()
+  const { clubSlug } = useParams()
+  const { orgId, inactive } = useClub(clubSlug)
+
+  if (inactive) return <ClubInactive />
   const [players, setPlayers] = useState([])
   const [player1, setPlayer1] = useState(null)
   const [player2, setPlayer2] = useState(null)
@@ -185,7 +190,7 @@ export default function PlayerComparison() {
         <div className="accent-bar mb-3" />
         <div className="flex flex-wrap items-start justify-between gap-4">
           <h1 className="display-heading text-4xl md:text-5xl text-white">COMPARE PLAYERS</h1>
-          <Link to={`/dashboard/${orgId}`} className="btn-ghost border border-navy-600 text-sm">← Dashboard</Link>
+          <Link to={`/${clubSlug}/dashboard`} className="btn-ghost border border-navy-600 text-sm">← Dashboard</Link>
         </div>
       </div>
 

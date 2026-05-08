@@ -1,7 +1,9 @@
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useClubData } from '../hooks/useClubData'
+import { useClub } from '../hooks/useClub'
 import { api } from '../lib/api'
+import ClubInactive from './ClubInactive'
 import SeasonSelector from '../components/SeasonSelector'
 import LoadingSpinner from '../components/LoadingSpinner'
 import clsx from 'clsx'
@@ -262,8 +264,11 @@ function FieldingLeaderboard({ orgId, seasonId, gradeId }) {
 }
 
 export default function Leaderboard() {
-  const { orgId } = useParams()
+  const { clubSlug } = useParams()
+  const { orgId, inactive } = useClub(clubSlug)
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading } = useClubData(orgId)
+
+  if (inactive) return <ClubInactive />
   const [tab, setTab] = useState('batting')
   const [battingSort, setBattingSort] = useState('total_runs')
   const [bowlingSort, setBowlingSort] = useState('total_wickets')
@@ -280,8 +285,8 @@ export default function Leaderboard() {
             <h1 className="display-heading text-4xl md:text-5xl text-white">LEADERBOARD</h1>
           </div>
           <div className="flex gap-2">
-            <Link to={`/compare/${orgId}`} className="btn-ghost border border-navy-600 text-sm">Compare →</Link>
-            <Link to={`/dashboard/${orgId}`} className="btn-ghost border border-navy-600 text-sm">← Dashboard</Link>
+            <Link to={`/${clubSlug}/compare`} className="btn-ghost border border-navy-600 text-sm">Compare →</Link>
+            <Link to={`/${clubSlug}/dashboard`} className="btn-ghost border border-navy-600 text-sm">← Dashboard</Link>
           </div>
         </div>
       </div>

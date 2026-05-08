@@ -386,8 +386,9 @@ function BulkAddPanel({ orgId, players, seasons, onSave, onCancel }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function AchievementsAdmin() {
-  const { orgId } = useParams()
+export default function AchievementsAdmin({ embeddedOrgId }) {
+  const params = useParams()
+  const orgId = embeddedOrgId || params.orgId
   const [achievements, setAchievements] = useState(null)
   const [players, setPlayers] = useState([])
   const [seasons, setSeasons] = useState([])

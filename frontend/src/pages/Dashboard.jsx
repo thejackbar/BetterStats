@@ -1,9 +1,11 @@
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useClubData, useRecentGames } from '../hooks/useClubData'
+import { useClub } from '../hooks/useClub'
 import { api } from '../lib/api'
 import SeasonSelector from '../components/SeasonSelector'
 import LoadingSpinner from '../components/LoadingSpinner'
+import ClubInactive from './ClubInactive'
 import clsx from 'clsx'
 
 const SPONSOR_IMAGE = import.meta.env.VITE_SPONSOR_IMAGE || ''
@@ -289,8 +291,11 @@ const STAT_PANELS = {
 }
 
 export default function Dashboard() {
-  const { orgId } = useParams()
+  const { clubSlug } = useParams()
+  const { orgId, inactive } = useClub(clubSlug)
   const navigate = useNavigate()
+
+  if (inactive) return <ClubInactive />
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading, error } = useClubData(orgId)
   const { games, loading: gamesLoading } = useRecentGames(orgId, { seasonId: selectedSeason, gradeId: selectedGrade })
 
@@ -360,9 +365,9 @@ export default function Dashboard() {
             {org.short_name && <p className="text-slate-500 font-mono text-sm mt-1">{org.short_name}</p>}
           </div>
           <div className="flex gap-2 flex-wrap">
-            <Link to={`/players/${orgId}/list`} className="btn-ghost border border-navy-600">Players</Link>
-            <Link to={`/leaderboard/${orgId}`} className="btn-primary">Leaderboard</Link>
-            <Link to={`/compare/${orgId}`} className="btn-ghost border border-navy-600">Compare</Link>
+            <Link to={`/${clubSlug}/players`} className="btn-ghost border border-navy-600">Players</Link>
+            <Link to={`/${clubSlug}/leaderboard`} className="btn-primary">Leaderboard</Link>
+            <Link to={`/${clubSlug}/compare`} className="btn-ghost border border-navy-600">Compare</Link>
             <button
               onClick={async () => {
                 if (syncing) return
@@ -461,7 +466,7 @@ export default function Dashboard() {
             <>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="display-heading text-lg text-white">TOP BATTERS</h2>
-                <Link to={`/leaderboard/${orgId}`} className="text-accent text-xs hover:underline">Full leaderboard →</Link>
+                <Link to={`/${clubSlug}/leaderboard`} className="text-accent text-xs hover:underline">Full leaderboard →</Link>
               </div>
               {statsLoading ? <LoadingSpinner size="sm" /> : topBatters.length === 0 ? (
                 <p className="text-slate-500 text-sm">No data yet.</p>
@@ -506,7 +511,7 @@ export default function Dashboard() {
             <>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="display-heading text-lg text-white">TOP BOWLERS</h2>
-                <Link to={`/leaderboard/${orgId}`} className="text-accent text-xs hover:underline">Full leaderboard →</Link>
+                <Link to={`/${clubSlug}/leaderboard`} className="text-accent text-xs hover:underline">Full leaderboard →</Link>
               </div>
               {statsLoading ? <LoadingSpinner size="sm" /> : topBowlers.length === 0 ? (
                 <p className="text-slate-500 text-sm">No data yet.</p>
@@ -573,7 +578,7 @@ export default function Dashboard() {
             <>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="display-heading text-lg text-white">ALL PLAYERS</h2>
-                <Link to={`/players/${orgId}/list`} className="text-accent text-xs hover:underline">Player search →</Link>
+                <Link to={`/${clubSlug}/players`} className="text-accent text-xs hover:underline">Player search →</Link>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1 max-h-60 overflow-y-auto pr-1">
                 {players.map(p => (
@@ -631,7 +636,7 @@ export default function Dashboard() {
         <div className="card p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="display-heading text-lg text-white">TOP BATTERS</h2>
-            <Link to={`/leaderboard/${orgId}`} className="text-accent text-xs hover:underline">See all →</Link>
+            <Link to={`/${clubSlug}/leaderboard`} className="text-accent text-xs hover:underline">See all →</Link>
           </div>
           {statsLoading ? <LoadingSpinner size="sm" /> : topBatters.length === 0 ? (
             <p className="text-slate-500 text-sm">No data yet.</p>
@@ -657,7 +662,7 @@ export default function Dashboard() {
         <div className="card p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="display-heading text-lg text-white">TOP BOWLERS</h2>
-            <Link to={`/leaderboard/${orgId}`} className="text-accent text-xs hover:underline">See all →</Link>
+            <Link to={`/${clubSlug}/leaderboard`} className="text-accent text-xs hover:underline">See all →</Link>
           </div>
           {statsLoading ? <LoadingSpinner size="sm" /> : topBowlers.length === 0 ? (
             <p className="text-slate-500 text-sm">No data yet.</p>
@@ -678,6 +683,13 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="mt-16 pt-6 border-t border-navy-800 text-center">
+        <p className="text-slate-700 text-xs">
+          Powered by{' '}
+          <a href="/" className="hover:text-slate-500 transition-colors">BetterStats</a>
+        </p>
       </div>
     </div>
   )
