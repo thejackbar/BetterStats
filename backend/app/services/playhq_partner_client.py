@@ -901,19 +901,27 @@ async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: s
 
     result: dict = {"innings": []}
 
-    # Try REST summary API first — richer dismissal data, no endpoint scraping needed
+    # Try REST summary API first — richer dismissal data
     try:
         rest_result = await _get_game_summary_rest(fixture_id)
-        if rest_result.get("innings"):
-            result = rest_result
-            _scorecard_cache[key] = (time.time(), result)
-            return result
+        rest_innings = len(rest_result.get("innings", []))
+        logger.info(f"REST scorecard for {fixture_id}: {rest_innings} innings")
+        if rest_innings >= 2:
+            # Both innings present — REST result is complete, return immediately
+            _scorecard_cache[key] = (time.time(), rest_result)
+            return rest_result
+        if rest_innings == 1:
+            result = rest_result  # keep as fallback; still try GraphQL
     except Exception as e:
         logger.warning(f"PlayHQ REST summary failed for {fixture_id}: {e}")
 
-    # Fallback: GraphQL discoverGame
+    # Try GraphQL — may have more innings than REST
     try:
-        result = await _query_graphql_scorecard(fixture_id)
+        gql_result = await _query_graphql_scorecard(fixture_id)
+        gql_innings = len(gql_result.get("innings", []))
+        logger.info(f"GraphQL scorecard for {fixture_id}: {gql_innings} innings")
+        if gql_innings > len(result.get("innings", [])):
+            result = gql_result
     except Exception as e:
         logger.warning(f"PlayHQ GraphQL scorecard failed for {fixture_id}: {e}")
 
