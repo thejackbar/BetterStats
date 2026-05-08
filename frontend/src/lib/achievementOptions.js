@@ -75,24 +75,79 @@ export const ACHIEVEMENT_TREE = {
   },
   'Association Award': {
     'WASTCA': [
+      // Club
       'Champion Club',
-      '3rd Grade Batting Aggregate',
+      'Club Championship',
+      // Barry Parker
+      'Barry Parker Memorial Award',
+      'Barry Parker Memorial Award - Best Single Performance in a Match',
+      // Spirit
+      'Spirit of the Game Award',
+      'John Ireland & Paul Pearce Spirit of the Game Award',
+      // 1st Grade
+      '1st Grade Batting',
+      '1st Grade Batting Average',
+      '1st Grade Bowling Average',
+      '1st Grade Fielding',
+      // 2nd Grade
+      '2nd Grade Batting Aggregate',
+      '2nd Grade Batting Average',
+      '2nd Grade Champion Cricketer',
+      '2nd Grade Paul Pearce Champion Cricketer',
+      '2nd Grade Fielding',
+      // 3rd Grade
       '3rd Grade Batting Average',
       '3rd Grade Bowling Aggregate',
       '3rd Grade Bowling Average',
-      'OD4 Batting Aggregate',
+      '3rd Grade Fielding',
+      // 4th Grade
+      '4th Grade Batting Average',
+      '4th Grade Bowling Aggregate',
+      '4th Grade Bowling Average',
+      '4th Grade Fielding',
+      // 5th Grade
+      '5th Grade Batting Aggregate',
+      '5th Grade Batting Average',
+      '5th Grade Bowling',
+      '5th Grade Champion Cricketer',
+      '5th Grade Fielding',
+      // 6th Grade
+      '6th Grade Batting Aggregate',
+      '6th Grade Batting Average',
+      '6th Grade Champion Cricketer',
+      // 7th Grade
+      '7th Grade Batting Aggregate',
+      '7th Grade Batting Average',
+      '7th Grade Bowling Average',
+      '7th Grade Fielding',
+      // 8th Grade
+      '8th Grade Batting Aggregate',
+      '8th Grade Batting Average',
+      '8th Grade Bowling Aggregate',
+      '8th Grade Bowling Average',
+      // 9th Grade
+      '9th Grade Batting',
+      '9th Grade Bowling',
+      '9th Grade Fielding',
+      // 10th Grade
+      '10th Grade Batting',
+      '10th Grade Bowling Average',
+      // One Day
+      'OD2 Batting Aggregate',
+      'OD2 Bowling Average',
+      'OD2 Fielding',
       'OD4 Batting Average',
-      'OD4 Bowling Aggregate',
-      'OD4 Bowling Average',
+      'OD4 Champion Player',
       'OD5 Champion Cricketer',
-      'OD5 Batting Aggregate',
-      'OD5 Batting Average',
       'OD5 Bowling Aggregate',
-      'OD5 Bowling Average',
-      'Barry Parker Memorial Award',
-      'Noel Sherwood Medal',
-      'Club Volunteer Award',
-      'Rising Star',
+      'OD5 Black Champion Cricketer',
+      'OD5 Black Bowling Aggregate',
+      'One Day Division 1 Bowling Average',
+      'One Day Div 2 Bowling Aggregate',
+      'One Day Div 3 Bowling Aggregate',
+      // Colts
+      'Colts Batting',
+      'Colts Spirit of the Game Award',
     ],
     'WABCC': [
       'Batting Award',
@@ -107,21 +162,25 @@ export const ACHIEVEMENT_TREE = {
       'Les Buchanan Medal',
     ],
     'PSWL': [
-      'Champion Player',
-      'South A Batting Average',
-      'South A Batting Aggregate',
-      'South A Bowling Aggregate',
-      'South A Bowling Average',
-      'South A Bowling Average (Runner Up)',
-      'South B Batting Average',
-      'South B Batting Aggregate',
-      'South B Bowling Aggregate',
-      'South B Bowling Average',
-      'South B Spirit of Cricket',
-      'Spirit of Cricket',
+      // Metro
+      'PSWL Metro: Champion Player',
+      'PSWL Metro: Batting Average',
+      'PSWL Metro: Batting Aggregate (Runner Up)',
+      'PSWL Metro: Bowling Aggregate',
+      'PSWL Metro: Bowling Average (Runner Up)',
+      // South A
+      'PSWL South A - Batting Average',
+      'PSWL South A - Bowling Aggregate Runner Up',
+      'PSWL South A - Bowling Average Runner Up',
+      // South B
+      'PSWL South B - Spirit of Cricket',
+      // General
+      'PSWL South Premiership',
+      'PSWL South Conference Runner Up Bowling Aggregate',
     ],
     'ACC': [
       'Hall of Fame',
+      'WACA Inclusion and Diversity Award',
     ],
   },
   'Office Bearer': {
