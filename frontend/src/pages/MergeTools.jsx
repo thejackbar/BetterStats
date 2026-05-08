@@ -64,7 +64,6 @@ function PlayerCard({ player, isSelected, onSelect, label }) {
 
 function MergePair({ pair, orgId, onMerged, onSkipped }) {
   const [keepId, setKeepId] = useState(() => {
-    // Default: prefer the player with Grassroots data, then by seasons count
     const a = pair.player_a
     const b = pair.player_b
     if (a.playhq_id && !b.playhq_id) return a.id
@@ -150,6 +149,65 @@ function MergePair({ pair, orgId, onMerged, onSkipped }) {
   )
 }
 
+function MergeHistory({ orgId, refreshKey }) {
+  const [history, setHistory] = useState([])
+  const [undoing, setUndoing] = useState(null)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    api.getMergeHistory(orgId).then(setHistory).catch(() => {})
+  }, [orgId, refreshKey])
+
+  async function handleUndo(entry) {
+    setUndoing(entry.id)
+    setError(null)
+    try {
+      await api.undoMerge(entry.id, orgId)
+      setHistory(h => h.map(e => e.id === entry.id ? { ...e, undone: true } : e))
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setUndoing(null)
+    }
+  }
+
+  if (history.length === 0) return null
+
+  return (
+    <div className="mt-10">
+      <h2 className="text-white font-display font-bold text-lg uppercase tracking-wider mb-3">Merge History</h2>
+      {error && (
+        <div className="mb-3 text-sm text-red-400 bg-red-900/30 border border-red-800 rounded px-3 py-2">{error}</div>
+      )}
+      <div className="flex flex-col gap-2">
+        {history.map(entry => (
+          <div key={entry.id} className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-sm ${entry.undone ? 'border-navy-700 bg-navy-900/40 opacity-50' : 'border-navy-700 bg-navy-900'}`}>
+            <div className="flex-1 min-w-0">
+              <span className="text-white font-medium">{entry.keep_player_name}</span>
+              <span className="text-slate-500 mx-2">←</span>
+              <span className="text-amber-300">{entry.removed_player_name}</span>
+              <span className="text-slate-600 text-xs ml-3">
+                {new Date(entry.merged_at).toLocaleDateString()}
+              </span>
+            </div>
+            {entry.undone ? (
+              <span className="text-xs text-slate-500 shrink-0">Undone</span>
+            ) : (
+              <button
+                onClick={() => handleUndo(entry)}
+                disabled={undoing === entry.id}
+                className="btn-ghost border border-navy-600 text-xs px-3 py-1 shrink-0 disabled:opacity-50"
+              >
+                {undoing === entry.id ? 'Undoing…' : 'Undo'}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function MergeTools() {
   const { orgId } = useParams()
   const [candidates, setCandidates] = useState(null)
@@ -157,6 +215,7 @@ export default function MergeTools() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [mergedCount, setMergedCount] = useState(0)
+  const [historyKey, setHistoryKey] = useState(0)
 
   function load() {
     setLoading(true)
@@ -188,7 +247,7 @@ export default function MergeTools() {
         </div>
         <p className="text-slate-400 mt-3 text-sm">
           Players with the same name from different data sources (e.g. Grassroots vs scorecard import) are shown below.
-          Select which record to keep, then confirm each merge. Skipped pairs won't be shown again until you refresh.
+          Select which record to keep, then confirm each merge. Merges can be undone via the history panel below.
         </p>
       </div>
 
@@ -230,6 +289,7 @@ export default function MergeTools() {
                 orgId={orgId}
                 onMerged={() => {
                   setMergedCount(c => c + 1)
+                  setHistoryKey(k => k + 1)
                   load()
                 }}
                 onSkipped={() => {
@@ -240,6 +300,8 @@ export default function MergeTools() {
           </div>
         </>
       )}
+
+      <MergeHistory orgId={orgId} refreshKey={historyKey} />
     </div>
   )
 }
