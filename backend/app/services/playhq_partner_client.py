@@ -190,7 +190,7 @@ async def get_org_games(
     if cached is not None:
         return cached
 
-    # ── Discover seasons ──────────────────────────────────────────────────────
+    # ── Discover seasons ───────────────────────────────────────
     try:
         api_seasons = await get_org_seasons(playhq_id)
     except Exception as e:
@@ -220,7 +220,7 @@ async def get_org_games(
 
     logger.info(f"PlayHQ: {len(unique_seasons)} seasons to probe for {playhq_id}: {[s['name'] for s in unique_seasons[:10]]}")
 
-    # ── Discover grades via season IDs (cached per season) ─────────────────────
+    # ── Discover grades via season IDs (cached per season) ─────────────────
     season_grade_results = await asyncio.gather(
         *[get_season_grades(s["id"]) for s in unique_seasons],
         return_exceptions=True,
@@ -238,7 +238,7 @@ async def get_org_games(
                     seen_grade_ids.add(gid)
                     grade_season_pairs.append((g, season_name))
 
-    # ── Also try org-level grades endpoint (may return all historical grades) ─
+    # ── Also try org-level grades endpoint (may return all historical grades) ──
     try:
         org_grades_data = await _get(f"{BASE_URL}/v1/organisations/{playhq_id}/grades")
         org_grades = org_grades_data.get("data", [])
@@ -552,30 +552,45 @@ def _parse_summary_rest(data: dict) -> dict:
 
     logger.info(f"REST scorecard periods: {ordered_canons}")
 
-    # Produce innings in _PERIOD_ORDER first, then any leftover unknown names
+    # Order canons: _PERIOD_ORDER first, then any extras
     seen_canons: set[str] = set()
-    innings_order: list[str] = []
+    canon_order: list[str] = []
     for name in _PERIOD_ORDER:
         if name in normalized_by_canon:
-            innings_order.append(name)
+            canon_order.append(name)
             seen_canons.add(name)
     for canon in ordered_canons:
         if canon not in seen_canons:
-            innings_order.append(canon)
+            canon_order.append(canon)
+
+    # Build one (periods, batting_team_id, bowling_team_id) entry per innings.
+    # Handles both "one period per innings" AND "one period with both teams inside".
+    innings_entries: list[tuple] = []
+    for canon in canon_order:
+        periods_for_canon = normalized_by_canon[canon]
+        ordered_bat: list[str] = []
+        ordered_bowl: list[str] = []
+        seen_bat: set[str] = set()
+        seen_bowl: set[str] = set()
+        for period in periods_for_canon:
+            for team_data in (period.get("teams") or []):
+                tid = team_data.get("id")
+                if not tid:
+                    continue
+                if team_data.get("discipline") == "BATTING" and tid not in seen_bat:
+                    ordered_bat.append(tid)
+                    seen_bat.add(tid)
+                elif team_data.get("discipline") == "BOWLING" and tid not in seen_bowl:
+                    ordered_bowl.append(tid)
+                    seen_bowl.add(tid)
+        for i, bat_tid in enumerate(ordered_bat):
+            bowl_tid = ordered_bowl[i] if i < len(ordered_bowl) else None
+            innings_entries.append((periods_for_canon, bat_tid, bowl_tid))
+
+    logger.info(f"REST scorecard: {len(innings_entries)} innings from {len(canon_order)} period group(s): {canon_order}")
 
     innings_out = []
-    for inn_num, period_name in enumerate(innings_order, 1):
-        periods = normalized_by_canon.get(period_name)
-        if not periods:
-            continue
-
-        batting_team_id = bowling_team_id = None
-        for period in periods:
-            for team_data in (period.get("teams") or []):
-                if team_data.get("discipline") == "BATTING":
-                    batting_team_id = team_data.get("id")
-                elif team_data.get("discipline") == "BOWLING":
-                    bowling_team_id = team_data.get("id")
+    for inn_num, (periods, batting_team_id, bowling_team_id) in enumerate(innings_entries, 1):
 
         all_shared = []
         for period in periods:
@@ -886,19 +901,27 @@ async def get_fixture_scorecard(fixture_id: str, grade_id: str = "", game_url: s
 
     result: dict = {"innings": []}
 
-    # Try REST summary API first — richer dismissal data, no endpoint scraping needed
+    # Try REST summary API first — richer dismissal data
     try:
         rest_result = await _get_game_summary_rest(fixture_id)
-        if rest_result.get("innings"):
-            result = rest_result
-            _scorecard_cache[key] = (time.time(), result)
-            return result
+        rest_innings = len(rest_result.get("innings", []))
+        logger.info(f"REST scorecard for {fixture_id}: {rest_innings} innings")
+        if rest_innings >= 2:
+            # Both innings present — REST result is complete, return immediately
+            _scorecard_cache[key] = (time.time(), rest_result)
+            return rest_result
+        if rest_innings == 1:
+            result = rest_result  # keep as fallback; still try GraphQL
     except Exception as e:
         logger.warning(f"PlayHQ REST summary failed for {fixture_id}: {e}")
 
-    # Fallback: GraphQL discoverGame
+    # Try GraphQL — may have more innings than REST
     try:
-        result = await _query_graphql_scorecard(fixture_id)
+        gql_result = await _query_graphql_scorecard(fixture_id)
+        gql_innings = len(gql_result.get("innings", []))
+        logger.info(f"GraphQL scorecard for {fixture_id}: {gql_innings} innings")
+        if gql_innings > len(result.get("innings", [])):
+            result = gql_result
     except Exception as e:
         logger.warning(f"PlayHQ GraphQL scorecard failed for {fixture_id}: {e}")
 
