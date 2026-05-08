@@ -31,7 +31,7 @@ async def get_records_grades(
     if grades:
         return [{"id": str(g.id), "name": g.name, "season_id": str(g.season_id)} for g in grades]
 
-    # DB has no grades — extract grades from get_org_games (same source as dashboard)
+    # DB has no grades — try the cheap org-level PlayHQ grades endpoint (single call)
     org = await db.get(Organisation, uuid.UUID(org_id))
     if not org or not org.playhq_id:
         return []
@@ -39,34 +39,45 @@ async def get_records_grades(
     db_seasons_res = await db.execute(select(Season).where(Season.organisation_id == uuid.UUID(org_id)))
     db_seasons_list = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
 
-    all_games = await playhq_partner_client.get_org_games(
-        org.playhq_id, org.name,
-        db_seasons=db_seasons_list,
-        grassroots_org_id=str(org.id),
-    )
+    try:
+        data = await playhq_partner_client._get(
+            f"{playhq_partner_client.BASE_URL}/v1/organisations/{org.playhq_id}/grades"
+        )
+        api_grades = data.get("data", []) or []
+    except Exception:
+        api_grades = []
+
+    if not api_grades:
+        # Fall back to per-season endpoint (also cheap — one call per season in parallel)
+        results = await asyncio.gather(
+            *[playhq_partner_client.get_season_grades(str(s["id"])) for s in db_seasons_list],
+            return_exceptions=True,
+        )
+        seen_ids: set[str] = set()
+        for s, res in zip(db_seasons_list, results):
+            if isinstance(res, list):
+                for g in res:
+                    gid = g.get("id")
+                    if gid and gid not in seen_ids:
+                        seen_ids.add(gid)
+                        api_grades.append({**g, "_season_id": s["id"]})
+
+    if not api_grades:
+        return []
 
     seen: set[str] = set()
     out: list[dict] = []
-    for game in all_games:
-        grade = game.get("grade") or {}
-        gid = grade.get("id")
-        gname = grade.get("name", "")
+    for g in api_grades:
+        gid = g.get("id")
+        gname = g.get("name", "")
         if not gid or not gname or gid in seen:
             continue
-        # Match game's season name to a DB season to get season_id
-        game_season_name = (game.get("season") or "").strip().lower()
-        matched_season = next(
-            (s for s in db_seasons_list if s["name"].strip().lower() == game_season_name),
-            None,
-        )
-        if season_id and (not matched_season or matched_season["id"] != season_id):
+        # Determine season_id: from nested season object or from per-season fallback tag
+        g_season_id = str((g.get("season") or {}).get("id", "") or g.get("_season_id", ""))
+        if season_id and g_season_id != season_id:
             continue
         seen.add(gid)
-        out.append({
-            "id": gid,
-            "name": gname,
-            "season_id": matched_season["id"] if matched_season else "",
-        })
+        out.append({"id": gid, "name": gname, "season_id": g_season_id})
     return sorted(out, key=lambda x: x["name"])
 
 
