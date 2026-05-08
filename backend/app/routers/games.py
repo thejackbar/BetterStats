@@ -197,10 +197,64 @@ async def get_playhq_scorecard(
     try:
         scorecard = await playhq_partner_client.get_fixture_scorecard(playhq_game_id, game_url=game_url)
         await _enrich_scorecard_player_ids(scorecard, org, db)
-        return scorecard
     except Exception as e:
         logger.warning(f"PlayHQ scorecard fetch failed for {playhq_game_id}: {e}")
         raise HTTPException(status_code=502, detail=f"Scorecard unavailable: {e}")
+
+    # Flatten innings-nested structure into the same shape the frontend expects
+    batting_flat = []
+    bowling_flat = []
+    innings_totals: dict[int, dict] = {}
+    for inn in (scorecard.get("innings") or []):
+        n = inn.get("innings_number", 1)
+        innings_totals[n] = {
+            "runs": inn.get("total_runs"),
+            "wickets": inn.get("total_wickets"),
+        }
+        for row in (inn.get("batting") or []):
+            batting_flat.append({
+                "innings_number": n,
+                "player_id": row.get("player_id"),
+                "player_name": row.get("name"),
+                "runs": row.get("runs"),
+                "balls": row.get("balls"),
+                "fours": row.get("fours"),
+                "sixes": row.get("sixes"),
+                "strike_rate": row.get("strike_rate"),
+                "dismissal_type": row.get("how_out"),
+                "not_out": row.get("not_out", False),
+            })
+        for row in (inn.get("bowling") or []):
+            bowling_flat.append({
+                "innings_number": n,
+                "player_id": row.get("player_id"),
+                "player_name": row.get("name"),
+                "overs": row.get("overs"),
+                "maidens": row.get("maidens"),
+                "runs": row.get("runs"),
+                "wickets": row.get("wickets"),
+                "wides": row.get("wides"),
+                "no_balls": row.get("no_balls"),
+                "economy": row.get("economy"),
+            })
+
+    meta = matched or {}
+    return {
+        "id": playhq_game_id,
+        "home_team": meta.get("home_team"),
+        "away_team": meta.get("away_team"),
+        "played_at": meta.get("played_at"),
+        "result": meta.get("result"),
+        "winning_team": meta.get("winning_team"),
+        "grade": meta.get("grade"),
+        "season": meta.get("season"),
+        "innings_totals": innings_totals,
+        "batting": batting_flat,
+        "bowling": bowling_flat,
+        "fielding": [],
+        "fall_of_wickets": scorecard.get("fall_of_wickets") or [],
+        "partnerships": scorecard.get("partnerships") or [],
+    }
 
 
 @router.get("/{game_id}/scorecard")
