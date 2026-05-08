@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
+from pydantic import BaseModel
 from typing import Optional
 import uuid
 
@@ -143,7 +144,6 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    # Return upcoming milestones just for this player
     RUN_MILESTONES = [50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 5000]
     WICKET_MILESTONES = [10, 25, 50, 75, 100, 150, 200]
     MATCH_MILESTONES = [10, 25, 50, 100, 150, 200]
@@ -178,6 +178,33 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
             upcoming.append({"type": "matches", "current": total_matches, "target": m, "needed": m - total_matches})
             break
     return upcoming
+
+
+class PlayerRename(BaseModel):
+    name: str
+
+
+@router.patch("/{player_id}")
+async def rename_player(
+    player_id: str,
+    body: PlayerRename,
+    db: AsyncSession = Depends(get_db),
+):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    old_name = player.name
+    player.name = name
+    # Keep player_achievements rows in sync for unlinked records
+    await db.execute(
+        text("UPDATE player_achievements SET player_name = :new WHERE player_id = :pid"),
+        {"new": name, "pid": player_id},
+    )
+    await db.commit()
+    return {"status": "renamed", "old_name": old_name, "new_name": name}
 
 
 @router.post("/{player_id}/claim")
