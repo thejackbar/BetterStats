@@ -110,8 +110,7 @@ function ImportPanel({ orgId, onImported }) {
     <div className="card p-5 mb-6">
       <h2 className="display-heading text-lg text-white mb-4">BULK IMPORT</h2>
       <p className="text-slate-400 text-sm mb-4">
-        Download the template, fill in achievements using the column format, then upload. Player names are matched automatically.
-        Upload the filled-in CSV to import achievements in bulk.
+        Download the CSV template, fill in achievements using the column format, then upload. Player names are matched automatically.
       </p>
       <div className="flex flex-wrap gap-3 items-center">
         <button onClick={handleDownloadTemplate} className="btn-ghost border border-navy-600 text-sm flex items-center gap-2">
