@@ -80,6 +80,14 @@ export const api = {
   getPlayHQGame: (orgId, gameId) => request(`/games/playhq/${gameId}?org_id=${encodeURIComponent(orgId)}`),
   getPlayHQScorecard: (orgId, gameId) => request(`/games/playhq/${gameId}/scorecard?org_id=${encodeURIComponent(orgId)}`),
 
+  // Admin / merge tools
+  getMergeCandidates: (orgId) => request(`/admin/merge-candidates?org_id=${orgId}`),
+  mergePlayers: (keepPlayerId, removePlayerId, orgId) =>
+    request('/admin/merge-players', {
+      method: 'POST',
+      body: JSON.stringify({ keep_player_id: keepPlayerId, remove_player_id: removePlayerId, org_id: orgId }),
+    }),
+
   // Records
   getRecords: (orgId, { seasonId, gradeId } = {}) => {
     const params = new URLSearchParams()

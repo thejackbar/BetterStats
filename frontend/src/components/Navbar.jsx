@@ -7,7 +7,7 @@ function useOrgId() {
   // Extract orgId from URL path segments
   const { pathname } = useLocation()
   const segments = pathname.split('/')
-  const idx = segments.findIndex(s => ['dashboard', 'leaderboard', 'compare', 'records'].includes(s))
+  const idx = segments.findIndex(s => ['dashboard', 'leaderboard', 'compare', 'records', 'merge'].includes(s))
   if (idx !== -1 && segments[idx + 1]) return segments[idx + 1]
   // players list: /players/:orgId/list
   const listIdx = segments.indexOf('list')
@@ -26,6 +26,7 @@ export default function Navbar() {
     { to: `/leaderboard/${orgId}`, label: 'Leaderboard' },
     { to: `/records/${orgId}`, label: 'Records' },
     { to: `/compare/${orgId}`, label: 'Compare' },
+    { to: `/merge/${orgId}`, label: 'Merge' },
   ] : []
 
   return (
@@ -43,7 +44,7 @@ export default function Navbar() {
           <span className="font-display font-bold text-xl tracking-wider uppercase text-white group-hover:text-accent transition-colors">
             Better<span className="text-accent">Stats</span>
           </span>
-          <span className="text-slate-600 text-xs font-mono">v2.2.6</span>
+          <span className="text-slate-600 text-xs font-mono">v2.3.0</span>
         </Link>
 
         {/* Desktop links */}
