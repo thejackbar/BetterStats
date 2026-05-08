@@ -39,6 +39,28 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE player_season_stats ADD COLUMN IF NOT EXISTS best_bowling_wickets INTEGER"
         ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID,
+                keep_player_id UUID,
+                keep_player_name TEXT,
+                removed_player_id UUID,
+                removed_player_name TEXT,
+                removed_player_playhq_id TEXT,
+                keep_original_playhq_id TEXT,
+                moved_season_stat_ids JSONB DEFAULT '[]',
+                batting_innings_ids JSONB DEFAULT '[]',
+                bowling_spell_ids JSONB DEFAULT '[]',
+                fielding_stat_ids JSONB DEFAULT '[]',
+                fall_of_wicket_ids JSONB DEFAULT '[]',
+                batter1_partnership_ids JSONB DEFAULT '[]',
+                batter2_partnership_ids JSONB DEFAULT '[]',
+                milestone_ids JSONB DEFAULT '[]',
+                undone_at TIMESTAMPTZ
+            )
+        """))
     start_scheduler()
     logger.info("BetterStats API started")
     yield
