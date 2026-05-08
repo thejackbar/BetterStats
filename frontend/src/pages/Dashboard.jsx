@@ -412,16 +412,18 @@ export default function Dashboard() {
 
       {/* Summary stat tiles — clickable */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
-        <div className="lg:col-span-2">
-          <ClickableStatCard
-            label="Win Rate"
-            value={winRate}
-            sub={summary ? `${summary.wins}W ${summary.losses}L ${summary.draws}D` : null}
-            accent
-            active={activePanel === 'results'}
-            onClick={() => setActivePanel(p => p === 'results' ? null : 'results')}
-          />
-        </div>
+        {selectedSeason && (
+          <div className="lg:col-span-2">
+            <ClickableStatCard
+              label="Win Rate"
+              value={winRate}
+              sub={summary ? `${summary.wins}W ${summary.losses}L ${summary.draws}D` : null}
+              accent
+              active={activePanel === 'results'}
+              onClick={() => setActivePanel(p => p === 'results' ? null : 'results')}
+            />
+          </div>
+        )}
         <div className="lg:col-span-2">
           <ClickableStatCard
             label="Club Runs"

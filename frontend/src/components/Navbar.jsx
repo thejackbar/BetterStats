@@ -1,18 +1,25 @@
-import { Link, useLocation, useParams } from 'react-router-dom'
-import { useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 
 const APPLECROSS_ORG_ID = import.meta.env.VITE_DEFAULT_ORG_ID || ''
 
 function useOrgId() {
-  // Extract orgId from URL path segments
   const { pathname } = useLocation()
+  const [cachedOrg, setCachedOrg] = useState(() => sessionStorage.getItem('bs_last_org_id') || '')
+
+  useEffect(() => {
+    const handler = () => setCachedOrg(sessionStorage.getItem('bs_last_org_id') || '')
+    window.addEventListener('bs_org_changed', handler)
+    return () => window.removeEventListener('bs_org_changed', handler)
+  }, [])
+
   const segments = pathname.split('/')
   const idx = segments.findIndex(s => ['dashboard', 'leaderboard', 'compare', 'records', 'merge', 'awards'].includes(s))
   if (idx !== -1 && segments[idx + 1]) return segments[idx + 1]
   // players list: /players/:orgId/list
   const listIdx = segments.indexOf('list')
   if (listIdx > 1) return segments[listIdx - 1]
-  return APPLECROSS_ORG_ID
+  return APPLECROSS_ORG_ID || cachedOrg
 }
 
 export default function Navbar() {
@@ -45,7 +52,7 @@ export default function Navbar() {
           <span className="font-display font-bold text-xl tracking-wider uppercase text-white group-hover:text-accent transition-colors">
             Better<span className="text-accent">Stats</span>
           </span>
-          <span className="text-slate-600 text-xs font-mono">v2.4.4</span>
+          <span className="text-slate-600 text-xs font-mono">v2.5.0</span>
         </Link>
 
         {/* Desktop links */}
