@@ -143,8 +143,13 @@ async def debug_playhq_scorecard(
 ):
     """Return raw PlayHQ REST period/team structure alongside parsed innings count."""
     from app.services.playhq_partner_client import BASE_URL, _get, _parse_summary_rest
-    raw = await _get(f"{BASE_URL}/v2/games/{playhq_game_id}/summary")
+    try:
+        raw = await _get(f"{BASE_URL}/v2/games/{playhq_game_id}/summary")
+    except Exception as e:
+        return {"error": str(e), "fixture_id": playhq_game_id, "hint": "PlayHQ API call failed — check fixture ID is a PlayHQ game ID, not an internal DB UUID"}
     data = raw.get("data") or {}
+    if not data:
+        return {"error": "PlayHQ returned empty data", "raw_keys": list(raw.keys()), "fixture_id": playhq_game_id}
     periods_summary = [
         {
             "name": p.get("name"),
@@ -155,8 +160,12 @@ async def debug_playhq_scorecard(
         }
         for p in (data.get("periods") or [])
     ]
-    parsed = _parse_summary_rest(data) if data else {"innings": []}
+    try:
+        parsed = _parse_summary_rest(data)
+    except Exception as e:
+        parsed = {"innings": [], "parse_error": str(e)}
     return {
+        "fixture_id": playhq_game_id,
         "periods_count": len(periods_summary),
         "periods": periods_summary,
         "teams_top_level": [{"id": t.get("id"), "name": t.get("name")} for t in (data.get("teams") or [])],
@@ -165,6 +174,7 @@ async def debug_playhq_scorecard(
             {"innings_number": inn["innings_number"], "batting_team": inn["batting_team"], "bowling_team": inn["bowling_team"], "batting_rows": len(inn["batting"]), "bowling_rows": len(inn["bowling"])}
             for inn in parsed.get("innings", [])
         ],
+        "parse_error": parsed.get("parse_error"),
     }
 
 
