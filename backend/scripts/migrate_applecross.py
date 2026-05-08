@@ -26,7 +26,7 @@ from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://cricket:cricket@localhost/betterstats")
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://cricket:cricket@localhost/betterstats").replace("postgresql+asyncpg://", "postgresql://")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "jack")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 ADMIN_DISPLAY = os.environ.get("ADMIN_DISPLAY_NAME", "Jack")
