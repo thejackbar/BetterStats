@@ -515,6 +515,9 @@ export default function PlayerProfile() {
   useEffect(() => {
     if (!data?.player?.organisation_id) return
     api.getOrgSeasons(data.player.organisation_id).then(setSeasons).catch(() => {})
+    // Make org available to Navbar when browsing a player profile directly
+    sessionStorage.setItem('bs_last_org_id', data.player.organisation_id)
+    window.dispatchEvent(new CustomEvent('bs_org_changed'))
   }, [data?.player?.organisation_id])
 
   const handleTabChange = useCallback((t) => {
