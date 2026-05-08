@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -71,6 +71,26 @@ async def lifespan(app: FastAPI):
                 UNIQUE (org_id, player_a_id, player_b_id)
             )
         """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS player_achievements (
+                id SERIAL PRIMARY KEY,
+                org_id UUID NOT NULL,
+                player_id UUID,
+                player_name TEXT NOT NULL,
+                season TEXT,
+                category TEXT NOT NULL,
+                subcategory TEXT,
+                achievement TEXT NOT NULL,
+                detail TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_achievements_player ON player_achievements(player_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_achievements_org ON player_achievements(org_id)"
+        ))
     start_scheduler()
     logger.info("BetterStats API started")
     yield
@@ -101,6 +121,7 @@ app.include_router(leaderboard.router)
 app.include_router(records.router)
 app.include_router(webhooks.router)
 app.include_router(admin.router)
+app.include_router(achievements.router)
 
 
 @app.get("/health")

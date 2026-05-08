@@ -100,6 +100,30 @@ export const api = {
       body: JSON.stringify({ merge_log_id: mergeLogId, org_id: orgId }),
     }),
 
+  // Achievements
+  listAchievements: (orgId, { playerId, season } = {}) => {
+    const params = new URLSearchParams({ org_id: orgId })
+    if (playerId) params.set('player_id', playerId)
+    if (season) params.set('season', season)
+    return request(`/achievements?${params}`)
+  },
+  createAchievement: (data) =>
+    request('/achievements', { method: 'POST', body: JSON.stringify(data) }),
+  updateAchievement: (id, data) =>
+    request(`/achievements/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAchievement: (id, orgId) =>
+    request(`/achievements/${id}?org_id=${orgId}`, { method: 'DELETE' }),
+  downloadAchievementsTemplate: () =>
+    fetch(`${BASE}/achievements/template`),
+  importAchievements: (orgId, file) => {
+    const form = new FormData()
+    form.append('file', file)
+    const token = localStorage.getItem('bs_token')
+    const headers = token ? { Authorization: `Bearer ${token}` } : {}
+    return fetch(`${BASE}/achievements/import?org_id=${orgId}`, { method: 'POST', body: form, headers })
+      .then(r => r.json())
+  },
+
   // Records
   getRecords: (orgId, { seasonId, gradeId } = {}) => {
     const params = new URLSearchParams()

@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -12,7 +12,193 @@ import RunsChart from '../components/RunsChart'
 import LoadingSpinner from '../components/LoadingSpinner'
 import clsx from 'clsx'
 
-const TABS = ['batting', 'bowling', 'analysis', 'milestones']
+const TABS = ['batting', 'bowling', 'analysis', 'milestones', 'achievements']
+
+const CATEGORY_ICONS = {
+  'Club Award': '🏆',
+  'Association Award': '🥇',
+  'Office Bearer': '👔',
+  'Premiership': '🏏',
+  'Hall of Fame': '⭐',
+  'Life Membership': '🎖',
+  'Milestone': '📍',
+}
+
+const CATEGORIES = ['Club Award', 'Association Award', 'Office Bearer', 'Premiership', 'Hall of Fame', 'Life Membership', 'Milestone']
+
+function AchievementsSection({ playerId, orgId }) {
+  const [achievements, setAchievements] = useState(null)
+  const [adding, setAdding] = useState(false)
+  const [editId, setEditId] = useState(null)
+  const [form, setForm] = useState({ season: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (!orgId) return
+    api.listAchievements(orgId, { playerId }).then(setAchievements).catch(() => setAchievements([]))
+  }, [playerId, orgId])
+
+  const openAdd = () => {
+    setForm({ season: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
+    setEditId(null)
+    setAdding(true)
+  }
+
+  const openEdit = (a) => {
+    setForm({ season: a.season || '', category: a.category, subcategory: a.subcategory || '', achievement: a.achievement, detail: a.detail || '' })
+    setEditId(a.id)
+    setAdding(true)
+  }
+
+  const handleSave = async () => {
+    if (!form.achievement.trim() || !form.category) return
+    setSaving(true)
+    setError(null)
+    try {
+      if (editId) {
+        await api.updateAchievement(editId, form)
+      } else {
+        await api.createAchievement({ ...form, org_id: orgId, player_id: playerId, player_name: '' })
+      }
+      const updated = await api.listAchievements(orgId, { playerId })
+      setAchievements(updated)
+      setAdding(false)
+      setEditId(null)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this achievement?')) return
+    await api.deleteAchievement(id, orgId)
+    setAchievements(prev => prev.filter(a => a.id !== id))
+  }
+
+  if (achievements === null) return <div className="p-5"><LoadingSpinner size="sm" /></div>
+
+  // Group by season then category
+  const grouped = {}
+  for (const a of achievements) {
+    const s = a.season || 'All Time'
+    if (!grouped[s]) grouped[s] = {}
+    if (!grouped[s][a.category]) grouped[s][a.category] = []
+    grouped[s][a.category].push(a)
+  }
+  const seasons = Object.keys(grouped).sort((a, b) => {
+    if (a === 'All Time') return 1
+    if (b === 'All Time') return -1
+    return b.localeCompare(a)
+  })
+
+  return (
+    <div>
+      <div className="px-5 py-4 border-b border-navy-700 flex items-center justify-between">
+        <h3 className="display-heading text-lg text-white">ACHIEVEMENTS & HONOURS</h3>
+        <button onClick={openAdd} className="btn-primary text-xs">+ Add</button>
+      </div>
+
+      {adding && (
+        <div className="px-5 py-4 border-b border-navy-700 bg-navy-800/50">
+          <h4 className="text-sm font-semibold text-white mb-3">{editId ? 'Edit Achievement' : 'Add Achievement'}</h4>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="section-label mb-1 block">Season</label>
+              <input
+                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
+                placeholder="e.g. 2025_26"
+                value={form.season}
+                onChange={e => setForm(f => ({ ...f, season: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="section-label mb-1 block">Category *</label>
+              <select
+                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
+                value={form.category}
+                onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+              >
+                {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="section-label mb-1 block">Subcategory / Grade</label>
+              <input
+                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
+                placeholder="e.g. 1st XI, WASTCA"
+                value={form.subcategory}
+                onChange={e => setForm(f => ({ ...f, subcategory: e.target.value }))}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="section-label mb-1 block">Achievement *</label>
+              <input
+                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
+                placeholder="e.g. Best & Fairest, President, Premiership"
+                value={form.achievement}
+                onChange={e => setForm(f => ({ ...f, achievement: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="section-label mb-1 block">Detail</label>
+              <input
+                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
+                placeholder="e.g. 436 runs at 39.64"
+                value={form.detail}
+                onChange={e => setForm(f => ({ ...f, detail: e.target.value }))}
+              />
+            </div>
+          </div>
+          {error && <p className="text-red-400 text-xs mb-2">{error}</p>}
+          <div className="flex gap-2">
+            <button onClick={handleSave} disabled={saving} className="btn-primary text-xs">
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => { setAdding(false); setEditId(null) }} className="btn-ghost text-xs">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {achievements.length === 0 && !adding && (
+        <p className="text-slate-500 text-sm px-5 py-8 text-center">No achievements recorded yet.</p>
+      )}
+
+      {seasons.map(season => (
+        <div key={season} className="border-b border-navy-700 last:border-0">
+          <div className="px-5 py-3 bg-navy-800/30">
+            <span className="text-accent font-mono font-bold text-sm">{season.replace('_', '/')}</span>
+          </div>
+          {Object.entries(grouped[season]).map(([cat, items]) => (
+            <div key={cat} className="px-5 py-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-base">{CATEGORY_ICONS[cat] || '🏅'}</span>
+                <span className="section-label text-xs">{cat.toUpperCase()}</span>
+              </div>
+              <div className="space-y-1.5">
+                {items.map(a => (
+                  <div key={a.id} className="flex items-start justify-between gap-2 group">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-white text-sm font-medium">{a.achievement}</span>
+                      {a.subcategory && <span className="text-slate-500 text-sm"> — {a.subcategory}</span>}
+                      {a.detail && <span className="text-slate-400 text-xs ml-2">({a.detail})</span>}
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button onClick={() => openEdit(a)} className="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded hover:bg-navy-700">Edit</button>
+                      <button onClick={() => handleDelete(a.id)} className="text-xs text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded hover:bg-navy-700">✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function daysSince(dateStr) {
   if (!dateStr) return null
@@ -267,6 +453,7 @@ export default function PlayerProfile() {
   const [upcomingMilestones, setUpcomingMilestones] = useState(null)
   const [milestones, setMilestones] = useState(null)
   const [seasonStats, setSeasonStats] = useState(null)
+  const [achievementsLoaded, setAchievementsLoaded] = useState(false)
 
   // Load season stats and activity eagerly on mount
   useEffect(() => {
@@ -286,6 +473,7 @@ export default function PlayerProfile() {
     if (t === 'milestones' && milestones === null) {
       api.getPlayerMilestones(playerId).then(setMilestones).catch(() => setMilestones([]))
     }
+    if (t === 'achievements') setAchievementsLoaded(true)
   }, [playerId, milestones])
 
   if (loading) return <LoadingSpinner message="Loading player stats…" />
@@ -482,6 +670,10 @@ export default function PlayerProfile() {
               : <MilestoneTimeline data={milestones} />
             }
           </>
+        )}
+
+        {tab === 'achievements' && achievementsLoaded && (
+          <AchievementsSection playerId={playerId} orgId={player.organisation_id} />
         )}
       </div>
     </div>
