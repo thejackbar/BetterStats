@@ -549,13 +549,13 @@ export default function PlayerProfile() {
     if (t === 'achievements') setAchievementsLoaded(true)
   }, [playerId, milestones])
 
-  if (loading) return <LoadingSpinner message="Loading player stats…" />
-  if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-red-400">Error: {error}</div>
-  if (!data) return null
+  // Hooks must run before any early returns — derive display stats for stat cards
+  const rawData = data
+  const cb = rawData?.career_batting
+  const cbw = rawData?.career_bowling
+  const cf = rawData?.career_fielding
+  const player = rawData?.player
 
-  const { player, career_batting: cb, career_bowling: cbw, career_fielding: cf } = data
-
-  // When a season is selected, derive display stats from seasonStats row
   const displayBatting = useMemo(() => {
     if (!seasonId || !seasonStats?.length) return cb
     const s = seasonStats.find(r => r.season_id === seasonId)
@@ -569,6 +569,12 @@ export default function PlayerProfile() {
     if (!s) return cbw
     return { total_wickets: s.total_wickets, economy: s.economy, best_bowling_figures: s.best_bowling_figures, best_figures_wickets: s.best_bowling_wickets }
   }, [seasonId, seasonStats, cbw])
+
+  if (loading) return <LoadingSpinner message="Loading player stats…" />
+  if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-red-400">Error: {error}</div>
+  if (!data) return null
+
+  const { career_batting: _cb, career_bowling: _cbw, career_fielding: _cf } = data
 
   const badgeMilestones = []
   if (cb?.hundreds > 0) badgeMilestones.push(`${cb.hundreds} ${cb.hundreds === 1 ? 'century' : 'centuries'}`)
