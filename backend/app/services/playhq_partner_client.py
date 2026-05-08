@@ -181,7 +181,7 @@ async def get_org_games(
     grassroots_org_id: str = "",
 ) -> list:
     """Fetch all games for an org across all discoverable seasons/grades."""
-    if not settings.playhq_api_key or not playhq_id:
+    if not playhq_id:
         return []
 
     # Full result cache — avoids repeating the expensive multi-API fan-out
