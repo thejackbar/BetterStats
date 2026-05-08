@@ -12,6 +12,7 @@ import PlayHQScorecard from './pages/PlayHQScorecard'
 import Records from './pages/Records'
 import Onboard from './pages/Onboard'
 import ShareCard from './pages/ShareCard'
+import MergeTools from './pages/MergeTools'
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/scorecards/:gameId" element={<PlayHQScorecard />} />
         <Route path="/records/:orgId" element={<Records />} />
         <Route path="/onboard" element={<Onboard />} />
+        <Route path="/merge/:orgId" element={<MergeTools />} />
       </Routes>
     </div>
   )
