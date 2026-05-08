@@ -1,9 +1,10 @@
+import asyncio
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
 import uuid
 
-from app.models.db import get_db, Grade, Season, Organisation
+from app.models.db import get_db, Grade, Season
 from app.services import playhq_partner_client
 
 router = APIRouter(prefix="/records", tags=["records"])
@@ -30,20 +31,27 @@ async def get_records_grades(
     if grades:
         return [{"id": str(g.id), "name": g.name, "season_id": str(g.season_id)} for g in grades]
 
-    # DB has no grades yet — fall back to live PlayHQ API
-    org = await db.get(Organisation, uuid.UUID(org_id))
-    if not org or not org.playhq_id:
-        return []
-    try:
-        data = await playhq_partner_client._get(
-            f"{playhq_partner_client.BASE_URL}/v1/organisations/{org.playhq_id}/grades"
-        )
-        api_grades = data.get("data", [])
-        if season_id:
-            api_grades = [g for g in api_grades if str((g.get("season") or {}).get("id", "")) == season_id]
-        return [{"id": g["id"], "name": g.get("name", ""), "season_id": str((g.get("season") or {}).get("id", ""))} for g in api_grades if g.get("id")]
-    except Exception:
-        return []
+    # DB has no grades — fall back to PlayHQ /v1/seasons/{id}/grades for each season
+    seasons_q = select(Season).where(Season.organisation_id == uuid.UUID(org_id))
+    if season_id:
+        seasons_q = seasons_q.where(Season.id == uuid.UUID(season_id))
+    seasons_res = await db.execute(seasons_q)
+    db_seasons = seasons_res.scalars().all()
+
+    results = await asyncio.gather(
+        *[playhq_partner_client.get_season_grades(str(s.id)) for s in db_seasons],
+        return_exceptions=True,
+    )
+    seen = set()
+    out = []
+    for s, res in zip(db_seasons, results):
+        if isinstance(res, list):
+            for g in res:
+                gid = g.get("id")
+                if gid and gid not in seen:
+                    seen.add(gid)
+                    out.append({"id": gid, "name": g.get("name", ""), "season_id": str(s.id)})
+    return sorted(out, key=lambda x: x["name"])
 
 
 @router.get("/{org_id}")
