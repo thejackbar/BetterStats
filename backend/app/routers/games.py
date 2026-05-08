@@ -136,6 +136,38 @@ async def get_playhq_game(
     return game
 
 
+@router.get("/playhq/{playhq_game_id}/scorecard/debug")
+async def debug_playhq_scorecard(
+    playhq_game_id: str,
+    org_id: str = Query(...),
+):
+    """Return raw PlayHQ REST period/team structure alongside parsed innings count."""
+    from app.services.playhq_partner_client import BASE_URL, _get, _parse_summary_rest
+    raw = await _get(f"{BASE_URL}/v2/games/{playhq_game_id}/summary")
+    data = raw.get("data") or {}
+    periods_summary = [
+        {
+            "name": p.get("name"),
+            "teams": [
+                {"id": t.get("id"), "name": t.get("name"), "discipline": t.get("discipline")}
+                for t in (p.get("teams") or [])
+            ],
+        }
+        for p in (data.get("periods") or [])
+    ]
+    parsed = _parse_summary_rest(data) if data else {"innings": []}
+    return {
+        "periods_count": len(periods_summary),
+        "periods": periods_summary,
+        "teams_top_level": [{"id": t.get("id"), "name": t.get("name")} for t in (data.get("teams") or [])],
+        "parsed_innings_count": len(parsed.get("innings", [])),
+        "parsed_innings": [
+            {"innings_number": inn["innings_number"], "batting_team": inn["batting_team"], "bowling_team": inn["bowling_team"], "batting_rows": len(inn["batting"]), "bowling_rows": len(inn["bowling"])}
+            for inn in parsed.get("innings", [])
+        ],
+    }
+
+
 @router.get("/playhq/{playhq_game_id}/scorecard")
 async def get_playhq_scorecard(
     playhq_game_id: str,
