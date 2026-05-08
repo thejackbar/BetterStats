@@ -33,6 +33,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS playhq_id TEXT"
         ))
+        await conn.execute(text(
+            "ALTER TABLE player_season_stats ADD COLUMN IF NOT EXISTS is_hs_not_out BOOLEAN DEFAULT FALSE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE player_season_stats ADD COLUMN IF NOT EXISTS best_bowling_wickets INTEGER"
+        ))
     start_scheduler()
     logger.info("BetterStats API started")
     yield

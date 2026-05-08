@@ -552,30 +552,45 @@ def _parse_summary_rest(data: dict) -> dict:
 
     logger.info(f"REST scorecard periods: {ordered_canons}")
 
-    # Produce innings in _PERIOD_ORDER first, then any leftover unknown names
+    # Order canons: _PERIOD_ORDER first, then any extras
     seen_canons: set[str] = set()
-    innings_order: list[str] = []
+    canon_order: list[str] = []
     for name in _PERIOD_ORDER:
         if name in normalized_by_canon:
-            innings_order.append(name)
+            canon_order.append(name)
             seen_canons.add(name)
     for canon in ordered_canons:
         if canon not in seen_canons:
-            innings_order.append(canon)
+            canon_order.append(canon)
+
+    # Build one (periods, batting_team_id, bowling_team_id) entry per innings.
+    # Handles both "one period per innings" AND "one period with both teams inside".
+    innings_entries: list[tuple] = []
+    for canon in canon_order:
+        periods_for_canon = normalized_by_canon[canon]
+        ordered_bat: list[str] = []
+        ordered_bowl: list[str] = []
+        seen_bat: set[str] = set()
+        seen_bowl: set[str] = set()
+        for period in periods_for_canon:
+            for team_data in (period.get("teams") or []):
+                tid = team_data.get("id")
+                if not tid:
+                    continue
+                if team_data.get("discipline") == "BATTING" and tid not in seen_bat:
+                    ordered_bat.append(tid)
+                    seen_bat.add(tid)
+                elif team_data.get("discipline") == "BOWLING" and tid not in seen_bowl:
+                    ordered_bowl.append(tid)
+                    seen_bowl.add(tid)
+        for i, bat_tid in enumerate(ordered_bat):
+            bowl_tid = ordered_bowl[i] if i < len(ordered_bowl) else None
+            innings_entries.append((periods_for_canon, bat_tid, bowl_tid))
+
+    logger.info(f"REST scorecard: {len(innings_entries)} innings from {len(canon_order)} period group(s): {canon_order}")
 
     innings_out = []
-    for inn_num, period_name in enumerate(innings_order, 1):
-        periods = normalized_by_canon.get(period_name)
-        if not periods:
-            continue
-
-        batting_team_id = bowling_team_id = None
-        for period in periods:
-            for team_data in (period.get("teams") or []):
-                if team_data.get("discipline") == "BATTING":
-                    batting_team_id = team_data.get("id")
-                elif team_data.get("discipline") == "BOWLING":
-                    bowling_team_id = team_data.get("id")
+    for inn_num, (periods, batting_team_id, bowling_team_id) in enumerate(innings_entries, 1):
 
         all_shared = []
         for period in periods:

@@ -56,16 +56,16 @@ async def get_records(
 
     top_high_scores = await q("""
         SELECT p.id::text AS player_id, p.name,
-               CAST(REPLACE(pss.high_score, '*', '') AS INTEGER) AS runs,
-               (pss.high_score LIKE '%*' OR pss.is_hs_not_out)  AS not_out,
+               pss.high_score AS runs,
+               pss.is_hs_not_out AS not_out,
                s.name AS season_name
         FROM player_season_stats pss
         JOIN players p ON p.id = pss.player_id
         JOIN seasons s ON s.id = pss.season_id
         """ + ("WHERE p.organisation_id = :org_id AND pss.season_id = :season_id" if season_id else
                "WHERE p.organisation_id = :org_id") + """
-          AND pss.high_score IS NOT NULL AND pss.high_score ~ '^[0-9]'
-        ORDER BY CAST(REPLACE(pss.high_score, '*', '') AS INTEGER) DESC LIMIT :limit
+          AND pss.high_score IS NOT NULL AND pss.high_score > 0
+        ORDER BY pss.high_score DESC LIMIT :limit
     """)
 
     top_batting_avg = await q("""
