@@ -212,81 +212,113 @@ async def get_scorecard(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
+    grade = await db.get(Grade, game.grade_id) if game.grade_id else None
+    season = await db.get(Season, grade.season_id) if grade else None
+
+    # Batting with player names via join
     batting_res = await db.execute(
-        select(BattingInnings).where(BattingInnings.game_id == game.id)
+        select(BattingInnings, Player)
+        .outerjoin(Player, Player.id == BattingInnings.player_id)
+        .where(BattingInnings.game_id == game.id)
+        .order_by(BattingInnings.innings_number, BattingInnings.batting_position)
     )
-    batting_innings_list = batting_res.scalars().all()
+    batting_rows = batting_res.all()
 
+    # Bowling with player names via join
     bowling_res = await db.execute(
-        select(BowlingSpell).where(BowlingSpell.game_id == game.id)
+        select(BowlingSpell, Player)
+        .outerjoin(Player, Player.id == BowlingSpell.player_id)
+        .where(BowlingSpell.game_id == game.id)
+        .order_by(BowlingSpell.innings_number)
     )
-    bowling_spells = bowling_res.scalars().all()
+    bowling_rows = bowling_res.all()
 
+    # Fielding with player names via join
     fielding_res = await db.execute(
-        select(FieldingStat).where(FieldingStat.game_id == game.id)
+        select(FieldingStat, Player)
+        .outerjoin(Player, Player.id == FieldingStat.player_id)
+        .where(FieldingStat.game_id == game.id)
     )
-    fielding_stats = fielding_res.scalars().all()
+    fielding_rows = fielding_res.all()
 
-    innings_map = {}
-    for bi in batting_innings_list:
-        inn_num = bi.innings_number
-        if inn_num not in innings_map:
-            innings_map[inn_num] = {
-                "innings_number": inn_num,
-                "batting_team": bi.batting_team,
-                "bowling_team": bi.bowling_team,
-                "total_runs": bi.total_runs,
-                "total_wickets": bi.total_wickets,
-                "overs": bi.overs,
-                "extras": bi.extras,
-                "batting": [],
-                "bowling": [],
-            }
-        innings_map[inn_num]["batting"].append({
-            "name": bi.player_name,
-            "how_out": bi.how_out,
+    # Build innings summary map (totals per innings)
+    innings_meta: dict[int, dict] = {}
+    for bi, p in batting_rows:
+        n = bi.innings_number or 1
+        if n not in innings_meta:
+            innings_meta[n] = {"batting_team": None, "bowling_team": None}
+
+    batting_flat = [
+        {
+            "innings_number": bi.innings_number or 1,
+            "player_id": str(bi.player_id) if bi.player_id else None,
+            "player_name": p.display_name if p else None,
             "runs": bi.runs,
             "balls": bi.balls,
             "fours": bi.fours,
             "sixes": bi.sixes,
+            "strike_rate": float(bi.strike_rate) if bi.strike_rate is not None else None,
+            "dismissal_type": bi.dismissal_type,
             "not_out": bi.not_out,
-        })
+            "batting_position": bi.batting_position,
+        }
+        for bi, p in batting_rows
+    ]
 
-    for bs in bowling_spells:
-        inn_num = bs.innings_number
-        if inn_num in innings_map:
-            innings_map[inn_num]["bowling"].append({
-                "name": bs.player_name,
-                "overs": bs.overs,
-                "maidens": bs.maidens,
-                "runs": bs.runs,
-                "wickets": bs.wickets,
-                "wides": bs.wides,
-                "no_balls": bs.no_balls,
-            })
+    bowling_flat = [
+        {
+            "innings_number": bs.innings_number or 1,
+            "player_id": str(bs.player_id) if bs.player_id else None,
+            "player_name": p.display_name if p else None,
+            "overs": float(bs.overs) if bs.overs is not None else None,
+            "maidens": bs.maidens,
+            "runs": bs.runs,
+            "wickets": bs.wickets,
+            "wides": bs.wides,
+            "no_balls": bs.no_balls,
+            "economy": float(bs.economy) if bs.economy is not None else None,
+        }
+        for bs, p in bowling_rows
+    ]
+
+    fielding_flat = [
+        {
+            "player_id": str(fs.player_id) if fs.player_id else None,
+            "player_name": p.display_name if p else None,
+            "catches": fs.catches,
+            "run_outs": fs.run_outs,
+            "stumpings": fs.stumpings,
+        }
+        for fs, p in fielding_rows
+        if (fs.catches or 0) + (fs.run_outs or 0) + (fs.stumpings or 0) > 0
+    ]
+
+    # Derive innings totals from batting data for the summary strip
+    innings_totals: dict[int, dict] = {}
+    for row in batting_flat:
+        n = row["innings_number"]
+        if n not in innings_totals:
+            innings_totals[n] = {"runs": 0, "wickets": 0, "team": None}
+        innings_totals[n]["runs"] += row["runs"] or 0
+        if not row["not_out"] and row["dismissal_type"]:
+            innings_totals[n]["wickets"] += 1
 
     fow = await get_game_fall_of_wickets(db, game.id)
     partnerships = await get_game_partnerships(db, game.id)
 
     return {
-        "game": {
-            "id": str(game.id),
-            "home_team": game.home_team,
-            "away_team": game.away_team,
-            "played_at": game.played_at.isoformat() if game.played_at else None,
-            "result": game.result,
-            "winning_team": game.winning_team,
-        },
-        "innings": [innings_map[k] for k in sorted(innings_map.keys())],
-        "fielding": [
-            {
-                "name": fs.player_name,
-                "catches": fs.catches,
-                "run_outs": fs.run_outs,
-                "stumpings": fs.stumpings,
-            }
-            for fs in fielding_stats
-        ],
+        "id": str(game.id),
+        "home_team": game.home_team,
+        "away_team": game.away_team,
+        "played_at": game.played_at.isoformat() if game.played_at else None,
+        "result": game.result,
+        "winning_team": game.winning_team,
+        "grade": {"id": str(grade.id), "name": grade.name} if grade else None,
+        "season": {"id": str(season.id), "name": season.name} if season else None,
+        "innings_totals": innings_totals,
+        "batting": batting_flat,
+        "bowling": bowling_flat,
+        "fielding": fielding_flat,
         "fall_of_wickets": fow,
         "partnerships": partnerships,
     }
