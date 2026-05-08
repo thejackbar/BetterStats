@@ -23,6 +23,33 @@ def _normalise(name: str) -> str:
     return re.sub(r"\s+", " ", name).lower()
 
 
+async def _enrich_player(db: AsyncSession, p: Player) -> dict:
+    stats_res = await db.execute(select(PlayerSeasonStats).where(PlayerSeasonStats.player_id == p.id))
+    season_stats = stats_res.scalars().all()
+    innings_res = await db.execute(select(BattingInnings).where(BattingInnings.player_id == p.id))
+    game_innings = len(innings_res.scalars().all())
+    return {
+        "id": str(p.id),
+        "name": p.name,
+        "playhq_id": p.playhq_id,
+        "claimed": p.claimed,
+        "seasons_count": len(season_stats),
+        "total_runs": sum((s.runs or 0) for s in season_stats),
+        "total_wickets": sum((s.wickets or 0) for s in season_stats),
+        "total_matches": sum((s.matches or 0) for s in season_stats),
+        "game_level_innings": game_innings,
+    }
+
+
+@router.get("/player-info")
+async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depends(get_db)):
+    """Return enriched stats for a single player (used by manual merge UI)."""
+    p = await db.get(Player, uuid.UUID(player_id))
+    if not p or str(p.organisation_id) != org_id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await _enrich_player(db, p)
+
+
 @router.get("/merge-candidates")
 async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db)):
     """Return pairs of players within an org that look like duplicates."""
@@ -30,6 +57,13 @@ async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db)):
         select(Player).where(Player.organisation_id == uuid.UUID(org_id))
     )
     players = result.scalars().all()
+
+    # Load permanently ignored pairs for this org
+    ignored_res = await db.execute(
+        text("SELECT player_a_id::text, player_b_id::text FROM merge_pair_ignores WHERE org_id = :org_id"),
+        {"org_id": org_id},
+    )
+    ignored = {(r.player_a_id, r.player_b_id) for r in ignored_res.mappings().all()}
 
     # Group by normalised name
     groups: dict[str, list[Player]] = {}
@@ -41,36 +75,13 @@ async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db)):
     for key, group in groups.items():
         if len(group) < 2:
             continue
-        enriched = []
-        for p in group:
-            stats_res = await db.execute(
-                select(PlayerSeasonStats).where(PlayerSeasonStats.player_id == p.id)
-            )
-            season_stats = stats_res.scalars().all()
-            total_runs = sum((s.runs or 0) for s in season_stats)
-            total_wickets = sum((s.wickets or 0) for s in season_stats)
-            total_matches = sum((s.matches or 0) for s in season_stats)
-            seasons_count = len(season_stats)
-
-            innings_res = await db.execute(
-                select(BattingInnings).where(BattingInnings.player_id == p.id)
-            )
-            game_innings = len(innings_res.scalars().all())
-
-            enriched.append({
-                "id": str(p.id),
-                "name": p.name,
-                "playhq_id": p.playhq_id,
-                "claimed": p.claimed,
-                "seasons_count": seasons_count,
-                "total_runs": total_runs,
-                "total_wickets": total_wickets,
-                "total_matches": total_matches,
-                "game_level_innings": game_innings,
-            })
+        enriched = [await _enrich_player(db, p) for p in group]
 
         for i in range(len(enriched)):
             for j in range(i + 1, len(enriched)):
+                pair_key = tuple(sorted([enriched[i]["id"], enriched[j]["id"]]))
+                if pair_key in ignored:
+                    continue
                 candidate_pairs.append({
                     "normalised_name": key,
                     "player_a": enriched[i],
@@ -78,6 +89,28 @@ async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db)):
                 })
 
     return candidate_pairs
+
+
+class IgnorePairRequest(BaseModel):
+    player_a_id: str
+    player_b_id: str
+    org_id: str
+
+
+@router.post("/ignore-pair")
+async def ignore_pair(req: IgnorePairRequest, db: AsyncSession = Depends(get_db)):
+    """Permanently suppress a suggested duplicate pair."""
+    a, b = sorted([req.player_a_id, req.player_b_id])
+    await db.execute(
+        text("""
+            INSERT INTO merge_pair_ignores (org_id, player_a_id, player_b_id)
+            VALUES (:org_id, :a, :b)
+            ON CONFLICT (org_id, player_a_id, player_b_id) DO NOTHING
+        """),
+        {"org_id": req.org_id, "a": a, "b": b},
+    )
+    await db.commit()
+    return {"status": "ignored"}
 
 
 @router.get("/merge-history")
@@ -244,7 +277,6 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db)):
     keep_id = log["keep_player_id"]
     remove_id = log["removed_player_id"]
 
-    # Verify keep player still exists
     keep = await db.get(Player, keep_id)
     if not keep:
         raise HTTPException(status_code=404, detail="Keep player no longer exists")
@@ -312,7 +344,6 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db)):
             {"pid": str(remove_id), "ids": mil_ids},
         )
 
-    # Reassign season stats back (only the ones we moved, not the deleted duplicates)
     pss_ids = json.loads(log["moved_season_stat_ids"] or "[]")
     if pss_ids:
         await db.execute(
@@ -320,7 +351,6 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db)):
             {"pid": str(remove_id), "ids": pss_ids},
         )
 
-    # Mark merge log as undone
     await db.execute(
         text("UPDATE merge_logs SET undone_at = NOW() WHERE id = :id"),
         {"id": req.merge_log_id},

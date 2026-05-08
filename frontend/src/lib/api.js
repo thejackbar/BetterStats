@@ -83,10 +83,16 @@ export const api = {
   // Admin / merge tools
   getMergeCandidates: (orgId) => request(`/admin/merge-candidates?org_id=${orgId}`),
   getMergeHistory: (orgId) => request(`/admin/merge-history?org_id=${orgId}`),
+  getPlayerMergeInfo: (playerId, orgId) => request(`/admin/player-info?player_id=${playerId}&org_id=${orgId}`),
   mergePlayers: (keepPlayerId, removePlayerId, orgId) =>
     request('/admin/merge-players', {
       method: 'POST',
       body: JSON.stringify({ keep_player_id: keepPlayerId, remove_player_id: removePlayerId, org_id: orgId }),
+    }),
+  ignorePair: (playerAId, playerBId, orgId) =>
+    request('/admin/ignore-pair', {
+      method: 'POST',
+      body: JSON.stringify({ player_a_id: playerAId, player_b_id: playerBId, org_id: orgId }),
     }),
   undoMerge: (mergeLogId, orgId) =>
     request('/admin/undo-merge', {

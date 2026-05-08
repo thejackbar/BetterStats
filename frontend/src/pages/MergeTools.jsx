@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import LoadingSpinner from '../components/LoadingSpinner'
 
@@ -19,9 +19,7 @@ function PlayerCard({ player, isSelected, onSelect, label }) {
       onClick={onSelect}
       className={[
         'flex-1 rounded-lg border-2 p-4 text-left transition-all',
-        isSelected
-          ? 'border-accent bg-accent/10'
-          : 'border-navy-600 bg-navy-800 hover:border-navy-400',
+        isSelected ? 'border-accent bg-accent/10' : 'border-navy-600 bg-navy-800 hover:border-navy-400',
       ].join(' ')}
     >
       <div className="flex items-start justify-between gap-2 mb-3">
@@ -31,19 +29,13 @@ function PlayerCard({ player, isSelected, onSelect, label }) {
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           {hasGrassroots && (
-            <span className="text-xs bg-green-900/60 text-green-300 border border-green-700 rounded px-2 py-0.5">
-              Grassroots
-            </span>
+            <span className="text-xs bg-green-900/60 text-green-300 border border-green-700 rounded px-2 py-0.5">Grassroots</span>
           )}
           {player.claimed && (
-            <span className="text-xs bg-accent/20 text-accent border border-accent/40 rounded px-2 py-0.5">
-              Claimed
-            </span>
+            <span className="text-xs bg-accent/20 text-accent border border-accent/40 rounded px-2 py-0.5">Claimed</span>
           )}
           {!hasGrassroots && !player.claimed && (
-            <span className="text-xs bg-navy-700 text-slate-400 border border-navy-600 rounded px-2 py-0.5">
-              Scorecard only
-            </span>
+            <span className="text-xs bg-navy-700 text-slate-400 border border-navy-600 rounded px-2 py-0.5">Scorecard only</span>
           )}
         </div>
       </div>
@@ -51,18 +43,215 @@ function PlayerCard({ player, isSelected, onSelect, label }) {
         <StatBadge label="Seasons" value={player.seasons_count} />
         <StatBadge label="Runs" value={player.total_runs} />
         <StatBadge label="Wkts" value={player.total_wickets} />
-        <StatBadge label="Game innings" value={player.game_level_innings} />
+        <StatBadge label="Game Inn." value={player.game_level_innings} />
       </div>
       {isSelected && (
-        <div className="mt-3 text-xs text-accent font-semibold text-center">
-          ✓ Keep this player
-        </div>
+        <div className="mt-3 text-xs text-accent font-semibold text-center">✓ Keep this player</div>
       )}
     </button>
   )
 }
 
-function MergePair({ pair, orgId, onMerged, onSkipped }) {
+// Autocomplete player search within an org's player list
+function PlayerSearch({ players, value, onChange, placeholder }) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    function handler(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const filtered = query.trim().length >= 1
+    ? players.filter(p => p.name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 10)
+    : []
+
+  function select(player) {
+    setQuery(player.name)
+    setOpen(false)
+    onChange(player)
+  }
+
+  function clear() {
+    setQuery('')
+    onChange(null)
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="relative">
+        <input
+          type="text"
+          value={value ? value.name : query}
+          onChange={e => {
+            if (value) onChange(null)
+            setQuery(e.target.value)
+            setOpen(true)
+          }}
+          onFocus={() => { if (!value) setOpen(true) }}
+          placeholder={placeholder}
+          className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:border-accent placeholder-slate-500"
+        />
+        {(value || query) && (
+          <button onClick={clear} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-lg leading-none">×</button>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 mt-1 w-full bg-navy-800 border border-navy-600 rounded-lg shadow-xl max-h-52 overflow-y-auto">
+          {filtered.map(p => (
+            <button
+              key={p.id}
+              onMouseDown={() => select(p)}
+              className="w-full text-left px-3 py-2 text-sm text-white hover:bg-navy-700 first:rounded-t-lg last:rounded-b-lg"
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ManualMerge({ orgId, onMerged }) {
+  const [expanded, setExpanded] = useState(false)
+  const [players, setPlayers] = useState([])
+  const [selectedA, setSelectedA] = useState(null)   // {id, name} from list
+  const [selectedB, setSelectedB] = useState(null)
+  const [infoA, setInfoA] = useState(null)            // enriched data
+  const [infoB, setInfoB] = useState(null)
+  const [keepId, setKeepId] = useState(null)
+  const [merging, setMerging] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (expanded && players.length === 0) {
+      api.listPlayers(orgId).then(setPlayers).catch(() => {})
+    }
+  }, [expanded, orgId])
+
+  async function handleSelectA(player) {
+    setSelectedA(player)
+    setInfoA(null)
+    setKeepId(null)
+    if (player) {
+      const info = await api.getPlayerMergeInfo(player.id, orgId).catch(() => null)
+      setInfoA(info)
+    }
+  }
+
+  async function handleSelectB(player) {
+    setSelectedB(player)
+    setInfoB(null)
+    setKeepId(null)
+    if (player) {
+      const info = await api.getPlayerMergeInfo(player.id, orgId).catch(() => null)
+      setInfoB(info)
+    }
+  }
+
+  // Auto-pick a sensible default keep when both are loaded
+  useEffect(() => {
+    if (infoA && infoB) {
+      if (infoA.playhq_id && !infoB.playhq_id) setKeepId(infoA.id)
+      else if (infoB.playhq_id && !infoA.playhq_id) setKeepId(infoB.id)
+      else setKeepId(infoA.seasons_count >= infoB.seasons_count ? infoA.id : infoB.id)
+    }
+  }, [infoA, infoB])
+
+  async function handleMerge() {
+    if (!keepId || !infoA || !infoB) return
+    const removeInfo = keepId === infoA.id ? infoB : infoA
+    setMerging(true)
+    setError(null)
+    try {
+      await api.mergePlayers(keepId, removeInfo.id, orgId)
+      setSelectedA(null); setSelectedB(null); setInfoA(null); setInfoB(null); setKeepId(null)
+      onMerged()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setMerging(false)
+    }
+  }
+
+  const canMerge = infoA && infoB && keepId && infoA.id !== infoB.id
+
+  return (
+    <div className="mb-8 border border-navy-600 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center justify-between px-5 py-4 bg-navy-800 hover:bg-navy-700 transition-colors text-left"
+      >
+        <div>
+          <span className="text-white font-semibold">Manual Merge</span>
+          <span className="text-slate-400 text-sm ml-3">Merge any two players by name — e.g. name changes after marriage</span>
+        </div>
+        <span className="text-slate-400 text-lg">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="bg-navy-900 p-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="section-label text-xs mb-2 block">Player to remove</label>
+              <PlayerSearch
+                players={players.filter(p => p.id !== selectedB?.id)}
+                value={selectedA}
+                onChange={handleSelectA}
+                placeholder="Search players…"
+              />
+            </div>
+            <div>
+              <label className="section-label text-xs mb-2 block">Player to keep</label>
+              <PlayerSearch
+                players={players.filter(p => p.id !== selectedA?.id)}
+                value={selectedB}
+                onChange={handleSelectB}
+                placeholder="Search players…"
+              />
+            </div>
+          </div>
+
+          {infoA && infoB && (
+            <>
+              <div className="flex flex-col sm:flex-row gap-3 mb-4">
+                <PlayerCard player={infoA} isSelected={keepId === infoA.id} onSelect={() => setKeepId(infoA.id)} label="Player A" />
+                <div className="flex items-center justify-center text-slate-600 font-bold shrink-0">vs</div>
+                <PlayerCard player={infoB} isSelected={keepId === infoB.id} onSelect={() => setKeepId(infoB.id)} label="Player B" />
+              </div>
+              {infoA.id === infoB.id && (
+                <p className="text-amber-400 text-sm mb-3">Select two different players.</p>
+              )}
+            </>
+          )}
+
+          {(infoA && !infoB) || (!infoA && infoB) ? (
+            <p className="text-slate-500 text-sm mb-3">Select a second player to continue.</p>
+          ) : null}
+
+          {error && (
+            <div className="mb-3 text-sm text-red-400 bg-red-900/30 border border-red-800 rounded px-3 py-2">{error}</div>
+          )}
+
+          <button
+            onClick={handleMerge}
+            disabled={!canMerge || merging}
+            className="btn-primary text-sm w-full disabled:opacity-40"
+          >
+            {merging ? 'Merging…' : 'Confirm Manual Merge'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored }) {
   const [keepId, setKeepId] = useState(() => {
     const a = pair.player_a
     const b = pair.player_b
@@ -71,6 +260,7 @@ function MergePair({ pair, orgId, onMerged, onSkipped }) {
     return a.seasons_count >= b.seasons_count ? a.id : b.id
   })
   const [merging, setMerging] = useState(false)
+  const [ignoring, setIgnoring] = useState(false)
   const [error, setError] = useState(null)
 
   const removePlayer = keepId === pair.player_a.id ? pair.player_b : pair.player_a
@@ -87,6 +277,18 @@ function MergePair({ pair, orgId, onMerged, onSkipped }) {
     }
   }
 
+  async function handleIgnore() {
+    setIgnoring(true)
+    try {
+      await api.ignorePair(pair.player_a.id, pair.player_b.id, orgId)
+      onIgnored()
+    } catch {
+      setIgnoring(false)
+    }
+  }
+
+  const busy = merging || ignoring
+
   return (
     <div className="bg-navy-900 border border-navy-700 rounded-xl p-5">
       <div className="flex items-center gap-2 mb-4">
@@ -95,28 +297,14 @@ function MergePair({ pair, orgId, onMerged, onSkipped }) {
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
-        <PlayerCard
-          player={pair.player_a}
-          isSelected={keepId === pair.player_a.id}
-          onSelect={() => setKeepId(pair.player_a.id)}
-          label="Player A"
-        />
-        <div className="flex items-center justify-center text-slate-600 font-bold text-lg sm:text-xl shrink-0">
-          vs
-        </div>
-        <PlayerCard
-          player={pair.player_b}
-          isSelected={keepId === pair.player_b.id}
-          onSelect={() => setKeepId(pair.player_b.id)}
-          label="Player B"
-        />
+        <PlayerCard player={pair.player_a} isSelected={keepId === pair.player_a.id} onSelect={() => setKeepId(pair.player_a.id)} label="Player A" />
+        <div className="flex items-center justify-center text-slate-600 font-bold text-lg sm:text-xl shrink-0">vs</div>
+        <PlayerCard player={pair.player_b} isSelected={keepId === pair.player_b.id} onSelect={() => setKeepId(pair.player_b.id)} label="Player B" />
       </div>
 
       <div className="bg-navy-800 rounded-lg px-4 py-3 mb-4 text-sm text-slate-300">
         <span className="text-slate-400">Will keep: </span>
-        <span className="text-white font-semibold">
-          {keepId === pair.player_a.id ? pair.player_a.name : pair.player_b.name}
-        </span>
+        <span className="text-white font-semibold">{keepId === pair.player_a.id ? pair.player_a.name : pair.player_b.name}</span>
         <span className="text-slate-400"> — merge all records from </span>
         <span className="text-amber-300 font-semibold">{removePlayer.name}</span>
         <span className="text-slate-400"> into it, then delete </span>
@@ -124,25 +312,23 @@ function MergePair({ pair, orgId, onMerged, onSkipped }) {
       </div>
 
       {error && (
-        <div className="mb-4 text-sm text-red-400 bg-red-900/30 border border-red-800 rounded px-3 py-2">
-          {error}
-        </div>
+        <div className="mb-4 text-sm text-red-400 bg-red-900/30 border border-red-800 rounded px-3 py-2">{error}</div>
       )}
 
-      <div className="flex gap-3">
-        <button
-          onClick={handleMerge}
-          disabled={merging}
-          className="btn-primary text-sm flex-1 disabled:opacity-50"
-        >
+      <div className="flex gap-2">
+        <button onClick={handleMerge} disabled={busy} className="btn-primary text-sm flex-1 disabled:opacity-50">
           {merging ? 'Merging…' : 'Confirm Merge'}
         </button>
-        <button
-          onClick={onSkipped}
-          disabled={merging}
-          className="btn-ghost border border-navy-600 text-sm px-5 disabled:opacity-50"
-        >
+        <button onClick={onSkipped} disabled={busy} className="btn-ghost border border-navy-600 text-sm px-4 disabled:opacity-50">
           Skip
+        </button>
+        <button
+          onClick={handleIgnore}
+          disabled={busy}
+          title="Never suggest this pair again"
+          className="btn-ghost border border-navy-700 text-slate-500 hover:text-red-400 hover:border-red-900 text-sm px-4 disabled:opacity-50"
+        >
+          {ignoring ? '…' : 'Ignore'}
         </button>
       </div>
     </div>
@@ -186,9 +372,7 @@ function MergeHistory({ orgId, refreshKey }) {
               <span className="text-white font-medium">{entry.keep_player_name}</span>
               <span className="text-slate-500 mx-2">←</span>
               <span className="text-amber-300">{entry.removed_player_name}</span>
-              <span className="text-slate-600 text-xs ml-3">
-                {new Date(entry.merged_at).toLocaleDateString()}
-              </span>
+              <span className="text-slate-600 text-xs ml-3">{new Date(entry.merged_at).toLocaleDateString()}</span>
             </div>
             {entry.undone ? (
               <span className="text-xs text-slate-500 shrink-0">Undone</span>
@@ -241,20 +425,17 @@ export default function MergeTools() {
             <p className="section-label mb-1">Admin Tools</p>
             <h1 className="display-heading text-4xl text-white">MERGE DUPLICATES</h1>
           </div>
-          <Link to={`/dashboard/${orgId}`} className="btn-ghost border border-navy-600 text-sm">
-            ← Dashboard
-          </Link>
+          <Link to={`/dashboard/${orgId}`} className="btn-ghost border border-navy-600 text-sm">← Dashboard</Link>
         </div>
         <p className="text-slate-400 mt-3 text-sm">
-          Players with the same name from different data sources (e.g. Grassroots vs scorecard import) are shown below.
-          Select which record to keep, then confirm each merge. Merges can be undone via the history panel below.
+          Players with the same name from different data sources are shown below. Use Manual Merge for name changes (e.g. after marriage).
         </p>
       </div>
 
+      <ManualMerge orgId={orgId} onMerged={() => { setMergedCount(c => c + 1); setHistoryKey(k => k + 1); load() }} />
+
       {error && (
-        <div className="mb-6 text-sm text-red-400 bg-red-900/30 border border-red-800 rounded px-4 py-3">
-          {error}
-        </div>
+        <div className="mb-6 text-sm text-red-400 bg-red-900/30 border border-red-800 rounded px-4 py-3">{error}</div>
       )}
 
       {mergedCount > 0 && (
@@ -269,32 +450,23 @@ export default function MergeTools() {
           <div className="text-lg font-semibold text-white mb-2">No duplicates found</div>
           <p className="text-sm mb-6">
             {candidates?.length > 0
-              ? 'All candidates were skipped. Refresh to see them again.'
+              ? 'All candidates were skipped or ignored. Refresh to see skipped pairs again.'
               : 'No players with matching names were detected in this club.'}
           </p>
-          <button onClick={load} className="btn-ghost border border-navy-600 text-sm">
-            Refresh
-          </button>
+          <button onClick={load} className="btn-ghost border border-navy-600 text-sm">Refresh</button>
         </div>
       ) : (
         <>
-          <p className="text-slate-500 text-sm mb-5">
-            {visible.length} candidate pair{visible.length !== 1 ? 's' : ''} found.
-          </p>
+          <p className="text-slate-500 text-sm mb-5">{visible.length} candidate pair{visible.length !== 1 ? 's' : ''} found.</p>
           <div className="flex flex-col gap-5">
             {visible.map(pair => (
               <MergePair
                 key={`${pair.player_a.id}:${pair.player_b.id}`}
                 pair={pair}
                 orgId={orgId}
-                onMerged={() => {
-                  setMergedCount(c => c + 1)
-                  setHistoryKey(k => k + 1)
-                  load()
-                }}
-                onSkipped={() => {
-                  setSkipped(s => new Set([...s, `${pair.player_a.id}:${pair.player_b.id}`]))
-                }}
+                onMerged={() => { setMergedCount(c => c + 1); setHistoryKey(k => k + 1); load() }}
+                onSkipped={() => setSkipped(s => new Set([...s, `${pair.player_a.id}:${pair.player_b.id}`]))}
+                onIgnored={() => load()}
               />
             ))}
           </div>
