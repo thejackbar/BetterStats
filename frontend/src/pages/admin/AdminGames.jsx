@@ -7,20 +7,21 @@ export default function AdminGames() {
   const [selectedSeason, setSelectedSeason] = useState('')
   const [games, setGames] = useState([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
-    api.adminListSeasons().then(s => {
-      setSeasons(s)
-      if (s.length > 0) setSelectedSeason(s[0].id)
-    }).catch(() => {})
+    api.adminListSeasons()
+      .then(s => { setSeasons(s); if (s.length > 0) setSelectedSeason(s[0].id) })
+      .catch(err => setError(err.message || 'Failed to load seasons'))
   }, [])
 
   useEffect(() => {
     if (!selectedSeason) return
     setLoading(true)
+    setError(null)
     api.adminListGames(selectedSeason)
       .then(setGames)
-      .catch(() => {})
+      .catch(err => setError(err.message || 'Failed to load matches'))
       .finally(() => setLoading(false))
   }, [selectedSeason])
 
@@ -44,9 +45,10 @@ export default function AdminGames() {
           </span>
         </div>
 
+        {error && <div className="text-red-400 text-sm bg-red-900/20 border border-red-800 rounded p-3">{error}</div>}
         {loading && <div className="text-slate-400 text-sm">Loading…</div>}
 
-        {!loading && games.length === 0 && (
+        {!loading && !error && games.length === 0 && (
           <div className="text-slate-500 text-sm">No matches found for this season.</div>
         )}
 

@@ -4,7 +4,7 @@ from datetime import datetime, timezone, date
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, text
 from sqlalchemy.sql import func
 
 from app.models.db import (
@@ -118,8 +118,19 @@ async def sync_organisation(org_id_str: str) -> dict:
             if not player_data:
                 continue
 
-            # Upsert players
+            # Build merged-player map so sync doesn't recreate deleted duplicates
+            merge_res = await session.execute(
+                text("SELECT removed_player_id::text, keep_player_id FROM merge_logs WHERE org_id = :org_id"),
+                {"org_id": str(org_id)},
+            )
+            merged_away: dict[str, uuid.UUID] = {
+                r.removed_player_id: r.keep_player_id for r in merge_res.mappings().all()
+            }
+
+            # Upsert players — skip any that were merged away
             for pid, pdata in player_data.items():
+                if str(pid) in merged_away:
+                    continue
                 player = await session.get(Player, pid)
                 if not player:
                     player = Player(id=pid, name=pdata["name"], organisation_id=org_id)
@@ -131,7 +142,14 @@ async def sync_organisation(org_id_str: str) -> dict:
                 delete(PlayerSeasonStats).where(PlayerSeasonStats.season_id == season_id)
             )
 
+            processed_in_season: set[uuid.UUID] = set()
             for pid, pdata in player_data.items():
+                # Redirect stats for merged-away players to the kept player
+                effective_pid = merged_away.get(str(pid), pid)
+                if effective_pid in processed_in_season:
+                    continue
+                processed_in_season.add(effective_pid)
+                pid = effective_pid
                 bat = pdata.get("batting", {})
                 bowl = pdata.get("bowling", {})
                 field = pdata.get("fielding", {})

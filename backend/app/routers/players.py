@@ -36,7 +36,7 @@ async def list_players(
     )
     players = result.scalars().all()
     return [
-        {"id": str(p.id), "name": p.name, "claimed": p.claimed}
+        {"id": str(p.id), "name": p.name, "display_name": p.display_name, "claimed": p.claimed}
         for p in players
     ]
 
@@ -49,6 +49,7 @@ async def get_player(player_id: str, db: AsyncSession = Depends(get_db)):
     return {
         "id": str(player.id),
         "name": player.name,
+        "display_name": player.display_name,
         "organisation_id": str(player.organisation_id),
         "claimed": player.claimed,
     }
@@ -72,7 +73,7 @@ async def get_player_stats(
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id)
 
     return {
-        "player": {"id": str(player.id), "name": player.name, "claimed": player.claimed, "organisation_id": str(player.organisation_id)},
+        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id)},
         "career_batting": _str_keys(batting),
         "career_bowling": _str_keys(bowling),
         "career_fielding": _str_keys(fielding),

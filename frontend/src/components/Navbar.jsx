@@ -9,6 +9,10 @@ function useClubSlug() {
   if (segments.length >= 2 && CLUB_SECTIONS.includes(segments[1])) {
     return segments[0]
   }
+  // Player profile pages (/players/:id) — use last visited club from sessionStorage
+  if (segments[0] === 'players' || segments[0] === 'scorecards' || segments[0] === 'match' || segments[0] === 'games') {
+    return sessionStorage.getItem('bs_last_slug') || null
+  }
   return null
 }
 

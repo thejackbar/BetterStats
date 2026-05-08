@@ -2,6 +2,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useMemo } from 'react'
 import { useClubData } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
+import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ClubInactive from './ClubInactive'
@@ -9,7 +10,8 @@ import clsx from 'clsx'
 
 export default function Players() {
   const { clubSlug } = useParams()
-  const { orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive } = useClub(clubSlug)
+  useClubTheme(club)
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading: clubLoading } = useClubData(orgId)
 
   if (inactive) return <ClubInactive />
@@ -147,7 +149,7 @@ export default function Players() {
                   <tr key={player.id} className="table-row">
                     <td className="table-cell">
                       <Link to={`/players/${player.id}`} className="text-white hover:text-accent transition-colors font-medium">
-                        {player.name}
+                        {player.display_name}
                       </Link>
                     </td>
                     <td className="table-cell stat-number text-right text-slate-400">{stats?.innings ?? '—'}</td>

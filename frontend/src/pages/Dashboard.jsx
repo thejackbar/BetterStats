@@ -2,6 +2,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useClubData, useRecentGames } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
+import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
 import SeasonSelector from '../components/SeasonSelector'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -292,7 +293,8 @@ const STAT_PANELS = {
 
 export default function Dashboard() {
   const { clubSlug } = useParams()
-  const { orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive } = useClub(clubSlug)
+  useClubTheme(club)
   const navigate = useNavigate()
 
   if (inactive) return <ClubInactive />

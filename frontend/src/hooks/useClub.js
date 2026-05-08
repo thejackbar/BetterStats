@@ -16,7 +16,11 @@ export function useClub(slug) {
     setLoading(true)
     setInactive(false)
     api.getClubBySlug(slug)
-      .then(c => { setClub(c); setLoading(false) })
+      .then(c => {
+        setClub(c)
+        setLoading(false)
+        if (c?.slug) sessionStorage.setItem('bs_last_slug', c.slug)
+      })
       .catch(err => {
         if (err.message && err.message.includes('not available')) {
           setInactive(true)

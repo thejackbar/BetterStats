@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useClub } from '../hooks/useClub'
+import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ClubInactive from './ClubInactive'
@@ -519,7 +520,8 @@ function FilterBar({ seasons, seasonId, onSeasonChange, grades, gradeId, onGrade
 
 export default function Records() {
   const { clubSlug } = useParams()
-  const { orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive } = useClub(clubSlug)
+  useClubTheme(club)
 
   if (inactive) return <ClubInactive />
   const [tab, setTab] = useState('batting')

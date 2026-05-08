@@ -2,6 +2,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useClubData } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
+import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import SeasonSelector from '../components/SeasonSelector'
@@ -265,7 +266,8 @@ function FieldingLeaderboard({ orgId, seasonId, gradeId }) {
 
 export default function Leaderboard() {
   const { clubSlug } = useParams()
-  const { orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive } = useClub(clubSlug)
+  useClubTheme(club)
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading } = useClubData(orgId)
 
   if (inactive) return <ClubInactive />
