@@ -32,7 +32,7 @@ export default function Players() {
 
   useEffect(() => {
     if (!orgId) return
-    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 500 })
+    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000 })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })

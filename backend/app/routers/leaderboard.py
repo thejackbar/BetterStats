@@ -22,7 +22,7 @@ async def batting_leaderboard(
     season_id: Optional[str] = Query(None),
     grade_id: Optional[str] = Query(None),
     sort_by: str = Query("total_runs"),
-    limit: int = Query(20, le=500),
+    limit: int = Query(20, le=5000),
     db: AsyncSession = Depends(get_db),
 ):
     rows = await get_batting_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit)
@@ -35,7 +35,7 @@ async def bowling_leaderboard(
     season_id: Optional[str] = Query(None),
     grade_id: Optional[str] = Query(None),
     sort_by: str = Query("total_wickets"),
-    limit: int = Query(20, le=500),
+    limit: int = Query(20, le=5000),
     db: AsyncSession = Depends(get_db),
 ):
     rows = await get_bowling_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit)
