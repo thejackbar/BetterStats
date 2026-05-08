@@ -3,7 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
 import uuid
 
-from app.models.db import get_db, Grade, Season
+from app.models.db import get_db, Grade, Season, Organisation
+from app.services import playhq_partner_client
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -26,7 +27,23 @@ async def get_records_grades(
         q = q.where(Grade.season_id == uuid.UUID(season_id))
     result = await db.execute(q.order_by(Grade.name))
     grades = result.scalars().all()
-    return [{"id": str(g.id), "name": g.name, "season_id": str(g.season_id)} for g in grades]
+    if grades:
+        return [{"id": str(g.id), "name": g.name, "season_id": str(g.season_id)} for g in grades]
+
+    # DB has no grades yet — fall back to live PlayHQ API
+    org = await db.get(Organisation, uuid.UUID(org_id))
+    if not org or not org.playhq_id:
+        return []
+    try:
+        data = await playhq_partner_client._get(
+            f"{playhq_partner_client.BASE_URL}/v1/organisations/{org.playhq_id}/grades"
+        )
+        api_grades = data.get("data", [])
+        if season_id:
+            api_grades = [g for g in api_grades if str((g.get("season") or {}).get("id", "")) == season_id]
+        return [{"id": g["id"], "name": g.get("name", ""), "season_id": str((g.get("season") or {}).get("id", ""))} for g in api_grades if g.get("id")]
+    except Exception:
+        return []
 
 
 @router.get("/{org_id}")
