@@ -71,7 +71,7 @@ async def get_player_stats(
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id)
 
     return {
-        "player": {"id": str(player.id), "name": player.name, "claimed": player.claimed},
+        "player": {"id": str(player.id), "name": player.name, "claimed": player.claimed, "organisation_id": str(player.organisation_id)},
         "career_batting": _str_keys(batting),
         "career_bowling": _str_keys(bowling),
         "career_fielding": _str_keys(fielding),
