@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
 import uuid
 
-from app.models.db import get_db, Grade
+from app.models.db import get_db, Grade, Season
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -17,8 +17,10 @@ async def get_records_grades(
     db: AsyncSession = Depends(get_db),
 ):
     """Return grades for the org, optionally scoped to a season."""
-    q = select(Grade).join(Grade.season).where(
-        Grade.season.has(organisation_id=uuid.UUID(org_id))
+    q = (
+        select(Grade)
+        .join(Season, Season.id == Grade.season_id)
+        .where(Season.organisation_id == uuid.UUID(org_id))
     )
     if season_id:
         q = q.where(Grade.season_id == uuid.UUID(season_id))
