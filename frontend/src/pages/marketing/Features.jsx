@@ -24,7 +24,7 @@ const SECTIONS = [
   },
   {
     title: 'Leaderboards & Records',
-    desc: 'See who's leading the club in every stat category, filterable by season and grade.',
+    desc: "See who's leading the club in every stat category, filterable by season and grade.",
     points: [
       'Batting: runs, average, strike rate, centuries, fifties',
       'Bowling: wickets, economy, average, five-fors',
