@@ -45,7 +45,7 @@ export default function Navbar() {
           <span className="font-display font-bold text-xl tracking-wider uppercase text-white group-hover:text-accent transition-colors">
             Better<span className="text-accent">Stats</span>
           </span>
-          <span className="text-slate-600 text-xs font-mono">v2.4.1</span>
+          <span className="text-slate-600 text-xs font-mono">v2.4.2</span>
         </Link>
 
         {/* Desktop links */}
