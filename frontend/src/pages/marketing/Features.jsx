@@ -34,7 +34,7 @@ const SECTIONS = [
   },
   {
     title: 'Awards & Honours',
-    desc: 'Log your club's annual awards, association honours, office bearers, hall of fame inductees, and premierships in one place.',
+    desc: "Log your club's annual awards, association honours, office bearers, hall of fame inductees, and premierships in one place.",
     points: [
       'Attach awards to player profiles',
       'Browse all-time award history by category',
@@ -44,7 +44,7 @@ const SECTIONS = [
   },
   {
     title: 'Admin Tools',
-    desc: 'A full-featured admin section for your stats volunteers — no technical skills needed.',
+    desc: "A full-featured admin section for your stats volunteers — no technical skills needed.",
     points: [
       'Duplicate player detection and merge tool',
       'Display name overrides for cosmetic corrections',
