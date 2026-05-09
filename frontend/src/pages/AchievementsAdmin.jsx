@@ -3,19 +3,10 @@ import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import { ACHIEVEMENT_TREE, getSubcategories, getAchievements } from '../lib/achievementOptions'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { CATEGORY_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import clsx from 'clsx'
 
 const CATEGORIES = ['Club Award', 'Association Award', 'Office Bearer', 'Premiership', 'Hall of Fame', 'Life Membership', 'Milestone']
-
-const CATEGORY_ICONS = {
-  'Club Award': '🏆',
-  'Association Award': '🥇',
-  'Office Bearer': '👔',
-  'Premiership': '🏏',
-  'Hall of Fame': '⭐',
-  'Life Membership': '🎖',
-  'Milestone': '📍',
-}
 
 const BASE = import.meta.env.VITE_API_URL || '/api'
 
@@ -531,7 +522,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
           {Object.entries(grouped[season]).map(([cat, items]) => (
             <div key={cat} className="card mb-3 overflow-hidden">
               <div className="px-4 py-2.5 bg-navy-800/60 border-b border-navy-700 flex items-center gap-2">
-                <span className="text-base">{CATEGORY_ICONS[cat] || '🏅'}</span>
+                <ThiingIcon src={CATEGORY_ICON_SRC[cat] || thiings.goldMedal} alt="" className="w-5 h-5" />
                 <span className="section-label text-xs">{cat.toUpperCase()}</span>
               </div>
 

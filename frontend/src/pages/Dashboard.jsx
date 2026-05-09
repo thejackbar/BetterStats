@@ -7,6 +7,7 @@ import { api } from '../lib/api'
 import SeasonSelector from '../components/SeasonSelector'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ClubInactive from './ClubInactive'
+import { MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import clsx from 'clsx'
 
 const SPONSOR_IMAGE = import.meta.env.VITE_SPONSOR_IMAGE || ''
@@ -196,7 +197,6 @@ function BestPerformances({ orgId, seasons, selectedSeason, clubSlug }) {
   )
 }
 
-const MILESTONE_ICONS = { runs: '🏏', wickets: '⚡', matches: '📅', catches: '🤝' }
 const CATEGORY_LABELS = { batting: 'Batting', bowling: 'Bowling', fielding: 'Fielding', matches: 'Matches Played' }
 const CATEGORY_ORDER = ['batting', 'bowling', 'fielding', 'matches']
 
@@ -206,7 +206,7 @@ function MilestoneCard({ m }) {
     <Link to={`/players/${m.player_id}`} className="block hover:opacity-80 transition-opacity">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-base">{MILESTONE_ICONS[m.type] || '🎯'}</span>
+          <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.target} alt="" className="w-5 h-5" />
           <span className="text-sm text-white font-medium truncate">{m.name}</span>
         </div>
         <span className="text-xs text-slate-400 ml-2 whitespace-nowrap">
@@ -233,7 +233,7 @@ function AchievedMilestoneCard({ m }) {
     <Link to={`/players/${m.player_id}`} className="block hover:opacity-80 transition-opacity">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-base">{MILESTONE_ICONS[m.type] || '🏆'}</span>
+          <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.trophy} alt="" className="w-5 h-5" />
           <span className="text-sm text-white font-medium truncate">{m.name}</span>
         </div>
         <div className="ml-2 text-right whitespace-nowrap">
@@ -296,7 +296,12 @@ function UpcomingMilestones({ milestones, achieved, loading, achievedLoading }) 
                   : 'border-transparent text-slate-400 hover:text-white'
               }`}
             >
-              {cat === 'achieved' ? '🏆 Recently Achieved' : CATEGORY_LABELS[cat]}
+              {cat === 'achieved' ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <ThiingIcon src={thiings.trophy} alt="" className="w-4 h-4" />
+                  Recently Achieved
+                </span>
+              ) : CATEGORY_LABELS[cat]}
               <span className="ml-1.5 text-slate-600 font-mono">
                 {cat === 'achieved' ? achieved.length : (grouped[cat]?.length || 0)}
               </span>

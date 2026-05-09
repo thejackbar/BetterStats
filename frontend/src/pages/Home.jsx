@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
+import { thiings } from '../assets/thiings'
 
 export default function Home() {
   const [orgs, setOrgs] = useState([])
@@ -55,23 +56,23 @@ export default function Home() {
         <div className="grid md:grid-cols-3 gap-6">
           {[
             {
-              icon: '📊',
+              icon: thiings.barChart,
               title: 'Complete Career Stats',
               desc: 'Every innings, every bowling spell, tracked automatically from PlayHQ. Batting average, strike rate, economy — all computed for you.',
             },
             {
-              icon: '⚡',
+              icon: thiings.lightningBolt,
               title: 'Live Match Updates',
               desc: 'PlayHQ webhooks push game updates in real time. Stats refresh automatically after every match — zero manual input.',
             },
             {
-              icon: '🏏',
+              icon: thiings.cricketBat,
               title: 'Player Profiles',
               desc: 'Claim your profile, track your form, share your season highlight. A home page for every cricketer in the club.',
             },
           ].map(({ icon, title, desc }) => (
             <div key={title} className="card p-6">
-              <div className="text-3xl mb-4">{icon}</div>
+              <img src={icon} alt="" className="w-12 h-12 object-contain mb-4" />
               <h3 className="display-heading text-xl text-white mb-2">{title}</h3>
               <p className="text-slate-400 text-sm leading-relaxed">{desc}</p>
             </div>
