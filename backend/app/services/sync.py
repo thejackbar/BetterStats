@@ -357,7 +357,11 @@ async def sync_game_level_data(
     seasons_res = await session.execute(
         select(Season).where(Season.organisation_id == org.id)
     )
-    season_by_name = {s.name.strip().lower(): s for s in seasons_res.scalars().all() if s.name}
+    # Store as plain dicts so session rollbacks can't expire these and trigger async lazy-loads
+    season_by_name = {
+        s.name.strip().lower(): {"id": s.id, "year": s.year}
+        for s in seasons_res.scalars().all() if s.name
+    }
 
     players_res = await session.execute(
         select(Player).where(Player.organisation_id == org.id)
@@ -447,7 +451,7 @@ async def sync_game_level_data(
             year = played_str[:4] if played_str else ""
             season = next(
                 (s for s in season_by_name.values()
-                 if str(s.year) == year or str((s.year or 0) + 1) == year),
+                 if str(s["year"]) == year or str((s["year"] or 0) + 1) == year),
                 None,
             )
         if not season:
@@ -466,7 +470,7 @@ async def sync_game_level_data(
             grade = await session.get(Grade, grade_uuid)
             if not grade:
                 grade_name = (game_data.get("grade") or {}).get("name", "Unknown Grade")
-                grade = Grade(id=grade_uuid, season_id=season.id, name=grade_name, playhq_id=grade_phq)
+                grade = Grade(id=grade_uuid, season_id=season["id"], name=grade_name, playhq_id=grade_phq)
                 session.add(grade)
                 try:
                     await session.flush()
@@ -567,6 +571,9 @@ async def sync_game_level_data(
                 bowling_stored += 1
 
             for fow in (innings.get("fall_of_wickets") or []):
+                wkt_num = fow.get("wicket_number") or None
+                if wkt_num is None:
+                    continue  # wicket_number is NOT NULL in DB — skip malformed FoW rows
                 pid = phq_to_pid.get(fow.get("batter_playhq_id") or "")
                 if not pid:
                     name_lc = (fow.get("name") or "").strip().lower()
@@ -574,7 +581,7 @@ async def sync_game_level_data(
                 session.add(FallOfWicket(
                     game_id=game_uuid,
                     innings_number=inn_num,
-                    wicket_number=fow.get("wicket_number", 1),
+                    wicket_number=wkt_num,
                     score_at_fall=fow.get("score_at_fall"),
                     overs_at_fall=fow.get("overs_at_fall"),
                     player_id=pid,
