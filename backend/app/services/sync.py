@@ -3,6 +3,9 @@ import uuid
 from datetime import datetime, timezone, date
 from typing import Optional
 
+# Rolling in-memory sync log (last 30 entries per org, survives only until restart)
+_sync_log: dict[str, list] = {}
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, text
 from sqlalchemy.sql import func
@@ -40,12 +43,26 @@ async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisa
     return org
 
 
+def _record_sync_log(org_id: str, started_at: str, stats: dict, error: str = "") -> None:
+    entry = {
+        "started_at": started_at,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "stats": stats,
+        "error": error,
+    }
+    log = _sync_log.setdefault(org_id, [])
+    log.insert(0, entry)
+    _sync_log[org_id] = log[:30]
+
+
 async def sync_organisation(org_id_str: str) -> dict:
     """Full historical sync for an organisation using season-aggregate stats."""
     logger.info(f"Starting sync for org {org_id_str}")
+    started_at = datetime.now(timezone.utc).isoformat()
 
     org_data = await playhq_client.get_organisation(org_id_str)
     if not org_data:
+        _record_sync_log(org_id_str, started_at, {}, "Organisation not found")
         return {"error": "Organisation not found", "org_id": org_id_str}
 
     stats = {"seasons": 0, "players": 0, "season_stats": 0}
@@ -257,6 +274,7 @@ async def sync_organisation(org_id_str: str) -> dict:
                     logger.error(f"PlayHQ game-level sync failed for {org_id_str}: {e}\n{_tb.format_exc()}")
 
         logger.info(f"Sync complete: {stats}")
+        _record_sync_log(org_id_str, started_at, stats)
         return stats
 
 

@@ -26,6 +26,7 @@ export const api = {
   getOrgSeasons: (orgId) => request(`/organisations/${orgId}/seasons`),
   getSeasonGrades: (orgId, seasonId) => request(`/organisations/${orgId}/seasons/${seasonId}/grades`),
   triggerSync: (orgId) => request(`/organisations/${orgId}/sync`, { method: 'POST' }),
+  getSyncLogs: (orgId) => request(`/organisations/${orgId}/sync-logs`),
   getOrgSummary: (orgId, { seasonId, gradeId } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)

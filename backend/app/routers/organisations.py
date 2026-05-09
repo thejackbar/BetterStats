@@ -214,3 +214,9 @@ async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
 async def trigger_sync(org_id: str, background_tasks: BackgroundTasks):
     background_tasks.add_task(sync_organisation, org_id)
     return {"status": "sync_started", "org_id": org_id}
+
+
+@router.get("/{org_id}/sync-logs")
+async def get_sync_logs(org_id: str):
+    from app.services.sync import _sync_log
+    return _sync_log.get(org_id, [])

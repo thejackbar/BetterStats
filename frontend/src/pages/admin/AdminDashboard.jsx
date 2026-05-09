@@ -18,6 +18,7 @@ export default function AdminDashboard() {
     { to: '/admin/players', label: 'Manage Players', desc: 'Edit display names' },
     { to: '/admin/awards', label: 'Awards', desc: 'Add season awards & achievements' },
     { to: '/admin/merge', label: 'Merge Players', desc: 'Fix duplicate player entries' },
+    { to: '/admin/sync', label: 'Data Sync', desc: 'Trigger sync & view sync log' },
     { to: '/admin/games', label: 'View Matches', desc: 'Browse match results' },
     { to: '/admin/settings', label: 'Club Settings', desc: 'Name, colours, contact' },
   ]
