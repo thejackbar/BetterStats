@@ -353,13 +353,25 @@ async def sync_game_level_data(
     season_by_name = {s.name.strip().lower(): s for s in seasons_res.scalars().all()}
 
     players_res = await session.execute(
-        select(Player).where(
-            Player.organisation_id == org.id,
-            Player.playhq_id.isnot(None),
-        )
+        select(Player).where(Player.organisation_id == org.id)
     )
-    phq_to_pid: dict[str, uuid.UUID] = {p.playhq_id: p.id for p in players_res.scalars().all()}
-    logger.info(f"GameSync: {len(phq_to_pid)} players with playhq_id for org {org.id}")
+    phq_to_pid: dict[str, uuid.UUID] = {}
+    name_to_pid: dict[str, uuid.UUID] = {}
+    for p in players_res.scalars().all():
+        if p.playhq_id:
+            phq_to_pid[p.playhq_id] = p.id
+        n = p.name.strip().lower()
+        name_to_pid[n] = p.id
+        # Index both "First Last" and "Last, First" so either scorecard format matches
+        if "," in n:
+            parts = [x.strip() for x in n.split(",", 1)]
+            if len(parts) == 2:
+                name_to_pid[f"{parts[1]} {parts[0]}"] = p.id
+        else:
+            words = n.split()
+            if len(words) >= 2:
+                name_to_pid[f"{' '.join(words[1:])}, {words[0]}"] = p.id
+    logger.info(f"GameSync: {len(phq_to_pid)} players with playhq_id, {len(name_to_pid)} name entries for org {org.id}")
 
     for game_data in final_games:
         game_id_str = game_data.get("id")
@@ -473,6 +485,9 @@ async def sync_game_level_data(
             for row in innings.get("batting", []):
                 pid = phq_to_pid.get(row.get("playhq_appearance_id") or "")
                 if not pid:
+                    name_lc = (row.get("name") or "").strip().lower()
+                    pid = name_to_pid.get(name_lc) if name_lc else None
+                if not pid:
                     continue
                 if partial_reprocess and str(pid) in existing_player_innings:
                     continue
@@ -493,6 +508,9 @@ async def sync_game_level_data(
 
             for row in innings.get("bowling", []):
                 pid = phq_to_pid.get(row.get("playhq_appearance_id") or "")
+                if not pid:
+                    name_lc = (row.get("name") or "").strip().lower()
+                    pid = name_to_pid.get(name_lc) if name_lc else None
                 if not pid:
                     continue
                 if partial_reprocess and str(pid) in existing_player_innings:
@@ -519,6 +537,9 @@ async def sync_game_level_data(
 
             for fow in (innings.get("fall_of_wickets") or []):
                 pid = phq_to_pid.get(fow.get("batter_playhq_id") or "")
+                if not pid:
+                    name_lc = (fow.get("name") or "").strip().lower()
+                    pid = name_to_pid.get(name_lc) if name_lc else None
                 session.add(FallOfWicket(
                     game_id=game_uuid,
                     innings_number=inn_num,
