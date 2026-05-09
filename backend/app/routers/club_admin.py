@@ -156,6 +156,7 @@ async def get_settings(
         "logo_url": club.logo_url,
         "hero_image_url": club.hero_image_url,
         "is_active": club.is_active,
+        "playhq_id": club.playhq_id,
     }
 
 
