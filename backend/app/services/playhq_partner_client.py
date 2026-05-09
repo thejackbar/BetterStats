@@ -615,7 +615,7 @@ def _parse_summary_rest(data: dict) -> dict:
                         pid = app.get("id") or app.get("appearanceId", "")
                         batting_position = app.get("displayOrder")
                         stats = _stat_map(app.get("statistics") or [])
-                        status = app.get("status", "")
+                        status = app.get("status") or ""
                         shared = get_shared_stats(pid, all_shared)
                         runs = stats.get("TOTAL_RUNS")
                         balls = stats.get("BALLS_FACED")
