@@ -11,19 +11,10 @@ import StatCard from '../components/StatCard'
 import TrendChart from '../components/TrendChart'
 import RunsChart from '../components/RunsChart'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import clsx from 'clsx'
 
 const TABS = ['batting', 'bowling', 'analysis', 'milestones', 'achievements']
-
-const CATEGORY_ICONS = {
-  'Club Award': '🏆',
-  'Association Award': '🥇',
-  'Office Bearer': '👔',
-  'Premiership': '🏏',
-  'Hall of Fame': '⭐',
-  'Life Membership': '🎖',
-  'Milestone': '📍',
-}
 
 const CATEGORIES = ['Club Award', 'Association Award', 'Office Bearer', 'Premiership', 'Hall of Fame', 'Life Membership', 'Milestone']
 
@@ -235,7 +226,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
           {Object.entries(grouped[season]).map(([cat, items]) => (
             <div key={cat} className="px-5 py-3">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-base">{CATEGORY_ICONS[cat] || '🏅'}</span>
+                <ThiingIcon src={CATEGORY_ICON_SRC[cat] || thiings.goldMedal} alt="" className="w-5 h-5" />
                 <span className="section-label text-xs">{cat.toUpperCase()}</span>
               </div>
               <div className="space-y-1.5">
@@ -299,7 +290,6 @@ function ActivityBadge({ label, value, sub, accent = false }) {
 
 function UpcomingMilestonesSection({ data }) {
   if (!data?.length) return null
-  const ICONS = { runs: '🏏', wickets: '⚡', matches: '📅' }
   return (
     <div className="mb-8">
       <h3 className="display-heading text-lg text-white mb-4">CHASING</h3>
@@ -310,7 +300,7 @@ function UpcomingMilestonesSection({ data }) {
             <div key={i} className="bg-navy-800 border border-navy-700 rounded-xl p-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-slate-400 flex items-center gap-1.5">
-                  <span>{ICONS[m.type] || '🎯'}</span>
+                  <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.target} alt="" className="w-5 h-5" />
                   {m.target.toLocaleString()} {m.type}
                 </span>
                 <span className="text-xs text-accent font-mono font-bold">{m.needed} to go</span>
