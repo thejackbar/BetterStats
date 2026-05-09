@@ -281,6 +281,7 @@ async def sync_organisation(org_id_str: str) -> dict:
                     await _backfill_player_playhq_ids(session, org, all_games)
                 except Exception as e:
                     logger.error(f"PlayHQ backfill failed for {org_id_str}: {e}\n{_tb.format_exc()}")
+                    await session.rollback()
                 try:
                     game_stats = await sync_game_level_data(session, org, all_games)
                     stats.update(game_stats)
@@ -486,6 +487,7 @@ async def sync_game_level_data(
         innings_list = scorecard.get("innings") or []
         batting_stored = 0
         bowling_stored = 0
+        partnerships_stored = 0
 
         for innings in innings_list:
             inn_num = innings.get("innings_number", 1)
@@ -511,7 +513,6 @@ async def sync_game_level_data(
                     dismissal_type=row.get("how_out") or None,
                     batting_position=row.get("batting_position"),
                 ))
-                stats["batting"] += 1
                 batting_stored += 1
 
             for row in innings.get("bowling", []):
@@ -540,7 +541,6 @@ async def sync_game_level_data(
                     no_balls=row.get("no_balls"),
                     economy=row.get("economy"),
                 ))
-                stats["bowling"] += 1
                 bowling_stored += 1
 
             for fow in (innings.get("fall_of_wickets") or []):
@@ -571,7 +571,7 @@ async def sync_game_level_data(
                         batter1_runs=p.get("batter1_runs"),
                         batter2_runs=p.get("batter2_runs"),
                     ))
-                    stats["partnerships"] += 1
+                    partnerships_stored += 1
 
         if batting_stored == 0 and bowling_stored == 0:
             if not partial_reprocess:
@@ -589,9 +589,16 @@ async def sync_game_level_data(
                 await session.rollback()
             continue
 
-        await session.commit()
-        if not partial_reprocess:
-            stats["games_new"] += 1
+        try:
+            await session.commit()
+            stats["batting"] += batting_stored
+            stats["bowling"] += bowling_stored
+            stats["partnerships"] += partnerships_stored
+            if not partial_reprocess:
+                stats["games_new"] += 1
+        except Exception as e:
+            logger.error(f"GameSync: commit failed for game {game_id_str}: {e}")
+            await session.rollback()
 
     logger.info(f"GameSync: {stats} for org {org.id}")
     return stats
@@ -665,9 +672,9 @@ async def _backfill_player_playhq_ids(
                     Player.organisation_id == org.id,
                     _or(*[func.lower(Player.name) == v for v in name_variants]),
                     Player.playhq_id.is_(None),
-                )
+                ).limit(1)
             )
-            player = name_res.scalar_one_or_none()
+            player = name_res.scalars().first()
             if player:
                 player.playhq_id = phq_id
                 stamped += 1
