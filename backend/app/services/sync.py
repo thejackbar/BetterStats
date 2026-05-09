@@ -391,7 +391,12 @@ async def sync_game_level_data(
         except ValueError:
             continue
 
-        existing_game = await session.get(Game, game_uuid)
+        try:
+            existing_game = await session.get(Game, game_uuid)
+        except Exception as e:
+            logger.error(f"GameSync: session error looking up game {game_id_str}: {e}")
+            await session.rollback()
+            continue
         partial_reprocess = False
         existing_player_innings: set[str] = set()
 
@@ -428,7 +433,12 @@ async def sync_game_level_data(
                 await session.execute(
                     _text("DELETE FROM games WHERE id=:gid"), {"gid": str(game_uuid)}
                 )
-                await session.commit()
+                try:
+                    await session.commit()
+                except Exception as e:
+                    logger.error(f"GameSync: dead-game delete commit failed for {game_id_str}: {e}")
+                    await session.rollback()
+                    continue
 
         s_name = (game_data.get("season") or "").strip().lower()
         season = season_by_name.get(s_name)
@@ -445,10 +455,11 @@ async def sync_game_level_data(
             stats["games_skipped_season"] += 1
             continue
 
-        grade_phq = game_data.get("grade_id", "")
+        grade_phq = game_data.get("grade_id") or ""
         try:
             grade_uuid = uuid.UUID(grade_phq)
-        except ValueError:
+        except (ValueError, TypeError):
+            logger.warning(f"GameSync: invalid grade_id {grade_phq!r} for game {game_id_str}")
             continue
 
         if not partial_reprocess:
@@ -457,7 +468,12 @@ async def sync_game_level_data(
                 grade_name = (game_data.get("grade") or {}).get("name", "Unknown Grade")
                 grade = Grade(id=grade_uuid, season_id=season.id, name=grade_name, playhq_id=grade_phq)
                 session.add(grade)
-                await session.flush()
+                try:
+                    await session.flush()
+                except Exception as e:
+                    logger.error(f"GameSync: flush failed for grade {grade_uuid} in game {game_id_str}: {e}")
+                    await session.rollback()
+                    continue
 
             played_at = None
             try:
@@ -475,7 +491,12 @@ async def sync_game_level_data(
                 winning_team=game_data.get("winning_team"),
             )
             session.add(game_obj)
-            await session.flush()
+            try:
+                await session.flush()
+            except Exception as e:
+                logger.error(f"GameSync: flush failed for game {game_id_str}: {e}")
+                await session.rollback()
+                continue
 
         try:
             scorecard = await playhq_partner_client.get_fixture_scorecard(
