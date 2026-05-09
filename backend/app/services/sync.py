@@ -277,7 +277,8 @@ async def sync_organisation(org_id_str: str) -> dict:
                 except Exception as e:
                     logger.error(f"PlayHQ backfill failed for {org_id_str}: {e}\n{_tb.format_exc()}")
                 try:
-                    await sync_game_level_data(session, org, all_games)
+                    game_stats = await sync_game_level_data(session, org, all_games)
+                    stats.update(game_stats)
                 except Exception as e:
                     logger.error(f"PlayHQ game-level sync failed for {org_id_str}: {e}\n{_tb.format_exc()}")
 
@@ -370,6 +371,9 @@ async def sync_game_level_data(
             continue
 
         existing_game = await session.get(Game, game_uuid)
+        partial_reprocess = False
+        existing_player_innings: set[str] = set()
+
         if existing_game:
             from sqlalchemy import text as _text
             has_stats = await session.execute(
@@ -377,21 +381,32 @@ async def sync_game_level_data(
                 {"gid": str(game_uuid)},
             )
             if has_stats.scalar():
-                continue
-            logger.info(f"GameSync: re-processing dead game record {game_id_str}")
-            await session.execute(
-                _text("DELETE FROM fall_of_wickets WHERE game_id=:gid"), {"gid": str(game_uuid)}
-            )
-            await session.execute(
-                _text("DELETE FROM partnerships WHERE game_id=:gid"), {"gid": str(game_uuid)}
-            )
-            await session.execute(
-                _text("DELETE FROM bowling_spells WHERE game_id=:gid"), {"gid": str(game_uuid)}
-            )
-            await session.execute(
-                _text("DELETE FROM games WHERE id=:gid"), {"gid": str(game_uuid)}
-            )
-            await session.commit()
+                # Game has some innings — check if any known players are missing
+                ep_res = await session.execute(
+                    _text("SELECT DISTINCT player_id::text FROM batting_innings WHERE game_id=:gid"),
+                    {"gid": str(game_uuid)},
+                )
+                existing_player_innings = {r[0] for r in ep_res.fetchall()}
+                known_missing = {str(pid) for pid in phq_to_pid.values()} - existing_player_innings
+                if not known_missing:
+                    continue
+                partial_reprocess = True
+                logger.info(f"GameSync: {len(known_missing)} players missing from game {game_id_str}, adding their innings")
+            else:
+                logger.info(f"GameSync: re-processing dead game record {game_id_str}")
+                await session.execute(
+                    _text("DELETE FROM fall_of_wickets WHERE game_id=:gid"), {"gid": str(game_uuid)}
+                )
+                await session.execute(
+                    _text("DELETE FROM partnerships WHERE game_id=:gid"), {"gid": str(game_uuid)}
+                )
+                await session.execute(
+                    _text("DELETE FROM bowling_spells WHERE game_id=:gid"), {"gid": str(game_uuid)}
+                )
+                await session.execute(
+                    _text("DELETE FROM games WHERE id=:gid"), {"gid": str(game_uuid)}
+                )
+                await session.commit()
 
         s_name = (game_data.get("season") or "").strip().lower()
         season = season_by_name.get(s_name)
@@ -413,30 +428,31 @@ async def sync_game_level_data(
         except ValueError:
             continue
 
-        grade = await session.get(Grade, grade_uuid)
-        if not grade:
-            grade_name = (game_data.get("grade") or {}).get("name", "Unknown Grade")
-            grade = Grade(id=grade_uuid, season_id=season.id, name=grade_name, playhq_id=grade_phq)
-            session.add(grade)
+        if not partial_reprocess:
+            grade = await session.get(Grade, grade_uuid)
+            if not grade:
+                grade_name = (game_data.get("grade") or {}).get("name", "Unknown Grade")
+                grade = Grade(id=grade_uuid, season_id=season.id, name=grade_name, playhq_id=grade_phq)
+                session.add(grade)
+                await session.flush()
+
+            played_at = None
+            try:
+                played_at = date_cls.fromisoformat(game_data["played_at"]) if game_data.get("played_at") else None
+            except ValueError:
+                pass
+
+            game_obj = Game(
+                id=game_uuid,
+                grade_id=grade.id,
+                played_at=played_at,
+                home_team=game_data.get("home_team", ""),
+                away_team=game_data.get("away_team", ""),
+                result=game_data.get("result"),
+                winning_team=game_data.get("winning_team"),
+            )
+            session.add(game_obj)
             await session.flush()
-
-        played_at = None
-        try:
-            played_at = date_cls.fromisoformat(game_data["played_at"]) if game_data.get("played_at") else None
-        except ValueError:
-            pass
-
-        game_obj = Game(
-            id=game_uuid,
-            grade_id=grade.id,
-            played_at=played_at,
-            home_team=game_data.get("home_team", ""),
-            away_team=game_data.get("away_team", ""),
-            result=game_data.get("result"),
-            winning_team=game_data.get("winning_team"),
-        )
-        session.add(game_obj)
-        await session.flush()
 
         try:
             scorecard = await playhq_partner_client.get_fixture_scorecard(
@@ -458,6 +474,8 @@ async def sync_game_level_data(
                 pid = phq_to_pid.get(row.get("playhq_appearance_id") or "")
                 if not pid:
                     continue
+                if partial_reprocess and str(pid) in existing_player_innings:
+                    continue
                 session.add(BattingInnings(
                     game_id=game_uuid,
                     player_id=pid,
@@ -476,6 +494,8 @@ async def sync_game_level_data(
             for row in innings.get("bowling", []):
                 pid = phq_to_pid.get(row.get("playhq_appearance_id") or "")
                 if not pid:
+                    continue
+                if partial_reprocess and str(pid) in existing_player_innings:
                     continue
                 overs_val = None
                 try:
@@ -525,12 +545,14 @@ async def sync_game_level_data(
                     stats["partnerships"] += 1
 
         if batting_stored == 0 and bowling_stored == 0:
-            await session.rollback()
-            logger.warning(f"GameSync: no stats stored for game {game_id_str} — rolling back for retry")
+            if not partial_reprocess:
+                await session.rollback()
+                logger.warning(f"GameSync: no stats stored for game {game_id_str} — rolling back for retry")
             continue
 
         await session.commit()
-        stats["games_new"] += 1
+        if not partial_reprocess:
+            stats["games_new"] += 1
 
     logger.info(f"GameSync: {stats} for org {org.id}")
     return stats
@@ -592,10 +614,17 @@ async def _backfill_player_playhq_ids(
             if existing_res.scalar_one_or_none():
                 continue
 
+            # Match both "Jack Barendse" and "Barendse, Jack" (Grassroots Last-First format)
+            name_variants = [full_name.lower()]
+            parts = full_name.split(None, 1)
+            if len(parts) == 2:
+                name_variants.append(f"{parts[1]}, {parts[0]}".lower())
+
+            from sqlalchemy import or_ as _or
             name_res = await session.execute(
                 select(Player).where(
                     Player.organisation_id == org.id,
-                    func.lower(Player.name) == full_name.lower(),
+                    _or(*[func.lower(Player.name) == v for v in name_variants]),
                     Player.playhq_id.is_(None),
                 )
             )
