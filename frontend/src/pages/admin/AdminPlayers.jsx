@@ -96,10 +96,19 @@ export default function AdminPlayers() {
               ) : (
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <span className="text-white text-sm">{p.display_name}</span>
-                    {p.display_name_override && (
-                      <span className="ml-2 text-xs text-slate-500">(PlayHQ: {p.name})</span>
-                    )}
+                    <div className="text-white text-sm">
+                      {p.display_name}
+                      {p.display_name_override && (
+                        <span className="ml-2 text-xs text-slate-500">(PlayHQ: {p.name})</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <span className="font-mono text-xs text-slate-600" title="Player ID">{p.id}</span>
+                      {p.playhq_id
+                        ? <span className="font-mono text-xs text-slate-500" title="PlayHQ ID">PHQ: {p.playhq_id}</span>
+                        : <span className="text-xs text-slate-700">no PHQ</span>
+                      }
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <button onClick={() => startEdit(p)} className="text-slate-400 hover:text-white text-xs">Edit</button>
