@@ -9,6 +9,7 @@ const NAV_LINKS = [
   { to: '/admin/seasons', label: 'Seasons' },
   { to: '/admin/awards', label: 'Awards' },
   { to: '/admin/merge', label: 'Merge Players' },
+  { to: '/admin/sync', label: 'Data Sync' },
   { to: '/admin/settings', label: 'Settings' },
 ]
 
