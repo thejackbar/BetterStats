@@ -145,6 +145,7 @@ async def sync_organisation(org_id_str: str) -> dict:
                     r.removed_player_id: r.keep_player_id for r in merge_res.mappings().all()
                 }
             except Exception:
+                await session.rollback()
                 merged_away = {}
 
             # Upsert players — skip any that were merged away
@@ -170,6 +171,10 @@ async def sync_organisation(org_id_str: str) -> dict:
                     continue
                 processed_in_season.add(effective_pid)
                 pid = effective_pid
+                # Safety: skip if the target player doesn't exist in DB (e.g. merge chain issue)
+                if not await session.get(Player, pid):
+                    logger.warning(f"Skipping stats for player {pid}: not found in players table")
+                    continue
                 bat = pdata.get("batting", {})
                 bowl = pdata.get("bowling", {})
                 field = pdata.get("fielding", {})
