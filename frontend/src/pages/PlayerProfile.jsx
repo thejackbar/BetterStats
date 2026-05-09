@@ -769,6 +769,11 @@ export default function PlayerProfile() {
               dismissals.length === 0 && byGrade.length === 0 && byPosition.length === 0 && (
               <p className="text-slate-600 text-sm italic">
                 Game-level data not yet synced — dismissal breakdown, position, and grade splits will appear after the next admin sync.
+                {player && !player.playhq_id && (
+                  <span className="block mt-1 text-amber-600 not-italic">
+                    PlayHQ ID not yet linked for this player — they need to appear in a recently synced game for the backfill to match them.
+                  </span>
+                )}
               </p>
             )}
 
