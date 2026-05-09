@@ -24,7 +24,7 @@ Bump version in `frontend/src/components/Navbar.jsx` with every change:
 
 ## Branch
 
-Active development branch: `claude/fix-api-org-id-error-9dS4h`
+Active development branch: `claude/sort-issue-MTmMB`
 Push to this branch AND to `main` via MCP after each change.
 
 ## Architecture
