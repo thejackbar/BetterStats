@@ -145,8 +145,44 @@ async def get_player_batting_innings(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
 ) -> list[dict]:
-    # Game-level innings data not available from season-aggregate API
-    return []
+    clauses = ["bi.player_id = :pid"]
+    params: dict = {"pid": player_id}
+    if season_id:
+        clauses.append("s.id = :sid")
+        params["sid"] = season_id
+    if grade_id:
+        clauses.append("gr.id = :gid")
+        params["gid"] = grade_id
+    where = " AND ".join(clauses)
+    result = await session.execute(
+        text(f"""
+            SELECT
+                bi.runs,
+                bi.balls,
+                bi.fours,
+                bi.sixes,
+                bi.strike_rate,
+                bi.dismissal_type,
+                bi.not_out,
+                bi.batting_position,
+                bi.innings_number,
+                g.home_team,
+                g.away_team,
+                g.played_at::text,
+                g.result,
+                gr.name AS grade_name,
+                s.name AS season_name,
+                s.year AS season_year
+            FROM batting_innings bi
+            JOIN games g ON g.id = bi.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE {where}
+            ORDER BY g.played_at DESC
+        """),
+        params,
+    )
+    return [dict(r) for r in result.mappings()]
 
 
 async def get_player_bowling_spells(
@@ -155,20 +191,117 @@ async def get_player_bowling_spells(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
 ) -> list[dict]:
-    # Game-level bowling data not available from season-aggregate API
-    return []
+    clauses = ["bs.player_id = :pid"]
+    params: dict = {"pid": player_id}
+    if season_id:
+        clauses.append("s.id = :sid")
+        params["sid"] = season_id
+    if grade_id:
+        clauses.append("gr.id = :gid")
+        params["gid"] = grade_id
+    where = " AND ".join(clauses)
+    result = await session.execute(
+        text(f"""
+            SELECT
+                bs.overs,
+                bs.maidens,
+                bs.runs,
+                bs.wickets,
+                bs.wides,
+                bs.no_balls,
+                bs.economy,
+                bs.innings_number,
+                g.home_team,
+                g.away_team,
+                g.played_at::text,
+                g.result,
+                gr.name AS grade_name,
+                s.name AS season_name,
+                s.year AS season_year
+            FROM bowling_spells bs
+            JOIN games g ON g.id = bs.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE {where}
+            ORDER BY g.played_at DESC
+        """),
+        params,
+    )
+    return [dict(r) for r in result.mappings()]
 
 
 async def get_dismissal_breakdown(session: AsyncSession, player_id: str) -> list[dict]:
-    return []
+    result = await session.execute(
+        text("""
+            SELECT
+                CASE
+                    WHEN bi.not_out THEN 'not out'
+                    WHEN bi.dismissal_type IS NULL THEN 'unknown'
+                    ELSE bi.dismissal_type
+                END AS dismissal_type,
+                COUNT(*) AS count
+            FROM batting_innings bi
+            WHERE bi.player_id = :pid
+              AND bi.runs IS NOT NULL
+            GROUP BY 1
+            ORDER BY COUNT(*) DESC
+        """),
+        {"pid": player_id},
+    )
+    return [dict(r) for r in result.mappings()]
 
 
 async def get_batting_by_position(session: AsyncSession, player_id: str) -> list[dict]:
-    return []
+    result = await session.execute(
+        text("""
+            SELECT
+                bi.batting_position,
+                COUNT(*) AS innings,
+                SUM(bi.runs) AS runs,
+                ROUND(
+                    SUM(bi.runs)::numeric /
+                    NULLIF(COUNT(*) FILTER (WHERE NOT bi.not_out AND bi.dismissal_type IS NOT NULL), 0),
+                    2
+                ) AS average,
+                MAX(bi.runs) AS high_score,
+                ROUND(AVG(bi.strike_rate), 1) AS avg_strike_rate
+            FROM batting_innings bi
+            WHERE bi.player_id = :pid
+              AND bi.batting_position IS NOT NULL
+              AND bi.runs IS NOT NULL
+            GROUP BY bi.batting_position
+            ORDER BY bi.batting_position
+        """),
+        {"pid": player_id},
+    )
+    return [dict(r) for r in result.mappings()]
 
 
 async def get_batting_by_grade(session: AsyncSession, player_id: str) -> list[dict]:
-    return []
+    result = await session.execute(
+        text("""
+            SELECT
+                gr.id::text AS grade_id,
+                gr.name AS grade_name,
+                COUNT(*) AS innings,
+                SUM(bi.runs) AS runs,
+                ROUND(
+                    SUM(bi.runs)::numeric /
+                    NULLIF(COUNT(*) FILTER (WHERE NOT bi.not_out AND bi.dismissal_type IS NOT NULL), 0),
+                    2
+                ) AS average,
+                MAX(bi.runs) AS high_score
+            FROM batting_innings bi
+            JOIN games g ON g.id = bi.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            WHERE bi.player_id = :pid
+              AND bi.runs IS NOT NULL
+            GROUP BY gr.id, gr.name
+            ORDER BY SUM(bi.runs) DESC
+        """),
+        {"pid": player_id},
+    )
+    return [dict(r) for r in result.mappings()]
 
 
 async def get_season_by_season(session: AsyncSession, player_id: str) -> list[dict]:

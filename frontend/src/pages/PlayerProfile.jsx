@@ -11,10 +11,19 @@ import StatCard from '../components/StatCard'
 import TrendChart from '../components/TrendChart'
 import RunsChart from '../components/RunsChart'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import clsx from 'clsx'
 
 const TABS = ['batting', 'bowling', 'analysis', 'milestones', 'achievements']
+
+const CATEGORY_ICONS = {
+  'Club Award': '🏆',
+  'Association Award': '🥇',
+  'Office Bearer': '👔',
+  'Premiership': '🏏',
+  'Hall of Fame': '⭐',
+  'Life Membership': '🎖',
+  'Milestone': '📍',
+}
 
 const CATEGORIES = ['Club Award', 'Association Award', 'Office Bearer', 'Premiership', 'Hall of Fame', 'Life Membership', 'Milestone']
 
@@ -226,7 +235,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
           {Object.entries(grouped[season]).map(([cat, items]) => (
             <div key={cat} className="px-5 py-3">
               <div className="flex items-center gap-2 mb-2">
-                <ThiingIcon src={CATEGORY_ICON_SRC[cat] || thiings.goldMedal} alt="" className="w-5 h-5" />
+                <span className="text-base">{CATEGORY_ICONS[cat] || '🏅'}</span>
                 <span className="section-label text-xs">{cat.toUpperCase()}</span>
               </div>
               <div className="space-y-1.5">
@@ -290,6 +299,7 @@ function ActivityBadge({ label, value, sub, accent = false }) {
 
 function UpcomingMilestonesSection({ data }) {
   if (!data?.length) return null
+  const ICONS = { runs: '🏏', wickets: '⚡', matches: '📅' }
   return (
     <div className="mb-8">
       <h3 className="display-heading text-lg text-white mb-4">CHASING</h3>
@@ -300,7 +310,7 @@ function UpcomingMilestonesSection({ data }) {
             <div key={i} className="bg-navy-800 border border-navy-700 rounded-xl p-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-slate-400 flex items-center gap-1.5">
-                  <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.target} alt="" className="w-5 h-5" />
+                  <span>{ICONS[m.type] || '🎯'}</span>
                   {m.target.toLocaleString()} {m.type}
                 </span>
                 <span className="text-xs text-accent font-mono font-bold">{m.needed} to go</span>
@@ -512,6 +522,9 @@ export default function PlayerProfile() {
   const [achievementsLoaded, setAchievementsLoaded] = useState(false)
   const [headerAchievements, setHeaderAchievements] = useState([])
   const [partnerships, setPartnerships] = useState(null)
+  const [dismissals, setDismissals] = useState(null)
+  const [byGrade, setByGrade] = useState(null)
+  const [byPosition, setByPosition] = useState(null)
 
   // Load season stats and activity eagerly on mount
   useEffect(() => {
@@ -540,6 +553,9 @@ export default function PlayerProfile() {
     if (t === 'achievements') setAchievementsLoaded(true)
     if (t === 'analysis' && partnerships === null) {
       api.getPlayerPartnerships(playerId).then(setPartnerships).catch(() => setPartnerships([]))
+      api.getPlayerDismissals(playerId).then(setDismissals).catch(() => setDismissals([]))
+      api.getPlayerByGrade(playerId).then(setByGrade).catch(() => setByGrade([]))
+      api.getPlayerByPosition(playerId).then(setByPosition).catch(() => setByPosition([]))
     }
   }, [playerId, milestones, partnerships])
 
@@ -753,6 +769,92 @@ export default function PlayerProfile() {
                           </tr>
                         )
                       })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {dismissals !== null && dismissals.length > 0 && (() => {
+              const total = dismissals.reduce((s, d) => s + Number(d.count), 0)
+              return (
+                <div>
+                  <h3 className="display-heading text-lg text-white mb-4">DISMISSAL BREAKDOWN</h3>
+                  <div className="card p-5 space-y-2">
+                    {dismissals.map((d, i) => {
+                      const pct = total > 0 ? Math.round(Number(d.count) / total * 100) : 0
+                      return (
+                        <div key={i} className="flex items-center gap-3">
+                          <span className="text-slate-400 text-sm capitalize w-28 shrink-0">{d.dismissal_type}</span>
+                          <div className="flex-1 bg-navy-800 rounded-full h-2">
+                            <div className="bg-accent h-2 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="stat-number text-white text-sm w-6 text-right">{d.count}</span>
+                          <span className="text-slate-600 text-xs w-9 text-right">{pct}%</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {byGrade !== null && byGrade.length > 1 && (
+              <div>
+                <h3 className="display-heading text-lg text-white mb-4">BATTING BY GRADE</h3>
+                <div className="card overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-navy-700">
+                        <th className="table-header">Grade</th>
+                        <th className="table-header text-right">Inn</th>
+                        <th className="table-header text-right">Runs</th>
+                        <th className="table-header text-right">Avg</th>
+                        <th className="table-header text-right">HS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {byGrade.map((r, i) => (
+                        <tr key={i} className="table-row">
+                          <td className="table-cell text-white">{r.grade_name}</td>
+                          <td className="table-cell stat-number text-right text-slate-400">{r.innings}</td>
+                          <td className="table-cell stat-number text-right text-accent font-bold">{r.runs}</td>
+                          <td className="table-cell stat-number text-right text-slate-300">{r.average ?? '—'}</td>
+                          <td className="table-cell stat-number text-right text-slate-300">{r.high_score ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {byPosition !== null && byPosition.length > 0 && (
+              <div>
+                <h3 className="display-heading text-lg text-white mb-4">BATTING BY POSITION</h3>
+                <div className="card overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-navy-700">
+                        <th className="table-header">Position</th>
+                        <th className="table-header text-right">Inn</th>
+                        <th className="table-header text-right">Runs</th>
+                        <th className="table-header text-right">Avg</th>
+                        <th className="table-header text-right">HS</th>
+                        <th className="table-header text-right hidden sm:table-cell">SR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {byPosition.map((r, i) => (
+                        <tr key={i} className="table-row">
+                          <td className="table-cell stat-number text-white">#{r.batting_position}</td>
+                          <td className="table-cell stat-number text-right text-slate-400">{r.innings}</td>
+                          <td className="table-cell stat-number text-right text-accent font-bold">{r.runs}</td>
+                          <td className="table-cell stat-number text-right text-slate-300">{r.average ?? '—'}</td>
+                          <td className="table-cell stat-number text-right text-slate-300">{r.high_score ?? '—'}</td>
+                          <td className="table-cell stat-number text-right text-slate-500 hidden sm:table-cell">{r.avg_strike_rate ?? '—'}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
