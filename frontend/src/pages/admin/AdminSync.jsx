@@ -183,6 +183,12 @@ export default function AdminSync() {
                         {s.season_stats != null && (
                           <StatPill label="stat rows" value={s.season_stats} />
                         )}
+                        {s.playhq_games_found != null && (
+                          <StatPill label="phq games" value={s.playhq_games_found} highlight={s.playhq_games_found > 0} />
+                        )}
+                        {s.playhq_games_final != null && (
+                          <StatPill label="phq final" value={s.playhq_games_final} highlight={s.playhq_games_final > 0} />
+                        )}
                         {s.games_new != null && (
                           <StatPill label="new games" value={s.games_new} highlight={s.games_new > 0} />
                         )}

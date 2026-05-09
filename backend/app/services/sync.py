@@ -65,7 +65,9 @@ async def sync_organisation(org_id_str: str) -> dict:
         _record_sync_log(org_id_str, started_at, {}, "Organisation not found")
         return {"error": "Organisation not found", "org_id": org_id_str}
 
-    stats = {"seasons": 0, "players": 0, "season_stats": 0}
+    stats = {"seasons": 0, "players": 0, "season_stats": 0,
+             "games_new": 0, "batting": 0, "bowling": 0, "partnerships": 0,
+             "playhq_games_found": 0, "playhq_games_final": 0}
 
     async with async_session_maker() as session:
         org = await upsert_organisation(session, org_data)
@@ -266,7 +268,10 @@ async def sync_organisation(org_id_str: str) -> dict:
                     db_seasons=db_seasons_list,
                     grassroots_org_id=org_id_str,
                 )
-                logger.info(f"PlayHQ: {len(all_games)} total games, {sum(1 for g in all_games if g.get('status') == 'FINAL')} FINAL")
+                final_count = sum(1 for g in all_games if g.get('status') == 'FINAL')
+                stats["playhq_games_found"] = len(all_games)
+                stats["playhq_games_final"] = final_count
+                logger.info(f"PlayHQ: {len(all_games)} total games, {final_count} FINAL")
             except Exception as e:
                 logger.error(f"PlayHQ get_org_games failed for {org_id_str}: {e}\n{_tb.format_exc()}")
                 all_games = []
@@ -749,4 +754,3 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
 
 async def process_game_updated_webhook(payload: dict):
     """Handle GAME.UPDATED webhook event."""
-    logger.info("Webhook GAME.UPDATED received — skipping (season-aggregate sync only)")
