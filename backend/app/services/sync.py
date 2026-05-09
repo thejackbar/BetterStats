@@ -348,7 +348,8 @@ async def sync_game_level_data(
     from app.services import playhq_partner_client
     from datetime import date as date_cls
 
-    stats = {"games_new": 0, "batting": 0, "bowling": 0, "partnerships": 0}
+    stats = {"games_new": 0, "batting": 0, "bowling": 0, "partnerships": 0,
+             "games_skipped_done": 0, "games_skipped_season": 0, "games_skipped_no_stats": 0}
 
     final_games = [g for g in all_games if g.get("status") == "FINAL"]
 
@@ -406,6 +407,7 @@ async def sync_game_level_data(
                 existing_player_innings = {r[0] for r in ep_res.fetchall()}
                 known_missing = {str(pid) for pid in phq_to_pid.values()} - existing_player_innings
                 if not known_missing:
+                    stats["games_skipped_done"] += 1
                     continue
                 partial_reprocess = True
                 logger.info(f"GameSync: {len(known_missing)} players missing from game {game_id_str}, adding their innings")
@@ -436,7 +438,8 @@ async def sync_game_level_data(
                 None,
             )
         if not season:
-            logger.warning(f"GameSync: no season match for game {game_id_str}")
+            logger.warning(f"GameSync: no season match for game {game_id_str} (season={s_name!r})")
+            stats["games_skipped_season"] += 1
             continue
 
         grade_phq = game_data.get("grade_id", "")
@@ -572,8 +575,18 @@ async def sync_game_level_data(
 
         if batting_stored == 0 and bowling_stored == 0:
             if not partial_reprocess:
+                sample_names = []
+                for inn in (scorecard.get("innings") or [])[:1]:
+                    sample_names = [(r.get("name"), r.get("playhq_appearance_id")) for r in (inn.get("batting") or [])[:3]]
+                logger.warning(
+                    f"GameSync: no stats for {game_id_str} — "
+                    f"scorecard innings={len(scorecard.get('innings') or [])}, "
+                    f"sample batting={sample_names}, "
+                    f"phq_to_pid keys={list(phq_to_pid.keys())[:3]}, "
+                    f"name_to_pid sample={list(name_to_pid.keys())[:3]}"
+                )
+                stats["games_skipped_no_stats"] += 1
                 await session.rollback()
-                logger.warning(f"GameSync: no stats stored for game {game_id_str} — rolling back for retry")
             continue
 
         await session.commit()

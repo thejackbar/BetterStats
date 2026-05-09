@@ -201,6 +201,15 @@ export default function AdminSync() {
                         {s.partnerships != null && (
                           <StatPill label="partnerships" value={s.partnerships} highlight={s.partnerships > 0} />
                         )}
+                        {s.games_skipped_done != null && (
+                          <StatPill label="already done" value={s.games_skipped_done} highlight={false} />
+                        )}
+                        {s.games_skipped_season != null && (
+                          <StatPill label="no season match" value={s.games_skipped_season} highlight={s.games_skipped_season > 0} />
+                        )}
+                        {s.games_skipped_no_stats != null && (
+                          <StatPill label="no stats" value={s.games_skipped_no_stats} highlight={s.games_skipped_no_stats > 0} />
+                        )}
                       </div>
                     )}
                   </div>
