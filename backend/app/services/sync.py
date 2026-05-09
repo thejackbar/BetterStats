@@ -357,7 +357,7 @@ async def sync_game_level_data(
     seasons_res = await session.execute(
         select(Season).where(Season.organisation_id == org.id)
     )
-    season_by_name = {s.name.strip().lower(): s for s in seasons_res.scalars().all()}
+    season_by_name = {s.name.strip().lower(): s for s in seasons_res.scalars().all() if s.name}
 
     players_res = await session.execute(
         select(Player).where(Player.organisation_id == org.id)
@@ -367,7 +367,9 @@ async def sync_game_level_data(
     for p in players_res.scalars().all():
         if p.playhq_id:
             phq_to_pid[p.playhq_id] = p.id
-        n = p.name.strip().lower()
+        n = (p.name or "").strip().lower()
+        if not n:
+            continue
         name_to_pid[n] = p.id
         # Index both "First Last" and "Last, First" so either scorecard format matches
         if "," in n:
