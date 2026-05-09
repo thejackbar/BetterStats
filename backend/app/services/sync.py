@@ -277,7 +277,8 @@ async def sync_organisation(org_id_str: str) -> dict:
                 except Exception as e:
                     logger.error(f"PlayHQ backfill failed for {org_id_str}: {e}\n{_tb.format_exc()}")
                 try:
-                    await sync_game_level_data(session, org, all_games)
+                    game_stats = await sync_game_level_data(session, org, all_games)
+                    stats.update(game_stats)
                 except Exception as e:
                     logger.error(f"PlayHQ game-level sync failed for {org_id_str}: {e}\n{_tb.format_exc()}")
 
