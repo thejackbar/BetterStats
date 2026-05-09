@@ -4,10 +4,12 @@ import { useState } from 'react'
 function useClubSlug() {
   const { pathname } = useLocation()
   const segments = pathname.split('/').filter(Boolean)
-  // Club pages: /:clubSlug/(dashboard|players|leaderboard|records|compare)
   const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare']
   if (segments.length >= 2 && CLUB_SECTIONS.includes(segments[1])) {
     return segments[0]
+  }
+  if (segments[0] === 'players' || segments[0] === 'scorecards' || segments[0] === 'match' || segments[0] === 'games') {
+    return sessionStorage.getItem('bs_last_slug') || null
   }
   return null
 }
@@ -17,7 +19,6 @@ export default function Navbar() {
   const [open, setOpen] = useState(false)
   const clubSlug = useClubSlug()
 
-  // Don't render Navbar on admin, marketing, or login pages — they have their own nav
   const SKIP_PATHS = ['/admin', '/login', '/features', '/pricing', '/about', '/contact', '/terms', '/privacy']
   if (SKIP_PATHS.some(p => pathname.startsWith(p)) || pathname === '/') return null
 
@@ -43,7 +44,7 @@ export default function Navbar() {
           <span className="font-display font-bold text-xl tracking-wider uppercase text-white group-hover:text-accent transition-colors">
             Better<span className="text-accent">Stats</span>
           </span>
-          <span className="text-slate-600 text-xs font-mono">v2.6.0.0</span>
+          <span className="text-slate-600 text-xs font-mono">v2.7.2.5</span>
         </Link>
 
         <div className="hidden md:flex items-center gap-1">

@@ -3,8 +3,11 @@ import uuid
 from datetime import datetime, timezone, date
 from typing import Optional
 
+# Rolling in-memory sync log (last 30 entries per org, survives only until restart)
+_sync_log: dict[str, list] = {}
+
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, text
 from sqlalchemy.sql import func
 
 from app.models.db import (
@@ -40,15 +43,31 @@ async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisa
     return org
 
 
+def _record_sync_log(org_id: str, started_at: str, stats: dict, error: str = "") -> None:
+    entry = {
+        "started_at": started_at,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "stats": stats,
+        "error": error,
+    }
+    log = _sync_log.setdefault(org_id, [])
+    log.insert(0, entry)
+    _sync_log[org_id] = log[:30]
+
+
 async def sync_organisation(org_id_str: str) -> dict:
     """Full historical sync for an organisation using season-aggregate stats."""
     logger.info(f"Starting sync for org {org_id_str}")
+    started_at = datetime.now(timezone.utc).isoformat()
 
     org_data = await playhq_client.get_organisation(org_id_str)
     if not org_data:
+        _record_sync_log(org_id_str, started_at, {}, "Organisation not found")
         return {"error": "Organisation not found", "org_id": org_id_str}
 
-    stats = {"seasons": 0, "players": 0, "season_stats": 0}
+    stats = {"seasons": 0, "players": 0, "season_stats": 0,
+             "games_new": 0, "batting": 0, "bowling": 0, "partnerships": 0,
+             "playhq_games_found": 0, "playhq_games_final": 0}
 
     async with async_session_maker() as session:
         org = await upsert_organisation(session, org_data)
@@ -118,8 +137,23 @@ async def sync_organisation(org_id_str: str) -> dict:
             if not player_data:
                 continue
 
-            # Upsert players
+            # Build merged-player map so sync doesn't recreate deleted duplicates
+            try:
+                merge_res = await session.execute(
+                    text("SELECT removed_player_id::text, keep_player_id FROM merge_logs WHERE org_id = :org_id"),
+                    {"org_id": str(org_id)},
+                )
+                merged_away: dict[str, uuid.UUID] = {
+                    r.removed_player_id: r.keep_player_id for r in merge_res.mappings().all()
+                }
+            except Exception:
+                await session.rollback()
+                merged_away = {}
+
+            # Upsert players — skip any that were merged away
             for pid, pdata in player_data.items():
+                if str(pid) in merged_away:
+                    continue
                 player = await session.get(Player, pid)
                 if not player:
                     player = Player(id=pid, name=pdata["name"], organisation_id=org_id)
@@ -131,7 +165,18 @@ async def sync_organisation(org_id_str: str) -> dict:
                 delete(PlayerSeasonStats).where(PlayerSeasonStats.season_id == season_id)
             )
 
+            processed_in_season: set[uuid.UUID] = set()
             for pid, pdata in player_data.items():
+                # Redirect stats for merged-away players to the kept player
+                effective_pid = merged_away.get(str(pid), pid)
+                if effective_pid in processed_in_season:
+                    continue
+                processed_in_season.add(effective_pid)
+                pid = effective_pid
+                # Safety: skip if the target player doesn't exist in DB (e.g. merge chain issue)
+                if not await session.get(Player, pid):
+                    logger.warning(f"Skipping stats for player {pid}: not found in players table")
+                    continue
                 bat = pdata.get("batting", {})
                 bowl = pdata.get("bowling", {})
                 field = pdata.get("fielding", {})
@@ -223,7 +268,10 @@ async def sync_organisation(org_id_str: str) -> dict:
                     db_seasons=db_seasons_list,
                     grassroots_org_id=org_id_str,
                 )
-                logger.info(f"PlayHQ: {len(all_games)} total games, {sum(1 for g in all_games if g.get('status') == 'FINAL')} FINAL")
+                final_count = sum(1 for g in all_games if g.get('status') == 'FINAL')
+                stats["playhq_games_found"] = len(all_games)
+                stats["playhq_games_final"] = final_count
+                logger.info(f"PlayHQ: {len(all_games)} total games, {final_count} FINAL")
             except Exception as e:
                 logger.error(f"PlayHQ get_org_games failed for {org_id_str}: {e}\n{_tb.format_exc()}")
                 all_games = []
@@ -234,11 +282,13 @@ async def sync_organisation(org_id_str: str) -> dict:
                 except Exception as e:
                     logger.error(f"PlayHQ backfill failed for {org_id_str}: {e}\n{_tb.format_exc()}")
                 try:
-                    await sync_game_level_data(session, org, all_games)
+                    game_stats = await sync_game_level_data(session, org, all_games)
+                    stats.update(game_stats)
                 except Exception as e:
                     logger.error(f"PlayHQ game-level sync failed for {org_id_str}: {e}\n{_tb.format_exc()}")
 
         logger.info(f"Sync complete: {stats}")
+        _record_sync_log(org_id_str, started_at, stats)
         return stats
 
 
@@ -294,11 +344,7 @@ async def sync_game_level_data(
     org: Organisation,
     all_games: list,
 ) -> dict:
-    """Store game-level batting/bowling/partnership rows from PlayHQ scorecards.
-
-    Uses PlayHQ game/grade UUIDs as DB primary keys so the function is fully
-    idempotent — games already in the DB are skipped.
-    """
+    """Store game-level batting/bowling/partnership rows from PlayHQ scorecards."""
     from app.services import playhq_partner_client
     from datetime import date as date_cls
 
@@ -306,21 +352,31 @@ async def sync_game_level_data(
 
     final_games = [g for g in all_games if g.get("status") == "FINAL"]
 
-    # Season name → DB Season lookup
     seasons_res = await session.execute(
         select(Season).where(Season.organisation_id == org.id)
     )
     season_by_name = {s.name.strip().lower(): s for s in seasons_res.scalars().all()}
 
-    # playhq_id → DB player UUID lookup (populated by backfill)
     players_res = await session.execute(
-        select(Player).where(
-            Player.organisation_id == org.id,
-            Player.playhq_id.isnot(None),
-        )
+        select(Player).where(Player.organisation_id == org.id)
     )
-    phq_to_pid: dict[str, uuid.UUID] = {p.playhq_id: p.id for p in players_res.scalars().all()}
-    logger.info(f"GameSync: {len(phq_to_pid)} players with playhq_id for org {org.id}")
+    phq_to_pid: dict[str, uuid.UUID] = {}
+    name_to_pid: dict[str, uuid.UUID] = {}
+    for p in players_res.scalars().all():
+        if p.playhq_id:
+            phq_to_pid[p.playhq_id] = p.id
+        n = p.name.strip().lower()
+        name_to_pid[n] = p.id
+        # Index both "First Last" and "Last, First" so either scorecard format matches
+        if "," in n:
+            parts = [x.strip() for x in n.split(",", 1)]
+            if len(parts) == 2:
+                name_to_pid[f"{parts[1]} {parts[0]}"] = p.id
+        else:
+            words = n.split()
+            if len(words) >= 2:
+                name_to_pid[f"{' '.join(words[1:])}, {words[0]}"] = p.id
+    logger.info(f"GameSync: {len(phq_to_pid)} players with playhq_id, {len(name_to_pid)} name entries for org {org.id}")
 
     for game_data in final_games:
         game_id_str = game_data.get("id")
@@ -331,8 +387,10 @@ async def sync_game_level_data(
         except ValueError:
             continue
 
-        # Idempotent — skip games that already have batting data stored
         existing_game = await session.get(Game, game_uuid)
+        partial_reprocess = False
+        existing_player_innings: set[str] = set()
+
         if existing_game:
             from sqlalchemy import text as _text
             has_stats = await session.execute(
@@ -340,24 +398,33 @@ async def sync_game_level_data(
                 {"gid": str(game_uuid)},
             )
             if has_stats.scalar():
-                continue
-            # Game row exists but has no stats (empty from a previous failed sync) — delete it so we retry
-            logger.info(f"GameSync: re-processing dead game record {game_id_str}")
-            await session.execute(
-                _text("DELETE FROM fall_of_wickets WHERE game_id=:gid"), {"gid": str(game_uuid)}
-            )
-            await session.execute(
-                _text("DELETE FROM partnerships WHERE game_id=:gid"), {"gid": str(game_uuid)}
-            )
-            await session.execute(
-                _text("DELETE FROM bowling_spells WHERE game_id=:gid"), {"gid": str(game_uuid)}
-            )
-            await session.execute(
-                _text("DELETE FROM games WHERE id=:gid"), {"gid": str(game_uuid)}
-            )
-            await session.commit()
+                # Game has some innings — check if any known players are missing
+                ep_res = await session.execute(
+                    _text("SELECT DISTINCT player_id::text FROM batting_innings WHERE game_id=:gid"),
+                    {"gid": str(game_uuid)},
+                )
+                existing_player_innings = {r[0] for r in ep_res.fetchall()}
+                known_missing = {str(pid) for pid in phq_to_pid.values()} - existing_player_innings
+                if not known_missing:
+                    continue
+                partial_reprocess = True
+                logger.info(f"GameSync: {len(known_missing)} players missing from game {game_id_str}, adding their innings")
+            else:
+                logger.info(f"GameSync: re-processing dead game record {game_id_str}")
+                await session.execute(
+                    _text("DELETE FROM fall_of_wickets WHERE game_id=:gid"), {"gid": str(game_uuid)}
+                )
+                await session.execute(
+                    _text("DELETE FROM partnerships WHERE game_id=:gid"), {"gid": str(game_uuid)}
+                )
+                await session.execute(
+                    _text("DELETE FROM bowling_spells WHERE game_id=:gid"), {"gid": str(game_uuid)}
+                )
+                await session.execute(
+                    _text("DELETE FROM games WHERE id=:gid"), {"gid": str(game_uuid)}
+                )
+                await session.commit()
 
-        # Resolve Season by name (fallback: year match)
         s_name = (game_data.get("season") or "").strip().lower()
         season = season_by_name.get(s_name)
         if not season:
@@ -369,43 +436,41 @@ async def sync_game_level_data(
                 None,
             )
         if not season:
-            logger.warning(f"GameSync: no season match for game {game_id_str} (s_name={s_name!r}, played_at={game_data.get('played_at')}); available: {list(season_by_name.keys())[:5]}")
+            logger.warning(f"GameSync: no season match for game {game_id_str}")
             continue
 
-        # Resolve/create Grade using PlayHQ grade UUID
         grade_phq = game_data.get("grade_id", "")
         try:
             grade_uuid = uuid.UUID(grade_phq)
         except ValueError:
             continue
 
-        grade = await session.get(Grade, grade_uuid)
-        if not grade:
-            grade_name = (game_data.get("grade") or {}).get("name", "Unknown Grade")
-            grade = Grade(id=grade_uuid, season_id=season.id, name=grade_name, playhq_id=grade_phq)
-            session.add(grade)
+        if not partial_reprocess:
+            grade = await session.get(Grade, grade_uuid)
+            if not grade:
+                grade_name = (game_data.get("grade") or {}).get("name", "Unknown Grade")
+                grade = Grade(id=grade_uuid, season_id=season.id, name=grade_name, playhq_id=grade_phq)
+                session.add(grade)
+                await session.flush()
+
+            played_at = None
+            try:
+                played_at = date_cls.fromisoformat(game_data["played_at"]) if game_data.get("played_at") else None
+            except ValueError:
+                pass
+
+            game_obj = Game(
+                id=game_uuid,
+                grade_id=grade.id,
+                played_at=played_at,
+                home_team=game_data.get("home_team", ""),
+                away_team=game_data.get("away_team", ""),
+                result=game_data.get("result"),
+                winning_team=game_data.get("winning_team"),
+            )
+            session.add(game_obj)
             await session.flush()
 
-        # Create Game row
-        played_at = None
-        try:
-            played_at = date_cls.fromisoformat(game_data["played_at"]) if game_data.get("played_at") else None
-        except ValueError:
-            pass
-
-        game_obj = Game(
-            id=game_uuid,
-            grade_id=grade.id,
-            played_at=played_at,
-            home_team=game_data.get("home_team", ""),
-            away_team=game_data.get("away_team", ""),
-            result=game_data.get("result"),
-            winning_team=game_data.get("winning_team"),
-        )
-        session.add(game_obj)
-        await session.flush()
-
-        # Fetch scorecard
         try:
             scorecard = await playhq_partner_client.get_fixture_scorecard(
                 game_id_str, game_url=game_data.get("url", "")
@@ -416,9 +481,6 @@ async def sync_game_level_data(
             continue
 
         innings_list = scorecard.get("innings") or []
-        logger.info(f"GameSync: game {game_id_str} scorecard has {len(innings_list)} innings, "
-                    f"phq_to_pid has {len(phq_to_pid)} entries")
-
         batting_stored = 0
         bowling_stored = 0
 
@@ -428,6 +490,11 @@ async def sync_game_level_data(
             for row in innings.get("batting", []):
                 pid = phq_to_pid.get(row.get("playhq_appearance_id") or "")
                 if not pid:
+                    name_lc = (row.get("name") or "").strip().lower()
+                    pid = name_to_pid.get(name_lc) if name_lc else None
+                if not pid:
+                    continue
+                if partial_reprocess and str(pid) in existing_player_innings:
                     continue
                 session.add(BattingInnings(
                     game_id=game_uuid,
@@ -447,6 +514,11 @@ async def sync_game_level_data(
             for row in innings.get("bowling", []):
                 pid = phq_to_pid.get(row.get("playhq_appearance_id") or "")
                 if not pid:
+                    name_lc = (row.get("name") or "").strip().lower()
+                    pid = name_to_pid.get(name_lc) if name_lc else None
+                if not pid:
+                    continue
+                if partial_reprocess and str(pid) in existing_player_innings:
                     continue
                 overs_val = None
                 try:
@@ -470,6 +542,9 @@ async def sync_game_level_data(
 
             for fow in (innings.get("fall_of_wickets") or []):
                 pid = phq_to_pid.get(fow.get("batter_playhq_id") or "")
+                if not pid:
+                    name_lc = (fow.get("name") or "").strip().lower()
+                    pid = name_to_pid.get(name_lc) if name_lc else None
                 session.add(FallOfWicket(
                     game_id=game_uuid,
                     innings_number=inn_num,
@@ -496,18 +571,14 @@ async def sync_game_level_data(
                     stats["partnerships"] += 1
 
         if batting_stored == 0 and bowling_stored == 0:
-            # No stats could be matched (phq_to_pid likely empty) — don't commit the Game
-            # so it will be retried on the next sync after backfill stamps player IDs
-            await session.rollback()
-            logger.warning(
-                f"GameSync: no stats stored for game {game_id_str} "
-                f"(phq_to_pid size={len(phq_to_pid)}, innings={len(innings_list)}) — rolling back for retry"
-            )
+            if not partial_reprocess:
+                await session.rollback()
+                logger.warning(f"GameSync: no stats stored for game {game_id_str} — rolling back for retry")
             continue
 
         await session.commit()
-        stats["games_new"] += 1
-        logger.info(f"GameSync: committed game {game_id_str}: {batting_stored} batting, {bowling_stored} bowling rows")
+        if not partial_reprocess:
+            stats["games_new"] += 1
 
     logger.info(f"GameSync: {stats} for org {org.id}")
     return stats
@@ -518,15 +589,6 @@ async def _backfill_player_playhq_ids(
     org: Organisation,
     all_games: list,
 ) -> int:
-    """Stamp playhq_id onto Player rows using game appearance data from the Partner API.
-
-    For each FINAL game (most recent first, capped at 50):
-    - Appearances belonging to the org's teams get upserted:
-      - Existing player with this playhq_id → skip
-      - Existing player with matching name but no playhq_id → stamp the ID
-      - Otherwise → create a new Player row with the PlayHQ ID
-    Opposition appearances are ignored — they surface by name only in scorecards.
-    """
     from app.services import playhq_partner_client
 
     keyword = org.name.split()[0].lower() if org.name else ""
@@ -550,13 +612,11 @@ async def _backfill_player_playhq_ids(
         }
         keyword_matched = bool(matched_team_ids)
         if not matched_team_ids:
-            # REST summary team names may differ — fall back to all teams but only do
-            # name-based stamping of EXISTING players (don't create new rows for unknown players)
             matched_team_ids = {t["id"] for t in teams if t.get("id")}
             if teams:
                 logger.warning(
                     f"Backfill: keyword '{keyword}' matched no teams in game {game_id}; "
-                    f"using all {len(matched_team_ids)} teams (name-match only): {[t.get('name') for t in teams]}"
+                    f"using all {len(matched_team_ids)} teams (name-match only)"
                 )
 
         for app in appearances:
@@ -571,7 +631,6 @@ async def _backfill_player_playhq_ids(
             if not full_name:
                 continue
 
-            # Already stamped?
             existing_res = await session.execute(
                 select(Player).where(
                     Player.organisation_id == org.id,
@@ -581,11 +640,17 @@ async def _backfill_player_playhq_ids(
             if existing_res.scalar_one_or_none():
                 continue
 
-            # Match by exact (case-insensitive) name on an unstamped row
+            # Match both "Jack Barendse" and "Barendse, Jack" (Grassroots Last-First format)
+            name_variants = [full_name.lower()]
+            parts = full_name.split(None, 1)
+            if len(parts) == 2:
+                name_variants.append(f"{parts[1]}, {parts[0]}".lower())
+
+            from sqlalchemy import or_ as _or
             name_res = await session.execute(
                 select(Player).where(
                     Player.organisation_id == org.id,
-                    func.lower(Player.name) == full_name.lower(),
+                    _or(*[func.lower(Player.name) == v for v in name_variants]),
                     Player.playhq_id.is_(None),
                 )
             )
@@ -594,7 +659,6 @@ async def _backfill_player_playhq_ids(
                 player.playhq_id = phq_id
                 stamped += 1
             elif keyword_matched:
-                # Only create new Player rows when we're confident this is our team
                 session.add(Player(
                     id=uuid.uuid4(),
                     name=full_name,
@@ -651,8 +715,8 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
         existing = {(r[0], r[1]) for r in exist_res.fetchall()}
 
         new_milestones = []
-
         today = date.today()
+
         for threshold in _RUN_MILESTONES:
             if total_runs >= threshold and ("runs", threshold) not in existing:
                 new_milestones.append(Milestone(
@@ -689,5 +753,4 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
 
 
 async def process_game_updated_webhook(payload: dict):
-    """Handle GAME.UPDATED webhook event — no-op until game-level sync is available."""
-    logger.info("Webhook GAME.UPDATED received — skipping (season-aggregate sync only)")
+    """Handle GAME.UPDATED webhook event."""
