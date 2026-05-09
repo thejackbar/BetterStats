@@ -7,7 +7,7 @@ from typing import Optional
 import uuid
 
 from app.models.db import (
-    User, Organisation, ClubMembership, Player, Season, Grade, get_db
+    User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord, get_db
 )
 from app.routers.auth import get_current_user, get_current_club, require_super_admin, _hash_password
 
@@ -179,6 +179,99 @@ async def patch_settings(
         club.theme_mode = data.theme_mode
     await db.commit()
     return {"status": "updated"}
+
+
+# ---------------------------------------------------------------------------
+# Manual partnership records
+# ---------------------------------------------------------------------------
+
+class ManualPartnershipCreate(BaseModel):
+    batter1_id: Optional[str] = None
+    batter1_name: str
+    batter2_id: Optional[str] = None
+    batter2_name: str
+    grade_name: str
+    season_year: int
+    wicket_number: int
+    runs: int
+    is_not_out: bool = False
+    notes: Optional[str] = None
+
+
+@router.get("/partnership-records")
+async def list_partnership_records(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ManualPartnershipRecord)
+        .where(ManualPartnershipRecord.org_id == club.id)
+        .order_by(ManualPartnershipRecord.runs.desc())
+    )
+    records = result.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "batter1_id": str(r.batter1_id) if r.batter1_id else None,
+            "batter1_name": r.batter1_name,
+            "batter2_id": str(r.batter2_id) if r.batter2_id else None,
+            "batter2_name": r.batter2_name,
+            "grade_name": r.grade_name,
+            "season_year": r.season_year,
+            "wicket_number": r.wicket_number,
+            "runs": r.runs,
+            "is_not_out": r.is_not_out,
+            "notes": r.notes,
+        }
+        for r in records
+    ]
+
+
+@router.post("/partnership-records", status_code=201)
+async def create_partnership_record(
+    data: ManualPartnershipCreate,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    record = ManualPartnershipRecord(
+        org_id=club.id,
+        batter1_id=uuid.UUID(data.batter1_id) if data.batter1_id else None,
+        batter1_name=data.batter1_name.strip(),
+        batter2_id=uuid.UUID(data.batter2_id) if data.batter2_id else None,
+        batter2_name=data.batter2_name.strip(),
+        grade_name=data.grade_name.strip(),
+        season_year=data.season_year,
+        wicket_number=data.wicket_number,
+        runs=data.runs,
+        is_not_out=data.is_not_out,
+        notes=data.notes,
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return {"id": record.id, "status": "created"}
+
+
+@router.delete("/partnership-records/{record_id}", status_code=204)
+async def delete_partnership_record(
+    record_id: int,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ManualPartnershipRecord).where(
+            ManualPartnershipRecord.id == record_id,
+            ManualPartnershipRecord.org_id == club.id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    await db.delete(record)
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------

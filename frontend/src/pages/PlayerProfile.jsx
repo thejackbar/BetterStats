@@ -733,32 +733,24 @@ export default function PlayerProfile() {
                     <thead>
                       <tr className="border-b border-navy-700">
                         <th className="table-header">Partner</th>
-                        <th className="table-header text-right">Runs</th>
-                        <th className="table-header text-right">Wkt</th>
-                        <th className="table-header text-right hidden sm:table-cell">Match</th>
+                        <th className="table-header text-right">Best</th>
+                        <th className="table-header text-right">Total</th>
+                        <th className="table-header text-right hidden sm:table-cell">Times</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {partnerships.slice(0, 20).map((p, i) => {
-                        const partnerId = p.batter1_id === playerId ? p.batter2_id : p.batter1_id
-                        const partnerName = p.batter1_id === playerId ? p.batter2_name : p.batter1_name
-                        const myRuns = p.batter1_id === playerId ? p.batter1_runs : p.batter2_runs
-                        return (
-                          <tr key={i} className="table-row">
-                            <td className="table-cell">
-                              {partnerId
-                                ? <Link to={`/players/${partnerId}`} className="text-white hover:text-accent transition-colors">{partnerName ?? '—'}</Link>
-                                : <span className="text-slate-400">{partnerName ?? '—'}</span>}
-                              {myRuns != null && <span className="text-slate-600 text-xs ml-1.5">({myRuns})</span>}
-                            </td>
-                            <td className="table-cell stat-number text-right font-bold text-accent">{p.runs ?? '—'}</td>
-                            <td className="table-cell stat-number text-right text-slate-400">{p.wicket_number ?? '—'}</td>
-                            <td className="table-cell text-right text-slate-600 text-xs hidden sm:table-cell">
-                              {p.home_team && p.away_team ? `${p.home_team} v ${p.away_team}` : '—'}
-                            </td>
-                          </tr>
-                        )
-                      })}
+                      {partnerships.map((p, i) => (
+                        <tr key={i} className="table-row">
+                          <td className="table-cell">
+                            {p.partner_id
+                              ? <Link to={`/players/${p.partner_id}`} className="text-white hover:text-accent transition-colors">{p.partner_name ?? '—'}</Link>
+                              : <span className="text-slate-400">{p.partner_name ?? '—'}</span>}
+                          </td>
+                          <td className="table-cell stat-number text-right font-bold text-accent">{p.best_runs ?? '—'}</td>
+                          <td className="table-cell stat-number text-right text-slate-300">{p.total_runs ?? '—'}</td>
+                          <td className="table-cell stat-number text-right text-slate-500 hidden sm:table-cell">{p.partnership_count}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

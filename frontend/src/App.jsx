@@ -27,6 +27,7 @@ import SuperUsers from './pages/admin/SuperUsers'
 import AdminAwards from './pages/admin/AdminAwards'
 import AdminMerge from './pages/admin/AdminMerge'
 import AdminSync from './pages/admin/AdminSync'
+import AdminPartnershipRecords from './pages/admin/AdminPartnershipRecords'
 
 // Public club pages (slug-based)
 import Dashboard from './pages/Dashboard'
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="/admin/awards" element={<ProtectedRoute><AdminAwards /></ProtectedRoute>} />
         <Route path="/admin/merge" element={<ProtectedRoute><AdminMerge /></ProtectedRoute>} />
         <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
+        <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
         <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
         <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />

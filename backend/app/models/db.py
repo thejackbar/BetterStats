@@ -302,3 +302,25 @@ class PlayerSeasonStats(Base):
 
     player = relationship("Player", back_populates="season_stats")
     season = relationship("Season", back_populates="player_stats")
+
+
+class ManualPartnershipRecord(Base):
+    __tablename__ = "manual_partnership_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    batter1_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    batter1_name = Column(Text, nullable=False)
+    batter2_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    batter2_name = Column(Text, nullable=False)
+    grade_name = Column(Text, nullable=False)
+    season_year = Column(Integer, nullable=False)
+    wicket_number = Column(Integer, nullable=False)
+    runs = Column(Integer, nullable=False)
+    is_not_out = Column(Boolean, server_default="false", nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    org = relationship("Organisation")
+    batter1 = relationship("Player", foreign_keys=[batter1_id])
+    batter2 = relationship("Player", foreign_keys=[batter2_id])

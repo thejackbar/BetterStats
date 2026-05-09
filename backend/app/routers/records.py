@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
 import uuid
 
-from app.models.db import get_db, Grade, Season, Organisation
+from app.models.db import get_db, Grade, Season, Organisation, ManualPartnershipRecord
+from sqlalchemy import select as sa_select
 from app.services import playhq_partner_client, playhq_client
 
 router = APIRouter(prefix="/records", tags=["records"])
@@ -118,6 +119,9 @@ async def get_records(
     # Clauses for game-level queries (partnerships) that already JOIN games g
     game_season_clause = " JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id" if season_id else ""
     game_grade_clause  = " AND g.grade_id = :grade_id" if grade_id else ""
+
+    # Partnership queries now always JOIN grades gr for grade_name; season filter via WHERE
+    partnership_season_clause = " AND gr.season_id = :season_id" if season_id else ""
 
     # Clauses for top_pairs which has no pre-existing games join
     pairs_game_join    = " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id" if season_id else ""
@@ -343,35 +347,41 @@ async def get_records(
 
     top_partnerships = await q("""
         SELECT
-            p1.id::text AS batter1_id, p1.name AS batter1_name,
-            p2.id::text AS batter2_id, p2.name AS batter2_name,
+            p1.id::text AS batter1_id, p1.display_name AS batter1_name,
+            p2.id::text AS batter2_id, p2.display_name AS batter2_name,
             pt.runs, pt.wicket_number,
-            g.played_at::text, g.home_team, g.away_team
+            g.played_at::text,
+            gr.name AS grade_name,
+            EXTRACT(YEAR FROM g.played_at)::int AS season_year,
+            false AS is_manual
         FROM partnerships pt
         JOIN games g ON g.id = pt.game_id
-        """ + game_season_clause + """
+        JOIN grades gr ON gr.id = g.grade_id
         LEFT JOIN players p1 ON p1.id = pt.batter1_id
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
         WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
-          """ + game_grade_clause + """
+          """ + partnership_season_clause + game_grade_clause + """
           AND pt.runs IS NOT NULL AND pt.runs > 0
         ORDER BY pt.runs DESC LIMIT :limit
     """)
 
     partnerships_by_wicket_rows = await q("""
         SELECT
-            p1.id::text AS batter1_id, p1.name AS batter1_name,
-            p2.id::text AS batter2_id, p2.name AS batter2_name,
+            p1.id::text AS batter1_id, p1.display_name AS batter1_name,
+            p2.id::text AS batter2_id, p2.display_name AS batter2_name,
             pt.runs, pt.wicket_number,
-            g.played_at::text, g.home_team, g.away_team,
+            g.played_at::text,
+            gr.name AS grade_name,
+            EXTRACT(YEAR FROM g.played_at)::int AS season_year,
+            false AS is_manual,
             ROW_NUMBER() OVER (PARTITION BY pt.wicket_number ORDER BY pt.runs DESC) AS rn
         FROM partnerships pt
         JOIN games g ON g.id = pt.game_id
-        """ + game_season_clause + """
+        JOIN grades gr ON gr.id = g.grade_id
         LEFT JOIN players p1 ON p1.id = pt.batter1_id
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
         WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
-          """ + game_grade_clause + """
+          """ + partnership_season_clause + game_grade_clause + """
           AND pt.runs IS NOT NULL AND pt.runs > 0 AND pt.wicket_number BETWEEN 1 AND 10
     """)
     by_wicket: dict[int, list] = {}
@@ -383,11 +393,35 @@ async def get_records(
             del d["rn"]
             by_wicket[wk].append(d)
 
+    # Manual partnership records (always included regardless of season/grade filter)
+    org_obj = await db.get(Organisation, uuid.UUID(org_id))
+    manual_rows = []
+    if org_obj:
+        manual_res = await db.execute(
+            sa_select(ManualPartnershipRecord)
+            .where(ManualPartnershipRecord.org_id == org_obj.id)
+            .order_by(ManualPartnershipRecord.runs.desc())
+        )
+        for r in manual_res.scalars().all():
+            manual_rows.append({
+                "batter1_id": str(r.batter1_id) if r.batter1_id else None,
+                "batter1_name": r.batter1_name,
+                "batter2_id": str(r.batter2_id) if r.batter2_id else None,
+                "batter2_name": r.batter2_name,
+                "runs": r.runs,
+                "wicket_number": r.wicket_number,
+                "played_at": None,
+                "grade_name": r.grade_name,
+                "season_year": r.season_year,
+                "is_not_out": r.is_not_out,
+                "is_manual": True,
+            })
+
     top_pairs = await q("""
         SELECT
             LEAST(p1.id::text, p2.id::text)    AS pair_key,
-            p1.id::text AS batter1_id, p1.name AS batter1_name,
-            p2.id::text AS batter2_id, p2.name AS batter2_name,
+            p1.id::text AS batter1_id, p1.display_name AS batter1_name,
+            p2.id::text AS batter2_id, p2.display_name AS batter2_name,
             COUNT(*)                            AS count,
             COALESCE(SUM(pt.runs), 0)           AS total_runs,
             MAX(pt.runs)                        AS best
@@ -398,7 +432,7 @@ async def get_records(
         WHERE p1.organisation_id = :org_id AND p2.organisation_id = :org_id
           """ + pairs_grade_clause + """
         GROUP BY LEAST(p1.id::text, p2.id::text),
-                 p1.id, p1.name, p2.id, p2.name
+                 p1.id, p1.display_name, p2.id, p2.display_name
         ORDER BY total_runs DESC LIMIT :limit
     """)
 
@@ -470,6 +504,7 @@ async def get_records(
             "top_overall": top_partnerships,
             "by_wicket":   by_wicket,
             "top_pairs":   top_pairs,
+            "manual":      manual_rows,
         },
         "team": {
             "most_matches":     most_matches,

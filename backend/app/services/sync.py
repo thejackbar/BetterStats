@@ -297,10 +297,20 @@ def _derive_partnerships(
     batting_rows: list,
     fow_rows: list,
     playhq_to_player_id: dict,
+    name_to_pid: dict | None = None,
 ) -> list:
     """Derive per-wicket partnership data from batting order + fall of wickets."""
     if len(batting_rows) < 2:
         return []
+
+    def resolve_pid(b):
+        if not b:
+            return None
+        pid = playhq_to_player_id.get(b.get("playhq_appearance_id") or "")
+        if not pid and name_to_pid:
+            name_lc = (b.get("name") or "").strip().lower()
+            pid = name_to_pid.get(name_lc) if name_lc else None
+        return pid
 
     batters = sorted(batting_rows, key=lambda r: r.get("batting_position") or 99)
     at_crease = list(batters[:2])
@@ -318,8 +328,8 @@ def _derive_partnerships(
 
         result.append({
             "wicket_number": wkt,
-            "batter1_id": playhq_to_player_id.get(b1["playhq_appearance_id"]) if b1 else None,
-            "batter2_id": playhq_to_player_id.get(b2["playhq_appearance_id"]) if b2 else None,
+            "batter1_id": resolve_pid(b1),
+            "batter2_id": resolve_pid(b2),
             "batter1_runs": b1.get("runs") if b1 else None,
             "batter2_runs": b2.get("runs") if b2 else None,
             "runs": (score - prev_score) if score is not None else None,
@@ -572,7 +582,7 @@ async def sync_game_level_data(
 
             batting_with_pos = [r for r in innings.get("batting", []) if r.get("batting_position")]
             fow_data = innings.get("fall_of_wickets") or []
-            for p in _derive_partnerships(batting_with_pos, fow_data, phq_to_pid):
+            for p in _derive_partnerships(batting_with_pos, fow_data, phq_to_pid, name_to_pid):
                 if p.get("batter1_id") or p.get("batter2_id"):
                     session.add(Partnership(
                         game_id=game_uuid,

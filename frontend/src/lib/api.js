@@ -102,6 +102,11 @@ export const api = {
   adminGetSettings: () => request('/club-admin/settings'),
   adminPatchSettings: (data) =>
     request('/club-admin/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  adminListPartnershipRecords: () => request('/club-admin/partnership-records'),
+  adminCreatePartnershipRecord: (data) =>
+    request('/club-admin/partnership-records', { method: 'POST', body: JSON.stringify(data) }),
+  adminDeletePartnershipRecord: (id) =>
+    request(`/club-admin/partnership-records/${id}`, { method: 'DELETE' }),
 
   // Super admin
   superListClubs: () => request('/club-admin/super/clubs'),
