@@ -110,6 +110,17 @@ export default function AdminSync() {
               Running in background — this page will update automatically when complete.
             </p>
           )}
+          {settings && (
+            <div className="mt-4 pt-4 border-t border-navy-700">
+              <p className="text-slate-500 text-xs">
+                PlayHQ ID:{' '}
+                {settings.playhq_id
+                  ? <span className="font-mono text-accent">{settings.playhq_id}</span>
+                  : <span className="text-amber-500">not set — game-level data (scorecards, partnerships) requires this</span>
+                }
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Log */}
