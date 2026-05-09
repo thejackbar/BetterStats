@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
-import LoadingSpinner from '../../components/LoadingSpinner'
 
 function fmtDuration(startedAt, completedAt) {
   if (!startedAt || !completedAt) return null
@@ -36,7 +35,7 @@ export default function AdminSync() {
   const [lastTriggered, setLastTriggered] = useState(null)
   const [polling, setPolling] = useState(false)
 
-  const orgId = settings?.org_id
+  const orgId = settings?.id
 
   const fetchLogs = useCallback(async (id) => {
     if (!id) return
@@ -44,18 +43,17 @@ export default function AdminSync() {
       const data = await api.getSyncLogs(id)
       setLogs(data || [])
     } catch {
-      // silent — backend may not have logs yet
+      // silent
     }
   }, [])
 
   useEffect(() => {
     api.adminGetSettings().then(s => {
       setSettings(s)
-      if (s?.org_id) fetchLogs(s.org_id)
+      if (s?.id) fetchLogs(s.id)
     }).catch(() => {})
   }, [fetchLogs])
 
-  // Poll for log updates for 2 minutes after a sync is triggered
   useEffect(() => {
     if (!polling || !orgId) return
     const interval = setInterval(() => fetchLogs(orgId), 4000)
@@ -66,7 +64,6 @@ export default function AdminSync() {
     return () => { clearInterval(interval); clearTimeout(timeout) }
   }, [polling, orgId, fetchLogs])
 
-  // Stop polling once a new log entry appears
   useEffect(() => {
     if (!polling || !lastTriggered || !logs.length) return
     if (new Date(logs[0].started_at) >= new Date(lastTriggered)) {
@@ -91,19 +88,11 @@ export default function AdminSync() {
   return (
     <AdminLayout>
       <div className="max-w-3xl">
-        <h1 className="text-2xl font-display font-bold text-white mb-1">Data Sync</h1>
-        <p className="text-slate-400 text-sm mb-6">
-          Pull the latest season stats, game-level scorecards, partnerships, and fall of wickets from PlayHQ.
-        </p>
+        <h1 className="text-2xl font-display font-bold text-white mb-6">Data Sync</h1>
 
         {/* Trigger card */}
         <div className="bg-navy-900 border border-navy-700 rounded-lg p-5 mb-8">
-          <h2 className="text-white font-semibold mb-1">Full Sync</h2>
-          <p className="text-slate-500 text-sm mb-4">
-            Fetches all seasons from the Grassroots API, then pulls individual game scorecards
-            from PlayHQ to populate batting innings, bowling spells, partnerships, and fall of wickets.
-            Large clubs may take 2–5 minutes.
-          </p>
+          <h2 className="text-white font-semibold mb-4">Full Sync</h2>
           <button
             onClick={handleSync}
             disabled={syncing || !orgId}
