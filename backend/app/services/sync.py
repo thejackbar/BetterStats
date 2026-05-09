@@ -353,6 +353,7 @@ async def sync_game_level_data(
              "games_skipped_done": 0, "games_skipped_season": 0, "games_skipped_no_stats": 0}
 
     final_games = [g for g in all_games if g.get("status") == "FINAL"]
+    org_id = org.id  # cache before any rollback can expire the ORM object
 
     seasons_res = await session.execute(
         select(Season).where(Season.organisation_id == org.id)
@@ -384,7 +385,7 @@ async def sync_game_level_data(
             words = n.split()
             if len(words) >= 2:
                 name_to_pid[f"{' '.join(words[1:])}, {words[0]}"] = p.id
-    logger.info(f"GameSync: {len(phq_to_pid)} players with playhq_id, {len(name_to_pid)} name entries for org {org.id}")
+    logger.info(f"GameSync: {len(phq_to_pid)} players with playhq_id, {len(name_to_pid)} name entries for org {org_id}")
 
     for game_data in final_games:
         game_id_str = game_data.get("id")
@@ -630,7 +631,7 @@ async def sync_game_level_data(
             logger.error(f"GameSync: commit failed for game {game_id_str}: {e}")
             await session.rollback()
 
-    logger.info(f"GameSync: {stats} for org {org.id}")
+    logger.info(f"GameSync: {stats} for org {org_id}")
     return stats
 
 
