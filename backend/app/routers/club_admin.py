@@ -17,6 +17,8 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 
 # Keep strong references to background tasks so they aren't GC'd before completing
 _background_tasks: set = set()
+# Per-org scan locks to prevent concurrent PHQ suggestion scans
+_phq_scan_running: set = set()
 
 router = APIRouter(prefix="/club-admin", tags=["club-admin"])
 
@@ -634,6 +636,11 @@ async def run_phq_suggestions(
     from app.services.sync import suggest_phq_ids
     org_id_str = str(club.id)
 
+    if org_id_str in _phq_scan_running:
+        return {"status": "already_running", "message": "A scan is already in progress for this org"}
+
+    _phq_scan_running.add(org_id_str)
+
     async def _run():
         _logging.getLogger(__name__).info(f"PhqSuggest: background task started for org {org_id_str}")
         try:
@@ -642,6 +649,7 @@ async def run_phq_suggestions(
         except Exception as e:
             _logging.getLogger(__name__).error(f"PhqSuggest: FAILED for org {org_id_str}: {e}", exc_info=True)
         finally:
+            _phq_scan_running.discard(org_id_str)
             _background_tasks.discard(asyncio.current_task())
 
     task = asyncio.create_task(_run())

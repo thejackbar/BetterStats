@@ -115,8 +115,12 @@ export default function AdminPhqMatch() {
     setScanning(true)
     setMsg('')
     try {
-      await api.adminRunPhqSuggestions()
-      setMsg('Scan started — auto-links happen immediately, suggestions appear below within a few minutes. Refresh to see results.')
+      const res = await api.adminRunPhqSuggestions()
+      if (res.status === 'already_running') {
+        setMsg('A scan is already running — wait for it to finish, then refresh.')
+      } else {
+        setMsg('Scan started — auto-links happen immediately, suggestions appear below within a few minutes. Refresh to see results.')
+      }
     } catch (e) {
       setMsg(`Failed: ${e.message}`)
     } finally {
