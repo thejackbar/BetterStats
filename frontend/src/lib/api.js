@@ -115,6 +115,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ action, admin_note: adminNote }),
     }),
+  adminListPhqSuggestions: () => request('/club-admin/phq-suggestions'),
+  adminRunPhqSuggestions: () => request('/club-admin/phq-suggestions/run', { method: 'POST' }),
+  adminActionPhqSuggestion: (id, action, playerId) =>
+    request(`/club-admin/phq-suggestions/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ action, player_id: playerId }),
+    }),
 
   // Super admin
   superListClubs: () => request('/club-admin/super/clubs'),

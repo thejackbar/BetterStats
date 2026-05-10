@@ -8,7 +8,7 @@ import uuid
 
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
-    PlayerSyncRequest, get_db
+    PlayerSyncRequest, PhqIdSuggestion, get_db
 )
 from sqlalchemy import text as _text
 import asyncio
@@ -49,6 +49,7 @@ async def list_players(
 
 class PlayerPatch(BaseModel):
     display_name_override: Optional[str] = None
+    playhq_id: Optional[str] = None
 
 
 @router.patch("/players/{player_id}")
@@ -63,11 +64,29 @@ async def patch_player(
     if not player or player.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Player not found")
 
-    # Empty string clears the override; None leaves it unchanged
     if data.display_name_override is not None:
         player.display_name_override = data.display_name_override.strip() or None
+    if data.playhq_id is not None:
+        new_phq = data.playhq_id.strip() or None
+        if new_phq and new_phq != player.playhq_id:
+            # Check no other player in this org already holds this PHQ ID
+            conflict = await db.execute(
+                select(Player).where(
+                    Player.organisation_id == club.id,
+                    Player.playhq_id == new_phq,
+                    Player.id != player.id,
+                )
+            )
+            if conflict.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="Another player already has this PlayHQ ID")
+        player.playhq_id = new_phq
     await db.commit()
-    return {"id": str(player.id), "display_name": player.display_name, "display_name_override": player.display_name_override}
+    return {
+        "id": str(player.id),
+        "display_name": player.display_name,
+        "display_name_override": player.display_name_override,
+        "playhq_id": player.playhq_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -556,3 +575,126 @@ async def action_sync_request(
         return {"status": "approved", "message": "Deep sync started in background"}
 
     return {"status": "dismissed"}
+
+
+# ---------------------------------------------------------------------------
+# PHQ ID Suggestions
+# ---------------------------------------------------------------------------
+
+@router.get("/phq-suggestions")
+async def list_phq_suggestions(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        _text("""
+            SELECT
+                s.id, s.phq_player_id, s.phq_first_name, s.phq_last_name,
+                s.confidence, s.game_count, s.status, s.created_at,
+                p.id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                p.playhq_id AS player_current_phq_id
+            FROM phq_id_suggestions s
+            LEFT JOIN players p ON p.id = s.player_id
+            WHERE s.org_id = :org_id
+            ORDER BY
+                CASE s.status WHEN 'pending' THEN 0 ELSE 1 END,
+                s.confidence DESC,
+                s.game_count DESC
+            LIMIT 200
+        """),
+        {"org_id": str(club.id)},
+    )
+    rows = result.mappings().all()
+    return [
+        {
+            "id": r["id"],
+            "phq_player_id": r["phq_player_id"],
+            "phq_name": f"{r['phq_first_name'] or ''} {r['phq_last_name'] or ''}".strip(),
+            "phq_first_name": r["phq_first_name"],
+            "phq_last_name": r["phq_last_name"],
+            "confidence": r["confidence"],
+            "game_count": r["game_count"],
+            "status": r["status"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "player_id": r["player_id"],
+            "player_name": r["player_name"],
+            "player_current_phq_id": r["player_current_phq_id"],
+        }
+        for r in rows
+    ]
+
+
+@router.post("/phq-suggestions/run")
+async def run_phq_suggestions(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    from app.services.sync import suggest_phq_ids
+    org_id_str = str(club.id)
+
+    async def _run():
+        _logging.getLogger(__name__).info(f"PhqSuggest: background task started for org {org_id_str}")
+        try:
+            result = await suggest_phq_ids(org_id_str)
+            _logging.getLogger(__name__).info(f"PhqSuggest: done for org {org_id_str}: {result}")
+        except Exception as e:
+            _logging.getLogger(__name__).error(f"PhqSuggest: FAILED for org {org_id_str}: {e}", exc_info=True)
+        finally:
+            _background_tasks.discard(asyncio.current_task())
+
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)
+    return {"status": "started", "message": "PHQ ID scan running in background"}
+
+
+class PhqSuggestionAction(BaseModel):
+    action: str  # "approve" or "dismiss"
+    player_id: Optional[str] = None  # override which player to link
+
+
+@router.post("/phq-suggestions/{suggestion_id}")
+async def action_phq_suggestion(
+    suggestion_id: int,
+    body: PhqSuggestionAction,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import datetime, timezone
+    sugg = await db.get(PhqIdSuggestion, suggestion_id)
+    if not sugg or str(sugg.org_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    if sugg.status != "pending":
+        raise HTTPException(status_code=409, detail="Suggestion already resolved")
+    if body.action not in ("approve", "dismiss"):
+        raise HTTPException(status_code=422, detail="action must be 'approve' or 'dismiss'")
+
+    sugg.resolved_at = datetime.now(timezone.utc)
+    sugg.status = "approved" if body.action == "approve" else "dismissed"
+
+    if body.action == "approve":
+        target_player_id = body.player_id or (str(sugg.player_id) if sugg.player_id else None)
+        if not target_player_id:
+            raise HTTPException(status_code=422, detail="player_id required for approval")
+        player = await db.get(Player, uuid.UUID(target_player_id))
+        if not player or player.organisation_id != club.id:
+            raise HTTPException(status_code=404, detail="Player not found")
+
+        # Check for conflict
+        conflict = await db.execute(
+            select(Player).where(
+                Player.organisation_id == club.id,
+                Player.playhq_id == sugg.phq_player_id,
+                Player.id != player.id,
+            )
+        )
+        if conflict.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Another player already has this PlayHQ ID")
+
+        player.playhq_id = sugg.phq_player_id
+        sugg.player_id = player.id
+
+    await db.commit()
+    return {"status": sugg.status}

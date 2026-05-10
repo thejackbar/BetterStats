@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { to: '/admin/merge', label: 'Merge Players' },
   { to: '/admin/sync', label: 'Data Sync' },
   { to: '/admin/partnerships', label: 'Partnership Rec.' },
+  { to: '/admin/phq-match', label: 'PHQ ID Match' },
   { to: '/admin/settings', label: 'Settings' },
 ]
 
@@ -52,7 +53,7 @@ export default function AdminLayout({ children }) {
               </span>
             </Link>
             <span className="hidden sm:block text-navy-600 text-sm">/ Admin</span>
-            <span className="hidden sm:block text-slate-700 text-xs font-mono">v2.7.6</span>
+            <span className="hidden sm:block text-slate-700 text-xs font-mono">v2.7.7</span>
           </div>
 
           <div className="flex items-center gap-3">

@@ -340,3 +340,22 @@ class PlayerSyncRequest(Base):
 
     player = relationship("Player")
     org = relationship("Organisation")
+
+
+class PhqIdSuggestion(Base):
+    __tablename__ = "phq_id_suggestions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
+    phq_player_id = Column(Text, nullable=False)
+    phq_first_name = Column(Text, nullable=True)
+    phq_last_name = Column(Text, nullable=True)
+    confidence = Column(Text, nullable=False)  # 'auto' | 'high' | 'low'
+    game_count = Column(Integer, server_default="1")
+    status = Column(Text, server_default="pending", nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    resolved_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    org = relationship("Organisation")
+    player = relationship("Player", foreign_keys=[player_id])
