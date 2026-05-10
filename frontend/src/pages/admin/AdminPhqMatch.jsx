@@ -98,11 +98,12 @@ export default function AdminPhqMatch() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [suggs, pls] = await Promise.all([
+      const [res, pls] = await Promise.all([
         api.adminListPhqSuggestions(),
         api.adminListPlayers(),
       ])
-      setSuggestions(suggs || [])
+      setSuggestions(res.suggestions || res || [])
+      if (res.scanning) setScanning(true)
       setPlayers((pls || []).sort((a, b) => a.name.localeCompare(b.name)))
     } catch {
       // silent
@@ -112,6 +113,7 @@ export default function AdminPhqMatch() {
   useEffect(() => { fetchAll() }, [fetchAll])
 
   const handleScan = async () => {
+    if (scanning) return
     setScanning(true)
     setMsg('')
     try {
@@ -119,13 +121,13 @@ export default function AdminPhqMatch() {
       if (res.status === 'already_running') {
         setMsg('A scan is already running — wait for it to finish, then refresh.')
       } else {
-        setMsg('Scan started — auto-links happen immediately, suggestions appear below within a few minutes. Refresh to see results.')
+        setMsg('Scan started — takes 5-15 min. Refresh this page when done to see results.')
       }
     } catch (e) {
       setMsg(`Failed: ${e.message}`)
-    } finally {
       setScanning(false)
     }
+    // intentionally NOT resetting scanning=false on success — button stays disabled until page reload
   }
 
   const handleAction = async (id, action, playerId) => {

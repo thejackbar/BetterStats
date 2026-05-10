@@ -609,7 +609,7 @@ async def list_phq_suggestions(
         {"org_id": str(club.id)},
     )
     rows = result.mappings().all()
-    return [
+    data = [
         {
             "id": r["id"],
             "phq_player_id": r["phq_player_id"],
@@ -626,6 +626,7 @@ async def list_phq_suggestions(
         }
         for r in rows
     ]
+    return {"suggestions": data, "scanning": str(club.id) in _phq_scan_running}
 
 
 @router.post("/phq-suggestions/run")
