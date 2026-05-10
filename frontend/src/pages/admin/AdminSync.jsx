@@ -34,6 +34,8 @@ export default function AdminSync() {
   const [syncing, setSyncing] = useState(false)
   const [lastTriggered, setLastTriggered] = useState(null)
   const [polling, setPolling] = useState(false)
+  const [syncRequests, setSyncRequests] = useState([])
+  const [actionLoading, setActionLoading] = useState(null)
 
   const orgId = settings?.id
 
@@ -47,12 +49,43 @@ export default function AdminSync() {
     }
   }, [])
 
+  const fetchSyncRequests = useCallback(async () => {
+    try {
+      const data = await api.adminListSyncRequests()
+      setSyncRequests(data || [])
+    } catch {
+      // silent
+    }
+  }, [])
+
   useEffect(() => {
     api.adminGetSettings().then(s => {
       setSettings(s)
       if (s?.id) fetchLogs(s.id)
     }).catch(() => {})
-  }, [fetchLogs])
+    fetchSyncRequests()
+  }, [fetchLogs, fetchSyncRequests])
+
+  const [syncWarnings, setSyncWarnings] = useState({}) // id → warning message
+
+  const handleSyncRequestAction = async (id, action, forceNote) => {
+    setActionLoading(id)
+    setSyncWarnings(w => ({ ...w, [id]: null }))
+    try {
+      const res = await api.adminActionSyncRequest(id, action, forceNote || null)
+      if (res.status === 'needs_confirmation') {
+        setSyncWarnings(w => ({ ...w, [id]: res.message }))
+      } else if (res.status === 'already_running') {
+        setSyncWarnings(w => ({ ...w, [id]: 'A sync is already running for this player.' }))
+      } else {
+        await fetchSyncRequests()
+      }
+    } catch (e) {
+      setSyncWarnings(w => ({ ...w, [id]: e.message }))
+    } finally {
+      setActionLoading(null)
+    }
+  }
 
   useEffect(() => {
     if (!polling || !orgId) return
@@ -77,7 +110,12 @@ export default function AdminSync() {
     setSyncing(true)
     setLastTriggered(new Date().toISOString())
     try {
-      await api.triggerSync(orgId)
+      const res = await api.triggerSync(orgId)
+      if (res.status === 'already_running') {
+        setSyncing(false)
+        alert('A sync is already running for this club. Wait for it to complete.')
+        return
+      }
       setPolling(true)
     } catch (e) {
       setSyncing(false)
@@ -122,6 +160,89 @@ export default function AdminSync() {
             </div>
           )}
         </div>
+
+        {/* Player Sync Requests */}
+        {syncRequests.length > 0 && (
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-white font-semibold">Player Sync Requests</h2>
+              <button
+                onClick={fetchSyncRequests}
+                className="text-slate-500 hover:text-white text-xs transition-colors"
+              >
+                Refresh
+              </button>
+            </div>
+            <div className="space-y-2">
+              {syncRequests.map(req => (
+                <div
+                  key={req.id}
+                  className={`bg-navy-900 border rounded-lg p-4 flex flex-wrap items-center justify-between gap-3 ${
+                    req.status === 'pending' ? 'border-amber-500/30' : 'border-navy-700'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-white text-sm font-medium">{req.player_name}</p>
+                      {!req.playhq_id && req.status === 'pending' && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                          no PHQ ID
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-slate-500 text-xs mt-0.5">
+                      {req.created_at ? new Date(req.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                      {req.requester_note && ` — "${req.requester_note}"`}
+                    </p>
+                    {req.playhq_id && (
+                      <p className="text-slate-600 text-xs font-mono mt-0.5">{req.playhq_id}</p>
+                    )}
+                    {syncWarnings[req.id] && (
+                      <div className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded p-2">
+                        <p className="mb-2">{syncWarnings[req.id]}</p>
+                        {syncWarnings[req.id].includes('no PlayHQ ID') && (
+                          <button
+                            onClick={() => handleSyncRequestAction(req.id, 'approve', 'admin override — no PHQ ID')}
+                            disabled={actionLoading === req.id}
+                            className="text-amber-400 underline text-xs disabled:opacity-50"
+                          >
+                            Proceed anyway (name matching only)
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {req.status === 'pending' ? (
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => handleSyncRequestAction(req.id, 'approve')}
+                        disabled={actionLoading === req.id}
+                        className="btn-primary text-xs disabled:opacity-50"
+                      >
+                        {actionLoading === req.id ? 'Processing…' : 'Approve & Deep Sync'}
+                      </button>
+                      <button
+                        onClick={() => handleSyncRequestAction(req.id, 'dismiss')}
+                        disabled={actionLoading === req.id}
+                        className="btn-ghost text-xs text-slate-400 disabled:opacity-50"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  ) : (
+                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium shrink-0 ${
+                      req.status === 'approved'
+                        ? 'bg-accent/10 border-accent/30 text-accent'
+                        : 'bg-navy-800 border-navy-700 text-slate-500'
+                    }`}>
+                      {req.status}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Log */}
         <div>
