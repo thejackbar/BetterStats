@@ -347,8 +347,10 @@ async def get_records(
 
     top_partnerships = await q("""
         SELECT
-            p1.id::text AS batter1_id, p1.display_name AS batter1_name,
-            p2.id::text AS batter2_id, p2.display_name AS batter2_name,
+            p1.id::text AS batter1_id,
+            COALESCE(p1.display_name_override, p1.name) AS batter1_name,
+            p2.id::text AS batter2_id,
+            COALESCE(p2.display_name_override, p2.name) AS batter2_name,
             pt.runs, pt.wicket_number,
             g.played_at::text,
             gr.name AS grade_name,
@@ -367,8 +369,10 @@ async def get_records(
 
     partnerships_by_wicket_rows = await q("""
         SELECT
-            p1.id::text AS batter1_id, p1.display_name AS batter1_name,
-            p2.id::text AS batter2_id, p2.display_name AS batter2_name,
+            p1.id::text AS batter1_id,
+            COALESCE(p1.display_name_override, p1.name) AS batter1_name,
+            p2.id::text AS batter2_id,
+            COALESCE(p2.display_name_override, p2.name) AS batter2_name,
             pt.runs, pt.wicket_number,
             g.played_at::text,
             gr.name AS grade_name,
@@ -420,8 +424,10 @@ async def get_records(
     top_pairs = await q("""
         SELECT
             LEAST(p1.id::text, p2.id::text)    AS pair_key,
-            p1.id::text AS batter1_id, p1.display_name AS batter1_name,
-            p2.id::text AS batter2_id, p2.display_name AS batter2_name,
+            p1.id::text AS batter1_id,
+            COALESCE(p1.display_name_override, p1.name) AS batter1_name,
+            p2.id::text AS batter2_id,
+            COALESCE(p2.display_name_override, p2.name) AS batter2_name,
             COUNT(*)                            AS count,
             COALESCE(SUM(pt.runs), 0)           AS total_runs,
             MAX(pt.runs)                        AS best
@@ -432,7 +438,8 @@ async def get_records(
         WHERE p1.organisation_id = :org_id AND p2.organisation_id = :org_id
           """ + pairs_grade_clause + """
         GROUP BY LEAST(p1.id::text, p2.id::text),
-                 p1.id, p1.display_name, p2.id, p2.display_name
+                 p1.id, COALESCE(p1.display_name_override, p1.name),
+                 p2.id, COALESCE(p2.display_name_override, p2.name)
         ORDER BY total_runs DESC LIMIT :limit
     """)
 

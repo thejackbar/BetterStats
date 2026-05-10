@@ -380,7 +380,10 @@ async def get_player_partnerships(session: AsyncSession, player_id: str) -> list
         text("""
             SELECT
                 CASE WHEN pt.batter1_id = :pid THEN pt.batter2_id::text ELSE pt.batter1_id::text END AS partner_id,
-                CASE WHEN pt.batter1_id = :pid THEN p2.display_name ELSE p1.display_name END AS partner_name,
+                CASE WHEN pt.batter1_id = :pid
+                     THEN COALESCE(p2.display_name_override, p2.name)
+                     ELSE COALESCE(p1.display_name_override, p1.name)
+                END AS partner_name,
                 COUNT(*) AS partnership_count,
                 COALESCE(SUM(pt.runs), 0) AS total_runs,
                 MAX(pt.runs) AS best_runs,
@@ -393,7 +396,10 @@ async def get_player_partnerships(session: AsyncSession, player_id: str) -> list
               AND pt.runs IS NOT NULL AND pt.runs > 0
             GROUP BY
                 CASE WHEN pt.batter1_id = :pid THEN pt.batter2_id::text ELSE pt.batter1_id::text END,
-                CASE WHEN pt.batter1_id = :pid THEN p2.display_name ELSE p1.display_name END
+                CASE WHEN pt.batter1_id = :pid
+                     THEN COALESCE(p2.display_name_override, p2.name)
+                     ELSE COALESCE(p1.display_name_override, p1.name)
+                END
             ORDER BY total_runs DESC
             LIMIT 20
         """),
