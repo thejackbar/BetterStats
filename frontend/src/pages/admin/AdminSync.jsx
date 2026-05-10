@@ -66,13 +66,22 @@ export default function AdminSync() {
     fetchSyncRequests()
   }, [fetchLogs, fetchSyncRequests])
 
-  const handleSyncRequestAction = async (id, action) => {
+  const [syncWarnings, setSyncWarnings] = useState({}) // id → warning message
+
+  const handleSyncRequestAction = async (id, action, forceNote) => {
     setActionLoading(id)
+    setSyncWarnings(w => ({ ...w, [id]: null }))
     try {
-      await api.adminActionSyncRequest(id, action, null)
-      await fetchSyncRequests()
+      const res = await api.adminActionSyncRequest(id, action, forceNote || null)
+      if (res.status === 'needs_confirmation') {
+        setSyncWarnings(w => ({ ...w, [id]: res.message }))
+      } else if (res.status === 'already_running') {
+        setSyncWarnings(w => ({ ...w, [id]: 'A sync is already running for this player.' }))
+      } else {
+        await fetchSyncRequests()
+      }
     } catch (e) {
-      alert(`Failed: ${e.message}`)
+      setSyncWarnings(w => ({ ...w, [id]: e.message }))
     } finally {
       setActionLoading(null)
     }
@@ -101,7 +110,12 @@ export default function AdminSync() {
     setSyncing(true)
     setLastTriggered(new Date().toISOString())
     try {
-      await api.triggerSync(orgId)
+      const res = await api.triggerSync(orgId)
+      if (res.status === 'already_running') {
+        setSyncing(false)
+        alert('A sync is already running for this club. Wait for it to complete.')
+        return
+      }
       setPolling(true)
     } catch (e) {
       setSyncing(false)
@@ -167,14 +181,35 @@ export default function AdminSync() {
                     req.status === 'pending' ? 'border-amber-500/30' : 'border-navy-700'
                   }`}
                 >
-                  <div className="min-w-0">
-                    <p className="text-white text-sm font-medium truncate">{req.player_name}</p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-white text-sm font-medium">{req.player_name}</p>
+                      {!req.playhq_id && req.status === 'pending' && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                          no PHQ ID
+                        </span>
+                      )}
+                    </div>
                     <p className="text-slate-500 text-xs mt-0.5">
                       {req.created_at ? new Date(req.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
                       {req.requester_note && ` — "${req.requester_note}"`}
                     </p>
                     {req.playhq_id && (
                       <p className="text-slate-600 text-xs font-mono mt-0.5">{req.playhq_id}</p>
+                    )}
+                    {syncWarnings[req.id] && (
+                      <div className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded p-2">
+                        <p className="mb-2">{syncWarnings[req.id]}</p>
+                        {syncWarnings[req.id].includes('no PlayHQ ID') && (
+                          <button
+                            onClick={() => handleSyncRequestAction(req.id, 'approve', 'admin override — no PHQ ID')}
+                            disabled={actionLoading === req.id}
+                            className="text-amber-400 underline text-xs disabled:opacity-50"
+                          >
+                            Proceed anyway (name matching only)
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                   {req.status === 'pending' ? (
@@ -195,7 +230,7 @@ export default function AdminSync() {
                       </button>
                     </div>
                   ) : (
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium shrink-0 ${
                       req.status === 'approved'
                         ? 'bg-accent/10 border-accent/30 text-accent'
                         : 'bg-navy-800 border-navy-700 text-slate-500'

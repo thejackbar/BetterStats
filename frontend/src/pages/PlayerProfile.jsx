@@ -605,7 +605,7 @@ export default function PlayerProfile() {
               <div className="flex flex-wrap gap-2 mt-2">
                 {headerAchievements.slice(0, 6).map(a => (
                   <span key={a.id} className="badge bg-navy-700 text-slate-300 border border-navy-600">
-                    {a.subcategory || a.category}{a.achievement ? ` — ${a.achievement}` : ''}{a.season_end ? ` (${a.season_end})` : a.season ? ` (${a.season})` : ''}
+                    {a.subcategory || a.category}{a.achievement ? ` — ${a.achievement}` : ''}{(() => { const yr = a.season_end || a.season; return yr && /^\d{4}$/.test(String(yr)) ? ` (${yr})` : '' })()}
                   </span>
                 ))}
               </div>

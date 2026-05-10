@@ -13,6 +13,8 @@ from app.services import playhq_partner_client
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
+_org_sync_running: set = set()
+
 
 def _filter_by_season(games: list, season_obj) -> list:
     name = (season_obj.name or "").strip().lower()
@@ -213,17 +215,23 @@ async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
 async def _sync_safe(org_id: str):
     from datetime import datetime, timezone
     from app.services.sync import _record_sync_log
+    import logging
     started_at = datetime.now(timezone.utc).isoformat()
     try:
         await sync_organisation(org_id)
     except Exception as exc:
-        import traceback, logging
+        import traceback
         logging.getLogger(__name__).error(f"Sync crashed for {org_id}: {exc}\n{traceback.format_exc()}")
         _record_sync_log(org_id, started_at, {}, f"Unexpected error: {exc}")
+    finally:
+        _org_sync_running.discard(org_id)
 
 
 @router.post("/{org_id}/sync", status_code=202)
 async def trigger_sync(org_id: str, background_tasks: BackgroundTasks):
+    if org_id in _org_sync_running:
+        return {"status": "already_running", "org_id": org_id}
+    _org_sync_running.add(org_id)
     background_tasks.add_task(_sync_safe, org_id)
     return {"status": "sync_started", "org_id": org_id}
 

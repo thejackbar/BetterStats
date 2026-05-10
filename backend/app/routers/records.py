@@ -124,7 +124,11 @@ async def get_records(
     partnership_season_clause = " AND gr.season_id = :season_id" if season_id else ""
 
     # Clauses for top_pairs which has no pre-existing games join
-    pairs_game_join    = " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id" if season_id else ""
+    pairs_game_join = (
+        " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id"
+        if season_id else
+        (" JOIN games g ON g.id = pt.game_id" if grade_id else "")
+    )
     pairs_grade_clause = " AND g.grade_id = :grade_id" if grade_id else ""
 
     # Inline WHERE additions for player_season_stats aggregate queries
@@ -440,6 +444,7 @@ async def get_records(
         GROUP BY LEAST(p1.id::text, p2.id::text),
                  p1.id, COALESCE(p1.display_name_override, p1.name),
                  p2.id, COALESCE(p2.display_name_override, p2.name)
+        HAVING COALESCE(SUM(pt.runs), 0) > 0
         ORDER BY total_runs DESC LIMIT :limit
     """)
 

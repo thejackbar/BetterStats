@@ -290,7 +290,6 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str) -> list[di
     result = await session.execute(
         text("""
             SELECT
-                gr.id::text AS grade_id,
                 gr.name AS grade_name,
                 COUNT(*) AS innings,
                 SUM(bi.runs) AS runs,
@@ -305,7 +304,7 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str) -> list[di
             JOIN grades gr ON gr.id = g.grade_id
             WHERE bi.player_id = :pid
               AND bi.runs IS NOT NULL
-            GROUP BY gr.id, gr.name
+            GROUP BY gr.name
             ORDER BY SUM(bi.runs) DESC
         """),
         {"pid": player_id},

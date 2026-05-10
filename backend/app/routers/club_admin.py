@@ -19,6 +19,8 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 _background_tasks: set = set()
 # Per-org scan locks to prevent concurrent PHQ suggestion scans
 _phq_scan_running: set = set()
+# Per-player deep sync locks
+_player_sync_running: set = set()
 
 router = APIRouter(prefix="/club-admin", tags=["club-admin"])
 
@@ -547,20 +549,44 @@ async def action_sync_request(
         raise HTTPException(status_code=404, detail="Request not found")
     if req.status != "pending":
         raise HTTPException(status_code=409, detail="Request already resolved")
-
     if body.action not in ("approve", "dismiss"):
         raise HTTPException(status_code=422, detail="action must be 'approve' or 'dismiss'")
 
-    req.admin_note = body.admin_note
-    req.resolved_at = datetime.now(timezone.utc)
-    req.status = "approved" if body.action == "approve" else "dismissed"
-    await db.commit()
-
     if body.action == "approve":
+        player = await db.get(Player, req.player_id)
+
+        # Pre-checks before approving
+        warnings = []
+        if not player:
+            raise HTTPException(status_code=404, detail="Player no longer exists")
+        if not player.playhq_id:
+            warnings.append("no_phq_id")
+        player_id_str = str(req.player_id)
+        if player_id_str in _player_sync_running:
+            return {"status": "already_running", "warnings": warnings,
+                    "message": "A deep sync is already running for this player"}
+
+        # Return warning to admin without approving yet so they can decide
+        if "no_phq_id" in warnings and not body.admin_note:
+            return {
+                "status": "needs_confirmation",
+                "warnings": warnings,
+                "message": (
+                    f"{player.display_name} has no PlayHQ ID linked — sync will rely on name matching only "
+                    "and may miss historical games. Set their PHQ ID first (Admin → PHQ ID Match or Admin → Players), "
+                    "then approve again. To proceed anyway, re-approve with any admin note."
+                ),
+            }
+
+        req.admin_note = body.admin_note
+        req.resolved_at = datetime.now(timezone.utc)
+        req.status = "approved"
+        await db.commit()
+
         from app.services.sync import deep_sync_player
         _logger = _logging.getLogger(__name__)
         org_id_str = str(club.id)
-        player_id_str = str(req.player_id)
+        _player_sync_running.add(player_id_str)
 
         async def _run_and_log():
             _logger.info(f"DeepSync: background task started for player {player_id_str}")
@@ -570,12 +596,17 @@ async def action_sync_request(
             except Exception as e:
                 _logger.error(f"DeepSync: FAILED for player {player_id_str}: {e}", exc_info=True)
             finally:
+                _player_sync_running.discard(player_id_str)
                 _background_tasks.discard(asyncio.current_task())
 
         task = asyncio.create_task(_run_and_log())
         _background_tasks.add(task)
-        return {"status": "approved", "message": "Deep sync started in background"}
+        return {"status": "approved", "warnings": warnings, "message": "Deep sync started in background"}
 
+    req.admin_note = body.admin_note
+    req.resolved_at = datetime.now(timezone.utc)
+    req.status = "dismissed"
+    await db.commit()
     return {"status": "dismissed"}
 
 
