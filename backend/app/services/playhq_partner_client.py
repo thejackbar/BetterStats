@@ -115,9 +115,22 @@ async def get_grade_games(grade_id: str) -> list:
     cached = _get_cached(key)
     if cached is not None:
         return cached
-    data = await _get(f"{BASE_URL}/v1/grades/{grade_id}/games")
-    games = data.get("data", [])
-    return _set_cached(key, games)
+
+    all_games = []
+    page = 1
+    while True:
+        data = await _get(f"{BASE_URL}/v1/grades/{grade_id}/games?page={page}&size=50")
+        batch = data.get("data", [])
+        all_games.extend(batch)
+        links = data.get("links") or {}
+        if links.get("next"):
+            page += 1
+        elif len(batch) < 50 or not batch:
+            break
+        else:
+            page += 1
+
+    return _set_cached(key, all_games)
 
 
 def _outcome_to_result(outcome: str) -> Optional[str]:
@@ -190,7 +203,7 @@ async def get_org_games(
     if cached is not None:
         return cached
 
-    # ── Discover seasons ───────────────────────────────────────
+    # ── Discover seasons ──────────────────────────────────────────────────────
     try:
         api_seasons = await get_org_seasons(playhq_id)
     except Exception as e:
@@ -220,7 +233,7 @@ async def get_org_games(
 
     logger.info(f"PlayHQ: {len(unique_seasons)} seasons to probe for {playhq_id}: {[s['name'] for s in unique_seasons[:10]]}")
 
-    # ── Discover grades via season IDs (cached per season) ─────────────────
+    # ── Discover grades via season IDs (cached per season) ─────────────────────────
     season_grade_results = await asyncio.gather(
         *[get_season_grades(s["id"]) for s in unique_seasons],
         return_exceptions=True,
@@ -410,7 +423,7 @@ def _parse_scorecard_statistics(game_data: dict) -> dict:
                 not_out = "NOT_OUT" in status.upper() or status.upper() == "NOT OUT"
                 batting_rows.append({
                     "name": player_name,
-                    "how_out": "" if not_out else status.lower().replace("_", " "),
+                    "how_out": "" if not_out else _HOW_OUT.get(status.upper(), status.lower().replace("_", " ")),
                     "bowled_by": "",
                     "runs": runs,
                     "balls": balls,
@@ -527,6 +540,8 @@ def _parse_summary_rest(data: dict) -> dict:
         if how == "BOWLED":
             bowler = shared.get("bowler")
             return f"b {bowler}" if bowler else "b"
+        if how == "LEG_BEFORE_WICKET":
+            return "lbw"
         prefix = _HOW_OUT.get(how, how.replace("_", " ").lower())
         parts = [prefix]
         fielder = shared.get("fielder")
