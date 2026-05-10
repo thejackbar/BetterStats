@@ -25,7 +25,7 @@ function opponent(row) {
   return row.home_team && row.away_team ? `${row.home_team} v ${row.away_team}` : null
 }
 
-// ── Shared sub-components ─────────────────────────────────────────────────────
+// ── Shared sub-components ──────────────────────────────────────────────────
 
 function RecordCard({ title, children, empty }) {
   return (
@@ -51,7 +51,7 @@ function RankBadge({ rank }) {
   return <span className={clsx('text-xs font-mono w-5 inline-block text-right mr-2', cls)}>{rank}</span>
 }
 
-// ── Batting tab ───────────────────────────────────────────────────────────────
+// ── Batting tab ─────────────────────────────────────────────────────
 
 function BattingTab({ data }) {
   return (
@@ -209,7 +209,7 @@ function BattingTab({ data }) {
   )
 }
 
-// ── Bowling tab ───────────────────────────────────────────────────────────────
+// ── Bowling tab ─────────────────────────────────────────────────────
 
 function BowlingTab({ data }) {
   return (
@@ -329,7 +329,7 @@ function BowlingTab({ data }) {
   )
 }
 
-// ── Partnerships tab ──────────────────────────────────────────────────────────
+// ── Partnerships tab ──────────────────────────────────────────────────
 
 function PartnershipRow({ r, rank }) {
   const b1 = r.batter1_name || 'Unknown'
@@ -341,30 +341,56 @@ function PartnershipRow({ r, rank }) {
         <span className="text-white">{b1}</span>
         <span className="text-slate-600 mx-1">&amp;</span>
         <span className="text-white">{b2}</span>
+        {r.is_not_out && <span className="ml-1.5 text-xs text-slate-500">*</span>}
+        {r.is_manual && <span className="ml-1.5 text-xs text-slate-600 italic">manual</span>}
       </td>
-      <td className="table-cell stat-number text-right text-accent font-bold">{r.runs}</td>
-      <td className="table-cell text-xs text-slate-500 text-right">{r.wicket_number ? ORDINALS[r.wicket_number - 1] : '—'}</td>
-      <td className="table-cell text-xs text-slate-500">{fmtDate(r.played_at)}</td>
+      <td className="table-cell stat-number text-right text-accent font-bold">
+        {r.runs}{r.is_not_out ? '*' : ''}
+      </td>
+      <td className="table-cell text-xs text-slate-400 text-right">{r.wicket_number ? ORDINALS[r.wicket_number - 1] : '—'}</td>
+      <td className="table-cell text-xs text-slate-500 hidden sm:table-cell">{r.grade_name || '—'}</td>
+      <td className="table-cell text-xs text-slate-600 text-right hidden md:table-cell">
+        {r.season_year || (r.played_at ? new Date(r.played_at + 'T00:00:00').getFullYear() : '—')}
+      </td>
     </tr>
   )
 }
 
 function PartnershipsTab({ data }) {
   const byWicket = data.by_wicket || {}
-  const wktNumbers = Array.from({ length: 10 }, (_, i) => i + 1).filter(n => byWicket[n]?.length || byWicket[String(n)]?.length)
-  const getWkt = n => byWicket[n] || byWicket[String(n)] || []
+  const manual = data.manual || []
+
+  // Merge manual records into by_wicket
+  const byWicketWithManual = { ...byWicket }
+  for (const r of manual) {
+    const wk = r.wicket_number
+    if (!byWicketWithManual[wk]) byWicketWithManual[wk] = []
+    byWicketWithManual[wk] = [...byWicketWithManual[wk], r]
+      .sort((a, b) => b.runs - a.runs)
+      .slice(0, 5)
+  }
+
+  const wktNumbers = Array.from({ length: 10 }, (_, i) => i + 1)
+    .filter(n => byWicketWithManual[n]?.length)
+  const getWkt = n => byWicketWithManual[n] || []
+
+  // Merge manual records into top_overall
+  const allOverall = [...(data.top_overall || []), ...manual]
+    .sort((a, b) => b.runs - a.runs)
+    .slice(0, 25)
 
   return (
     <div className="space-y-5">
-      <RecordCard title="Top Partnerships Overall" empty={!data.top_overall?.length}>
+      <RecordCard title="Top Partnerships" empty={!allOverall.length}>
         <table className="w-full">
           <thead><tr className="border-b border-navy-700">
             <th className="table-header">Batters</th>
             <th className="table-header text-right">Runs</th>
             <th className="table-header text-right">Wkt</th>
-            <th className="table-header">Date</th>
+            <th className="table-header hidden sm:table-cell">Grade</th>
+            <th className="table-header text-right hidden md:table-cell">Year</th>
           </tr></thead>
-          <tbody>{data.top_overall?.map((r, i) => <PartnershipRow key={i} r={r} rank={i+1} />)}</tbody>
+          <tbody>{allOverall.map((r, i) => <PartnershipRow key={i} r={r} rank={i+1} />)}</tbody>
         </table>
       </RecordCard>
 
@@ -382,10 +408,14 @@ function PartnershipsTab({ data }) {
                     <div key={i} className="px-4 py-2">
                       <div className="text-xs text-white font-medium leading-snug">
                         {r.batter1_name} <span className="text-slate-600">&</span> {r.batter2_name}
+                        {r.is_manual && <span className="text-slate-700 ml-1 italic">manual</span>}
                       </div>
                       <div className="flex items-baseline gap-2 mt-0.5">
-                        <span className="stat-number text-accent font-bold">{r.runs}</span>
-                        <span className="text-xs text-slate-600">{fmtDate(r.played_at)}</span>
+                        <span className="stat-number text-accent font-bold">{r.runs}{r.is_not_out ? '*' : ''}</span>
+                        <span className="text-xs text-slate-600">{r.grade_name || ''}</span>
+                        <span className="text-xs text-slate-700">
+                          {r.season_year || (r.played_at ? new Date(r.played_at + 'T00:00:00').getFullYear() : '')}
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -423,7 +453,7 @@ function PartnershipsTab({ data }) {
   )
 }
 
-// ── Team tab ──────────────────────────────────────────────────────────────────
+// ── Team tab ─────────────────────────────────────────────────────
 
 function TeamTab({ data }) {
   return (
@@ -486,7 +516,7 @@ function TeamTab({ data }) {
   )
 }
 
-// ── Filters ───────────────────────────────────────────────────────────────────
+// ── Filters ─────────────────────────────────────────────────────
 
 function FilterBar({ seasons, seasonId, onSeasonChange, grades, gradeId, onGradeChange }) {
   return (
@@ -517,7 +547,7 @@ function FilterBar({ seasons, seasonId, onSeasonChange, grades, gradeId, onGrade
   )
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Main page ─────────────────────────────────────────────────────
 
 export default function Records() {
   const { clubSlug } = useParams()
