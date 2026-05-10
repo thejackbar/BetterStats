@@ -52,7 +52,7 @@ export default function AdminLayout({ children }) {
               </span>
             </Link>
             <span className="hidden sm:block text-navy-600 text-sm">/ Admin</span>
-            <span className="hidden sm:block text-slate-700 text-xs font-mono">v2.7.4</span>
+            <span className="hidden sm:block text-slate-700 text-xs font-mono">v2.7.5</span>
           </div>
 
           <div className="flex items-center gap-3">

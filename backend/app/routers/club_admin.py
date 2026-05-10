@@ -532,10 +532,21 @@ async def action_sync_request(
     await db.commit()
 
     if body.action == "approve":
+        import logging
         from app.services.sync import deep_sync_player
+        logger = logging.getLogger(__name__)
         org_id_str = str(club.id)
         player_id_str = str(req.player_id)
-        asyncio.create_task(deep_sync_player(org_id_str, player_id_str))
+
+        async def _run_and_log():
+            logger.info(f"DeepSync: background task started for player {player_id_str}")
+            try:
+                result = await deep_sync_player(org_id_str, player_id_str)
+                logger.info(f"DeepSync: completed for player {player_id_str}: {result}")
+            except Exception as e:
+                logger.error(f"DeepSync: FAILED for player {player_id_str}: {e}", exc_info=True)
+
+        asyncio.create_task(_run_and_log())
         return {"status": "approved", "message": "Deep sync started in background"}
 
     return {"status": "dismissed"}

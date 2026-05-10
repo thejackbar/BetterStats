@@ -423,7 +423,7 @@ def _parse_scorecard_statistics(game_data: dict) -> dict:
                 not_out = "NOT_OUT" in status.upper() or status.upper() == "NOT OUT"
                 batting_rows.append({
                     "name": player_name,
-                    "how_out": "" if not_out else status.lower().replace("_", " "),
+                    "how_out": "" if not_out else _HOW_OUT.get(status.upper(), status.lower().replace("_", " ")),
                     "bowled_by": "",
                     "runs": runs,
                     "balls": balls,
@@ -540,6 +540,8 @@ def _parse_summary_rest(data: dict) -> dict:
         if how == "BOWLED":
             bowler = shared.get("bowler")
             return f"b {bowler}" if bowler else "b"
+        if how == "LEG_BEFORE_WICKET":
+            return "lbw"
         prefix = _HOW_OUT.get(how, how.replace("_", " ").lower())
         parts = [prefix]
         fielder = shared.get("fielder")

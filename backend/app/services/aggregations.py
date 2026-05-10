@@ -239,10 +239,12 @@ async def get_dismissal_breakdown(session: AsyncSession, player_id: str) -> list
                     WHEN bi.dismissal_type IS NULL THEN 'unknown'
                     WHEN bi.dismissal_type = 'b' OR bi.dismissal_type LIKE 'b %' THEN 'bowled'
                     WHEN bi.dismissal_type = 'c' OR bi.dismissal_type LIKE 'c %' THEN 'caught'
-                    WHEN bi.dismissal_type = 'lbw' THEN 'lbw'
+                    WHEN bi.dismissal_type = 'lbw' OR bi.dismissal_type LIKE 'lbw %'
+                         OR bi.dismissal_type = 'leg before wicket'
+                         OR bi.dismissal_type LIKE 'leg before wicket%' THEN 'lbw'
                     WHEN bi.dismissal_type = 'st' OR bi.dismissal_type LIKE 'st %' THEN 'stumped'
                     WHEN bi.dismissal_type LIKE 'run out%' THEN 'run out'
-                    WHEN bi.dismissal_type = 'hit wicket' THEN 'hit wicket'
+                    WHEN bi.dismissal_type = 'hit wicket' OR bi.dismissal_type LIKE 'hit wicket%' THEN 'hit wicket'
                     WHEN bi.dismissal_type LIKE 'ret%' THEN 'retired'
                     ELSE bi.dismissal_type
                 END AS dismissal_type,
