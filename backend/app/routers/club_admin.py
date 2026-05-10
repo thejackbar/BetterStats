@@ -12,7 +12,11 @@ from app.models.db import (
 )
 from sqlalchemy import text as _text
 import asyncio
+import logging as _logging
 from app.routers.auth import get_current_user, get_current_club, require_super_admin, _hash_password
+
+# Keep strong references to background tasks so they aren't GC'd before completing
+_background_tasks: set = set()
 
 router = APIRouter(prefix="/club-admin", tags=["club-admin"])
 
@@ -532,21 +536,23 @@ async def action_sync_request(
     await db.commit()
 
     if body.action == "approve":
-        import logging
         from app.services.sync import deep_sync_player
-        logger = logging.getLogger(__name__)
+        _logger = _logging.getLogger(__name__)
         org_id_str = str(club.id)
         player_id_str = str(req.player_id)
 
         async def _run_and_log():
-            logger.info(f"DeepSync: background task started for player {player_id_str}")
+            _logger.info(f"DeepSync: background task started for player {player_id_str}")
             try:
                 result = await deep_sync_player(org_id_str, player_id_str)
-                logger.info(f"DeepSync: completed for player {player_id_str}: {result}")
+                _logger.info(f"DeepSync: completed for player {player_id_str}: {result}")
             except Exception as e:
-                logger.error(f"DeepSync: FAILED for player {player_id_str}: {e}", exc_info=True)
+                _logger.error(f"DeepSync: FAILED for player {player_id_str}: {e}", exc_info=True)
+            finally:
+                _background_tasks.discard(asyncio.current_task())
 
-        asyncio.create_task(_run_and_log())
+        task = asyncio.create_task(_run_and_log())
+        _background_tasks.add(task)
         return {"status": "approved", "message": "Deep sync started in background"}
 
     return {"status": "dismissed"}
