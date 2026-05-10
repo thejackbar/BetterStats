@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = '002'
-down_revision = '001'
+down_revision = '001_saas_foundations'
 branch_labels = None
 depends_on = None
 
