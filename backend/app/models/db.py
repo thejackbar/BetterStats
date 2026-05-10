@@ -302,3 +302,60 @@ class PlayerSeasonStats(Base):
 
     player = relationship("Player", back_populates="season_stats")
     season = relationship("Season", back_populates="player_stats")
+
+
+class ManualPartnershipRecord(Base):
+    __tablename__ = "manual_partnership_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    batter1_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    batter1_name = Column(Text, nullable=False)
+    batter2_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    batter2_name = Column(Text, nullable=False)
+    grade_name = Column(Text, nullable=False)
+    season_year = Column(Integer, nullable=False)
+    wicket_number = Column(Integer, nullable=False)
+    runs = Column(Integer, nullable=False)
+    is_not_out = Column(Boolean, server_default="false", nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    org = relationship("Organisation")
+    batter1 = relationship("Player", foreign_keys=[batter1_id])
+    batter2 = relationship("Player", foreign_keys=[batter2_id])
+
+
+class PlayerSyncRequest(Base):
+    __tablename__ = "player_sync_requests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    status = Column(Text, server_default="pending", nullable=False)
+    requester_note = Column(Text, nullable=True)
+    admin_note = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    resolved_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    player = relationship("Player")
+    org = relationship("Organisation")
+
+
+class PhqIdSuggestion(Base):
+    __tablename__ = "phq_id_suggestions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
+    phq_player_id = Column(Text, nullable=False)
+    phq_first_name = Column(Text, nullable=True)
+    phq_last_name = Column(Text, nullable=True)
+    confidence = Column(Text, nullable=False)  # 'auto' | 'high' | 'low'
+    game_count = Column(Integer, server_default="1")
+    status = Column(Text, server_default="pending", nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    resolved_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    org = relationship("Organisation")
+    player = relationship("Player", foreign_keys=[player_id])
