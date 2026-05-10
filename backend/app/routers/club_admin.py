@@ -7,9 +7,20 @@ from typing import Optional
 import uuid
 
 from app.models.db import (
-    User, Organisation, ClubMembership, Player, Season, Grade, get_db
+    User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
+    PlayerSyncRequest, PhqIdSuggestion, get_db
 )
+from sqlalchemy import text as _text
+import asyncio
+import logging as _logging
 from app.routers.auth import get_current_user, get_current_club, require_super_admin, _hash_password
+
+# Keep strong references to background tasks so they aren't GC'd before completing
+_background_tasks: set = set()
+# Per-org scan locks to prevent concurrent PHQ suggestion scans
+_phq_scan_running: set = set()
+# Per-player deep sync locks
+_player_sync_running: set = set()
 
 router = APIRouter(prefix="/club-admin", tags=["club-admin"])
 
@@ -42,6 +53,7 @@ async def list_players(
 
 class PlayerPatch(BaseModel):
     display_name_override: Optional[str] = None
+    playhq_id: Optional[str] = None
 
 
 @router.patch("/players/{player_id}")
@@ -56,11 +68,29 @@ async def patch_player(
     if not player or player.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Player not found")
 
-    # Empty string clears the override; None leaves it unchanged
     if data.display_name_override is not None:
         player.display_name_override = data.display_name_override.strip() or None
+    if data.playhq_id is not None:
+        new_phq = data.playhq_id.strip() or None
+        if new_phq and new_phq != player.playhq_id:
+            # Check no other player in this org already holds this PHQ ID
+            conflict = await db.execute(
+                select(Player).where(
+                    Player.organisation_id == club.id,
+                    Player.playhq_id == new_phq,
+                    Player.id != player.id,
+                )
+            )
+            if conflict.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="Another player already has this PlayHQ ID")
+        player.playhq_id = new_phq
     await db.commit()
-    return {"id": str(player.id), "display_name": player.display_name, "display_name_override": player.display_name_override}
+    return {
+        "id": str(player.id),
+        "display_name": player.display_name,
+        "display_name_override": player.display_name_override,
+        "playhq_id": player.playhq_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +209,99 @@ async def patch_settings(
         club.theme_mode = data.theme_mode
     await db.commit()
     return {"status": "updated"}
+
+
+# ---------------------------------------------------------------------------
+# Manual partnership records
+# ---------------------------------------------------------------------------
+
+class ManualPartnershipCreate(BaseModel):
+    batter1_id: Optional[str] = None
+    batter1_name: str
+    batter2_id: Optional[str] = None
+    batter2_name: str
+    grade_name: str
+    season_year: int
+    wicket_number: int
+    runs: int
+    is_not_out: bool = False
+    notes: Optional[str] = None
+
+
+@router.get("/partnership-records")
+async def list_partnership_records(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ManualPartnershipRecord)
+        .where(ManualPartnershipRecord.org_id == club.id)
+        .order_by(ManualPartnershipRecord.runs.desc())
+    )
+    records = result.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "batter1_id": str(r.batter1_id) if r.batter1_id else None,
+            "batter1_name": r.batter1_name,
+            "batter2_id": str(r.batter2_id) if r.batter2_id else None,
+            "batter2_name": r.batter2_name,
+            "grade_name": r.grade_name,
+            "season_year": r.season_year,
+            "wicket_number": r.wicket_number,
+            "runs": r.runs,
+            "is_not_out": r.is_not_out,
+            "notes": r.notes,
+        }
+        for r in records
+    ]
+
+
+@router.post("/partnership-records", status_code=201)
+async def create_partnership_record(
+    data: ManualPartnershipCreate,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    record = ManualPartnershipRecord(
+        org_id=club.id,
+        batter1_id=uuid.UUID(data.batter1_id) if data.batter1_id else None,
+        batter1_name=data.batter1_name.strip(),
+        batter2_id=uuid.UUID(data.batter2_id) if data.batter2_id else None,
+        batter2_name=data.batter2_name.strip(),
+        grade_name=data.grade_name.strip(),
+        season_year=data.season_year,
+        wicket_number=data.wicket_number,
+        runs=data.runs,
+        is_not_out=data.is_not_out,
+        notes=data.notes,
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return {"id": record.id, "status": "created"}
+
+
+@router.delete("/partnership-records/{record_id}", status_code=204)
+async def delete_partnership_record(
+    record_id: int,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ManualPartnershipRecord).where(
+            ManualPartnershipRecord.id == record_id,
+            ManualPartnershipRecord.org_id == club.id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    await db.delete(record)
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -362,3 +485,256 @@ async def reset_password(
     user.locked_until = None
     await db.commit()
     return {"status": "password_reset"}
+
+
+# ---------------------------------------------------------------------------
+# Player Sync Requests
+# ---------------------------------------------------------------------------
+
+@router.get("/sync-requests")
+async def list_sync_requests(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        _text("""
+            SELECT
+                sr.id, sr.status, sr.requester_note, sr.admin_note,
+                sr.created_at, sr.resolved_at,
+                p.id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                p.playhq_id
+            FROM player_sync_requests sr
+            JOIN players p ON p.id = sr.player_id
+            WHERE sr.org_id = :org_id
+            ORDER BY sr.created_at DESC
+            LIMIT 100
+        """),
+        {"org_id": str(club.id)},
+    )
+    rows = result.mappings().all()
+    return [
+        {
+            "id": r["id"],
+            "status": r["status"],
+            "requester_note": r["requester_note"],
+            "admin_note": r["admin_note"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "resolved_at": r["resolved_at"].isoformat() if r["resolved_at"] else None,
+            "player_id": r["player_id"],
+            "player_name": r["player_name"],
+            "playhq_id": r["playhq_id"],
+        }
+        for r in rows
+    ]
+
+
+class SyncRequestAction(BaseModel):
+    action: str  # "approve" or "dismiss"
+    admin_note: Optional[str] = None
+
+
+@router.post("/sync-requests/{request_id}")
+async def action_sync_request(
+    request_id: int,
+    body: SyncRequestAction,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import datetime, timezone
+    req = await db.get(PlayerSyncRequest, request_id)
+    if not req or str(req.org_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.status != "pending":
+        raise HTTPException(status_code=409, detail="Request already resolved")
+    if body.action not in ("approve", "dismiss"):
+        raise HTTPException(status_code=422, detail="action must be 'approve' or 'dismiss'")
+
+    if body.action == "approve":
+        player = await db.get(Player, req.player_id)
+
+        # Pre-checks before approving
+        warnings = []
+        if not player:
+            raise HTTPException(status_code=404, detail="Player no longer exists")
+        if not player.playhq_id:
+            warnings.append("no_phq_id")
+        player_id_str = str(req.player_id)
+        if player_id_str in _player_sync_running:
+            return {"status": "already_running", "warnings": warnings,
+                    "message": "A deep sync is already running for this player"}
+
+        # Return warning to admin without approving yet so they can decide
+        if "no_phq_id" in warnings and not body.admin_note:
+            return {
+                "status": "needs_confirmation",
+                "warnings": warnings,
+                "message": (
+                    f"{player.display_name} has no PlayHQ ID linked — sync will rely on name matching only "
+                    "and may miss historical games. Set their PHQ ID first (Admin → PHQ ID Match or Admin → Players), "
+                    "then approve again. To proceed anyway, re-approve with any admin note."
+                ),
+            }
+
+        req.admin_note = body.admin_note
+        req.resolved_at = datetime.now(timezone.utc)
+        req.status = "approved"
+        await db.commit()
+
+        from app.services.sync import deep_sync_player
+        _logger = _logging.getLogger(__name__)
+        org_id_str = str(club.id)
+        _player_sync_running.add(player_id_str)
+
+        async def _run_and_log():
+            _logger.info(f"DeepSync: background task started for player {player_id_str}")
+            try:
+                result = await deep_sync_player(org_id_str, player_id_str)
+                _logger.info(f"DeepSync: completed for player {player_id_str}: {result}")
+            except Exception as e:
+                _logger.error(f"DeepSync: FAILED for player {player_id_str}: {e}", exc_info=True)
+            finally:
+                _player_sync_running.discard(player_id_str)
+                _background_tasks.discard(asyncio.current_task())
+
+        task = asyncio.create_task(_run_and_log())
+        _background_tasks.add(task)
+        return {"status": "approved", "warnings": warnings, "message": "Deep sync started in background"}
+
+    req.admin_note = body.admin_note
+    req.resolved_at = datetime.now(timezone.utc)
+    req.status = "dismissed"
+    await db.commit()
+    return {"status": "dismissed"}
+
+
+# ---------------------------------------------------------------------------
+# PHQ ID Suggestions
+# ---------------------------------------------------------------------------
+
+@router.get("/phq-suggestions")
+async def list_phq_suggestions(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        _text("""
+            SELECT
+                s.id, s.phq_player_id, s.phq_first_name, s.phq_last_name,
+                s.confidence, s.game_count, s.status, s.created_at,
+                p.id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                p.playhq_id AS player_current_phq_id
+            FROM phq_id_suggestions s
+            LEFT JOIN players p ON p.id = s.player_id
+            WHERE s.org_id = :org_id
+            ORDER BY
+                CASE s.status WHEN 'pending' THEN 0 ELSE 1 END,
+                s.confidence DESC,
+                s.game_count DESC
+            LIMIT 200
+        """),
+        {"org_id": str(club.id)},
+    )
+    rows = result.mappings().all()
+    data = [
+        {
+            "id": r["id"],
+            "phq_player_id": r["phq_player_id"],
+            "phq_name": f"{r['phq_first_name'] or ''} {r['phq_last_name'] or ''}".strip(),
+            "phq_first_name": r["phq_first_name"],
+            "phq_last_name": r["phq_last_name"],
+            "confidence": r["confidence"],
+            "game_count": r["game_count"],
+            "status": r["status"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "player_id": r["player_id"],
+            "player_name": r["player_name"],
+            "player_current_phq_id": r["player_current_phq_id"],
+        }
+        for r in rows
+    ]
+    return {"suggestions": data, "scanning": str(club.id) in _phq_scan_running}
+
+
+@router.post("/phq-suggestions/run")
+async def run_phq_suggestions(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    from app.services.sync import suggest_phq_ids
+    org_id_str = str(club.id)
+
+    if org_id_str in _phq_scan_running:
+        return {"status": "already_running", "message": "A scan is already in progress for this org"}
+
+    _phq_scan_running.add(org_id_str)
+
+    async def _run():
+        _logging.getLogger(__name__).info(f"PhqSuggest: background task started for org {org_id_str}")
+        try:
+            result = await suggest_phq_ids(org_id_str)
+            _logging.getLogger(__name__).info(f"PhqSuggest: done for org {org_id_str}: {result}")
+        except Exception as e:
+            _logging.getLogger(__name__).error(f"PhqSuggest: FAILED for org {org_id_str}: {e}", exc_info=True)
+        finally:
+            _phq_scan_running.discard(org_id_str)
+            _background_tasks.discard(asyncio.current_task())
+
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)
+    return {"status": "started", "message": "PHQ ID scan running in background"}
+
+
+class PhqSuggestionAction(BaseModel):
+    action: str  # "approve" or "dismiss"
+    player_id: Optional[str] = None  # override which player to link
+
+
+@router.post("/phq-suggestions/{suggestion_id}")
+async def action_phq_suggestion(
+    suggestion_id: int,
+    body: PhqSuggestionAction,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import datetime, timezone
+    sugg = await db.get(PhqIdSuggestion, suggestion_id)
+    if not sugg or str(sugg.org_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    if sugg.status != "pending":
+        raise HTTPException(status_code=409, detail="Suggestion already resolved")
+    if body.action not in ("approve", "dismiss"):
+        raise HTTPException(status_code=422, detail="action must be 'approve' or 'dismiss'")
+
+    sugg.resolved_at = datetime.now(timezone.utc)
+    sugg.status = "approved" if body.action == "approve" else "dismissed"
+
+    if body.action == "approve":
+        target_player_id = body.player_id or (str(sugg.player_id) if sugg.player_id else None)
+        if not target_player_id:
+            raise HTTPException(status_code=422, detail="player_id required for approval")
+        player = await db.get(Player, uuid.UUID(target_player_id))
+        if not player or player.organisation_id != club.id:
+            raise HTTPException(status_code=404, detail="Player not found")
+
+        # Check for conflict
+        conflict = await db.execute(
+            select(Player).where(
+                Player.organisation_id == club.id,
+                Player.playhq_id == sugg.phq_player_id,
+                Player.id != player.id,
+            )
+        )
+        if conflict.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Another player already has this PlayHQ ID")
+
+        player.playhq_id = sugg.phq_player_id
+        sugg.player_id = player.id
+
+    await db.commit()
+    return {"status": sugg.status}
