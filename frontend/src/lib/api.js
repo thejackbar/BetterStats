@@ -56,6 +56,8 @@ export const api = {
   getPlayerPartnerships: (playerId) => request(`/players/${playerId}/partnerships`),
   getPlayerActivity: (playerId) => request(`/players/${playerId}/activity`),
   getPlayerUpcomingMilestones: (playerId) => request(`/players/${playerId}/upcoming-milestones`),
+  requestPlayerSync: (playerId, note) =>
+    request(`/players/${playerId}/request-sync`, { method: 'POST', body: JSON.stringify({ note }) }),
 
   // Games
   listGames: (orgId, { seasonId, gradeId, limit } = {}) => {
@@ -107,6 +109,12 @@ export const api = {
     request('/club-admin/partnership-records', { method: 'POST', body: JSON.stringify(data) }),
   adminDeletePartnershipRecord: (id) =>
     request(`/club-admin/partnership-records/${id}`, { method: 'DELETE' }),
+  adminListSyncRequests: () => request('/club-admin/sync-requests'),
+  adminActionSyncRequest: (id, action, adminNote) =>
+    request(`/club-admin/sync-requests/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ action, admin_note: adminNote }),
+    }),
 
   // Super admin
   superListClubs: () => request('/club-admin/super/clubs'),

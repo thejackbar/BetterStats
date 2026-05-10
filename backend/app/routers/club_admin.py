@@ -7,8 +7,11 @@ from typing import Optional
 import uuid
 
 from app.models.db import (
-    User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord, get_db
+    User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
+    PlayerSyncRequest, get_db
 )
+from sqlalchemy import text as _text
+import asyncio
 from app.routers.auth import get_current_user, get_current_club, require_super_admin, _hash_password
 
 router = APIRouter(prefix="/club-admin", tags=["club-admin"])
@@ -455,3 +458,84 @@ async def reset_password(
     user.locked_until = None
     await db.commit()
     return {"status": "password_reset"}
+
+
+# ---------------------------------------------------------------------------
+# Player Sync Requests
+# ---------------------------------------------------------------------------
+
+@router.get("/sync-requests")
+async def list_sync_requests(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        _text("""
+            SELECT
+                sr.id, sr.status, sr.requester_note, sr.admin_note,
+                sr.created_at, sr.resolved_at,
+                p.id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                p.playhq_id
+            FROM player_sync_requests sr
+            JOIN players p ON p.id = sr.player_id
+            WHERE sr.org_id = :org_id
+            ORDER BY sr.created_at DESC
+            LIMIT 100
+        """),
+        {"org_id": str(club.id)},
+    )
+    rows = result.mappings().all()
+    return [
+        {
+            "id": r["id"],
+            "status": r["status"],
+            "requester_note": r["requester_note"],
+            "admin_note": r["admin_note"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "resolved_at": r["resolved_at"].isoformat() if r["resolved_at"] else None,
+            "player_id": r["player_id"],
+            "player_name": r["player_name"],
+            "playhq_id": r["playhq_id"],
+        }
+        for r in rows
+    ]
+
+
+class SyncRequestAction(BaseModel):
+    action: str  # "approve" or "dismiss"
+    admin_note: Optional[str] = None
+
+
+@router.post("/sync-requests/{request_id}")
+async def action_sync_request(
+    request_id: int,
+    body: SyncRequestAction,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import datetime, timezone
+    req = await db.get(PlayerSyncRequest, request_id)
+    if not req or str(req.org_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.status != "pending":
+        raise HTTPException(status_code=409, detail="Request already resolved")
+
+    if body.action not in ("approve", "dismiss"):
+        raise HTTPException(status_code=422, detail="action must be 'approve' or 'dismiss'")
+
+    req.admin_note = body.admin_note
+    req.resolved_at = datetime.now(timezone.utc)
+    req.status = "approved" if body.action == "approve" else "dismissed"
+    await db.commit()
+
+    if body.action == "approve":
+        from app.services.sync import deep_sync_player
+        org_id_str = str(club.id)
+        player_id_str = str(req.player_id)
+        asyncio.create_task(deep_sync_player(org_id_str, player_id_str))
+        return {"status": "approved", "message": "Deep sync started in background"}
+
+    return {"status": "dismissed"}

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 import uuid
 
-from app.models.db import Player, User, get_db
+from app.models.db import Player, User, PlayerSyncRequest, get_db
 from app.routers.auth import get_current_user
 from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
@@ -180,6 +180,43 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
             upcoming.append({"type": "matches", "current": total_matches, "target": m, "needed": m - total_matches})
             break
     return upcoming
+
+
+class SyncRequestCreate(BaseModel):
+    note: Optional[str] = None
+
+
+@router.post("/{player_id}/request-sync")
+async def request_player_sync(
+    player_id: str,
+    body: SyncRequestCreate = SyncRequestCreate(),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    # Prevent duplicate pending requests
+    existing = await db.execute(
+        text("""
+            SELECT id FROM player_sync_requests
+            WHERE player_id = :pid AND status = 'pending'
+            LIMIT 1
+        """),
+        {"pid": player_id},
+    )
+    if existing.fetchone():
+        return {"status": "already_pending"}
+
+    req = PlayerSyncRequest(
+        player_id=player.id,
+        org_id=player.organisation_id,
+        requester_note=body.note,
+        status="pending",
+    )
+    db.add(req)
+    await db.commit()
+    return {"status": "requested"}
 
 
 class PlayerRename(BaseModel):

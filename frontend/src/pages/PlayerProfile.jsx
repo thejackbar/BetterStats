@@ -515,6 +515,8 @@ export default function PlayerProfile() {
   const [dismissals, setDismissals] = useState(null)
   const [byGrade, setByGrade] = useState(null)
   const [byPosition, setByPosition] = useState(null)
+  const [syncRequested, setSyncRequested] = useState(false)
+  const [syncRequestLoading, setSyncRequestLoading] = useState(false)
 
   // Load season stats and activity eagerly on mount
   useEffect(() => {
@@ -759,14 +761,39 @@ export default function PlayerProfile() {
 
             {dismissals !== null && byGrade !== null && byPosition !== null &&
               dismissals.length === 0 && byGrade.length === 0 && byPosition.length === 0 && (
-              <p className="text-slate-600 text-sm italic">
-                Game-level data not yet synced — dismissal breakdown, position, and grade splits will appear after the next admin sync.
+              <div className="card p-5">
+                <p className="text-slate-400 text-sm mb-3">
+                  Game-level data (dismissals, position, grade splits) hasn't been synced for this player yet.
+                </p>
                 {player && !player.playhq_id && (
-                  <span className="block mt-1 text-amber-600 not-italic">
-                    PlayHQ ID not yet linked for this player — they need to appear in a recently synced game for the backfill to match them.
-                  </span>
+                  <p className="text-amber-500 text-xs mb-3">
+                    PlayHQ ID not yet linked — this player needs to appear in a recently synced game first.
+                  </p>
                 )}
-              </p>
+                {syncRequested ? (
+                  <p className="text-accent text-sm font-medium">
+                    Sync request submitted — an admin will review it shortly.
+                  </p>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      setSyncRequestLoading(true)
+                      try {
+                        await api.requestPlayerSync(playerId)
+                        setSyncRequested(true)
+                      } catch {
+                        setSyncRequested(true)
+                      } finally {
+                        setSyncRequestLoading(false)
+                      }
+                    }}
+                    disabled={syncRequestLoading}
+                    className="btn-primary text-sm disabled:opacity-50"
+                  >
+                    {syncRequestLoading ? 'Submitting…' : 'Request Full Stats Sync'}
+                  </button>
+                )}
+              </div>
             )}
 
             {dismissals !== null && dismissals.length > 0 && (() => {
@@ -789,6 +816,37 @@ export default function PlayerProfile() {
                       )
                     })}
                   </div>
+                </div>
+              )
+            })()}
+
+            {dismissals !== null && dismissals.length > 0 && cb?.innings > 0 && (() => {
+              const syncedInnings = dismissals.reduce((s, d) => s + Number(d.count), 0)
+              const totalInnings = Number(cb.innings) || 0
+              const sparseRatio = totalInnings > 0 ? syncedInnings / totalInnings : 1
+              if (sparseRatio >= 0.5 || syncedInnings >= totalInnings) return null
+              return (
+                <div className="bg-navy-800/50 border border-navy-700 rounded p-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-slate-400 text-sm">
+                    Only <span className="text-white font-mono">{syncedInnings}</span> of <span className="text-white font-mono">{totalInnings}</span> innings have game-level data.
+                    Request a full sync to fill in historical records.
+                  </p>
+                  {syncRequested ? (
+                    <span className="text-accent text-sm font-medium">Sync requested ✓</span>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        setSyncRequestLoading(true)
+                        try { await api.requestPlayerSync(playerId) } catch {}
+                        setSyncRequested(true)
+                        setSyncRequestLoading(false)
+                      }}
+                      disabled={syncRequestLoading}
+                      className="btn-primary text-sm disabled:opacity-50 shrink-0"
+                    >
+                      {syncRequestLoading ? 'Submitting…' : 'Request Full Sync'}
+                    </button>
+                  )}
                 </div>
               )
             })()}

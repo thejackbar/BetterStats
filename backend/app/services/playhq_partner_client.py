@@ -115,9 +115,22 @@ async def get_grade_games(grade_id: str) -> list:
     cached = _get_cached(key)
     if cached is not None:
         return cached
-    data = await _get(f"{BASE_URL}/v1/grades/{grade_id}/games")
-    games = data.get("data", [])
-    return _set_cached(key, games)
+
+    all_games = []
+    page = 1
+    while True:
+        data = await _get(f"{BASE_URL}/v1/grades/{grade_id}/games?page={page}&size=50")
+        batch = data.get("data", [])
+        all_games.extend(batch)
+        links = data.get("links") or {}
+        if links.get("next"):
+            page += 1
+        elif len(batch) < 50 or not batch:
+            break
+        else:
+            page += 1
+
+    return _set_cached(key, all_games)
 
 
 def _outcome_to_result(outcome: str) -> Optional[str]:

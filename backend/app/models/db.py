@@ -324,3 +324,19 @@ class ManualPartnershipRecord(Base):
     org = relationship("Organisation")
     batter1 = relationship("Player", foreign_keys=[batter1_id])
     batter2 = relationship("Player", foreign_keys=[batter2_id])
+
+
+class PlayerSyncRequest(Base):
+    __tablename__ = "player_sync_requests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    status = Column(Text, server_default="pending", nullable=False)
+    requester_note = Column(Text, nullable=True)
+    admin_note = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    resolved_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    player = relationship("Player")
+    org = relationship("Organisation")
