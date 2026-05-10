@@ -866,11 +866,11 @@ async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
         stats = {"games_checked": 0, "games_reprocessed": 0, "batting": 0, "bowling": 0, "partnerships": 0}
 
         for game_data in final_games:
-            game_id_str2 = game_data.get("id")
-            if not game_id_str2:
+            game_id_str = game_data.get("id")
+            if not game_id_str:
                 continue
             try:
-                game_uuid = uuid.UUID(game_id_str2)
+                game_uuid = uuid.UUID(game_id_str)
             except ValueError:
                 continue
 
@@ -893,19 +893,19 @@ async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
                 await session.execute(text("DELETE FROM games WHERE id=:gid"), {"gid": str(game_uuid)})
                 await session.commit()
             except Exception as e:
-                logger.error(f"DeepSync: delete failed for game {game_id_str2}: {e}")
+                logger.error(f"DeepSync: delete failed for game {game_id_str}: {e}")
                 await session.rollback()
                 continue
 
             # Re-fetch and store game
             try:
                 scorecard = await playhq_partner_client.get_fixture_scorecard(
-                    game_id_str2,
+                    game_id_str,
                     grade_id=game_data.get("grade_id", ""),
                     game_url=game_data.get("url", ""),
                 )
             except Exception as e:
-                logger.warning(f"DeepSync: scorecard fetch failed for {game_id_str2}: {e}")
+                logger.warning(f"DeepSync: scorecard fetch failed for {game_id_str}: {e}")
                 continue
 
             s_name = (game_data.get("season") or "").strip().lower()
@@ -945,7 +945,7 @@ async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
             try:
                 await session.commit()
             except Exception as e:
-                logger.error(f"DeepSync: game insert failed for {game_id_str2}: {e}")
+                logger.error(f"DeepSync: game insert failed for {game_id_str}: {e}")
                 await session.rollback()
                 continue
 
@@ -1032,7 +1032,7 @@ async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
                 stats["partnerships"] += partnerships_stored
                 stats["games_reprocessed"] += 1
             except Exception as e:
-                logger.error(f"DeepSync: commit failed for game {game_id_str2}: {e}")
+                logger.error(f"DeepSync: commit failed for game {game_id_str}: {e}")
                 await session.rollback()
 
         logger.info(f"DeepSync: complete for player {player_id_str}: {stats}")
