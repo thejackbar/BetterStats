@@ -237,6 +237,15 @@ async def get_dismissal_breakdown(session: AsyncSession, player_id: str) -> list
                 CASE
                     WHEN bi.not_out THEN 'not out'
                     WHEN bi.dismissal_type IS NULL THEN 'unknown'
+                    WHEN bi.dismissal_type = 'b' OR bi.dismissal_type LIKE 'b %' THEN 'bowled'
+                    WHEN bi.dismissal_type = 'c' OR bi.dismissal_type LIKE 'c %' THEN 'caught'
+                    WHEN bi.dismissal_type = 'lbw' OR bi.dismissal_type LIKE 'lbw %'
+                         OR bi.dismissal_type = 'leg before wicket'
+                         OR bi.dismissal_type LIKE 'leg before wicket%' THEN 'lbw'
+                    WHEN bi.dismissal_type = 'st' OR bi.dismissal_type LIKE 'st %' THEN 'stumped'
+                    WHEN bi.dismissal_type LIKE 'run out%' THEN 'run out'
+                    WHEN bi.dismissal_type = 'hit wicket' OR bi.dismissal_type LIKE 'hit wicket%' THEN 'hit wicket'
+                    WHEN bi.dismissal_type LIKE 'ret%' THEN 'retired'
                     ELSE bi.dismissal_type
                 END AS dismissal_type,
                 COUNT(*) AS count
@@ -281,7 +290,6 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str) -> list[di
     result = await session.execute(
         text("""
             SELECT
-                gr.id::text AS grade_id,
                 gr.name AS grade_name,
                 COUNT(*) AS innings,
                 SUM(bi.runs) AS runs,
@@ -296,7 +304,7 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str) -> list[di
             JOIN grades gr ON gr.id = g.grade_id
             WHERE bi.player_id = :pid
               AND bi.runs IS NOT NULL
-            GROUP BY gr.id, gr.name
+            GROUP BY gr.name
             ORDER BY SUM(bi.runs) DESC
         """),
         {"pid": player_id},
@@ -372,27 +380,29 @@ async def get_player_partnerships(session: AsyncSession, player_id: str) -> list
     result = await session.execute(
         text("""
             SELECT
-                pt.wicket_number,
-                pt.innings_number,
-                pt.runs,
-                pt.balls,
-                pt.batter1_runs,
-                pt.batter2_runs,
-                p1.name AS batter1_name,
-                p2.name AS batter2_name,
-                pt.batter1_id::text,
-                pt.batter2_id::text,
-                g.home_team,
-                g.away_team,
-                g.played_at::text
+                CASE WHEN pt.batter1_id = :pid THEN pt.batter2_id::text ELSE pt.batter1_id::text END AS partner_id,
+                CASE WHEN pt.batter1_id = :pid
+                     THEN COALESCE(p2.display_name_override, p2.name)
+                     ELSE COALESCE(p1.display_name_override, p1.name)
+                END AS partner_name,
+                COUNT(*) AS partnership_count,
+                COALESCE(SUM(pt.runs), 0) AS total_runs,
+                MAX(pt.runs) AS best_runs,
+                MAX(g.played_at)::text AS last_played
             FROM partnerships pt
             JOIN games g ON g.id = pt.game_id
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE (pt.batter1_id = :pid OR pt.batter2_id = :pid)
-              AND pt.runs IS NOT NULL
-            ORDER BY pt.runs DESC
-            LIMIT 50
+              AND pt.runs IS NOT NULL AND pt.runs > 0
+            GROUP BY
+                CASE WHEN pt.batter1_id = :pid THEN pt.batter2_id::text ELSE pt.batter1_id::text END,
+                CASE WHEN pt.batter1_id = :pid
+                     THEN COALESCE(p2.display_name_override, p2.name)
+                     ELSE COALESCE(p1.display_name_override, p1.name)
+                END
+            ORDER BY total_runs DESC
+            LIMIT 20
         """),
         {"pid": player_id},
     )
