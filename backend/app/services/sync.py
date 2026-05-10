@@ -918,14 +918,13 @@ async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
                     None,
                 )
 
-            grade_name = (game_data.get("grade") or {}).get("name", "")
-            grade_res = await session.execute(
-                select(Grade).where(
-                    Grade.organisation_id == org.id,
-                    Grade.name == grade_name,
-                )
-            )
-            grade = grade_res.scalars().first()
+            grade_phq = game_data.get("grade_id") or ""
+            try:
+                grade_uuid = uuid.UUID(grade_phq)
+            except (ValueError, TypeError):
+                grade_uuid = None
+
+            grade = await session.get(Grade, grade_uuid) if grade_uuid else None
 
             played_str = game_data.get("played_at", "")
             try:
@@ -935,17 +934,12 @@ async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
 
             new_game = Game(
                 id=game_uuid,
-                organisation_id=org.id,
-                season_id=season["id"] if season else None,
                 grade_id=grade.id if grade else None,
                 played_at=played_date,
                 home_team=game_data.get("home_team", ""),
                 away_team=game_data.get("away_team", ""),
                 result=game_data.get("result"),
                 winning_team=game_data.get("winning_team"),
-                venue=game_data.get("venue"),
-                round_name=game_data.get("round"),
-                status="FINAL",
             )
             session.add(new_game)
             try:
@@ -979,7 +973,7 @@ async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
                             innings_number=innings_num,
                             batting_position=pos,
                             runs=row.get("runs") or 0,
-                            balls_faced=row.get("balls_faced") or 0,
+                            balls=row.get("balls") or 0,
                             fours=row.get("fours") or 0,
                             sixes=row.get("sixes") or 0,
                             not_out=row.get("not_out", False),
@@ -994,16 +988,22 @@ async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
                         name_lc = (row.get("name") or "").strip().lower()
                         pid = name_to_pid.get(name_lc) if name_lc else None
                     if pid:
+                        overs_val = None
+                        try:
+                            overs_val = float(row["overs"]) if row.get("overs") is not None else None
+                        except (ValueError, TypeError):
+                            pass
                         bs = BowlingSpell(
                             game_id=game_uuid,
                             player_id=pid,
                             innings_number=innings_num,
-                            balls=row.get("balls") or 0,
-                            runs_conceded=row.get("runs_conceded") or 0,
-                            wickets=row.get("wickets") or 0,
-                            maidens=row.get("maidens") or 0,
-                            wides=row.get("wides") or 0,
-                            no_balls=row.get("no_balls") or 0,
+                            overs=overs_val,
+                            maidens=row.get("maidens"),
+                            runs=row.get("runs"),
+                            wickets=row.get("wickets"),
+                            wides=row.get("wides"),
+                            no_balls=row.get("no_balls"),
+                            economy=row.get("economy"),
                         )
                         session.add(bs)
                         bowling_stored += 1
@@ -1011,11 +1011,13 @@ async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
                 for p in _derive_partnerships(batting_with_pos, fow_rows, phq_to_pid, name_to_pid):
                     session.add(Partnership(
                         game_id=game_uuid,
-                        batter1_id=p["batter1_id"],
-                        batter2_id=p["batter2_id"],
-                        wicket_number=p["wicket_number"],
-                        runs=p["runs"],
                         innings_number=innings_num,
+                        wicket_number=p["wicket_number"],
+                        batter1_id=p.get("batter1_id"),
+                        batter2_id=p.get("batter2_id"),
+                        runs=p.get("runs") or 0,
+                        batter1_runs=p.get("batter1_runs"),
+                        batter2_runs=p.get("batter2_runs"),
                     ))
                     partnerships_stored += 1
 

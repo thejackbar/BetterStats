@@ -25,7 +25,7 @@ function opponent(row) {
   return row.home_team && row.away_team ? `${row.home_team} v ${row.away_team}` : null
 }
 
-// ── Shared sub-components ─────────────────────────────────────────────────────
+// ── Shared sub-components ──────────────────────────────────────────────────
 
 function RecordCard({ title, children, empty }) {
   return (
@@ -51,7 +51,7 @@ function RankBadge({ rank }) {
   return <span className={clsx('text-xs font-mono w-5 inline-block text-right mr-2', cls)}>{rank}</span>
 }
 
-// ── Batting tab ───────────────────────────────────────────────────────────────
+// ── Batting tab ─────────────────────────────────────────────────────
 
 function BattingTab({ data }) {
   return (
@@ -209,7 +209,7 @@ function BattingTab({ data }) {
   )
 }
 
-// ── Bowling tab ───────────────────────────────────────────────────────────────
+// ── Bowling tab ─────────────────────────────────────────────────────
 
 function BowlingTab({ data }) {
   return (
@@ -329,7 +329,7 @@ function BowlingTab({ data }) {
   )
 }
 
-// ── Partnerships tab ──────────────────────────────────────────────────────────
+// ── Partnerships tab ──────────────────────────────────────────────────
 
 function PartnershipRow({ r, rank }) {
   const b1 = r.batter1_name || 'Unknown'
@@ -453,7 +453,7 @@ function PartnershipsTab({ data }) {
   )
 }
 
-// ── Team tab ──────────────────────────────────────────────────────────────────
+// ── Team tab ─────────────────────────────────────────────────────
 
 function TeamTab({ data }) {
   return (
@@ -516,7 +516,7 @@ function TeamTab({ data }) {
   )
 }
 
-// ── Filters ───────────────────────────────────────────────────────────────────
+// ── Filters ─────────────────────────────────────────────────────
 
 function FilterBar({ seasons, seasonId, onSeasonChange, grades, gradeId, onGradeChange }) {
   return (
@@ -547,7 +547,7 @@ function FilterBar({ seasons, seasonId, onSeasonChange, grades, gradeId, onGrade
   )
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Main page ─────────────────────────────────────────────────────
 
 export default function Records() {
   const { clubSlug } = useParams()

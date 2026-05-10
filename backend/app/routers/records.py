@@ -138,7 +138,7 @@ async def get_records(
         rows = await db.execute(text(sql), params or p)
         return [dict(r) for r in rows.mappings().all()]
 
-    # ── Batting ──────────────────────────────────────────────────────────────
+    # ── Batting ────────────────────────────────────────────────────────────────────────
 
     top_career_runs = await q("""
         SELECT p.id::text AS player_id, p.name,
@@ -254,7 +254,7 @@ async def get_records(
         ORDER BY pss.runs DESC LIMIT :limit
     """)
 
-    # ── Bowling ──────────────────────────────────────────────────────────────
+    # ── Bowling ────────────────────────────────────────────────────────────────────────
 
     top_career_wickets = await q("""
         SELECT p.id::text AS player_id, p.name,
@@ -347,7 +347,7 @@ async def get_records(
         ORDER BY pss.wickets DESC LIMIT :limit
     """)
 
-    # ── Partnerships ─────────────────────────────────────────────────────────
+    # ── Partnerships ──────────────────────────────────────────────────────────────────────
 
     top_partnerships = await q("""
         SELECT
@@ -448,7 +448,7 @@ async def get_records(
         ORDER BY total_runs DESC LIMIT :limit
     """)
 
-    # ── Team / fielding ───────────────────────────────────────────────────────
+    # ── Team / fielding ───────────────────────────────────────────────────────────────────────
 
     most_matches = await q("""
         SELECT p.id::text AS player_id, p.name,

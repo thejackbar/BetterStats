@@ -203,7 +203,7 @@ async def get_org_games(
     if cached is not None:
         return cached
 
-    # ── Discover seasons ───────────────────────────────────────
+    # ── Discover seasons ──────────────────────────────────────────────────────
     try:
         api_seasons = await get_org_seasons(playhq_id)
     except Exception as e:
@@ -233,7 +233,7 @@ async def get_org_games(
 
     logger.info(f"PlayHQ: {len(unique_seasons)} seasons to probe for {playhq_id}: {[s['name'] for s in unique_seasons[:10]]}")
 
-    # ── Discover grades via season IDs (cached per season) ─────────────────
+    # ── Discover grades via season IDs (cached per season) ─────────────────────────
     season_grade_results = await asyncio.gather(
         *[get_season_grades(s["id"]) for s in unique_seasons],
         return_exceptions=True,
