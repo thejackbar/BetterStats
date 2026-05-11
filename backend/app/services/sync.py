@@ -3,9 +3,6 @@ import uuid
 from datetime import datetime, timezone, date
 from typing import Optional
 
-# Rolling in-memory sync log (last 30 entries per org, survives until restart)
-_sync_log: dict[str, list] = {}
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, text
 from sqlalchemy.sql import func
@@ -13,7 +10,7 @@ from sqlalchemy.sql import func
 from app.models.db import (
     Organisation, Season, Grade, Game, Player,
     BattingInnings, BowlingSpell, FallOfWicket, Partnership,
-    PlayerSeasonStats, Milestone, PhqIdSuggestion, async_session_maker
+    PlayerSeasonStats, Milestone, PhqIdSuggestion, SyncRun, async_session_maker
 )
 from app.services import playhq_client
 
@@ -43,26 +40,65 @@ async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisa
     return org
 
 
-def _record_sync_log(org_id: str, started_at: str, stats: dict, error: str = "") -> None:
-    entry = {
-        "started_at": started_at,
-        "completed_at": datetime.now(timezone.utc).isoformat(),
-        "stats": stats,
-        "error": error,
-    }
-    log = _sync_log.setdefault(org_id, [])
-    log.insert(0, entry)
-    _sync_log[org_id] = log[:30]
+async def start_sync_run(
+    org_id: uuid.UUID,
+    kind: str,
+    player_id: Optional[uuid.UUID] = None,
+) -> uuid.UUID:
+    run_id = uuid.uuid4()
+    async with async_session_maker() as session:
+        session.add(SyncRun(
+            id=run_id,
+            org_id=org_id,
+            player_id=player_id,
+            kind=kind,
+            status="running",
+            stats={},
+        ))
+        await session.commit()
+    return run_id
 
 
-async def sync_organisation(org_id_str: str) -> dict:
+async def update_sync_run(run_id: uuid.UUID, stats: dict) -> None:
+    async with async_session_maker() as session:
+        run = await session.get(SyncRun, run_id)
+        if run:
+            run.stats = dict(stats)
+            run.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+
+
+async def finish_sync_run(run_id: uuid.UUID, stats: dict, error: str = "") -> None:
+    async with async_session_maker() as session:
+        run = await session.get(SyncRun, run_id)
+        if not run:
+            return
+        run.stats = dict(stats)
+        run.status = "error" if error else "success"
+        run.error = error or None
+        now = datetime.now(timezone.utc)
+        run.completed_at = now
+        run.updated_at = now
+        await session.commit()
+
+
+async def sync_organisation(
+    org_id_str: str,
+    run_id: Optional[uuid.UUID] = None,
+    kind: str = "org_full",
+) -> dict:
     """Full historical sync for an organisation using season-aggregate stats."""
-    logger.info(f"Starting sync for org {org_id_str}")
-    started_at = datetime.now(timezone.utc).isoformat()
+    logger.info(f"Starting sync for org {org_id_str} (run_id={run_id}, kind={kind})")
+
+    org_uuid = _parse_uuid(org_id_str)
+    owns_run = run_id is None
+    if owns_run and org_uuid:
+        run_id = await start_sync_run(org_uuid, kind)
 
     org_data = await playhq_client.get_organisation(org_id_str)
     if not org_data:
-        _record_sync_log(org_id_str, started_at, {}, "Organisation not found")
+        if run_id:
+            await finish_sync_run(run_id, {}, "Organisation not found")
         return {"error": "Organisation not found", "org_id": org_id_str}
 
     stats = {"seasons": 0, "players": 0, "season_stats": 0,
@@ -242,6 +278,8 @@ async def sync_organisation(org_id_str: str) -> dict:
             stats["players"] += len(player_data)
             stats["season_stats"] += len(player_data)
             logger.info(f"Season {season_data.get('name')}: {len(player_data)} players synced")
+            if run_id:
+                await update_sync_run(run_id, stats)
 
         # Recompute milestones for all players in this org
         all_pids_res = await session.execute(
@@ -272,6 +310,8 @@ async def sync_organisation(org_id_str: str) -> dict:
                 stats["playhq_games_found"] = len(all_games)
                 stats["playhq_games_final"] = final_count
                 logger.info(f"PlayHQ: {len(all_games)} total games, {final_count} FINAL")
+                if run_id:
+                    await update_sync_run(run_id, stats)
             except Exception as e:
                 logger.error(f"PlayHQ get_org_games failed for {org_id_str}: {e}\n{_tb.format_exc()}")
                 all_games = []
@@ -283,13 +323,16 @@ async def sync_organisation(org_id_str: str) -> dict:
                     logger.error(f"PlayHQ backfill failed for {org_id_str}: {e}\n{_tb.format_exc()}")
                     await session.rollback()
                 try:
-                    game_stats = await sync_game_level_data(session, org, all_games)
+                    game_stats = await sync_game_level_data(session, org, all_games, run_id=run_id)
                     stats.update(game_stats)
                 except Exception as e:
                     logger.error(f"PlayHQ game-level sync failed for {org_id_str}: {e}\n{_tb.format_exc()}")
 
         logger.info(f"Sync complete: {stats}")
-        _record_sync_log(org_id_str, started_at, stats)
+        if run_id and owns_run:
+            await finish_sync_run(run_id, stats)
+        elif run_id:
+            await update_sync_run(run_id, stats)
         return stats
 
 
@@ -354,12 +397,20 @@ async def sync_game_level_data(
     session: AsyncSession,
     org: Organisation,
     all_games: list,
+    run_id: Optional[uuid.UUID] = None,
 ) -> dict:
-    """Store game-level batting/bowling/partnership rows from PlayHQ scorecards."""
+    """Store game-level batting/bowling/partnership rows from PlayHQ scorecards.
+
+    Top-up behaviour: for games that already have stats, re-fetch the scorecard
+    and insert any missing (player_id, innings_number) batting/bowling rows.
+    Partnerships and fall-of-wickets are not re-derived for existing games to
+    avoid clobbering manually-edited data.
+    """
     from app.services import playhq_partner_client
     from datetime import date as date_cls
 
     stats = {"games_new": 0, "batting": 0, "bowling": 0, "partnerships": 0,
+             "games_topped_up": 0,
              "games_skipped_done": 0, "games_skipped_season": 0, "games_skipped_no_stats": 0}
 
     final_games = [g for g in all_games if g.get("status") == "FINAL"]
@@ -419,7 +470,101 @@ async def sync_game_level_data(
                 {"gid": str(game_uuid)},
             )
             if has_stats.scalar():
-                stats["games_skipped_done"] += 1
+                # Top-up: fetch the scorecard and insert batting/bowling rows
+                # for players that didn't get matched on a previous sync.
+                # Partnerships and fall-of-wickets are NOT re-derived here to preserve
+                # any manually-edited data; full reprocessing goes through deep_sync_player.
+                try:
+                    scorecard = await playhq_partner_client.get_fixture_scorecard(
+                        game_id_str, game_url=game_data.get("url", "")
+                    )
+                except Exception as e:
+                    logger.warning(f"GameSync: top-up scorecard fetch failed for {game_id_str}: {e}")
+                    stats["games_skipped_done"] += 1
+                    continue
+
+                bat_existing_res = await session.execute(
+                    _text("SELECT player_id, innings_number FROM batting_innings WHERE game_id=:gid"),
+                    {"gid": str(game_uuid)},
+                )
+                bat_existing = {(str(r.player_id), r.innings_number) for r in bat_existing_res.mappings().all()}
+
+                bowl_existing_res = await session.execute(
+                    _text("SELECT player_id, innings_number FROM bowling_spells WHERE game_id=:gid"),
+                    {"gid": str(game_uuid)},
+                )
+                bowl_existing = {(str(r.player_id), r.innings_number) for r in bowl_existing_res.mappings().all()}
+
+                topup_batting = 0
+                topup_bowling = 0
+                for innings in (scorecard.get("innings") or []):
+                    inn_num = innings.get("innings_number", 1)
+
+                    for row in innings.get("batting", []):
+                        pid = phq_to_pid.get(row.get("playhq_appearance_id") or "")
+                        if not pid:
+                            name_lc = (row.get("name") or "").strip().lower()
+                            pid = name_to_pid.get(name_lc) if name_lc else None
+                        if not pid or (str(pid), inn_num) in bat_existing:
+                            continue
+                        session.add(BattingInnings(
+                            game_id=game_uuid,
+                            player_id=pid,
+                            innings_number=inn_num,
+                            runs=row.get("runs"),
+                            balls=row.get("balls"),
+                            fours=row.get("fours"),
+                            sixes=row.get("sixes"),
+                            not_out=row.get("not_out", False),
+                            dismissal_type=row.get("how_out") or None,
+                            batting_position=row.get("batting_position"),
+                        ))
+                        bat_existing.add((str(pid), inn_num))
+                        topup_batting += 1
+
+                    for row in innings.get("bowling", []):
+                        pid = phq_to_pid.get(row.get("playhq_appearance_id") or "")
+                        if not pid:
+                            name_lc = (row.get("name") or "").strip().lower()
+                            pid = name_to_pid.get(name_lc) if name_lc else None
+                        if not pid or (str(pid), inn_num) in bowl_existing:
+                            continue
+                        overs_val = None
+                        try:
+                            overs_val = float(row["overs"]) if row.get("overs") is not None else None
+                        except (ValueError, TypeError):
+                            pass
+                        session.add(BowlingSpell(
+                            game_id=game_uuid,
+                            player_id=pid,
+                            innings_number=inn_num,
+                            overs=overs_val,
+                            maidens=row.get("maidens"),
+                            runs=row.get("runs"),
+                            wickets=row.get("wickets"),
+                            wides=row.get("wides"),
+                            no_balls=row.get("no_balls"),
+                            economy=row.get("economy"),
+                        ))
+                        bowl_existing.add((str(pid), inn_num))
+                        topup_bowling += 1
+
+                if topup_batting == 0 and topup_bowling == 0:
+                    stats["games_skipped_done"] += 1
+                    continue
+
+                try:
+                    await session.commit()
+                    stats["batting"] += topup_batting
+                    stats["bowling"] += topup_bowling
+                    stats["games_topped_up"] += 1
+                    logger.info(
+                        f"GameSync: topped up game {game_id_str}: "
+                        f"+{topup_batting} batting, +{topup_bowling} bowling"
+                    )
+                except Exception as e:
+                    logger.error(f"GameSync: top-up commit failed for {game_id_str}: {e}")
+                    await session.rollback()
                 continue
             else:
                 logger.info(f"GameSync: re-processing dead game record {game_id_str}")
@@ -620,6 +765,10 @@ async def sync_game_level_data(
             logger.error(f"GameSync: commit failed for game {game_id_str}: {e}")
             await session.rollback()
 
+        processed = stats["games_new"] + stats["games_topped_up"] + stats["games_skipped_done"]
+        if run_id and processed and processed % 25 == 0:
+            await update_sync_run(run_id, stats)
+
     logger.info(f"GameSync: {stats} for org {org_id}")
     return stats
 
@@ -636,7 +785,8 @@ async def _backfill_player_playhq_ids(
     final_games.sort(key=lambda g: g.get("played_at") or "", reverse=True)
 
     stamped = 0
-    for game in final_games[:50]:
+    logger.info(f"Backfill: scanning {len(final_games)} FINAL games for org {org.id}")
+    for game in final_games:
         game_id = game.get("id")
         if not game_id:
             continue
@@ -792,20 +942,34 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
         await session.commit()
 
 
-async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
+async def deep_sync_player(
+    org_id_str: str,
+    player_id_str: str,
+    run_id: Optional[uuid.UUID] = None,
+) -> dict:
     """Re-process ALL games for an org, forcing reprocessing for any game that involves the target player."""
     from app.models.db import PlayerSyncRequest
     from app.services import playhq_partner_client
 
-    logger.info(f"DeepSync: starting for player {player_id_str} in org {org_id_str}")
+    logger.info(f"DeepSync: starting for player {player_id_str} in org {org_id_str} (run_id={run_id})")
+
+    org_uuid = _parse_uuid(org_id_str)
+    player_uuid = _parse_uuid(player_id_str)
+    owns_run = run_id is None
+    if owns_run and org_uuid:
+        run_id = await start_sync_run(org_uuid, "player_deep", player_id=player_uuid)
 
     async with async_session_maker() as session:
         org = await session.get(Organisation, uuid.UUID(org_id_str))
         if not org or not org.playhq_id:
+            if run_id:
+                await finish_sync_run(run_id, {}, "Organisation not found or missing playhq_id")
             return {"error": "Organisation not found or missing playhq_id"}
 
         player = await session.get(Player, uuid.UUID(player_id_str))
         if not player:
+            if run_id:
+                await finish_sync_run(run_id, {}, "Player not found")
             return {"error": "Player not found"}
 
         player_name = (player.name or "").strip().lower()
@@ -1035,7 +1199,14 @@ async def deep_sync_player(org_id_str: str, player_id_str: str) -> dict:
                 logger.error(f"DeepSync: commit failed for game {game_id_str}: {e}")
                 await session.rollback()
 
+            if run_id and stats["games_checked"] % 20 == 0:
+                await update_sync_run(run_id, stats)
+
         logger.info(f"DeepSync: complete for player {player_id_str}: {stats}")
+        if run_id and owns_run:
+            await finish_sync_run(run_id, stats)
+        elif run_id:
+            await update_sync_run(run_id, stats)
         return stats
 
 

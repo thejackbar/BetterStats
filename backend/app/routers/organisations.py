@@ -62,13 +62,16 @@ async def onboard_organisation(
     name = data.org_name.strip() or org_data.get("name") or data.org_id
     org_data["name"] = name
 
-    await upsert_organisation(db, org_data)
-    background_tasks.add_task(sync_organisation, data.org_id)
+    from app.services.sync import start_sync_run
+    org = await upsert_organisation(db, org_data)
+    run_id = await start_sync_run(org.id, "org_full")
+    background_tasks.add_task(_sync_safe, data.org_id, run_id, "org_full")
 
     return {
         "status": "sync_started",
         "org_id": data.org_id,
         "name": name,
+        "run_id": str(run_id),
     }
 
 
@@ -212,31 +215,51 @@ async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
     return upcoming[:20]
 
 
-async def _sync_safe(org_id: str):
-    from datetime import datetime, timezone
-    from app.services.sync import _record_sync_log
+async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full"):
+    from app.services.sync import finish_sync_run
     import logging
-    started_at = datetime.now(timezone.utc).isoformat()
     try:
-        await sync_organisation(org_id)
+        await sync_organisation(org_id, run_id=run_id, kind=kind)
     except Exception as exc:
         import traceback
         logging.getLogger(__name__).error(f"Sync crashed for {org_id}: {exc}\n{traceback.format_exc()}")
-        _record_sync_log(org_id, started_at, {}, f"Unexpected error: {exc}")
+        await finish_sync_run(run_id, {}, f"Unexpected error: {exc}")
     finally:
         _org_sync_running.discard(org_id)
 
 
 @router.post("/{org_id}/sync", status_code=202)
 async def trigger_sync(org_id: str, background_tasks: BackgroundTasks):
+    from app.services.sync import start_sync_run
     if org_id in _org_sync_running:
         return {"status": "already_running", "org_id": org_id}
+    org_uuid = uuid.UUID(org_id)
+    run_id = await start_sync_run(org_uuid, "org_full")
     _org_sync_running.add(org_id)
-    background_tasks.add_task(_sync_safe, org_id)
-    return {"status": "sync_started", "org_id": org_id}
+    background_tasks.add_task(_sync_safe, org_id, run_id, "org_full")
+    return {"status": "sync_started", "org_id": org_id, "run_id": str(run_id)}
 
 
 @router.get("/{org_id}/sync-logs")
-async def get_sync_logs(org_id: str):
-    from app.services.sync import _sync_log
-    return _sync_log.get(org_id, [])
+async def get_sync_logs(org_id: str, db: AsyncSession = Depends(get_db)):
+    from app.models.db import SyncRun
+    org_uuid = uuid.UUID(org_id)
+    res = await db.execute(
+        select(SyncRun)
+        .where(SyncRun.org_id == org_uuid)
+        .order_by(SyncRun.started_at.desc())
+        .limit(30)
+    )
+    runs = res.scalars().all()
+    return [
+        {
+            "id": str(r.id),
+            "kind": r.kind,
+            "status": r.status,
+            "started_at": r.started_at.isoformat() if r.started_at else None,
+            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            "stats": r.stats or {},
+            "error": r.error,
+        }
+        for r in runs
+    ]
