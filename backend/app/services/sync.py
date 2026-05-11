@@ -9,7 +9,7 @@ from sqlalchemy.sql import func
 
 from app.models.db import (
     Organisation, Season, Grade, Game, Player,
-    BattingInnings, BowlingSpell, FallOfWicket, Partnership,
+    BattingInnings, BowlingSpell, FieldingStat, FallOfWicket, Partnership,
     PlayerSeasonStats, Milestone, PhqIdSuggestion, SyncRun, async_session_maker
 )
 from app.services import playhq_client
