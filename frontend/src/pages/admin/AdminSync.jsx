@@ -393,6 +393,24 @@ export default function AdminSync() {
                         {s.games_skipped_no_stats != null && (
                           <StatPill label="no stats" value={s.games_skipped_no_stats} highlight={s.games_skipped_no_stats > 0} />
                         )}
+                        {s.gr_matches_seen != null && (
+                          <StatPill label="GR matches" value={s.gr_matches_seen} highlight={s.gr_matches_seen > 0} />
+                        )}
+                        {s.gr_games_new != null && (
+                          <StatPill label="GR new games" value={s.gr_games_new} highlight={s.gr_games_new > 0} />
+                        )}
+                        {s.gr_batting != null && (
+                          <StatPill label="GR batting" value={s.gr_batting} highlight={s.gr_batting > 0} />
+                        )}
+                        {s.gr_bowling != null && (
+                          <StatPill label="GR bowling" value={s.gr_bowling} highlight={s.gr_bowling > 0} />
+                        )}
+                        {s.gr_fielding != null && (
+                          <StatPill label="GR fielding" value={s.gr_fielding} highlight={s.gr_fielding > 0} />
+                        )}
+                        {s.gr_partnerships != null && (
+                          <StatPill label="GR partnerships" value={s.gr_partnerships} highlight={s.gr_partnerships > 0} />
+                        )}
                       </div>
                     )}
                   </div>
