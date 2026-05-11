@@ -120,6 +120,10 @@ export const api = {
   adminListSyncRuns: (limit = 30) =>
     request(`/club-admin/sync-runs?limit=${limit}`),
   adminGetSyncRun: (runId) => request(`/club-admin/sync-runs/${runId}`),
+  adminClearSyncRuns: () =>
+    request('/club-admin/sync-runs', { method: 'DELETE' }),
+  adminClearResolvedSyncRequests: () =>
+    request('/club-admin/sync-requests/resolved', { method: 'DELETE' }),
   adminListPhqSuggestions: () => request('/club-admin/phq-suggestions'), // returns {suggestions, scanning}
   adminRunPhqSuggestions: () => request('/club-admin/phq-suggestions/run', { method: 'POST' }),
   adminActionPhqSuggestion: (id, action, playerId) =>

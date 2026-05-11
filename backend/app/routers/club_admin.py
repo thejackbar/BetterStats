@@ -789,6 +789,36 @@ async def hard_refresh_org(
     return {"status": "started", "run_id": str(run_id), "org_id": org_id_str}
 
 
+@router.delete("/sync-runs")
+async def clear_sync_runs(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete completed/errored sync runs for this org. Preserves any currently-running rows."""
+    res = await db.execute(
+        _text("DELETE FROM sync_runs WHERE org_id = :oid AND status != 'running'"),
+        {"oid": str(club.id)},
+    )
+    await db.commit()
+    return {"deleted": res.rowcount}
+
+
+@router.delete("/sync-requests/resolved")
+async def clear_resolved_sync_requests(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete approved/dismissed player sync requests for this org. Preserves pending ones."""
+    res = await db.execute(
+        _text("DELETE FROM player_sync_requests WHERE org_id = :oid AND status != 'pending'"),
+        {"oid": str(club.id)},
+    )
+    await db.commit()
+    return {"deleted": res.rowcount}
+
+
 @router.get("/sync-runs")
 async def list_sync_runs(
     current_user: User = Depends(get_current_user),
