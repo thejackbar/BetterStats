@@ -60,20 +60,36 @@ async def start_sync_run(
 
 
 async def update_sync_run(run_id: uuid.UUID, stats: dict) -> None:
+    """Merge `stats` into the run's existing stats dict (don't replace).
+
+    Each sub-phase (PlayHQ Partner, Grassroots scores) tracks its own keys.
+    Merging means keys from earlier phases stay visible on the dashboard even
+    while a later phase is writing its own progress.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
     async with async_session_maker() as session:
         run = await session.get(SyncRun, run_id)
         if run:
-            run.stats = dict(stats)
+            merged = dict(run.stats or {})
+            merged.update(stats)
+            run.stats = merged
+            flag_modified(run, "stats")  # JSON column mutation hint
             run.updated_at = datetime.now(timezone.utc)
             await session.commit()
 
 
 async def finish_sync_run(run_id: uuid.UUID, stats: dict, error: str = "") -> None:
+    """Mark a run as final. Stats here are merged on top of whatever is in the
+    DB — preserves intermediate updates from sub-phases."""
+    from sqlalchemy.orm.attributes import flag_modified
     async with async_session_maker() as session:
         run = await session.get(SyncRun, run_id)
         if not run:
             return
-        run.stats = dict(stats)
+        merged = dict(run.stats or {})
+        merged.update(stats)
+        run.stats = merged
+        flag_modified(run, "stats")
         run.status = "error" if error else "success"
         run.error = error or None
         now = datetime.now(timezone.utc)
