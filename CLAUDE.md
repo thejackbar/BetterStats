@@ -59,13 +59,13 @@ Cricket Australia hosts club cricket data across **two separate backends**, both
 
 ## Sync Architecture
 
-- **Full sync** (`POST /organisations/{id}/sync`) / **Hard refresh** (`POST /club-admin/hard-refresh`): scheduled weekly + on-demand. Three game-level passes in order:
+- **Full sync** (`POST /organisations/{id}/sync`) / **Hard refresh** (`POST /club-admin/hard-refresh`): scheduled weekly + on-demand. Two passes:
   1. **Grassroots aggregate** (`playhq_client.get_*_stats`) — season totals for all 52 seasons. Source of `player_season_stats`.
-  2. **PlayHQ Partner** (`playhq_partner_client.get_org_games` + `sync_game_level_data`) — recent-only (~3 seasons of game-level coverage with public API key). Has top-up logic.
-  3. **Grassroots scores** (`grassroots_scores_client` + `sync_grassroots_game_level_data`) — historical scorecards back to ~2002. Enumerates teams-per-season, fans out to `/scores/teams/{id}/matches`, fetches `/scores/matches/{id}?includeScorecard` for each. Skips PlayHQ-namespace IDs that 204.
-- **Per-player deep sync**: `deep_sync_player()` — admin-triggered, re-pulls FINAL PlayHQ games for that player.
-- **Top-up in `sync_game_level_data`**: for PlayHQ games already in DB, re-fetches the scorecard and inserts only `(player_id, innings_number)` rows that are missing. Partnerships/FoW not re-derived for existing games (preserves manual edits).
-- **Sync runs persisted** in `sync_runs` table (migration 005). Stale `running` rows are marked `error` on backend startup.
+  2. **Grassroots scores** (`grassroots_scores_client` + `sync_grassroots_game_level_data`) — game-level scorecards back to ~2002. Enumerates teams-per-season via `/fixturesladders/.../teams?seasonId=`, fans out to `/scores/teams/{id}/matches`, fetches `/scores/matches/{id}?includeScorecard` for each. Skips PHQ-namespace IDs that 204. Per-game session pattern to avoid async session deadlock. Uses `session.get(Grade, ...)` to avoid stale-cache FK violations.
+- **PlayHQ Partner game-level sync** is **disabled** in `sync_organisation`. The public API key only exposed ~3 seasons of history vs Grassroots's 50+, AND because the same physical match has different UUIDs in PHQ vs Grassroots, running both produced duplicate batting rows (the existing-game skip is UUID-based). Kept the code commented in case we get a Partner-tier key.
+- **Per-player deep sync**: `deep_sync_player()` — admin-triggered, re-pulls FINAL PlayHQ games for that player (still on the Partner path; pre-dates the Grassroots unlock).
+- **Sync runs persisted** in `sync_runs` table (migration 005). `update_sync_run` and `finish_sync_run` MERGE stats into the existing row (don't replace) so sub-phases accumulate. Stale `running` rows are marked `error` on backend startup.
+- **GR scorecard team-name parsing**: `isHome` lives on `matchSummary.teams`, NOT on the top-level `teams` array. Reading from the wrong field is silently OK (no error) but produces empty `home_team`.
 
 ## Key Notes
 
