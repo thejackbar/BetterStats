@@ -305,44 +305,18 @@ async def sync_organisation(
         if all_player_ids:
             await _compute_milestones(session, all_player_ids, org_id)
 
-        # Backfill PlayHQ player IDs + full game-level data
-        if org.playhq_id:
-            import traceback as _tb
-            try:
-                from app.services import playhq_partner_client
-                db_seasons_res2 = await session.execute(
-                    select(Season).where(Season.organisation_id == org_id)
-                )
-                db_seasons_list = [
-                    {"id": str(s.id), "name": s.name}
-                    for s in db_seasons_res2.scalars().all()
-                ]
-                all_games = await playhq_partner_client.get_org_games(
-                    org.playhq_id, org.name,
-                    db_seasons=db_seasons_list,
-                    grassroots_org_id=org_id_str,
-                )
-                final_count = sum(1 for g in all_games if g.get('status') == 'FINAL')
-                stats["playhq_games_found"] = len(all_games)
-                stats["playhq_games_final"] = final_count
-                logger.info(f"PlayHQ: {len(all_games)} total games, {final_count} FINAL")
-                if run_id:
-                    await update_sync_run(run_id, stats)
-            except Exception as e:
-                logger.error(f"PlayHQ get_org_games failed for {org_id_str}: {e}\n{_tb.format_exc()}")
-                all_games = []
-
-            if all_games:
-                try:
-                    await _backfill_player_playhq_ids(session, org, all_games)
-                except Exception as e:
-                    logger.error(f"PlayHQ backfill failed for {org_id_str}: {e}\n{_tb.format_exc()}")
-                    await session.rollback()
-                try:
-                    game_stats = await sync_game_level_data(session, org, all_games, run_id=run_id)
-                    stats.update(game_stats)
-                except Exception as e:
-                    logger.error(f"PlayHQ game-level sync failed for {org_id_str}: {e}\n{_tb.format_exc()}")
+        # PlayHQ Partner game-level sync — DISABLED.
+        # Grassroots /scores/* is now our single source of truth for game-level
+        # data. It covers all 50+ seasons of history vs PlayHQ Partner's 3
+        # seasons (the public API key caps history to recent). Running both
+        # caused duplicate batting rows because the same physical match has
+        # different UUIDs in the two backends and our existing-game check is
+        # UUID-based. See CLAUDE.md "Data Source Topology" for the full story.
+        #
+        # Kept here as commented-out code in case we ever get a Partner-tier
+        # API key from PlayHQ and want to re-enable Partner as a secondary
+        # source for very-recent games Grassroots hasn't yet indexed.
+        all_games = []  # unused; kept so downstream code that references it stays valid
 
         # Grassroots /scores/* — historical (pre-PlayHQ-migration) scorecards.
         # Independent of org.playhq_id; uses its own DB session because the
@@ -1019,9 +993,13 @@ async def sync_grassroots_game_level_data(
                     (t for t in teams_data if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id_str.lower()),
                     None,
                 )
-                home_team_name = next((t.get("displayName", "") for t in teams_data if t.get("isHome")), "")
-                away_team_name = next((t.get("displayName", "") for t in teams_data if not t.get("isHome")), "")
+                # isHome lives on matchSummary.teams, NOT on the top-level
+                # teams array (which has no isHome field at all). Bug from
+                # initial version: was reading from teams_data and getting
+                # empty home_team on every game.
                 summary_teams = (scorecard.get("matchSummary") or {}).get("teams") or []
+                home_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "")
+                away_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "")
                 winner_name = next((t.get("displayName") for t in (teams_data or []) + summary_teams if t.get("isWinner")), None)
                 result_text = None
                 for st in summary_teams:
