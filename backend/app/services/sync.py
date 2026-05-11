@@ -189,15 +189,29 @@ async def sync_organisation(
             if not player_data:
                 continue
 
-            # Build merged-player map so sync doesn't recreate deleted duplicates
+            # Build merged-player map so sync doesn't recreate deleted duplicates.
+            # Filter by undone_at IS NULL — historically-bad rows get marked undone by
+            # an admin op (e.g. merge that was reversed by a later re-merge in the
+            # opposite direction; the original entry is stale data poisoning the redirect).
+            # Resolve transitively (A→B→C ⇒ A→C) with cycle break so a chain
+            # of merges still lands on the final kept player.
             try:
                 merge_res = await session.execute(
-                    text("SELECT removed_player_id::text, keep_player_id FROM merge_logs WHERE org_id = :org_id"),
+                    text(
+                        "SELECT removed_player_id::text AS removed, keep_player_id::text AS keep "
+                        "FROM merge_logs "
+                        "WHERE org_id = :org_id AND undone_at IS NULL"
+                    ),
                     {"org_id": str(org_id)},
                 )
-                merged_away: dict[str, uuid.UUID] = {
-                    r.removed_player_id: r.keep_player_id for r in merge_res.mappings().all()
-                }
+                raw_redirects: dict[str, str] = {r.removed: r.keep for r in merge_res.mappings().all()}
+                merged_away: dict[str, uuid.UUID] = {}
+                for removed_id, target in raw_redirects.items():
+                    seen = {removed_id}
+                    while target in raw_redirects and target not in seen:
+                        seen.add(target)
+                        target = raw_redirects[target]
+                    merged_away[removed_id] = uuid.UUID(target)
             except Exception:
                 await session.rollback()
                 merged_away = {}
