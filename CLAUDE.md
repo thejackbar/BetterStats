@@ -42,11 +42,16 @@ Cricket Australia hosts club cricket data across **two separate backends**, both
    - Partner REST API `api.playhq.com/v1/...` — public key only returns ~3 seasons (Summer 23/24, 24/25, 25/26). `/teams` is 401 with public key. `/grades` (org-level) is 404. `/v2/games/{id}/summary` works for IDs in this universe.
    - Public GraphQL `api.playhq.com/graphql` — `discoverGame` works for current games, `discoverGradeFixture` and `discoverTeamFixture` 500 with "Bolt adapter map not found" (require session/cookie auth the website holds). Schema introspection disabled.
 
-2. **MyCricket / Pulselive Play Community** (legacy / pre-migration, back to ~2002): also GUID-keyed in URLs but maps internally to integer IDs. Reachable via:
-   - `grassrootsapiproxy.cricket.com.au` — our existing proxy. Aggregate stats endpoints (`/participants/.../batting-statistics` etc.) work with no auth. Game-level endpoints (`/fixturesladders/games/{id}`, `/participants/games/{id}/batting`, `/scorecards/...`) **exist** but return `403 "The API key you provided does not have access to the requested resource."` — proxy's upstream key is scope-limited.
-   - `apiv2.cricket.com.au` — has Swagger UI at `/`, OpenAPI at `/openapi.json`. Endpoints include `/scorecard?FixtureId=...&CompetitionId=...`, `/innings`, `/playerstats/career`. **BUT** this is the **international** stats API (Ashes, BBL, Sheffield Shield) — it does NOT contain club cricket data.
-   - `api.playcommunity.pulselive.com` — only verified path is `/registration` so far; broader scope unknown.
+2. **MyCricket / Pulselive Play Community** (legacy / pre-migration, back to ~2002): GUID-keyed throughout (different namespace from PlayHQ). Reachable via the same `grassrootsapiproxy.cricket.com.au` host we already use — just on a different path prefix than the proxy's restricted endpoints:
+   - **`/scores/teams/{team_id}/matches`** — list of matches a team played that season. ✓ unauthenticated.
+   - **`/scores/matches/{match_id}?responseModifier=includeScorecard`** — full scorecard (batting, bowling, fielding, fall-of-wickets). ✓ unauthenticated. Returns **HTTP 204 No Content** for post-migration PlayHQ-namespace IDs, which is a clean "not mine" signal.
+   - `participantId` in the response **is the same GUID as `players.id` in our DB** — no extra mapping needed.
+   - The restricted paths (`/fixturesladders/games/{id}`, `/participants/games/{id}/batting`, `/scorecards/...`) all return `403 "API key does not have access"`. **Don't try those.** The `/scores/*` path is the one that works.
+   - `apiv2.cricket.com.au` — has Swagger UI at `/`, OpenAPI at `/openapi.json`. Looks promising at first glance but is the **international** stats API (Ashes, BBL, Sheffield Shield) — does NOT contain club cricket data. Skip.
+   - `api.playcommunity.pulselive.com` — verified `/registration` only; broader scope unknown.
    - `crm-communitycricket-cdn.cricket.com.au` — referenced by the bundle, scope unknown.
+
+   **How to find the real API call**: the play.cricket.com.au website is a CSR Pulselive SPA (`window.API_ACCOUNT = 'playcommunity'`, bundle at `/resources/playcricket/v1.28.6/scripts/bundle-es.min.js`). HTML is just a shell. Anonymous server-side curls of `ca.playhq.com/*` and JS bundles get 403'd. Network-tab the request from a real browser load to recover the URL — that's how we found `/scores/*`.
 
 3. **Pagination quirk**: PlayHQ's `links.next` is sometimes returned forever even when the data is exhausted (observed paginating past page 1100 on a single grade). Our pagination loops cap at MAX_PAGES=200 and stop on the first short batch — never trust `links.next` alone.
 
@@ -54,10 +59,12 @@ Cricket Australia hosts club cricket data across **two separate backends**, both
 
 ## Sync Architecture
 
-- **Full sync** (`POST /organisations/{id}/sync`): scheduled weekly Sun 03:00 + on-demand. Pulls aggregate stats per season, then PlayHQ Partner games for the recent 3 seasons.
-- **Hard refresh** (`POST /club-admin/hard-refresh`, admin-only): same code path as full sync but explicit. For long historical pulls.
-- **Per-player deep sync** (admin approves a `player_sync_request`): `deep_sync_player()` re-pulls all FINAL games for the org and re-inserts game-level rows for that one player.
-- **Top-up logic** in `sync_game_level_data`: for games already in DB, re-fetches the scorecard and inserts only `(player_id, innings_number)` rows that are missing. Partnerships and fall-of-wickets are not re-derived for existing games (preserves manual edits).
+- **Full sync** (`POST /organisations/{id}/sync`) / **Hard refresh** (`POST /club-admin/hard-refresh`): scheduled weekly + on-demand. Three game-level passes in order:
+  1. **Grassroots aggregate** (`playhq_client.get_*_stats`) — season totals for all 52 seasons. Source of `player_season_stats`.
+  2. **PlayHQ Partner** (`playhq_partner_client.get_org_games` + `sync_game_level_data`) — recent-only (~3 seasons of game-level coverage with public API key). Has top-up logic.
+  3. **Grassroots scores** (`grassroots_scores_client` + `sync_grassroots_game_level_data`) — historical scorecards back to ~2002. Enumerates teams-per-season, fans out to `/scores/teams/{id}/matches`, fetches `/scores/matches/{id}?includeScorecard` for each. Skips PlayHQ-namespace IDs that 204.
+- **Per-player deep sync**: `deep_sync_player()` — admin-triggered, re-pulls FINAL PlayHQ games for that player.
+- **Top-up in `sync_game_level_data`**: for PlayHQ games already in DB, re-fetches the scorecard and inserts only `(player_id, innings_number)` rows that are missing. Partnerships/FoW not re-derived for existing games (preserves manual edits).
 - **Sync runs persisted** in `sync_runs` table (migration 005). Stale `running` rows are marked `error` on backend startup.
 
 ## Key Notes
