@@ -80,18 +80,26 @@ async def get_org_seasons(playhq_id: str) -> list:
 
     all_seasons = []
     page = 1
-    while True:
+    # Hard ceiling — PlayHQ has been observed to return links.next forever, so
+    # always cap at a sane page count even if the API claims there's more.
+    MAX_PAGES = 200
+    while page <= MAX_PAGES:
         url = f"{BASE_URL}/v1/organisations/{playhq_id}/seasons?page={page}&size=50"
         data = await _get(url)
         batch = data.get("data", [])
-        all_seasons.extend(batch)
-        links = data.get("links") or {}
-        if links.get("next"):
-            page += 1
-        elif len(batch) < 50 or not batch:
+        if not batch:
             break
-        else:
-            page += 1
+        all_seasons.extend(batch)
+        # A short page is the only reliable end-of-data signal — links.next
+        # cannot be trusted on its own.
+        if len(batch) < 50:
+            break
+        links = data.get("links") or {}
+        if not links.get("next"):
+            break
+        page += 1
+    else:
+        logger.warning(f"PlayHQ partner: seasons hit MAX_PAGES={MAX_PAGES} for org {playhq_id}")
 
     logger.info(f"PlayHQ partner: got {len(all_seasons)} seasons for org {playhq_id}")
     return _set_cached(key, all_seasons)
@@ -118,17 +126,25 @@ async def get_grade_games(grade_id: str) -> list:
 
     all_games = []
     page = 1
-    while True:
+    # Hard ceiling — PlayHQ returns links.next indefinitely on some grades
+    # (observed paginating past page 1000 with no end). A short batch is the
+    # only trustworthy stop condition. 200 pages × 50 = 10k games is plenty
+    # for any real grade.
+    MAX_PAGES = 200
+    while page <= MAX_PAGES:
         data = await _get(f"{BASE_URL}/v1/grades/{grade_id}/games?page={page}&size=50")
         batch = data.get("data", [])
-        all_games.extend(batch)
-        links = data.get("links") or {}
-        if links.get("next"):
-            page += 1
-        elif len(batch) < 50 or not batch:
+        if not batch:
             break
-        else:
-            page += 1
+        all_games.extend(batch)
+        if len(batch) < 50:
+            break
+        links = data.get("links") or {}
+        if not links.get("next"):
+            break
+        page += 1
+    else:
+        logger.warning(f"PlayHQ partner: grade {grade_id} hit MAX_PAGES={MAX_PAGES}")
 
     return _set_cached(key, all_games)
 

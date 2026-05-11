@@ -94,6 +94,16 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE player_achievements ADD COLUMN IF NOT EXISTS season_end TEXT"
         ))
+        # Mark any sync_runs left in 'running' state by a previous crash/restart
+        # as errored so the dashboard doesn't show a phantom in-flight sync.
+        await conn.execute(text("""
+            UPDATE sync_runs
+            SET status = 'error',
+                error = COALESCE(error, 'Server restarted while sync was running'),
+                completed_at = NOW(),
+                updated_at = NOW()
+            WHERE status = 'running'
+        """))
     start_scheduler()
     logger.info("BetterStats API started")
     yield
