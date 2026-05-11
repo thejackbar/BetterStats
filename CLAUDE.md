@@ -65,6 +65,7 @@ Cricket Australia hosts club cricket data across **two separate backends**, both
 - **PlayHQ Partner game-level sync** is **disabled** in `sync_organisation`. The public API key only exposed ~3 seasons of history vs Grassroots's 50+, AND because the same physical match has different UUIDs in PHQ vs Grassroots, running both produced duplicate batting rows (the existing-game skip is UUID-based). Kept the code commented in case we get a Partner-tier key.
 - **Per-player deep sync**: `deep_sync_player()` — admin-triggered, re-pulls FINAL PlayHQ games for that player (still on the Partner path; pre-dates the Grassroots unlock).
 - **Sync runs persisted** in `sync_runs` table (migration 005). `update_sync_run` and `finish_sync_run` MERGE stats into the existing row (don't replace) so sub-phases accumulate. Stale `running` rows are marked `error` on backend startup.
+- **`owns_run` gotcha**: inside `sync_organisation`, `owns_run = run_id is None`. So when a caller passes `run_id` (e.g. the hard-refresh handler that calls `start_sync_run` itself), sync_organisation only ever calls `update_sync_run` on success and NEVER `finish_sync_run`. The **caller** is responsible for finishing the run. The hard-refresh handler (`club_admin.py:_run`) used to only call `finish_sync_run` in the exception branch, so every successful hard-refresh sat at `running` forever — fixed May 2026.
 - **GR scorecard team-name parsing**: `isHome` lives on `matchSummary.teams`, NOT on the top-level `teams` array. Reading from the wrong field is silently OK (no error) but produces empty `home_team`.
 
 ## Key Notes
@@ -74,3 +75,28 @@ Cricket Australia hosts club cricket data across **two separate backends**, both
 - API field names: `bowlingEconomyRate`, `fieldingTotalCatches`, no `bowlingOvers` (derive from `bowlingBalls`)
 - `Season.year` is NULL when Grassroots doesn't return `startDate` — extract from name (`"Summer 2010/11"` → `2010`) as a fallback
 - `stats["players"]` in sync is misleading — it's `len(player_data)` summed across seasons, i.e. player-season records, not unique players. With 52 seasons × ~3.4 avg seasons/player ≈ 5326 (which Applecross actually shows). Worth renaming to `player_seasons`.
+
+## May 2026 Historical Data Fix — Resolution Log
+
+**Problem**: post-migration, every historical game had blank `home_team`/`away_team` AND Jack Barendse had ~280 batting rows instead of the expected 200. Two root causes.
+
+**Fix 1 — duplicate batting rows from running both sync paths**:
+PlayHQ Partner game-level sync was disabled in `sync_organisation` (see Sync Architecture above). Same physical match has different UUIDs in PHQ vs Grassroots; the existing-game skip is UUID-based; running both produced duplicate batting rows.
+
+**Fix 2 — `isHome` lookup on wrong field**:
+GR scorecard parser was reading `isHome` from the top-level `teams` array — silently absent, so every game's `home_team` was empty. The flag actually lives on `matchSummary.teams`. Fixed and re-parses cleanly.
+
+**Verification (Applecross, post-wipe + hard refresh)**:
+- games: 3957 (was 4418 — old number was bloated by PHQ/GR duplicates)
+- batting_innings: 41423, bowling_spells: 26862, fielding_stats: 15495
+- games with empty home_team: **0**
+- Barendse, Jack: **200 batting / 168 bowling / 93 fielding** ✓
+
+**Fix 3 — successful hard-refresh stuck at `running`** (discovered during the verification of Fixes 1+2):
+`sync_organisation` only calls `finish_sync_run` when it owns the run (i.e. when called without a `run_id`). The hard-refresh handler owns the run itself but only called `finish_sync_run` in its exception branch. Fixed `club_admin.py::hard_refresh_org._run` to call `finish_sync_run(run_id, stats)` after a successful `await sync_organisation(...)`.
+
+**Open follow-ups worth investigating**:
+- `upsert_organisation` defensive check for duplicate orgs across Grassroots GUID and PlayHQ UUID id-spaces (CLAUDE.md flagged it; Applecross duplicate was hand-cleaned but the trap remains).
+- Rename `stats["players"]` → `stats["player_seasons"]` to match what it actually counts.
+- The PHQ partner endpoints (`api.playhq.com/v1/seasons/.../grades`, `/grades/.../games`) still get hit during admin UI activity. These come from `suggest_phq_ids` and `deep_sync_player`. Both pre-date the Grassroots unlock and could probably be retired or repointed at GR. Low priority — they don't pollute the data anymore.
+- `get_org_games` has a per-`playhq_id` cache but no lock — concurrent first-callers will both fan out before the cache is populated. Observed as 2× "fetching games for 70 grades" log lines 27ms apart. Cheap fix: wrap with `asyncio.Lock`.
