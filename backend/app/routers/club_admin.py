@@ -775,7 +775,8 @@ async def hard_refresh_org(
     async def _run():
         _logger.info(f"HardRefresh: starting for org {org_id_str} (run_id={run_id})")
         try:
-            await sync_organisation(org_id_str, run_id=run_id, kind="org_hard_refresh")
+            stats = await sync_organisation(org_id_str, run_id=run_id, kind="org_hard_refresh")
+            await finish_sync_run(run_id, stats or {})
         except Exception as e:
             _logger.error(f"HardRefresh: failed for {org_id_str}: {e}", exc_info=True)
             await finish_sync_run(run_id, {}, f"Unexpected error: {e}")
