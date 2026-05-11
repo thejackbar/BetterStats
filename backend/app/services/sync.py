@@ -891,10 +891,9 @@ async def sync_grassroots_game_level_data(
         return stats
 
     # ── DISCOVERY PHASE ──────────────────────────────────────────────────
-    # Short-lived session: enumerate seasons, teams, matches. Read-only.
+    # Short-lived session: enumerate seasons and known players. Read-only.
     seasons: list[tuple] = []
     known_player_ids: set[uuid.UUID] = set()
-    known_grade_ids: set[uuid.UUID] = set()
     async with async_session_maker() as session:
         org = await session.get(Organisation, org_uuid)
         if not org:
@@ -912,13 +911,6 @@ async def sync_grassroots_game_level_data(
         )
         known_player_ids = {r[0] for r in player_res}
         logger.info(f"GR-sync: {len(known_player_ids)} existing players in org")
-
-        grade_res = await session.execute(
-            select(Grade.id)
-            .join(Season, Grade.season_id == Season.id)
-            .where(Season.organisation_id == org_uuid)
-        )
-        known_grade_ids = {r[0] for r in grade_res}
 
     # Enumerate match IDs by fanning out across teams-per-season.
     seen_match_ids: set[str] = set()
@@ -992,20 +984,23 @@ async def sync_grassroots_game_level_data(
                         grade_uuid = uuid.UUID(grade_id_str)
                     except ValueError:
                         grade_uuid = None
-                if grade_uuid and grade_uuid not in known_grade_ids:
-                    session.add(Grade(
-                        id=grade_uuid,
-                        season_id=season_id,
-                        name=grade_data.get("name", "Unknown Grade"),
-                        playhq_id=grade_id_str,
-                    ))
-                    try:
-                        await session.flush()
-                        known_grade_ids.add(grade_uuid)
-                    except Exception as e:
-                        logger.warning(f"GR-sync: grade flush failed for {grade_id_str}: {e}")
-                        await session.rollback()
-                        continue
+                if grade_uuid:
+                    # Check DB directly — caching across sessions is unsafe
+                    # because a rolled-back game session can leave a cached
+                    # grade ID that doesn't actually exist in the DB.
+                    existing_grade = await session.get(Grade, grade_uuid)
+                    if not existing_grade:
+                        session.add(Grade(
+                            id=grade_uuid,
+                            season_id=season_id,
+                            name=grade_data.get("name", "Unknown Grade"),
+                            playhq_id=grade_id_str,
+                        ))
+                        try:
+                            await session.flush()
+                        except Exception as e:
+                            logger.warning(f"GR-sync: grade flush failed for {grade_id_str}: {e}")
+                            continue  # session auto-rollback on context exit
 
                 # Date
                 played_at = None
