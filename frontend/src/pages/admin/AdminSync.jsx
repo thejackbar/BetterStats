@@ -210,12 +210,30 @@ export default function AdminSync() {
           <div className="mb-8">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-white font-semibold">Player Sync Requests</h2>
-              <button
-                onClick={fetchSyncRequests}
-                className="text-slate-500 hover:text-white text-xs transition-colors"
-              >
-                Refresh
-              </button>
+              <div className="flex items-center gap-3">
+                {syncRequests.some(r => r.status !== 'pending') && (
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm('Clear all resolved (approved/dismissed) player sync requests? Pending ones are preserved.')) return
+                      try {
+                        await api.adminClearResolvedSyncRequests()
+                        await fetchSyncRequests()
+                      } catch (e) {
+                        alert(`Failed to clear: ${e.message}`)
+                      }
+                    }}
+                    className="text-slate-500 hover:text-red-400 text-xs transition-colors"
+                  >
+                    Clear resolved
+                  </button>
+                )}
+                <button
+                  onClick={fetchSyncRequests}
+                  className="text-slate-500 hover:text-white text-xs transition-colors"
+                >
+                  Refresh
+                </button>
+              </div>
             </div>
             <div className="space-y-2">
               {syncRequests.map(req => (
@@ -292,12 +310,30 @@ export default function AdminSync() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-white font-semibold">Sync History</h2>
-            <button
-              onClick={() => orgId && fetchLogs(orgId)}
-              className="text-slate-500 hover:text-white text-xs transition-colors"
-            >
-              Refresh
-            </button>
+            <div className="flex items-center gap-3">
+              {logs.some(l => l.status !== 'running') && (
+                <button
+                  onClick={async () => {
+                    if (!window.confirm('Clear sync history? Any currently-running sync is preserved.')) return
+                    try {
+                      await api.adminClearSyncRuns()
+                      if (orgId) await fetchLogs(orgId)
+                    } catch (e) {
+                      alert(`Failed to clear: ${e.message}`)
+                    }
+                  }}
+                  className="text-slate-500 hover:text-red-400 text-xs transition-colors"
+                >
+                  Clear history
+                </button>
+              )}
+              <button
+                onClick={() => orgId && fetchLogs(orgId)}
+                className="text-slate-500 hover:text-white text-xs transition-colors"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
 
           {logs.length === 0 ? (
