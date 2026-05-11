@@ -871,8 +871,10 @@ async def sync_grassroots_game_level_data(
     return 204 and are silently skipped — they're already handled by the
     PlayHQ Partner sync path.
 
-    Uses its own DB session so that the long-running PlayHQ phase before us
-    can't leave the outer session in a state that breaks our async ORM calls.
+    Each game is processed in its OWN short-lived DB session. Holding one
+    session across thousands of inserts has been observed to deadlock with
+    SQLAlchemy/asyncpg, so we open-commit-close per game and accept the small
+    per-game overhead in exchange for robustness.
     """
     from app.services import grassroots_scores_client as gr
     from datetime import date as date_cls
@@ -888,325 +890,308 @@ async def sync_grassroots_game_level_data(
         logger.warning(f"GR-sync: invalid org_id_str {org_id_str!r}")
         return stats
 
+    # ── DISCOVERY PHASE ──────────────────────────────────────────────────
+    # Short-lived session: enumerate seasons, teams, matches. Read-only.
+    seasons: list[tuple] = []
+    known_player_ids: set[uuid.UUID] = set()
+    known_grade_ids: set[uuid.UUID] = set()
     async with async_session_maker() as session:
         org = await session.get(Organisation, org_uuid)
         if not org:
             logger.warning(f"GR-sync: org {org_id_str} not found")
             return stats
-        org_id = org.id
 
-        # 1) Enumerate seasons in DB (Grassroots seasons)
         seasons_res = await session.execute(
-            select(Season).where(Season.organisation_id == org_id)
+            select(Season).where(Season.organisation_id == org_uuid)
         )
         seasons = [(s.id, s.name) for s in seasons_res.scalars().all()]
-        logger.info(f"GR-sync: {len(seasons)} seasons for org {org_id}")
+        logger.info(f"GR-sync: {len(seasons)} seasons for org {org_uuid}")
 
-        # 2) Existing players (participantId == players.id, just verify they exist)
-        existing_player_res = await session.execute(
-            select(Player.id).where(Player.organisation_id == org_id)
+        player_res = await session.execute(
+            select(Player.id).where(Player.organisation_id == org_uuid)
         )
-        known_player_ids: set[uuid.UUID] = {r[0] for r in existing_player_res}
+        known_player_ids = {r[0] for r in player_res}
         logger.info(f"GR-sync: {len(known_player_ids)} existing players in org")
 
-        # 3) For each season, get teams, then collect match IDs per team
-        seen_match_ids: set[str] = set()
-        match_to_season: dict[str, uuid.UUID] = {}
+        grade_res = await session.execute(
+            select(Grade.id)
+            .join(Season, Grade.season_id == Season.id)
+            .where(Season.organisation_id == org_uuid)
+        )
+        known_grade_ids = {r[0] for r in grade_res}
 
-        for season_id, season_name in seasons:
-            try:
-                teams = await playhq_client.get_teams(org_id_str, str(season_id))
-            except Exception as e:
-                logger.warning(f"GR-sync: get_teams failed for season {season_name}: {e}")
+    # Enumerate match IDs by fanning out across teams-per-season.
+    seen_match_ids: set[str] = set()
+    match_to_season: dict[str, uuid.UUID] = {}
+    for season_id, season_name in seasons:
+        try:
+            teams = await playhq_client.get_teams(org_id_str, str(season_id))
+        except Exception as e:
+            logger.warning(f"GR-sync: get_teams failed for season {season_name}: {e}")
+            continue
+        for team in teams:
+            team_id = team.get("id")
+            if not team_id:
                 continue
-            for team in teams:
-                team_id = team.get("id")
-                if not team_id:
-                    continue
-                stats["gr_teams_scanned"] += 1
-                try:
-                    matches = await gr.get_team_matches(team_id)
-                except Exception as e:
-                    logger.warning(f"GR-sync: team {team_id} matches failed: {e}")
-                    continue
-                for m in matches:
-                    mid = m.get("id")
-                    if not mid:
-                        continue
-                    if mid not in seen_match_ids:
-                        seen_match_ids.add(mid)
-                        match_to_season[mid] = season_id
-            if run_id:
-                await update_sync_run(run_id, stats)
-
-        stats["gr_matches_seen"] = len(seen_match_ids)
-        logger.info(f"GR-sync: discovered {len(seen_match_ids)} unique match IDs across {stats['gr_teams_scanned']} teams")
+            stats["gr_teams_scanned"] += 1
+            try:
+                matches = await gr.get_team_matches(team_id)
+            except Exception as e:
+                logger.warning(f"GR-sync: team {team_id} matches failed: {e}")
+                continue
+            for m in matches:
+                mid = m.get("id")
+                if mid and mid not in seen_match_ids:
+                    seen_match_ids.add(mid)
+                    match_to_season[mid] = season_id
         if run_id:
             await update_sync_run(run_id, stats)
 
-        # 4) For each match, skip if already in DB; else fetch scorecard and store
-        processed = 0
-        for match_id_str in seen_match_ids:
-            processed += 1
-            try:
-                match_uuid = uuid.UUID(match_id_str)
-            except ValueError:
-                continue
+    stats["gr_matches_seen"] = len(seen_match_ids)
+    logger.info(f"GR-sync: discovered {len(seen_match_ids)} unique match IDs across {stats['gr_teams_scanned']} teams")
+    if run_id:
+        await update_sync_run(run_id, stats)
 
-            # If we already have batting rows for this game, skip (top-up not implemented for GR yet)
-            existing = await session.execute(
-                text("SELECT 1 FROM batting_innings WHERE game_id=:gid LIMIT 1"),
-                {"gid": match_id_str},
-            )
-            if existing.scalar():
-                stats["gr_games_skipped_done"] += 1
-                continue
+    # ── PER-GAME PROCESSING ─────────────────────────────────────────────
+    processed = 0
+    for match_id_str in seen_match_ids:
+        processed += 1
+        try:
+            match_uuid = uuid.UUID(match_id_str)
+        except ValueError:
+            continue
 
-            scorecard = await gr.get_match_scorecard(match_id_str)
-            if not scorecard:
-                stats["gr_games_skipped_no_data"] += 1
-                continue
+        # Fetch first (no session needed). 204 → not in Grassroots, skip.
+        scorecard = await gr.get_match_scorecard(match_id_str)
+        if not scorecard:
+            stats["gr_games_skipped_no_data"] += 1
+            continue
 
-            # Resolve season — prefer the team-level mapping; fall back to first season
-            season_id = match_to_season.get(match_id_str)
-            if not season_id and seasons:
-                season_id = seasons[0][0]
+        # Open a fresh per-game session.
+        try:
+            async with async_session_maker() as session:
+                # Skip if game already has batting rows
+                existing = await session.execute(
+                    text("SELECT 1 FROM batting_innings WHERE game_id=:gid LIMIT 1"),
+                    {"gid": match_id_str},
+                )
+                if existing.scalar():
+                    stats["gr_games_skipped_done"] += 1
+                    continue
 
-            # Grade — from scorecard.grade
-            grade_data = scorecard.get("grade") or {}
-            grade_id_str = grade_data.get("id")
-            grade_uuid = None
-            if grade_id_str:
-                try:
-                    grade_uuid = uuid.UUID(grade_id_str)
-                except ValueError:
-                    grade_uuid = None
-            grade = None
-            if grade_uuid:
-                grade = await session.get(Grade, grade_uuid)
-                if not grade:
-                    grade = Grade(
+                season_id = match_to_season.get(match_id_str)
+                if not season_id and seasons:
+                    season_id = seasons[0][0]
+
+                # Grade
+                grade_data = scorecard.get("grade") or {}
+                grade_id_str = grade_data.get("id")
+                grade_uuid = None
+                if grade_id_str:
+                    try:
+                        grade_uuid = uuid.UUID(grade_id_str)
+                    except ValueError:
+                        grade_uuid = None
+                if grade_uuid and grade_uuid not in known_grade_ids:
+                    session.add(Grade(
                         id=grade_uuid,
                         season_id=season_id,
                         name=grade_data.get("name", "Unknown Grade"),
                         playhq_id=grade_id_str,
-                    )
-                    session.add(grade)
+                    ))
                     try:
                         await session.flush()
+                        known_grade_ids.add(grade_uuid)
                     except Exception as e:
                         logger.warning(f"GR-sync: grade flush failed for {grade_id_str}: {e}")
                         await session.rollback()
                         continue
 
-            # Date
-            played_at = None
-            for sched in (scorecard.get("matchSchedule") or []):
-                iso = sched.get("startDateTime") or ""
-                if iso:
-                    try:
-                        played_at = date_cls.fromisoformat(iso[:10])
+                # Date
+                played_at = None
+                for sched in (scorecard.get("matchSchedule") or []):
+                    iso = sched.get("startDateTime") or ""
+                    if iso:
+                        try:
+                            played_at = date_cls.fromisoformat(iso[:10])
+                            break
+                        except ValueError:
+                            pass
+
+                # Teams
+                teams_data = scorecard.get("teams") or []
+                our_team = next(
+                    (t for t in teams_data if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id_str.lower()),
+                    None,
+                )
+                home_team_name = next((t.get("displayName", "") for t in teams_data if t.get("isHome")), "")
+                away_team_name = next((t.get("displayName", "") for t in teams_data if not t.get("isHome")), "")
+                summary_teams = (scorecard.get("matchSummary") or {}).get("teams") or []
+                winner_name = next((t.get("displayName") for t in (teams_data or []) + summary_teams if t.get("isWinner")), None)
+                result_text = None
+                for st in summary_teams:
+                    if ((st.get("id") or "").lower() == ((our_team or {}).get("id") or "").lower()):
+                        rt = (st.get("resultType") or "").upper()
+                        if st.get("isWinner") or rt == "WON_ON_FIRST_INNINGS":
+                            result_text = "WIN"
+                        elif rt in ("LOST_ON_FIRST_INNINGS", "LOST"):
+                            result_text = "LOSS"
+                        elif rt in ("DREW", "TIED"):
+                            result_text = "DRAW"
                         break
-                    except ValueError:
-                        pass
 
-            # Teams — find our team and theirs
-            teams_data = scorecard.get("teams") or []
-            our_team = next(
-                (t for t in teams_data if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id_str.lower()),
-                None,
-            )
-            opp_team = next((t for t in teams_data if t is not our_team), None)
-            home_team_name = next((t.get("displayName", "") for t in teams_data if t.get("isHome")), "")
-            away_team_name = next((t.get("displayName", "") for t in teams_data if not t.get("isHome")), "")
-            summary_teams = (scorecard.get("matchSummary") or {}).get("teams") or []
-            winner_name = next((t.get("displayName") for t in (teams_data or [])
-                                 + summary_teams if t.get("isWinner")), None)
+                # Game
+                session.add(Game(
+                    id=match_uuid,
+                    grade_id=grade_uuid,
+                    played_at=played_at,
+                    home_team=home_team_name,
+                    away_team=away_team_name,
+                    result=result_text,
+                    winning_team=winner_name,
+                ))
+                try:
+                    await session.flush()
+                except Exception as e:
+                    logger.warning(f"GR-sync: game flush failed for {match_id_str}: {e}")
+                    continue  # session auto-rollback on context exit
 
-            # Our team result relative to org
-            result_text = None
-            for st in summary_teams:
-                if ((st.get("id") or "").lower() == ((our_team or {}).get("id") or "").lower()):
-                    if st.get("isWinner"):
-                        result_text = "WIN"
-                    elif (st.get("resultType") or "").upper() in ("WON_ON_FIRST_INNINGS",):
-                        result_text = "WIN"
-                    elif (st.get("resultType") or "").upper() in ("LOST_ON_FIRST_INNINGS", "LOST"):
-                        result_text = "LOSS"
-                    elif (st.get("resultType") or "").upper() in ("DREW", "TIED"):
-                        result_text = "DRAW"
-                    break
+                bat_count = bowl_count = field_count = part_count = fow_count = 0
+                for inn in (scorecard.get("innings") or []):
+                    inn_num = inn.get("inningsNumber") or 1
+                    batting_rows = inn.get("batting") or []
+                    bowling_rows = inn.get("bowling") or []
+                    fielding_rows = inn.get("fielding") or []
+                    fow_rows = inn.get("fallOfWickets") or []
 
-            # Create Game
-            game = Game(
-                id=match_uuid,
-                grade_id=grade.id if grade else None,
-                played_at=played_at,
-                home_team=home_team_name,
-                away_team=away_team_name,
-                result=result_text,
-                winning_team=winner_name,
-            )
-            session.add(game)
-            try:
-                await session.flush()
-            except Exception as e:
-                logger.warning(f"GR-sync: game flush failed for {match_id_str}: {e}")
-                await session.rollback()
-                continue
-
-            # 5) Innings — batting / bowling / fielding / FoW
-            innings_list = scorecard.get("innings") or []
-            bat_count = bowl_count = field_count = part_count = fow_count = 0
-            for inn in innings_list:
-                inn_num = inn.get("inningsNumber") or 1
-                batting_rows = inn.get("batting") or []
-                bowling_rows = inn.get("bowling") or []
-                fielding_rows = inn.get("fielding") or []
-                fow_rows = inn.get("fallOfWickets") or []
-
-                for row in batting_rows:
-                    pid_str = row.get("participantId")
-                    if not pid_str:
-                        continue
-                    try:
-                        pid = uuid.UUID(pid_str)
-                    except ValueError:
-                        continue
-                    if pid not in known_player_ids:
-                        # Players come from the aggregate-stats sync; if missing here it's
-                        # a fill-in or guest, skip rather than create unknown rows.
-                        continue
-                    dt_id = row.get("dismissalTypeId") or 0
-                    if dt_id == 0:  # Did Not Bat
-                        continue
-                    not_out = dt_id == 1
-                    dismissal_type_long = row.get("dismissalType") or ""
-                    dismissal_short = _GR_DISMISSAL_SHORT.get(dismissal_type_long, dismissal_type_long.lower())
-                    session.add(BattingInnings(
-                        game_id=match_uuid,
-                        player_id=pid,
-                        innings_number=inn_num,
-                        batting_position=row.get("batOrder"),
-                        runs=row.get("runsScored") or 0,
-                        balls=row.get("ballsFaced") or 0,
-                        fours=row.get("foursScored") or 0,
-                        sixes=row.get("sixesScored") or 0,
-                        not_out=not_out,
-                        dismissal_type=dismissal_short or None,
-                    ))
-                    bat_count += 1
-
-                for row in bowling_rows:
-                    pid_str = row.get("participantId")
-                    if not pid_str:
-                        continue
-                    try:
-                        pid = uuid.UUID(pid_str)
-                    except ValueError:
-                        continue
-                    if pid not in known_player_ids:
-                        continue
-                    econ = None
-                    try:
-                        econ_raw = row.get("economy")
-                        econ = float(econ_raw) if econ_raw is not None else None
-                    except (TypeError, ValueError):
-                        pass
-                    session.add(BowlingSpell(
-                        game_id=match_uuid,
-                        player_id=pid,
-                        innings_number=inn_num,
-                        overs=row.get("oversBowled"),
-                        maidens=row.get("maidensBowled"),
-                        runs=row.get("runsConceded"),
-                        wickets=row.get("wicketsTaken"),
-                        wides=row.get("wideBalls"),
-                        no_balls=row.get("noBalls"),
-                        economy=econ,
-                    ))
-                    bowl_count += 1
-
-                for row in fielding_rows:
-                    pid_str = row.get("participantId")
-                    if not pid_str:
-                        continue
-                    try:
-                        pid = uuid.UUID(pid_str)
-                    except ValueError:
-                        continue
-                    if pid not in known_player_ids:
-                        continue
-                    catches_total = row.get("totalCatches")
-                    if catches_total is None:
-                        catches_total = (row.get("catches") or 0) + (row.get("wicketKeeperCatches") or 0)
-                    session.add(FieldingStat(
-                        game_id=match_uuid,
-                        player_id=pid,
-                        catches=catches_total or 0,
-                        run_outs=row.get("runOuts") or 0,
-                        stumpings=row.get("stumpings") or 0,
-                    ))
-                    field_count += 1
-
-                for row in fow_rows:
-                    pid = None
-                    pid_str = row.get("participantId")
-                    if pid_str:
+                    for row in batting_rows:
+                        pid_str = row.get("participantId")
+                        if not pid_str:
+                            continue
                         try:
                             pid = uuid.UUID(pid_str)
-                            if pid not in known_player_ids:
-                                pid = None
                         except ValueError:
-                            pid = None
-                    wkt = row.get("order")
-                    if wkt is None:
-                        continue
-                    session.add(FallOfWicket(
-                        game_id=match_uuid,
-                        innings_number=inn_num,
-                        wicket_number=wkt,
-                        score_at_fall=row.get("runs"),
-                        player_id=pid,
-                    ))
-                    fow_count += 1
+                            continue
+                        if pid not in known_player_ids:
+                            continue
+                        dt_id = row.get("dismissalTypeId") or 0
+                        if dt_id == 0:
+                            continue
+                        not_out = dt_id == 1
+                        dt_long = row.get("dismissalType") or ""
+                        dt_short = _GR_DISMISSAL_SHORT.get(dt_long, dt_long.lower())
+                        session.add(BattingInnings(
+                            game_id=match_uuid, player_id=pid, innings_number=inn_num,
+                            batting_position=row.get("batOrder"),
+                            runs=row.get("runsScored") or 0,
+                            balls=row.get("ballsFaced") or 0,
+                            fours=row.get("foursScored") or 0,
+                            sixes=row.get("sixesScored") or 0,
+                            not_out=not_out,
+                            dismissal_type=dt_short or None,
+                        ))
+                        bat_count += 1
 
-                for p in _derive_partnerships_grassroots(batting_rows, fow_rows):
-                    b1_id = b2_id = None
-                    if p.get("batter1_id"):
+                    for row in bowling_rows:
+                        pid_str = row.get("participantId")
+                        if not pid_str:
+                            continue
                         try:
-                            candidate = uuid.UUID(p["batter1_id"])
-                            if candidate in known_player_ids:
-                                b1_id = candidate
-                        except (ValueError, TypeError):
-                            pass
-                    if p.get("batter2_id"):
+                            pid = uuid.UUID(pid_str)
+                        except ValueError:
+                            continue
+                        if pid not in known_player_ids:
+                            continue
+                        econ = None
                         try:
-                            candidate = uuid.UUID(p["batter2_id"])
-                            if candidate in known_player_ids:
-                                b2_id = candidate
-                        except (ValueError, TypeError):
+                            econ_raw = row.get("economy")
+                            econ = float(econ_raw) if econ_raw is not None else None
+                        except (TypeError, ValueError):
                             pass
-                    if not b1_id and not b2_id:
-                        continue
-                    session.add(Partnership(
-                        game_id=match_uuid,
-                        innings_number=inn_num,
-                        wicket_number=p["wicket_number"],
-                        batter1_id=b1_id,
-                        batter2_id=b2_id,
-                        runs=p.get("runs") or 0,
-                        batter1_runs=p.get("batter1_runs"),
-                        batter2_runs=p.get("batter2_runs"),
-                    ))
-                    part_count += 1
+                        session.add(BowlingSpell(
+                            game_id=match_uuid, player_id=pid, innings_number=inn_num,
+                            overs=row.get("oversBowled"),
+                            maidens=row.get("maidensBowled"),
+                            runs=row.get("runsConceded"),
+                            wickets=row.get("wicketsTaken"),
+                            wides=row.get("wideBalls"),
+                            no_balls=row.get("noBalls"),
+                            economy=econ,
+                        ))
+                        bowl_count += 1
 
-            if bat_count == 0 and bowl_count == 0:
-                await session.rollback()
-                stats["gr_games_skipped_no_data"] += 1
-                continue
+                    for row in fielding_rows:
+                        pid_str = row.get("participantId")
+                        if not pid_str:
+                            continue
+                        try:
+                            pid = uuid.UUID(pid_str)
+                        except ValueError:
+                            continue
+                        if pid not in known_player_ids:
+                            continue
+                        catches_total = row.get("totalCatches")
+                        if catches_total is None:
+                            catches_total = (row.get("catches") or 0) + (row.get("wicketKeeperCatches") or 0)
+                        session.add(FieldingStat(
+                            game_id=match_uuid, player_id=pid,
+                            catches=catches_total or 0,
+                            run_outs=row.get("runOuts") or 0,
+                            stumpings=row.get("stumpings") or 0,
+                        ))
+                        field_count += 1
 
-            try:
+                    for row in fow_rows:
+                        pid = None
+                        pid_str = row.get("participantId")
+                        if pid_str:
+                            try:
+                                pid = uuid.UUID(pid_str)
+                                if pid not in known_player_ids:
+                                    pid = None
+                            except ValueError:
+                                pid = None
+                        wkt = row.get("order")
+                        if wkt is None:
+                            continue
+                        session.add(FallOfWicket(
+                            game_id=match_uuid, innings_number=inn_num,
+                            wicket_number=wkt,
+                            score_at_fall=row.get("runs"),
+                            player_id=pid,
+                        ))
+                        fow_count += 1
+
+                    for p in _derive_partnerships_grassroots(batting_rows, fow_rows):
+                        b1_id = b2_id = None
+                        for src_key, dst in (("batter1_id", "b1"), ("batter2_id", "b2")):
+                            v = p.get(src_key)
+                            if v:
+                                try:
+                                    cand = uuid.UUID(v)
+                                    if cand in known_player_ids:
+                                        if dst == "b1":
+                                            b1_id = cand
+                                        else:
+                                            b2_id = cand
+                                except (ValueError, TypeError):
+                                    pass
+                        if not b1_id and not b2_id:
+                            continue
+                        session.add(Partnership(
+                            game_id=match_uuid, innings_number=inn_num,
+                            wicket_number=p["wicket_number"],
+                            batter1_id=b1_id, batter2_id=b2_id,
+                            runs=p.get("runs") or 0,
+                            batter1_runs=p.get("batter1_runs"),
+                            batter2_runs=p.get("batter2_runs"),
+                        ))
+                        part_count += 1
+
+                if bat_count == 0 and bowl_count == 0:
+                    stats["gr_games_skipped_no_data"] += 1
+                    continue  # session auto-rollback
+
                 await session.commit()
                 stats["gr_games_new"] += 1
                 stats["gr_batting"] += bat_count
@@ -1214,15 +1199,16 @@ async def sync_grassroots_game_level_data(
                 stats["gr_fielding"] += field_count
                 stats["gr_partnerships"] += part_count
                 stats["gr_fow"] += fow_count
-            except Exception as e:
-                logger.error(f"GR-sync: commit failed for game {match_id_str}: {e}")
-                await session.rollback()
+        except Exception as e:
+            logger.error(f"GR-sync: per-game exception for {match_id_str}: {e}")
+            # session has already auto-closed; just move on
 
-            if run_id and processed % 25 == 0:
-                await update_sync_run(run_id, stats)
+        if run_id and processed % 25 == 0:
+            await update_sync_run(run_id, stats)
+            logger.info(f"GR-sync: processed {processed}/{len(seen_match_ids)} games, stats={stats}")
 
-        logger.info(f"GR-sync complete: {stats} for org {org_id}")
-        return stats
+    logger.info(f"GR-sync complete: {stats} for org {org_uuid}")
+    return stats
 
 
 async def _backfill_player_playhq_ids(
