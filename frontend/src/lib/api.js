@@ -115,6 +115,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ action, admin_note: adminNote }),
     }),
+  adminHardRefreshOrg: () =>
+    request('/club-admin/hard-refresh', { method: 'POST' }),
+  adminListSyncRuns: (limit = 30) =>
+    request(`/club-admin/sync-runs?limit=${limit}`),
+  adminGetSyncRun: (runId) => request(`/club-admin/sync-runs/${runId}`),
   adminListPhqSuggestions: () => request('/club-admin/phq-suggestions'), // returns {suggestions, scanning}
   adminRunPhqSuggestions: () => request('/club-admin/phq-suggestions/run', { method: 'POST' }),
   adminActionPhqSuggestion: (id, action, playerId) =>

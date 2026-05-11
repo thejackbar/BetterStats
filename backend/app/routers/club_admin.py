@@ -583,25 +583,28 @@ async def action_sync_request(
         req.status = "approved"
         await db.commit()
 
-        from app.services.sync import deep_sync_player
+        from app.services.sync import deep_sync_player, start_sync_run, finish_sync_run
         _logger = _logging.getLogger(__name__)
         org_id_str = str(club.id)
         _player_sync_running.add(player_id_str)
+        run_id = await start_sync_run(club.id, "player_deep", player_id=player.id)
 
         async def _run_and_log():
             _logger.info(f"DeepSync: background task started for player {player_id_str}")
             try:
-                result = await deep_sync_player(org_id_str, player_id_str)
+                result = await deep_sync_player(org_id_str, player_id_str, run_id=run_id)
                 _logger.info(f"DeepSync: completed for player {player_id_str}: {result}")
+                await finish_sync_run(run_id, result if isinstance(result, dict) and "error" not in result else {}, result.get("error", "") if isinstance(result, dict) else "")
             except Exception as e:
                 _logger.error(f"DeepSync: FAILED for player {player_id_str}: {e}", exc_info=True)
+                await finish_sync_run(run_id, {}, f"Unexpected error: {e}")
             finally:
                 _player_sync_running.discard(player_id_str)
                 _background_tasks.discard(asyncio.current_task())
 
         task = asyncio.create_task(_run_and_log())
         _background_tasks.add(task)
-        return {"status": "approved", "warnings": warnings, "message": "Deep sync started in background"}
+        return {"status": "approved", "warnings": warnings, "message": "Deep sync started in background", "run_id": str(run_id)}
 
     req.admin_note = body.admin_note
     req.resolved_at = datetime.now(timezone.utc)
@@ -738,3 +741,103 @@ async def action_phq_suggestion(
 
     await db.commit()
     return {"status": sugg.status}
+
+
+# ---------------------------------------------------------------------------
+# Sync runs (hard refresh + history)
+# ---------------------------------------------------------------------------
+
+# Per-org hard-refresh locks
+_hard_refresh_running: set = set()
+
+
+@router.post("/hard-refresh", status_code=202)
+async def hard_refresh_org(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    """Trigger a full historical re-sync of the org.
+
+    Same code path as the scheduled weekly sync, but explicitly run on demand.
+    Backfills missing PlayHQ IDs across ALL games (no 50-game cap) and tops up
+    any missing batting/bowling rows in already-processed games. Runs in the
+    background; poll GET /club-admin/sync-runs/{run_id} for progress.
+    """
+    from app.services.sync import sync_organisation, start_sync_run, finish_sync_run
+    org_id_str = str(club.id)
+    if org_id_str in _hard_refresh_running:
+        return {"status": "already_running", "org_id": org_id_str}
+
+    run_id = await start_sync_run(club.id, "org_hard_refresh")
+    _hard_refresh_running.add(org_id_str)
+    _logger = _logging.getLogger(__name__)
+
+    async def _run():
+        _logger.info(f"HardRefresh: starting for org {org_id_str} (run_id={run_id})")
+        try:
+            await sync_organisation(org_id_str, run_id=run_id, kind="org_hard_refresh")
+        except Exception as e:
+            _logger.error(f"HardRefresh: failed for {org_id_str}: {e}", exc_info=True)
+            await finish_sync_run(run_id, {}, f"Unexpected error: {e}")
+        finally:
+            _hard_refresh_running.discard(org_id_str)
+            _background_tasks.discard(asyncio.current_task())
+
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)
+    return {"status": "started", "run_id": str(run_id), "org_id": org_id_str}
+
+
+@router.get("/sync-runs")
+async def list_sync_runs(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+    limit: int = 30,
+):
+    from app.models.db import SyncRun
+    res = await db.execute(
+        select(SyncRun)
+        .where(SyncRun.org_id == club.id)
+        .order_by(SyncRun.started_at.desc())
+        .limit(min(limit, 100))
+    )
+    runs = res.scalars().all()
+    return [
+        {
+            "id": str(r.id),
+            "kind": r.kind,
+            "status": r.status,
+            "player_id": str(r.player_id) if r.player_id else None,
+            "started_at": r.started_at.isoformat() if r.started_at else None,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            "stats": r.stats or {},
+            "error": r.error,
+        }
+        for r in runs
+    ]
+
+
+@router.get("/sync-runs/{run_id}")
+async def get_sync_run(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.db import SyncRun
+    run = await db.get(SyncRun, uuid.UUID(run_id))
+    if not run or run.org_id != club.id:
+        raise HTTPException(status_code=404, detail="Sync run not found")
+    return {
+        "id": str(run.id),
+        "kind": run.kind,
+        "status": run.status,
+        "player_id": str(run.player_id) if run.player_id else None,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "updated_at": run.updated_at.isoformat() if run.updated_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "stats": run.stats or {},
+        "error": run.error,
+    }

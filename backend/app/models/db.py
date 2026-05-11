@@ -342,6 +342,21 @@ class PlayerSyncRequest(Base):
     org = relationship("Organisation")
 
 
+class SyncRun(Base):
+    __tablename__ = "sync_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
+    kind = Column(Text, nullable=False)
+    status = Column(Text, nullable=False, server_default="running")
+    started_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    stats = Column(JSON, nullable=False, default=dict)
+    error = Column(Text, nullable=True)
+
+
 class PhqIdSuggestion(Base):
     __tablename__ = "phq_id_suggestions"
 
