@@ -886,6 +886,27 @@ async def sync_grassroots_game_level_data(
         known_player_ids = {r[0] for r in player_res}
         logger.info(f"GR-sync: {len(known_player_ids)} existing players in org")
 
+        # Build merged-away → kept redirect map so scorecards referencing a
+        # previously-merged player_id attribute stats to the kept player
+        # instead of silently dropping rows.
+        merge_res = await session.execute(
+            text(
+                "SELECT removed_player_id, keep_player_id "
+                "FROM merge_logs "
+                "WHERE org_id = :oid AND undone_at IS NULL"
+            ),
+            {"oid": str(org_uuid)},
+        )
+        raw_redirects: dict[uuid.UUID, uuid.UUID] = {r[0]: r[1] for r in merge_res.fetchall()}
+        merged_away: dict[uuid.UUID, uuid.UUID] = {}
+        for removed, target in raw_redirects.items():
+            seen = {removed}
+            while target in raw_redirects and target not in seen:
+                seen.add(target)
+                target = raw_redirects[target]
+            merged_away[removed] = target
+        logger.info(f"GR-sync: {len(merged_away)} merged-away player redirects loaded")
+
     # Enumerate match IDs by fanning out across teams-per-season.
     seen_match_ids: set[str] = set()
     match_to_season: dict[str, uuid.UUID] = {}
@@ -1046,7 +1067,9 @@ async def sync_grassroots_game_level_data(
                         except ValueError:
                             continue
                         if pid not in known_player_ids:
-                            continue
+                            pid = merged_away.get(pid)
+                            if pid is None or pid not in known_player_ids:
+                                continue
                         dt_id = row.get("dismissalTypeId") or 0
                         if dt_id == 0:
                             continue
@@ -1074,7 +1097,9 @@ async def sync_grassroots_game_level_data(
                         except ValueError:
                             continue
                         if pid not in known_player_ids:
-                            continue
+                            pid = merged_away.get(pid)
+                            if pid is None or pid not in known_player_ids:
+                                continue
                         econ = None
                         try:
                             econ_raw = row.get("economy")
@@ -1102,7 +1127,9 @@ async def sync_grassroots_game_level_data(
                         except ValueError:
                             continue
                         if pid not in known_player_ids:
-                            continue
+                            pid = merged_away.get(pid)
+                            if pid is None or pid not in known_player_ids:
+                                continue
                         catches_total = row.get("totalCatches")
                         if catches_total is None:
                             catches_total = (row.get("catches") or 0) + (row.get("wicketKeeperCatches") or 0)
@@ -1121,7 +1148,9 @@ async def sync_grassroots_game_level_data(
                             try:
                                 pid = uuid.UUID(pid_str)
                                 if pid not in known_player_ids:
-                                    pid = None
+                                    pid = merged_away.get(pid)
+                                    if pid is not None and pid not in known_player_ids:
+                                        pid = None
                             except ValueError:
                                 pid = None
                         wkt = row.get("order")
@@ -1142,7 +1171,9 @@ async def sync_grassroots_game_level_data(
                             if v:
                                 try:
                                     cand = uuid.UUID(v)
-                                    if cand in known_player_ids:
+                                    if cand not in known_player_ids:
+                                        cand = merged_away.get(cand)
+                                    if cand and cand in known_player_ids:
                                         if dst == "b1":
                                             b1_id = cand
                                         else:
