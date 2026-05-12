@@ -1,4 +1,5 @@
 import asyncio
+import re
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
@@ -30,7 +31,13 @@ async def get_records_grades(
     result = await db.execute(q.order_by(Grade.name))
     grades = result.scalars().all()
     if grades:
-        return [{"id": str(g.id), "name": g.name, "season_id": str(g.season_id)} for g in grades]
+        seen: set[str] = set()
+        out = []
+        for g in grades:
+            if g.name not in seen:
+                seen.add(g.name)
+                out.append({"id": str(g.id), "name": g.name, "season_id": str(g.season_id)})
+        return out
 
     # DB has no grades — try the cheap org-level PlayHQ grades endpoint (single call)
     org = await db.get(Organisation, uuid.UUID(org_id))
@@ -121,10 +128,9 @@ async def get_records(
             if season_obj.year is not None:
                 manual_season_year = season_obj.year
             else:
-                for part in (season_obj.name or '').split():
-                    if part.isdigit() and len(part) == 4:
-                        manual_season_year = int(part)
-                        break
+                m = re.search(r'(\d{4})', season_obj.name or '')
+                if m:
+                    manual_season_year = int(m.group(1))
 
     p = {"org_id": org_id, "limit": _LIMIT}
     if season_id:
