@@ -4,9 +4,13 @@ from typing import Optional
 import uuid
 
 
-async def get_career_batting(session: AsyncSession, player_id: str) -> Optional[dict]:
+async def get_career_batting(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
+    season_clause = " AND pss.season_id = :sid" if season_id else ""
+    params: dict = {"pid": player_id}
+    if season_id:
+        params["sid"] = season_id
     result = await session.execute(
-        text("""
+        text(f"""
             SELECT
                 p.id AS player_id,
                 p.name,
@@ -23,19 +27,23 @@ async def get_career_batting(session: AsyncSession, player_id: str) -> Optional[
                 COALESCE(SUM(pss.ducks), 0) AS ducks,
                 COALESCE(SUM(pss.matches), 0) AS games
             FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+            LEFT JOIN player_season_stats pss ON pss.player_id = p.id{season_clause}
             WHERE p.id = :pid
             GROUP BY p.id, p.name, p.organisation_id
         """),
-        {"pid": player_id}
+        params,
     )
     row = result.mappings().first()
     return dict(row) if row else None
 
 
-async def get_career_bowling(session: AsyncSession, player_id: str) -> Optional[dict]:
+async def get_career_bowling(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
+    season_clause = " AND pss.season_id = :sid" if season_id else ""
+    params: dict = {"pid": player_id}
+    if season_id:
+        params["sid"] = season_id
     result = await session.execute(
-        text("""
+        text(f"""
             SELECT
                 p.id AS player_id,
                 p.name,
@@ -51,19 +59,23 @@ async def get_career_bowling(session: AsyncSession, player_id: str) -> Optional[
                 COALESCE(SUM(pss.runs_conceded), 0) AS total_runs,
                 COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors
             FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+            LEFT JOIN player_season_stats pss ON pss.player_id = p.id{season_clause}
             WHERE p.id = :pid
             GROUP BY p.id, p.name, p.organisation_id
         """),
-        {"pid": player_id}
+        params,
     )
     row = result.mappings().first()
     return dict(row) if row else None
 
 
-async def get_career_fielding(session: AsyncSession, player_id: str) -> Optional[dict]:
+async def get_career_fielding(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
+    season_clause = " AND pss.season_id = :sid" if season_id else ""
+    params: dict = {"pid": player_id}
+    if season_id:
+        params["sid"] = season_id
     result = await session.execute(
-        text("""
+        text(f"""
             SELECT
                 p.id AS player_id,
                 p.name,
@@ -78,11 +90,11 @@ async def get_career_fielding(session: AsyncSession, player_id: str) -> Optional
                 COALESCE(SUM(pss.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(pss.catches + pss.run_outs + pss.stumpings), 0) AS total_dismissals
             FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+            LEFT JOIN player_season_stats pss ON pss.player_id = p.id{season_clause}
             WHERE p.id = :pid
             GROUP BY p.id, p.name, p.organisation_id
         """),
-        {"pid": player_id}
+        params,
     )
     row = result.mappings().first()
     return dict(row) if row else None

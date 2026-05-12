@@ -127,7 +127,7 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org }) {
               { label: 'Wkts', value: cbw.total_wickets, highlight: true },
               { label: 'Ave', value: cbw.average },
               { label: 'Econ', value: cbw.economy },
-              { label: 'Best', value: cbw.best_figures_wickets ? `${cbw.best_figures_wickets}w` : '—' },
+              { label: 'Best', value: cbw.best_bowling_figures || (cbw.best_figures_wickets ? `${cbw.best_figures_wickets}w` : '—') },
             ].map(({ label, value, highlight }) => (
               <div key={label} style={{ textAlign: 'center' }}>
                 <div style={{

@@ -6,6 +6,7 @@ import {
 } from 'recharts'
 import { api } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useClubTheme } from '../hooks/useClubTheme'
 import { getSubcategories, getAchievements } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
 import StatCard from '../components/StatCard'
@@ -29,50 +30,80 @@ function formatSeasonShort(value, seasons) {
   return name
 }
 
+function formatRange(inst, seasons) {
+  const start = formatSeasonShort(inst.season, seasons)
+  const end = formatSeasonShort(inst.season_end, seasons)
+  if (start && end && start !== end) return `${start}–${end}`
+  return start || end || null
+}
+
 function formatAchievementBadge(a, seasons) {
   const label = a.achievement || a.subcategory || a.category
-  const start = formatSeasonShort(a.season, seasons)
-  const end = formatSeasonShort(a.season_end, seasons)
-  let range = ''
-  if (start && end && start !== end) range = ` (${start} – ${end})`
-  else if (start) range = ` (${start})`
-  else if (end) range = ` (${end})`
-  return `${label}${range}`
+
+  // Cap Number pills: the detail (e.g. "#32") is the headline number, not the season.
+  if (a.category === 'Milestone' && a.subcategory === 'Cap Number' && a.detail) {
+    return `${label} ${a.detail}`
+  }
+
+  // Deduped multi-instance pill (e.g. "3rd XI Captain 17/18, 21/22")
+  if (a._instances && a._instances.length > 1) {
+    const ranges = a._instances.map(i => formatRange(i, seasons)).filter(Boolean)
+    if (ranges.length) return `${label} ${ranges.join(', ')}`
+  }
+
+  // Single instance
+  const range = formatRange(a, seasons)
+  return range ? `${label} (${range})` : label
 }
 
-const HEADER_CATEGORY_RANK = {
-  'Hall of Fame': 0,
-  'Life Membership': 1,
-  'Premiership': 3,
-  'Association Award': 5,
-  'Club Award': 6,
-  'Office Bearer': 8,
-}
+// Exec-committee roles that carry weight beyond a typical year role.
+const EXEC_RANK = { 'president': 1, 'vice president': 2, 'vice-president': 2, 'secretary': 3, 'treasurer': 3 }
 
 function headerPriority(a) {
+  if (a.category === 'Hall of Fame') return 0
+  if (a.category === 'Life Membership') return 1.5
+  if (a.category === 'Office Bearer' && a.subcategory === 'Executive Committee') {
+    return EXEC_RANK[(a.achievement || '').toLowerCase()] ?? 3
+  }
   if (a.category === 'Milestone') {
-    if (a.subcategory === 'Cap Number') return 2
+    if (a.subcategory === 'Cap Number') return 2.5
     if (a.subcategory === 'Games') {
       const n = parseInt((a.achievement || '').match(/(\d+)/)?.[1] || '0', 10)
-      if (n >= 500) return 2.5
-      if (n >= 300) return 4
-      if (n >= 200) return 4.5
-      return 7
+      if (n >= 500) return 3
+      if (n >= 300) return 4.5
+      if (n >= 200) return 5
+      return 9
     }
-    return 7
+    return 9
   }
-  return HEADER_CATEGORY_RANK[a.category] ?? 99
+  if (a.category === 'Premiership') return 4
+  if (a.category === 'Association Award') return 6
+  if (a.category === 'Club Award') return 7
+  if (a.category === 'Office Bearer') return 8  // captaincy + other roles
+  return 99
 }
 
 function rankedHeaderAchievements(items) {
-  // Dedupe by (category, subcategory, achievement) keeping the newest season.
+  // Group by (category, subcategory, achievement) so a multi-term role becomes
+  // a single pill listing all its seasons.
   const map = new Map()
   for (const a of items || []) {
     const key = `${a.category}|${a.subcategory || ''}|${a.achievement}`
     const cur = map.get(key)
-    if (!cur || (a.season || '') > (cur.season || '')) {
-      map.set(key, a)
+    if (!cur) {
+      map.set(key, { ...a, _instances: [a] })
+    } else {
+      cur._instances.push(a)
+      // Surface the newest instance's fields (season, detail) at the top level
+      // so priority sorting and detail display work consistently.
+      if ((a.season || '') > (cur.season || '')) {
+        Object.assign(cur, a, { _instances: cur._instances })
+      }
     }
+  }
+  // Sort instances within each group oldest → newest for "17/18, 21/22" reading order.
+  for (const g of map.values()) {
+    g._instances.sort((x, y) => (x.season || '').localeCompare(y.season || ''))
   }
   return [...map.values()].sort((a, b) => {
     const pa = headerPriority(a)
@@ -856,7 +887,9 @@ export default function PlayerProfile() {
   const [tab, setTab] = useState('batting')
   const [seasonId, setSeasonId] = useState(null)
   const [seasons, setSeasons] = useState([])
+  const [org, setOrg] = useState(null)
   const { data, loading, error } = usePlayerStats(playerId, { seasonId })
+  useClubTheme(org)
 
   const [activity, setActivity] = useState(null)
   const [upcomingMilestones, setUpcomingMilestones] = useState(null)
@@ -882,6 +915,7 @@ export default function PlayerProfile() {
   useEffect(() => {
     if (!data?.player?.organisation_id) return
     api.getOrgSeasons(data.player.organisation_id).then(setSeasons).catch(() => {})
+    api.getOrg(data.player.organisation_id).then(setOrg).catch(() => {})
     sessionStorage.setItem('bs_last_org_id', data.player.organisation_id)
     window.dispatchEvent(new CustomEvent('bs_org_changed'))
     // Load achievements for header display

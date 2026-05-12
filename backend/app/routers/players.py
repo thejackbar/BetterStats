@@ -67,9 +67,9 @@ async def get_player_stats(
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
 
-    batting = await get_career_batting(db, player_id)
-    bowling = await get_career_bowling(db, player_id)
-    fielding = await get_career_fielding(db, player_id)
+    batting = await get_career_batting(db, player_id, season_id)
+    bowling = await get_career_bowling(db, player_id, season_id)
+    fielding = await get_career_fielding(db, player_id, season_id)
     batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id)
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id)
 
