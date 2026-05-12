@@ -72,6 +72,20 @@ async def lifespan(app: FastAPI):
             )
         """))
         await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL,
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_grade_merge_logs_org_active "
+            "ON grade_merge_logs(org_id, alias_name) WHERE undone_at IS NULL"
+        ))
+        await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS player_achievements (
                 id SERIAL PRIMARY KEY,
                 org_id UUID NOT NULL,

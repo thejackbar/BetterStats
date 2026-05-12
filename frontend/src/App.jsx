@@ -26,6 +26,7 @@ import SuperUsers from './pages/admin/SuperUsers'
 // Admin wrappers for existing tools
 import AdminAwards from './pages/admin/AdminAwards'
 import AdminMerge from './pages/admin/AdminMerge'
+import AdminGrades from './pages/admin/AdminGrades'
 import AdminSync from './pages/admin/AdminSync'
 import AdminPartnershipRecords from './pages/admin/AdminPartnershipRecords'
 import AdminPhqMatch from './pages/admin/AdminPhqMatch'
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="/admin/seasons" element={<ProtectedRoute><AdminSeasons /></ProtectedRoute>} />
         <Route path="/admin/awards" element={<ProtectedRoute><AdminAwards /></ProtectedRoute>} />
         <Route path="/admin/merge" element={<ProtectedRoute><AdminMerge /></ProtectedRoute>} />
+        <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
         <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
         <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
         <Route path="/admin/phq-match" element={<ProtectedRoute><AdminPhqMatch /></ProtectedRoute>} />

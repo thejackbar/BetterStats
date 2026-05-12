@@ -286,11 +286,11 @@ async def get_batting_by_position(session: AsyncSession, player_id: str) -> list
     return [dict(r) for r in result.mappings()]
 
 
-async def get_batting_by_grade(session: AsyncSession, player_id: str) -> list[dict]:
+async def get_batting_by_grade(session: AsyncSession, player_id: str, org_id: Optional[str] = None) -> list[dict]:
     result = await session.execute(
         text("""
             SELECT
-                gr.name AS grade_name,
+                COALESCE(am.canonical_name, gr.name) AS grade_name,
                 COUNT(*) AS innings,
                 SUM(bi.runs) AS runs,
                 ROUND(
@@ -302,12 +302,19 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str) -> list[di
             FROM batting_innings bi
             JOIN games g ON g.id = bi.game_id
             JOIN grades gr ON gr.id = g.grade_id
+            LEFT JOIN LATERAL (
+                SELECT canonical_name FROM grade_merge_logs gml
+                WHERE gml.org_id = CAST(:org_id AS UUID)
+                  AND gml.alias_name = gr.name
+                  AND gml.undone_at IS NULL
+                LIMIT 1
+            ) am ON TRUE
             WHERE bi.player_id = :pid
               AND bi.runs IS NOT NULL
-            GROUP BY gr.name
+            GROUP BY COALESCE(am.canonical_name, gr.name)
             ORDER BY SUM(bi.runs) DESC
         """),
-        {"pid": player_id},
+        {"pid": player_id, "org_id": org_id},
     )
     return [dict(r) for r in result.mappings()]
 
