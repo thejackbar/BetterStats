@@ -404,7 +404,10 @@ def _parse_xlsx_partnerships(content: bytes) -> list[dict]:
 
 
 def _parse_csv_partnerships(content: bytes) -> list[dict]:
-    text_content = content.decode("utf-8-sig")
+    try:
+        text_content = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text_content = content.decode("latin-1")
     reader = csv.DictReader(io.StringIO(text_content))
     return [
         {k.strip().lower().replace(" ", "_"): (v.strip() if v else "")
