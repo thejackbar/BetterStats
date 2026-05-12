@@ -104,11 +104,27 @@ async def get_records(
     grade_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    # If grade_id supplied without season_id, resolve season from grade
-    if grade_id and not season_id:
+    # If grade_id supplied, resolve grade name (for manual record filtering) and season if missing
+    manual_grade_name: str | None = None
+    if grade_id:
         grade = await db.get(Grade, uuid.UUID(grade_id))
         if grade:
-            season_id = str(grade.season_id)
+            manual_grade_name = grade.name
+            if not season_id:
+                season_id = str(grade.season_id)
+
+    # Resolve season year for filtering manual records (season_year is an int, not a UUID)
+    manual_season_year: int | None = None
+    if season_id:
+        season_obj = await db.get(Season, uuid.UUID(season_id))
+        if season_obj:
+            if season_obj.year is not None:
+                manual_season_year = season_obj.year
+            else:
+                for part in (season_obj.name or '').split():
+                    if part.isdigit() and len(part) == 4:
+                        manual_season_year = int(part)
+                        break
 
     p = {"org_id": org_id, "limit": _LIMIT}
     if season_id:
@@ -401,15 +417,20 @@ async def get_records(
             del d["rn"]
             by_wicket[wk].append(d)
 
-    # Manual partnership records (always included regardless of season/grade filter)
+    # Manual partnership records — filtered by season year and/or grade name when active
     org_obj = await db.get(Organisation, uuid.UUID(org_id))
     manual_rows = []
     if org_obj:
-        manual_res = await db.execute(
+        manual_stmt = (
             sa_select(ManualPartnershipRecord)
             .where(ManualPartnershipRecord.org_id == org_obj.id)
-            .order_by(ManualPartnershipRecord.runs.desc())
         )
+        if manual_season_year is not None:
+            manual_stmt = manual_stmt.where(ManualPartnershipRecord.season_year == manual_season_year)
+        if manual_grade_name:
+            manual_stmt = manual_stmt.where(ManualPartnershipRecord.grade_name == manual_grade_name)
+        manual_stmt = manual_stmt.order_by(ManualPartnershipRecord.runs.desc())
+        manual_res = await db.execute(manual_stmt)
         for r in manual_res.scalars().all():
             manual_rows.append({
                 "batter1_id": str(r.batter1_id) if r.batter1_id else None,
