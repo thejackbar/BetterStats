@@ -803,6 +803,22 @@ _GR_DISMISSAL_SHORT = {
 }
 
 
+_NON_WICKET_DT = {"absent", "did not bat", "dnb", "retired hurt"}
+
+
+def _count_dismissals_grassroots(batting_rows: list) -> int:
+    """Number of wickets that actually fell in this innings."""
+    n = 0
+    for b in batting_rows:
+        dt_id = b.get("dismissalTypeId") or 0
+        if dt_id in (0, 1):  # 0 = didn't bat, 1 = not out
+            continue
+        if (b.get("dismissalType") or "").lower() in _NON_WICKET_DT:
+            continue
+        n += 1
+    return n
+
+
 def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
     """Derive per-wicket partnerships from a Grassroots-shaped innings.
 
@@ -820,6 +836,15 @@ def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
         and (b.get("dismissalType") or "").lower() not in _SKIP_DT
     ]
     if len(valid) < 2:
+        return []
+
+    # Incomplete FOW data poisons every partnership it touches: the loop below
+    # marches `at_crease` forward one wicket per FOW row, so a single 5/215 row
+    # in an innings that actually lost 7 wickets gets attributed to the openers
+    # as a 215-run 5th-wicket stand. Refuse to derive unless FOW count matches
+    # the dismissals in the batting card.
+    expected_fow = _count_dismissals_grassroots(batting_rows)
+    if expected_fow == 0 or len(fow_rows) != expected_fow:
         return []
     batters = sorted(valid, key=lambda r: r.get("batOrder") or 99)
     at_crease = list(batters[:2])
