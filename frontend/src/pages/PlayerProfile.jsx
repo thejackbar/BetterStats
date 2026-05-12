@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  LineChart, Line, PieChart, Pie, Cell, ReferenceLine,
 } from 'recharts'
 import { api } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -16,7 +17,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import clsx from 'clsx'
 
-const TABS = ['batting', 'bowling', 'analysis', 'milestones', 'achievements']
+const TABS = ['batting', 'bowling', 'fielding', 'analysis', 'milestones', 'achievements']
 
 function formatSeasonShort(value, seasons) {
   if (!value) return null
@@ -517,21 +518,25 @@ function AchievementsSection({ playerId, orgId, playerName }) {
       <div className="p-5 space-y-6">
         {honours.length > 0 && (
           <section>
-            <h4 className="section-label text-xs mb-3">Honours</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <h4 className="section-label text-xs mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+              Honours
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               {honours.map(a => (
                 <div
                   key={a.id}
-                  className="rounded-lg border border-navy-700 bg-gradient-to-br from-navy-800 to-navy-900 p-3 group relative"
+                  className="rounded-lg border border-l-2 border-amber-400/40 border-navy-700 bg-gradient-to-br from-navy-800 to-navy-900 p-3 group relative"
+                  style={{ borderLeftColor: '#f59e0b60' }}
                 >
                   <div className="flex items-start gap-2.5">
-                    <ThiingIcon src={categoryIcon(a)} alt="" className="w-8 h-8 shrink-0" />
+                    <ThiingIcon src={categoryIcon(a)} alt="" className="w-8 h-8 shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
-                      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-mono">{a.category}</div>
-                      <div className="text-white text-sm font-semibold truncate">{a.achievement}</div>
-                      <div className="text-xs text-slate-400 mt-0.5">
+                      <div className="text-[10px] uppercase tracking-wider text-amber-600/80 font-mono">{a.category}</div>
+                      <div className="text-white text-sm font-semibold leading-tight">{a.achievement}</div>
+                      <div className="text-xs text-slate-400 mt-0.5 leading-tight">
                         {[a.subcategory, seasonRange(a)].filter(Boolean).join(' · ')}
-                        {a.detail && <span className="text-accent ml-1">{a.detail}</span>}
+                        {a.detail && <span className="text-accent ml-1 font-mono">{a.detail}</span>}
                       </div>
                     </div>
                   </div>
@@ -549,20 +554,24 @@ function AchievementsSection({ playerId, orgId, playerName }) {
 
         {rolesList.length > 0 && (
           <section>
-            <h4 className="section-label text-xs mb-3">Roles</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <h4 className="section-label text-xs mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-accent inline-block" />
+              Roles
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {rolesList.map((g, i) => (
-                <div key={i} className="rounded-lg border border-navy-700 bg-navy-800/40 p-3">
+                <div key={i} className="rounded-lg border border-l-2 border-navy-700 bg-navy-800/40 p-3" style={{ borderLeftColor: '#16c78440' }}>
                   <div className="flex items-center gap-2 mb-2">
                     <ThiingIcon src={CATEGORY_ICON_SRC['Office Bearer'] || thiings.goldMedal} alt="" className="w-5 h-5 shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="text-white text-sm font-semibold truncate">{g.achievement}</div>
+                      <div className="text-white text-sm font-semibold leading-tight truncate">{g.achievement}</div>
                       {g.subcategory && <div className="text-xs text-slate-500">{g.subcategory}</div>}
                     </div>
+                    <span className="text-xs text-slate-600 font-mono shrink-0">{g.instances.length}×</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {g.instances.map(inst => (
-                      <span key={inst.id} className="group/chip relative inline-flex items-center gap-1 text-xs font-mono bg-navy-700/60 text-accent px-2 py-0.5 rounded">
+                      <span key={inst.id} className="group/chip relative inline-flex items-center gap-1 text-xs font-mono bg-navy-700/60 text-accent border border-accent/20 px-2 py-0.5 rounded-md">
                         {canEdit ? (
                           <button onClick={() => openEdit(inst)} className="hover:text-white" title="Edit">
                             {seasonRange(inst)}
@@ -572,11 +581,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
                         )}
                         {inst.detail && <span className="text-slate-400">· {inst.detail}</span>}
                         {canEdit && (
-                          <button
-                            onClick={() => handleDelete(inst.id)}
-                            className="ml-0.5 text-slate-500 hover:text-red-400 opacity-0 group-hover/chip:opacity-100 transition-opacity"
-                            title="Delete"
-                          >×</button>
+                          <button onClick={() => handleDelete(inst.id)} className="ml-0.5 text-slate-500 hover:text-red-400 opacity-0 group-hover/chip:opacity-100 transition-opacity" title="Delete">×</button>
                         )}
                       </span>
                     ))}
@@ -589,17 +594,20 @@ function AchievementsSection({ playerId, orgId, playerName }) {
 
         {awards.length > 0 && (
           <section>
-            <h4 className="section-label text-xs mb-3">Awards</h4>
-            <div className="rounded-lg border border-navy-700 divide-y divide-navy-700/50 overflow-hidden">
+            <h4 className="section-label text-xs mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
+              Awards
+            </h4>
+            <div className="rounded-lg border border-navy-700 overflow-hidden divide-y divide-navy-700/40">
               {awards.map(a => (
-                <div key={a.id} className="px-3 py-2.5 flex items-center gap-3 group hover:bg-navy-800/40 transition-colors">
-                  <ThiingIcon src={categoryIcon(a)} alt="" className="w-5 h-5 shrink-0" />
+                <div key={a.id} className="px-4 py-2.5 flex items-center gap-3 group hover:bg-navy-800/50 transition-colors">
+                  <ThiingIcon src={categoryIcon(a)} alt="" className="w-5 h-5 shrink-0 opacity-70" />
                   <div className="flex-1 min-w-0">
                     <span className="text-white text-sm font-medium">{a.achievement}</span>
-                    {a.subcategory && <span className="text-slate-500 text-xs ml-1.5">— {a.subcategory}</span>}
-                    {a.detail && <span className="text-slate-400 text-xs italic ml-1.5">({a.detail})</span>}
+                    {a.subcategory && <span className="text-slate-500 text-xs ml-1.5">· {a.subcategory}</span>}
+                    {a.detail && <span className="text-accent text-xs font-mono ml-1.5">{a.detail}</span>}
                   </div>
-                  <span className="text-xs font-mono text-accent shrink-0">{seasonRange(a)}</span>
+                  <span className="text-xs font-mono text-slate-400 shrink-0 bg-navy-700/60 px-2 py-0.5 rounded">{seasonRange(a)}</span>
                   {canEdit && (
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                       <button onClick={() => openEdit(a)} className="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded hover:bg-navy-700">Edit</button>
@@ -614,17 +622,20 @@ function AchievementsSection({ playerId, orgId, playerName }) {
 
         {milestones.length > 0 && (
           <section>
-            <h4 className="section-label text-xs mb-3">Milestones</h4>
-            <div className="rounded-lg border border-navy-700 divide-y divide-navy-700/50 overflow-hidden">
+            <h4 className="section-label text-xs mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />
+              Milestones
+            </h4>
+            <div className="rounded-lg border border-navy-700 overflow-hidden divide-y divide-navy-700/40">
               {milestones.map(a => (
-                <div key={a.id} className="px-3 py-2.5 flex items-center gap-3 group hover:bg-navy-800/40 transition-colors">
-                  <ThiingIcon src={MILESTONE_ICON_SRC[a.subcategory] || categoryIcon(a)} alt="" className="w-5 h-5 shrink-0" />
+                <div key={a.id} className="px-4 py-2.5 flex items-center gap-3 group hover:bg-navy-800/50 transition-colors">
+                  <ThiingIcon src={MILESTONE_ICON_SRC[a.subcategory] || categoryIcon(a)} alt="" className="w-5 h-5 shrink-0 opacity-70" />
                   <div className="flex-1 min-w-0">
                     <span className="text-white text-sm font-medium">{a.achievement}</span>
-                    {a.subcategory && <span className="text-slate-500 text-xs ml-1.5">— {a.subcategory}</span>}
-                    {a.detail && <span className="text-slate-400 text-xs italic ml-1.5">({a.detail})</span>}
+                    {a.subcategory && <span className="text-slate-500 text-xs ml-1.5">· {a.subcategory}</span>}
+                    {a.detail && <span className="text-accent text-xs font-mono ml-1.5">{a.detail}</span>}
                   </div>
-                  <span className="text-xs font-mono text-accent shrink-0">{seasonRange(a)}</span>
+                  <span className="text-xs font-mono text-slate-400 shrink-0 bg-navy-700/60 px-2 py-0.5 rounded">{seasonRange(a)}</span>
                   {canEdit && (
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                       <button onClick={() => openEdit(a)} className="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded hover:bg-navy-700">Edit</button>
@@ -704,8 +715,34 @@ function UpcomingMilestonesSection({ data }) {
   )
 }
 
+function computeRankSets(rows, key, direction = 'desc') {
+  if (!rows?.length) return { topIdx: new Set(), botIdx: new Set() }
+  const valid = rows.map((r, i) => ({ i, v: r[key] })).filter(x => x.v != null && !Number.isNaN(Number(x.v)))
+  if (valid.length < 2) return { topIdx: new Set(), botIdx: new Set() }
+  const sorted = [...valid].sort((a, b) => direction === 'desc' ? b.v - a.v : a.v - b.v)
+  const topN = Math.min(3, sorted.length - 1)
+  const topIdx = new Set(sorted.slice(0, topN).map(x => x.i))
+  const botIdx = new Set([sorted[sorted.length - 1]].filter(x => !topIdx.has(x.i)).map(x => x.i))
+  return { topIdx, botIdx }
+}
+
+function rankCls(i, topIdx, botIdx, defaultCls = 'text-slate-300') {
+  if (topIdx.has(i)) return 'text-green-400 font-bold'
+  if (botIdx.has(i)) return 'text-red-400'
+  return defaultCls
+}
+
 function SeasonBattingTable({ data }) {
   if (!data?.length) return <p className="text-slate-500 text-sm px-5 py-4">No batting data.</p>
+  const rnRuns = computeRankSets(data, 'total_runs')
+  const rnAvg  = computeRankSets(data, 'batting_average')
+  const rnHS   = computeRankSets(data, 'high_score')
+  const rnSR   = computeRankSets(data, 'strike_rate')
+  const rnFif  = computeRankSets(data, 'fifties')
+  const rnHun  = computeRankSets(data, 'hundreds')
+  const rnSix  = computeRankSets(data, 'total_sixes')
+  const rnFour = computeRankSets(data, 'total_fours')
+  const rnDuck = computeRankSets(data, 'ducks', 'asc')
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -722,6 +759,7 @@ function SeasonBattingTable({ data }) {
             <th className="table-header text-right">100s</th>
             <th className="table-header text-right">6s</th>
             <th className="table-header text-right">4s</th>
+            <th className="table-header text-right">0s</th>
           </tr>
         </thead>
         <tbody>
@@ -730,28 +768,33 @@ function SeasonBattingTable({ data }) {
               <td className="table-cell text-white font-medium">{row.season_name}</td>
               <td className="table-cell stat-number text-right text-slate-400">{row.matches ?? '—'}</td>
               <td className="table-cell stat-number text-right text-slate-400">{row.batting_innings ?? '—'}</td>
-              <td className="table-cell text-right">
-                <span className={clsx('stat-number font-bold',
-                  row.total_runs >= 500 ? 'text-amber-cricket' : row.total_runs >= 200 ? 'text-accent' : 'text-white'
-                )}>
-                  {row.total_runs ?? '—'}
-                </span>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnRuns.topIdx, rnRuns.botIdx, 'text-white'))}>
+                {row.total_runs ?? '—'}
               </td>
-              <td className="table-cell stat-number text-right text-slate-300">
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnAvg.topIdx, rnAvg.botIdx))}>
                 {row.batting_average != null ? Number(row.batting_average).toFixed(1) : '—'}
               </td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.high_score ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-400">
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnHS.topIdx, rnHS.botIdx))}>
+                {row.high_score ?? '—'}
+              </td>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnSR.topIdx, rnSR.botIdx, 'text-slate-400'))}>
                 {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
               </td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.fifties || '—'}</td>
-              <td className="table-cell stat-number text-right">
-                <span className={row.hundreds > 0 ? 'text-amber-cricket font-bold' : 'text-slate-300'}>
-                  {row.hundreds || '—'}
-                </span>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnFif.topIdx, rnFif.botIdx))}>
+                {row.fifties || '—'}
               </td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.total_sixes || '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.total_fours || '—'}</td>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnHun.topIdx, rnHun.botIdx, row.hundreds > 0 ? 'text-amber-cricket font-bold' : 'text-slate-300'))}>
+                {row.hundreds || '—'}
+              </td>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnSix.topIdx, rnSix.botIdx, 'text-slate-400'))}>
+                {row.total_sixes || '—'}
+              </td>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnFour.topIdx, rnFour.botIdx, 'text-slate-400'))}>
+                {row.total_fours || '—'}
+              </td>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnDuck.topIdx, rnDuck.botIdx, 'text-slate-500'))}>
+                {row.ducks || '—'}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -761,8 +804,15 @@ function SeasonBattingTable({ data }) {
 }
 
 function SeasonBowlingTable({ data }) {
-  const hasAnyWickets = data?.some(r => (r.total_wickets ?? 0) > 0)
-  if (!hasAnyWickets) return <p className="text-slate-500 text-sm px-5 py-4">No bowling data.</p>
+  const bowlingRows = data?.filter(r => (r.total_wickets ?? 0) > 0 || (r.total_overs ?? 0) > 0) ?? []
+  if (!bowlingRows.length) return <p className="text-slate-500 text-sm px-5 py-4">No bowling data.</p>
+  const rnW    = computeRankSets(bowlingRows, 'total_wickets')
+  const rnO    = computeRankSets(bowlingRows, 'total_overs')
+  const rnM    = computeRankSets(bowlingRows, 'total_maidens')
+  const rnR    = computeRankSets(bowlingRows, 'bowling_runs_conceded', 'asc')
+  const rnAvg  = computeRankSets(bowlingRows, 'bowling_average', 'asc')
+  const rnEcon = computeRankSets(bowlingRows, 'economy', 'asc')
+  const rnFW   = computeRankSets(bowlingRows, 'five_fors')
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -781,34 +831,87 @@ function SeasonBowlingTable({ data }) {
           </tr>
         </thead>
         <tbody>
-          {data.filter(r => (r.total_wickets ?? 0) > 0 || (r.total_overs ?? 0) > 0).map((row, i) => (
+          {bowlingRows.map((row, i) => (
             <tr key={i} className="table-row">
               <td className="table-cell text-white font-medium">{row.season_name}</td>
               <td className="table-cell stat-number text-right text-slate-400">{row.matches ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.total_overs ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.total_maidens ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.total_runs ?? '—'}</td>
-              <td className="table-cell text-right">
-                <span className={clsx('stat-number font-bold',
-                  row.total_wickets >= 50 ? 'text-amber-cricket' : row.total_wickets >= 20 ? 'text-accent' : 'text-white'
-                )}>
-                  {row.total_wickets ?? '—'}
-                </span>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnO.topIdx, rnO.botIdx, 'text-slate-400'))}>
+                {row.total_overs ?? '—'}
               </td>
-              <td className="table-cell stat-number text-right text-slate-300">
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnM.topIdx, rnM.botIdx, 'text-slate-400'))}>
+                {row.total_maidens ?? '—'}
+              </td>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnR.topIdx, rnR.botIdx))}>
+                {row.bowling_runs_conceded ?? '—'}
+              </td>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnW.topIdx, rnW.botIdx, 'text-white font-bold'))}>
+                {row.total_wickets ?? '—'}
+              </td>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnAvg.topIdx, rnAvg.botIdx))}>
                 {row.bowling_average != null ? Number(row.bowling_average).toFixed(1) : '—'}
               </td>
-              <td className="table-cell stat-number text-right text-slate-300">
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnEcon.topIdx, rnEcon.botIdx))}>
                 {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
               </td>
               <td className="table-cell stat-number text-right text-slate-300">
                 {row.best_bowling_figures || (row.best_bowling_wickets > 0 ? `${row.best_bowling_wickets}w` : '—')}
               </td>
-              <td className="table-cell stat-number text-right">
-                <span className={row.five_fors > 0 ? 'text-amber-cricket font-bold' : 'text-slate-400'}>
-                  {row.five_fors || '—'}
-                </span>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnFW.topIdx, rnFW.botIdx, row.five_fors > 0 ? 'text-amber-cricket font-bold' : 'text-slate-400'))}>
+                {row.five_fors || '—'}
               </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function SeasonFieldingTable({ data }) {
+  const fieldingRows = data?.filter(r =>
+    (r.total_catches ?? 0) > 0 || (r.total_run_outs ?? 0) > 0 || (r.total_stumpings ?? 0) > 0 || (r.total_catches_wk ?? 0) > 0
+  ) ?? []
+  if (!fieldingRows.length) return <p className="text-slate-500 text-sm px-5 py-4">No fielding data.</p>
+  const rnCt  = computeRankSets(fieldingRows, 'total_catches')
+  const rnRO  = computeRankSets(fieldingRows, 'total_run_outs')
+  const rnWK  = computeRankSets(fieldingRows, 'total_catches_wk')
+  const rnSt  = computeRankSets(fieldingRows, 'total_stumpings')
+  const hasWK = fieldingRows.some(r => (r.total_catches_wk ?? 0) > 0)
+  const hasSt = fieldingRows.some(r => (r.total_stumpings ?? 0) > 0)
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-navy-700">
+            <th className="table-header">Season</th>
+            <th className="table-header text-right">Mat</th>
+            <th className="table-header text-right">Catches</th>
+            {hasWK && <th className="table-header text-right">WK Ct</th>}
+            <th className="table-header text-right">Run Outs</th>
+            {hasSt && <th className="table-header text-right">Stumpings</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {fieldingRows.map((row, i) => (
+            <tr key={i} className="table-row">
+              <td className="table-cell text-white font-medium">{row.season_name}</td>
+              <td className="table-cell stat-number text-right text-slate-400">{row.matches ?? '—'}</td>
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnCt.topIdx, rnCt.botIdx, 'text-slate-300'))}>
+                {row.total_catches || '—'}
+              </td>
+              {hasWK && (
+                <td className={clsx('table-cell stat-number text-right', rankCls(i, rnWK.topIdx, rnWK.botIdx, 'text-slate-300'))}>
+                  {row.total_catches_wk || '—'}
+                </td>
+              )}
+              <td className={clsx('table-cell stat-number text-right', rankCls(i, rnRO.topIdx, rnRO.botIdx, 'text-slate-300'))}>
+                {row.total_run_outs || '—'}
+              </td>
+              {hasSt && (
+                <td className={clsx('table-cell stat-number text-right', rankCls(i, rnSt.topIdx, rnSt.botIdx, 'text-slate-300'))}>
+                  {row.total_stumpings || '—'}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -840,8 +943,20 @@ function SeasonChart({ data }) {
   )
 }
 
+const MILESTONE_TYPE_META = {
+  runs:    { label: 'Runs Milestones',    color: 'text-accent',        border: 'border-accent/30',    bg: 'bg-accent/5' },
+  wickets: { label: 'Wicket Milestones',  color: 'text-blue-400',      border: 'border-blue-400/30',  bg: 'bg-blue-400/5' },
+  matches: { label: 'Match Milestones',   color: 'text-amber-cricket', border: 'border-amber-400/30', bg: 'bg-amber-400/5' },
+  catches: { label: 'Fielding Milestones',color: 'text-purple-400',    border: 'border-purple-400/30',bg: 'bg-purple-400/5' },
+}
+
 function MilestoneTimeline({ data }) {
-  if (!data?.length) return <p className="text-slate-500 text-sm px-4 py-4">No milestones recorded yet.</p>
+  if (!data?.length) return (
+    <div className="px-6 py-12 text-center">
+      <div className="text-4xl mb-3 opacity-30">🏆</div>
+      <p className="text-slate-500 text-sm">No milestones recorded yet.</p>
+    </div>
+  )
 
   const grouped = data.reduce((acc, m) => {
     const key = m.milestone_type
@@ -851,34 +966,152 @@ function MilestoneTimeline({ data }) {
   }, {})
 
   const TYPE_ORDER = ['runs', 'wickets', 'matches', 'catches']
-  const typeLabels = { runs: 'Runs', wickets: 'Wickets', matches: 'Matches', catches: 'Catches' }
   const orderedGroups = TYPE_ORDER.filter(t => grouped[t])
     .concat(Object.keys(grouped).filter(t => !TYPE_ORDER.includes(t)))
     .map(t => [t, [...grouped[t]].sort((a, b) => b.milestone_value - a.milestone_value)])
 
   return (
-    <div className="px-4 py-4 space-y-6">
-      {orderedGroups.map(([type, items]) => (
-        <div key={type}>
-          <h4 className="display-heading text-sm text-slate-400 mb-3 uppercase">
-            {typeLabels[type] || type}
-          </h4>
-          <div className="flex flex-wrap gap-2">
-            {items.map((m, i) => (
-              <div key={i} className="flex items-center gap-2 bg-navy-800 border border-navy-700 rounded-lg px-3 py-2">
-                <span className="text-accent stat-number font-bold text-lg">
-                  {m.milestone_value.toLocaleString()}
-                </span>
-                <div className="text-xs text-slate-400">
-                  {m.detail && <div>{m.detail}</div>}
-                  {m.game_date && <div className="text-slate-600">{m.game_date}</div>}
+    <div className="p-5 space-y-8">
+      {orderedGroups.map(([type, items]) => {
+        const meta = MILESTONE_TYPE_META[type] || { label: type, color: 'text-slate-300', border: 'border-navy-600', bg: 'bg-navy-800/30' }
+        return (
+          <div key={type}>
+            <div className="flex items-center gap-2 mb-4">
+              <ThiingIcon src={MILESTONE_ICON_SRC[type] || thiings.target} alt="" className="w-5 h-5" />
+              <h4 className={clsx('display-heading text-sm uppercase', meta.color)}>{meta.label}</h4>
+              <span className="text-xs text-slate-600 font-mono">{items.length} achieved</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {items.map((m, i) => (
+                <div key={i} className={clsx(
+                  'rounded-xl border p-3 flex flex-col gap-1 transition-colors hover:bg-navy-700/30',
+                  meta.border, meta.bg
+                )}>
+                  <span className={clsx('stat-number font-bold text-2xl leading-none', meta.color)}>
+                    {m.milestone_value.toLocaleString()}
+                  </span>
+                  {m.detail && (
+                    <span className="text-xs text-slate-400 leading-tight">{m.detail}</span>
+                  )}
+                  {m.game_date && (
+                    <span className="text-xs text-slate-600">{m.game_date}</span>
+                  )}
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
+  )
+}
+
+const PIE_COLORS = ['#16c784', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#06b6d4', '#84cc16', '#f97316']
+
+function DismissalDonut({ dismissals }) {
+  if (!dismissals?.length) return null
+  const total = dismissals.reduce((s, d) => s + Number(d.count), 0)
+  const pieData = dismissals.map(d => ({ name: d.dismissal_type, value: Number(d.count) }))
+  return (
+    <div className="flex flex-col md:flex-row items-center gap-6">
+      <div className="w-48 h-48 shrink-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={2}>
+              {pieData.map((_, idx) => <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />)}
+            </Pie>
+            <Tooltip
+              contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, fontSize: 12 }}
+              formatter={(v) => [`${v} (${Math.round(v/total*100)}%)`, '']}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+        {dismissals.map((d, i) => (
+          <div key={i} className="flex items-center gap-2 text-sm">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+            <span className="capitalize text-slate-300 flex-1 truncate">{d.dismissal_type}</span>
+            <span className="stat-number text-white font-bold">{d.count}</span>
+            <span className="text-slate-500 text-xs w-9 text-right">{Math.round(Number(d.count)/total*100)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function CumulativeRunsChart({ seasonStats }) {
+  if (!seasonStats?.length) return null
+  let cumulative = 0
+  const chartData = [...seasonStats].reverse().map(s => {
+    cumulative += (s.total_runs ?? 0)
+    return { season: s.season_name?.replace('Summer ', '') ?? '', total: cumulative, season_runs: s.total_runs ?? 0 }
+  })
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+        <XAxis dataKey="season" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+        <Tooltip
+          contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }}
+          labelStyle={{ color: '#94a3b8' }}
+          formatter={(v, name) => [v.toLocaleString(), name === 'total' ? 'Career total' : 'Season runs']}
+        />
+        <Bar dataKey="season_runs" name="season_runs" fill="#16c78440" radius={[2,2,0,0]} />
+        <Line type="monotone" dataKey="total" name="total" stroke="#16c784" strokeWidth={2} dot={false} />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+function AveragesChart({ seasonStats }) {
+  if (!seasonStats?.length) return null
+  const chartData = [...seasonStats].reverse()
+    .filter(s => s.batting_average != null || s.bowling_average != null)
+    .map(s => ({
+      season: s.season_name?.replace('Summer ', '') ?? '',
+      bat_avg: s.batting_average != null ? Number(Number(s.batting_average).toFixed(1)) : null,
+      bowl_avg: s.bowling_average != null ? Number(Number(s.bowling_average).toFixed(1)) : null,
+    }))
+  if (!chartData.length) return null
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+        <XAxis dataKey="season" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+        <Tooltip
+          contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }}
+          labelStyle={{ color: '#94a3b8' }}
+          itemStyle={{ color: '#fff' }}
+        />
+        <Legend wrapperStyle={{ color: '#94a3b8', fontSize: 12 }} />
+        <Line type="monotone" dataKey="bat_avg" name="Batting Avg" stroke="#16c784" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+        <Line type="monotone" dataKey="bowl_avg" name="Bowling Avg" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
+function RunsByGradeChart({ byGrade }) {
+  if (!byGrade?.length) return null
+  const sorted = [...byGrade].sort((a, b) => b.runs - a.runs).slice(0, 10)
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(180, sorted.length * 36)}>
+      <BarChart data={sorted} layout="vertical" margin={{ top: 5, right: 60, left: 8, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
+        <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} />
+        <YAxis type="category" dataKey="grade_name" width={130} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+        <Tooltip
+          contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }}
+          labelStyle={{ color: '#94a3b8' }}
+          formatter={(v, _, props) => [`${v} runs (${props.payload.innings} inn, avg ${props.payload.average ?? '—'})`, '']}
+        />
+        <Bar dataKey="runs" fill="#16c784" radius={[0,3,3,0]} label={{ position: 'right', fill: '#64748b', fontSize: 11 }} />
+      </BarChart>
+    </ResponsiveContainer>
   )
 }
 
@@ -956,8 +1189,30 @@ export default function PlayerProfile() {
     if (!seasonId || !seasonStats?.length) return cbw
     const s = seasonStats.find(r => r.season_id === seasonId)
     if (!s) return cbw
-    return { total_wickets: s.total_wickets, economy: s.economy, best_bowling_figures: s.best_bowling_figures, best_figures_wickets: s.best_bowling_wickets }
+    return {
+      total_wickets: s.total_wickets,
+      economy: s.economy,
+      best_bowling_figures: s.best_bowling_figures,
+      best_figures_wickets: s.best_bowling_wickets,
+      bowling_average: s.bowling_average,
+      total_overs: s.total_overs,
+      total_maidens: s.total_maidens,
+      total_runs: s.bowling_runs_conceded,
+      five_fors: s.five_fors,
+    }
   }, [seasonId, seasonStats, cbw])
+
+  const displayFielding = useMemo(() => {
+    if (!seasonId || !seasonStats?.length) return cf
+    const s = seasonStats.find(r => r.season_id === seasonId)
+    if (!s) return cf
+    return {
+      total_catches: s.total_catches,
+      total_catches_wk: s.total_catches_wk,
+      total_run_outs: s.total_run_outs,
+      total_stumpings: s.total_stumpings,
+    }
+  }, [seasonId, seasonStats, cf])
 
   if (loading) return <LoadingSpinner message="Loading player stats…" />
   if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-red-400">Error: {error}</div>
@@ -1021,16 +1276,58 @@ export default function PlayerProfile() {
         <UpcomingMilestonesSection data={upcomingMilestones} />
       )}
 
-      {/* Stat cards — season-aware */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-10">
-        <StatCard label="Matches" value={seasonId ? (displayBatting?.matches ?? '—') : (cb?.games ?? '—')} />
-        <StatCard label="Innings" value={displayBatting?.innings ?? '—'} />
-        <StatCard label="Runs" value={displayBatting?.total_runs ?? '—'} accent />
-        <StatCard label="Average" value={displayBatting?.average ?? '—'} />
-        <StatCard label="High Score" value={displayBatting?.high_score != null ? displayBatting.high_score : '—'} />
-        <StatCard label="Wickets" value={displayBowling?.total_wickets ?? '—'} />
-        <StatCard label="Economy" value={displayBowling?.economy ?? '—'} />
-        <StatCard label="Best Spell" value={displayBowling?.best_bowling_figures ?? cbw?.best_bowling_figures ?? '—'} />
+      {/* Stat cards — season-aware, stacked rows */}
+      <div className="space-y-3 mb-10">
+        {/* Matches */}
+        <div className="flex items-stretch gap-3">
+          <div className="bg-navy-800 border border-navy-700 rounded-xl px-6 py-3 text-center min-w-[100px]">
+            <div className="section-label mb-1">Matches</div>
+            <div className="stat-number font-bold text-2xl text-white leading-none">
+              {seasonId ? (displayBatting?.matches ?? '—') : (cb?.games ?? '—')}
+            </div>
+          </div>
+        </div>
+
+        {/* Batting */}
+        <div>
+          <div className="section-label text-slate-500 mb-1.5 ml-1">Batting</div>
+          <div className="grid grid-cols-4 sm:grid-cols-4 md:grid-cols-7 gap-2">
+            <StatCard label="Innings"   value={displayBatting?.innings ?? '—'} />
+            <StatCard label="Runs"      value={displayBatting?.total_runs ?? '—'} accent />
+            <StatCard label="Average"   value={displayBatting?.average ?? '—'} />
+            <StatCard label="High Score" value={displayBatting?.high_score != null ? displayBatting.high_score : '—'} />
+            <StatCard label="Centuries" value={displayBatting?.hundreds ?? '—'} />
+            <StatCard label="Fifties"   value={displayBatting?.fifties ?? '—'} />
+            <StatCard label="Ducks"     value={seasonId ? (seasonStats?.find(s => s.season_id === seasonId)?.ducks ?? '—') : (cb?.ducks ?? '—')} />
+          </div>
+        </div>
+
+        {/* Bowling */}
+        <div>
+          <div className="section-label text-slate-500 mb-1.5 ml-1">Bowling</div>
+          <div className="grid grid-cols-4 sm:grid-cols-4 md:grid-cols-7 gap-2">
+            <StatCard label="Overs"      value={displayBowling?.total_overs ?? '—'} />
+            <StatCard label="Maidens"    value={displayBowling?.total_maidens ?? '—'} />
+            <StatCard label="Wickets"    value={displayBowling?.total_wickets ?? '—'} accent />
+            <StatCard label="Runs"       value={displayBowling?.total_runs ?? '—'} />
+            <StatCard label="Average"    value={displayBowling?.bowling_average != null ? Number(displayBowling.bowling_average).toFixed(1) : '—'} />
+            <StatCard label="Economy"    value={displayBowling?.economy ?? '—'} />
+            <StatCard label="Best"       value={displayBowling?.best_bowling_figures ?? cbw?.best_bowling_figures ?? '—'} />
+          </div>
+        </div>
+
+        {/* Fielding */}
+        {(displayFielding?.total_catches > 0 || displayFielding?.total_run_outs > 0 || displayFielding?.total_stumpings > 0) && (
+          <div>
+            <div className="section-label text-slate-500 mb-1.5 ml-1">Fielding</div>
+            <div className="flex flex-wrap gap-2">
+              <StatCard label="Catches"  value={displayFielding?.total_catches ?? '—'} />
+              <StatCard label="Run Outs" value={displayFielding?.total_run_outs ?? '—'} />
+              {(displayFielding?.total_catches_wk ?? 0) > 0 && <StatCard label="WK Catches" value={displayFielding.total_catches_wk} />}
+              {(displayFielding?.total_stumpings ?? 0) > 0 && <StatCard label="Stumpings"  value={displayFielding.total_stumpings} />}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -1049,13 +1346,6 @@ export default function PlayerProfile() {
             {t}
           </button>
         ))}
-        {cf && (
-          <div className="ml-auto flex items-center gap-4 pb-2 text-sm text-slate-400">
-            <span>Catches: <strong className="text-white stat-number">{cf.total_catches ?? 0}</strong></span>
-            <span>Run outs: <strong className="text-white stat-number">{cf.total_run_outs ?? 0}</strong></span>
-            {cf.total_stumpings > 0 && <span>Stumpings: <strong className="text-white stat-number">{cf.total_stumpings}</strong></span>}
-          </div>
-        )}
       </div>
 
       {/* Tab content */}
@@ -1092,27 +1382,86 @@ export default function PlayerProfile() {
           </>
         )}
 
+        {tab === 'fielding' && (
+          <>
+            <div className="px-5 py-4 border-b border-navy-700 flex items-center justify-between">
+              <h3 className="display-heading text-lg text-white">FIELDING BY SEASON</h3>
+            </div>
+            {seasonStats === null
+              ? <div className="p-5"><LoadingSpinner size="sm" /></div>
+              : <SeasonFieldingTable data={seasonStats} />
+            }
+          </>
+        )}
+
         {tab === 'analysis' && (
-          <div className="p-5 space-y-8">
+          <div className="p-5 space-y-10">
+
+            {/* Season-by-season overview */}
             <div>
-              <h3 className="display-heading text-lg text-white mb-4">SEASON BY SEASON</h3>
+              <h3 className="display-heading text-lg text-white mb-4">RUNS &amp; WICKETS BY SEASON</h3>
               {seasonStats === null
                 ? <LoadingSpinner size="sm" />
                 : <SeasonChart data={seasonStats} />
               }
             </div>
-            {seasonStats !== null && seasonStats.length > 0 && (
+
+            {/* Cumulative career runs */}
+            {seasonStats !== null && seasonStats.some(s => (s.total_runs ?? 0) > 0) && (
               <div>
-                <h3 className="display-heading text-lg text-white mb-4">FULL SEASON HISTORY</h3>
-                <SeasonBattingTable data={seasonStats} />
+                <h3 className="display-heading text-lg text-white mb-1">CAREER RUNS ACCUMULATION</h3>
+                <p className="text-slate-500 text-xs mb-4">Running total of career batting runs, season by season.</p>
+                <CumulativeRunsChart seasonStats={seasonStats} />
               </div>
             )}
-            {partnerships === null ? (
-              <LoadingSpinner size="sm" />
-            ) : partnerships.length === 0 ? null : (
-              <PartnershipsTable partnerships={partnerships} />
+
+            {/* Season averages trend */}
+            {seasonStats !== null && (
+              <div>
+                <h3 className="display-heading text-lg text-white mb-1">AVERAGES OVER TIME</h3>
+                <p className="text-slate-500 text-xs mb-4">Batting and bowling averages season by season.</p>
+                <AveragesChart seasonStats={seasonStats} />
+              </div>
             )}
 
+            {/* Dismissal donut */}
+            {dismissals !== null && dismissals.length > 0 && (
+              <div>
+                <h3 className="display-heading text-lg text-white mb-4">HOW I GET OUT</h3>
+                <div className="card p-5">
+                  <DismissalDonut dismissals={dismissals} />
+                </div>
+                {cb?.innings > 0 && (() => {
+                  const synced = dismissals.reduce((s, d) => s + Number(d.count), 0)
+                  const total = Number(cb.innings) || 0
+                  if (total <= 0 || synced / total >= 0.5) return null
+                  return (
+                    <div className="mt-3 bg-navy-800/50 border border-navy-700 rounded p-4 flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-slate-400 text-sm">
+                        Only <span className="text-white font-mono">{synced}</span> of <span className="text-white font-mono">{total}</span> innings have game-level data.
+                      </p>
+                      {syncRequested
+                        ? <span className="text-accent text-sm font-medium">Sync requested ✓</span>
+                        : <button onClick={async () => { setSyncRequestLoading(true); try { await api.requestPlayerSync(playerId) } catch {} setSyncRequested(true); setSyncRequestLoading(false) }} disabled={syncRequestLoading} className="btn-primary text-sm disabled:opacity-50 shrink-0">{syncRequestLoading ? 'Submitting…' : 'Request Full Sync'}</button>
+                      }
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
+
+            {/* Runs by grade */}
+            {byGrade !== null && byGrade.length > 1 && (
+              <div>
+                <h3 className="display-heading text-lg text-white mb-1">RUNS BY GRADE</h3>
+                <p className="text-slate-500 text-xs mb-4">Career batting runs broken down by grade.</p>
+                <div className="card p-5">
+                  <RunsByGradeChart byGrade={byGrade} />
+                </div>
+              </div>
+            )}
+
+            {/* No game-level data prompt */}
             {dismissals !== null && byGrade !== null && byPosition !== null &&
               dismissals.length === 0 && byGrade.length === 0 && byPosition.length === 0 && (
               <div className="card p-5">
@@ -1125,88 +1474,22 @@ export default function PlayerProfile() {
                   </p>
                 )}
                 {syncRequested ? (
-                  <p className="text-accent text-sm font-medium">
-                    Sync request submitted — an admin will review it shortly.
-                  </p>
+                  <p className="text-accent text-sm font-medium">Sync request submitted — an admin will review it shortly.</p>
                 ) : (
-                  <button
-                    onClick={async () => {
-                      setSyncRequestLoading(true)
-                      try {
-                        await api.requestPlayerSync(playerId)
-                        setSyncRequested(true)
-                      } catch {
-                        setSyncRequested(true)
-                      } finally {
-                        setSyncRequestLoading(false)
-                      }
-                    }}
-                    disabled={syncRequestLoading}
-                    className="btn-primary text-sm disabled:opacity-50"
-                  >
+                  <button onClick={async () => { setSyncRequestLoading(true); try { await api.requestPlayerSync(playerId); setSyncRequested(true) } catch { setSyncRequested(true) } finally { setSyncRequestLoading(false) } }} disabled={syncRequestLoading} className="btn-primary text-sm disabled:opacity-50">
                     {syncRequestLoading ? 'Submitting…' : 'Request Full Stats Sync'}
                   </button>
                 )}
               </div>
             )}
 
-            {dismissals !== null && dismissals.length > 0 && (() => {
-              const total = dismissals.reduce((s, d) => s + Number(d.count), 0)
-              return (
-                <div>
-                  <h3 className="display-heading text-lg text-white mb-4">DISMISSAL BREAKDOWN</h3>
-                  <div className="card p-5 space-y-2">
-                    {dismissals.map((d, i) => {
-                      const pct = total > 0 ? Math.round(Number(d.count) / total * 100) : 0
-                      return (
-                        <div key={i} className="flex items-center gap-3">
-                          <span className="text-slate-400 text-sm capitalize w-28 shrink-0">{d.dismissal_type}</span>
-                          <div className="flex-1 bg-navy-800 rounded-full h-2">
-                            <div className="bg-accent h-2 rounded-full" style={{ width: `${pct}%` }} />
-                          </div>
-                          <span className="stat-number text-white text-sm w-6 text-right">{d.count}</span>
-                          <span className="text-slate-600 text-xs w-9 text-right">{pct}%</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })()}
+            {/* Partnerships */}
+            {partnerships === null ? <LoadingSpinner size="sm" /> : partnerships.length > 0 && <PartnershipsTable partnerships={partnerships} />}
 
-            {dismissals !== null && dismissals.length > 0 && cb?.innings > 0 && (() => {
-              const syncedInnings = dismissals.reduce((s, d) => s + Number(d.count), 0)
-              const totalInnings = Number(cb.innings) || 0
-              const sparseRatio = totalInnings > 0 ? syncedInnings / totalInnings : 1
-              if (sparseRatio >= 0.5 || syncedInnings >= totalInnings) return null
-              return (
-                <div className="bg-navy-800/50 border border-navy-700 rounded p-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-slate-400 text-sm">
-                    Only <span className="text-white font-mono">{syncedInnings}</span> of <span className="text-white font-mono">{totalInnings}</span> innings have game-level data.
-                    Request a full sync to fill in historical records.
-                  </p>
-                  {syncRequested ? (
-                    <span className="text-accent text-sm font-medium">Sync requested ✓</span>
-                  ) : (
-                    <button
-                      onClick={async () => {
-                        setSyncRequestLoading(true)
-                        try { await api.requestPlayerSync(playerId) } catch {}
-                        setSyncRequested(true)
-                        setSyncRequestLoading(false)
-                      }}
-                      disabled={syncRequestLoading}
-                      className="btn-primary text-sm disabled:opacity-50 shrink-0"
-                    >
-                      {syncRequestLoading ? 'Submitting…' : 'Request Full Sync'}
-                    </button>
-                  )}
-                </div>
-              )
-            })()}
-
+            {/* By grade detail table */}
             {byGrade !== null && byGrade.length > 1 && <ByGradeTable rows={byGrade} />}
 
+            {/* By batting position */}
             {byPosition !== null && byPosition.length > 0 && <ByPositionTable rows={byPosition} />}
           </div>
         )}

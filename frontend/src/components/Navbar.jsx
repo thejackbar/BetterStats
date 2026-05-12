@@ -8,7 +8,8 @@ function useClubSlug() {
   if (segments.length >= 2 && CLUB_SECTIONS.includes(segments[1])) {
     return segments[0]
   }
-  return null
+  // Fall back to the last club the user visited (stored by useClub hook)
+  return sessionStorage.getItem('bs_last_slug') || null
 }
 
 export default function Navbar() {
@@ -31,11 +32,16 @@ export default function Navbar() {
         <div className="flex items-center justify-between h-14">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 group shrink-0">
-            <img src="/betterstats-logo.png" alt="BetterStats logo" className="h-7 w-auto" />
+            <svg className="h-7 w-7 shrink-0" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+              <circle cx="14" cy="14" r="13" stroke="#16c784" strokeWidth="2" fill="none"/>
+              <path d="M3.5 14c0-5.799 4.701-10.5 10.5-10.5S24.5 8.201 24.5 14 19.799 24.5 14 24.5 3.5 19.799 3.5 14z" fill="#16c784" fillOpacity="0.08"/>
+              <path d="M7 10.5c3.5 1.5 6.5 1.5 14 0M7 17.5c3.5-1.5 6.5-1.5 14 0" stroke="#16c784" strokeWidth="1.5" strokeLinecap="round"/>
+              <path d="M14 3.5v21M8 5.5c2 4 2 13 0 17M20 5.5c-2 4-2 13 0 17" stroke="#16c784" strokeWidth="1" strokeLinecap="round" opacity="0.5"/>
+            </svg>
             <span className="font-display font-bold text-xl tracking-wider uppercase text-white group-hover:text-accent transition-colors">
               Better<span className="text-accent">Stats</span>
             </span>
-            <span className="text-slate-600 text-xs font-mono">v3.2.0</span>
+            <span className="text-slate-600 text-xs font-mono">v3.3.0</span>
           </Link>
 
           <div className="hidden md:flex items-center gap-1">
