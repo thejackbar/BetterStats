@@ -3,9 +3,9 @@ import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
 const CONFIDENCE_LABEL = {
-  auto: { label: 'Auto-linked', color: 'text-accent bg-accent/10 border-accent/30' },
-  high: { label: 'High confidence', color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
-  low: { label: 'Low confidence', color: 'text-slate-400 bg-navy-800 border-navy-700' },
+  auto: { label: 'Auto-linked', cls: 'text-pb-accent border-pb-accent/30', bg: 'bg-pb-accent/10' },
+  high: { label: 'High confidence', cls: 'text-pb-amber border-pb-amber/30', bg: 'bg-pb-amber/10' },
+  low: { label: 'Low confidence', cls: 'text-pb-faint', bg: 'bg-pb-surface2' },
 }
 
 function SuggestionRow({ s, players, onAction, loading }) {
@@ -13,24 +13,21 @@ function SuggestionRow({ s, players, onAction, loading }) {
   const conf = CONFIDENCE_LABEL[s.confidence] || CONFIDENCE_LABEL.low
 
   return (
-    <div className={`bg-navy-900 border rounded-lg p-4 ${
-      s.status === 'pending' ? 'border-navy-600' : 'border-navy-800 opacity-60'
-    }`}>
+    <div className={`pb-card p-4 ${s.status !== 'pending' ? 'opacity-60' : ''}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          {/* PHQ side */}
-          <div className="flex items-center gap-2 mb-1">
-            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${conf.color}`}>
+          <div className="flex items-center gap-2 mb-2">
+            <span className={`font-mono text-[10px] px-2 py-0.5 rounded border ${conf.cls} ${conf.bg}`}>
               {conf.label}
             </span>
-            <span className="text-slate-500 text-xs">{s.game_count} game{s.game_count !== 1 ? 's' : ''}</span>
+            <span className="font-mono text-[10px] text-pb-faintest">{s.game_count} game{s.game_count !== 1 ? 's' : ''}</span>
           </div>
           <div className="flex items-center gap-3">
             <div>
-              <p className="text-white font-medium">{s.phq_name}</p>
-              <p className="font-mono text-xs text-slate-600 mt-0.5">{s.phq_player_id}</p>
+              <p className="text-pb-text font-medium text-sm">{s.phq_name}</p>
+              <p className="font-mono text-[10px] text-pb-faintest mt-0.5">{s.phq_player_id}</p>
             </div>
-            <svg className="w-4 h-4 text-slate-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 text-pb-faintest shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
             </svg>
             <div>
@@ -38,7 +35,7 @@ function SuggestionRow({ s, players, onAction, loading }) {
                 <select
                   value={selectedPlayerId}
                   onChange={e => setSelectedPlayerId(e.target.value)}
-                  className="bg-navy-800 border border-navy-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-accent"
+                  className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
                 >
                   <option value="">— select player —</option>
                   {players.map(p => (
@@ -48,10 +45,10 @@ function SuggestionRow({ s, players, onAction, loading }) {
                   ))}
                 </select>
               ) : (
-                <p className="text-slate-300 text-sm">{s.player_name || '—'}</p>
+                <p className="text-pb-dim text-sm">{s.player_name || '—'}</p>
               )}
               {s.player_current_phq_id && (
-                <p className="text-xs text-amber-500/70 mt-0.5">already has PHQ: {s.player_current_phq_id}</p>
+                <p className="font-mono text-[10px] text-pb-amber mt-0.5">already has PHQ: {s.player_current_phq_id}</p>
               )}
             </div>
           </div>
@@ -62,23 +59,24 @@ function SuggestionRow({ s, players, onAction, loading }) {
             <button
               onClick={() => onAction(s.id, 'approve', selectedPlayerId)}
               disabled={loading || !selectedPlayerId}
-              className="btn-primary text-xs disabled:opacity-40"
+              className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}
             >
               {loading ? 'Saving…' : 'Approve Link'}
             </button>
             <button
               onClick={() => onAction(s.id, 'dismiss', null)}
               disabled={loading}
-              className="btn-ghost text-xs text-slate-400 disabled:opacity-40"
+              className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors disabled:opacity-40"
             >
               Dismiss
             </button>
           </div>
         ) : (
-          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+          <span className={`font-mono text-[10px] px-2 py-0.5 rounded border capitalize ${
             s.status === 'approved'
-              ? 'bg-accent/10 border-accent/30 text-accent'
-              : 'bg-navy-800 border-navy-700 text-slate-500'
+              ? 'text-pb-accent border-pb-accent/30 bg-pb-accent/10'
+              : 'text-pb-faint border-pb-hairline bg-pb-surface2'
           }`}>
             {s.status}
           </span>
@@ -92,7 +90,7 @@ export default function AdminPhqMatch() {
   const [suggestions, setSuggestions] = useState([])
   const [players, setPlayers] = useState([])
   const [scanning, setScanning] = useState(false)
-  const [loading, setLoading] = useState(null) // suggestion id being actioned
+  const [loading, setLoading] = useState(null)
   const [msg, setMsg] = useState('')
   const [filter, setFilter] = useState('pending')
 
@@ -127,7 +125,6 @@ export default function AdminPhqMatch() {
       setMsg(`Failed: ${e.message}`)
       setScanning(false)
     }
-    // intentionally NOT resetting scanning=false on success — button stays disabled until page reload
   }
 
   const handleAction = async (id, action, playerId) => {
@@ -153,18 +150,17 @@ export default function AdminPhqMatch() {
   return (
     <AdminLayout>
       <div className="max-w-3xl">
-        <h1 className="text-2xl font-display font-bold text-white mb-2">PHQ ID Match</h1>
-        <p className="text-slate-400 text-sm mb-6">
+        <h1 className="font-display font-bold text-2xl text-pb-text mb-2">PHQ ID Match</h1>
+        <p className="text-pb-faint text-sm mb-6 leading-relaxed">
           Scan scorecards to auto-link PlayHQ player UUIDs to your players. Exact name matches are linked
           automatically; ambiguous matches appear below for review.
         </p>
 
-        {/* Scan card */}
-        <div className="bg-navy-900 border border-navy-700 rounded-lg p-5 mb-6">
+        <div className="pb-card p-5 mb-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 className="text-white font-semibold mb-1">Run PHQ ID Scan</h2>
-              <p className="text-slate-500 text-xs">
+              <h2 className="text-pb-text font-semibold text-sm mb-1">Run PHQ ID Scan</h2>
+              <p className="font-mono text-[10px] text-pb-faint leading-relaxed max-w-sm">
                 Scans all game appearances for this org. Auto-links exact matches; creates suggestions for ambiguous ones.
                 Takes 5-15 minutes depending on history volume.
               </p>
@@ -172,50 +168,46 @@ export default function AdminPhqMatch() {
             <button
               onClick={handleScan}
               disabled={scanning}
-              className="btn-primary disabled:opacity-50 flex items-center gap-2 shrink-0"
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg flex items-center gap-2 shrink-0"
+              style={{ background: 'var(--pb-accent)' }}
             >
               {scanning ? (
                 <>
-                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span className="w-3.5 h-3.5 border-2 border-pb-bg/30 border-t-pb-bg rounded-full animate-spin" />
                   Starting…
                 </>
-              ) : 'Scan Now'}
+              ) : 'SCAN NOW'}
             </button>
           </div>
-          {msg && <p className="text-amber-400 text-xs mt-3">{msg}</p>}
+          {msg && <p className="font-mono text-[11px] text-pb-amber mt-3">{msg}</p>}
         </div>
 
-        {/* Stats */}
         {suggestions.length > 0 && (
-          <div className="flex flex-wrap gap-3 mb-4">
-            <div className="bg-navy-900 border border-navy-700 rounded px-3 py-2 text-center">
-              <div className="text-accent font-mono font-bold text-lg">{pending.length}</div>
-              <div className="text-slate-500 text-xs">Pending</div>
-            </div>
-            <div className="bg-navy-900 border border-navy-700 rounded px-3 py-2 text-center">
-              <div className="text-white font-mono font-bold text-lg">{autoLinked}</div>
-              <div className="text-slate-500 text-xs">Auto-linked</div>
-            </div>
-            <div className="bg-navy-900 border border-navy-700 rounded px-3 py-2 text-center">
-              <div className="text-white font-mono font-bold text-lg">{manualApproved}</div>
-              <div className="text-slate-500 text-xs">Approved</div>
-            </div>
-            <div className="bg-navy-900 border border-navy-700 rounded px-3 py-2 text-center">
-              <div className="text-slate-400 font-mono font-bold text-lg">{dismissed}</div>
-              <div className="text-slate-500 text-xs">Dismissed</div>
-            </div>
+          <div className="flex flex-wrap gap-3 mb-5">
+            {[
+              { value: pending.length, label: 'Pending', accent: true },
+              { value: autoLinked, label: 'Auto-linked' },
+              { value: manualApproved, label: 'Approved' },
+              { value: dismissed, label: 'Dismissed', dim: true },
+            ].map(({ value, label, accent, dim }) => (
+              <div key={label} className="pb-card px-4 py-3 text-center min-w-[80px]">
+                <div className={`font-mono font-bold text-lg ${accent ? 'text-pb-accent' : dim ? 'text-pb-dim' : 'text-pb-text'}`}>{value}</div>
+                <div className="font-mono text-[10px] text-pb-faint mt-0.5">{label}</div>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* Filter tabs */}
         {suggestions.length > 0 && (
           <div className="flex gap-1 mb-4">
             {['pending', 'resolved', 'all'].map(f => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
-                className={`text-xs px-3 py-1.5 rounded capitalize transition-colors ${
-                  filter === f ? 'bg-navy-700 text-white' : 'text-slate-400 hover:text-white'
+                className={`font-mono text-[10px] px-3 py-1.5 rounded capitalize transition-colors ${
+                  filter === f
+                    ? 'text-pb-text bg-pb-surface2'
+                    : 'text-pb-faint hover:text-pb-text'
                 }`}
               >
                 {f} {f === 'pending' ? `(${pending.length})` : f === 'resolved' ? `(${resolved.length})` : `(${suggestions.length})`}
@@ -223,17 +215,16 @@ export default function AdminPhqMatch() {
             ))}
             <button
               onClick={fetchAll}
-              className="ml-auto text-slate-500 hover:text-white text-xs"
+              className="ml-auto font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
             >
               Refresh
             </button>
           </div>
         )}
 
-        {/* Suggestions list */}
         {displayed.length === 0 ? (
-          <div className="bg-navy-900 border border-navy-700 rounded-lg p-8 text-center">
-            <p className="text-slate-500 text-sm">
+          <div className="pb-card p-8 text-center">
+            <p className="font-mono text-[11px] text-pb-faint">
               {suggestions.length === 0
                 ? 'No suggestions yet — run a scan above.'
                 : 'No suggestions in this filter.'}

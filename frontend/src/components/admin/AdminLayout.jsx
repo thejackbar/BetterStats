@@ -36,39 +36,41 @@ export default function AdminLayout({ children }) {
     exact ? location.pathname === to : location.pathname.startsWith(to)
 
   return (
-    <div className="min-h-screen bg-navy-950 flex flex-col">
+    <div className="min-h-screen bg-pb-bg text-pb-text flex flex-col">
       {/* Top bar */}
-      <header className="bg-navy-900 border-b border-navy-700 sticky top-0 z-50">
+      <header className="bg-pb-surface border-b pb-hairline-b sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
           <div className="flex items-center gap-3">
             <Link to="/" className="flex items-center gap-2 group">
-              <span className="w-6 h-6 rounded bg-accent flex items-center justify-center">
-                <svg viewBox="0 0 24 24" className="w-4 h-4 fill-navy-950">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="4" x2="12" y2="20" stroke="#070b14" strokeWidth="2" />
-                  <line x1="4" y1="12" x2="20" y2="12" stroke="#070b14" strokeWidth="2" />
-                </svg>
+              <span
+                className="w-7 h-7 rounded font-mono font-bold text-xs flex items-center justify-center text-pb-bg"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                BS
               </span>
-              <span className="font-display font-bold text-lg tracking-wider uppercase text-white group-hover:text-accent transition-colors">
-                Better<span className="text-accent">Stats</span>
+              <span className="font-display font-bold text-base tracking-wider uppercase text-pb-text group-hover:text-pb-accent transition-colors">
+                BetterStats
               </span>
             </Link>
-            <span className="hidden sm:block text-navy-600 text-sm">/ Admin</span>
-            <span className="hidden sm:block text-slate-700 text-xs font-mono">v3.1.3</span>
+            <span className="hidden sm:block text-pb-faintest text-sm">/</span>
+            <span className="hidden sm:block font-mono text-[11px] tracking-wide2 text-pb-faint">ADMIN</span>
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="hidden sm:block text-slate-400 text-sm">
+            <span className="hidden sm:block font-mono text-[11px] text-pb-faint">
               {user?.display_name || user?.username}
               {user?.role === 'super_admin' && (
-                <span className="ml-1 text-accent text-xs">(super)</span>
+                <span className="ml-1 text-[10px]" style={{ color: 'var(--pb-accent)' }}>(SUPER)</span>
               )}
             </span>
-            <button onClick={handleLogout} className="btn-ghost text-sm text-slate-400 hover:text-white">
-              Log out
+            <button
+              onClick={handleLogout}
+              className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-3 py-1.5"
+            >
+              LOG OUT
             </button>
             <button
-              className="md:hidden text-slate-400 hover:text-white p-1"
+              className="md:hidden text-pb-faint hover:text-pb-text p-1"
               onClick={() => setMobileOpen(o => !o)}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -86,39 +88,41 @@ export default function AdminLayout({ children }) {
         {/* Sidebar */}
         <aside className={`
           ${mobileOpen ? 'block' : 'hidden'} md:block
-          w-full md:w-48 shrink-0 border-r border-navy-800 pt-4 pb-8 px-2
+          w-full md:w-48 shrink-0 border-r pb-hairline-r pt-4 pb-8 px-2
         `}>
-          <nav className="space-y-1">
+          <nav className="space-y-0.5">
             {NAV_LINKS.map(link => (
               <Link
                 key={link.to}
                 to={link.to}
                 onClick={() => setMobileOpen(false)}
-                className={`block px-3 py-2 rounded text-sm transition-colors ${
+                className={`block px-3 py-2 rounded text-sm transition-colors font-mono text-[11px] tracking-wide2 ${
                   isActive(link.to, link.exact)
-                    ? 'bg-navy-800 text-accent'
-                    : 'text-slate-400 hover:text-white hover:bg-navy-800'
+                    ? 'bg-pb-surface2 text-pb-text'
+                    : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
                 }`}
+                style={isActive(link.to, link.exact) ? { color: 'var(--pb-accent)' } : {}}
               >
-                {link.label}
+                {link.label.toUpperCase()}
               </Link>
             ))}
 
             {user?.role === 'super_admin' && (
               <>
-                <div className="pt-4 pb-1 px-3 text-xs text-slate-600 uppercase tracking-wider">Super Admin</div>
+                <div className="pt-5 pb-1 px-3 font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase">Super Admin</div>
                 {SUPER_LINKS.map(link => (
                   <Link
                     key={link.to}
                     to={link.to}
                     onClick={() => setMobileOpen(false)}
-                    className={`block px-3 py-2 rounded text-sm transition-colors ${
+                    className={`block px-3 py-2 rounded text-sm transition-colors font-mono text-[11px] tracking-wide2 ${
                       isActive(link.to)
-                        ? 'bg-navy-800 text-accent'
-                        : 'text-slate-400 hover:text-white hover:bg-navy-800'
+                        ? 'bg-pb-surface2'
+                        : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
                     }`}
+                    style={isActive(link.to) ? { color: 'var(--pb-accent)' } : {}}
                   >
-                    {link.label}
+                    {link.label.toUpperCase()}
                   </Link>
                 ))}
               </>

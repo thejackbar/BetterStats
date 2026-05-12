@@ -11,32 +11,34 @@ export default function Home() {
   }, [])
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-pb-bg text-pb-text">
       {/* Hero */}
-      <section className="relative overflow-hidden border-b border-navy-700">
-        <div className="absolute inset-0 bg-gradient-to-br from-navy-800 via-navy-900 to-navy-950" />
-        <div className="absolute top-0 right-0 w-96 h-96 bg-accent/5 rounded-full blur-3xl" />
-        <div className="relative max-w-7xl mx-auto px-4 py-24 md:py-36">
+      <section className="relative overflow-hidden pb-hairline-b">
+        <div className="relative max-w-5xl mx-auto px-4 py-24 md:py-36">
           <div className="max-w-2xl">
-            <div className="accent-bar mb-6" />
-            <h1 className="display-heading text-5xl md:text-7xl text-white leading-none mb-6">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-6 uppercase">Built for Australian cricket clubs</p>
+            <h1 className="font-display font-bold text-[56px] md:text-[88px] text-pb-text leading-none mb-6 tracking-tight">
               YOUR STATS.<br />
-              <span className="text-accent">YOUR GAME.</span>
+              <span style={{ color: 'var(--pb-accent)' }}>YOUR GAME.</span>
             </h1>
-            <p className="text-slate-400 text-lg md:text-xl leading-relaxed mb-8 max-w-xl">
+            <p className="text-pb-dim text-lg md:text-xl leading-relaxed mb-8 max-w-xl">
               The cricket statistics platform built for players. Career averages, innings history,
               and live match data — all powered by PlayHQ. No manual exports.
             </p>
             <div className="flex flex-wrap gap-4">
-              <Link to="/onboard" className="btn-primary text-base px-6 py-3">
-                Add Your Club
+              <Link
+                to="/onboard"
+                className="px-6 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                ADD YOUR CLUB
               </Link>
               {orgs.length > 0 && (
                 <Link
-                  to={`/dashboard/${orgs[0].id}`}
-                  className="border border-navy-600 hover:border-accent text-white hover:text-accent px-6 py-3 rounded-lg transition-colors text-sm font-semibold"
+                  to={`/${orgs[0].slug}/dashboard`}
+                  className="border pb-hairline text-pb-dim hover:text-pb-text px-6 py-3 rounded font-mono text-[11px] tracking-wide2 font-semibold transition-colors"
                 >
-                  View Dashboard →
+                  VIEW DASHBOARD →
                 </Link>
               )}
             </div>
@@ -45,15 +47,15 @@ export default function Home() {
       </section>
 
       {/* Feature blocks */}
-      <section className="max-w-7xl mx-auto px-4 py-20">
+      <section className="max-w-5xl mx-auto px-4 py-20">
         <div className="text-center mb-14">
-          <div className="accent-bar mx-auto mb-4" />
-          <h2 className="display-heading text-3xl md:text-4xl text-white">
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4">WHY BETTERSTATS?</p>
+          <h2 className="font-display font-bold text-[32px] md:text-[44px] text-pb-text tracking-tight">
             BUILT FOR CRICKET, BUILT FOR PLAYERS
           </h2>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6">
+        <div className="grid md:grid-cols-3 gap-5">
           {[
             {
               icon: thiings.barChart,
@@ -71,10 +73,10 @@ export default function Home() {
               desc: 'Claim your profile, track your form, share your season highlight. A home page for every cricketer in the club.',
             },
           ].map(({ icon, title, desc }) => (
-            <div key={title} className="card p-6">
-              <img src={icon} alt="" className="w-12 h-12 object-contain mb-4" />
-              <h3 className="display-heading text-xl text-white mb-2">{title}</h3>
-              <p className="text-slate-400 text-sm leading-relaxed">{desc}</p>
+            <div key={title} className="pb-card p-6">
+              <img src={icon} alt="" className="w-10 h-10 object-contain mb-4" />
+              <p className="font-mono text-[10px] tracking-wide3 mb-2" style={{ color: 'var(--pb-accent)' }}>{title.toUpperCase()}</p>
+              <p className="text-pb-dim text-sm leading-relaxed">{desc}</p>
             </div>
           ))}
         </div>
@@ -82,22 +84,22 @@ export default function Home() {
 
       {/* Clubs */}
       {orgs.length > 0 && (
-        <section className="border-t border-navy-700 max-w-7xl mx-auto px-4 py-16">
-          <h2 className="section-label mb-6">Clubs on BetterStats</h2>
+        <section className="pb-hairline-t max-w-5xl mx-auto px-4 py-16">
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-6 uppercase">Clubs on BetterStats</p>
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
             {orgs.map(org => (
               <Link
                 key={org.id}
-                to={`/dashboard/${org.id}`}
-                className="card p-5 hover:border-accent/40 transition-colors group"
+                to={`/${org.slug}/dashboard`}
+                className="pb-card p-5 hover:bg-pb-surface2 transition-colors group"
               >
-                <div className="display-heading text-lg text-white group-hover:text-accent transition-colors">
+                <div className="font-display font-bold text-lg text-pb-text group-hover:text-pb-accent transition-colors">
                   {org.name}
                 </div>
                 {org.short_name && (
-                  <div className="text-xs text-slate-500 mt-1 font-mono">{org.short_name}</div>
+                  <div className="font-mono text-[10px] text-pb-faintest mt-1">{org.short_name}</div>
                 )}
-                <div className="text-accent text-xs mt-3 font-semibold">View stats →</div>
+                <div className="font-mono text-[10px] tracking-wide2 mt-3" style={{ color: 'var(--pb-accent)' }}>View stats →</div>
               </Link>
             ))}
           </div>
@@ -105,12 +107,17 @@ export default function Home() {
       )}
 
       {/* CTA */}
-      <section className="border-t border-navy-700 bg-navy-800/50">
-        <div className="max-w-7xl mx-auto px-4 py-16 text-center">
-          <h2 className="display-heading text-3xl text-white mb-4">READY TO GET YOUR STATS?</h2>
-          <p className="text-slate-400 mb-8">Add your club's PlayHQ Organisation ID and we'll pull everything automatically.</p>
-          <Link to="/onboard" className="btn-primary text-base px-8 py-3">
-            Get Started — It's Free
+      <section className="pb-hairline-t">
+        <div className="max-w-5xl mx-auto px-4 py-16 text-center">
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4">GET STARTED</p>
+          <h2 className="font-display font-bold text-3xl text-pb-text mb-4 tracking-tight">READY TO GET YOUR STATS?</h2>
+          <p className="text-pb-faint mb-8">Add your club's PlayHQ Organisation ID and we'll pull everything automatically.</p>
+          <Link
+            to="/onboard"
+            className="inline-block px-8 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
+            style={{ background: 'var(--pb-accent)' }}
+          >
+            GET STARTED — IT'S FREE
           </Link>
         </div>
       </section>

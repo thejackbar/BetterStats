@@ -5,10 +5,10 @@ import { api } from '../lib/api'
 export default function Onboard() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
-  const [selected, setSelected] = useState(null) // { id, name }
+  const [selected, setSelected] = useState(null)
   const [showResults, setShowResults] = useState(false)
   const [searching, setSearching] = useState(false)
-  const [status, setStatus] = useState(null) // null | 'loading' | 'success' | 'error'
+  const [status, setStatus] = useState(null)
   const [message, setMessage] = useState('')
   const [result, setResult] = useState(null)
   const navigate = useNavigate()
@@ -81,94 +81,109 @@ export default function Onboard() {
   const orgName = (org) => org.name || org.shortName || org.organisationName || org.id || ''
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-16">
-      <div className="mb-10">
-        <div className="accent-bar mb-4" />
-        <h1 className="display-heading text-4xl text-white mb-2">ADD YOUR CLUB</h1>
-        <p className="text-slate-400">
-          Search for your cricket club by name to connect it to BetterStats.
-        </p>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div ref={wrapperRef} className="relative">
-          <label className="section-label block mb-2">Search Club Name</label>
-          <div className="relative">
-            <input
-              type="text"
-              value={query}
-              onChange={handleQueryChange}
-              onFocus={() => results.length > 0 && setShowResults(true)}
-              placeholder="e.g. Applecross Cricket Club"
-              className="w-full bg-navy-800 border border-navy-600 text-white placeholder-slate-600 text-sm rounded-lg px-4 py-3 focus:outline-none focus:border-accent transition-colors pr-10"
-              disabled={status === 'loading' || status === 'success'}
-              autoComplete="off"
-            />
-            {searching && (
-              <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                <span className="w-4 h-4 border-2 border-accent/40 border-t-accent rounded-full animate-spin block" />
-              </div>
-            )}
-            {selected && (
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-accent text-lg">✓</div>
-            )}
-          </div>
-
-          {showResults && results.length > 0 && (
-            <ul className="absolute z-10 mt-1 w-full bg-navy-800 border border-navy-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
-              {results.map((org) => (
-                <li key={org.id}>
-                  <button
-                    type="button"
-                    onClick={() => handleSelect(org)}
-                    className="w-full text-left px-4 py-3 text-sm text-white hover:bg-navy-700 transition-colors border-b border-navy-700 last:border-0"
-                  >
-                    <div className="font-medium">{orgName(org)}</div>
-                    {org.shortName && org.shortName !== org.name && (
-                      <div className="text-slate-400 text-xs">{org.shortName}</div>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {showResults && !searching && results.length === 0 && query.length >= 2 && (
-            <div className="absolute z-10 mt-1 w-full bg-navy-800 border border-navy-600 rounded-lg px-4 py-3 text-sm text-slate-400">
-              No clubs found for "{query}"
-            </div>
-          )}
+    <div className="min-h-screen bg-pb-bg text-pb-text">
+      <div className="max-w-2xl mx-auto px-4 py-16">
+        <div className="mb-10">
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">Get started</p>
+          <h1 className="font-display font-bold text-[40px] md:text-[56px] text-pb-text leading-none mb-4 tracking-tight">
+            ADD YOUR<br />
+            <span style={{ color: 'var(--pb-accent)' }}>CLUB.</span>
+          </h1>
+          <p className="text-pb-dim">
+            Search for your cricket club by name to connect it to BetterStats.
+          </p>
         </div>
 
-        {message && (
-          <div className={`rounded-lg px-4 py-3 text-sm ${status === 'error' ? 'bg-red-500/10 border border-red-500/30 text-red-400' : 'bg-accent/10 border border-accent/30 text-accent'}`}>
-            {message}
-          </div>
-        )}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div ref={wrapperRef} className="relative">
+            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-2">
+              Search Club Name
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={query}
+                onChange={handleQueryChange}
+                onFocus={() => results.length > 0 && setShowResults(true)}
+                placeholder="e.g. Applecross Cricket Club"
+                className="w-full bg-pb-surface2 border pb-hairline text-pb-text placeholder-pb-faintest text-sm rounded px-4 py-3 focus:outline-none focus:border-pb-accent transition-colors pr-10"
+                disabled={status === 'loading' || status === 'success'}
+                autoComplete="off"
+              />
+              {searching && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <span className="w-4 h-4 border-2 border-pb-accent/40 border-t-pb-accent rounded-full animate-spin block" />
+                </div>
+              )}
+              {selected && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--pb-accent)' }}>✓</div>
+              )}
+            </div>
 
-        {status !== 'success' ? (
-          <button
-            type="submit"
-            disabled={status === 'loading' || !selected}
-            className="btn-primary w-full py-3 text-base disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {status === 'loading' ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="w-4 h-4 border-2 border-navy-950/40 border-t-navy-950 rounded-full animate-spin" />
-                Connecting…
-              </span>
-            ) : 'Add Club & Start Sync'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => result && navigate(`/dashboard/${result.org_id}`)}
-            className="btn-primary w-full py-3 text-base"
-          >
-            View Dashboard →
-          </button>
-        )}
-      </form>
+            {showResults && results.length > 0 && (
+              <ul className="absolute z-10 mt-1 w-full bg-pb-surface border pb-hairline rounded shadow-xl max-h-60 overflow-y-auto">
+                {results.map((org) => (
+                  <li key={org.id}>
+                    <button
+                      type="button"
+                      onClick={() => handleSelect(org)}
+                      className="w-full text-left px-4 py-3 text-sm text-pb-text hover:bg-pb-surface2 transition-colors pb-hairline-b last:border-0"
+                    >
+                      <div className="font-medium">{orgName(org)}</div>
+                      {org.shortName && org.shortName !== org.name && (
+                        <div className="text-pb-faint text-xs mt-0.5">{org.shortName}</div>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {showResults && !searching && results.length === 0 && query.length >= 2 && (
+              <div className="absolute z-10 mt-1 w-full bg-pb-surface border pb-hairline rounded px-4 py-3 text-sm text-pb-faint">
+                No clubs found for "{query}"
+              </div>
+            )}
+          </div>
+
+          {message && (
+            <div className={`rounded px-4 py-3 font-mono text-[11px] ${
+              status === 'error'
+                ? 'bg-pb-red/10 border border-pb-red/30 text-pb-red'
+                : 'border text-pb-accent'
+            }`}
+            style={status !== 'error' ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' } : {}}
+            >
+              {message}
+            </div>
+          )}
+
+          {status !== 'success' ? (
+            <button
+              type="submit"
+              disabled={status === 'loading' || !selected}
+              className="w-full py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}
+            >
+              {status === 'loading' ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-pb-bg/40 border-t-pb-bg rounded-full animate-spin" />
+                  Connecting…
+                </span>
+              ) : 'ADD CLUB & START SYNC'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => result && navigate(`/${result.slug}/dashboard`)}
+              className="w-full py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}
+            >
+              VIEW DASHBOARD →
+            </button>
+          )}
+        </form>
+      </div>
     </div>
   )
 }

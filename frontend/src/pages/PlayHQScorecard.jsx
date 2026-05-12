@@ -1,10 +1,7 @@
 import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
-import LoadingSpinner from '../components/LoadingSpinner'
-import clsx from 'clsx'
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
+import { PbSpinner, ResultPill } from '../lib/presskit'
 
 function fmtDate(iso) {
   if (!iso) return null
@@ -13,66 +10,54 @@ function fmtDate(iso) {
   })
 }
 
-// ── Result banner ─────────────────────────────────────────────────────────────
-
 function ResultBanner({ game, toss }) {
   if (!game) return null
   const isWin = game.result === 'WIN'
   const isDraw = ['DRAW', 'TIE', 'NO_RESULT'].includes(game.result)
 
   return (
-    <div className={clsx(
-      'rounded-xl p-6 mb-6 border',
-      isWin  ? 'bg-accent/10 border-accent/30'
-             : isDraw ? 'bg-slate-500/10 border-slate-500/30'
-                      : 'bg-red-500/10 border-red-500/30',
-    )}>
+    <div className={`pb-card p-5 mb-5 ${
+      isWin ? 'border-pb-accent/30' : isDraw ? 'border-pb-faintest' : 'border-pb-red/30'
+    }`}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           {(game.season || game.grade?.name) && (
-            <p className="section-label mb-1">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2 uppercase">
               {[game.season, game.grade?.name].filter(Boolean).join(' · ')}
               {game.round && <span> · {game.round}</span>}
             </p>
           )}
-          <h2 className="display-heading text-2xl md:text-3xl text-white">
+          <h2 className="font-display font-bold text-[24px] md:text-[30px] text-pb-text leading-tight tracking-tight">
             {game.home_team}
-            <span className="text-slate-500 font-sans font-normal text-xl mx-2">vs</span>
+            <span className="text-pb-faint font-sans font-normal text-xl mx-2">vs</span>
             {game.away_team}
           </h2>
           {game.played_at && (
-            <p className="text-slate-400 text-sm mt-1">{fmtDate(game.played_at)}</p>
+            <p className="text-pb-faint text-sm mt-1">{fmtDate(game.played_at)}</p>
           )}
-          {game.venue && (
-            <p className="text-slate-500 text-xs mt-0.5">{game.venue}</p>
-          )}
-          {toss && (
-            <p className="text-slate-500 text-xs mt-2 italic">{toss}</p>
-          )}
+          {game.venue && <p className="font-mono text-[10px] text-pb-faintest mt-0.5">{game.venue}</p>}
+          {toss && <p className="font-mono text-[10px] text-pb-faintest mt-2 italic">{toss}</p>}
         </div>
 
         <div className="text-right shrink-0">
           {(game.competitors || []).map((c, i) => (
             <div key={i} className="mb-1">
-              <span className="text-xs text-slate-400 mr-2">{c.name}</span>
+              <span className="font-mono text-[10px] text-pb-faint mr-2">{c.name}</span>
               {(c.innings || []).map((inn, j) => (
-                <span key={j} className="stat-number text-white font-bold text-sm mr-2">
+                <span key={j} className="font-mono font-bold text-sm text-pb-text mr-2 pb-num">
                   {inn.score ?? '—'}{inn.declared ? '*' : ''}
                 </span>
               ))}
               {!c.innings?.length && c.score != null && (
-                <span className="stat-number text-white font-bold text-sm">{c.score}</span>
+                <span className="font-mono font-bold text-sm text-pb-text pb-num">{c.score}</span>
               )}
             </div>
           ))}
-          <div className={clsx(
-            'display-heading text-xl mt-2',
-            isWin ? 'text-accent' : isDraw ? 'text-slate-400' : 'text-red-400',
-          )}>
-            {game.result || 'N/R'}
+          <div className="mt-2 flex justify-end">
+            <ResultPill result={game.result || 'N/R'} />
           </div>
           {game.winning_team && (
-            <p className="text-xs text-slate-400 mt-0.5">{game.winning_team} won</p>
+            <p className="font-mono text-[10px] text-pb-faint mt-1">{game.winning_team} won</p>
           )}
         </div>
       </div>
@@ -80,76 +65,62 @@ function ResultBanner({ game, toss }) {
   )
 }
 
-// ── Score summary line ────────────────────────────────────────────────────────
-
 function ScoreLine({ innings }) {
   const runs = innings.total_runs ?? innings.batting.reduce((s, r) => s + (r.runs ?? 0), 0)
   const wickets = innings.total_wickets ?? innings.batting.filter(r => !r.not_out && !r.did_not_bat).length
   return (
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <span className="stat-number text-white font-bold text-xl">{runs}/{wickets}</span>
-      {innings.overs != null && (
-        <span className="text-slate-400 text-sm">({innings.overs} ov)</span>
-      )}
-      {innings.extras != null && (
-        <span className="text-slate-500 text-xs">Extras: {innings.extras}</span>
-      )}
+      <span className="font-mono text-[20px] font-bold text-pb-text pb-num">{runs}/{wickets}</span>
+      {innings.overs != null && <span className="font-mono text-sm text-pb-faint">({innings.overs} ov)</span>}
+      {innings.extras != null && <span className="font-mono text-[11px] text-pb-faintest">Extras: {innings.extras}</span>}
     </div>
   )
 }
 
-// ── Batting table ─────────────────────────────────────────────────────────────
-
 function BattingTable({ batting = [] }) {
-  if (!batting.length) return <p className="text-slate-500 text-sm py-4 px-4">No batting data.</p>
+  if (!batting.length) return <p className="text-pb-faint text-sm py-4 px-5">No batting data.</p>
 
   const dnb = batting.filter(r => r.did_not_bat)
   const batted = batting.filter(r => !r.did_not_bat)
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full">
+    <div className="overflow-x-auto pb-scroll">
+      <table className="w-full text-[13px]">
         <thead>
-          <tr className="border-b border-navy-700">
-            <th className="table-header">Batter</th>
-            <th className="table-header text-slate-500 font-normal normal-case tracking-normal min-w-[120px]">Dismissal</th>
-            <th className="table-header text-right">R</th>
-            <th className="table-header text-right">B</th>
-            <th className="table-header text-right">4s</th>
-            <th className="table-header text-right">6s</th>
-            <th className="table-header text-right">SR</th>
+          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+            <th className="font-medium py-2.5 pl-5">BATTER</th>
+            <th className="font-medium py-2.5 text-pb-faintest font-normal normal-case tracking-normal hidden sm:table-cell">Dismissal</th>
+            <th className="font-medium py-2.5 text-right" style={{ color: 'var(--pb-accent)' }}>R</th>
+            <th className="font-medium py-2.5 text-right">B</th>
+            <th className="font-medium py-2.5 text-right hidden sm:table-cell">4s</th>
+            <th className="font-medium py-2.5 text-right hidden sm:table-cell">6s</th>
+            <th className="font-medium py-2.5 pr-5 text-right hidden sm:table-cell">SR</th>
           </tr>
         </thead>
         <tbody>
           {batted.map((row, i) => (
-            <tr key={i} className="table-row">
-              <td className="table-cell font-medium">
-                {row.player_id ? (
-                  <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors">
-                    {row.name}
-                  </Link>
-                ) : (
-                  <span className="text-white">{row.name}</span>
-                )}
+            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+              <td className="py-2.5 pl-5">
+                {row.player_id
+                  ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{row.name}</Link>
+                  : <span className="text-pb-text font-semibold">{row.name}</span>
+                }
               </td>
-              <td className="table-cell text-slate-400 text-xs">
+              <td className="py-2.5 px-3 text-pb-faint text-xs hidden sm:table-cell">
                 {row.how_out || (row.not_out ? 'not out' : '—')}
               </td>
-              <td className="table-cell text-right">
-                <span className={clsx(
-                  'stat-number font-bold',
-                  (row.runs ?? 0) >= 100 ? 'text-amber-cricket'
-                    : (row.runs ?? 0) >= 50 ? 'text-accent'
-                    : 'text-white',
-                )}>
+              <td className="py-2.5 text-right">
+                <span className="font-mono font-bold pb-num" style={{
+                  color: (row.runs ?? 0) >= 100 ? 'var(--pb-amber)' : (row.runs ?? 0) >= 50 ? 'var(--pb-accent)' : undefined
+                }}>
                   {row.runs ?? '—'}
                 </span>
-                {row.not_out && <span className="text-accent text-xs">*</span>}
+                {row.not_out && <span className="text-pb-accent text-xs">*</span>}
               </td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.balls ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.fours ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.sixes ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-400">
+              <td className="py-2.5 font-mono text-pb-dim text-right">{row.balls ?? '—'}</td>
+              <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.fours ?? '—'}</td>
+              <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.sixes ?? '—'}</td>
+              <td className="py-2.5 pr-5 font-mono text-pb-faint text-right hidden sm:table-cell">
                 {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
               </td>
             </tr>
@@ -157,8 +128,8 @@ function BattingTable({ batting = [] }) {
         </tbody>
         {dnb.length > 0 && (
           <tfoot>
-            <tr className="border-t border-navy-700/50">
-              <td colSpan={7} className="table-cell text-slate-600 text-xs italic">
+            <tr className="pb-hairline-t">
+              <td colSpan={7} className="px-5 py-2 font-mono text-[10px] text-pb-faintest italic">
                 DNB: {dnb.map(r => r.name).join(', ')}
               </td>
             </tr>
@@ -169,56 +140,48 @@ function BattingTable({ batting = [] }) {
   )
 }
 
-// ── Bowling table ─────────────────────────────────────────────────────────────
-
 function BowlingTable({ bowling = [] }) {
-  if (!bowling.length) return <p className="text-slate-500 text-sm py-4 px-4">No bowling data.</p>
+  if (!bowling.length) return <p className="text-pb-faint text-sm py-4 px-5">No bowling data.</p>
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full">
+    <div className="overflow-x-auto pb-scroll">
+      <table className="w-full text-[13px]">
         <thead>
-          <tr className="border-b border-navy-700">
-            <th className="table-header">Bowler</th>
-            <th className="table-header text-right">O</th>
-            <th className="table-header text-right">M</th>
-            <th className="table-header text-right">R</th>
-            <th className="table-header text-right">W</th>
-            <th className="table-header text-right">Econ</th>
-            <th className="table-header text-right">Wd</th>
-            <th className="table-header text-right">NB</th>
+          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+            <th className="font-medium py-2.5 pl-5">BOWLER</th>
+            <th className="font-medium py-2.5 text-right">O</th>
+            <th className="font-medium py-2.5 text-right hidden sm:table-cell">M</th>
+            <th className="font-medium py-2.5 text-right">R</th>
+            <th className="font-medium py-2.5 text-right" style={{ color: 'var(--pb-accent)' }}>W</th>
+            <th className="font-medium py-2.5 text-right hidden sm:table-cell">ECON</th>
+            <th className="font-medium py-2.5 text-right hidden md:table-cell">WD</th>
+            <th className="font-medium py-2.5 pr-5 text-right hidden md:table-cell">NB</th>
           </tr>
         </thead>
         <tbody>
           {bowling.map((row, i) => (
-            <tr key={i} className="table-row">
-              <td className="table-cell font-medium">
-                {row.player_id ? (
-                  <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors">
-                    {row.name}
-                  </Link>
-                ) : (
-                  <span className="text-white">{row.name}</span>
-                )}
+            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+              <td className="py-2.5 pl-5">
+                {row.player_id
+                  ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{row.name}</Link>
+                  : <span className="text-pb-text font-semibold">{row.name}</span>
+                }
               </td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.overs ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.maidens ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.runs ?? '—'}</td>
-              <td className="table-cell text-right">
-                <span className={clsx(
-                  'stat-number font-bold',
-                  (row.wickets ?? 0) >= 5 ? 'text-amber-cricket'
-                    : (row.wickets ?? 0) >= 3 ? 'text-accent'
-                    : 'text-white',
-                )}>
+              <td className="py-2.5 font-mono text-pb-dim text-right">{row.overs ?? '—'}</td>
+              <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.maidens ?? '—'}</td>
+              <td className="py-2.5 font-mono text-pb-dim text-right">{row.runs ?? '—'}</td>
+              <td className="py-2.5 text-right">
+                <span className="font-mono font-bold pb-num" style={{
+                  color: (row.wickets ?? 0) >= 5 ? 'var(--pb-amber)' : (row.wickets ?? 0) >= 3 ? 'var(--pb-accent)' : undefined
+                }}>
                   {row.wickets ?? '—'}
                 </span>
               </td>
-              <td className="table-cell stat-number text-right text-slate-300">
+              <td className="py-2.5 font-mono text-pb-dim text-right hidden sm:table-cell">
                 {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
               </td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.wides ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.no_balls ?? '—'}</td>
+              <td className="py-2.5 font-mono text-pb-faint text-right hidden md:table-cell">{row.wides ?? '—'}</td>
+              <td className="py-2.5 pr-5 font-mono text-pb-faint text-right hidden md:table-cell">{row.no_balls ?? '—'}</td>
             </tr>
           ))}
         </tbody>
@@ -227,39 +190,35 @@ function BowlingTable({ bowling = [] }) {
   )
 }
 
-// ── Single innings card ───────────────────────────────────────────────────────
-
 function InningsCard({ innings, accentTitle }) {
   const label = innings.batting_team || `Innings ${innings.innings_number}`
 
   return (
-    <div className="card overflow-hidden flex flex-col">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-navy-700">
-        <h3 className={clsx('display-heading text-lg', accentTitle ? 'text-accent' : 'text-white')}>
+    <div className="pb-card overflow-hidden flex flex-col">
+      <div className="px-5 py-4 pb-hairline-b">
+        <h3 className={`font-display font-bold text-[17px] tracking-tight ${accentTitle ? '' : 'text-pb-text'}`}
+          style={accentTitle ? { color: 'var(--pb-accent)' } : {}}>
           {label.toUpperCase()}
         </h3>
         {innings.bowling_team && (
-          <p className="text-slate-500 text-xs mt-0.5">Bowling: {innings.bowling_team}</p>
+          <p className="font-mono text-[10px] text-pb-faintest mt-0.5">Bowling: {innings.bowling_team}</p>
         )}
         <div className="mt-2">
           <ScoreLine innings={innings} />
         </div>
       </div>
 
-      {/* Batting */}
-      <div className="border-b border-navy-700/60">
-        <div className="px-4 py-1.5 bg-navy-800/40">
-          <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Batting</span>
+      <div className="pb-hairline-b">
+        <div className="px-5 py-2 bg-pb-surface2/10">
+          <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">BATTING</span>
         </div>
         <BattingTable batting={innings.batting} />
       </div>
 
-      {/* Bowling — always visible */}
       {innings.bowling.length > 0 && (
         <div>
-          <div className="px-4 py-1.5 bg-navy-800/40 border-b border-navy-700/60">
-            <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Bowling</span>
+          <div className="px-5 py-2 bg-pb-surface2/10 pb-hairline-b">
+            <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">BOWLING</span>
           </div>
           <BowlingTable bowling={innings.bowling} />
         </div>
@@ -267,8 +226,6 @@ function InningsCard({ innings, accentTitle }) {
     </div>
   )
 }
-
-// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function PlayHQScorecard() {
   const { gameId } = useParams()
@@ -291,15 +248,10 @@ export default function PlayHQScorecard() {
       .finally(() => setLoading(false))
   }, [gameId, orgId])
 
-  if (loading) return <LoadingSpinner message="Loading scorecard…" />
+  if (loading) return <PbSpinner message="Loading scorecard…" />
   if (error) return (
-    <div className="max-w-5xl mx-auto px-4 py-16 text-red-400">
-      <p>Error: {error}</p>
-      {orgId && (
-        <Link to={`/dashboard/${orgId}`} className="text-accent text-sm mt-4 block hover:underline">
-          ← Back to dashboard
-        </Link>
-      )}
+    <div className="min-h-screen bg-pb-bg flex items-center justify-center">
+      <p className="text-pb-red font-mono text-sm">Error: {error}</p>
     </div>
   )
   if (!data) return null
@@ -308,18 +260,15 @@ export default function PlayHQScorecard() {
 
   if (!innings.length) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-16 text-center">
-        <p className="text-slate-400 text-lg mb-2">Scorecard not available</p>
-        <p className="text-slate-600 text-sm mb-6">
-          {status === 'FINAL'
-            ? 'The match is complete but scorecard data could not be loaded.'
-            : 'This match may not have started yet or data is still being processed.'}
-        </p>
-        {orgId && (
-          <Link to={`/dashboard/${orgId}`} className="text-accent text-sm hover:underline">
-            ← Back to dashboard
-          </Link>
-        )}
+      <div className="min-h-screen bg-pb-bg text-pb-text flex items-center justify-center">
+        <div className="text-center px-4">
+          <p className="text-pb-faint text-lg mb-2">Scorecard not available</p>
+          <p className="font-mono text-[11px] text-pb-faintest mb-6">
+            {status === 'FINAL'
+              ? 'The match is complete but scorecard data could not be loaded.'
+              : 'This match may not have started yet or data is still being processed.'}
+          </p>
+        </div>
       </div>
     )
   }
@@ -327,28 +276,24 @@ export default function PlayHQScorecard() {
   const isTwoInnings = innings.length >= 2
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      {orgId && (
-        <Link to={`/dashboard/${orgId}`} className="text-slate-500 text-sm hover:text-accent transition-colors mb-6 block">
-          ← Back to dashboard
-        </Link>
-      )}
+    <div className="min-h-screen bg-pb-bg text-pb-text">
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        <ResultBanner game={game} toss={toss} />
 
-      <ResultBanner game={game} toss={toss} />
-
-      {/* Two-innings: side-by-side on large screens */}
-      {isTwoInnings ? (
-        <div className="grid lg:grid-cols-2 gap-6">
-          {innings.map((inn, i) => (
-            <InningsCard key={inn.innings_number} innings={inn} accentTitle={i === 0} />
-          ))}
-        </div>
-      ) : (
-        /* Single innings: full width */
-        innings.map((inn, i) => (
-          <InningsCard key={inn.innings_number} innings={inn} accentTitle={i === 0} />
-        ))
-      )}
+        {isTwoInnings ? (
+          <div className="grid lg:grid-cols-2 gap-5">
+            {innings.map((inn, i) => (
+              <InningsCard key={inn.innings_number} innings={inn} accentTitle={i === 0} />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {innings.map((inn, i) => (
+              <InningsCard key={inn.innings_number} innings={inn} accentTitle={i === 0} />
+            ))}
+          </div>
+        )}
+      </main>
     </div>
   )
 }

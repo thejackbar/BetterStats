@@ -10,11 +10,11 @@ export default function SeasonSelector({
     <div className="flex flex-wrap gap-3 items-center">
       {seasons.length > 0 && (
         <div className="flex items-center gap-2">
-          <label className="section-label whitespace-nowrap">Season</label>
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Season</label>
           <select
             value={selectedSeason || ''}
             onChange={e => setSelectedSeason(e.target.value || null)}
-            className="bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent"
+            className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
           >
             <option value="">All seasons</option>
             {seasons.map(s => (
@@ -25,11 +25,11 @@ export default function SeasonSelector({
       )}
       {grades.length > 0 && (
         <div className="flex items-center gap-2">
-          <label className="section-label whitespace-nowrap">Grade</label>
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Grade</label>
           <select
             value={selectedGrade || ''}
             onChange={e => setSelectedGrade(e.target.value || null)}
-            className="bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent"
+            className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
           >
             <option value="">All grades</option>
             {grades.map(g => (

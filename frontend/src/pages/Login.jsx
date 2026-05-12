@@ -26,40 +26,43 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-navy-950 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-pb-bg flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        {/* Logo */}
+        {/* Brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 mb-2">
-            <span className="w-8 h-8 rounded bg-accent flex items-center justify-center">
-              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-navy-950">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="4" x2="12" y2="20" stroke="#070b14" strokeWidth="2" />
-                <line x1="4" y1="12" x2="20" y2="12" stroke="#070b14" strokeWidth="2" />
-              </svg>
+          <div className="inline-flex items-center gap-2.5 mb-3">
+            <span
+              className="w-8 h-8 rounded font-mono font-bold text-sm flex items-center justify-center text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}
+            >
+              BS
             </span>
-            <span className="font-display font-bold text-2xl tracking-wider uppercase text-white">
-              Better<span className="text-accent">Stats</span>
+            <span className="font-display font-bold text-xl tracking-wider uppercase text-pb-text">
+              BetterStats
             </span>
           </div>
-          <p className="text-slate-400 text-sm">Club admin login</p>
+          <p className="font-mono text-[11px] tracking-wide3 text-pb-faint">CLUB ADMIN LOGIN</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-navy-900 border border-navy-700 rounded-lg p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="pb-card p-6 space-y-4">
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Username</label>
+            <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">
+              Username
+            </label>
             <input
               type="text"
               autoComplete="username"
               value={username}
               onChange={e => setUsername(e.target.value)}
               required
-              className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
+              className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent placeholder-pb-faintest"
             />
           </div>
 
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Password</label>
+            <label className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">
+              Password
+            </label>
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -67,34 +70,35 @@ export default function Login() {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
-                className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 pr-10 text-white text-sm focus:outline-none focus:border-accent"
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2.5 pr-14 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(s => !s)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs px-1"
+                className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors"
               >
-                {showPassword ? 'Hide' : 'Show'}
+                {showPassword ? 'HIDE' : 'SHOW'}
               </button>
             </div>
           </div>
 
           {error && (
-            <p className="text-red-400 text-sm">{error}</p>
+            <p className="font-mono text-[11px] text-pb-red">{error}</p>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-2.5 rounded font-mono text-[11px] tracking-wide3 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed text-pb-bg"
+            style={{ background: 'var(--pb-accent)' }}
           >
-            {loading ? 'Signing in…' : 'Sign in'}
+            {loading ? 'SIGNING IN…' : 'SIGN IN'}
           </button>
         </form>
 
-        <p className="text-center text-slate-600 text-xs mt-6">
+        <p className="text-center font-mono text-[10px] tracking-wide2 text-pb-faintest mt-6">
           Forgot your password? Contact{' '}
-          <a href="mailto:jack@klubpro.com" className="text-slate-400 hover:text-white">
+          <a href="mailto:jack@klubpro.com" className="text-pb-faint hover:text-pb-text transition-colors">
             jack@klubpro.com
           </a>
         </p>

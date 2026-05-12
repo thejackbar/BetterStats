@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
-import LoadingSpinner from '../../components/LoadingSpinner'
+import { PbSpinner } from '../../lib/presskit'
 
 function GradePicker({ grades, value, onChange, placeholder, exclude }) {
   return (
     <select
       value={value || ''}
       onChange={e => onChange(e.target.value || null)}
-      className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
+      className="w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent"
     >
       <option value="">{placeholder}</option>
       {grades
@@ -48,44 +48,33 @@ function MergeBuilder({ orgId, grades, onMerged }) {
   }
 
   return (
-    <div className="card p-5 mb-8">
-      <h3 className="display-heading text-base text-white mb-3">MERGE GRADES</h3>
-      <p className="text-slate-400 text-sm mb-4">
+    <div className="pb-card p-5 mb-8">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Merge Grades</p>
+      <p className="text-pb-dim text-sm mb-4 leading-relaxed">
         Use this when one grade is sponsored or renamed across seasons (e.g. "One Day Grade 3" and "One Day Grade 3 - East" are actually the same).
         Stats will be combined in the player by-grade view.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         <div>
-          <label className="section-label text-xs mb-2 block">Variant to merge</label>
-          <GradePicker
-            grades={grades}
-            value={alias}
-            onChange={setAlias}
-            placeholder="— Select grade —"
-            exclude={canonical}
-          />
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Variant to merge</label>
+          <GradePicker grades={grades} value={alias} onChange={setAlias} placeholder="— Select grade —" exclude={canonical} />
         </div>
         <div>
-          <label className="section-label text-xs mb-2 block">Merge into (keep this name)</label>
-          <GradePicker
-            grades={grades}
-            value={canonical}
-            onChange={setCanonical}
-            placeholder="— Select canonical grade —"
-            exclude={alias}
-          />
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Merge into (keep this name)</label>
+          <GradePicker grades={grades} value={canonical} onChange={setCanonical} placeholder="— Select canonical grade —" exclude={alias} />
         </div>
       </div>
       {alias && canonical && alias === canonical && (
-        <p className="text-amber-400 text-sm mb-3">Pick two different grades.</p>
+        <p className="font-mono text-[11px] text-pb-amber mb-3">Pick two different grades.</p>
       )}
       {error && (
-        <div className="mb-3 text-sm text-red-400 bg-red-900/30 border border-red-800 rounded px-3 py-2">{error}</div>
+        <div className="mb-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
       )}
       <button
         onClick={handleMerge}
         disabled={!canMerge || busy}
-        className="btn-primary text-sm w-full disabled:opacity-40"
+        className="w-full py-2.5 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-40 text-pb-bg"
+        style={{ background: 'var(--pb-accent)' }}
       >
         {busy ? 'Merging…' : `Merge ${alias || '…'} into ${canonical || '…'}`}
       </button>
@@ -94,32 +83,30 @@ function MergeBuilder({ orgId, grades, onMerged }) {
 }
 
 function GradeList({ grades }) {
-  if (!grades.length) {
-    return <p className="text-slate-500 text-sm">No grades found for this club.</p>
-  }
+  if (!grades.length) return <p className="font-mono text-[11px] text-pb-faint">No grades found for this club.</p>
   return (
-    <div className="card overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="pb-card overflow-hidden">
+      <table className="w-full text-[13px]">
         <thead>
-          <tr className="border-b border-navy-700">
-            <th className="table-header">Grade</th>
-            <th className="table-header text-right">Games</th>
-            <th className="table-header text-right">Runs</th>
+          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+            <th className="font-medium py-2.5 pl-5">GRADE</th>
+            <th className="font-medium py-2.5 text-right">GAMES</th>
+            <th className="font-medium py-2.5 pr-5 text-right">RUNS</th>
           </tr>
         </thead>
         <tbody>
-          {grades.map(g => (
-            <tr key={g.grade_name} className="table-row align-top">
-              <td className="table-cell">
-                <div className="text-white">{g.grade_name}</div>
+          {grades.map((g, i) => (
+            <tr key={g.grade_name} className={`${i ? 'pb-hairline-t' : ''} align-top hover:bg-pb-surface2`}>
+              <td className="py-2.5 pl-5">
+                <div className="text-pb-text">{g.grade_name}</div>
                 {g.aliases?.length > 0 && (
-                  <div className="text-xs text-slate-500 mt-1">
+                  <div className="font-mono text-[10px] text-pb-faintest mt-0.5">
                     Includes: {g.aliases.join(', ')}
                   </div>
                 )}
               </td>
-              <td className="table-cell stat-number text-right text-slate-300">{g.games}</td>
-              <td className="table-cell stat-number text-right text-slate-300">{g.runs}</td>
+              <td className="py-2.5 font-mono text-pb-dim text-right">{g.games}</td>
+              <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">{g.runs}</td>
             </tr>
           ))}
         </tbody>
@@ -154,29 +141,29 @@ function MergeHistory({ orgId, refreshKey, onChanged }) {
 
   return (
     <div className="mt-10">
-      <h3 className="display-heading text-base text-white mb-3">MERGE HISTORY</h3>
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Merge History</p>
       {error && (
-        <div className="mb-3 text-sm text-red-400 bg-red-900/30 border border-red-800 rounded px-3 py-2">{error}</div>
+        <div className="mb-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
       )}
       <div className="flex flex-col gap-2">
         {history.map(entry => (
           <div
             key={entry.id}
-            className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-sm ${entry.undone ? 'border-navy-700 bg-navy-900/40 opacity-50' : 'border-navy-700 bg-navy-900'}`}
+            className={`flex items-center gap-3 rounded border px-4 py-3 text-sm pb-hairline ${entry.undone ? 'opacity-40' : 'bg-pb-surface'}`}
           >
             <div className="flex-1 min-w-0">
-              <span className="text-white font-medium">{entry.canonical_name}</span>
-              <span className="text-slate-500 mx-2">←</span>
-              <span className="text-amber-300">{entry.alias_name}</span>
-              <span className="text-slate-600 text-xs ml-3">{new Date(entry.merged_at).toLocaleDateString()}</span>
+              <span className="text-pb-text font-medium">{entry.canonical_name}</span>
+              <span className="text-pb-faint mx-2">←</span>
+              <span className="text-pb-amber">{entry.alias_name}</span>
+              <span className="font-mono text-[10px] text-pb-faintest ml-3">{new Date(entry.merged_at).toLocaleDateString()}</span>
             </div>
             {entry.undone ? (
-              <span className="text-xs text-slate-500 shrink-0">Undone</span>
+              <span className="font-mono text-[10px] text-pb-faintest shrink-0">Undone</span>
             ) : (
               <button
                 onClick={() => handleUndo(entry)}
                 disabled={undoing === entry.id}
-                className="btn-ghost border border-navy-600 text-xs px-3 py-1 shrink-0 disabled:opacity-50"
+                className="font-mono text-[10px] border pb-hairline rounded px-3 py-1 text-pb-faint hover:text-pb-text transition-colors shrink-0 disabled:opacity-50"
               >
                 {undoing === entry.id ? 'Undoing…' : 'Undo'}
               </button>
@@ -222,28 +209,24 @@ export default function AdminGrades() {
   if (!orgId || loading) {
     return (
       <AdminLayout>
-        <LoadingSpinner message="Loading grades…" />
+        <PbSpinner message="Loading grades…" />
       </AdminLayout>
     )
   }
 
   return (
     <AdminLayout>
-      <div className="max-w-3xl mx-auto">
-        <div className="mb-6">
-          <div className="accent-bar mb-3" />
-          <p className="section-label mb-1">Admin Tools</p>
-          <h1 className="display-heading text-3xl text-white">MERGE GRADES</h1>
-          <p className="text-slate-400 mt-2 text-sm">
-            Combine grades that are actually the same competition but were named differently across seasons (e.g. sponsorship changes).
-          </p>
-        </div>
+      <div className="max-w-3xl">
+        <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Merge Grades</h1>
+        <p className="text-pb-faint text-sm mb-6 leading-relaxed">
+          Combine grades that are actually the same competition but were named differently across seasons.
+        </p>
 
         <MergeBuilder orgId={orgId} grades={grades || []} onMerged={refresh} />
 
-        <h3 className="display-heading text-base text-white mb-3">
-          ALL GRADES <span className="text-slate-500 text-sm font-normal">({(grades || []).length})</span>
-        </h3>
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">
+          All Grades <span className="text-pb-faintest">({(grades || []).length})</span>
+        </p>
         <GradeList grades={grades || []} />
 
         <MergeHistory orgId={orgId} refreshKey={historyKey} onChanged={refresh} />

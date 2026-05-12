@@ -4,6 +4,8 @@ import AdminLayout from '../../components/admin/AdminLayout'
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
 
+const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
+
 const EMPTY_FORM = {
   batter1_name: '',
   batter1_id: '',
@@ -39,7 +41,7 @@ function PlayerSearch({ label, name, playerId, onSelect, players }) {
 
   return (
     <div className="relative">
-      <label className="block text-xs text-slate-500 mb-1">{label}</label>
+      <label className="font-mono text-[10px] text-pb-faint block mb-1">{label}</label>
       <input
         type="text"
         value={query}
@@ -47,20 +49,20 @@ function PlayerSearch({ label, name, playerId, onSelect, players }) {
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder="Search player…"
-        className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
+        className={INPUT_CLS}
       />
-      {playerId && <p className="text-xs text-slate-600 mt-0.5 font-mono truncate">{playerId}</p>}
+      {playerId && <p className="font-mono text-[10px] text-pb-faintest mt-0.5 truncate">{playerId}</p>}
       {open && filtered.length > 0 && (
-        <div className="absolute z-10 w-full bg-navy-800 border border-navy-600 rounded mt-1 shadow-lg">
+        <div className="absolute z-10 w-full bg-pb-surface border pb-hairline rounded mt-1 shadow-lg">
           {filtered.map(p => (
             <button
               key={p.id}
               type="button"
               onMouseDown={() => handleSelect(p)}
-              className="w-full text-left px-3 py-2 text-sm text-white hover:bg-navy-700"
+              className="w-full text-left px-3 py-2 text-sm text-pb-text hover:bg-pb-surface2"
             >
               {p.display_name}
-              {p.playhq_id && <span className="ml-2 text-xs text-slate-600">PHQ: {p.playhq_id}</span>}
+              {p.playhq_id && <span className="ml-2 font-mono text-[10px] text-pb-faintest">PHQ: {p.playhq_id}</span>}
             </button>
           ))}
         </div>
@@ -68,8 +70,6 @@ function PlayerSearch({ label, name, playerId, onSelect, players }) {
     </div>
   )
 }
-
-// ─── Import panel ────────────────────────────────────────────────────────────────────────────────
 
 function ImportPanel({ onImported }) {
   const fileRef = useRef(null)
@@ -105,26 +105,29 @@ function ImportPanel({ onImported }) {
   }
 
   return (
-    <div className="bg-navy-900 border border-navy-700 rounded-lg p-5 mb-4">
-      <h2 className="text-sm font-semibold text-white mb-1">Bulk Import</h2>
-      <p className="text-slate-500 text-xs mb-4">
+    <div className="pb-card p-5 mb-4">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Bulk Import</p>
+      <p className="font-mono text-[10px] text-pb-faint mb-4 leading-relaxed">
         Download the CSV template, fill in partnership records, then upload. Player names are matched automatically and potential GR duplicates are flagged for review.
       </p>
       <div className="flex flex-wrap gap-3 items-center">
-        <button onClick={handleDownloadTemplate} className="btn-ghost border border-navy-600 text-sm flex items-center gap-2">
-          <span>⬇</span> Download Template (.csv)
+        <button
+          onClick={handleDownloadTemplate}
+          className="border pb-hairline text-pb-faint hover:text-pb-text px-4 py-2 rounded font-mono text-[10px] tracking-wide2 transition-colors flex items-center gap-2"
+        >
+          ⬇ Download Template (.csv)
         </button>
-        <label className={`btn-primary text-sm cursor-pointer flex items-center gap-2${importing ? ' opacity-50 pointer-events-none' : ''}`}>
-          <span>⬆</span> {importing ? 'Importing…' : 'Upload File (.xlsx / .csv)'}
+        <label className={`px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition cursor-pointer flex items-center gap-2 text-pb-bg${importing ? ' opacity-50 pointer-events-none' : ''}`}
+          style={{ background: 'var(--pb-accent)' }}
+        >
+          ⬆ {importing ? 'Importing…' : 'Upload File (.xlsx / .csv)'}
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileChange} />
         </label>
       </div>
-      {error && <p className="mt-3 text-red-400 text-sm">{error}</p>}
+      {error && <p className="mt-3 font-mono text-[11px] text-pb-red">{error}</p>}
     </div>
   )
 }
-
-// ─── Grade match panel ────────────────────────────────────────────────────────────────────────────
 
 function GradeMatchPanel({ records, onRecordsRenamed }) {
   const [open, setOpen] = useState(false)
@@ -173,34 +176,34 @@ function GradeMatchPanel({ records, onRecordsRenamed }) {
   }
 
   return (
-    <div className="bg-navy-900 border border-navy-700 rounded-lg mb-4">
+    <div className="pb-card mb-4">
       <button
         onClick={handleToggle}
         className="w-full flex items-center justify-between px-5 py-4 text-left"
       >
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-white">Grade Match</span>
+          <span className="text-sm font-semibold text-pb-text">Grade Match</span>
           {records.length > 0 && syncedGrades.length > 0 && mismatchCount > 0 && (
-            <span className="text-xs text-orange-400">{mismatchCount} unmatched</span>
+            <span className="font-mono text-[10px] text-pb-amber">{mismatchCount} unmatched</span>
           )}
           {records.length > 0 && syncedGrades.length > 0 && mismatchCount === 0 && (
-            <span className="text-xs text-green-400">All matched</span>
+            <span className="font-mono text-[10px]" style={{ color: 'var(--pb-accent)' }}>All matched</span>
           )}
           {records.length === 0 && (
-            <span className="text-xs text-slate-600">No records</span>
+            <span className="font-mono text-[10px] text-pb-faintest">No records</span>
           )}
         </div>
-        <span className="text-slate-500 text-sm">{open ? '▲' : '▼'}</span>
+        <span className="text-pb-faint text-sm">{open ? '▲' : '▼'}</span>
       </button>
 
       {open && (
-        <div className="border-t border-navy-700 px-5 pb-5 pt-4">
-          <p className="text-slate-500 text-xs mb-4">
-            Match grade names in manual records to the synced grade names from your club's data. This ensures records appear in the correct grade filters on the Records page.
+        <div className="pb-hairline-t px-5 pb-5 pt-4">
+          <p className="font-mono text-[10px] text-pb-faint mb-4 leading-relaxed">
+            Match grade names in manual records to the synced grade names from your club's data.
           </p>
-          {loading && <p className="text-slate-500 text-sm">Loading synced grades…</p>}
+          {loading && <p className="font-mono text-[11px] text-pb-faint">Loading synced grades…</p>}
           {!loading && uniqueGrades.length === 0 && (
-            <p className="text-slate-500 text-sm">No manual records yet.</p>
+            <p className="font-mono text-[11px] text-pb-faint">No manual records yet.</p>
           )}
           {!loading && uniqueGrades.length > 0 && (
             <>
@@ -214,29 +217,32 @@ function GradeMatchPanel({ records, onRecordsRenamed }) {
                   return (
                     <div key={gradeName} className="flex items-center gap-3 flex-wrap">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className={`text-sm shrink-0 ${isMatched ? 'text-green-400' : 'text-orange-400'}`}>
+                        <span className={`text-sm shrink-0 ${isMatched ? 'text-pb-accent' : 'text-pb-amber'}`}
+                          style={isMatched ? { color: 'var(--pb-accent)' } : {}}
+                        >
                           {isMatched ? '✓' : '⚠'}
                         </span>
-                        <span className="text-white text-sm">{gradeName}</span>
-                        <span className="text-slate-600 text-xs shrink-0">
+                        <span className="text-pb-text text-sm">{gradeName}</span>
+                        <span className="font-mono text-[10px] text-pb-faintest shrink-0">
                           {count} record{count !== 1 ? 's' : ''}
                         </span>
                       </div>
                       {!isMatched && (
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-slate-600 text-xs">→</span>
+                          <span className="text-pb-faintest text-xs">→</span>
                           <input
                             type="text"
                             value={renames[gradeName] || ''}
                             onChange={e => setRenames(r => ({ ...r, [gradeName]: e.target.value }))}
                             list="synced-grades-list"
                             placeholder="Pick or type new name…"
-                            className="bg-navy-800 border border-navy-600 rounded px-2 py-1 text-white text-xs w-48 focus:outline-none focus:border-accent"
+                            className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-xs w-48 focus:outline-none focus:border-pb-accent"
                           />
                           <button
                             onClick={() => handleApply(gradeName)}
                             disabled={!renames[gradeName]?.trim() || renames[gradeName]?.trim() === gradeName || saving === gradeName}
-                            className="btn-primary text-xs disabled:opacity-40"
+                            className="px-3 py-1 rounded font-mono text-[10px] font-semibold transition disabled:opacity-40 text-pb-bg"
+                            style={{ background: 'var(--pb-accent)' }}
                           >
                             {saving === gradeName ? 'Saving…' : 'Apply'}
                           </button>
@@ -248,14 +254,12 @@ function GradeMatchPanel({ records, onRecordsRenamed }) {
               </div>
             </>
           )}
-          {msg && <p className="mt-3 text-accent text-xs">{msg}</p>}
+          {msg && <p className="mt-3 font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>{msg}</p>}
         </div>
       )}
     </div>
   )
 }
-
-// ─── Post-import wizard ───────────────────────────────────────────────────────────────────────────────
 
 function ImportWizard({ result, players, onClose, onRecordDeleted }) {
   const { created, skipped, errors, records } = result
@@ -265,33 +269,33 @@ function ImportWizard({ result, players, onClose, onRecordDeleted }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 pt-8 px-4 overflow-y-auto">
-      <div className="bg-navy-900 border border-navy-700 rounded-xl w-full max-w-3xl mb-8">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-navy-700">
+      <div className="bg-pb-surface border pb-hairline rounded-xl w-full max-w-3xl mb-8">
+        <div className="flex items-center justify-between px-5 py-4 pb-hairline-b">
           <div>
-            <h2 className="text-white font-semibold">Import Complete — Review Results</h2>
-            <p className="text-slate-500 text-xs mt-0.5">
+            <h2 className="text-pb-text font-semibold">Import Complete — Review Results</h2>
+            <p className="font-mono text-[10px] text-pb-faint mt-0.5">
               {created} record{created !== 1 ? 's' : ''} imported
               {skipped > 0 ? `, ${skipped} skipped` : ''}
             </p>
           </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-white text-xl leading-none">×</button>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text text-xl leading-none">×</button>
         </div>
 
         {errors?.length > 0 && (
-          <div className="px-5 py-3 border-b border-navy-700 space-y-1">
-            {errors.map((e, i) => <p key={i} className="text-red-400 text-xs">{e}</p>)}
+          <div className="px-5 py-3 pb-hairline-b space-y-1">
+            {errors.map((e, i) => <p key={i} className="font-mono text-[11px] text-pb-red">{e}</p>)}
           </div>
         )}
 
         {needsAttention.length === 0 && (
-          <div className="px-5 py-6 text-center text-green-400 text-sm">
+          <div className="px-5 py-6 text-center font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>
             All {created} records imported cleanly — no issues to review.
           </div>
         )}
 
         {needsAttention.length > 0 && (
           <div className="px-5 py-4">
-            <p className="text-yellow-400 text-xs font-medium mb-3">
+            <p className="font-mono text-[10px] text-pb-amber mb-3">
               {needsAttention.length} record{needsAttention.length !== 1 ? 's need' : ' needs'} attention
             </p>
             <div className="space-y-3">
@@ -309,12 +313,18 @@ function ImportWizard({ result, players, onClose, onRecordDeleted }) {
 
         {clean.length > 0 && needsAttention.length > 0 && (
           <div className="px-5 pb-4">
-            <p className="text-slate-600 text-xs">{clean.length} other record{clean.length !== 1 ? 's' : ''} imported without issues.</p>
+            <p className="font-mono text-[10px] text-pb-faintest">{clean.length} other record{clean.length !== 1 ? 's' : ''} imported without issues.</p>
           </div>
         )}
 
-        <div className="px-5 py-4 border-t border-navy-700 flex justify-end">
-          <button onClick={onClose} className="btn-primary text-sm">Done</button>
+        <div className="px-5 py-4 pb-hairline-t flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition text-pb-bg"
+            style={{ background: 'var(--pb-accent)' }}
+          >
+            Done
+          </button>
         </div>
       </div>
     </div>
@@ -349,25 +359,25 @@ function WizardRow({ record, players, onDeleted }) {
   const canLink = (record.batter1_unmatched && b1Id) || (record.batter2_unmatched && b2Id)
 
   return (
-    <div className="bg-navy-800 border border-navy-700 rounded-lg p-4">
+    <div className="pb-card p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <p className="text-white text-sm font-medium">
-            {record.batter1_name} <span className="text-slate-500">&amp;</span> {record.batter2_name}
-            <span className="ml-2 text-slate-500 text-xs font-normal">
+          <p className="text-pb-text text-sm font-medium">
+            {record.batter1_name} <span className="text-pb-faintest">&amp;</span> {record.batter2_name}
+            <span className="ml-2 font-mono text-[10px] text-pb-faintest font-normal">
               {record.runs}{record.is_not_out ? '*' : ''} — {ORDINALS[record.wicket_number - 1]} wkt — {record.grade_name} {record.season_year}
             </span>
           </p>
 
           {record.gr_duplicate && (
-            <div className="mt-2 flex items-center gap-3 p-2 bg-yellow-900/30 border border-yellow-700/40 rounded text-xs">
-              <span className="text-yellow-400 font-medium shrink-0">⚠ GR duplicate found</span>
-              <span className="text-slate-400">
-                This partnership ({record.gr_duplicate.runs} runs, {ORDINALS[(record.gr_duplicate.wicket_number || 1) - 1]} wkt, {record.gr_duplicate.season_year}) already exists in game data from Grassroots sync.
+            <div className="mt-2 flex items-center gap-3 p-2 bg-pb-amber/10 border border-pb-amber/30 rounded text-xs">
+              <span className="text-pb-amber font-medium shrink-0">⚠ GR duplicate found</span>
+              <span className="text-pb-dim">
+                This partnership ({record.gr_duplicate.runs} runs, {ORDINALS[(record.gr_duplicate.wicket_number || 1) - 1]} wkt, {record.gr_duplicate.season_year}) already exists in game data.
               </span>
               <button
                 onClick={handleDelete}
-                className="shrink-0 text-xs text-red-400 hover:text-red-300 border border-red-700/40 rounded px-2 py-1 hover:bg-red-900/20"
+                className="shrink-0 font-mono text-[10px] text-pb-red hover:opacity-80 border border-pb-red/30 rounded px-2 py-1"
               >
                 Delete this record
               </button>
@@ -393,13 +403,18 @@ function WizardRow({ record, players, onDeleted }) {
                 />
               )}
               {canLink && (
-                <button onClick={handleLink} disabled={linking} className="text-xs btn-primary mt-1">
+                <button
+                  onClick={handleLink}
+                  disabled={linking}
+                  className="font-mono text-[10px] px-3 py-1 rounded font-semibold transition text-pb-bg mt-1"
+                  style={{ background: 'var(--pb-accent)' }}
+                >
                   {linking ? 'Linking…' : 'Link Player'}
                 </button>
               )}
             </div>
           )}
-          {linked && <p className="mt-1 text-green-400 text-xs">Player linked successfully.</p>}
+          {linked && <p className="mt-1 font-mono text-[10px]" style={{ color: 'var(--pb-accent)' }}>Player linked successfully.</p>}
         </div>
       </div>
     </div>
@@ -422,7 +437,7 @@ function UnmatchedPlayerRow({ label, players, value, onChange }) {
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-orange-400 text-xs shrink-0">{label}</span>
+      <span className="font-mono text-[10px] text-pb-amber shrink-0">{label}</span>
       <div className="relative flex-1 max-w-xs">
         <input
           type="text"
@@ -431,16 +446,16 @@ function UnmatchedPlayerRow({ label, players, value, onChange }) {
           onFocus={() => setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
           placeholder="Link to player…"
-          className="w-full bg-navy-700 border border-navy-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-accent"
+          className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-xs focus:outline-none focus:border-pb-accent"
         />
         {open && filtered.length > 0 && (
-          <div className="absolute z-20 w-full bg-navy-800 border border-navy-600 rounded mt-1 shadow-lg max-h-40 overflow-y-auto">
+          <div className="absolute z-20 w-full bg-pb-surface border pb-hairline rounded mt-1 shadow-lg max-h-40 overflow-y-auto">
             {filtered.map(p => (
               <button
                 key={p.id}
                 type="button"
                 onMouseDown={() => handleSelect(p)}
-                className="w-full text-left px-2 py-1.5 text-xs text-white hover:bg-navy-700"
+                className="w-full text-left px-2 py-1.5 text-xs text-pb-text hover:bg-pb-surface2"
               >
                 {p.display_name}
               </button>
@@ -451,8 +466,6 @@ function UnmatchedPlayerRow({ label, players, value, onChange }) {
     </div>
   )
 }
-
-// ─── Inline edit row ──────────────────────────────────────────────────────────────────────────────
 
 function EditRow({ record, players, syncedGrades, onSaved, onCancel }) {
   const [form, setForm] = useState({
@@ -512,8 +525,8 @@ function EditRow({ record, players, syncedGrades, onSaved, onCancel }) {
   }
 
   return (
-    <tr className="bg-navy-800/50">
-      <td colSpan={6} className="px-4 py-4 border-t border-navy-700">
+    <tr className="bg-pb-surface2/30">
+      <td colSpan={6} className="px-5 py-4 pb-hairline-t">
         <div className="space-y-3 max-w-2xl">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <PlayerSearch
@@ -533,27 +546,27 @@ function EditRow({ record, players, syncedGrades, onSaved, onCancel }) {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Runs</label>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Runs</label>
               <input type="number" min="0" value={form.runs} onChange={e => setField('runs', e.target.value)}
-                className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent" />
+                className={INPUT_CLS} />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Wicket</label>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Wicket</label>
               <select value={form.wicket_number} onChange={e => setField('wicket_number', Number(e.target.value))}
-                className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent">
+                className={INPUT_CLS}>
                 {ORDINALS.map((o, i) => <option key={i + 1} value={i + 1}>{o}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Year</label>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Year</label>
               <input type="number" min="1900" max="2100" value={form.season_year} onChange={e => setField('season_year', e.target.value)}
-                className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent" />
+                className={INPUT_CLS} />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Grade</label>
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Grade</label>
               <input type="text" value={form.grade_name} onChange={e => setField('grade_name', e.target.value)}
                 list="edit-row-grades"
-                className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent" />
+                className={INPUT_CLS} />
               <datalist id="edit-row-grades">
                 {syncedGrades.map(g => <option key={g} value={g} />)}
               </datalist>
@@ -561,30 +574,38 @@ function EditRow({ record, players, syncedGrades, onSaved, onCancel }) {
             <div className="flex items-end pb-1">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={form.is_not_out} onChange={e => setField('is_not_out', e.target.checked)}
-                  className="w-4 h-4 rounded border-navy-600 bg-navy-800 text-accent focus:ring-accent" />
-                <span className="text-sm text-slate-400">Not Out</span>
+                  className="w-4 h-4 rounded" />
+                <span className="text-sm text-pb-faint">Not Out</span>
               </label>
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-500 mb-1">Notes</label>
+            <label className="font-mono text-[10px] text-pb-faint block mb-1">Notes</label>
             <input type="text" value={form.notes} onChange={e => setField('notes', e.target.value)}
-              className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent" />
+              className={INPUT_CLS} />
           </div>
-          {err && <p className="text-red-400 text-xs">{err}</p>}
+          {err && <p className="font-mono text-[11px] text-pb-red">{err}</p>}
           <div className="flex gap-2">
-            <button onClick={handleSave} disabled={saving} className="btn-primary text-sm">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}
+            >
               {saving ? 'Saving…' : 'Save Changes'}
             </button>
-            <button onClick={onCancel} className="btn-ghost text-sm">Cancel</button>
+            <button
+              onClick={onCancel}
+              className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       </td>
     </tr>
   )
 }
-
-// ─── Main page ────────────────────────────────────────────────────────────────────────────────────
 
 export default function AdminPartnershipRecords() {
   const [records, setRecords] = useState([])
@@ -664,16 +685,20 @@ export default function AdminPartnershipRecords() {
     <AdminLayout>
       <div className="max-w-4xl">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-display font-bold text-white">Partnership Records</h1>
+          <h1 className="font-display font-bold text-2xl text-pb-text">Partnership Records</h1>
           <div className="flex items-center gap-3">
-            {msg && <span className="text-sm text-accent">{msg}</span>}
-            <button onClick={() => { setShowForm(s => !s); setEditingId(null) }} className="btn-primary text-sm">
-              {showForm ? 'Cancel' : '+ Add Record'}
+            {msg && <span className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>{msg}</span>}
+            <button
+              onClick={() => { setShowForm(s => !s); setEditingId(null) }}
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}
+            >
+              {showForm ? 'CANCEL' : '+ ADD RECORD'}
             </button>
           </div>
         </div>
 
-        <p className="text-slate-500 text-xs mb-4">
+        <p className="font-mono text-[10px] text-pb-faint mb-5 leading-relaxed">
           Manually add historical partnership records that predate PlayHQ sync. These appear in the Records board alongside auto-synced data.
         </p>
 
@@ -681,8 +706,8 @@ export default function AdminPartnershipRecords() {
         <GradeMatchPanel records={records} onRecordsRenamed={handleRecordsRenamed} />
 
         {showForm && (
-          <form onSubmit={handleSubmit} className="bg-navy-900 border border-navy-700 rounded-lg p-5 mb-6 space-y-4">
-            <h2 className="text-sm font-medium text-white">New Partnership Record</h2>
+          <form onSubmit={handleSubmit} className="pb-card p-5 mb-6 space-y-4">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">New Partnership Record</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <PlayerSearch
                 label="Batter 1 *"
@@ -701,119 +726,114 @@ export default function AdminPartnershipRecords() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Runs *</label>
-                <input
-                  type="number" min="0"
-                  value={form.runs}
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Runs *</label>
+                <input type="number" min="0" value={form.runs}
                   onChange={e => setField('runs', e.target.value)}
-                  className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
-                />
+                  className={INPUT_CLS} />
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Wicket</label>
-                <select
-                  value={form.wicket_number}
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Wicket</label>
+                <select value={form.wicket_number}
                   onChange={e => setField('wicket_number', e.target.value)}
-                  className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
-                >
+                  className={INPUT_CLS}>
                   {ORDINALS.map((o, i) => <option key={i + 1} value={i + 1}>{o}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Year *</label>
-                <input
-                  type="number" min="1900" max="2100"
-                  value={form.season_year}
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Year *</label>
+                <input type="number" min="1900" max="2100" value={form.season_year}
                   onChange={e => setField('season_year', e.target.value)}
-                  className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
-                />
+                  className={INPUT_CLS} />
               </div>
               <div className="flex items-end pb-1">
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.is_not_out}
+                  <input type="checkbox" checked={form.is_not_out}
                     onChange={e => setField('is_not_out', e.target.checked)}
-                    className="w-4 h-4 rounded border-navy-600 bg-navy-800 text-accent focus:ring-accent"
-                  />
-                  <span className="text-sm text-slate-400">Not Out</span>
+                    className="w-4 h-4 rounded" />
+                  <span className="text-sm text-pb-faint">Not Out</span>
                 </label>
               </div>
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Grade *</label>
-              <input
-                type="text"
-                value={form.grade_name}
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Grade *</label>
+              <input type="text" value={form.grade_name}
                 onChange={e => setField('grade_name', e.target.value)}
                 list="add-form-grades"
                 placeholder="e.g. 1st XI, C Grade, T20"
-                className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
-              />
+                className={INPUT_CLS} />
               <datalist id="add-form-grades">
                 {syncedGrades.map(g => <option key={g} value={g} />)}
               </datalist>
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Notes (optional)</label>
-              <input
-                type="text"
-                value={form.notes}
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">Notes (optional)</label>
+              <input type="text" value={form.notes}
                 onChange={e => setField('notes', e.target.value)}
                 placeholder="vs Opponent, ground, etc."
-                className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
-              />
+                className={INPUT_CLS} />
             </div>
             <div className="flex gap-2">
-              <button type="submit" disabled={saving} className="btn-primary text-sm">
-                {saving ? 'Saving…' : 'Save Record'}
+              <button type="submit" disabled={saving}
+                className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition text-pb-bg"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                {saving ? 'Saving…' : 'SAVE RECORD'}
               </button>
-              <button type="button" onClick={() => setShowForm(false)} className="btn-ghost text-sm">Cancel</button>
+              <button type="button" onClick={() => setShowForm(false)}
+                className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
+              >
+                Cancel
+              </button>
             </div>
           </form>
         )}
 
-        <div className="bg-navy-900 border border-navy-700 rounded-lg overflow-hidden">
+        <div className="pb-card overflow-hidden">
           {records.length === 0 && (
-            <div className="px-4 py-8 text-center text-slate-500 text-sm">No manual records yet</div>
+            <div className="px-5 py-8 text-center font-mono text-[11px] text-pb-faint">No manual records yet</div>
           )}
           {records.length > 0 && (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-navy-700">
-                  <th className="table-header">Batters</th>
-                  <th className="table-header text-right">Runs</th>
-                  <th className="table-header text-right">Wkt</th>
-                  <th className="table-header">Grade</th>
-                  <th className="table-header text-right">Year</th>
-                  <th className="table-header"></th>
+                <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint bg-pb-surface2/40">
+                  <th className="font-medium py-2.5 pl-5 text-left">BATTERS</th>
+                  <th className="font-medium py-2.5 px-3 text-right">RUNS</th>
+                  <th className="font-medium py-2.5 px-3 text-right">WKT</th>
+                  <th className="font-medium py-2.5 px-3 text-left">GRADE</th>
+                  <th className="font-medium py-2.5 px-3 text-right">YEAR</th>
+                  <th className="font-medium py-2.5 pr-5"></th>
                 </tr>
               </thead>
               <tbody>
                 {records.map((r, i) => (
                   <Fragment key={r.id}>
-                    <tr className={`table-row${i > 0 ? ' border-t border-navy-800' : ''}`}>
-                      <td className="table-cell text-white">
-                        {r.batter1_name} <span className="text-slate-600">&amp;</span> {r.batter2_name}
-                        {r.notes && <span className="block text-xs text-slate-600">{r.notes}</span>}
+                    <tr className={`${i > 0 ? 'pb-hairline-t' : ''} hover:bg-pb-surface2 align-top`}>
+                      <td className="py-2.5 pl-5 text-pb-text">
+                        {r.batter1_name} <span className="text-pb-faintest">&amp;</span> {r.batter2_name}
+                        {r.notes && <span className="block font-mono text-[10px] text-pb-faintest">{r.notes}</span>}
                       </td>
-                      <td className="table-cell stat-number text-right text-accent font-bold">
+                      <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>
                         {r.runs}{r.is_not_out ? '*' : ''}
                       </td>
-                      <td className="table-cell stat-number text-right text-slate-400">
+                      <td className="py-2.5 px-3 font-mono text-sm text-pb-faint text-right">
                         {ORDINALS[r.wicket_number - 1] || r.wicket_number}
                       </td>
-                      <td className="table-cell text-slate-400">{r.grade_name}</td>
-                      <td className="table-cell stat-number text-right text-slate-500">{r.season_year}</td>
-                      <td className="table-cell text-right">
+                      <td className="py-2.5 px-3 text-pb-faint">{r.grade_name}</td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faintest text-right">{r.season_year}</td>
+                      <td className="py-2.5 pr-5 text-right">
                         <div className="flex items-center justify-end gap-3">
                           <button
                             onClick={() => setEditingId(id => id === r.id ? null : r.id)}
-                            className="text-slate-500 hover:text-accent text-xs"
+                            className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
                           >
                             {editingId === r.id ? 'Cancel' : 'Edit'}
                           </button>
-                          <button onClick={() => handleDelete(r.id)} className="text-slate-600 hover:text-red-400 text-xs">Delete</button>
+                          <button
+                            onClick={() => handleDelete(r.id)}
+                            className="font-mono text-[10px] text-pb-faint hover:text-pb-red transition-colors"
+                          >
+                            Delete
+                          </button>
                         </div>
                       </td>
                     </tr>

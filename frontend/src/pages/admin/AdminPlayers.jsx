@@ -62,85 +62,105 @@ export default function AdminPlayers() {
   return (
     <AdminLayout>
       <div className="max-w-4xl">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-display font-bold text-white">Players</h1>
-          {msg && <span className="text-sm text-accent">{msg}</span>}
+        <div className="flex items-center justify-between mb-5">
+          <h1 className="font-display font-bold text-2xl text-pb-text">Players</h1>
+          {msg && <span className="font-mono text-[11px] tracking-wide2" style={{ color: 'var(--pb-accent)' }}>{msg.toUpperCase()}</span>}
         </div>
 
-        <input
-          type="text"
-          placeholder="Filter by name, display name or PHQ ID…"
-          value={filter}
-          onChange={e => setFilter(e.target.value)}
-          className="w-full bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm mb-4 focus:outline-none focus:border-accent"
-        />
+        <div className="relative mb-4">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-pb-faint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Filter by name, display name or PHQ ID…"
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            className="w-full bg-pb-surface border pb-hairline rounded pl-9 pr-4 py-2.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent placeholder-pb-faintest"
+          />
+        </div>
 
-        <p className="text-slate-500 text-xs mb-3">
-          <span className="text-accent font-medium">Display name</span> adds a suffix without affecting sync.{' '}
-          <span className="text-accent font-medium">PHQ ID</span> links a player to their PlayHQ UUID for precise game-level matching.
+        <p className="font-mono text-[10px] text-pb-faint mb-4">
+          <span style={{ color: 'var(--pb-accent)' }}>Display name</span> adds a suffix without affecting sync.{' '}
+          <span style={{ color: 'var(--pb-accent)' }}>PHQ ID</span> links a player to their PlayHQ UUID for precise game-level matching.
           Use Admin → PHQ ID Match to auto-detect IDs.
         </p>
 
-        <div className="bg-navy-900 border border-navy-700 rounded-lg overflow-hidden">
+        <div className="pb-card overflow-hidden">
           {filtered.length === 0 && (
-            <div className="px-4 py-8 text-center text-slate-500 text-sm">No players found</div>
+            <div className="px-5 py-8 text-center text-pb-faint font-mono text-[11px]">No players found</div>
           )}
           {filtered.map((p, i) => (
-            <div key={p.id} className={`px-4 py-3 ${i > 0 ? 'border-t border-navy-800' : ''}`}>
-              {/* Display name edit row */}
+            <div key={p.id} className={`px-5 py-3.5 ${i > 0 ? 'pb-hairline-t' : ''}`}>
               {editing?.id === p.id && editing.field === 'display_name' ? (
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2">
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs text-slate-500 mb-1">Display name override</div>
+                    <p className="font-mono text-[10px] text-pb-faint mb-1">Display name override</p>
                     <input
                       autoFocus
                       type="text"
                       value={editing.value}
                       onChange={e => setEditing(ed => ({ ...ed, value: e.target.value }))}
                       placeholder="Blank to clear"
-                      className="w-full bg-navy-800 border border-accent rounded px-2 py-1 text-white text-sm focus:outline-none"
+                      className="w-full bg-pb-surface2 border rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none"
+                      style={{ borderColor: 'var(--pb-accent)' }}
                       onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(null) }}
                     />
                   </div>
-                  <button onClick={saveEdit} disabled={saving} className="btn-primary text-sm">Save</button>
-                  <button onClick={() => setEditing(null)} className="btn-ghost text-sm">Cancel</button>
+                  <button
+                    onClick={saveEdit}
+                    disabled={saving}
+                    className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
+                    style={{ background: 'var(--pb-accent)' }}
+                  >
+                    SAVE
+                  </button>
+                  <button onClick={() => setEditing(null)} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
+                    CANCEL
+                  </button>
                 </div>
               ) : editing?.id === p.id && editing.field === 'playhq_id' ? (
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2">
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs text-slate-500 mb-1">PlayHQ ID (UUID)</div>
+                    <p className="font-mono text-[10px] text-pb-faint mb-1">PlayHQ ID (UUID)</p>
                     <input
                       autoFocus
                       type="text"
                       value={editing.value}
                       onChange={e => setEditing(ed => ({ ...ed, value: e.target.value }))}
                       placeholder="e.g. a1b2c3d4-e5f6-..."
-                      className="w-full bg-navy-800 border border-amber-500 rounded px-2 py-1 text-white text-sm font-mono focus:outline-none"
+                      className="w-full bg-pb-surface2 border rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none"
+                      style={{ borderColor: 'var(--pb-amber)' }}
                       onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(null) }}
                     />
                   </div>
-                  <button onClick={saveEdit} disabled={saving} className="btn-primary text-sm">Save</button>
-                  <button onClick={() => setEditing(null)} className="btn-ghost text-sm">Cancel</button>
+                  <button
+                    onClick={saveEdit}
+                    disabled={saving}
+                    className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
+                    style={{ background: 'var(--pb-accent)' }}
+                  >
+                    SAVE
+                  </button>
+                  <button onClick={() => setEditing(null)} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
+                    CANCEL
+                  </button>
                 </div>
               ) : (
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    {/* Name row */}
-                    <div className="text-white text-sm">
+                    <p className="text-pb-text text-sm font-medium">
                       {p.display_name}
                       {p.display_name_override && (
-                        <span className="ml-2 text-xs text-slate-500">(PlayHQ: {p.name})</span>
+                        <span className="ml-2 font-mono text-[10px] text-pb-faint">(PlayHQ: {p.name})</span>
                       )}
-                    </div>
-                    {/* ID row */}
+                    </p>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
-                      <span className="font-mono text-xs text-slate-700" title="Internal player ID">{p.id}</span>
+                      <span className="font-mono text-[10px] text-pb-faintest">{p.id}</span>
                       {p.playhq_id ? (
-                        <span className="font-mono text-xs text-amber-500/80" title="PlayHQ player UUID">
-                          PHQ: {p.playhq_id}
-                        </span>
+                        <span className="font-mono text-[10px] text-pb-amber/70">PHQ: {p.playhq_id}</span>
                       ) : (
-                        <span className="text-xs text-slate-700 italic">no PHQ ID</span>
+                        <span className="font-mono text-[10px] text-pb-faintest italic">no PHQ ID</span>
                       )}
                     </div>
                   </div>
@@ -148,28 +168,28 @@ export default function AdminPlayers() {
                   <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
                     <button
                       onClick={() => startEdit(p, 'display_name')}
-                      className="text-slate-400 hover:text-white text-xs px-2 py-1"
+                      className="font-mono text-[10px] text-pb-faint hover:text-pb-text px-2 py-1 transition-colors"
                     >
                       Name
                     </button>
                     {p.display_name_override && (
                       <button
                         onClick={() => clearField(p.id, 'display_name')}
-                        className="text-slate-600 hover:text-red-400 text-xs px-2 py-1"
+                        className="font-mono text-[10px] text-pb-faintest hover:text-pb-red px-2 py-1 transition-colors"
                       >
                         ✕ name
                       </button>
                     )}
                     <button
                       onClick={() => startEdit(p, 'playhq_id')}
-                      className={`text-xs px-2 py-1 ${p.playhq_id ? 'text-amber-500/70 hover:text-amber-400' : 'text-slate-400 hover:text-amber-400'}`}
+                      className={`font-mono text-[10px] px-2 py-1 transition-colors ${p.playhq_id ? 'text-pb-amber/70 hover:text-pb-amber' : 'text-pb-faint hover:text-pb-amber'}`}
                     >
                       {p.playhq_id ? 'Edit PHQ' : 'Set PHQ'}
                     </button>
                     {p.playhq_id && (
                       <button
                         onClick={() => clearField(p.id, 'playhq_id')}
-                        className="text-slate-600 hover:text-red-400 text-xs px-2 py-1"
+                        className="font-mono text-[10px] text-pb-faintest hover:text-pb-red px-2 py-1 transition-colors"
                       >
                         ✕ PHQ
                       </button>

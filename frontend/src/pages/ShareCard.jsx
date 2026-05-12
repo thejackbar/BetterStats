@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
-import LoadingSpinner from '../components/LoadingSpinner'
+import { PbSpinner } from '../lib/presskit'
 
 function hexWithAlpha(hex, alpha) {
   // hex like "#rrggbb" → "rgba(r,g,b,a)"
@@ -206,8 +206,8 @@ export default function ShareCard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSeason])
 
-  if (loading) return <LoadingSpinner message="Loading…" />
-  if (!data) return <div className="max-w-7xl mx-auto px-4 py-16 text-red-400">Player not found</div>
+  if (loading) return <PbSpinner message="Loading…" />
+  if (!data) return <div className="min-h-screen bg-pb-bg flex items-center justify-center"><p className="text-pb-red font-mono text-sm">Player not found</p></div>
 
   const { player, career_batting: cb, career_bowling: cbw, career_fielding: cf } = data
   const seasonLabel = selectedSeason
@@ -230,46 +230,52 @@ export default function ShareCard() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      <div className="mb-6">
-        <Link to={`/players/${playerId}`} className="text-accent text-sm hover:underline">← Back to profile</Link>
-        <h1 className="display-heading text-3xl text-white mt-3">SHARE CARD</h1>
-        <p className="text-slate-400 text-sm mt-1">Screenshot this card to share on social media</p>
-      </div>
-
-      {seasons.length > 0 && (
-        <div className="mb-6 flex items-center gap-3">
-          <select
-            value={selectedSeason}
-            onChange={e => setSelectedSeason(e.target.value)}
-            className="bg-navy-800 border border-navy-600 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent"
-          >
-            <option value="">Career Statistics</option>
-            {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          {statsLoading && <span className="text-slate-500 text-xs">updating…</span>}
+    <div className="min-h-screen bg-pb-bg text-pb-text">
+      <main className="max-w-3xl mx-auto px-4 py-8">
+        <div className="mb-6">
+          <Link to={`/players/${playerId}`} className="font-mono text-[11px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">← BACK TO PROFILE</Link>
+          <h1 className="font-display font-bold text-3xl text-pb-text mt-3 tracking-tight">Share Card</h1>
+          <p className="text-pb-faint text-sm mt-1">Screenshot this card to share on social media</p>
         </div>
-      )}
 
-      <div className="overflow-x-auto pb-4">
-        <ShareCardVisual
-          player={player}
-          cb={cb}
-          cbw={cbw}
-          cf={cf}
-          season={seasonLabel}
-          org={org}
-        />
-      </div>
+        {seasons.length > 0 && (
+          <div className="mb-6 flex items-center gap-3">
+            <select
+              value={selectedSeason}
+              onChange={e => setSelectedSeason(e.target.value)}
+              className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
+            >
+              <option value="">Career Statistics</option>
+              {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            {statsLoading && <span className="font-mono text-[10px] text-pb-faint">updating…</span>}
+          </div>
+        )}
 
-      <div className="mt-6 flex gap-3">
-        <button onClick={handleShare} className="btn-primary">
-          {copied ? 'Copied!' : (typeof navigator !== 'undefined' && navigator.share ? 'Share' : 'Copy Link')}
-        </button>
-        <p className="text-slate-500 text-xs self-center">
-          Take a screenshot of the card above to save as an image
-        </p>
-      </div>
+        <div className="overflow-x-auto pb-4">
+          <ShareCardVisual
+            player={player}
+            cb={cb}
+            cbw={cbw}
+            cf={cf}
+            season={seasonLabel}
+            org={org}
+          />
+        </div>
+
+        <div className="mt-6 flex gap-3 items-center">
+          <button
+            onClick={handleShare}
+            className="px-5 py-2.5 rounded font-mono text-[11px] tracking-wide2 font-semibold transition text-pb-bg"
+            style={{ background: 'var(--pb-accent)' }}
+          >
+            {copied ? 'COPIED!' : (typeof navigator !== 'undefined' && navigator.share ? 'SHARE' : 'COPY LINK')}
+          </button>
+          <p className="font-mono text-[10px] text-pb-faintest">
+            Take a screenshot of the card above to save as an image
+          </p>
+        </div>
+      </main>
     </div>
   )
 }

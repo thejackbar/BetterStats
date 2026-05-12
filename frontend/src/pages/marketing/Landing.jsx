@@ -12,19 +12,19 @@ const FEATURES = [
 
 export default function Landing() {
   return (
-    <div className="min-h-screen bg-navy-950 text-white">
+    <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
       {/* Hero */}
-      <section className="max-w-6xl mx-auto px-4 pt-20 pb-16 text-center">
-        <div className="inline-block bg-accent/10 border border-accent/20 text-accent text-xs px-3 py-1 rounded-full mb-6">
+      <section className="max-w-5xl mx-auto px-4 pt-24 pb-20 text-center">
+        <div className="inline-block border pb-hairline font-mono text-[10px] tracking-wide3 text-pb-faint px-3 py-1 rounded-full mb-8 uppercase">
           Built for Australian cricket clubs
         </div>
-        <h1 className="font-display font-bold text-5xl md:text-7xl tracking-tight mb-6">
+        <h1 className="font-display font-bold text-[52px] sm:text-[72px] md:text-[88px] tracking-tight leading-[0.9] text-pb-text mb-8">
           Your club's stats,<br />
-          <span className="text-accent">done properly.</span>
+          <span style={{ color: 'var(--pb-accent)' }}>done properly.</span>
         </h1>
-        <p className="text-slate-300 text-lg md:text-xl max-w-2xl mx-auto mb-10">
+        <p className="text-pb-dim text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
           BetterStats turns your PlayHQ data into a beautiful, public stats page your club members will actually use — with player profiles, leaderboards, records, and awards.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -32,49 +32,52 @@ export default function Landing() {
             href="https://docs.google.com/forms/d/e/1FAIpQLSdTODO/viewform"
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-primary text-base px-6 py-3"
+            className="px-8 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
+            style={{ background: 'var(--pb-accent)' }}
           >
-            Request access
+            REQUEST ACCESS
           </a>
-          <Link to="/features" className="btn-ghost text-base px-6 py-3 text-slate-300">
-            See features →
+          <Link to="/features" className="px-8 py-3 border pb-hairline rounded font-mono text-[11px] tracking-wide3 font-semibold text-pb-dim hover:text-pb-text transition-colors">
+            SEE FEATURES →
           </Link>
         </div>
       </section>
 
       {/* Feature grid */}
-      <section className="max-w-6xl mx-auto px-4 pb-20">
+      <section className="max-w-5xl mx-auto px-4 pb-24">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {FEATURES.map(f => (
-            <div key={f.title} className="bg-navy-900 border border-navy-700 rounded-lg p-5">
-              <h3 className="font-medium text-white mb-2">{f.title}</h3>
-              <p className="text-slate-400 text-sm leading-relaxed">{f.desc}</p>
+            <div key={f.title} className="pb-card p-5">
+              <p className="font-mono text-[10px] tracking-wide3 mb-2" style={{ color: 'var(--pb-accent)' }}>{f.title.toUpperCase()}</p>
+              <p className="text-pb-dim text-sm leading-relaxed">{f.desc}</p>
             </div>
           ))}
         </div>
       </section>
 
       {/* CTA */}
-      <section className="border-t border-navy-800 py-16 text-center">
-        <h2 className="font-display font-bold text-3xl mb-4">Ready to upgrade your club's stats?</h2>
-        <p className="text-slate-400 mb-8">$250/year. Setup included. No lock-in.</p>
+      <section className="pb-hairline-t py-20 text-center">
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4">READY TO UPGRADE?</p>
+        <h2 className="font-display font-bold text-4xl text-pb-text mb-3 tracking-tight">Your club deserves better stats.</h2>
+        <p className="text-pb-faint font-mono text-[11px] tracking-wide2 mb-8">$250/year. Setup included. No lock-in.</p>
         <a
           href="https://docs.google.com/forms/d/e/1FAIpQLSdTODO/viewform"
           target="_blank"
           rel="noopener noreferrer"
-          className="btn-primary text-base px-8 py-3"
+          className="inline-block px-10 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
+          style={{ background: 'var(--pb-accent)' }}
         >
-          Get started
+          GET STARTED
         </a>
       </section>
 
-      <footer className="border-t border-navy-800 py-8 text-center text-slate-600 text-sm">
-        <div className="flex items-center justify-center gap-6 mb-3">
-          <Link to="/terms" className="hover:text-slate-400">Terms</Link>
-          <Link to="/privacy" className="hover:text-slate-400">Privacy</Link>
-          <Link to="/contact" className="hover:text-slate-400">Contact</Link>
+      <footer className="pb-hairline-t py-8 text-center">
+        <div className="flex items-center justify-center gap-8 mb-3">
+          <Link to="/terms" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">TERMS</Link>
+          <Link to="/privacy" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">PRIVACY</Link>
+          <Link to="/contact" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">CONTACT</Link>
         </div>
-        © {new Date().getFullYear()} BetterStats
+        <p className="font-mono text-[10px] text-pb-faintest">© {new Date().getFullYear()} BETTERSTATS</p>
       </footer>
     </div>
   )
