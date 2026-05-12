@@ -1098,7 +1098,13 @@ async def sync_grassroots_game_level_data(
 
                 bat_count = bowl_count = field_count = part_count = fow_count = 0
                 for inn in (scorecard.get("innings") or []):
-                    inn_num = inn.get("inningsNumber") or 1
+                    # CA's GR API returns `inningsNumber: 1` for BOTH innings
+                    # (data bug their end). `inningsOrder` is the field that
+                    # actually distinguishes 1st vs 2nd innings — using
+                    # `inningsNumber` collapses both teams' batting/FOW/etc.
+                    # into the same row group, which silently breaks per-innings
+                    # partnership derivation.
+                    inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
                     batting_rows = inn.get("batting") or []
                     bowling_rows = inn.get("bowling") or []
                     fielding_rows = inn.get("fielding") or []
