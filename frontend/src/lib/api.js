@@ -212,6 +212,14 @@ export const api = {
     }).then(r => r.json())
   },
 
+  // StatLab
+  statlabQuery: (orgId, { mode = 'career', seasonId, groupBy = 'player', sortBy = 'runs', sortDir = 'desc', limit = 100, filters = [] } = {}) => {
+    const params = new URLSearchParams({ org_id: orgId, mode, group_by: groupBy, sort_by: sortBy, sort_dir: sortDir, limit })
+    if (seasonId) params.set('season_id', seasonId)
+    filters.forEach(f => params.append('filters', f))
+    return request(`/statlab/query?${params}`)
+  },
+
   // Records
   getRecords: (orgId, { seasonId, gradeId } = {}) => {
     const params = new URLSearchParams()

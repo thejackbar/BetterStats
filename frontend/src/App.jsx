@@ -39,6 +39,7 @@ import PlayerComparison from './pages/PlayerComparison'
 import Leaderboard from './pages/Leaderboard'
 import Records from './pages/Records'
 import ShareCard from './pages/ShareCard'
+import StatLab from './pages/StatLab'
 
 // Game pages (game-level, UUID-based — no slug needed)
 import MatchScorecard from './pages/MatchScorecard'
@@ -96,6 +97,7 @@ export default function App() {
         <Route path="/:clubSlug/compare" element={<PlayerComparison />} />
         <Route path="/:clubSlug/leaderboard" element={<Leaderboard />} />
         <Route path="/:clubSlug/records" element={<Records />} />
+        <Route path="/:clubSlug/statlab" element={<StatLab />} />
         <Route path="/players/:playerId" element={<PlayerProfile />} />
         <Route path="/players/:playerId/share" element={<ShareCard />} />
 
