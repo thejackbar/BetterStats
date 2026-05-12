@@ -1,58 +1,88 @@
-// src/pages/marketing/Features.jsx — feature list, quiet
-import React from "react";
-import { Label, Btn } from "../../lib/presskit";
+import MarketingNav from '../../components/MarketingNav'
+import { Link } from 'react-router-dom'
 
-const GROUPS = [
+const SECTIONS = [
   {
-    title: "FOR PLAYERS",
-    items: [
-      ["Career & season tile",      "All your numbers, animated up on load."],
-      ["Last 14 innings chart",     "Spot form trends at a glance."],
-      ["Dismissal & shot split",    "Where do you actually get out?"],
-      ["Milestones in reach",       "Next century, next ton, next half-century."],
-      ["By grade · by position",    "Slice your runs however the captain asks."],
+    title: 'Live PlayHQ Sync',
+    desc: 'Connect your PlayHQ organisation once, and BetterStats keeps your stats automatically updated after every match. No manual data entry required.',
+    points: [
+      'Weekly automatic sync, runs overnight',
+      'Batting, bowling, and fielding stats per player per game',
+      'Season aggregates computed automatically',
+      'Works with any PlayHQ-registered club in Australia',
     ],
   },
   {
-    title: "FOR CAPTAINS & COACHES",
-    items: [
-      ["Club dashboard",            "Form, leaders, milestones, fixtures — one page."],
-      ["Compare two players",       "Settle selection arguments with data."],
-      ["Stat Lab deep-dive",        "Phase / bowler type / ground splits."],
-      ["Match scorecard worm",      "Runs by over for both innings overlaid."],
-      ["Hall of records",           "Every club benchmark, kept honest."],
+    title: 'Player Profiles',
+    desc: 'Every registered player gets a rich profile page with their full career history, season breakdowns, and notable performances.',
+    points: [
+      'Career batting, bowling, and fielding totals',
+      'Season-by-season comparison',
+      'Milestone tracking (500 runs, 50 wickets, 100 games…)',
+      'Partnership data and batting position analysis',
     ],
   },
   {
-    title: "FOR ADMINS",
-    items: [
-      ["Play-Cricket sync",         "Daily auto-sync + on-demand run."],
-      ["Roster CRUD",               "Add players, link IDs, retire profiles."],
-      ["White-label theming",       "Club colours, custom domain, hide branding."],
-      ["CSV export",                "Your data, always. No lock-in."],
-      ["Cross-club leaderboards",   "Where one club has many teams."],
+    title: 'Leaderboards & Records',
+    desc: "See who's leading the club in every stat category, filterable by season and grade.",
+    points: [
+      'Batting: runs, average, strike rate, centuries, fifties',
+      'Bowling: wickets, economy, average, five-fors',
+      'Fielding: catches, run-outs, stumpings',
+      'Club and season records updated automatically',
     ],
   },
-];
+  {
+    title: 'Awards & Honours',
+    desc: "Log your club's annual awards, association honours, office bearers, hall of fame inductees, and premierships in one place.",
+    points: [
+      'Attach awards to player profiles',
+      'Browse all-time award history by category',
+      'CSV bulk import for historical data',
+      'Separate season and career award views',
+    ],
+  },
+  {
+    title: 'Admin Tools',
+    desc: "A full-featured admin section for your stats volunteers — no technical skills needed.",
+    points: [
+      'Duplicate player detection and merge tool',
+      'Display name overrides for cosmetic corrections',
+      'CSV import and export for all data',
+      'Username/password login — shareable with committee members',
+    ],
+  },
+  {
+    title: 'Season Yearbook (Phase 2)',
+    desc: 'A shareable, web-based season summary with auto-generated modules and admin-written prose.',
+    points: [
+      'Season summary, top performers, match results',
+      'Admin-written intro and closing sections',
+      'Toggle which modules appear',
+      'Publish/unpublish control',
+    ],
+  },
+]
 
 export default function Features() {
   return (
-    <div className="min-h-screen bg-pb-bg text-pb-text">
-      <main className="max-w-[1200px] mx-auto px-4 sm:px-6 py-16 sm:py-24">
-        <Label>FEATURES · EVERYTHING IN THE BOX</Label>
-        <h1 className="font-display text-[56px] sm:text-[88px] font-bold tracking-tight leading-[0.92] mt-3 max-w-[16ch]">
-          Built for clubs that take their numbers seriously.
-        </h1>
+    <div className="min-h-screen bg-navy-950 text-white">
+      <MarketingNav />
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-12">
-          {GROUPS.map(g => (
-            <div key={g.title} className="pb-card p-6">
-              <Label>{g.title}</Label>
-              <ul className="flex flex-col mt-3">
-                {g.items.map(([t, d], i) => (
-                  <li key={t} className={`${i ? "pb-hairline-t" : ""} py-3`}>
-                    <div className="text-pb-text font-semibold text-[14px]">{t}</div>
-                    <div className="text-pb-dim text-[13px] mt-1 leading-[1.45]">{d}</div>
+      <div className="max-w-4xl mx-auto px-4 py-16">
+        <h1 className="font-display font-bold text-4xl md:text-5xl mb-4">Features</h1>
+        <p className="text-slate-300 text-lg mb-12">Everything your cricket club needs to run a proper stats platform.</p>
+
+        <div className="space-y-12">
+          {SECTIONS.map(s => (
+            <div key={s.title} className="border-t border-navy-800 pt-10">
+              <h2 className="font-display font-bold text-2xl text-white mb-3">{s.title}</h2>
+              <p className="text-slate-300 mb-4">{s.desc}</p>
+              <ul className="space-y-2">
+                {s.points.map(p => (
+                  <li key={p} className="flex items-start gap-2 text-sm text-slate-400">
+                    <span className="text-accent mt-0.5">✓</span>
+                    {p}
                   </li>
                 ))}
               </ul>
@@ -60,10 +90,10 @@ export default function Features() {
           ))}
         </div>
 
-        <div className="mt-10 flex justify-center">
-          <Btn primary>Try BetterStats free →</Btn>
+        <div className="mt-16 text-center">
+          <Link to="/pricing" className="btn-primary text-base px-8 py-3">See pricing →</Link>
         </div>
-      </main>
+      </div>
     </div>
-  );
+  )
 }
