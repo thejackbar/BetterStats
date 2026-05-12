@@ -307,6 +307,7 @@ ACHIEVEMENT_TREE = {
     'Hall of Fame': {'ACC': ['Hall of Fame']},
     'Life Membership': {'ACC': ['Life Membership']},
     'Milestone': {
+        'Cap Number': ['Player Number', '100 Game Number', '200 Game Number', '300 Game Number', '400 Game Number', '500 Game Number', '600 Game Number', '700 Game Number', '800 Game Number', '900 Game Number', '1000 Game Number'],
         'Games': ['50 Games', '100 Games', '150 Games', '200 Games', '250 Games', '300 Games', '350 Games', '400 Games', '450 Games', '500 Games'],
         'Runs': ['500 Runs', '1000 Runs', '2000 Runs', '3000 Runs', '4000 Runs', '5000 Runs', '6000 Runs', '7000 Runs', '8000 Runs', '9000 Runs', '10000 Runs'],
         'Wickets': ['50 Wickets', '100 Wickets', '150 Wickets', '200 Wickets', '250 Wickets', '300 Wickets', '350 Wickets', '400 Wickets', '450 Wickets', '500 Wickets', '550 Wickets', '600 Wickets', '650 Wickets', '700 Wickets'],
