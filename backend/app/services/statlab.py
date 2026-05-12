@@ -110,7 +110,7 @@ async def query_players(
     filter_clauses, filter_params = _build_filter_clauses(filters or [], PLAYER_FIELDS)
     params.update(filter_params)
     where_sql = ("WHERE " + " AND ".join(filter_clauses)) if filter_clauses else ""
-    nulls = "LAST" if sort_dir == "desc" else "FIRST"
+    nulls = "LAST"
 
     sql = f"""
         WITH agg AS (
@@ -192,7 +192,7 @@ async def query_grades(
     filter_clauses, filter_params = _build_filter_clauses(filters or [], GRADE_FIELDS)
     params.update(filter_params)
     where_sql = ("WHERE " + " AND ".join(filter_clauses)) if filter_clauses else ""
-    nulls = "LAST" if sort_dir == "desc" else "FIRST"
+    nulls = "LAST"
 
     if group_by_season:
         group_cols = "og.grade_name, og.season_name, og.season_year"

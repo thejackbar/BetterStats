@@ -130,16 +130,15 @@ const PRESETS = {
     presets: [
       { label: 'Career Run Scorers',      desc: 'Sorted by total runs',                group: 'player', mode: 'career', filters: [], sortBy: 'runs',                sortDir: 'desc' },
       { label: 'Best Batting Average',    desc: 'Min 20 innings',                      group: 'player', mode: 'career', filters: [{ field:'batting_innings', op:'gte', value:'20' }], sortBy: 'batting_average', sortDir: 'desc' },
-      { label: 'Best Strike Rate',        desc: 'Min 20 innings',                      group: 'player', mode: 'career', filters: [{ field:'batting_innings', op:'gte', value:'20' }], sortBy: 'batting_strike_rate', sortDir: 'desc' },
+      { label: 'Best Strike Rate',        desc: 'Min 10 innings (requires ball-by-ball data)', group: 'player', mode: 'career', filters: [{ field:'batting_innings', op:'gte', value:'10' }], sortBy: 'batting_strike_rate', sortDir: 'desc' },
       { label: 'High Score Records',      desc: 'Highest individual innings',          group: 'player', mode: 'career', filters: [], sortBy: 'high_score', sortDir: 'desc' },
       { label: 'Century Makers',          desc: 'Players who have scored a 100',       group: 'player', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'1' }], sortBy: 'hundreds', sortDir: 'desc' },
       { label: 'Most Centuries',          desc: 'All-time 100s',                       group: 'player', mode: 'career', filters: [], sortBy: 'hundreds', sortDir: 'desc' },
       { label: 'Most Half-Centuries',     desc: 'All-time 50s',                        group: 'player', mode: 'career', filters: [], sortBy: 'fifties', sortDir: 'desc' },
-      { label: 'Five-for Club',           desc: 'Players with 5+ centuries',           group: 'player', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'5' }], sortBy: 'hundreds', sortDir: 'desc' },
+      { label: '3+ Centuries Club',        desc: 'Players with 3 or more centuries',    group: 'player', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'3' }], sortBy: 'hundreds', sortDir: 'desc' },
       { label: 'Duck Brigade',            desc: 'Most career ducks',                   group: 'player', mode: 'career', filters: [], sortBy: 'ducks', sortDir: 'desc' },
       { label: 'Power Hitters',           desc: 'Most career sixes',                   group: 'player', mode: 'career', filters: [], sortBy: 'sixes', sortDir: 'desc' },
       { label: 'Boundary Hunters',        desc: 'Most career fours',                   group: 'player', mode: 'career', filters: [], sortBy: 'fours', sortDir: 'desc' },
-      { label: 'Elite SR (≥100)',          desc: 'Min 20 innings, SR ≥ 100',            group: 'player', mode: 'career', filters: [{ field:'batting_innings', op:'gte', value:'20' }, { field:'batting_strike_rate', op:'gte', value:'100' }], sortBy: 'batting_strike_rate', sortDir: 'desc' },
       { label: 'Season Run Scorers',      desc: 'Most runs in a single season',        group: 'player', mode: 'season', filters: [], sortBy: 'runs', sortDir: 'desc' },
       { label: 'Season Batting Avg',      desc: 'Best avg in a single season (10+ inn)',group: 'player', mode: 'season', filters: [{ field:'batting_innings', op:'gte', value:'10' }], sortBy: 'batting_average', sortDir: 'desc' },
     ],
@@ -172,11 +171,11 @@ const PRESETS = {
     label: 'All-rounders',
     presets: [
       { label: 'True All-rounders',       desc: '500+ runs AND 50+ wickets',           group: 'player', mode: 'career', filters: [{ field:'runs', op:'gte', value:'500' }, { field:'wickets', op:'gte', value:'50' }], sortBy: 'runs', sortDir: 'desc' },
-      { label: 'Elite All-rounders',      desc: '1000+ runs AND 100+ wickets',         group: 'player', mode: 'career', filters: [{ field:'runs', op:'gte', value:'1000' }, { field:'wickets', op:'gte', value:'100' }], sortBy: 'runs', sortDir: 'desc' },
+      { label: 'Elite All-rounders',      desc: '1000+ runs AND 50+ wickets',          group: 'player', mode: 'career', filters: [{ field:'runs', op:'gte', value:'1000' }, { field:'wickets', op:'gte', value:'50' }], sortBy: 'runs', sortDir: 'desc' },
       { label: 'Club Stalwarts',          desc: '100+ matches played',                 group: 'player', mode: 'career', filters: [{ field:'matches', op:'gte', value:'100' }], sortBy: 'matches', sortDir: 'desc' },
       { label: 'Century & Wickets',       desc: '100+ runs AND 10+ wickets',           group: 'player', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'1' }, { field:'wickets', op:'gte', value:'10' }], sortBy: 'runs', sortDir: 'desc' },
       { label: '10-Season Veterans',      desc: 'Players with 10+ seasons',            group: 'player', mode: 'career', filters: [{ field:'seasons_played', op:'gte', value:'10' }], sortBy: 'seasons_played', sortDir: 'desc' },
-      { label: 'Big Hitters Who Bowl',    desc: '10+ sixes AND 20+ wickets',           group: 'player', mode: 'career', filters: [{ field:'sixes', op:'gte', value:'10' }, { field:'wickets', op:'gte', value:'20' }], sortBy: 'sixes', sortDir: 'desc' },
+      { label: 'Big Hitters Who Bowl',    desc: '20+ wickets and highest run scorers',  group: 'player', mode: 'career', filters: [{ field:'wickets', op:'gte', value:'20' }], sortBy: 'runs', sortDir: 'desc' },
     ],
   },
   grade: {
@@ -187,7 +186,7 @@ const PRESETS = {
       { label: 'Busiest Grades',          desc: 'Most matches played in this grade',   group: 'grade', mode: 'career', filters: [], sortBy: 'matches', sortDir: 'desc' },
       { label: 'Season Team Runs',        desc: 'Highest-scoring teams in a season',   group: 'team',  mode: 'career', filters: [], sortBy: 'runs',    sortDir: 'desc' },
       { label: 'Season Team Wickets',     desc: 'Most wickets taken by a team in a season', group: 'team', mode: 'career', filters: [], sortBy: 'wickets', sortDir: 'desc' },
-      { label: 'Century-Rich Seasons',    desc: 'Most centuries scored in a grade/season', group: 'team', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'5' }], sortBy: 'hundreds', sortDir: 'desc' },
+      { label: 'Century-Rich Seasons',    desc: 'Grade/seasons with the most centuries',   group: 'team', mode: 'career', filters: [], sortBy: 'hundreds', sortDir: 'desc' },
     ],
   },
 }
@@ -416,20 +415,48 @@ export default function StatLab() {
     setSortBy('runs')
   }
 
-  // Apply a preset
-  const applyPreset = (preset) => {
-    const newGroup = preset.group || 'player'
-    const newMode  = preset.mode  || 'career'
+  // Apply a preset and immediately run the query with the new values
+  const applyPreset = useCallback(async (preset) => {
+    if (!orgId) return
+    const newGroup   = preset.group    || 'player'
+    const newMode    = preset.mode     || 'career'
+    const newSortBy  = preset.sortBy   || 'runs'
+    const newSortDir = preset.sortDir  || 'desc'
+    const newFilters = preset.filters.map((f, i) => ({ ...f, id: Date.now() + i }))
+
     setGroupBy(newGroup)
     setMode(newMode)
-    setSortBy(preset.sortBy   || 'runs')
-    setSortDir(preset.sortDir || 'desc')
-    setFilters(preset.filters.map((f, i) => ({ ...f, id: Date.now() + i })))
-    setRows([])
-    setHasQueried(false)
-    setError(null)
+    setSortBy(newSortBy)
+    setSortDir(newSortDir)
+    setFilters(newFilters)
     setGalleryOpen(false)
-  }
+    setClientSort({ col: null, dir: null })
+    setLoading(true)
+    setError(null)
+    setHasQueried(true)
+    setRows([])
+
+    const validFilters = newFilters
+      .filter(f => f.field && f.op && f.value !== '')
+      .map(f => `${f.field}:${f.op}:${f.value}`)
+    try {
+      const data = await api.statlabQuery(orgId, {
+        mode: newMode,
+        seasonId: newMode === 'season' ? seasonId : undefined,
+        groupBy: newGroup,
+        sortBy: newSortBy,
+        sortDir: newSortDir,
+        limit: 500,
+        filters: validFilters,
+      })
+      setRows(data)
+    } catch (e) {
+      setError(e.message)
+      setRows([])
+    } finally {
+      setLoading(false)
+    }
+  }, [orgId, seasonId])
 
   // Client-side column sort
   const handleColSort = (col) => {
