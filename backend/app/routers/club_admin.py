@@ -488,8 +488,8 @@ async def import_partnership_records(
                   AND pt.wicket_number = :wicket
                   AND EXTRACT(YEAR FROM g.played_at)::int = :season_year
                   AND (
-                    (pt.batter1_id = :b1_id::uuid AND pt.batter2_id = :b2_id::uuid) OR
-                    (pt.batter1_id = :b2_id::uuid AND pt.batter2_id = :b1_id::uuid)
+                    (pt.batter1_id = CAST(:b1_id AS uuid) AND pt.batter2_id = CAST(:b2_id AS uuid)) OR
+                    (pt.batter1_id = CAST(:b2_id AS uuid) AND pt.batter2_id = CAST(:b1_id AS uuid))
                   )
                 LIMIT 1
             """), {
@@ -501,7 +501,12 @@ async def import_partnership_records(
             })
             dup_row = dup_res.mappings().first()
             if dup_row:
-                gr_duplicate = dict(dup_row)
+                gr_duplicate = {
+                    "runs": int(dup_row["runs"]) if dup_row["runs"] is not None else None,
+                    "wicket_number": int(dup_row["wicket_number"]) if dup_row["wicket_number"] is not None else None,
+                    "season_year": int(dup_row["season_year"]) if dup_row["season_year"] is not None else None,
+                    "grade_name": str(dup_row["grade_name"]) if dup_row["grade_name"] is not None else None,
+                }
 
         record = ManualPartnershipRecord(
             org_id=club.id,
