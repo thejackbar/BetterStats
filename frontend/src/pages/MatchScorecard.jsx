@@ -1,374 +1,241 @@
-import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
-import { api } from '../lib/api'
-import LoadingSpinner from '../components/LoadingSpinner'
-import clsx from 'clsx'
+// src/pages/MatchScorecard.jsx — BetterStats Press Box scorecard
+// Drop in as MatchScorecardV2.jsx or replace existing.
 
-function MatchSummary({ game }) {
-  const isWin = game.result === 'WIN'
-  const isLoss = game.result === 'LOSS'
-  const isDraw = ['DRAW', 'TIE', 'NO_RESULT'].includes(game.result)
+import React, { useEffect, useState } from "react";
+import { useParams, Link } from "react-router-dom";
+import { AnimatedNum, Sparkline, Label, Card, Btn, ResultPill, PageHeader } from "../lib/presskit";
 
-  const resultColor = isWin ? 'text-accent' : isLoss ? 'text-red-400' : 'text-slate-400'
-  const bannerBorder = isWin ? 'border-accent/20' : isLoss ? 'border-red-500/20' : 'border-navy-700'
+// Mock — match real /api/matches/{id} shape.
+const mockMatch = {
+  id: 901,
+  date: "2026-05-09",
+  ground: "Marlow CC",
+  format: "T20",
+  toss: "ACTON, chose to bat",
+  result: "ACTON won by 23 runs",
+  outcome: "WIN",
+  player_of_match: "Jack Banner",
+  innings: [
+    {
+      team: "Acton CC", total: "187/4", overs: "20.0", rr: 9.35,
+      batting: [
+        { id: 1, name: "J. Banner",     dismissal: "c Smith b Lyle", r: 78, b: 42, fours: 8, sixes: 4, sr: 185.7 },
+        { id: 2, name: "T. Whitfield",  dismissal: "b Patel",        r: 38, b: 34, fours: 4, sixes: 1, sr: 111.8 },
+        { id: 3, name: "R. Stone",      dismissal: "not out",        r: 41, b: 28, fours: 5, sixes: 1, sr: 146.4 },
+        { id: 4, name: "H. Vaughn",     dismissal: "c Roy b Doyle",  r: 12, b: 11, fours: 1, sixes: 0, sr: 109.1 },
+        { id: 5, name: "S. Okafor",     dismissal: "not out",        r: 14, b: 5,  fours: 2, sixes: 0, sr: 280.0 },
+      ],
+      bowling: [
+        { id: 11, name: "Lyle",   o: 4, m: 0, r: 28, w: 2, econ: 7.0 },
+        { id: 12, name: "Patel",  o: 4, m: 0, r: 31, w: 1, econ: 7.75 },
+        { id: 13, name: "Doyle",  o: 4, m: 0, r: 42, w: 1, econ: 10.5 },
+        { id: 14, name: "Briggs", o: 4, m: 0, r: 38, w: 0, econ: 9.5 },
+        { id: 15, name: "Pope",   o: 4, m: 0, r: 44, w: 0, econ: 11.0 },
+      ],
+    },
+    {
+      team: "Marlow CC", total: "164/8", overs: "20.0", rr: 8.2,
+      batting: [
+        { id: 21, name: "Roy",     dismissal: "b Patel",         r: 44, b: 28, fours: 4, sixes: 2, sr: 157.1 },
+        { id: 22, name: "Doyle",   dismissal: "c Stone b Lyle",  r: 22, b: 21, fours: 2, sixes: 1, sr: 104.8 },
+        { id: 23, name: "Smith",   dismissal: "lbw b Patel",     r: 31, b: 26, fours: 3, sixes: 0, sr: 119.2 },
+        { id: 24, name: "Briggs",  dismissal: "c Banner b Lyle", r: 18, b: 17, fours: 2, sixes: 0, sr: 105.9 },
+        { id: 25, name: "Pope",    dismissal: "run out",         r:  9, b: 12, fours: 1, sixes: 0, sr:  75.0 },
+      ],
+      bowling: [
+        { id: 6, name: "Patel",   o: 4, m: 1, r: 22, w: 4, econ: 5.5  },
+        { id: 7, name: "Lyle",    o: 4, m: 0, r: 28, w: 3, econ: 7.0  },
+        { id: 8, name: "Khanna",  o: 4, m: 0, r: 34, w: 1, econ: 8.5  },
+        { id: 9, name: "Rivers",  o: 4, m: 0, r: 36, w: 0, econ: 9.0  },
+        { id: 10, name: "Banner", o: 4, m: 0, r: 42, w: 0, econ: 10.5 },
+      ],
+    },
+  ],
+  worm: {
+    // runs per over for each innings
+    teams: ["Acton CC", "Marlow CC"],
+    overs: Array.from({length: 20}, (_, i) => i + 1),
+    series: [
+      [8, 12, 6, 14, 9, 11, 8, 7, 12, 6, 9, 8, 13, 11, 9, 10, 8, 12, 7, 7],
+      [6, 9, 4, 11, 7, 8, 6, 5, 10, 4, 8, 6, 11, 9, 7, 8, 6, 10, 5, 4],
+    ],
+  },
+};
 
-  // Build score summary from innings_totals
-  const totals = game.innings_totals || {}
-  const inningNums = Object.keys(totals).map(Number).sort()
-  const scoreLine = inningNums.map(n => {
-    const t = totals[n]
-    return `${t.runs}/${t.wickets}`
-  }).join('  ·  ')
+export default function MatchScorecard() {
+  const { id } = useParams();
+  const [m, setM] = useState(mockMatch);
+
+  useEffect(() => {
+    // WIRE: api.matches.get(id) → setM
+  }, [id]);
 
   return (
-    <div className={`card p-5 mb-6 border ${bannerBorder}`}>
-      {/* Grade / Season breadcrumb */}
-      <p className="section-label mb-3">
-        {game.season?.name}{game.grade?.name ? ` · ${game.grade.name}` : ''}
-        {game.played_at && (
-          <span className="ml-2">
-            {new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </span>
-        )}
-      </p>
-
-      {/* Teams + result */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="display-heading text-3xl md:text-4xl text-white leading-tight">
-            {game.home_team}
-            <span className="text-slate-600 font-sans font-normal text-xl mx-3">vs</span>
-            {game.away_team}
-          </h1>
-          {scoreLine && (
-            <p className="stat-number text-slate-300 text-lg mt-2 tracking-wider">{scoreLine}</p>
-          )}
+    <div className="min-h-screen bg-pb-bg text-pb-text">
+      <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div className="flex items-center gap-2 font-mono text-[10.5px] tracking-wide2 text-pb-faint mb-4">
+          <Link to="/matches" className="hover:text-pb-text">MATCHES</Link>
+          <span>/</span>
+          <span className="text-pb-dim">{m.innings[0].team.toUpperCase()} v {m.innings[1].team.toUpperCase()}</span>
         </div>
-        <div className="text-right shrink-0">
-          <div className={clsx('display-heading text-3xl font-bold', resultColor)}>
-            {game.result || 'N/R'}
+
+        {/* Header */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-6 mb-6">
+          <div>
+            <Label>{m.format} · {m.date} · {m.ground}</Label>
+            <h1 className="font-display text-[40px] sm:text-[56px] font-bold tracking-tight leading-[0.95] mt-1.5">{m.result}</h1>
+            <div className="flex flex-wrap gap-x-5 gap-y-1 text-pb-dim font-mono text-[13px] mt-2">
+              <span>TOSS · <span className="text-pb-text">{m.toss}</span></span>
+              <span>POM · <span style={{color:"var(--pb-accent)"}}>★</span> <span className="text-pb-text">{m.player_of_match}</span></span>
+            </div>
           </div>
-          {game.winning_team && (
-            <p className="text-sm text-slate-400 mt-1">{game.winning_team} won</p>
-          )}
+          <div className="flex gap-2 self-end">
+            <Btn>Share</Btn>
+            <Btn>Export PDF</Btn>
+            <Btn primary>Highlights →</Btn>
+          </div>
         </div>
-      </div>
-    </div>
-  )
-}
 
-function BattingTable({ batting = [] }) {
-  if (!batting.length) return <p className="text-slate-500 text-sm py-4 px-5">No batting data.</p>
-
-  const total = batting.reduce((s, r) => s + (r.runs ?? 0), 0)
-  const wickets = batting.filter(r => !r.not_out && r.dismissal_type).length
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-navy-700 bg-navy-800/30">
-            <th className="table-header pl-5">Batter</th>
-            <th className="table-header text-slate-500 font-normal normal-case tracking-normal">Dismissal</th>
-            <th className="table-header text-right pr-2">R</th>
-            <th className="table-header text-right pr-2">B</th>
-            <th className="table-header text-right pr-2">4s</th>
-            <th className="table-header text-right pr-2">6s</th>
-            <th className="table-header text-right pr-5">SR</th>
-          </tr>
-        </thead>
-        <tbody>
-          {batting.map((row, i) => (
-            <tr key={i} className="border-b border-navy-800/50 hover:bg-navy-800/20 transition-colors">
-              <td className="py-2.5 px-5">
-                {row.player_id
-                  ? <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors font-medium">{row.player_name || '—'}</Link>
-                  : <span className="text-white font-medium">{row.player_name || '—'}</span>
-                }
-              </td>
-              <td className="py-2.5 px-3 text-slate-500 text-xs capitalize max-w-[140px] truncate">
-                {row.not_out ? 'not out' : row.dismissal_type || '—'}
-              </td>
-              <td className="py-2.5 pr-2 text-right">
-                <span className={clsx(
-                  'stat-number font-bold',
-                  row.runs >= 100 ? 'text-amber-cricket' : row.runs >= 50 ? 'text-accent' : 'text-white'
-                )}>
-                  {row.runs ?? '—'}
-                </span>
-                {row.not_out && <span className="text-accent text-xs">*</span>}
-              </td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-400">{row.balls ?? '—'}</td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-400">{row.fours ?? '—'}</td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-400">{row.sixes ?? '—'}</td>
-              <td className="py-2.5 pr-5 stat-number text-right text-slate-500 text-xs">
-                {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
-              </td>
-            </tr>
+        {/* Score bar */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+          {m.innings.map((inn, i) => (
+            <div key={inn.team} className="pb-card p-5 flex items-baseline gap-4">
+              <Label>INN {i + 1}</Label>
+              <div className="flex-1 min-w-0">
+                <div className="text-pb-text font-semibold text-[14px] truncate">{inn.team}</div>
+                <div className="font-mono text-pb-faint text-[11px] tracking-wide2">RR {inn.rr.toFixed(2)} · {inn.overs} OV</div>
+              </div>
+              <div className="font-mono text-[34px] font-bold pb-num leading-none" style={{ color: i === 0 ? "var(--pb-accent)" : "var(--pb-text)" }}>
+                {inn.total}
+              </div>
+            </div>
           ))}
-        </tbody>
-        <tfoot>
-          <tr className="border-t border-navy-600 bg-navy-800/20">
-            <td colSpan={2} className="py-2 px-5 text-slate-400 font-semibold text-sm">Total</td>
-            <td className="py-2 pr-2 stat-number text-right font-bold text-white">
-              {total}/{wickets}
-            </td>
-            <td colSpan={4} />
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  )
-}
-
-function BowlingTable({ bowling = [] }) {
-  if (!bowling.length) return <p className="text-slate-500 text-sm py-4 px-5">No bowling data.</p>
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-navy-700 bg-navy-800/30">
-            <th className="table-header pl-5">Bowler</th>
-            <th className="table-header text-right pr-2">O</th>
-            <th className="table-header text-right pr-2">M</th>
-            <th className="table-header text-right pr-2">R</th>
-            <th className="table-header text-right pr-2">W</th>
-            <th className="table-header text-right pr-2">Econ</th>
-            <th className="table-header text-right pr-2">Wd</th>
-            <th className="table-header text-right pr-5">NB</th>
-          </tr>
-        </thead>
-        <tbody>
-          {bowling.map((row, i) => (
-            <tr key={i} className="border-b border-navy-800/50 hover:bg-navy-800/20 transition-colors">
-              <td className="py-2.5 px-5">
-                {row.player_id
-                  ? <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors font-medium">{row.player_name || '—'}</Link>
-                  : <span className="text-white font-medium">{row.player_name || '—'}</span>
-                }
-              </td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-300">{row.overs ?? '—'}</td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-500">{row.maidens ?? '—'}</td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-300">{row.runs ?? '—'}</td>
-              <td className="py-2.5 pr-2 text-right">
-                <span className={clsx(
-                  'stat-number font-bold',
-                  row.wickets >= 5 ? 'text-amber-cricket' : row.wickets >= 3 ? 'text-accent' : 'text-white'
-                )}>
-                  {row.wickets ?? '—'}
-                </span>
-              </td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-300">
-                {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
-              </td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-500">{row.wides ?? '—'}</td>
-              <td className="py-2.5 pr-5 stat-number text-right text-slate-500">{row.no_balls ?? '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function InningsBlock({ num, title, batting, bowling }) {
-  const total = batting.reduce((s, r) => s + (r.runs ?? 0), 0)
-  const wickets = batting.filter(r => !r.not_out && r.dismissal_type).length
-
-  return (
-    <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-navy-700 bg-navy-800/20 flex items-center justify-between">
-        <div>
-          <p className="section-label text-xs">INNINGS {num}</p>
-          <h3 className="display-heading text-lg text-white">{title}</h3>
         </div>
-        {batting.length > 0 && (
-          <div className="text-right">
-            <span className="stat-number text-2xl font-bold text-white">{total}/{wickets}</span>
+
+        {/* Worm */}
+        <Card title="RUNS BY OVER" className="mb-6">
+          <div className="h-[200px] relative">
+            <Worm worm={m.worm} />
           </div>
-        )}
-      </div>
-
-      <div className="border-b border-navy-800/50">
-        <div className="px-5 py-2 bg-navy-800/10">
-          <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Batting</span>
-        </div>
-        <BattingTable batting={batting} />
-      </div>
-
-      {bowling.length > 0 && (
-        <div>
-          <div className="px-5 py-2 bg-navy-800/10 border-b border-navy-800/50">
-            <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Bowling</span>
-          </div>
-          <BowlingTable bowling={bowling} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-function FallOfWicketsSection({ fow = [] }) {
-  if (!fow.length) return null
-  const byInnings = fow.reduce((acc, f) => {
-    const k = f.innings_number; if (!acc[k]) acc[k] = []; acc[k].push(f); return acc
-  }, {})
-  return (
-    <div className="card p-5">
-      <h3 className="display-heading text-base text-white mb-3">FALL OF WICKETS</h3>
-      {Object.entries(byInnings).map(([inn, items]) => (
-        <div key={inn} className="mb-3 last:mb-0">
-          {Object.keys(byInnings).length > 1 && <p className="section-label mb-2">Innings {inn}</p>}
-          <div className="flex flex-wrap gap-2">
-            {items.map((f, i) => (
-              <div key={i} className="bg-navy-800 border border-navy-700 rounded px-2.5 py-1 text-xs">
-                <span className="stat-number text-accent font-bold">{f.score_at_fall ?? '?'}</span>
-                <span className="text-slate-600 mx-1">-</span>
-                <span className="stat-number text-white">{f.wicket_number}</span>
-                {f.player_name && (
-                  <Link to={`/players/${f.player_id}`} className="text-slate-400 ml-1.5 hover:text-accent transition-colors">
-                    {f.player_name}
-                  </Link>
-                )}
+          <div className="flex gap-4 mt-3">
+            {m.worm.teams.map((t, i) => (
+              <div key={t} className="flex items-center gap-2 font-mono text-[11px] tracking-wide2 text-pb-dim">
+                <span className="w-3 h-[2px]" style={{ background: i === 0 ? "var(--pb-accent)" : "var(--pb-text)" }} />
+                {t.toUpperCase()}
               </div>
             ))}
           </div>
-        </div>
-      ))}
-    </div>
-  )
-}
+        </Card>
 
-function PartnershipsSection({ partnerships = [] }) {
-  if (!partnerships.length) return null
-  const byInnings = partnerships.reduce((acc, p) => {
-    const k = p.innings_number; if (!acc[k]) acc[k] = []; acc[k].push(p); return acc
-  }, {})
-  return (
-    <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-navy-700">
-        <h3 className="display-heading text-base text-white">PARTNERSHIPS</h3>
-      </div>
-      {Object.entries(byInnings).map(([inn, items]) => (
-        <div key={inn}>
-          {Object.keys(byInnings).length > 1 && <p className="section-label px-5 pt-3 pb-1">Innings {inn}</p>}
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-navy-700 bg-navy-800/20">
-                  <th className="table-header pl-5">Wkt</th>
-                  <th className="table-header">Batters</th>
-                  <th className="table-header text-right pr-5">Runs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((p, i) => (
-                  <tr key={i} className="border-b border-navy-800/50">
-                    <td className="py-2 px-5 stat-number text-slate-500">{p.wicket_number}</td>
-                    <td className="py-2 px-3 text-slate-300 text-xs">
-                      <span className="flex gap-3">
-                        {p.batter1_name && (
-                          <span>
-                            <Link to={`/players/${p.batter1_id}`} className="hover:text-accent transition-colors">{p.batter1_name}</Link>
-                            {p.batter1_runs != null && <span className="text-slate-600 ml-1">({p.batter1_runs})</span>}
-                          </span>
-                        )}
-                        {p.batter2_name && (
-                          <span>
-                            <Link to={`/players/${p.batter2_id}`} className="hover:text-accent transition-colors">{p.batter2_name}</Link>
-                            {p.batter2_runs != null && <span className="text-slate-600 ml-1">({p.batter2_runs})</span>}
-                          </span>
-                        )}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-5 stat-number text-right font-bold text-white">{p.runs ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-export default function MatchScorecard() {
-  const { gameId } = useParams()
-  const [searchParams] = useSearchParams()
-  const orgId = searchParams.get('org')
-  const navigate = useNavigate()
-  const [game, setGame] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    const fetch = orgId
-      ? api.getPlayHQScorecard(orgId, gameId)
-      : api.getScorecard(gameId)
-    fetch
-      .then(setGame)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [gameId, orgId])
-
-  if (loading) return <LoadingSpinner message="Loading scorecard…" />
-  if (error) return <div className="max-w-5xl mx-auto px-4 py-16 text-red-400">Error: {error}</div>
-  if (!game) return null
-
-  // Group batting and bowling by innings_number
-  const inningsNums = [...new Set([
-    ...(game.batting || []).map(r => r.innings_number || 1),
-    ...(game.bowling || []).map(r => r.innings_number || 1),
-  ])].sort()
-
-  const innings = inningsNums.map(num => ({
-    num,
-    batting: (game.batting || []).filter(r => (r.innings_number || 1) === num),
-    bowling: (game.bowling || []).filter(r => (r.innings_number || 1) === num),
-  }))
-
-  // Determine team name per innings: bowling team for inn 1 bats in inn 2 etc.
-  const teams = [game.home_team, game.away_team].filter(Boolean)
-  const getInningsTitle = (num, batting) => {
-    if (batting.length && batting[0].player_name) {
-      // Try to determine team from the winning_team / home/away assignment
-    }
-    // Fallback: just use home/away alternating
-    return num === 1 ? (game.home_team || `Innings ${num}`) : (game.away_team || `Innings ${num}`)
-  }
-
-  return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <button
-        onClick={() => navigate(-1)}
-        className="flex items-center gap-1.5 text-slate-500 hover:text-white text-sm mb-5 transition-colors"
-      >
-        ← Back
-      </button>
-      <MatchSummary game={game} />
-
-      <div className="space-y-5">
-        {innings.map(({ num, batting, bowling }) => (
-          <InningsBlock
-            key={num}
-            num={num}
-            title={(num === 1 ? game.home_team : game.away_team)?.toUpperCase() || `INNINGS ${num}`}
-            batting={batting}
-            bowling={bowling}
-          />
+        {/* Innings cards */}
+        {m.innings.map((inn, i) => (
+          <Card key={i} title={`${inn.team.toUpperCase()} · ${inn.total} (${inn.overs} ov)`} className="mb-6"
+                action={<span className="font-mono text-2xs tracking-wide2 text-pb-faint">RR {inn.rr.toFixed(2)}</span>}>
+            <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5">
+              {/* Batting */}
+              <div>
+                <Label className="block mb-2">BATTING</Label>
+                <div className="overflow-x-auto pb-scroll">
+                  <table className="w-full min-w-[480px] text-[13px]">
+                    <thead>
+                      <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                        <th className="font-medium pb-2">BATTER</th>
+                        <th className="font-medium pb-2 text-right">R</th>
+                        <th className="font-medium pb-2 text-right">B</th>
+                        <th className="font-medium pb-2 text-right">4s</th>
+                        <th className="font-medium pb-2 text-right">6s</th>
+                        <th className="font-medium pb-2 text-right">SR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inn.batting.map((b, j) => (
+                        <tr key={b.id} className={`${j ? "pb-hairline-t" : ""} hover:bg-pb-surface2`}>
+                          <td className="py-2">
+                            <div className="text-pb-text font-medium">{b.name}</div>
+                            <div className="font-mono text-pb-faint text-[10.5px] tracking-wide2">{b.dismissal}</div>
+                          </td>
+                          <td className="py-2 font-mono text-pb-text font-bold text-right">{b.r}</td>
+                          <td className="py-2 font-mono text-pb-dim text-right">{b.b}</td>
+                          <td className="py-2 font-mono text-pb-dim text-right">{b.fours}</td>
+                          <td className="py-2 font-mono text-pb-dim text-right">{b.sixes}</td>
+                          <td className="py-2 font-mono text-pb-dim text-right">{b.sr.toFixed(1)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {/* Bowling */}
+              <div>
+                <Label className="block mb-2">BOWLING</Label>
+                <div className="overflow-x-auto pb-scroll">
+                  <table className="w-full min-w-[320px] text-[13px]">
+                    <thead>
+                      <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                        <th className="font-medium pb-2">BOWLER</th>
+                        <th className="font-medium pb-2 text-right">O</th>
+                        <th className="font-medium pb-2 text-right">M</th>
+                        <th className="font-medium pb-2 text-right">R</th>
+                        <th className="font-medium pb-2 text-right">W</th>
+                        <th className="font-medium pb-2 text-right">ECON</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inn.bowling.map((b, j) => (
+                        <tr key={b.id} className={`${j ? "pb-hairline-t" : ""} hover:bg-pb-surface2`}>
+                          <td className="py-2 text-pb-text font-medium">{b.name}</td>
+                          <td className="py-2 font-mono text-pb-dim text-right">{b.o}</td>
+                          <td className="py-2 font-mono text-pb-dim text-right">{b.m}</td>
+                          <td className="py-2 font-mono text-pb-dim text-right">{b.r}</td>
+                          <td className="py-2 font-mono text-pb-text font-bold text-right">{b.w}</td>
+                          <td className="py-2 font-mono text-pb-dim text-right">{b.econ.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </Card>
         ))}
-
-        {innings.length === 0 && (
-          <div className="card p-8 text-center text-slate-500">
-            No scorecard data available for this match.
-          </div>
-        )}
-
-        <FallOfWicketsSection fow={game.fall_of_wickets ?? []} />
-        <PartnershipsSection partnerships={game.partnerships ?? []} />
-      </div>
+      </main>
     </div>
-  )
+  );
+}
+
+// ── Worm chart ────────────────────────────────────────────────────────
+function Worm({ worm }) {
+  const w = 1200, h = 200, pad = 24;
+  const cumulative = worm.series.map(s => s.reduce((acc, v) => [...acc, (acc[acc.length-1] || 0) + v], []));
+  const max = Math.max(...cumulative.flat(), 1);
+  const stepX = (w - pad * 2) / Math.max(worm.overs.length - 1, 1);
+  const colors = ["var(--pb-accent)", "var(--pb-text)"];
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" height="100%" preserveAspectRatio="none">
+      {/* grid */}
+      {[0.25, 0.5, 0.75, 1].map(t => (
+        <line key={t} x1={pad} x2={w-pad} y1={h - pad - (h - pad*2)*t} y2={h - pad - (h - pad*2)*t}
+              stroke="var(--pb-hairline)" strokeWidth="1" strokeDasharray="2 4" />
+      ))}
+      {cumulative.map((series, idx) => {
+        const d = series.map((v, i) => {
+          const x = pad + i * stepX;
+          const y = h - pad - (v / max) * (h - pad * 2);
+          return `${i === 0 ? "M" : "L"}${x},${y}`;
+        }).join(" ");
+        return (
+          <g key={idx}>
+            <path d={d} fill="none" stroke={colors[idx]} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity={idx === 0 ? 1 : 0.85} />
+          </g>
+        );
+      })}
+      {/* axis labels */}
+      {worm.overs.filter((_, i) => i % 4 === 3 || i === 0).map((o, i) => (
+        <text key={o} x={pad + worm.overs.indexOf(o) * stepX} y={h - 6}
+              fill="var(--pb-faint)" fontSize="10" fontFamily="JetBrains Mono" textAnchor="middle">
+          OV {o}
+        </text>
+      ))}
+    </svg>
+  );
 }

@@ -49,13 +49,13 @@ import PlayHQScorecard from './pages/PlayHQScorecard'
 // Misc
 import ClubInactive from './pages/ClubInactive'
 import Onboard from './pages/Onboard'
-import Navbar from './components/Navbar'
+import PressNav from './components/PressNav'
 
 export default function App() {
   return (
     <AuthProvider>
       <div className="min-h-screen bg-navy-950">
-        <Navbar />
+        <PressNav />
       <Routes>
         {/* Marketing site */}
         <Route path="/" element={<Landing />} />
