@@ -129,16 +129,15 @@ const PRESETS = {
     presets: [
       { label: 'Career Run Scorers',      desc: 'Sorted by total runs',                group: 'player', mode: 'career', filters: [], sortBy: 'runs',                sortDir: 'desc' },
       { label: 'Best Batting Average',    desc: 'Min 20 innings',                      group: 'player', mode: 'career', filters: [{ field:'batting_innings', op:'gte', value:'20' }], sortBy: 'batting_average', sortDir: 'desc' },
-      { label: 'Best Strike Rate',        desc: 'Min 20 innings',                      group: 'player', mode: 'career', filters: [{ field:'batting_innings', op:'gte', value:'20' }], sortBy: 'batting_strike_rate', sortDir: 'desc' },
+      { label: 'Best Strike Rate',        desc: 'Min 10 innings (requires ball-by-ball data)', group: 'player', mode: 'career', filters: [{ field:'batting_innings', op:'gte', value:'10' }], sortBy: 'batting_strike_rate', sortDir: 'desc' },
       { label: 'High Score Records',      desc: 'Highest individual innings',          group: 'player', mode: 'career', filters: [], sortBy: 'high_score', sortDir: 'desc' },
       { label: 'Century Makers',          desc: 'Players who have scored a 100',       group: 'player', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'1' }], sortBy: 'hundreds', sortDir: 'desc' },
       { label: 'Most Centuries',          desc: 'All-time 100s',                       group: 'player', mode: 'career', filters: [], sortBy: 'hundreds', sortDir: 'desc' },
       { label: 'Most Half-Centuries',     desc: 'All-time 50s',                        group: 'player', mode: 'career', filters: [], sortBy: 'fifties', sortDir: 'desc' },
-      { label: 'Five-for Club',           desc: 'Players with 5+ centuries',           group: 'player', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'5' }], sortBy: 'hundreds', sortDir: 'desc' },
+      { label: '3+ Centuries Club',       desc: 'Players with 3 or more centuries',    group: 'player', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'3' }], sortBy: 'hundreds', sortDir: 'desc' },
       { label: 'Duck Brigade',            desc: 'Most career ducks',                   group: 'player', mode: 'career', filters: [], sortBy: 'ducks', sortDir: 'desc' },
       { label: 'Power Hitters',           desc: 'Most career sixes',                   group: 'player', mode: 'career', filters: [], sortBy: 'sixes', sortDir: 'desc' },
       { label: 'Boundary Hunters',        desc: 'Most career fours',                   group: 'player', mode: 'career', filters: [], sortBy: 'fours', sortDir: 'desc' },
-      { label: 'Elite SR (≥100)',     desc: 'Min 20 innings, SR ≥ 100',       group: 'player', mode: 'career', filters: [{ field:'batting_innings', op:'gte', value:'20' }, { field:'batting_strike_rate', op:'gte', value:'100' }], sortBy: 'batting_strike_rate', sortDir: 'desc' },
       { label: 'Season Run Scorers',      desc: 'Most runs in a single season',        group: 'player', mode: 'season', filters: [], sortBy: 'runs', sortDir: 'desc' },
       { label: 'Season Batting Avg',      desc: 'Best avg in a single season (10+ inn)',group: 'player', mode: 'season', filters: [{ field:'batting_innings', op:'gte', value:'10' }], sortBy: 'batting_average', sortDir: 'desc' },
     ],
@@ -171,11 +170,11 @@ const PRESETS = {
     label: 'All-rounders',
     presets: [
       { label: 'True All-rounders',       desc: '500+ runs AND 50+ wickets',           group: 'player', mode: 'career', filters: [{ field:'runs', op:'gte', value:'500' }, { field:'wickets', op:'gte', value:'50' }], sortBy: 'runs', sortDir: 'desc' },
-      { label: 'Elite All-rounders',      desc: '1000+ runs AND 100+ wickets',         group: 'player', mode: 'career', filters: [{ field:'runs', op:'gte', value:'1000' }, { field:'wickets', op:'gte', value:'100' }], sortBy: 'runs', sortDir: 'desc' },
+      { label: 'Elite All-rounders',      desc: '1000+ runs AND 50+ wickets',          group: 'player', mode: 'career', filters: [{ field:'runs', op:'gte', value:'1000' }, { field:'wickets', op:'gte', value:'50' }], sortBy: 'runs', sortDir: 'desc' },
       { label: 'Club Stalwarts',          desc: '100+ matches played',                 group: 'player', mode: 'career', filters: [{ field:'matches', op:'gte', value:'100' }], sortBy: 'matches', sortDir: 'desc' },
-      { label: 'Century & Wickets',       desc: '100+ runs AND 10+ wickets',           group: 'player', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'1' }, { field:'wickets', op:'gte', value:'10' }], sortBy: 'runs', sortDir: 'desc' },
+      { label: 'Century & Wickets',       desc: 'Scored a century AND 10+ wickets',    group: 'player', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'1' }, { field:'wickets', op:'gte', value:'10' }], sortBy: 'runs', sortDir: 'desc' },
       { label: '10-Season Veterans',      desc: 'Players with 10+ seasons',            group: 'player', mode: 'career', filters: [{ field:'seasons_played', op:'gte', value:'10' }], sortBy: 'seasons_played', sortDir: 'desc' },
-      { label: 'Big Hitters Who Bowl',    desc: '10+ sixes AND 20+ wickets',           group: 'player', mode: 'career', filters: [{ field:'sixes', op:'gte', value:'10' }, { field:'wickets', op:'gte', value:'20' }], sortBy: 'sixes', sortDir: 'desc' },
+      { label: 'Big Hitters Who Bowl',    desc: '20+ wickets and highest run scorers', group: 'player', mode: 'career', filters: [{ field:'wickets', op:'gte', value:'20' }], sortBy: 'runs', sortDir: 'desc' },
     ],
   },
   grade: {
@@ -186,7 +185,7 @@ const PRESETS = {
       { label: 'Busiest Grades',          desc: 'Most matches played in this grade',   group: 'grade', mode: 'career', filters: [], sortBy: 'matches', sortDir: 'desc' },
       { label: 'Season Team Runs',        desc: 'Highest-scoring teams in a season',   group: 'team',  mode: 'career', filters: [], sortBy: 'runs',    sortDir: 'desc' },
       { label: 'Season Team Wickets',     desc: 'Most wickets taken by a team in a season', group: 'team', mode: 'career', filters: [], sortBy: 'wickets', sortDir: 'desc' },
-      { label: 'Century-Rich Seasons',    desc: 'Most centuries scored in a grade/season', group: 'team', mode: 'career', filters: [{ field:'hundreds', op:'gte', value:'5' }], sortBy: 'hundreds', sortDir: 'desc' },
+      { label: 'Century-Rich Seasons',    desc: 'Grade/seasons with the most centuries',   group: 'team', mode: 'career', filters: [], sortBy: 'hundreds', sortDir: 'desc' },
     ],
   },
 }
@@ -318,9 +317,8 @@ export default function StatLab() {
   const { clubSlug } = useParams()
   const { club, orgId, loading: clubLoading, inactive } = useClub(clubSlug)
   const { seasons } = useClubData(orgId)
-  const [searchParams, setSearchParams] = useSearchParams()   // ← useSearchParams instead of navigate
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  // State initialised from URL on mount
   const [mode,     setMode]     = useState(searchParams.get('mode')   || 'career')
   const [seasonId, setSeasonId] = useState(searchParams.get('sid')    || '')
   const [groupBy,  setGroupBy]  = useState(searchParams.get('group')  || 'player')
@@ -328,20 +326,17 @@ export default function StatLab() {
   const [sortDir,  setSortDir]  = useState(searchParams.get('dir')    || 'desc')
   const [filters,  setFilters]  = useState(() => decodeFilters(searchParams.get('f') || ''))
 
-  // Results
   const [rows,        setRows]        = useState([])
   const [loading,     setLoading]     = useState(false)
   const [error,       setError]       = useState(null)
   const [hasQueried,  setHasQueried]  = useState(false)
   const [clientSort,  setClientSort]  = useState({ col: null, dir: null })
 
-  // Preset gallery
-  const [presetTab,     setPresetTab]     = useState('popular')
-  const [galleryOpen,   setGalleryOpen]   = useState(true)
+  const [presetTab,   setPresetTab]   = useState('popular')
+  const [galleryOpen, setGalleryOpen] = useState(true)
 
   const statGroups = groupBy === 'player' ? PLAYER_STAT_GROUPS : GRADE_STAT_GROUPS
 
-  // Sync state → URL search params (safe: setSearchParams never navigates away)
   useEffect(() => {
     const p = {}
     if (mode    !== 'career')  p.mode  = mode
@@ -356,7 +351,6 @@ export default function StatLab() {
 
   useEffect(() => { setClientSort({ col: null, dir: null }) }, [rows])
 
-  // Run query
   const runQuery = useCallback(async () => {
     if (!orgId) return
     setLoading(true)
@@ -385,7 +379,6 @@ export default function StatLab() {
     }
   }, [orgId, mode, seasonId, groupBy, sortBy, sortDir, filters])
 
-  // Filter management
   const addFilter = () => {
     const firstField = statGroups[0]?.stats[0]?.key || 'matches'
     setFilters(prev => [...prev, { id: Date.now(), field: firstField, op: 'gte', value: '' }])
@@ -415,22 +408,49 @@ export default function StatLab() {
     setSortBy('runs')
   }
 
-  // Apply a preset
-  const applyPreset = (preset) => {
-    const newGroup = preset.group || 'player'
-    const newMode  = preset.mode  || 'career'
+  // Apply a preset and immediately run the query with the new values
+  const applyPreset = useCallback(async (preset) => {
+    if (!orgId) return
+    const newGroup   = preset.group    || 'player'
+    const newMode    = preset.mode     || 'career'
+    const newSortBy  = preset.sortBy   || 'runs'
+    const newSortDir = preset.sortDir  || 'desc'
+    const newFilters = preset.filters.map((f, i) => ({ ...f, id: Date.now() + i }))
+
     setGroupBy(newGroup)
     setMode(newMode)
-    setSortBy(preset.sortBy   || 'runs')
-    setSortDir(preset.sortDir || 'desc')
-    setFilters(preset.filters.map((f, i) => ({ ...f, id: Date.now() + i })))
-    setRows([])
-    setHasQueried(false)
-    setError(null)
+    setSortBy(newSortBy)
+    setSortDir(newSortDir)
+    setFilters(newFilters)
     setGalleryOpen(false)
-  }
+    setClientSort({ col: null, dir: null })
+    setLoading(true)
+    setError(null)
+    setHasQueried(true)
+    setRows([])
 
-  // Client-side column sort
+    const validFilters = newFilters
+      .filter(f => f.field && f.op && f.value !== '')
+      .map(f => `${f.field}:${f.op}:${f.value}`)
+    try {
+      const data = await api.statlabQuery(orgId, {
+        mode: newMode,
+        seasonId: newMode === 'season' ? seasonId : undefined,
+        groupBy: newGroup,
+        sortBy: newSortBy,
+        sortDir: newSortDir,
+        limit: 500,
+        filters: validFilters,
+      })
+      setRows(data)
+    } catch (e) {
+      setError(e.message)
+      setRows([])
+    } finally {
+      setLoading(false)
+    }
+  }, [orgId, seasonId])
+
   const handleColSort = (col) => {
     const newDir = clientSort.col === col && clientSort.dir === 'desc' ? 'asc' : 'desc'
     setClientSort({ col, dir: newDir })
@@ -444,7 +464,6 @@ export default function StatLab() {
       })
     : rows
 
-  // Result table columns
   const resultColumns = (() => {
     if (groupBy === 'player') {
       const filteredKeys = filters.filter(f => f.value !== '').map(f => f.field)
@@ -463,7 +482,6 @@ export default function StatLab() {
       if (cols.length < 5) ['runs', 'batting_average', 'wickets', 'bowling_economy', 'catches'].forEach(add)
       return cols
     }
-    // Grade / Team
     const filteredKeys = filters.filter(f => f.value !== '').map(f => f.field)
     const allStats = getAllStats(GRADE_STAT_GROUPS)
     const shown = new Set()
@@ -482,7 +500,6 @@ export default function StatLab() {
     return cols
   })()
 
-  // ── Guards ──
   if (clubLoading) return <div className="flex items-center justify-center h-64"><LoadingSpinner /></div>
   if (inactive) return <ClubInactive />
 
@@ -491,7 +508,6 @@ export default function StatLab() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-5">
 
-      {/* ── Header ── */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-accent/10 rounded-xl border border-accent/20">
@@ -506,7 +522,6 @@ export default function StatLab() {
           </div>
         </div>
 
-        {/* Mode toggle */}
         <div className="flex items-center gap-1 bg-navy-800 rounded-xl p-1 border border-navy-700">
           {['career', 'season'].map(m => (
             <button key={m}
@@ -521,7 +536,6 @@ export default function StatLab() {
         </div>
       </div>
 
-      {/* Season picker */}
       {mode === 'season' && (
         <div className="flex items-center gap-3 bg-navy-900/60 border border-navy-700 rounded-xl px-4 py-3">
           <span className="text-slate-400 text-sm font-medium shrink-0">Season:</span>
@@ -537,7 +551,6 @@ export default function StatLab() {
         </div>
       )}
 
-      {/* Group-by tabs */}
       <div className="flex items-center gap-1 border-b border-navy-700">
         {GROUP_TABS.map(tab => (
           <button key={tab.key} onClick={() => changeGroupBy(tab.key)}
@@ -563,7 +576,7 @@ export default function StatLab() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
             <span className="text-white text-sm font-semibold">Report Gallery</span>
-            <span className="text-slate-500 text-xs">— pick a preset or build your own below</span>
+            <span className="text-slate-500 text-xs">— click a report to run it instantly</span>
           </div>
           <svg className={clsx('w-4 h-4 text-slate-400 transition-transform', galleryOpen && 'rotate-180')} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -572,7 +585,6 @@ export default function StatLab() {
 
         {galleryOpen && (
           <div>
-            {/* Preset category tabs */}
             <div className="flex gap-0 border-b border-navy-700/60 overflow-x-auto">
               {PRESET_TABS.map(t => (
                 <button key={t.key} onClick={() => setPresetTab(t.key)}
@@ -587,7 +599,6 @@ export default function StatLab() {
               ))}
             </div>
 
-            {/* Preset cards */}
             <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               {(PRESETS[presetTab]?.presets || []).map((preset, i) => {
                 const targetGroup = preset.group || 'player'
@@ -696,14 +707,12 @@ export default function StatLab() {
         </div>
       </div>
 
-      {/* ── Error ── */}
       {error && (
         <div className="bg-red-950/40 border border-red-800 text-red-300 px-4 py-3 rounded-xl text-sm">
           Query failed: {error}
         </div>
       )}
 
-      {/* ── Results table ── */}
       {hasQueried && !loading && !error && (
         <div className="bg-navy-900/60 border border-navy-700 rounded-2xl overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3 border-b border-navy-700/60">
