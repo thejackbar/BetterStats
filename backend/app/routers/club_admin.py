@@ -1,10 +1,14 @@
 """Admin API routes — all require authentication."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 from typing import Optional
 import uuid
+import io
+import csv
+import re
 
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
@@ -302,6 +306,242 @@ async def delete_partnership_record(
         raise HTTPException(status_code=404, detail="Record not found")
     await db.delete(record)
     await db.commit()
+
+
+class ManualPartnershipPatch(BaseModel):
+    batter1_id: Optional[str] = None
+    batter2_id: Optional[str] = None
+
+
+@router.patch("/partnership-records/{record_id}")
+async def patch_partnership_record(
+    record_id: int,
+    data: ManualPartnershipPatch,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ManualPartnershipRecord).where(
+            ManualPartnershipRecord.id == record_id,
+            ManualPartnershipRecord.org_id == club.id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    if data.batter1_id is not None:
+        record.batter1_id = uuid.UUID(data.batter1_id) if data.batter1_id else None
+    if data.batter2_id is not None:
+        record.batter2_id = uuid.UUID(data.batter2_id) if data.batter2_id else None
+    await db.commit()
+    return {"status": "updated"}
+
+
+# ---------------------------------------------------------------------------
+# Partnership records — template & bulk import
+# ---------------------------------------------------------------------------
+
+_PARTNERSHIP_TEMPLATE_ROWS = [
+    ("Matthew Edwards", "Pratik Bhave", "147", "3", "2024", "No", "1st XI"),
+    ("Jack Barendse", "Chris Cooper", "98", "1", "2023", "Yes", "2nd XI"),
+]
+
+ORDINAL_MAP = {
+    "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, "5th": 5,
+    "6th": 6, "7th": 7, "8th": 8, "9th": 9, "10th": 10,
+}
+
+
+def _normalise_name(name: str) -> str:
+    name = name.strip()
+    if ", " in name:
+        parts = name.split(", ", 1)
+        name = f"{parts[1]} {parts[0]}"
+    return re.sub(r"\s+", " ", name).lower()
+
+
+def _parse_xlsx_partnerships(content: bytes) -> list[dict]:
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return []
+    headers = [str(h).strip().lower().replace(" ", "_") if h else "" for h in rows[0]]
+    result = []
+    for row in rows[1:]:
+        if not any(row):
+            continue
+        d = {headers[i]: (str(v).strip() if v is not None else "") for i, v in enumerate(row) if i < len(headers)}
+        result.append(d)
+    return result
+
+
+def _parse_csv_partnerships(content: bytes) -> list[dict]:
+    text_content = content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text_content))
+    return [
+        {k.strip().lower().replace(" ", "_"): (v.strip() if v else "")
+         for k, v in row.items()}
+        for row in reader
+        if any(row.values())
+    ]
+
+
+@router.get("/partnership-records/template")
+async def download_partnership_template(
+    current_user: User = Depends(get_current_user),
+):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Batter 1", "Batter 2", "Runs", "Wicket", "Season", "Not Out", "Grade"])
+    writer.writerows(_PARTNERSHIP_TEMPLATE_ROWS)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=partnership_records_template.csv"},
+    )
+
+
+@router.post("/partnership-records/import")
+async def import_partnership_records(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    content = await file.read()
+    filename = (file.filename or "").lower()
+
+    if filename.endswith(".xlsx") or filename.endswith(".xls"):
+        rows = _parse_xlsx_partnerships(content)
+    else:
+        rows = _parse_csv_partnerships(content)
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No data found in file")
+
+    # Build name→id map for this org
+    players_result = await db.execute(
+        _text("SELECT id, name FROM players WHERE organisation_id = :org_id"),
+        {"org_id": str(club.id)},
+    )
+    player_map: dict[str, str] = {
+        _normalise_name(row["name"]): str(row["id"])
+        for row in players_result.mappings().all()
+    }
+
+    created_records = []
+    skipped = 0
+    errors = []
+
+    for i, row in enumerate(rows, 2):
+        b1_name = (row.get("batter_1") or row.get("batter1") or "").strip()
+        b2_name = (row.get("batter_2") or row.get("batter2") or "").strip()
+        runs_raw = row.get("runs", "").strip()
+        wicket_raw = row.get("wicket", "").strip()
+        season_raw = row.get("season", "").strip()
+        not_out_raw = (row.get("not_out") or row.get("not_out_(y/n)") or "").strip().lower()
+        grade = row.get("grade", "").strip()
+
+        if not b1_name or not b2_name or not runs_raw or not grade or not season_raw:
+            skipped += 1
+            continue
+
+        try:
+            runs = int(float(runs_raw))
+            season_year = int(float(season_raw))
+        except ValueError:
+            errors.append(f"Row {i}: invalid runs or season value")
+            skipped += 1
+            continue
+
+        # Accept ordinal strings ("1st", "3rd") or plain integers for wicket
+        wicket_number = ORDINAL_MAP.get(wicket_raw.lower())
+        if wicket_number is None:
+            try:
+                wicket_number = int(float(wicket_raw)) if wicket_raw else 0
+            except ValueError:
+                wicket_number = 0
+        if wicket_number < 1 or wicket_number > 10:
+            errors.append(f"Row {i}: wicket must be 1–10 (got '{wicket_raw}')")
+            skipped += 1
+            continue
+
+        is_not_out = not_out_raw in ("yes", "y", "true", "1")
+
+        b1_id = player_map.get(_normalise_name(b1_name))
+        b2_id = player_map.get(_normalise_name(b2_name))
+
+        # Check for potential GR duplicate (only when both IDs resolved)
+        gr_duplicate = None
+        if b1_id and b2_id:
+            dup_res = await db.execute(_text("""
+                SELECT pt.runs, pt.wicket_number,
+                       EXTRACT(YEAR FROM g.played_at)::int AS season_year,
+                       gr.name AS grade_name
+                FROM partnerships pt
+                JOIN games g ON g.id = pt.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                WHERE pt.runs = :runs
+                  AND pt.wicket_number = :wicket
+                  AND EXTRACT(YEAR FROM g.played_at)::int = :season_year
+                  AND (
+                    (pt.batter1_id = :b1_id::uuid AND pt.batter2_id = :b2_id::uuid) OR
+                    (pt.batter1_id = :b2_id::uuid AND pt.batter2_id = :b1_id::uuid)
+                  )
+                LIMIT 1
+            """), {
+                "runs": runs,
+                "wicket": wicket_number,
+                "season_year": season_year,
+                "b1_id": b1_id,
+                "b2_id": b2_id,
+            })
+            dup_row = dup_res.mappings().first()
+            if dup_row:
+                gr_duplicate = dict(dup_row)
+
+        record = ManualPartnershipRecord(
+            org_id=club.id,
+            batter1_id=uuid.UUID(b1_id) if b1_id else None,
+            batter1_name=b1_name,
+            batter2_id=uuid.UUID(b2_id) if b2_id else None,
+            batter2_name=b2_name,
+            grade_name=grade,
+            season_year=season_year,
+            wicket_number=wicket_number,
+            runs=runs,
+            is_not_out=is_not_out,
+        )
+        db.add(record)
+        await db.flush()
+
+        created_records.append({
+            "id": record.id,
+            "batter1_name": b1_name,
+            "batter1_id": b1_id,
+            "batter1_unmatched": b1_id is None,
+            "batter2_name": b2_name,
+            "batter2_id": b2_id,
+            "batter2_unmatched": b2_id is None,
+            "runs": runs,
+            "wicket_number": wicket_number,
+            "season_year": season_year,
+            "grade_name": grade,
+            "is_not_out": is_not_out,
+            "gr_duplicate": gr_duplicate,
+        })
+
+    await db.commit()
+
+    return {
+        "created": len(created_records),
+        "skipped": skipped,
+        "errors": errors,
+        "records": created_records,
+    }
 
 
 # ---------------------------------------------------------------------------

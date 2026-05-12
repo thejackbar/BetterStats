@@ -123,6 +123,19 @@ export const api = {
     request('/club-admin/partnership-records', { method: 'POST', body: JSON.stringify(data) }),
   adminDeletePartnershipRecord: (id) =>
     request(`/club-admin/partnership-records/${id}`, { method: 'DELETE' }),
+  adminPatchPartnershipRecord: (id, data) =>
+    request(`/club-admin/partnership-records/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adminDownloadPartnershipTemplate: () =>
+    fetch(`${BASE}/club-admin/partnership-records/template`, { credentials: 'include' }),
+  adminImportPartnershipRecords: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/club-admin/partnership-records/import`, {
+      method: 'POST',
+      body: form,
+      credentials: 'include',
+    }).then(r => r.json())
+  },
   adminListSyncRequests: () => request('/club-admin/sync-requests'),
   adminActionSyncRequest: (id, action, adminNote) =>
     request(`/club-admin/sync-requests/${id}`, {
