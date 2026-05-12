@@ -758,9 +758,14 @@ async def hard_refresh_org(
 ):
     """Trigger a full historical re-sync of the org.
 
-    Same code path as the scheduled weekly sync, but explicitly run on demand.
-    Backfills missing PlayHQ IDs across ALL games (no 50-game cap) and tops up
-    any missing batting/bowling rows in already-processed games. Runs in the
+    Wipes existing game-level data (games + cascading batting / bowling /
+    fielding / FOW / partnerships) and re-runs the full sync. Used after
+    sync-logic changes (innings split, FOW-vs-dismissal checks, etc.) to
+    rebuild from current code rather than top up.
+
+    Only wipes games that have batting rows — PHQ-namespace shells the GR
+    API returns 204 for would be unrecoverable, but those have no batting
+    rows anyway so the WHERE filter is a no-op for them. Runs in the
     background; poll GET /club-admin/sync-runs/{run_id} for progress.
     """
     from app.services.sync import sync_organisation, start_sync_run, finish_sync_run
@@ -775,8 +780,33 @@ async def hard_refresh_org(
     async def _run():
         _logger.info(f"HardRefresh: starting for org {org_id_str} (run_id={run_id})")
         try:
+            # Wipe phase — games with batting rows whose seasons belong to this org.
+            from app.models.db import async_session_maker
+            from sqlalchemy import text as _t
+            async with async_session_maker() as s:
+                r = await s.execute(
+                    _t(
+                        """
+                        DELETE FROM games
+                        WHERE id IN (SELECT DISTINCT game_id FROM batting_innings)
+                          AND grade_id IN (
+                            SELECT gr.id FROM grades gr
+                            JOIN seasons se ON se.id = gr.season_id
+                            WHERE se.organisation_id = :oid
+                          )
+                        RETURNING id
+                        """
+                    ),
+                    {"oid": org_id_str},
+                )
+                wiped = len(list(r))
+                await s.commit()
+                _logger.info(f"HardRefresh: wiped {wiped} games (cascades cleared all child rows) for org {org_id_str}")
+
             stats = await sync_organisation(org_id_str, run_id=run_id, kind="org_hard_refresh")
-            await finish_sync_run(run_id, stats or {})
+            stats = dict(stats or {})
+            stats["games_wiped_pre_sync"] = wiped
+            await finish_sync_run(run_id, stats)
         except Exception as e:
             _logger.error(f"HardRefresh: failed for {org_id_str}: {e}", exc_info=True)
             await finish_sync_run(run_id, {}, f"Unexpected error: {e}")
