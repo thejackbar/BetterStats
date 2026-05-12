@@ -808,15 +808,23 @@ _NON_WICKET_DT = {"absent", "did not bat", "dnb", "retired hurt", "retired not o
 
 def _count_dismissals_grassroots(batting_rows: list) -> int:
     """Number of wickets that actually fell in this innings."""
-    n = 0
+    return len(_dismissed_pids_grassroots(batting_rows))
+
+
+def _dismissed_pids_grassroots(batting_rows: list) -> set:
+    """Set of participantIds for batters who were genuinely dismissed
+    (excludes Not Out, DNB, Absent, Retired Hurt, Retired Not Out)."""
+    pids = set()
     for b in batting_rows:
         dt_id = b.get("dismissalTypeId") or 0
-        if dt_id in (0, 1):  # 0 = didn't bat, 1 = not out
+        if dt_id in (0, 1):
             continue
         if (b.get("dismissalType") or "").lower() in _NON_WICKET_DT:
             continue
-        n += 1
-    return n
+        pid = b.get("participantId")
+        if pid:
+            pids.add(pid)
+    return pids
 
 
 def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
@@ -843,8 +851,17 @@ def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
     # in an innings that actually lost 7 wickets gets attributed to the openers
     # as a 215-run 5th-wicket stand. Refuse to derive unless FOW count matches
     # the dismissals in the batting card.
-    expected_fow = _count_dismissals_grassroots(batting_rows)
-    if expected_fow == 0 or len(fow_rows) != expected_fow:
+    dismissed_pids = _dismissed_pids_grassroots(batting_rows)
+    if not dismissed_pids or len(fow_rows) != len(dismissed_pids):
+        return []
+
+    # PSWL / women's scorecards sometimes encode a *retirement* as a FOW row
+    # (order=N, pid=retired batter). Combined with a missed real-wicket FOW,
+    # the count check above can coincidentally pass: 1 retirement-FOW + 1
+    # missed dismissal looks like 1 == 1. Catch this by requiring every FOW
+    # participantId to point to a genuinely dismissed batter.
+    fow_pids = {f.get("participantId") for f in fow_rows if f.get("participantId")}
+    if fow_pids and not fow_pids.issubset(dismissed_pids):
         return []
     batters = sorted(valid, key=lambda r: r.get("batOrder") or 99)
     at_crease = list(batters[:2])
