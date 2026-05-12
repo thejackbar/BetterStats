@@ -117,7 +117,13 @@ async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depe
     )
     grades = result.scalars().all()
     if grades:
-        return [{"id": str(g.id), "name": g.name} for g in grades]
+        seen: set[str] = set()
+        out = []
+        for g in grades:
+            if g.name not in seen:
+                seen.add(g.name)
+                out.append({"id": str(g.id), "name": g.name})
+        return out
 
     # No grades in DB — try the cheap per-season PlayHQ endpoint (single call per season)
     try:
