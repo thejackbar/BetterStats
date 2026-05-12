@@ -36,6 +36,11 @@ class OrganisationOut(BaseModel):
     id: uuid.UUID
     name: str
     short_name: str | None
+    slug: str | None = None
+    primary_color: str | None = None
+    accent_color: str | None = None
+    logo_url: str | None = None
+    hero_image_url: str | None = None
 
     class Config:
         from_attributes = True
