@@ -803,7 +803,7 @@ _GR_DISMISSAL_SHORT = {
 }
 
 
-_NON_WICKET_DT = {"absent", "did not bat", "dnb", "retired hurt"}
+_NON_WICKET_DT = {"absent", "did not bat", "dnb", "retired hurt", "retired not out"}
 
 
 def _count_dismissals_grassroots(batting_rows: list) -> int:
