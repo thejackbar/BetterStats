@@ -811,7 +811,14 @@ def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
     (score at fall). This deriver assumes participantId IS the player_id —
     which it is, because both come from the same Grassroots namespace.
     """
-    valid = [b for b in batting_rows if (b.get("dismissalTypeId") or 0) != 0]
+    # Exclude both "didn't bat" (dismissalTypeId=0) and "Absent" / "DNB" string types —
+    # these batters were never at the crease so can't be in any partnership.
+    _SKIP_DT = {"absent", "did not bat", "dnb"}
+    valid = [
+        b for b in batting_rows
+        if (b.get("dismissalTypeId") or 0) != 0
+        and (b.get("dismissalType") or "").lower() not in _SKIP_DT
+    ]
     if len(valid) < 2:
         return []
     batters = sorted(valid, key=lambda r: r.get("batOrder") or 99)
@@ -1087,8 +1094,13 @@ async def sync_grassroots_game_level_data(
                         dt_id = row.get("dismissalTypeId") or 0
                         if dt_id == 0:
                             continue
-                        not_out = dt_id == 1
                         dt_long = row.get("dismissalType") or ""
+                        # "Absent" / "Did Not Bat" aren't innings (no ball faced) — CA's
+                        # aggregate API excludes them, so we must too or we end up with
+                        # 1-2 row over-counts vs the season summary.
+                        if dt_long.lower() in ("absent", "did not bat", "dnb"):
+                            continue
+                        not_out = dt_id == 1
                         dt_short = _GR_DISMISSAL_SHORT.get(dt_long, dt_long.lower())
                         session.add(BattingInnings(
                             game_id=match_uuid, player_id=pid, innings_number=inn_num,
