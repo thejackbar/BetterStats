@@ -436,6 +436,16 @@ async def import_partnership_records(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
+    try:
+        return await _do_import_partnership_records(file, club, db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logging.getLogger(__name__).error("Partnership import failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Import failed: {exc}")
+
+
+async def _do_import_partnership_records(file, club, db):
     content = await file.read()
     filename = (file.filename or "").lower()
 

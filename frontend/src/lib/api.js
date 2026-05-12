@@ -140,7 +140,14 @@ export const api = {
       method: 'POST',
       body: form,
       credentials: 'include',
-    }).then(r => r.json())
+    }).then(async r => {
+      const text = await r.text()
+      try {
+        return JSON.parse(text)
+      } catch {
+        throw new Error(`Server error (${r.status}): ${text.slice(0, 120)}`)
+      }
+    })
   },
   adminListSyncRequests: () => request('/club-admin/sync-requests'),
   adminActionSyncRequest: (id, action, adminNote) =>
