@@ -5,6 +5,7 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import { api } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import { getSubcategories, getAchievements } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
 import StatCard from '../components/StatCard'
@@ -37,6 +38,48 @@ function formatAchievementBadge(a, seasons) {
   else if (start) range = ` (${start})`
   else if (end) range = ` (${end})`
   return `${label}${range}`
+}
+
+const HEADER_CATEGORY_RANK = {
+  'Hall of Fame': 0,
+  'Life Membership': 1,
+  'Premiership': 3,
+  'Association Award': 5,
+  'Club Award': 6,
+  'Office Bearer': 8,
+}
+
+function headerPriority(a) {
+  if (a.category === 'Milestone') {
+    if (a.subcategory === 'Cap Number') return 2
+    if (a.subcategory === 'Games') {
+      const n = parseInt((a.achievement || '').match(/(\d+)/)?.[1] || '0', 10)
+      if (n >= 500) return 2.5
+      if (n >= 300) return 4
+      if (n >= 200) return 4.5
+      return 7
+    }
+    return 7
+  }
+  return HEADER_CATEGORY_RANK[a.category] ?? 99
+}
+
+function rankedHeaderAchievements(items) {
+  // Dedupe by (category, subcategory, achievement) keeping the newest season.
+  const map = new Map()
+  for (const a of items || []) {
+    const key = `${a.category}|${a.subcategory || ''}|${a.achievement}`
+    const cur = map.get(key)
+    if (!cur || (a.season || '') > (cur.season || '')) {
+      map.set(key, a)
+    }
+  }
+  return [...map.values()].sort((a, b) => {
+    const pa = headerPriority(a)
+    const pb = headerPriority(b)
+    if (pa !== pb) return pa - pb
+    return (b.season || '').localeCompare(a.season || '')
+  })
 }
 
 function useSortable(rows, defaultKey, defaultDir = 'desc') {
@@ -197,6 +240,8 @@ function ByPositionTable({ rows }) {
 const CATEGORIES = ['Club Award', 'Association Award', 'Office Bearer', 'Premiership', 'Hall of Fame', 'Life Membership', 'Milestone']
 
 function AchievementsSection({ playerId, orgId, playerName }) {
+  const { user } = useAuth()
+  const canEdit = !!user
   const [achievements, setAchievements] = useState(null)
   const [seasons, setSeasons] = useState([])
   const [adding, setAdding] = useState(false)
@@ -293,28 +338,70 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   const seasonMap = Object.fromEntries(seasons.map(s => [s.id, s.name]))
   const seasonDisplay = (s) => !s || s === 'All Time' ? 'All Time' : (seasonMap[s] || s.replace(/_/g, '/'))
 
-  // Group by season then category
-  const grouped = {}
+  // Partition achievements into four buckets based on type rather than season,
+  // so the player's permanent honours sit above their year-by-year roles.
+  const honours = []      // HoF, Life Membership, Premiership, Cap Number
+  const roles = []        // Office Bearer
+  const awards = []       // Club Award + Association Award
+  const milestones = []   // Other Milestones (Games, Runs, Wickets, etc.)
   for (const a of achievements) {
-    const s = a.season || 'All Time'
-    if (!grouped[s]) grouped[s] = {}
-    if (!grouped[s][a.category]) grouped[s][a.category] = []
-    grouped[s][a.category].push(a)
+    if (a.category === 'Hall of Fame' || a.category === 'Life Membership' || a.category === 'Premiership') {
+      honours.push(a)
+    } else if (a.category === 'Milestone' && a.subcategory === 'Cap Number') {
+      honours.push(a)
+    } else if (a.category === 'Office Bearer') {
+      roles.push(a)
+    } else if (a.category === 'Club Award' || a.category === 'Association Award') {
+      awards.push(a)
+    } else if (a.category === 'Milestone') {
+      milestones.push(a)
+    } else {
+      awards.push(a) // safety net for any unknown category
+    }
   }
-  const groupedSeasons = Object.keys(grouped).sort((a, b) => {
-    if (a === 'All Time') return 1
-    if (b === 'All Time') return -1
-    return b.localeCompare(a)
+
+  // Sort awards / milestones newest-first
+  const bySeasonDesc = (a, b) => (b.season || '').localeCompare(a.season || '')
+  honours.sort((a, b) => {
+    const pa = headerPriority(a); const pb = headerPriority(b)
+    if (pa !== pb) return pa - pb
+    return bySeasonDesc(a, b)
   })
+  awards.sort(bySeasonDesc)
+  milestones.sort(bySeasonDesc)
+
+  // Group roles by (subcategory, achievement) so a 3-time captain becomes one card.
+  const rolesGrouped = new Map()
+  for (const r of roles) {
+    const key = `${r.subcategory || ''}|${r.achievement}`
+    if (!rolesGrouped.has(key)) {
+      rolesGrouped.set(key, { subcategory: r.subcategory, achievement: r.achievement, instances: [] })
+    }
+    rolesGrouped.get(key).instances.push(r)
+  }
+  for (const g of rolesGrouped.values()) g.instances.sort(bySeasonDesc)
+  const rolesList = [...rolesGrouped.values()].sort((a, b) => {
+    const sa = a.instances[0]?.season || ''
+    const sb = b.instances[0]?.season || ''
+    return sb.localeCompare(sa)
+  })
+
+  const seasonRange = (a) => {
+    const s = seasonDisplay(a.season)
+    if (a.season_end && a.season_end !== a.season) return `${s} — ${seasonDisplay(a.season_end)}`
+    return s
+  }
+
+  const categoryIcon = (a) => CATEGORY_ICON_SRC[a.category] || thiings.goldMedal
 
   return (
     <div>
       <div className="px-5 py-4 border-b border-navy-700 flex items-center justify-between">
         <h3 className="display-heading text-lg text-white">ACHIEVEMENTS & HONOURS</h3>
-        <button onClick={openAdd} className="btn-primary text-xs">+ Add</button>
+        {canEdit && <button onClick={openAdd} className="btn-primary text-xs">+ Add</button>}
       </div>
 
-      {adding && (
+      {adding && canEdit && (
         <div className="px-5 py-4 border-b border-navy-700 bg-navy-800/50">
           <h4 className="text-sm font-semibold text-white mb-3">{editId ? 'Edit Achievement' : 'Add Achievement'}</h4>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
@@ -396,41 +483,129 @@ function AchievementsSection({ playerId, orgId, playerName }) {
         <p className="text-slate-500 text-sm px-5 py-8 text-center">No achievements recorded yet.</p>
       )}
 
-      {groupedSeasons.map(season => (
-        <div key={season} className="border-b border-navy-700 last:border-0">
-          <div className="px-5 py-3 bg-navy-800/30">
-            <span className="text-accent font-mono font-bold text-sm">{seasonDisplay(season)}</span>
-          </div>
-          {Object.entries(grouped[season]).map(([cat, items]) => (
-            <div key={cat} className="px-5 py-3">
-              <div className="flex items-center gap-2 mb-2">
-                <ThiingIcon src={CATEGORY_ICON_SRC[cat] || thiings.goldMedal} alt="" className="w-5 h-5" />
-                <span className="section-label text-xs">{cat.toUpperCase()}</span>
-              </div>
-              <div className="space-y-1.5">
-                {items.map(a => (
-                  <div key={a.id} className="flex items-start justify-between gap-2 group">
+      <div className="p-5 space-y-6">
+        {honours.length > 0 && (
+          <section>
+            <h4 className="section-label text-xs mb-3">Honours</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {honours.map(a => (
+                <div
+                  key={a.id}
+                  className="rounded-lg border border-navy-700 bg-gradient-to-br from-navy-800 to-navy-900 p-3 group relative"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <ThiingIcon src={categoryIcon(a)} alt="" className="w-8 h-8 shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <span className="text-white text-sm font-medium">{a.achievement}</span>
-                      {a.subcategory && <span className="text-slate-500 text-sm"> — {a.subcategory}</span>}
-                      {a.season_end && (
-                        <span className="text-xs text-slate-500 ml-2 font-mono">
-                          {seasonDisplay(a.season)} — {seasonDisplay(a.season_end)}
-                        </span>
-                      )}
-                      {a.detail && <span className="text-slate-400 text-xs ml-2">({a.detail})</span>}
+                      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-mono">{a.category}</div>
+                      <div className="text-white text-sm font-semibold truncate">{a.achievement}</div>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        {[a.subcategory, seasonRange(a)].filter(Boolean).join(' · ')}
+                        {a.detail && <span className="text-accent ml-1">{a.detail}</span>}
+                      </div>
                     </div>
+                  </div>
+                  {canEdit && (
+                    <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => openEdit(a)} className="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded hover:bg-navy-700">Edit</button>
+                      <button onClick={() => handleDelete(a.id)} className="text-xs text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded hover:bg-navy-700">✕</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {rolesList.length > 0 && (
+          <section>
+            <h4 className="section-label text-xs mb-3">Roles</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {rolesList.map((g, i) => (
+                <div key={i} className="rounded-lg border border-navy-700 bg-navy-800/40 p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <ThiingIcon src={CATEGORY_ICON_SRC['Office Bearer'] || thiings.goldMedal} alt="" className="w-5 h-5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-white text-sm font-semibold truncate">{g.achievement}</div>
+                      {g.subcategory && <div className="text-xs text-slate-500">{g.subcategory}</div>}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {g.instances.map(inst => (
+                      <span key={inst.id} className="group/chip relative inline-flex items-center gap-1 text-xs font-mono bg-navy-700/60 text-accent px-2 py-0.5 rounded">
+                        {canEdit ? (
+                          <button onClick={() => openEdit(inst)} className="hover:text-white" title="Edit">
+                            {seasonRange(inst)}
+                          </button>
+                        ) : (
+                          <span>{seasonRange(inst)}</span>
+                        )}
+                        {inst.detail && <span className="text-slate-400">· {inst.detail}</span>}
+                        {canEdit && (
+                          <button
+                            onClick={() => handleDelete(inst.id)}
+                            className="ml-0.5 text-slate-500 hover:text-red-400 opacity-0 group-hover/chip:opacity-100 transition-opacity"
+                            title="Delete"
+                          >×</button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {awards.length > 0 && (
+          <section>
+            <h4 className="section-label text-xs mb-3">Awards</h4>
+            <div className="rounded-lg border border-navy-700 divide-y divide-navy-700/50 overflow-hidden">
+              {awards.map(a => (
+                <div key={a.id} className="px-3 py-2.5 flex items-center gap-3 group hover:bg-navy-800/40 transition-colors">
+                  <ThiingIcon src={categoryIcon(a)} alt="" className="w-5 h-5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-white text-sm font-medium">{a.achievement}</span>
+                    {a.subcategory && <span className="text-slate-500 text-xs ml-1.5">— {a.subcategory}</span>}
+                    {a.detail && <span className="text-slate-400 text-xs italic ml-1.5">({a.detail})</span>}
+                  </div>
+                  <span className="text-xs font-mono text-accent shrink-0">{seasonRange(a)}</span>
+                  {canEdit && (
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                       <button onClick={() => openEdit(a)} className="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded hover:bg-navy-700">Edit</button>
                       <button onClick={() => handleDelete(a.id)} className="text-xs text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded hover:bg-navy-700">✕</button>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ))}
+          </section>
+        )}
+
+        {milestones.length > 0 && (
+          <section>
+            <h4 className="section-label text-xs mb-3">Milestones</h4>
+            <div className="rounded-lg border border-navy-700 divide-y divide-navy-700/50 overflow-hidden">
+              {milestones.map(a => (
+                <div key={a.id} className="px-3 py-2.5 flex items-center gap-3 group hover:bg-navy-800/40 transition-colors">
+                  <ThiingIcon src={MILESTONE_ICON_SRC[a.subcategory] || categoryIcon(a)} alt="" className="w-5 h-5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-white text-sm font-medium">{a.achievement}</span>
+                    {a.subcategory && <span className="text-slate-500 text-xs ml-1.5">— {a.subcategory}</span>}
+                    {a.detail && <span className="text-slate-400 text-xs italic ml-1.5">({a.detail})</span>}
+                  </div>
+                  <span className="text-xs font-mono text-accent shrink-0">{seasonRange(a)}</span>
+                  {canEdit && (
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button onClick={() => openEdit(a)} className="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded hover:bg-navy-700">Edit</button>
+                      <button onClick={() => handleDelete(a.id)} className="text-xs text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded hover:bg-navy-700">✕</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
     </div>
   )
 }
@@ -781,7 +956,7 @@ export default function PlayerProfile() {
             )}
             {headerAchievements.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-2">
-                {headerAchievements.slice(0, 6).map(a => (
+                {rankedHeaderAchievements(headerAchievements).slice(0, 6).map(a => (
                   <span key={a.id} className="badge bg-navy-700 text-slate-300 border border-navy-600">
                     {formatAchievementBadge(a, seasons)}
                   </span>
@@ -803,11 +978,6 @@ export default function PlayerProfile() {
             <Link to={`/players/${playerId}/share`} className="btn-ghost border border-navy-600 text-xs">
               Share ↗
             </Link>
-            {!player.claimed && (
-              <button onClick={() => api.claimPlayer(playerId)} className="btn-primary text-xs">
-                Claim Profile
-              </button>
-            )}
           </div>
         </div>
       </div>
