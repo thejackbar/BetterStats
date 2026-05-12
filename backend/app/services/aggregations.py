@@ -351,6 +351,7 @@ async def get_season_by_season(session: AsyncSession, player_id: str) -> list[di
                 pss.fours AS total_fours,
                 pss.sixes AS total_sixes,
                 pss.wickets AS total_wickets,
+                pss.runs_conceded AS bowling_runs_conceded,
                 pss.overs AS total_overs,
                 pss.bowling_average,
                 pss.bowling_economy AS economy,
