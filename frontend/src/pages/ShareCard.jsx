@@ -75,8 +75,9 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org }) {
           <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 12px' }}>
             Batting
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
             {[
+              { label: 'M', value: cb.games },
               { label: 'Inns', value: cb.innings },
               { label: 'Runs', value: cb.total_runs, highlight: true },
               { label: 'HS', value: cb.high_score },
