@@ -310,7 +310,15 @@ async def delete_partnership_record(
 
 class ManualPartnershipPatch(BaseModel):
     batter1_id: Optional[str] = None
+    batter1_name: Optional[str] = None
     batter2_id: Optional[str] = None
+    batter2_name: Optional[str] = None
+    grade_name: Optional[str] = None
+    season_year: Optional[int] = None
+    wicket_number: Optional[int] = None
+    runs: Optional[int] = None
+    is_not_out: Optional[bool] = None
+    notes: Optional[str] = None
 
 
 @router.patch("/partnership-records/{record_id}")
@@ -330,10 +338,27 @@ async def patch_partnership_record(
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
-    if data.batter1_id is not None:
+    fields = data.model_fields_set
+    if 'batter1_id' in fields:
         record.batter1_id = uuid.UUID(data.batter1_id) if data.batter1_id else None
-    if data.batter2_id is not None:
+    if 'batter1_name' in fields and data.batter1_name is not None:
+        record.batter1_name = data.batter1_name.strip()
+    if 'batter2_id' in fields:
         record.batter2_id = uuid.UUID(data.batter2_id) if data.batter2_id else None
+    if 'batter2_name' in fields and data.batter2_name is not None:
+        record.batter2_name = data.batter2_name.strip()
+    if 'grade_name' in fields and data.grade_name is not None:
+        record.grade_name = data.grade_name.strip()
+    if 'season_year' in fields and data.season_year is not None:
+        record.season_year = data.season_year
+    if 'wicket_number' in fields and data.wicket_number is not None:
+        record.wicket_number = data.wicket_number
+    if 'runs' in fields and data.runs is not None:
+        record.runs = data.runs
+    if 'is_not_out' in fields:
+        record.is_not_out = data.is_not_out
+    if 'notes' in fields:
+        record.notes = data.notes
     await db.commit()
     return {"status": "updated"}
 
@@ -547,6 +572,49 @@ async def import_partnership_records(
         "errors": errors,
         "records": created_records,
     }
+
+
+@router.get("/grades")
+async def list_grades(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        _text("""
+            SELECT DISTINCT gr.name
+            FROM grades gr
+            JOIN seasons se ON se.id = gr.season_id
+            WHERE se.organisation_id = :org_id
+            ORDER BY gr.name
+        """),
+        {"org_id": str(club.id)},
+    )
+    return [r["name"] for r in result.mappings().all()]
+
+
+class PartnershipGradeRename(BaseModel):
+    old_name: str
+    new_name: str
+
+
+@router.post("/partnership-records/rename-grade")
+async def rename_partnership_grade(
+    data: PartnershipGradeRename,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        _text("""
+            UPDATE manual_partnership_records
+            SET grade_name = :new_name
+            WHERE org_id = :org_id AND grade_name = :old_name
+        """),
+        {"new_name": data.new_name.strip(), "org_id": str(club.id), "old_name": data.old_name},
+    )
+    await db.commit()
+    return {"updated": result.rowcount}
 
 
 # ---------------------------------------------------------------------------
