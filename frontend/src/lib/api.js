@@ -125,6 +125,12 @@ export const api = {
     request(`/club-admin/partnership-records/${id}`, { method: 'DELETE' }),
   adminPatchPartnershipRecord: (id, data) =>
     request(`/club-admin/partnership-records/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adminListGrades: () => request('/club-admin/grades'),
+  adminRenamePartnershipGrade: (oldName, newName) =>
+    request('/club-admin/partnership-records/rename-grade', {
+      method: 'POST',
+      body: JSON.stringify({ old_name: oldName, new_name: newName }),
+    }),
   adminDownloadPartnershipTemplate: () =>
     fetch(`${BASE}/club-admin/partnership-records/template`, { credentials: 'include' }),
   adminImportPartnershipRecords: (file) => {
@@ -151,7 +157,7 @@ export const api = {
     request('/club-admin/sync-runs', { method: 'DELETE' }),
   adminClearResolvedSyncRequests: () =>
     request('/club-admin/sync-requests/resolved', { method: 'DELETE' }),
-  adminListPhqSuggestions: () => request('/club-admin/phq-suggestions'), // returns {suggestions, scanning}
+  adminListPhqSuggestions: () => request('/club-admin/phq-suggestions'),
   adminRunPhqSuggestions: () => request('/club-admin/phq-suggestions/run', { method: 'POST' }),
   adminActionPhqSuggestion: (id, action, playerId) =>
     request(`/club-admin/phq-suggestions/${id}`, {

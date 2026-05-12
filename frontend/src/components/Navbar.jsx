@@ -44,7 +44,7 @@ export default function Navbar() {
           <span className="font-display font-bold text-xl tracking-wider uppercase text-white group-hover:text-accent transition-colors">
             Better<span className="text-accent">Stats</span>
           </span>
-          <span className="text-slate-600 text-xs font-mono">v3.1.4</span>
+          <span className="text-slate-600 text-xs font-mono">v3.1.5</span>
         </Link>
 
         <div className="hidden md:flex items-center gap-1">
