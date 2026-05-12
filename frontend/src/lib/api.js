@@ -91,6 +91,20 @@ export const api = {
       body: JSON.stringify({ merge_log_id: mergeLogId, org_id: orgId }),
     }),
 
+  // Grade merge tools
+  listGradesWithStats: (orgId) => request(`/admin/grades-with-stats?org_id=${orgId}`),
+  mergeGrades: (orgId, aliasName, canonicalName) =>
+    request('/admin/merge-grades', {
+      method: 'POST',
+      body: JSON.stringify({ org_id: orgId, alias_name: aliasName, canonical_name: canonicalName }),
+    }),
+  getGradeMergeHistory: (orgId) => request(`/admin/grade-merge-history?org_id=${orgId}`),
+  undoGradeMerge: (mergeLogId, orgId) =>
+    request('/admin/undo-grade-merge', {
+      method: 'POST',
+      body: JSON.stringify({ merge_log_id: mergeLogId, org_id: orgId }),
+    }),
+
   // Club admin
   adminListPlayers: () => request('/club-admin/players'),
   adminPatchPlayer: (playerId, data) =>

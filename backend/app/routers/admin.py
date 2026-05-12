@@ -261,6 +261,184 @@ class UndoMergeRequest(BaseModel):
     org_id: str
 
 
+# ─── Grade merge ─────────────────────────────────────────
+
+def _resolve_canonical_grade(canonical_chain: dict[str, str], name: str) -> str:
+    seen = set()
+    current = name
+    while current in canonical_chain and current not in seen:
+        seen.add(current)
+        current = canonical_chain[current]
+    return current
+
+
+@router.get("/grades-with-stats")
+async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)):
+    """List distinct grade names in an org with aggregate stats, applying active merges."""
+    raw = await db.execute(
+        text("""
+            SELECT
+                gr.name AS grade_name,
+                COUNT(DISTINCT g.id) AS games,
+                COUNT(DISTINCT bi.player_id) AS players,
+                COALESCE(SUM(bi.runs), 0) AS runs
+            FROM grades gr
+            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN games g ON g.grade_id = gr.id
+            LEFT JOIN batting_innings bi ON bi.game_id = g.id
+            WHERE s.organisation_id = :org_id
+            GROUP BY gr.name
+            ORDER BY gr.name
+        """),
+        {"org_id": org_id},
+    )
+    raw_rows = [dict(r) for r in raw.mappings().all()]
+
+    log_rows = await db.execute(
+        text("""
+            SELECT alias_name, canonical_name
+            FROM grade_merge_logs
+            WHERE org_id = :org_id AND undone_at IS NULL
+        """),
+        {"org_id": org_id},
+    )
+    alias_to_canonical = {r["alias_name"]: r["canonical_name"] for r in log_rows.mappings().all()}
+
+    bucket: dict[str, dict] = {}
+    aliases_by_canonical: dict[str, list[str]] = {}
+    for row in raw_rows:
+        name = row["grade_name"]
+        canonical = _resolve_canonical_grade(alias_to_canonical, name)
+        slot = bucket.setdefault(canonical, {
+            "grade_name": canonical,
+            "games": 0,
+            "players": 0,
+            "runs": 0,
+            "aliases": [],
+        })
+        slot["games"] += int(row["games"] or 0)
+        slot["runs"] += int(row["runs"] or 0)
+        slot["players"] = max(slot["players"], int(row["players"] or 0))
+        if name != canonical:
+            slot["aliases"].append(name)
+            aliases_by_canonical.setdefault(canonical, []).append(name)
+
+    out = list(bucket.values())
+    out.sort(key=lambda r: r["grade_name"].lower())
+    return out
+
+
+class MergeGradesRequest(BaseModel):
+    org_id: str
+    alias_name: str
+    canonical_name: str
+
+
+@router.post("/merge-grades")
+async def merge_grades(req: MergeGradesRequest, db: AsyncSession = Depends(get_db)):
+    """Mark `alias_name` as a variant of `canonical_name` for the given org."""
+    alias = req.alias_name.strip()
+    canonical = req.canonical_name.strip()
+    if not alias or not canonical:
+        raise HTTPException(status_code=400, detail="Both grade names are required")
+    if alias == canonical:
+        raise HTTPException(status_code=400, detail="Alias and canonical grade are the same")
+
+    existing = await db.execute(
+        text("""
+            SELECT alias_name, canonical_name
+            FROM grade_merge_logs
+            WHERE org_id = :org_id AND undone_at IS NULL
+        """),
+        {"org_id": req.org_id},
+    )
+    chain = {r["alias_name"]: r["canonical_name"] for r in existing.mappings().all()}
+
+    resolved_canonical = _resolve_canonical_grade(chain, canonical)
+    if resolved_canonical == alias:
+        raise HTTPException(status_code=400, detail="That merge would create a cycle")
+
+    # If alias is itself currently a canonical for other merges, redirect those to the new canonical
+    await db.execute(
+        text("""
+            UPDATE grade_merge_logs
+            SET canonical_name = :new_canonical
+            WHERE org_id = :org_id
+              AND undone_at IS NULL
+              AND canonical_name = :alias
+        """),
+        {"org_id": req.org_id, "new_canonical": resolved_canonical, "alias": alias},
+    )
+
+    # If this exact alias already maps, replace with the resolved canonical
+    await db.execute(
+        text("""
+            UPDATE grade_merge_logs
+            SET undone_at = NOW()
+            WHERE org_id = :org_id
+              AND undone_at IS NULL
+              AND alias_name = :alias
+        """),
+        {"org_id": req.org_id, "alias": alias},
+    )
+
+    await db.execute(
+        text("""
+            INSERT INTO grade_merge_logs (org_id, alias_name, canonical_name)
+            VALUES (:org_id, :alias, :canonical)
+        """),
+        {"org_id": req.org_id, "alias": alias, "canonical": resolved_canonical},
+    )
+    await db.commit()
+    return {"status": "merged", "alias": alias, "canonical": resolved_canonical}
+
+
+@router.get("/grade-merge-history")
+async def grade_merge_history(org_id: str, db: AsyncSession = Depends(get_db)):
+    rows = await db.execute(
+        text("""
+            SELECT id, merged_at, alias_name, canonical_name, undone_at
+            FROM grade_merge_logs
+            WHERE org_id = :org_id
+            ORDER BY merged_at DESC
+            LIMIT 100
+        """),
+        {"org_id": org_id},
+    )
+    return [
+        {
+            "id": r["id"],
+            "merged_at": r["merged_at"].isoformat() if r["merged_at"] else None,
+            "alias_name": r["alias_name"],
+            "canonical_name": r["canonical_name"],
+            "undone": r["undone_at"] is not None,
+        }
+        for r in rows.mappings().all()
+    ]
+
+
+class UndoGradeMergeRequest(BaseModel):
+    merge_log_id: int
+    org_id: str
+
+
+@router.post("/undo-grade-merge")
+async def undo_grade_merge(req: UndoGradeMergeRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        text("""
+            UPDATE grade_merge_logs
+            SET undone_at = NOW()
+            WHERE id = :id AND org_id = :org_id AND undone_at IS NULL
+            RETURNING id
+        """),
+        {"id": req.merge_log_id, "org_id": req.org_id},
+    )
+    if result.first() is None:
+        raise HTTPException(status_code=404, detail="Merge log not found or already undone")
+    await db.commit()
+    return {"status": "undone"}
+
+
 @router.post("/undo-merge")
 async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db)):
     """Reverse a previous merge: re-create removed player and reassign records back."""

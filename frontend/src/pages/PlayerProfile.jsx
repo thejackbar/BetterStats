@@ -16,6 +16,184 @@ import clsx from 'clsx'
 
 const TABS = ['batting', 'bowling', 'analysis', 'milestones', 'achievements']
 
+function formatSeasonShort(value, seasons) {
+  if (!value) return null
+  const match = seasons?.find(s => s.id === value)
+  const name = match ? match.name : String(value)
+  // Patterns: "2019_20", "2019/20", "Summer 2019/20", "Summer 2019_20"
+  const m = name.match(/(\d{2})(\d{2})\s*[\/_-]\s*(\d{2})/)
+  if (m) return `${m[2]}/${m[3]}`
+  const single = name.match(/\b(\d{4})\b/)
+  if (single) return single[1].slice(2)
+  return name
+}
+
+function formatAchievementBadge(a, seasons) {
+  const label = a.achievement || a.subcategory || a.category
+  const start = formatSeasonShort(a.season, seasons)
+  const end = formatSeasonShort(a.season_end, seasons)
+  let range = ''
+  if (start && end && start !== end) range = ` (${start} – ${end})`
+  else if (start) range = ` (${start})`
+  else if (end) range = ` (${end})`
+  return `${label}${range}`
+}
+
+function useSortable(rows, defaultKey, defaultDir = 'desc') {
+  const [sortKey, setSortKey] = useState(defaultKey)
+  const [sortDir, setSortDir] = useState(defaultDir)
+
+  const sorted = useMemo(() => {
+    if (!Array.isArray(rows) || !sortKey) return rows
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      const av = a?.[sortKey]
+      const bv = b?.[sortKey]
+      if (av == null && bv == null) return 0
+      if (av == null) return 1
+      if (bv == null) return -1
+      const an = typeof av === 'number' ? av : Number(av)
+      const bn = typeof bv === 'number' ? bv : Number(bv)
+      if (!Number.isNaN(an) && !Number.isNaN(bn) && (typeof av !== 'string' || /^-?\d+(\.\d+)?$/.test(av))) {
+        return (an - bn) * dir
+      }
+      return String(av).localeCompare(String(bv)) * dir
+    })
+  }, [rows, sortKey, sortDir])
+
+  function request(key, defaultDirForKey = 'desc') {
+    if (key === sortKey) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir(defaultDirForKey)
+    }
+  }
+
+  return { sorted, sortKey, sortDir, request }
+}
+
+function SortHeader({ label, sortKey, currentKey, currentDir, onSort, defaultDir = 'desc', align = 'left', className = '' }) {
+  const active = sortKey === currentKey
+  const arrow = active ? (currentDir === 'asc' ? ' ↑' : ' ↓') : ''
+  return (
+    <th
+      onClick={() => onSort(sortKey, defaultDir)}
+      className={clsx(
+        'table-header cursor-pointer select-none hover:text-white transition-colors',
+        align === 'right' && 'text-right',
+        className,
+      )}
+    >
+      {label}
+      <span className="text-accent text-xs">{arrow}</span>
+    </th>
+  )
+}
+
+function PartnershipsTable({ partnerships }) {
+  const { sorted, sortKey, sortDir, request } = useSortable(partnerships, 'total_runs', 'desc')
+  return (
+    <div>
+      <h3 className="display-heading text-lg text-white mb-4">TOP PARTNERSHIPS</h3>
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-navy-700">
+              <SortHeader label="Partner" sortKey="partner_name" currentKey={sortKey} currentDir={sortDir} onSort={request} defaultDir="asc" />
+              <SortHeader label="Best" sortKey="best_runs" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" />
+              <SortHeader label="Total" sortKey="total_runs" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" />
+              <SortHeader label="Times" sortKey="partnership_count" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" className="hidden sm:table-cell" />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((p, i) => (
+              <tr key={i} className="table-row">
+                <td className="table-cell">
+                  {p.partner_id
+                    ? <Link to={`/players/${p.partner_id}`} className="text-white hover:text-accent transition-colors">{p.partner_name ?? '—'}</Link>
+                    : <span className="text-slate-400">{p.partner_name ?? '—'}</span>}
+                </td>
+                <td className="table-cell stat-number text-right font-bold text-accent">{p.best_runs ?? '—'}</td>
+                <td className="table-cell stat-number text-right text-slate-300">{p.total_runs ?? '—'}</td>
+                <td className="table-cell stat-number text-right text-slate-500 hidden sm:table-cell">{p.partnership_count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function ByGradeTable({ rows }) {
+  const { sorted, sortKey, sortDir, request } = useSortable(rows, 'runs', 'desc')
+  return (
+    <div>
+      <h3 className="display-heading text-lg text-white mb-4">BATTING BY GRADE</h3>
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-navy-700">
+              <SortHeader label="Grade" sortKey="grade_name" currentKey={sortKey} currentDir={sortDir} onSort={request} defaultDir="asc" />
+              <SortHeader label="Inn" sortKey="innings" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" />
+              <SortHeader label="Runs" sortKey="runs" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" />
+              <SortHeader label="Avg" sortKey="average" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" />
+              <SortHeader label="HS" sortKey="high_score" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r, i) => (
+              <tr key={i} className="table-row">
+                <td className="table-cell text-white">{r.grade_name}</td>
+                <td className="table-cell stat-number text-right text-slate-400">{r.innings}</td>
+                <td className="table-cell stat-number text-right text-accent font-bold">{r.runs}</td>
+                <td className="table-cell stat-number text-right text-slate-300">{r.average ?? '—'}</td>
+                <td className="table-cell stat-number text-right text-slate-300">{r.high_score ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function ByPositionTable({ rows }) {
+  const { sorted, sortKey, sortDir, request } = useSortable(rows, 'batting_position', 'asc')
+  return (
+    <div>
+      <h3 className="display-heading text-lg text-white mb-4">BATTING BY POSITION</h3>
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-navy-700">
+              <SortHeader label="Position" sortKey="batting_position" currentKey={sortKey} currentDir={sortDir} onSort={request} defaultDir="asc" />
+              <SortHeader label="Inn" sortKey="innings" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" />
+              <SortHeader label="Runs" sortKey="runs" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" />
+              <SortHeader label="Avg" sortKey="average" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" />
+              <SortHeader label="HS" sortKey="high_score" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" />
+              <SortHeader label="SR" sortKey="avg_strike_rate" currentKey={sortKey} currentDir={sortDir} onSort={request} align="right" className="hidden sm:table-cell" />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r, i) => (
+              <tr key={i} className="table-row">
+                <td className="table-cell stat-number text-white">#{r.batting_position}</td>
+                <td className="table-cell stat-number text-right text-slate-400">{r.innings}</td>
+                <td className="table-cell stat-number text-right text-accent font-bold">{r.runs}</td>
+                <td className="table-cell stat-number text-right text-slate-300">{r.average ?? '—'}</td>
+                <td className="table-cell stat-number text-right text-slate-300">{r.high_score ?? '—'}</td>
+                <td className="table-cell stat-number text-right text-slate-500 hidden sm:table-cell">{r.avg_strike_rate ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 const CATEGORIES = ['Club Award', 'Association Award', 'Office Bearer', 'Premiership', 'Hall of Fame', 'Life Membership', 'Milestone']
 
 function AchievementsSection({ playerId, orgId, playerName }) {
@@ -605,7 +783,7 @@ export default function PlayerProfile() {
               <div className="flex flex-wrap gap-2 mt-2">
                 {headerAchievements.slice(0, 6).map(a => (
                   <span key={a.id} className="badge bg-navy-700 text-slate-300 border border-navy-600">
-                    {a.subcategory || a.category}{a.achievement ? ` — ${a.achievement}` : ''}{(() => { const yr = a.season_end || a.season; return yr && /^\d{4}$/.test(String(yr)) ? ` (${yr})` : '' })()}
+                    {formatAchievementBadge(a, seasons)}
                   </span>
                 ))}
               </div>
@@ -728,35 +906,7 @@ export default function PlayerProfile() {
             {partnerships === null ? (
               <LoadingSpinner size="sm" />
             ) : partnerships.length === 0 ? null : (
-              <div>
-                <h3 className="display-heading text-lg text-white mb-4">TOP PARTNERSHIPS</h3>
-                <div className="card overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-navy-700">
-                        <th className="table-header">Partner</th>
-                        <th className="table-header text-right">Best</th>
-                        <th className="table-header text-right">Total</th>
-                        <th className="table-header text-right hidden sm:table-cell">Times</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {partnerships.map((p, i) => (
-                        <tr key={i} className="table-row">
-                          <td className="table-cell">
-                            {p.partner_id
-                              ? <Link to={`/players/${p.partner_id}`} className="text-white hover:text-accent transition-colors">{p.partner_name ?? '—'}</Link>
-                              : <span className="text-slate-400">{p.partner_name ?? '—'}</span>}
-                          </td>
-                          <td className="table-cell stat-number text-right font-bold text-accent">{p.best_runs ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-300">{p.total_runs ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-500 hidden sm:table-cell">{p.partnership_count}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <PartnershipsTable partnerships={partnerships} />
             )}
 
             {dismissals !== null && byGrade !== null && byPosition !== null &&
@@ -851,67 +1001,9 @@ export default function PlayerProfile() {
               )
             })()}
 
-            {byGrade !== null && byGrade.length > 1 && (
-              <div>
-                <h3 className="display-heading text-lg text-white mb-4">BATTING BY GRADE</h3>
-                <div className="card overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-navy-700">
-                        <th className="table-header">Grade</th>
-                        <th className="table-header text-right">Inn</th>
-                        <th className="table-header text-right">Runs</th>
-                        <th className="table-header text-right">Avg</th>
-                        <th className="table-header text-right">HS</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {byGrade.map((r, i) => (
-                        <tr key={i} className="table-row">
-                          <td className="table-cell text-white">{r.grade_name}</td>
-                          <td className="table-cell stat-number text-right text-slate-400">{r.innings}</td>
-                          <td className="table-cell stat-number text-right text-accent font-bold">{r.runs}</td>
-                          <td className="table-cell stat-number text-right text-slate-300">{r.average ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-300">{r.high_score ?? '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+            {byGrade !== null && byGrade.length > 1 && <ByGradeTable rows={byGrade} />}
 
-            {byPosition !== null && byPosition.length > 0 && (
-              <div>
-                <h3 className="display-heading text-lg text-white mb-4">BATTING BY POSITION</h3>
-                <div className="card overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-navy-700">
-                        <th className="table-header">Position</th>
-                        <th className="table-header text-right">Inn</th>
-                        <th className="table-header text-right">Runs</th>
-                        <th className="table-header text-right">Avg</th>
-                        <th className="table-header text-right">HS</th>
-                        <th className="table-header text-right hidden sm:table-cell">SR</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {byPosition.map((r, i) => (
-                        <tr key={i} className="table-row">
-                          <td className="table-cell stat-number text-white">#{r.batting_position}</td>
-                          <td className="table-cell stat-number text-right text-slate-400">{r.innings}</td>
-                          <td className="table-cell stat-number text-right text-accent font-bold">{r.runs}</td>
-                          <td className="table-cell stat-number text-right text-slate-300">{r.average ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-300">{r.high_score ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-500 hidden sm:table-cell">{r.avg_strike_rate ?? '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+            {byPosition !== null && byPosition.length > 0 && <ByPositionTable rows={byPosition} />}
           </div>
         )}
 
