@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -151,6 +151,7 @@ app.include_router(records.router)
 app.include_router(webhooks.router)
 app.include_router(admin.router)
 app.include_router(achievements.router)
+app.include_router(statlab.router)
 
 
 @app.get("/health")
