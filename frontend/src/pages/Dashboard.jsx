@@ -353,7 +353,26 @@ export default function Dashboard() {
           />
         </Card>
 
-        <div className="mt-10 pt-6 pb-hairline-t text-center">
+        {/* Yearbook CTA */}
+        <Link
+          to={`/${clubSlug}/yearbook`}
+          className="flex items-center justify-between gap-4 mb-6 px-5 py-4 rounded-xl border border-white/8 bg-white/2 hover:bg-white/4 hover:border-white/15 transition-colors group"
+        >
+          <div>
+            <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">Season Yearbook</div>
+            <div className="text-[15px] font-semibold text-white/80 group-hover:text-white transition-colors">
+              View the Season Yearbook
+            </div>
+            <div className="text-[12px] text-white/35 mt-0.5">
+              Stats, honour board, editorial reports &amp; season highlights
+            </div>
+          </div>
+          <div className="shrink-0 font-mono text-[12px] text-white/30 group-hover:text-white/60 transition-colors">
+            →
+          </div>
+        </Link>
+
+        <div className="mt-4 pt-6 pb-hairline-t text-center">
           <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest">
             POWERED BY <Link to="/" className="hover:text-pb-dim transition-colors">BETTERSTATS</Link>
           </p>

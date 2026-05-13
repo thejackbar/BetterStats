@@ -966,29 +966,19 @@ export default function Yearbook() {
   // Load yearbook list and resolve the current season
   useEffect(() => {
     if (!club) return
-    Promise.all([
-      api.listYearbooks(club.id),
-      api.getOrgSeasons(club.id),
-    ]).then(([ybs, seasons]) => {
+    api.listYearbooks(club.id).then(ybs => {
       setYearbooks(ybs)
 
-      // Find the matching season by slug
-      const matched = ybs.find(yb => {
-        const slug = _seasonSlug(yb.season_name)
-        return slug === seasonSlug
-      })
+      if (!seasonSlug) {
+        // Show index — stop loading so the index page renders
+        setLoading(false)
+        return
+      }
 
+      const matched = ybs.find(yb => _seasonSlug(yb.season_name) === seasonSlug)
       if (!matched) {
-        // If no slug given, redirect to latest published or latest draft
-        if (!seasonSlug) {
-          const published = ybs.filter(y => y.status === 'published')
-          const target = published[0] || ybs[0]
-          if (target) {
-            navigate(`/${clubSlug}/yearbook/${_seasonSlug(target.season_name)}`, { replace: true })
-          }
-          return
-        }
         setNotFound(true)
+        setLoading(false)
         return
       }
 
@@ -997,9 +987,6 @@ export default function Yearbook() {
         api.getYearbook(club.id, matched.season_id),
         api.getSeasonGrades(club.id, matched.season_id),
       ]).then(([yb, gradeList]) => {
-        if (yb.status !== 'published') {
-          // Still show draft to club admins — for now show it to all (auth check in v4.1)
-        }
         setYearbook(yb)
         setGrades(gradeList)
       }).finally(() => setLoading(false))
@@ -1007,7 +994,7 @@ export default function Yearbook() {
       setNotFound(true)
       setLoading(false)
     })
-  }, [club, clubSlug, seasonSlug, navigate])
+  }, [club, clubSlug, seasonSlug])
 
   if (notFound) {
     return (
@@ -1017,6 +1004,58 @@ export default function Yearbook() {
           <Link to={`/${clubSlug}/dashboard`} className="mt-4 text-sm underline" style={{ color: 'var(--pb-accent)' }}>
             Back to dashboard
           </Link>
+        </div>
+      </div>
+    )
+  }
+
+  // Index page — no season selected
+  if (!seasonSlug) {
+    const published = (yearbooks || []).filter(yb => yb.status === 'published')
+    return (
+      <div className="min-h-screen" style={{ background: 'var(--pb-bg)' }}>
+        <div className="max-w-3xl mx-auto px-4 py-12">
+          <Link to={`/${clubSlug}/dashboard`} className="font-mono text-[11px] text-white/30 hover:text-white/50 transition mb-6 inline-block">
+            ← Dashboard
+          </Link>
+          {club?.logo_url && (
+            <img src={club.logo_url} alt={club.name} className="w-12 h-12 object-contain mb-4 opacity-80" />
+          )}
+          <div className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase mb-2">{club?.name}</div>
+          <h1 className="text-3xl font-bold text-white mb-1">Season Yearbooks</h1>
+          <p className="text-white/40 text-sm mb-8">Season-by-season editorial wrap-ups, stats, and club records.</p>
+
+          {loading ? <PbSpinner /> : published.length === 0 ? (
+            <div className="rounded-xl border border-white/8 border-dashed px-6 py-10 text-center">
+              <p className="font-mono text-[11px] text-white/30 uppercase tracking-wide3">No yearbooks published yet</p>
+              <p className="text-white/25 text-sm mt-2">Check back after the season wraps up.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {published.map(yb => {
+                const slug = _seasonSlug(yb.season_name)
+                return (
+                  <Link
+                    key={yb.season_id}
+                    to={`/${clubSlug}/yearbook/${slug}`}
+                    className="flex items-center justify-between gap-4 px-5 py-4 rounded-xl border border-white/8 bg-white/2 hover:bg-white/5 hover:border-white/20 transition-colors group"
+                  >
+                    <div>
+                      <div className="text-[15px] font-semibold text-white/85 group-hover:text-white transition-colors">
+                        {yb.season_name}
+                      </div>
+                      {yb.published_at && (
+                        <div className="font-mono text-[11px] text-white/30 mt-0.5">
+                          Published {new Date(yb.published_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </div>
+                      )}
+                    </div>
+                    <span className="font-mono text-[13px] text-white/25 group-hover:text-white/60 transition-colors shrink-0">→</span>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
     )
