@@ -636,20 +636,27 @@ function MilestonesTab({ playerId, upcomingMilestones, milestones }) {
       {milestones?.length > 0 && (
         <Card title="ACHIEVED MILESTONES" pad="p-0">
           <ul className="flex flex-col">
-            {milestones.map((m, i) => (
-              <li key={i} className={`${i ? 'pb-hairline-t' : ''} flex items-center gap-4 px-5 py-3 hover:bg-pb-surface2`}>
-                <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.trophy} alt="" className="w-6 h-6 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-pb-text text-[14px] font-semibold truncate">{m.name || m.description}</div>
-                  <div className="font-mono text-pb-faint text-[10.5px] tracking-wide2 mt-0.5">
-                    {m.season_name || ''}{m.achieved_at ? ` · ${new Date(m.achieved_at + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+            {milestones.map((m, i) => {
+              const typeLabel = { runs: 'Runs', wickets: 'Wickets', matches: 'Matches', catches: 'Catches' }[m.milestone_type] || m.milestone_type || 'Milestone'
+              const title = m.milestone_value != null ? `${m.milestone_value.toLocaleString()} ${typeLabel}` : typeLabel
+              const dateStr = m.achieved_at
+                ? new Date(m.achieved_at + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+                : null
+              return (
+                <li key={i} className={`${i ? 'pb-hairline-t' : ''} flex items-center gap-4 px-5 py-3 hover:bg-pb-surface2`}>
+                  <ThiingIcon src={MILESTONE_ICON_SRC[m.milestone_type] || thiings.trophy} alt="" className="w-6 h-6 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-pb-text text-[14px] font-semibold">{title}</div>
+                    <div className="font-mono text-pb-faint text-[10.5px] tracking-wide2 mt-0.5">
+                      {[m.detail, dateStr].filter(Boolean).join(' · ')}
+                    </div>
                   </div>
-                </div>
-                <span className="font-mono text-[18px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
-                  {m.milestone?.toLocaleString() ?? m.value?.toLocaleString()}
-                </span>
-              </li>
-            ))}
+                  <span className="font-mono text-[18px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
+                    {m.milestone_value?.toLocaleString()}
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         </Card>
       )}
