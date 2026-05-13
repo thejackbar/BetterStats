@@ -31,6 +31,16 @@ function fmt(val, dec = false) {
   return val
 }
 
+function fmtNum(val) {
+  if (val == null || val === '') return '—'
+  return Number(val).toLocaleString()
+}
+
+function fmtDec(val, dec = 2) {
+  if (val == null || val === '') return '—'
+  return Number(val).toFixed(dec)
+}
+
 function formatSeasonShort(value, seasons) {
   if (!value) return null
   const match = seasons?.find(s => s.id === value)
@@ -270,11 +280,11 @@ function BattingTab({ batting, seasonStats, seasons }) {
           {[
             ['INNINGS', batting.batting_innings],
             ['RUNS', batting.total_runs, true],
-            ['AVERAGE', fmt(batting.batting_average, true)],
-            ['STRIKE RATE', fmt(batting.strike_rate, true)],
+            ['AVERAGE', fmtDec(batting.batting_average)],
             ['HIGH SCORE', batting.high_score],
             ['100s · 50s', `${batting.hundreds ?? 0} · ${batting.fifties ?? 0}`],
-            ['4s · 6s', `${batting.total_fours ?? 0} · ${batting.total_sixes ?? 0}`],
+            ['4s', batting.total_fours ?? 0],
+            ['6s', batting.total_sixes ?? 0],
             ['DUCKS', batting.ducks ?? 0],
           ].map(([label, value, accent]) => (
             <div key={label} className="flex flex-col">
@@ -299,11 +309,11 @@ function BattingTab({ batting, seasonStats, seasons }) {
                   <SortTh label="INN" sKey="batting_innings" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="RUNS" sKey="total_runs" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="AVG" sKey="batting_average" cur={sortKey} dir={sortDir} onSort={request} right />
-                  <SortTh label="SR" sKey="strike_rate" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="HS" sKey="high_score" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="100s" sKey="hundreds" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="50s" sKey="fifties" cur={sortKey} dir={sortDir} onSort={request} right />
-                  <th className="py-3 pr-5 text-right pb-2 font-mono text-[10px] tracking-wide3">6s</th>
+                  <SortTh label="4s" sKey="total_fours" cur={sortKey} dir={sortDir} onSort={request} right />
+                  <th className="py-3 pr-5 text-right pb-2 font-mono text-[10px] tracking-wide3">0s</th>
                 </tr>
               </thead>
               <tbody>
@@ -313,11 +323,11 @@ function BattingTab({ batting, seasonStats, seasons }) {
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.batting_innings)}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_runs)}</td>
                     <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.batting_average, true)}</td>
-                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.strike_rate, true)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.high_score)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.hundreds)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.fifties)}</td>
-                    <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">{fmt(s.total_sixes)}</td>
+                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.total_fours)}</td>
+                    <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">{fmt(s.ducks)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -340,13 +350,12 @@ function BowlingTab({ bowling, seasonStats }) {
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-x-6 gap-y-4">
           {[
             ['WICKETS', bowling.total_wickets, true],
-            ['OVERS', fmt(bowling.bowling_overs, true)],
-            ['AVERAGE', fmt(bowling.bowling_average, true)],
-            ['ECONOMY', fmt(bowling.bowling_economy, true)],
-            ['STRIKE RATE', fmt(bowling.bowling_strike_rate, true)],
-            ['5-FORS', bowling.five_wicket_innings ?? 0],
+            ['OVERS', bowling.total_overs != null ? Number(bowling.total_overs).toFixed(1) : '—'],
+            ['AVERAGE', fmtDec(bowling.average)],
+            ['ECONOMY', fmtDec(bowling.economy)],
+            ['5-FORS', bowling.five_fors ?? 0],
             ['MAIDENS', bowling.total_maidens ?? 0],
-            ['BEST', bowling.best_bowling_wickets ? `${bowling.best_bowling_wickets}/${bowling.best_bowling_runs ?? '?'}` : '—'],
+            ['BEST', bowling.best_bowling_figures || (bowling.best_figures_wickets ? `${bowling.best_figures_wickets}w` : '—')],
           ].map(([label, value, accent]) => (
             <div key={label} className="flex flex-col">
               <span className="font-mono text-[9.5px] tracking-wide3 text-pb-faint">{label}</span>
@@ -367,10 +376,10 @@ function BowlingTab({ bowling, seasonStats }) {
                 <tr>
                   <th className="py-3 pl-5 text-left pb-2">SEASON</th>
                   <SortTh label="WKTS" sKey="total_wickets" cur={sortKey} dir={sortDir} onSort={request} right />
-                  <SortTh label="OV" sKey="bowling_overs" cur={sortKey} dir={sortDir} onSort={request} right />
+                  <SortTh label="OV" sKey="total_overs" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="AVG" sKey="bowling_average" cur={sortKey} dir={sortDir} onSort={request} right />
-                  <SortTh label="ECON" sKey="bowling_economy" cur={sortKey} dir={sortDir} onSort={request} right />
-                  <SortTh label="5W" sKey="five_wicket_innings" cur={sortKey} dir={sortDir} onSort={request} right />
+                  <SortTh label="ECON" sKey="economy" cur={sortKey} dir={sortDir} onSort={request} right />
+                  <SortTh label="5W" sKey="five_fors" cur={sortKey} dir={sortDir} onSort={request} right />
                   <th className="py-3 pr-5 text-right pb-2 font-mono text-[10px] tracking-wide3">BEST</th>
                 </tr>
               </thead>
@@ -379,12 +388,12 @@ function BowlingTab({ bowling, seasonStats }) {
                   <tr key={s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{s.season_name}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_wickets)}</td>
-                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.bowling_overs, true)}</td>
+                    <td className="py-2.5 font-mono text-pb-dim text-right">{s.total_overs != null ? Number(s.total_overs).toFixed(1) : '—'}</td>
                     <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.bowling_average, true)}</td>
-                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.bowling_economy, true)}</td>
-                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.five_wicket_innings)}</td>
+                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmtDec(s.economy)}</td>
+                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.five_fors)}</td>
                     <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">
-                      {s.best_bowling_wickets ? `${s.best_bowling_wickets}/${s.best_bowling_runs ?? '?'}` : '—'}
+                      {s.best_bowling_figures || (s.best_bowling_wickets ? `${s.best_bowling_wickets}w` : '—')}
                     </td>
                   </tr>
                 ))}
@@ -677,6 +686,12 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   const seasonMap = Object.fromEntries(seasons.map(s => [s.id, s.name]))
   const seasonDisplay = (s) => !s || s === 'All Time' ? 'All Time' : (seasonMap[s] || s.replace(/_/g, '/'))
 
+  const openEdit = (a) => {
+    setForm({ season: a.season||'', season_end: a.season_end||'', category: a.category, subcategory: a.subcategory||'', achievement: a.achievement, detail: a.detail||'' })
+    setCustomSubcat(false); setCustomAchievement(false)
+    setEditId(a.id); setAdding(true)
+  }
+
   const handleSave = async () => {
     if (!form.achievement.trim() || !form.category) return
     setSaving(true); setFormError(null)
@@ -699,7 +714,6 @@ function AchievementsSection({ playerId, orgId, playerName }) {
 
   if (achievements === null) return <PbSpinner />
 
-  // Partition
   const honours = [], roles = [], awards = [], milestones = []
   for (const a of achievements) {
     if (['Hall of Fame', 'Life Membership', 'Premiership'].includes(a.category) ||
@@ -726,18 +740,36 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   const inputCls = 'w-full bg-pb-surface border border-pb-hairline2 text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent placeholder-pb-faintest'
   const selectCls = inputCls + ' cursor-pointer'
 
-  const renderBadge = (a) => (
-    <span key={a.id}
-      className="inline-flex items-center gap-1 font-mono text-[10.5px] tracking-wide2 px-2.5 py-1 rounded-sm border border-pb-hairline2 text-pb-dim bg-pb-surface2"
-    >
-      {formatAchievementBadge(a, seasons)}
+  const seasonRange = (a) => {
+    const s = seasonDisplay(a.season)
+    if (a.season_end && a.season_end !== a.season) return `${s}–${seasonDisplay(a.season_end)}`
+    return s
+  }
+
+  const AchievementCard = ({ a, accent = false }) => (
+    <div className="relative group rounded border pb-hairline p-4 bg-pb-surface hover:bg-pb-surface2 transition-colors"
+         style={accent ? { borderColor: 'color-mix(in srgb, var(--pb-amber) 40%, transparent)', background: 'color-mix(in srgb, var(--pb-amber) 5%, transparent)' } : {}}>
+      <div className="flex items-start gap-3">
+        <ThiingIcon src={CATEGORY_ICON_SRC[a.category] || thiings.trophy} alt="" className="w-7 h-7 shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest uppercase mb-0.5">{a.category}</div>
+          <div className="text-pb-text text-[14px] font-semibold leading-tight">{a.achievement}</div>
+          {(a.subcategory || a.detail) && (
+            <div className="font-mono text-[11px] text-pb-dim mt-0.5">
+              {a.subcategory && <span>{a.subcategory}</span>}
+              {a.detail && <span className="ml-1" style={{ color: 'var(--pb-accent)' }}>{a.detail}</span>}
+            </div>
+          )}
+          <div className="font-mono text-[10px] text-pb-faint tracking-wide2 mt-1">{seasonRange(a)}</div>
+        </div>
+      </div>
       {canEdit && (
-        <>
-          <button onClick={() => { setForm({ season: a.season||'', season_end: a.season_end||'', category: a.category, subcategory: a.subcategory||'', achievement: a.achievement, detail: a.detail||'' }); setEditId(a.id); setAdding(true) }} className="ml-1 text-pb-faint hover:text-pb-text">✎</button>
-          <button onClick={() => handleDelete(a.id)} className="text-pb-faint hover:text-pb-red">×</button>
-        </>
+        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={() => openEdit(a)} className="text-[10px] text-pb-faint hover:text-pb-text px-1.5 py-0.5 rounded hover:bg-pb-surface2">Edit</button>
+          <button onClick={() => handleDelete(a.id)} className="text-[10px] text-pb-red hover:text-pb-red px-1.5 py-0.5 rounded hover:bg-pb-surface2">✕</button>
+        </div>
       )}
-    </span>
+    </div>
   )
 
   return (
@@ -766,6 +798,15 @@ function AchievementsSection({ playerId, orgId, playerName }) {
                 {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
+            {form.category === 'Office Bearer' && (
+              <div>
+                <Label className="block mb-1">Season End</Label>
+                <select className={selectCls} value={form.season_end} onChange={e => setForm(f => ({ ...f, season_end: e.target.value }))}>
+                  <option value="">Present</option>
+                  {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <Label className="block mb-1">Subcategory</Label>
               {customSubcat
@@ -790,7 +831,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
             </div>
             <div>
               <Label className="block mb-1">Detail (optional)</Label>
-              <input className={inputCls} value={form.detail} onChange={e => setForm(f => ({ ...f, detail: e.target.value }))} placeholder="e.g. #32" />
+              <input className={inputCls} value={form.detail} onChange={e => setForm(f => ({ ...f, detail: e.target.value }))} placeholder="e.g. #32, 436 runs at 39.64" />
             </div>
           </div>
           {formError && <p className="text-pb-red text-sm mt-2">{formError}</p>}
@@ -808,23 +849,36 @@ function AchievementsSection({ playerId, orgId, playerName }) {
       {honours.length > 0 && (
         <div>
           <Label className="block mb-3">HONOURS</Label>
-          <div className="flex flex-wrap gap-2">{honours.map(renderBadge)}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {honours.map(a => <AchievementCard key={a.id} a={a} accent />)}
+          </div>
         </div>
       )}
       {rolesList.length > 0 && (
         <div>
           <Label className="block mb-3">ROLES</Label>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {rolesList.map((g, i) => {
               const seasons_str = g.instances.map(inst => formatSeasonShort(inst.season, seasons)).filter(Boolean).join(', ')
               return (
-                <span key={i} className="inline-flex items-center gap-1 font-mono text-[10.5px] tracking-wide2 px-2.5 py-1 rounded-sm border border-pb-hairline2 text-pb-dim bg-pb-surface2">
-                  {g.subcategory ? `${g.subcategory} – ` : ''}{g.achievement}{seasons_str ? ` (${seasons_str})` : ''}
-                  {canEdit && <>
-                    <button onClick={() => { const a = g.instances[0]; setForm({ season: a.season||'', season_end: a.season_end||'', category: a.category, subcategory: a.subcategory||'', achievement: a.achievement, detail: a.detail||'' }); setEditId(a.id); setAdding(true) }} className="ml-1 text-pb-faint hover:text-pb-text">✎</button>
-                    <button onClick={() => handleDelete(g.instances[0].id)} className="text-pb-faint hover:text-pb-red">×</button>
-                  </>}
-                </span>
+                <div key={i} className="relative group rounded border pb-hairline p-4 bg-pb-surface hover:bg-pb-surface2 transition-colors">
+                  <div className="flex items-start gap-3">
+                    <ThiingIcon src={CATEGORY_ICON_SRC['Office Bearer'] || thiings.necktie} alt="" className="w-7 h-7 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest uppercase mb-0.5">Office Bearer</div>
+                      <div className="text-pb-text text-[14px] font-semibold leading-tight">{g.achievement}</div>
+                      {g.subcategory && <div className="font-mono text-[11px] text-pb-dim mt-0.5">{g.subcategory}</div>}
+                      {seasons_str && <div className="font-mono text-[10px] text-pb-faint tracking-wide2 mt-1">{seasons_str}</div>}
+                    </div>
+                    <span className="font-mono text-[10px] text-pb-faintest shrink-0">{g.instances.length}×</span>
+                  </div>
+                  {canEdit && (
+                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => openEdit(g.instances[0])} className="text-[10px] text-pb-faint hover:text-pb-text px-1.5 py-0.5 rounded hover:bg-pb-surface2">Edit</button>
+                      <button onClick={() => handleDelete(g.instances[0].id)} className="text-[10px] text-pb-red px-1.5 py-0.5 rounded hover:bg-pb-surface2">✕</button>
+                    </div>
+                  )}
+                </div>
               )
             })}
           </div>
@@ -833,13 +887,17 @@ function AchievementsSection({ playerId, orgId, playerName }) {
       {awards.length > 0 && (
         <div>
           <Label className="block mb-3">AWARDS</Label>
-          <div className="flex flex-wrap gap-2">{awards.map(renderBadge)}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {awards.map(a => <AchievementCard key={a.id} a={a} />)}
+          </div>
         </div>
       )}
       {milestones.length > 0 && (
         <div>
           <Label className="block mb-3">MILESTONES</Label>
-          <div className="flex flex-wrap gap-2">{milestones.map(renderBadge)}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {milestones.map(a => <AchievementCard key={a.id} a={a} />)}
+          </div>
         </div>
       )}
     </div>
@@ -951,7 +1009,7 @@ export default function PlayerProfile() {
             {headerAchievements.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-3">
                 {headerAchievements.map(a => (
-                  <span key={a.id} className="font-mono text-[10px] tracking-wide2 px-2 py-0.5 rounded-sm border border-pb-hairline2 text-pb-dim">
+                  <span key={a.id} className="font-mono text-[10px] tracking-wide2 px-2.5 py-1 rounded-sm border text-[11px]" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)', color: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' }}>
                     {formatAchievementBadge(a, seasons)}
                   </span>
                 ))}
@@ -980,23 +1038,16 @@ export default function PlayerProfile() {
         {seasons.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 mb-5">
             <Label>SEASON</Label>
-            <div className="flex border border-pb-hairline2 rounded overflow-hidden">
-              <button
-                onClick={() => setSeasonId(null)}
-                className={`px-2.5 py-1.5 font-mono text-[10.5px] tracking-wide2 ${!seasonId ? 'text-pb-text bg-pb-surface2' : 'text-pb-faint hover:text-pb-dim'}`}
-              >
-                ALL
-              </button>
-              {seasons.slice(0, 8).map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => setSeasonId(s.id)}
-                  className={`px-2.5 py-1.5 font-mono text-[10.5px] tracking-wide2 ${seasonId === s.id ? 'text-pb-text bg-pb-surface2' : 'text-pb-faint hover:text-pb-dim'}`}
-                >
-                  {s.name?.replace(/Summer /i, '').replace(/Winter /i, '') || s.id}
-                </button>
+            <select
+              value={seasonId || ''}
+              onChange={e => setSeasonId(e.target.value || null)}
+              className="bg-pb-surface border border-pb-hairline2 text-pb-text text-[11px] font-mono rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent cursor-pointer"
+            >
+              <option value="">All Seasons</option>
+              {seasons.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
               ))}
-            </div>
+            </select>
           </div>
         )}
 

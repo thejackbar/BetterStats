@@ -459,6 +459,12 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db)):
     if not keep:
         raise HTTPException(status_code=404, detail="Keep player no longer exists")
 
+    # Reverse playhq_id copy on keep player FIRST, before re-creating the removed player,
+    # to avoid unique constraint violation (organisation_id, playhq_id).
+    if log["keep_original_playhq_id"] is None and log["removed_player_playhq_id"]:
+        keep.playhq_id = None
+        await db.flush()
+
     # Re-create removed player
     await db.execute(
         text("""
@@ -473,10 +479,6 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db)):
             "playhq_id": log["removed_player_playhq_id"],
         },
     )
-
-    # Reverse playhq_id copy on keep player if we were the ones who set it
-    if log["keep_original_playhq_id"] is None and log["removed_player_playhq_id"]:
-        keep.playhq_id = None
 
     # Reassign game-level records back
     bat_ids = json.loads(log["batting_innings_ids"] or "[]")

@@ -120,7 +120,6 @@ export default function Players() {
                     <th className="font-medium py-3 text-right">AVG</th>
                     <th className="font-medium py-3 text-right">HS</th>
                     <th className="font-medium py-3 text-right hidden md:table-cell">50s</th>
-                    <th className="font-medium py-3 text-right hidden md:table-cell">100s</th>
                     <th className="font-medium py-3 text-right hidden lg:table-cell" style={{ color: 'var(--pb-accent)' }}>WKTS</th>
                     <th className="font-medium py-3 text-right hidden lg:table-cell">BEST</th>
                     <th className="font-medium py-3 pr-5 w-16"></th>
@@ -129,7 +128,7 @@ export default function Players() {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center text-pb-faint text-sm">
+                      <td colSpan={10} className="py-12 text-center text-pb-faint text-sm">
                         {search ? `No players matching "${search}"` : 'No players found.'}
                       </td>
                     </tr>
@@ -156,12 +155,6 @@ export default function Players() {
                         <td className="py-3 font-mono text-pb-dim text-right">{b?.average ?? '—'}</td>
                         <td className="py-3 font-mono text-pb-dim text-right">{b?.high_score ?? '—'}</td>
                         <td className="py-3 font-mono text-pb-dim text-right hidden md:table-cell">{b?.fifties ?? '—'}</td>
-                        <td className="py-3 font-mono text-right hidden md:table-cell">
-                          <span className={b?.hundreds > 0 ? 'font-bold pb-num' : 'text-pb-faintest'}
-                            style={b?.hundreds > 0 ? { color: 'var(--pb-amber)' } : {}}>
-                            {b?.hundreds ?? '—'}
-                          </span>
-                        </td>
                         <td className="py-3 text-right hidden lg:table-cell">
                           <span className="font-mono font-bold pb-num" style={{ color: bw?.total_wickets > 0 ? 'var(--pb-accent)' : undefined }}>
                             {bw?.total_wickets ?? '—'}
