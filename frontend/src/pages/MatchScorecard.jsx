@@ -168,16 +168,16 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
       </div>
 
       {/* Batting table */}
-      <div className="overflow-x-auto pb-scroll">
+      <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
         <table className="w-full text-[13px]">
           <thead>
-            <tr className="text-pb-faintest font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/30">
+            <tr className="font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/30" style={{ color: 'var(--pb-faintest)' }}>
               <th className="font-medium py-2 pl-5 pr-3">BATTER</th>
-              <th className="font-medium py-2 pr-3 text-left font-mono text-[10px] text-pb-faintest hidden sm:table-cell">DISMISSAL</th>
+              <th className="font-medium py-2 pr-3 text-left max-sm:hidden">DISMISSAL</th>
               <th className="font-medium py-2 px-3 text-right w-12" style={{ color: 'var(--pb-accent)' }}>R</th>
               <th className="font-medium py-2 px-2 text-right w-10">B</th>
-              <th className="font-medium py-2 px-2 text-right w-8 font-mono text-[10px] max-md:hidden" style={{ color: 'var(--pb-faintest)' }}>4s</th>
-              <th className="font-medium py-2 pr-4 text-right w-8 font-mono text-[10px] max-md:hidden" style={{ color: 'var(--pb-faintest)' }}>6s</th>
+              <th className="font-medium py-2 px-2 text-right w-8 max-md:hidden">4s</th>
+              <th className="font-medium py-2 pr-4 text-right w-8 max-md:hidden">6s</th>
             </tr>
           </thead>
           <tbody>
@@ -189,7 +189,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
                     : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
                   }
                 </td>
-                <td className="py-2 pr-5 font-mono text-[12px] text-pb-faint capitalize whitespace-nowrap hidden sm:table-cell">
+                <td className="py-2 pr-5 font-mono text-[12px] capitalize whitespace-nowrap max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
                   {row.not_out ? 'not out' : row.dismissal_type || '—'}
                 </td>
                 <td className="py-2 px-3 text-right w-12">
@@ -233,18 +233,18 @@ function BowlingCard({ label, teamName, bowling = [] }) {
           <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest mt-0.5">{label} · BOWLING</div>
         </div>
       </div>
-      <div className="overflow-x-auto pb-scroll">
+      <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
         <table className="w-full text-[13px]">
           <thead>
-            <tr className="text-pb-faintest font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/30">
+            <tr className="font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/30" style={{ color: 'var(--pb-faintest)' }}>
               <th className="font-medium py-2 pl-5">BOWLER</th>
-              <th className="font-medium py-2 px-3 text-right">O</th>
-              <th className="font-medium py-2 px-3 text-right hidden sm:table-cell">M</th>
-              <th className="font-medium py-2 px-3 text-right">R</th>
+              <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-text)' }}>O</th>
+              <th className="font-medium py-2 px-3 text-right max-sm:hidden">M</th>
+              <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-text)' }}>R</th>
               <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-accent)' }}>W</th>
-              <th className="font-medium py-2 px-3 text-right hidden sm:table-cell">ECON</th>
-              <th className="font-medium py-2 px-3 text-right font-mono text-[10px] max-md:hidden" style={{ color: 'var(--pb-faintest)' }}>WD</th>
-              <th className="font-medium py-2 pr-5 text-right font-mono text-[10px] max-md:hidden" style={{ color: 'var(--pb-faintest)' }}>NB</th>
+              <th className="font-medium py-2 px-3 text-right max-sm:hidden">ECON</th>
+              <th className="font-medium py-2 px-3 text-right max-md:hidden">WD</th>
+              <th className="font-medium py-2 pr-5 text-right max-md:hidden">NB</th>
             </tr>
           </thead>
           <tbody>
@@ -256,9 +256,9 @@ function BowlingCard({ label, teamName, bowling = [] }) {
                     : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
                   }
                 </td>
-                <td className="py-2 px-3 font-mono font-semibold text-[13px] text-pb-text text-right">{row.overs ?? '—'}</td>
-                <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right hidden sm:table-cell">{row.maidens ?? 0}</td>
-                <td className="py-2 px-3 font-mono font-semibold text-[13px] text-pb-text text-right">{row.runs ?? '—'}</td>
+                <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{row.overs ?? '—'}</td>
+                <td className="py-2 px-3 font-mono text-[12px] text-right max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>{row.maidens ?? 0}</td>
+                <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{row.runs ?? '—'}</td>
                 <td className="py-2 px-3 text-right">
                   <span
                     className="font-mono font-bold text-[13px] pb-num"
@@ -267,7 +267,7 @@ function BowlingCard({ label, teamName, bowling = [] }) {
                     {row.wickets ?? 0}
                   </span>
                 </td>
-                <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right hidden sm:table-cell">
+                <td className="py-2 px-3 font-mono text-[12px] text-right max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
                   {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
                 </td>
                 <td className="py-2 px-3 font-mono text-[12px] text-right max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.wides ?? 0}</td>
