@@ -3,6 +3,231 @@ import { useParams, Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { PbSpinner, Btn } from '../../lib/presskit'
 
+const SECTION_PRESETS = [
+  { type: 'presidents_report',  label: "President's Report" },
+  { type: 'treasurers_report',  label: "Treasurer's Report" },
+  { type: 'secretarys_report',  label: "Secretary's Report" },
+  { type: 'coachs_report',      label: "Coach's Report" },
+  { type: 'sponsors_message',   label: "Sponsor's Message" },
+  { type: 'custom',             label: 'Custom' },
+]
+
+function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
+  const [adding, setAdding] = useState(false)
+  const [newType, setNewType] = useState('')
+  const [newTitle, setNewTitle] = useState('')
+  const [creating, setCreating] = useState(false)
+  // Per-section editor state: { [id]: { content, title, dirty, saving } }
+  const [editors, setEditors] = useState({})
+
+  const setEditor = (id, patch) =>
+    setEditors(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
+
+  const getEditor = (s) =>
+    editors[s.id] ?? { content: s.content_markdown || '', title: s.title || '', dirty: false, saving: false }
+
+  // Sync editors when sections reload
+  useEffect(() => {
+    setEditors(prev => {
+      const next = { ...prev }
+      sections.forEach(s => {
+        if (!next[s.id]) {
+          next[s.id] = { content: s.content_markdown || '', title: s.title || '', dirty: false, saving: false }
+        }
+      })
+      return next
+    })
+  }, [sections])
+
+  const handleCreate = async () => {
+    if (!newType) return
+    const preset = SECTION_PRESETS.find(p => p.type === newType)
+    const title = newType === 'custom' ? (newTitle.trim() || 'Custom Section') : preset.label
+    setCreating(true)
+    try {
+      await api.createYearbookSection(orgId, seasonId, {
+        section_type: newType,
+        title,
+        content_markdown: '',
+        sort_order: sections.length,
+        is_enabled: false,
+      })
+      setAdding(false)
+      setNewType('')
+      setNewTitle('')
+      onRefresh()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleSave = async (s) => {
+    const ed = getEditor(s)
+    setEditor(s.id, { saving: true })
+    try {
+      await api.updateYearbookSection(orgId, seasonId, s.id, {
+        section_type: s.section_type,
+        title: ed.title,
+        content_markdown: ed.content,
+        sort_order: s.sort_order,
+        is_enabled: s.is_enabled,
+      })
+      setEditor(s.id, { dirty: false, saving: false })
+      onRefresh()
+    } catch (e) {
+      setEditor(s.id, { saving: false })
+    }
+  }
+
+  const handleToggle = async (s) => {
+    const ed = getEditor(s)
+    try {
+      await api.updateYearbookSection(orgId, seasonId, s.id, {
+        section_type: s.section_type,
+        title: ed.title,
+        content_markdown: ed.content,
+        sort_order: s.sort_order,
+        is_enabled: !s.is_enabled,
+      })
+      onRefresh()
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const handleDelete = async (s) => {
+    if (!confirm(`Delete "${s.title}"? This cannot be undone.`)) return
+    try {
+      await api.deleteYearbookSection(orgId, seasonId, s.id)
+      onRefresh()
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-[13px] font-semibold text-white/90">Editorial Sections</h2>
+          <p className="text-[11px] text-white/40 mt-0.5">
+            Optional club reports shown on the public yearbook — toggle each one on/off.
+          </p>
+        </div>
+        {!adding && (
+          <Btn onClick={() => setAdding(true)}>+ Add Section</Btn>
+        )}
+      </div>
+
+      {/* Existing sections */}
+      {sections.length === 0 && !adding && (
+        <p className="text-[12px] text-white/25 italic mb-3">No sections yet. Add a President's Report, Sponsor's Message, or any custom section.</p>
+      )}
+
+      <div className="space-y-4">
+        {sections.map(s => {
+          const ed = getEditor(s)
+          return (
+            <div key={s.id} className="rounded-lg border border-white/8 bg-white/2 p-4">
+              {/* Section header */}
+              <div className="flex items-center gap-3 mb-3">
+                <input
+                  type="text"
+                  value={ed.title}
+                  onChange={e => setEditor(s.id, { title: e.target.value, dirty: true })}
+                  className="flex-1 bg-transparent border-b border-white/10 focus:border-white/25 text-[13px] font-semibold text-white/80 py-0.5 focus:outline-none"
+                />
+                {/* Toggle */}
+                <button
+                  onClick={() => handleToggle(s)}
+                  title={s.is_enabled ? 'Visible on public page' : 'Hidden — toggle to show'}
+                  className={`shrink-0 px-2.5 py-1 rounded border text-[10px] font-mono transition-colors ${
+                    s.is_enabled
+                      ? 'border-green-500/30 text-green-400 bg-green-500/10'
+                      : 'border-white/15 text-white/30 hover:border-white/25'
+                  }`}
+                >
+                  {s.is_enabled ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  onClick={() => handleDelete(s)}
+                  className="shrink-0 text-white/20 hover:text-red-400/70 transition text-[12px] font-mono"
+                  title="Delete section"
+                >
+                  Delete
+                </button>
+              </div>
+
+              {/* Content textarea */}
+              <textarea
+                value={ed.content}
+                onChange={e => setEditor(s.id, { content: e.target.value, dirty: true })}
+                rows={7}
+                placeholder="Write your content here…"
+                className="w-full rounded bg-white/5 border border-white/10 text-white/75 text-sm px-3 py-2.5 resize-y font-sans leading-relaxed focus:outline-none focus:border-white/25 placeholder:text-white/20"
+              />
+
+              <div className="flex items-center justify-between mt-2.5">
+                <span className="text-[10px] font-mono text-white/20">
+                  {ed.content.length} chars
+                  {ed.dirty && <span className="ml-2 text-amber-400/60">· unsaved</span>}
+                </span>
+                <Btn onClick={() => handleSave(s)} disabled={ed.saving || !ed.dirty}>
+                  {ed.saving ? 'Saving…' : 'Save'}
+                </Btn>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Add section form */}
+      {adding && (
+        <div className="mt-4 rounded-lg border border-white/10 bg-white/3 p-4 space-y-3">
+          <p className="text-[12px] font-semibold text-white/70">Choose section type</p>
+          <div className="flex flex-wrap gap-2">
+            {SECTION_PRESETS.map(p => (
+              <button
+                key={p.type}
+                onClick={() => setNewType(p.type)}
+                className={`px-3 py-1.5 rounded border text-[12px] font-mono transition-colors ${
+                  newType === p.type
+                    ? 'border-pb-accent/50 text-pb-accent bg-pb-accent/10'
+                    : 'border-white/15 text-white/40 hover:border-white/25 hover:text-white/60'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {newType === 'custom' && (
+            <input
+              type="text"
+              value={newTitle}
+              onChange={e => setNewTitle(e.target.value)}
+              placeholder="Section title…"
+              className="w-full rounded bg-white/5 border border-white/10 text-white/80 text-[13px] px-3 py-2 focus:outline-none focus:border-white/25 placeholder:text-white/20"
+            />
+          )}
+          <div className="flex items-center gap-2">
+            <Btn onClick={handleCreate} disabled={creating || !newType}>
+              {creating ? 'Creating…' : 'Create Section'}
+            </Btn>
+            <button
+              onClick={() => { setAdding(false); setNewType(''); setNewTitle('') }}
+              className="px-3 py-1.5 text-[12px] font-mono text-white/30 hover:text-white/50 transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const PRESET_POSITIONS = [
   'President', 'Vice President', 'Secretary', 'Treasurer',
   'Captain (1st Grade)', 'Vice Captain (1st Grade)',
@@ -433,6 +658,14 @@ export default function AdminYearbookDetail() {
           </Btn>
         </div>
       </div>
+
+      {/* Editorial Sections */}
+      <CustomSectionsPanel
+        orgId={org.id}
+        seasonId={seasonId}
+        sections={(yearbook.sections || []).filter(s => s.section_type !== 'narrative')}
+        onRefresh={load}
+      />
 
       {/* Honour Board */}
       <HonourBoardSection

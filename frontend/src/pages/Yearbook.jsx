@@ -92,7 +92,7 @@ function StatCallout({ value, label, sub, accent = false }) {
 
 // ─── Overview tab ────────────────────────────────────────────────────────────
 
-function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative }) {
+function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, customSections }) {
   const [overview, setOverview] = useState(null)
   const [superlatives, setSuperlatives] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -143,6 +143,16 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative }) 
           <p className="text-white/25 text-sm mt-1">Editorial content coming in v4.1 — admin can write or AI-generate this section.</p>
         </div>
       )}
+
+      {/* Custom editorial sections (Presidents Report, etc.) */}
+      {customSections?.length > 0 && customSections.map(s => (
+        <div key={s.id} className="rounded-xl border border-white/8 bg-white/3 px-6 py-5">
+          <p className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-3">{s.title}</p>
+          <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed whitespace-pre-wrap">
+            {s.content_markdown}
+          </div>
+        </div>
+      ))}
 
       {/* By the Numbers */}
       {superlatives && (
@@ -873,6 +883,7 @@ export default function Yearbook() {
 
   const season = yearbook.season
   const narrative = yearbook.sections?.find(s => s.section_type === 'narrative' && s.is_enabled)?.content_markdown
+  const customSections = yearbook.sections?.filter(s => s.section_type !== 'narrative' && s.is_enabled && s.content_markdown) || []
 
   const orgId = club.id
   const seasonId = season?.id
@@ -950,7 +961,7 @@ export default function Yearbook() {
       {/* Tab content */}
       <div className="max-w-5xl mx-auto px-4 py-8">
         {activeTab === 'overview' && (
-          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} />
+          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} customSections={customSections} />
         )}
         {activeTab === 'results' && (
           <ResultsTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />
