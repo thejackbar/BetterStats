@@ -177,19 +177,24 @@ async def get_overview(
     grade_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    grade_join = ""
-    grade_where = ""
     params: dict = {"o": org_id, "s": season_id}
+    grade_filter = ""
     if grade_id:
-        grade_join = "JOIN grades g ON g.id = pss.grade_id"
-        grade_where = "AND pss.grade_id = :gid"
+        grade_filter = """
+            AND pss.player_id IN (
+                SELECT DISTINCT bi.player_id
+                FROM batting_innings bi
+                JOIN games gm ON gm.id = bi.game_id
+                WHERE gm.grade_id = :gid
+            )
+        """
         params["gid"] = grade_id
 
     row = await db.execute(
         text(f"""
             SELECT
                 COUNT(DISTINCT pss.player_id) AS total_players,
-                COUNT(DISTINCT g2.id) AS total_grades,
+                (SELECT COUNT(DISTINCT g.id) FROM grades g WHERE g.season_id = :s) AS total_grades,
                 COALESCE(SUM(pss.matches), 0) / GREATEST(COUNT(DISTINCT pss.player_id), 1) AS avg_matches_per_player,
                 COALESCE(SUM(pss.runs), 0) AS total_runs,
                 COALESCE(SUM(pss.wickets), 0) AS total_wickets,
@@ -198,12 +203,10 @@ async def get_overview(
                 COALESCE(SUM(pss.hundreds), 0) AS total_hundreds,
                 COALESCE(SUM(pss.catches + pss.run_outs + pss.stumpings), 0) AS total_dismissals
             FROM player_season_stats pss
-            {grade_join}
-            JOIN grades g2 ON g2.id = pss.grade_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE pss.season_id = :s
               AND s.organisation_id = :o
-              {grade_where}
+              {grade_filter}
         """),
         params,
     )
@@ -253,8 +256,9 @@ async def get_batting_stats(
     db: AsyncSession = Depends(get_db),
 ):
     params: dict = {"o": org_id, "s": season_id, "min_inn": min_innings, "limit": limit}
-    grade_where = "AND pss.grade_id = :gid" if grade_id else ""
+    grade_where = ""
     if grade_id:
+        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM batting_innings bi JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
         params["gid"] = grade_id
 
     rows = await db.execute(
@@ -302,8 +306,9 @@ async def get_bowling_stats(
     db: AsyncSession = Depends(get_db),
 ):
     params: dict = {"o": org_id, "s": season_id, "min_wkts": min_wickets, "limit": limit}
-    grade_where = "AND pss.grade_id = :gid" if grade_id else ""
+    grade_where = ""
     if grade_id:
+        grade_where = "AND pss.player_id IN (SELECT DISTINCT bs.player_id FROM bowling_spells bs JOIN games gm ON gm.id = bs.game_id WHERE gm.grade_id = :gid)"
         params["gid"] = grade_id
 
     rows = await db.execute(
@@ -349,8 +354,9 @@ async def get_fielding_stats(
     db: AsyncSession = Depends(get_db),
 ):
     params: dict = {"o": org_id, "s": season_id, "limit": limit}
-    grade_where = "AND pss.grade_id = :gid" if grade_id else ""
+    grade_where = ""
     if grade_id:
+        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM batting_innings bi JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
         params["gid"] = grade_id
 
     rows = await db.execute(
@@ -393,8 +399,9 @@ async def get_allrounder_stats(
     db: AsyncSession = Depends(get_db),
 ):
     params: dict = {"o": org_id, "s": season_id, "min_runs": min_runs, "min_wkts": min_wickets, "limit": limit}
-    grade_where = "AND pss.grade_id = :gid" if grade_id else ""
+    grade_where = ""
     if grade_id:
+        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM batting_innings bi JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
         params["gid"] = grade_id
 
     rows = await db.execute(
