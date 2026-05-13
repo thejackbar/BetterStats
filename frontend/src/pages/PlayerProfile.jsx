@@ -278,9 +278,9 @@ function BattingTab({ batting, seasonStats, seasons }) {
       <Card title="CAREER BATTING">
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-x-6 gap-y-4">
           {[
-            ['INNINGS', batting.batting_innings],
+            ['INNINGS', batting.innings],
             ['RUNS', batting.total_runs, true],
-            ['AVERAGE', fmtDec(batting.batting_average)],
+            ['AVERAGE', fmtDec(batting.average)],
             ['HIGH SCORE', batting.high_score],
             ['100s · 50s', `${batting.hundreds ?? 0} · ${batting.fifties ?? 0}`],
             ['4s', batting.total_fours ?? 0],
@@ -1079,7 +1079,7 @@ export default function PlayerProfile() {
                   <div className="pb-card p-3 flex flex-col gap-1">
                     <Label>INNINGS</Label>
                     <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
-                      <AnimatedNum value={batting.batting_innings || 0} />
+                      <AnimatedNum value={batting.innings || 0} />
                     </span>
                   </div>
                   <div className="pb-card p-3 flex flex-col gap-1">
