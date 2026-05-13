@@ -16,6 +16,7 @@ export default function AdminDashboard() {
 
   const quickLinks = [
     { to: '/admin/players', label: 'Manage Players', desc: 'Edit display names' },
+    { to: '/admin/yearbook', label: 'Yearbooks', desc: 'Publish season yearbooks' },
     { to: '/admin/awards', label: 'Awards', desc: 'Add season awards & achievements' },
     { to: '/admin/merge', label: 'Merge Players', desc: 'Fix duplicate player entries' },
     { to: '/admin/sync', label: 'Data Sync', desc: 'Trigger sync & view sync log' },

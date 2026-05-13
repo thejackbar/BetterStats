@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -118,6 +118,75 @@ async def lifespan(app: FastAPI):
                 updated_at = NOW()
             WHERE status = 'running'
         """))
+        # Yearbook tables (v4)
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS yearbooks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                status TEXT NOT NULL DEFAULT 'draft',
+                published_at TIMESTAMPTZ,
+                hero_image_path TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (org_id, season_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_yearbooks_status ON yearbooks(status)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS yearbook_sections (
+                id SERIAL PRIMARY KEY,
+                yearbook_id UUID NOT NULL REFERENCES yearbooks(id) ON DELETE CASCADE,
+                section_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content_markdown TEXT,
+                ai_draft TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_enabled BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_yearbook_sections_yearbook ON yearbook_sections(yearbook_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS yearbook_honour_board (
+                id SERIAL PRIMARY KEY,
+                yearbook_id UUID NOT NULL REFERENCES yearbooks(id) ON DELETE CASCADE,
+                position_title TEXT NOT NULL,
+                player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                name_override TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_yearbook_honour_board_yearbook ON yearbook_honour_board(yearbook_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS yearbook_images (
+                id SERIAL PRIMARY KEY,
+                yearbook_id UUID NOT NULL REFERENCES yearbooks(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                caption TEXT,
+                image_type TEXT NOT NULL DEFAULT 'gallery',
+                section_id INTEGER,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_yearbook_images_yearbook ON yearbook_images(yearbook_id)"
+        ))
+    # Generate yearbook stubs for any seasons that don't have one yet
+    from app.models.db import async_session_maker as AsyncSessionLocal
+    from app.routers.yearbooks import generate_all_stubs
+    async with AsyncSessionLocal() as stub_session:
+        await generate_all_stubs(stub_session)
+
     start_scheduler()
     logger.info("BetterStats API started")
     yield
@@ -152,6 +221,7 @@ app.include_router(webhooks.router)
 app.include_router(admin.router)
 app.include_router(achievements.router)
 app.include_router(statlab.router)
+app.include_router(yearbooks.router)
 
 
 @app.get("/health")
