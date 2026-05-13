@@ -189,7 +189,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
                     : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
                   }
                 </td>
-                <td className="py-2 pr-4 text-pb-faint text-[12px] capitalize whitespace-nowrap hidden sm:table-cell">
+                <td className="py-2 pr-5 text-pb-dim text-[12px] capitalize whitespace-nowrap hidden sm:table-cell">
                   {row.not_out ? 'not out' : row.dismissal_type || '—'}
                 </td>
                 <td className="py-2 px-3 text-right w-12">
@@ -257,21 +257,21 @@ function BowlingCard({ label, teamName, bowling = [] }) {
                   }
                 </td>
                 <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right">{row.overs ?? '—'}</td>
-                <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right hidden sm:table-cell">{row.maidens ?? '—'}</td>
+                <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right hidden sm:table-cell">{row.maidens ?? 0}</td>
                 <td className="py-2 px-3 font-mono font-semibold text-[13px] text-pb-text text-right">{row.runs ?? '—'}</td>
                 <td className="py-2 px-3 text-right">
                   <span
                     className="font-mono font-bold text-[13px] pb-num"
                     style={{ color: row.wickets >= 5 ? 'var(--pb-amber)' : row.wickets >= 3 ? 'var(--pb-accent)' : 'var(--pb-text)' }}
                   >
-                    {row.wickets ?? '—'}
+                    {row.wickets ?? 0}
                   </span>
                 </td>
                 <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right hidden sm:table-cell">
                   {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
                 </td>
-                <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right hidden md:table-cell">{row.wides ?? '—'}</td>
-                <td className="py-2 pr-5 font-mono text-[12px] text-pb-faint text-right hidden md:table-cell">{row.no_balls ?? '—'}</td>
+                <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right hidden md:table-cell">{row.wides ?? 0}</td>
+                <td className="py-2 pr-5 font-mono text-[12px] text-pb-faint text-right hidden md:table-cell">{row.no_balls ?? 0}</td>
               </tr>
             ))}
           </tbody>
