@@ -10,6 +10,11 @@ import {
   AnimatedNum, Sparkline, Label, Card, Btn,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
+import {
+  BarChart, Bar, XAxis, YAxis,
+  CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  LineChart, Line, PieChart, Pie, Cell,
+} from 'recharts'
 
 const MAIN_TABS = [
   { key: 'batting',       label: 'BATTING' },
@@ -111,6 +116,144 @@ function SortTh({ label, sKey, cur, dir, onSort, dDir = 'desc', right = false })
     >
       {label}{active ? (dir === 'asc' ? ' ↑' : ' ↓') : ''}
     </th>
+  )
+}
+
+// ── Rank helpers for highlighting best/worst seasons ───────────────────────
+function computeRankSets(rows, key, direction = 'desc') {
+  if (!rows?.length) return { topIdx: new Set(), botIdx: new Set() }
+  const valid = rows.map((r, i) => ({ i, v: r[key] })).filter(x => x.v != null && !Number.isNaN(Number(x.v)))
+  if (valid.length < 2) return { topIdx: new Set(), botIdx: new Set() }
+  const sorted = [...valid].sort((a, b) => direction === 'desc' ? b.v - a.v : a.v - b.v)
+  const topN = Math.min(3, sorted.length - 1)
+  const topIdx = new Set(sorted.slice(0, topN).map(x => x.i))
+  const botIdx = new Set([sorted[sorted.length - 1]].filter(x => !topIdx.has(x.i)).map(x => x.i))
+  return { topIdx, botIdx }
+}
+
+function rankCls(i, topIdx, botIdx, defaultCls = 'text-pb-dim') {
+  if (topIdx.has(i)) return 'text-green-400 font-bold'
+  if (botIdx.has(i)) return 'text-red-400'
+  return defaultCls
+}
+
+// ── Charts ──────────────────────────────────────────────────────────────────
+const PIE_COLORS = ['#16c784', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#06b6d4', '#84cc16', '#f97316']
+
+const CHART_TOOLTIP_STYLE = {
+  contentStyle: { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: '#94a3b8' },
+  itemStyle: { color: '#fff' },
+}
+
+function DismissalDonut({ dismissals }) {
+  if (!dismissals?.length) return null
+  const total = dismissals.reduce((s, d) => s + Number(d.count), 0)
+  const pieData = dismissals.map(d => ({ name: d.dismissal_type || 'Unknown', value: Number(d.count) }))
+  return (
+    <div className="flex flex-col md:flex-row items-center gap-6">
+      <div className="w-44 h-44 shrink-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={72} dataKey="value" paddingAngle={2}>
+              {pieData.map((_, idx) => <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />)}
+            </Pie>
+            <Tooltip contentStyle={CHART_TOOLTIP_STYLE.contentStyle} formatter={(v) => [`${v} (${Math.round(v/total*100)}%)`, '']} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+        {dismissals.map((d, i) => (
+          <div key={i} className="flex items-center gap-2 text-sm">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+            <span className="capitalize text-pb-dim flex-1 truncate">{d.dismissal_type || 'Unknown'}</span>
+            <span className="font-mono font-bold text-pb-text">{d.count}</span>
+            <span className="font-mono text-pb-faint text-[11px] w-9 text-right">{Math.round(Number(d.count)/total*100)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SeasonChart({ data }) {
+  if (!data?.length) return null
+  const chartData = [...data].reverse()
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+        <XAxis dataKey="season_name" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis yAxisId="left" tick={{ fill: '#64748b', fontSize: 11 }} />
+        <YAxis yAxisId="right" orientation="right" tick={{ fill: '#64748b', fontSize: 11 }} />
+        <Tooltip {...CHART_TOOLTIP_STYLE} />
+        <Legend wrapperStyle={{ color: '#94a3b8', fontSize: 12 }} />
+        <Bar yAxisId="left" dataKey="total_runs" name="Runs" fill="#16c784" radius={[3,3,0,0]} />
+        <Bar yAxisId="right" dataKey="total_wickets" name="Wickets" fill="#3b82f6" radius={[3,3,0,0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+function CumulativeRunsChart({ seasonStats }) {
+  if (!seasonStats?.length) return null
+  let cumulative = 0
+  const chartData = [...seasonStats].reverse().map(s => {
+    cumulative += (s.total_runs ?? 0)
+    return { season: s.season_name?.replace('Summer ', '') ?? '', total: cumulative, season_runs: s.total_runs ?? 0 }
+  })
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+        <XAxis dataKey="season" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+        <Tooltip {...CHART_TOOLTIP_STYLE} formatter={(v, name) => [v.toLocaleString(), name === 'total' ? 'Career total' : 'Season runs']} />
+        <Bar dataKey="season_runs" name="season_runs" fill="#16c78440" radius={[2,2,0,0]} />
+        <Line type="monotone" dataKey="total" name="total" stroke="#16c784" strokeWidth={2} dot={false} />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+function AveragesChart({ seasonStats }) {
+  if (!seasonStats?.length) return null
+  const chartData = [...seasonStats].reverse()
+    .filter(s => s.batting_average != null || s.bowling_average != null)
+    .map(s => ({
+      season: s.season_name?.replace('Summer ', '') ?? '',
+      bat_avg: s.batting_average != null ? Number(Number(s.batting_average).toFixed(1)) : null,
+      bowl_avg: s.bowling_average != null ? Number(Number(s.bowling_average).toFixed(1)) : null,
+    }))
+  if (!chartData.length) return null
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+        <XAxis dataKey="season" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+        <Tooltip {...CHART_TOOLTIP_STYLE} />
+        <Legend wrapperStyle={{ color: '#94a3b8', fontSize: 12 }} />
+        <Line type="monotone" dataKey="bat_avg" name="Batting Avg" stroke="#16c784" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+        <Line type="monotone" dataKey="bowl_avg" name="Bowling Avg" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
+function RunsByGradeChart({ byGrade }) {
+  if (!byGrade?.length) return null
+  const sorted = [...byGrade].sort((a, b) => b.runs - a.runs).slice(0, 10)
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(180, sorted.length * 36)}>
+      <BarChart data={sorted} layout="vertical" margin={{ top: 5, right: 60, left: 8, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
+        <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} />
+        <YAxis type="category" dataKey="grade_name" width={130} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+        <Tooltip {...CHART_TOOLTIP_STYLE} formatter={(v, _, props) => [`${v} runs (${props.payload.innings} inn, avg ${props.payload.average ?? '—'})`, '']} />
+        <Bar dataKey="runs" fill="#16c784" radius={[0,3,3,0]} label={{ position: 'right', fill: '#64748b', fontSize: 11 }} />
+      </BarChart>
+    </ResponsiveContainer>
   )
 }
 
@@ -310,23 +453,44 @@ function FieldingTab({ fielding, seasonStats }) {
 }
 
 // ── Analysis tab ─────────────────────────────────────────────────────────
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition }) {
+function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats }) {
   return (
     <div className="space-y-6">
-      {/* Dismissal split */}
+      {/* Runs & Wickets by season */}
+      {seasonStats?.length > 0 && (
+        <Card title="RUNS & WICKETS BY SEASON">
+          <SeasonChart data={seasonStats} />
+        </Card>
+      )}
+
+      {/* Cumulative career runs */}
+      {seasonStats?.some(s => (s.total_runs ?? 0) > 0) && (
+        <Card title="CAREER RUNS ACCUMULATION">
+          <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Running total of career batting runs, season by season.</p>
+          <CumulativeRunsChart seasonStats={seasonStats} />
+        </Card>
+      )}
+
+      {/* Averages over time */}
+      {seasonStats?.length > 0 && (
+        <Card title="AVERAGES OVER TIME">
+          <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Batting and bowling averages season by season.</p>
+          <AveragesChart seasonStats={seasonStats} />
+        </Card>
+      )}
+
+      {/* Dismissal donut */}
       {dismissals?.length > 0 && (
-        <Card title="DISMISSAL SPLIT">
-          <ul className="flex flex-col gap-2.5">
-            {dismissals.map(d => (
-              <li key={d.dismissal_type} className="flex items-center gap-3">
-                <span className="w-28 font-mono text-[11px] tracking-wide2 text-pb-dim capitalize">{d.dismissal_type || 'Unknown'}</span>
-                <div className="flex-1 h-1.5 bg-pb-hairline rounded-sm overflow-hidden">
-                  <div className="h-full" style={{ width: `${d.pct ?? 0}%`, background: 'var(--pb-accent)', opacity: 0.8 }} />
-                </div>
-                <span className="font-mono text-[12px] text-pb-text pb-num w-12 text-right">{d.count} ({d.pct ?? 0}%)</span>
-              </li>
-            ))}
-          </ul>
+        <Card title="HOW I GET OUT">
+          <DismissalDonut dismissals={dismissals} />
+        </Card>
+      )}
+
+      {/* Runs by grade chart */}
+      {byGrade?.length > 1 && (
+        <Card title="RUNS BY GRADE">
+          <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Career batting runs broken down by grade.</p>
+          <RunsByGradeChart byGrade={byGrade} />
         </Card>
       )}
 
@@ -362,7 +526,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition }
         </Card>
       )}
 
-      {/* By grade */}
+      {/* By grade detail table */}
       {byGrade?.length > 0 && (
         <Card title="BATTING BY GRADE" pad="p-0">
           <div className="overflow-x-auto pb-scroll">
@@ -422,7 +586,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition }
         </Card>
       )}
 
-      {!dismissals?.length && !partnerships?.length && !byGrade?.length && !byPosition?.length && (
+      {!dismissals?.length && !partnerships?.length && !byGrade?.length && !byPosition?.length && !seasonStats?.length && (
         <p className="text-pb-faint text-sm py-4">No analysis data available. Game-level data may still be syncing.</p>
       )}
     </div>
@@ -743,9 +907,9 @@ export default function PlayerProfile() {
   if (!data?.player) return null
 
   const player = data.player
-  const batting = data.batting_career
-  const bowling = data.bowling_career
-  const fielding = data.fielding_career
+  const batting = data.career_batting
+  const bowling = data.career_bowling
+  const fielding = data.career_fielding
   const orgSlug = org ? (sessionStorage.getItem('bs_last_slug') || '') : ''
 
   // Ranked achievements for the header badges
@@ -879,7 +1043,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.name} />}
       </main>
