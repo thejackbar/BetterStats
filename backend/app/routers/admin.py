@@ -480,51 +480,58 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db)):
         },
     )
 
+    # asyncpg returns JSONB columns as Python lists already; guard against
+    # legacy string-encoded rows just in case.
+    def _jlist(val):
+        if isinstance(val, list):
+            return val
+        return json.loads(val or "[]")
+
     # Reassign game-level records back
-    bat_ids = json.loads(log["batting_innings_ids"] or "[]")
+    bat_ids = _jlist(log["batting_innings_ids"])
     if bat_ids:
         await db.execute(
             text("UPDATE batting_innings SET player_id = :pid WHERE id = ANY(:ids)"),
             {"pid": str(remove_id), "ids": bat_ids},
         )
-    bowl_ids = json.loads(log["bowling_spell_ids"] or "[]")
+    bowl_ids = _jlist(log["bowling_spell_ids"])
     if bowl_ids:
         await db.execute(
             text("UPDATE bowling_spells SET player_id = :pid WHERE id = ANY(:ids)"),
             {"pid": str(remove_id), "ids": bowl_ids},
         )
-    field_ids = json.loads(log["fielding_stat_ids"] or "[]")
+    field_ids = _jlist(log["fielding_stat_ids"])
     if field_ids:
         await db.execute(
             text("UPDATE fielding_stats SET player_id = :pid WHERE id = ANY(:ids)"),
             {"pid": str(remove_id), "ids": field_ids},
         )
-    fow_ids = json.loads(log["fall_of_wicket_ids"] or "[]")
+    fow_ids = _jlist(log["fall_of_wicket_ids"])
     if fow_ids:
         await db.execute(
             text("UPDATE fall_of_wickets SET player_id = :pid WHERE id = ANY(:ids)"),
             {"pid": str(remove_id), "ids": fow_ids},
         )
-    b1_ids = json.loads(log["batter1_partnership_ids"] or "[]")
+    b1_ids = _jlist(log["batter1_partnership_ids"])
     if b1_ids:
         await db.execute(
             text("UPDATE partnerships SET batter1_id = :pid WHERE id = ANY(:ids)"),
             {"pid": str(remove_id), "ids": b1_ids},
         )
-    b2_ids = json.loads(log["batter2_partnership_ids"] or "[]")
+    b2_ids = _jlist(log["batter2_partnership_ids"])
     if b2_ids:
         await db.execute(
             text("UPDATE partnerships SET batter2_id = :pid WHERE id = ANY(:ids)"),
             {"pid": str(remove_id), "ids": b2_ids},
         )
-    mil_ids = json.loads(log["milestone_ids"] or "[]")
+    mil_ids = _jlist(log["milestone_ids"])
     if mil_ids:
         await db.execute(
             text("UPDATE milestones SET player_id = :pid WHERE id = ANY(:ids)"),
             {"pid": str(remove_id), "ids": mil_ids},
         )
 
-    pss_ids = json.loads(log["moved_season_stat_ids"] or "[]")
+    pss_ids = _jlist(log["moved_season_stat_ids"])
     if pss_ids:
         await db.execute(
             text("UPDATE player_season_stats SET player_id = :pid WHERE id = ANY(:ids)"),
