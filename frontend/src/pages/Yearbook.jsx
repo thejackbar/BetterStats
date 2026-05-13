@@ -3,6 +3,11 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { PbSpinner, TabBar, Label, AnimatedNum } from '../lib/presskit'
 import { useClubTheme } from '../hooks/useClubTheme'
+import { useAuth } from '../contexts/AuthContext'
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
+  AreaChart, Area, CartesianGrid,
+} from 'recharts'
 
 // ─── Utility helpers ────────────────────────────────────────────────────────
 
@@ -31,6 +36,24 @@ function PlayerLink({ id, name, slug }) {
 }
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{ background: '#0c1a10', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+      <div style={{ color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>{label}</div>
+      {payload.map((p, i) => (
+        <div key={i} style={{ color: p.color || '#4ade80', fontWeight: 600 }}>{p.value?.toLocaleString()} {p.name}</div>
+      ))}
+    </div>
+  )
+}
+
+function abbrev(name) {
+  if (!name) return ''
+  const parts = name.split(' ')
+  return parts.length <= 1 ? name.slice(0, 14) : `${parts[0]} ${parts[parts.length-1][0]}.`
+}
 
 // ─── Shared table components ─────────────────────────────────────────────────
 
@@ -75,9 +98,9 @@ function SectionCard({ title, label, children, className = '' }) {
   )
 }
 
-function StatCallout({ value, label, sub, accent = false }) {
+function StatCallout({ value, label, sub, accent = false, className = '' }) {
   return (
-    <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
+    <div className={`flex flex-col items-center justify-center py-6 px-4 text-center ${className}`}>
       <div
         className="text-5xl font-bold tabular-nums leading-none mb-2"
         style={{ color: accent ? 'var(--pb-accent)' : 'white' }}
@@ -92,7 +115,7 @@ function StatCallout({ value, label, sub, accent = false }) {
 
 // ─── Overview tab ────────────────────────────────────────────────────────────
 
-function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative }) {
+function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, customSections, galleryImages }) {
   const [overview, setOverview] = useState(null)
   const [superlatives, setSuperlatives] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -118,7 +141,7 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative }) 
   return (
     <div className="space-y-8">
       {/* Headline stat trio */}
-      <div className="grid grid-cols-3 sm:grid-cols-5 gap-px bg-white/8 rounded-xl overflow-hidden">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-white/8 rounded-xl overflow-hidden">
         <StatCallout value={overview?.total_players ?? '—'} label="Players" accent />
         <StatCallout value={fmtRuns(overview?.total_runs)} label="Club Runs" />
         <StatCallout value={fmtRuns(overview?.total_wickets)} label="Wickets" />
@@ -126,8 +149,40 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative }) 
         <StatCallout
           value={totalGames > 0 ? `${Math.round(wins / totalGames * 100)}%` : '—'}
           label="Win Rate"
+          className="col-span-2 sm:col-span-1"
         />
       </div>
+
+      {/* Season Record chart */}
+      {overview && parseInt(overview.total_games) > 0 && (
+        <SectionCard title="Season Record">
+          <div className="px-4 py-5">
+            <ResponsiveContainer width="100%" height={80}>
+              <BarChart data={[{
+                name: 'Season',
+                Won: parseInt(overview.wins || 0),
+                Drew: parseInt(overview.draws || 0),
+                Lost: parseInt(overview.losses || 0),
+              }]} layout="vertical" margin={{ top: 0, right: 8, left: 8, bottom: 0 }}>
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="name" hide />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="Won" stackId="a" fill="var(--pb-accent)" radius={[4,0,0,4]} />
+                <Bar dataKey="Drew" stackId="a" fill="rgba(255,255,255,0.2)" />
+                <Bar dataKey="Lost" stackId="a" fill="#f87171" radius={[0,4,4,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="flex justify-center gap-6 mt-2">
+              {[['Won', 'var(--pb-accent)'], ['Drew', 'rgba(255,255,255,0.3)'], ['Lost', '#f87171']].map(([l, c]) => (
+                <div key={l} className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-sm" style={{ background: c }} />
+                  <span className="text-[11px] font-mono text-white/40">{l}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </SectionCard>
+      )}
 
       {/* Narrative / Season in Brief */}
       {narrative ? (
@@ -142,6 +197,31 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative }) 
           <p className="font-mono text-[11px] text-white/30 uppercase tracking-wide3">Season in Brief</p>
           <p className="text-white/25 text-sm mt-1">Editorial content coming in v4.1 — admin can write or AI-generate this section.</p>
         </div>
+      )}
+
+      {/* Custom editorial sections (Presidents Report, etc.) */}
+      {customSections?.length > 0 && customSections.map(s => (
+        <div key={s.id} className="rounded-xl border border-white/8 bg-white/3 px-6 py-5">
+          <p className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-3">{s.title}</p>
+          <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed whitespace-pre-wrap">
+            {s.content_markdown}
+          </div>
+        </div>
+      ))}
+
+      {/* Photo gallery */}
+      {galleryImages?.length > 0 && (
+        <SectionCard title="Photo Gallery">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 p-1">
+            {galleryImages.map(img => (
+              <a key={img.id} href={`/uploads/${img.file_path}`} target="_blank" rel="noopener noreferrer"
+                 className="aspect-video block overflow-hidden rounded">
+                <img src={`/uploads/${img.file_path}`} alt={img.caption || ''}
+                     className="w-full h-full object-cover hover:scale-105 transition-transform duration-200" />
+              </a>
+            ))}
+          </div>
+        </SectionCard>
       )}
 
       {/* By the Numbers */}
@@ -251,8 +331,49 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
     return acc
   }, {})
 
+  const allGames = results
+    .filter(g => g.played_at)
+    .sort((a, b) => new Date(a.played_at) - new Date(b.played_at))
+
+  let cumWins = 0, cumLosses = 0
+  const progressionData = allGames.map(g => {
+    if (g.result === 'won') cumWins++
+    else if (g.result === 'lost') cumLosses++
+    return {
+      date: fmtDate(g.played_at),
+      Wins: cumWins,
+      Losses: cumLosses,
+    }
+  })
+
   return (
     <div className="space-y-6">
+      {progressionData.length > 1 && (
+        <SectionCard title="Season Progression">
+          <div className="px-4 py-5">
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={progressionData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="winsGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--pb-accent)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--pb-accent)" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="lossesGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f87171" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="#f87171" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip content={<ChartTooltip />} />
+                <Area type="monotone" dataKey="Wins" stroke="var(--pb-accent)" strokeWidth={2} fill="url(#winsGrad)" dot={false} />
+                <Area type="monotone" dataKey="Losses" stroke="#f87171" strokeWidth={1.5} fill="url(#lossesGrad)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      )}
       {Object.entries(byGrade).map(([gradeName, games]) => (
         <SectionCard key={gradeName} title={gradeName}>
           <YbTable
@@ -323,6 +444,25 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
           >{n}+</button>
         ))}
       </div>
+
+      {data?.length > 0 && (
+        <SectionCard title="Runs Scored — Top Players">
+          <div className="px-4 py-4">
+            <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
+              <BarChart
+                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), runs: parseInt(p.runs || 0), id: p.player_id }))}
+                layout="vertical"
+                margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
+              >
+                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="runs" name="runs" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard title="Batting Honours">
         {data?.length ? (
@@ -417,6 +557,25 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
           >{n}+</button>
         ))}
       </div>
+
+      {data?.length > 0 && (
+        <SectionCard title="Wickets Taken — Top Bowlers">
+          <div className="px-4 py-4">
+            <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
+              <BarChart
+                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), wickets: parseInt(p.wickets || 0) }))}
+                layout="vertical"
+                margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
+              >
+                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="wickets" name="wickets" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard title="Bowling Honours">
         {data?.length ? (
@@ -569,9 +728,9 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
       .finally(() => setLoading(false))
   }, [orgId, seasonId])
 
+  const clubAwards = yearbookData?.awards || []
   const honourBoard = yearbookData?.honour_board || []
 
-  // Group honour board by position
   const hbByPos = honourBoard.reduce((acc, h) => {
     if (!acc[h.position_title]) acc[h.position_title] = []
     acc[h.position_title].push(h)
@@ -580,6 +739,26 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
 
   return (
     <div className="space-y-6">
+      {/* Club Awards */}
+      {clubAwards.length > 0 && (
+        <SectionCard title="Club Awards">
+          <div className="grid sm:grid-cols-2 gap-px bg-white/5">
+            {clubAwards.map(a => (
+              <div key={a.id} className="bg-white/2 px-5 py-4">
+                <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">{a.award_name}</div>
+                <div className="text-[15px] font-semibold text-white/90">
+                  {a.player_id
+                    ? <PlayerLink id={a.player_id} name={a.player_name || a.name_override} slug={clubSlug} />
+                    : <span>{a.name_override}</span>
+                  }
+                </div>
+                {a.notes && <div className="text-[12px] text-white/40 mt-1 italic">{a.notes}</div>}
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
       {honourBoard.length > 0 && (
         <SectionCard title="Honour Board">
           <div className="divide-y divide-white/5">
@@ -800,7 +979,18 @@ export default function Yearbook() {
   const [gradeId, setGradeId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [copied, setCopied] = useState(false)
 
+  const handleShare = () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  const handlePrint = () => window.print()
+
+  const { user } = useAuth()
   useClubTheme(club)
 
   // Load club
@@ -813,29 +1003,19 @@ export default function Yearbook() {
   // Load yearbook list and resolve the current season
   useEffect(() => {
     if (!club) return
-    Promise.all([
-      api.listYearbooks(club.id),
-      api.getOrgSeasons(club.id),
-    ]).then(([ybs, seasons]) => {
+    api.listYearbooks(club.id).then(ybs => {
       setYearbooks(ybs)
 
-      // Find the matching season by slug
-      const matched = ybs.find(yb => {
-        const slug = _seasonSlug(yb.season_name)
-        return slug === seasonSlug
-      })
+      if (!seasonSlug) {
+        // Show index — stop loading so the index page renders
+        setLoading(false)
+        return
+      }
 
+      const matched = ybs.find(yb => _seasonSlug(yb.season_name) === seasonSlug)
       if (!matched) {
-        // If no slug given, redirect to latest published or latest draft
-        if (!seasonSlug) {
-          const published = ybs.filter(y => y.status === 'published')
-          const target = published[0] || ybs[0]
-          if (target) {
-            navigate(`/${clubSlug}/yearbook/${_seasonSlug(target.season_name)}`, { replace: true })
-          }
-          return
-        }
         setNotFound(true)
+        setLoading(false)
         return
       }
 
@@ -844,9 +1024,6 @@ export default function Yearbook() {
         api.getYearbook(club.id, matched.season_id),
         api.getSeasonGrades(club.id, matched.season_id),
       ]).then(([yb, gradeList]) => {
-        if (yb.status !== 'published') {
-          // Still show draft to club admins — for now show it to all (auth check in v4.1)
-        }
         setYearbook(yb)
         setGrades(gradeList)
       }).finally(() => setLoading(false))
@@ -854,7 +1031,7 @@ export default function Yearbook() {
       setNotFound(true)
       setLoading(false)
     })
-  }, [club, clubSlug, seasonSlug, navigate])
+  }, [club, clubSlug, seasonSlug])
 
   if (notFound) {
     return (
@@ -869,10 +1046,81 @@ export default function Yearbook() {
     )
   }
 
+  // Index page — no season selected
+  if (!seasonSlug) {
+    const published = (yearbooks || []).filter(yb => yb.status === 'published')
+    return (
+      <div className="min-h-screen" style={{ background: 'var(--pb-bg)' }}>
+        <div className="max-w-3xl mx-auto px-4 py-12">
+          <Link to={`/${clubSlug}/dashboard`} className="font-mono text-[11px] text-white/30 hover:text-white/50 transition mb-6 inline-block">
+            ← Dashboard
+          </Link>
+          {club?.logo_url && (
+            <img src={club.logo_url} alt={club.name} className="w-12 h-12 object-contain mb-4 opacity-80" />
+          )}
+          <div className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase mb-2">{club?.name}</div>
+          <h1 className="text-3xl font-bold text-white mb-1">Season Yearbooks</h1>
+          <p className="text-white/40 text-sm mb-8">Season-by-season editorial wrap-ups, stats, and club records.</p>
+
+          {loading ? <PbSpinner /> : published.length === 0 ? (
+            <div className="rounded-xl border border-white/8 border-dashed px-6 py-10 text-center">
+              <p className="font-mono text-[11px] text-white/30 uppercase tracking-wide3">No yearbooks published yet</p>
+              <p className="text-white/25 text-sm mt-2">Check back after the season wraps up.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {published.map(yb => {
+                const slug = _seasonSlug(yb.season_name)
+                return (
+                  <Link
+                    key={yb.season_id}
+                    to={`/${clubSlug}/yearbook/${slug}`}
+                    className="flex items-center justify-between gap-4 px-5 py-4 rounded-xl border border-white/8 bg-white/2 hover:bg-white/5 hover:border-white/20 transition-colors group"
+                  >
+                    <div>
+                      <div className="text-[15px] font-semibold text-white/85 group-hover:text-white transition-colors">
+                        {yb.season_name}
+                      </div>
+                      {yb.published_at && (
+                        <div className="font-mono text-[11px] text-white/30 mt-0.5">
+                          Published {new Date(yb.published_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </div>
+                      )}
+                    </div>
+                    <span className="font-mono text-[13px] text-white/25 group-hover:text-white/60 transition-colors shrink-0">→</span>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   if (loading || !yearbook) return <PbSpinner message="Loading yearbook…" />
+
+  if (yearbook.status !== 'published' && !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--pb-bg)' }}>
+        <div className="text-center px-4">
+          <div className="font-mono text-[11px] tracking-wide3 text-white/30 uppercase mb-3">
+            {club?.name} · Season Yearbook
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-2">{yearbook.season?.name || seasonSlug}</h1>
+          <p className="text-white/40 text-sm mb-6">This yearbook hasn't been published yet.</p>
+          <Link to={`/${clubSlug}/dashboard`} className="font-mono text-[12px]" style={{ color: 'var(--pb-accent)' }}>
+            ← Back to dashboard
+          </Link>
+        </div>
+      </div>
+    )
+  }
 
   const season = yearbook.season
   const narrative = yearbook.sections?.find(s => s.section_type === 'narrative' && s.is_enabled)?.content_markdown
+  const customSections = yearbook.sections?.filter(s => s.section_type !== 'narrative' && s.is_enabled && s.content_markdown) || []
+  const galleryImages = yearbook.images?.filter(i => i.image_type === 'gallery') || []
 
   const orgId = club.id
   const seasonId = season?.id
@@ -888,26 +1136,66 @@ export default function Yearbook() {
             : `linear-gradient(135deg, color-mix(in srgb, var(--pb-accent) 20%, var(--pb-bg)), var(--pb-bg))`,
         }}
       >
-        <div className="max-w-5xl mx-auto px-4 py-12 sm:py-16">
-          {club.logo_url && (
-            <img src={club.logo_url} alt={club.name} className="w-16 h-16 object-contain mb-4 opacity-90" />
-          )}
-          <div className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase mb-2">
-            {club.name} · Season Yearbook
+        <div className="max-w-5xl mx-auto px-4 py-10 sm:py-14">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              {club.logo_url && (
+                <img src={club.logo_url} alt={club.name} className="w-12 h-12 sm:w-16 sm:h-16 object-contain mb-3 opacity-90" />
+              )}
+              <div className="font-mono text-[10px] sm:text-[11px] tracking-wide3 text-white/40 uppercase mb-2">
+                {club.name} · Season Yearbook
+              </div>
+              <h1 className="text-2xl sm:text-4xl font-bold text-white leading-tight mb-2">
+                {season?.name || seasonSlug}
+              </h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                {yearbook.status === 'draft' && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono tracking-wide3 border border-white/20 text-white/40">
+                    DRAFT
+                  </span>
+                )}
+                {/* Season switcher */}
+                {yearbooks?.filter(yb => yb.status === 'published').length > 1 && (
+                  <select
+                    value={seasonSlug || ''}
+                    onChange={e => navigate(`/${clubSlug}/yearbook/${e.target.value}`)}
+                    className="print:hidden text-[11px] font-mono bg-white/8 border border-white/15 rounded px-2 py-1 text-white/60 focus:outline-none"
+                  >
+                    {yearbooks.filter(yb => yb.status === 'published').map(yb => {
+                      const sl = _seasonSlug(yb.season_name)
+                      return <option key={yb.season_id} value={sl}>{yb.season_name}</option>
+                    })}
+                  </select>
+                )}
+              </div>
+            </div>
+            {/* Hero actions */}
+            <div className="print:hidden flex flex-col sm:flex-row items-end sm:items-center gap-2 shrink-0 pt-1">
+              <button
+                onClick={handleShare}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-white/20 text-[11px] font-mono text-white/50 hover:text-white/70 hover:border-white/30 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                {copied ? 'Copied!' : 'Share'}
+              </button>
+              <button
+                onClick={handlePrint}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-white/20 text-[11px] font-mono text-white/50 hover:text-white/70 hover:border-white/30 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                Print
+              </button>
+            </div>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-bold text-white leading-tight mb-1">
-            {season?.name || seasonSlug}
-          </h1>
-          {yearbook.status === 'draft' && (
-            <span className="inline-block mt-2 px-2 py-0.5 rounded text-[10px] font-mono tracking-wide3 border border-white/20 text-white/40">
-              DRAFT — not published
-            </span>
-          )}
         </div>
       </div>
 
       {/* Tab bar + grade filter */}
-      <div className="sticky top-0 z-30 border-b border-white/8 backdrop-blur-sm"
+      <div className="print:hidden sticky top-0 z-30 border-b border-white/8 backdrop-blur-sm"
            style={{ background: 'color-mix(in srgb, var(--pb-bg) 92%, transparent)' }}>
         <div className="max-w-5xl mx-auto px-4">
           <div className="flex items-center justify-between gap-4">
@@ -950,7 +1238,7 @@ export default function Yearbook() {
       {/* Tab content */}
       <div className="max-w-5xl mx-auto px-4 py-8">
         {activeTab === 'overview' && (
-          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} />
+          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} customSections={customSections} galleryImages={galleryImages} />
         )}
         {activeTab === 'results' && (
           <ResultsTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />

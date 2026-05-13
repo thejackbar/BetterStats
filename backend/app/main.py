@@ -1,8 +1,11 @@
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config.settings import settings
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks
@@ -181,6 +184,24 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_yearbook_images_yearbook ON yearbook_images(yearbook_id)"
         ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS yearbook_club_awards (
+                id SERIAL PRIMARY KEY,
+                yearbook_id UUID NOT NULL REFERENCES yearbooks(id) ON DELETE CASCADE,
+                award_name TEXT NOT NULL,
+                player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                name_override TEXT,
+                notes TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_yearbook_awards_yearbook ON yearbook_club_awards(yearbook_id)"
+        ))
+    # Ensure uploads directory exists
+    upload_dir = Path("/app/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
     # Generate yearbook stubs for any seasons that don't have one yet
     from app.models.db import async_session_maker as AsyncSessionLocal
     from app.routers.yearbooks import generate_all_stubs
@@ -222,6 +243,11 @@ app.include_router(admin.router)
 app.include_router(achievements.router)
 app.include_router(statlab.router)
 app.include_router(yearbooks.router)
+
+# Serve uploaded files (hero images, gallery photos)
+_upload_dir = Path("/app/uploads")
+_upload_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_upload_dir)), name="uploads")
 
 
 @app.get("/health")

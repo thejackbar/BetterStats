@@ -218,6 +218,8 @@ export const api = {
   publishYearbook: (orgId, seasonId) => request(`/yearbooks/${orgId}/${seasonId}/publish`, { method: 'POST' }),
   unpublishYearbook: (orgId, seasonId) => request(`/yearbooks/${orgId}/${seasonId}/unpublish`, { method: 'POST' }),
   generateYearbookStubs: (orgId) => request(`/yearbooks/${orgId}/generate-stubs`, { method: 'POST' }),
+  generateYearbookNarrative: (orgId, seasonId) =>
+    request(`/yearbooks/${orgId}/${seasonId}/generate-narrative`, { method: 'POST' }),
   getYearbookOverview: (orgId, seasonId, gradeId) => {
     const params = new URLSearchParams()
     if (gradeId) params.set('grade_id', gradeId)
@@ -282,6 +284,20 @@ export const api = {
     request(`/yearbooks/${orgId}/${seasonId}/honour-board`, { method: 'POST', body: JSON.stringify(data) }),
   deleteHonourBoardEntry: (orgId, seasonId, entryId) =>
     request(`/yearbooks/${orgId}/${seasonId}/honour-board/${entryId}`, { method: 'DELETE' }),
+  uploadYearbookHero: (orgId, seasonId, formData) =>
+    fetch(`/api/yearbooks/${orgId}/${seasonId}/upload/hero`, { method: 'POST', body: formData, credentials: 'include' })
+      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(new Error(e.detail || 'Upload failed')))),
+  clearYearbookHero: (orgId, seasonId) =>
+    request(`/yearbooks/${orgId}/${seasonId}/upload/hero`, { method: 'DELETE' }),
+  uploadYearbookGallery: (orgId, seasonId, formData) =>
+    fetch(`/api/yearbooks/${orgId}/${seasonId}/upload/gallery`, { method: 'POST', body: formData, credentials: 'include' })
+      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(new Error(e.detail || 'Upload failed')))),
+  deleteYearbookImage: (orgId, seasonId, imageId) =>
+    request(`/yearbooks/${orgId}/${seasonId}/images/${imageId}`, { method: 'DELETE' }),
+  createYearbookAward: (orgId, seasonId, data) =>
+    request(`/yearbooks/${orgId}/${seasonId}/awards`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteYearbookAward: (orgId, seasonId, awardId) =>
+    request(`/yearbooks/${orgId}/${seasonId}/awards/${awardId}`, { method: 'DELETE' }),
 
   // StatLab
   statlabQuery: (orgId, { mode = 'career', seasonId, groupBy = 'player', sortBy = 'runs', sortDir = 'desc', limit = 100, filters = [] } = {}) => {
