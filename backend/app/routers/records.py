@@ -403,12 +403,46 @@ async def get_records(
     """)
     by_wicket: dict[int, list] = {}
     for row in partnerships_by_wicket_rows:
-        if row["rn"] <= 5:
+        if row["rn"] <= 10:
             wk = int(row["wicket_number"])
             by_wicket.setdefault(wk, [])
             d = dict(row)
             del d["rn"]
             by_wicket[wk].append(d)
+
+    partnerships_by_grade_rows = await q("""
+        WITH ranked AS (
+            SELECT
+                gr.name AS grade_name,
+                pt.wicket_number,
+                p1.id::text AS batter1_id,
+                COALESCE(p1.display_name_override, p1.name) AS batter1_name,
+                p2.id::text AS batter2_id,
+                COALESCE(p2.display_name_override, p2.name) AS batter2_name,
+                pt.runs,
+                g.played_at::text,
+                EXTRACT(YEAR FROM g.played_at)::int AS season_year,
+                ROW_NUMBER() OVER (PARTITION BY gr.name, pt.wicket_number ORDER BY pt.runs DESC) AS rn
+            FROM partnerships pt
+            JOIN games g ON g.id = pt.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            LEFT JOIN players p1 ON p1.id = pt.batter1_id
+            LEFT JOIN players p2 ON p2.id = pt.batter2_id
+            WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
+              """ + partnership_season_clause + game_grade_clause + """
+              AND pt.runs IS NOT NULL AND pt.runs > 0 AND pt.wicket_number BETWEEN 1 AND 10
+        )
+        SELECT * FROM ranked WHERE rn = 1
+        ORDER BY grade_name, wicket_number
+    """)
+    by_grade_wicket: dict[str, list] = {}
+    for row in partnerships_by_grade_rows:
+        grade = row["grade_name"] or "Unknown"
+        if grade not in by_grade_wicket:
+            by_grade_wicket[grade] = []
+        d = dict(row)
+        del d["rn"]
+        by_grade_wicket[grade].append(d)
 
     # Manual partnership records — filtered by season year and/or grade name when active
     org_obj = await db.get(Organisation, uuid.UUID(org_id))
@@ -520,6 +554,10 @@ async def get_records(
     partnerships_flat = {
         "top_partnerships": [normalise_partnership(r) for r in top_partnerships],
         **{f"wicket_{wk}": [normalise_partnership(r) for r in rows] for wk, rows in by_wicket.items()},
+        "by_grade": {
+            grade: [normalise_partnership(r) for r in rows]
+            for grade, rows in by_grade_wicket.items()
+        },
     }
     # Add manual records merged into top_partnerships and per-wicket buckets
     for mr in manual_rows:

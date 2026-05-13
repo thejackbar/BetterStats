@@ -294,6 +294,48 @@ function PartnershipsTab({ data }) {
           </RecordSection>
         )
       })}
+
+      {/* By-grade partnership records */}
+      {data.by_grade && Object.entries(data.by_grade).length > 0 && (
+        <div className="md:col-span-2">
+          <div className="pb-card overflow-hidden mb-4">
+            <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
+              <Label style={{ color: 'var(--pb-accent)' }}>WICKET PARTNERSHIPS BY GRADE</Label>
+            </div>
+            <div className="grid gap-0 md:grid-cols-2">
+              {Object.entries(data.by_grade).sort(([a], [b]) => a.localeCompare(b)).map(([grade, records], gi) => (
+                <div key={grade} className={`${gi % 2 === 0 ? 'md:border-r' : ''} pb-hairline-r`}>
+                  <div className="px-5 py-2.5 pb-hairline-b">
+                    <span className="font-mono text-[11px] tracking-wide2 text-pb-dim font-semibold">{grade}</span>
+                  </div>
+                  <table className="w-full text-[12px]">
+                    <thead>
+                      <tr className="text-pb-faintest font-mono text-[10px] tracking-wide3">
+                        <th className="py-2 px-3 text-left">WKT</th>
+                        <th className="py-2 px-3 text-left">PARTNERSHIP</th>
+                        <th className="py-2 px-3 text-right">RUNS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {records.sort((a, b) => (a.wicket_number ?? 0) - (b.wicket_number ?? 0)).map((r, i) => (
+                        <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                          <td className="py-2 px-3 font-mono text-pb-faint">{ORDINALS[(r.wicket_number || 1) - 1]}</td>
+                          <td className="py-2 px-3">
+                            <PlayerLink id={r.player1_id} name={r.player1_name} />
+                            <span className="text-pb-faintest mx-1">&</span>
+                            <PlayerLink id={r.player2_id} name={r.player2_name} />
+                          </td>
+                          <td className="py-2 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

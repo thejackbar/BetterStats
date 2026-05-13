@@ -56,33 +56,10 @@ function MilestoneRow({ m }) {
   )
 }
 
-function AchievedRow({ m }) {
-  const dateLabel = m.achieved_at
-    ? new Date(m.achieved_at + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
-    : m.season_name || null
-  return (
-    <Link to={`/players/${m.player_id}`} className="block hover:opacity-80 transition-opacity">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 min-w-0">
-          <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.trophy} alt="" className="w-4 h-4" />
-          <span className="text-pb-text text-[13px] font-semibold truncate">{m.name}</span>
-        </div>
-        <div className="ml-2 text-right whitespace-nowrap">
-          <span className="font-mono font-bold text-pb-text" style={{ color: "var(--pb-accent)" }}>{m.milestone?.toLocaleString()}</span>
-          <span className="font-mono text-[10px] text-pb-faint ml-1">{m.type}</span>
-        </div>
-      </div>
-      {dateLabel && <div className="font-mono text-[10px] text-pb-faint tracking-wide2 mt-0.5">{dateLabel}</div>}
-    </Link>
-  )
-}
-
 const MILESTONE_CATS = { batting: 'Batting', bowling: 'Bowling', fielding: 'Fielding', matches: 'Matches Played' }
 
-function MilestonesSection({ milestones, achieved, loading, achievedLoading }) {
-  const [tab, setTab] = useState('batting')
-  const [page, setPage] = useState(1)
-  const PER_PAGE = 10
+function MilestonesSection({ milestones, loading }) {
+  const PER_COL = 8
 
   const grouped = {}
   for (const m of milestones) {
@@ -90,60 +67,25 @@ function MilestonesSection({ milestones, achieved, loading, achievedLoading }) {
     if (!grouped[cat]) grouped[cat] = []
     grouped[cat].push(m)
   }
-  const upcomingTabs = ['batting', 'bowling', 'fielding', 'matches'].filter(c => grouped[c])
-  const allTabs = achieved.length > 0 ? [...upcomingTabs, 'achieved'] : upcomingTabs
-  const activeTab = allTabs.includes(tab) ? tab : (allTabs[0] || 'batting')
-  const isAchieved = activeTab === 'achieved'
-  const items = isAchieved ? achieved : (grouped[activeTab] || [])
-  const totalPages = Math.max(1, Math.ceil(items.length / PER_PAGE))
-  const safePage = Math.min(page, totalPages)
-  const pageItems = items.slice((safePage - 1) * PER_PAGE, safePage * PER_PAGE)
+  const cats = ['batting', 'bowling', 'fielding', 'matches'].filter(c => grouped[c])
 
-  if ((loading && achievedLoading) || !allTabs.length) {
-    return loading ? <PbSpinner message="Loading milestones…" /> : <p className="text-pb-faint text-sm py-4">No milestones found.</p>
-  }
+  if (loading) return <PbSpinner message="Loading milestones…" />
+  if (!cats.length) return <p className="text-pb-faint text-sm py-4">No upcoming milestones.</p>
 
   return (
-    <div>
-      <div className="flex items-center justify-between pb-hairline-b mb-4 flex-wrap gap-y-2">
-        <div className="flex gap-1 flex-wrap">
-          {allTabs.map(cat => (
-            <button
-              key={cat}
-              onClick={() => { setTab(cat); setPage(1) }}
-              className={`px-3 py-2 text-[11px] font-mono font-semibold tracking-wide3 relative ${
-                cat === activeTab ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'
-              }`}
-            >
-              {cat === 'achieved' ? '★ ACHIEVED' : (MILESTONE_CATS[cat] || cat).toUpperCase()}
-              {cat === activeTab && <span className="absolute left-0 right-0 -bottom-px h-[2px]" style={{ background: "var(--pb-accent)" }} />}
-            </button>
-          ))}
-        </div>
-      </div>
-      {(isAchieved ? achievedLoading : loading) ? <PbSpinner /> : (
-        <>
+    <div className={`grid gap-4 ${cats.length >= 3 ? 'md:grid-cols-2 xl:grid-cols-4' : cats.length === 2 ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
+      {cats.map(cat => (
+        <div key={cat}>
+          <Label className="block mb-3">{(MILESTONE_CATS[cat] || cat).toUpperCase()}</Label>
           <ul className="flex flex-col gap-3">
-            {pageItems.length === 0
-              ? <p className="text-pb-faint text-sm py-4">{isAchieved ? 'No milestones achieved this season.' : 'No upcoming milestones.'}</p>
-              : pageItems.map((m, i) => (
-                  <li key={i} className={i ? "pb-hairline-t pt-3" : ""}>
-                    {isAchieved ? <AchievedRow m={m} /> : <MilestoneRow m={m} />}
-                  </li>
-                ))
-            }
+            {(grouped[cat] || []).slice(0, PER_COL).map((m, i) => (
+              <li key={i} className={i ? "pb-hairline-t pt-3" : ""}>
+                <MilestoneRow m={m} />
+              </li>
+            ))}
           </ul>
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4 pt-3 pb-hairline-t">
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage === 1}
-                className="font-mono text-[11px] text-pb-faint hover:text-pb-text disabled:opacity-30 px-2 py-1">← PREV</button>
-              <span className="font-mono text-[11px] text-pb-faint">{safePage} / {totalPages}</span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
-                className="font-mono text-[11px] text-pb-faint hover:text-pb-text disabled:opacity-30 px-2 py-1">NEXT →</button>
-            </div>
-          )}
-        </>
-      )}
+        </div>
+      ))}
     </div>
   )
 }
@@ -162,11 +104,9 @@ export default function Dashboard() {
   const [topBowlers, setTopBowlers] = useState([])
   const [summary, setSummary] = useState(null)
   const [milestones, setMilestones] = useState([])
-  const [achievedMilestones, setAchievedMilestones] = useState([])
   const [fixtures, setFixtures] = useState([])
   const [statsLoading, setStatsLoading] = useState(true)
   const [milestonesLoading, setMilestonesLoading] = useState(true)
-  const [achievedLoading, setAchievedLoading] = useState(true)
   const [fixturesLoading, setFixturesLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [syncDone, setSyncDone] = useState(false)
@@ -192,9 +132,6 @@ export default function Dashboard() {
     api.getUpcomingMilestones(orgId, 200)
       .then(setMilestones).catch(() => setMilestones([]))
       .finally(() => setMilestonesLoading(false))
-    api.getRecentlyAchievedMilestones(orgId)
-      .then(setAchievedMilestones).catch(() => setAchievedMilestones([]))
-      .finally(() => setAchievedLoading(false))
     api.getOrgFixtures(orgId)
       .then(setFixtures).catch(() => setFixtures([]))
       .finally(() => setFixturesLoading(false))
@@ -409,12 +346,10 @@ export default function Dashboard() {
         <SponsorBanner />
 
         {/* Full milestones */}
-        <Card title="MILESTONES" className="mb-6">
+        <Card title="MILESTONES IN REACH" className="mb-6">
           <MilestonesSection
             milestones={milestones}
-            achieved={achievedMilestones}
             loading={milestonesLoading}
-            achievedLoading={achievedLoading}
           />
         </Card>
 
