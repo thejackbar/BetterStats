@@ -6,7 +6,7 @@ import { Ticker } from "../lib/presskit";
 function useClubSlug() {
   const { pathname } = useLocation();
   const segments = pathname.split('/').filter(Boolean);
-  const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab'];
+  const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook'];
   if (segments.length >= 2 && CLUB_SECTIONS.includes(segments[1])) {
     return segments[0];
   }
@@ -74,7 +74,7 @@ export default function Navbar() {
           </div>
           <div className="hidden md:block leading-tight">
             <div className="text-pb-text text-[13px] font-semibold tracking-tight">{displayName}</div>
-            <div className="text-pb-faint text-[10px] font-mono tracking-wide2">BETTERSTATS · v4.3</div>
+            <div className="text-pb-faint text-[10px] font-mono tracking-wide2">BETTERSTATS · v4.4</div>
           </div>
           <div className="md:hidden text-pb-text text-[13px] font-bold tracking-wide2">{displayShort}</div>
         </Link>

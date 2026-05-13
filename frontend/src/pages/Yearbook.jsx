@@ -3,6 +3,10 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { PbSpinner, TabBar, Label, AnimatedNum } from '../lib/presskit'
 import { useClubTheme } from '../hooks/useClubTheme'
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
+  AreaChart, Area, CartesianGrid,
+} from 'recharts'
 
 // ─── Utility helpers ────────────────────────────────────────────────────────
 
@@ -31,6 +35,24 @@ function PlayerLink({ id, name, slug }) {
 }
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{ background: '#0c1a10', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+      <div style={{ color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>{label}</div>
+      {payload.map((p, i) => (
+        <div key={i} style={{ color: p.color || '#4ade80', fontWeight: 600 }}>{p.value?.toLocaleString()} {p.name}</div>
+      ))}
+    </div>
+  )
+}
+
+function abbrev(name) {
+  if (!name) return ''
+  const parts = name.split(' ')
+  return parts.length <= 1 ? name.slice(0, 14) : `${parts[0]} ${parts[parts.length-1][0]}.`
+}
 
 // ─── Shared table components ─────────────────────────────────────────────────
 
@@ -128,6 +150,37 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
           label="Win Rate"
         />
       </div>
+
+      {/* Season Record chart */}
+      {overview && parseInt(overview.total_games) > 0 && (
+        <SectionCard title="Season Record">
+          <div className="px-4 py-5">
+            <ResponsiveContainer width="100%" height={80}>
+              <BarChart data={[{
+                name: 'Season',
+                Won: parseInt(overview.wins || 0),
+                Drew: parseInt(overview.draws || 0),
+                Lost: parseInt(overview.losses || 0),
+              }]} layout="vertical" margin={{ top: 0, right: 8, left: 8, bottom: 0 }}>
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="name" hide />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="Won" stackId="a" fill="var(--pb-accent)" radius={[4,0,0,4]} />
+                <Bar dataKey="Drew" stackId="a" fill="rgba(255,255,255,0.2)" />
+                <Bar dataKey="Lost" stackId="a" fill="#f87171" radius={[0,4,4,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="flex justify-center gap-6 mt-2">
+              {[['Won', 'var(--pb-accent)'], ['Drew', 'rgba(255,255,255,0.3)'], ['Lost', '#f87171']].map(([l, c]) => (
+                <div key={l} className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-sm" style={{ background: c }} />
+                  <span className="text-[11px] font-mono text-white/40">{l}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </SectionCard>
+      )}
 
       {/* Narrative / Season in Brief */}
       {narrative ? (
@@ -261,8 +314,49 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
     return acc
   }, {})
 
+  const allGames = results
+    .filter(g => g.played_at)
+    .sort((a, b) => new Date(a.played_at) - new Date(b.played_at))
+
+  let cumWins = 0, cumLosses = 0
+  const progressionData = allGames.map(g => {
+    if (g.result === 'won') cumWins++
+    else if (g.result === 'lost') cumLosses++
+    return {
+      date: fmtDate(g.played_at),
+      Wins: cumWins,
+      Losses: cumLosses,
+    }
+  })
+
   return (
     <div className="space-y-6">
+      {progressionData.length > 1 && (
+        <SectionCard title="Season Progression">
+          <div className="px-4 py-5">
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={progressionData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="winsGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--pb-accent)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--pb-accent)" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="lossesGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f87171" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="#f87171" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip content={<ChartTooltip />} />
+                <Area type="monotone" dataKey="Wins" stroke="var(--pb-accent)" strokeWidth={2} fill="url(#winsGrad)" dot={false} />
+                <Area type="monotone" dataKey="Losses" stroke="#f87171" strokeWidth={1.5} fill="url(#lossesGrad)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      )}
       {Object.entries(byGrade).map(([gradeName, games]) => (
         <SectionCard key={gradeName} title={gradeName}>
           <YbTable
@@ -333,6 +427,25 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
           >{n}+</button>
         ))}
       </div>
+
+      {data?.length > 0 && (
+        <SectionCard title="Runs Scored — Top Players">
+          <div className="px-4 py-4">
+            <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
+              <BarChart
+                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), runs: parseInt(p.runs || 0), id: p.player_id }))}
+                layout="vertical"
+                margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
+              >
+                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="runs" name="runs" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard title="Batting Honours">
         {data?.length ? (
@@ -427,6 +540,25 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
           >{n}+</button>
         ))}
       </div>
+
+      {data?.length > 0 && (
+        <SectionCard title="Wickets Taken — Top Bowlers">
+          <div className="px-4 py-4">
+            <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
+              <BarChart
+                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), wickets: parseInt(p.wickets || 0) }))}
+                layout="vertical"
+                margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
+              >
+                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="wickets" name="wickets" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard title="Bowling Honours">
         {data?.length ? (
