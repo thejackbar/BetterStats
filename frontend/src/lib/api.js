@@ -212,6 +212,77 @@ export const api = {
     }).then(r => r.json())
   },
 
+  // Yearbooks
+  listYearbooks: (orgId) => request(`/yearbooks/${orgId}`),
+  getYearbook: (orgId, seasonId) => request(`/yearbooks/${orgId}/${seasonId}`),
+  publishYearbook: (orgId, seasonId) => request(`/yearbooks/${orgId}/${seasonId}/publish`, { method: 'POST' }),
+  unpublishYearbook: (orgId, seasonId) => request(`/yearbooks/${orgId}/${seasonId}/unpublish`, { method: 'POST' }),
+  generateYearbookStubs: (orgId) => request(`/yearbooks/${orgId}/generate-stubs`, { method: 'POST' }),
+  getYearbookOverview: (orgId, seasonId, gradeId) => {
+    const params = new URLSearchParams()
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/yearbooks/${orgId}/${seasonId}/stats/overview?${params}`)
+  },
+  getYearbookBatting: (orgId, seasonId, { gradeId, minInnings = 1, limit = 50 } = {}) => {
+    const params = new URLSearchParams({ min_innings: minInnings, limit })
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/yearbooks/${orgId}/${seasonId}/stats/batting?${params}`)
+  },
+  getYearbookBowling: (orgId, seasonId, { gradeId, minWickets = 1, limit = 50 } = {}) => {
+    const params = new URLSearchParams({ min_wickets: minWickets, limit })
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/yearbooks/${orgId}/${seasonId}/stats/bowling?${params}`)
+  },
+  getYearbookFielding: (orgId, seasonId, { gradeId, limit = 50 } = {}) => {
+    const params = new URLSearchParams({ limit })
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/yearbooks/${orgId}/${seasonId}/stats/fielding?${params}`)
+  },
+  getYearbookAllrounders: (orgId, seasonId, { gradeId } = {}) => {
+    const params = new URLSearchParams()
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/yearbooks/${orgId}/${seasonId}/stats/allrounders?${params}`)
+  },
+  getYearbookSuperlatives: (orgId, seasonId, gradeId) => {
+    const params = new URLSearchParams()
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/yearbooks/${orgId}/${seasonId}/stats/superlatives?${params}`)
+  },
+  getYearbookResults: (orgId, seasonId, gradeId) => {
+    const params = new URLSearchParams()
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/yearbooks/${orgId}/${seasonId}/stats/results?${params}`)
+  },
+  getYearbookPartnerships: (orgId, seasonId, gradeId) => {
+    const params = new URLSearchParams()
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/yearbooks/${orgId}/${seasonId}/stats/partnerships?${params}`)
+  },
+  getYearbookMilestones: (orgId, seasonId) =>
+    request(`/yearbooks/${orgId}/${seasonId}/stats/milestones`),
+  getYearbookGrades: (orgId, seasonId) =>
+    request(`/yearbooks/${orgId}/${seasonId}/stats/grades`),
+  getYearbookDismissals: (orgId, seasonId, gradeId) => {
+    const params = new URLSearchParams()
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/yearbooks/${orgId}/${seasonId}/stats/dismissals?${params}`)
+  },
+  getYearbookPlayers: (orgId, seasonId, gradeId) => {
+    const params = new URLSearchParams()
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/yearbooks/${orgId}/${seasonId}/stats/players?${params}`)
+  },
+  createYearbookSection: (orgId, seasonId, data) =>
+    request(`/yearbooks/${orgId}/${seasonId}/sections`, { method: 'POST', body: JSON.stringify(data) }),
+  updateYearbookSection: (orgId, seasonId, sectionId, data) =>
+    request(`/yearbooks/${orgId}/${seasonId}/sections/${sectionId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteYearbookSection: (orgId, seasonId, sectionId) =>
+    request(`/yearbooks/${orgId}/${seasonId}/sections/${sectionId}`, { method: 'DELETE' }),
+  addHonourBoardEntry: (orgId, seasonId, data) =>
+    request(`/yearbooks/${orgId}/${seasonId}/honour-board`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteHonourBoardEntry: (orgId, seasonId, entryId) =>
+    request(`/yearbooks/${orgId}/${seasonId}/honour-board/${entryId}`, { method: 'DELETE' }),
+
   // StatLab
   statlabQuery: (orgId, { mode = 'career', seasonId, groupBy = 'player', sortBy = 'runs', sortDir = 'desc', limit = 100, filters = [] } = {}) => {
     const params = new URLSearchParams({ org_id: orgId, mode, group_by: groupBy, sort_by: sortBy, sort_dir: sortDir, limit })

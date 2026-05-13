@@ -40,6 +40,8 @@ import Leaderboard from './pages/Leaderboard'
 import Records from './pages/Records'
 import ShareCard from './pages/ShareCard'
 import StatLab from './pages/StatLab'
+import Yearbook from './pages/Yearbook'
+import AdminYearbook from './pages/admin/AdminYearbook'
 
 // Game pages (game-level, UUID-based — no slug needed)
 import MatchScorecard from './pages/MatchScorecard'
@@ -81,6 +83,7 @@ export default function App() {
         <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
         <Route path="/admin/phq-match" element={<ProtectedRoute><AdminPhqMatch /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+        <Route path="/admin/yearbook" element={<ProtectedRoute><AdminYearbook /></ProtectedRoute>} />
         <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
         <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
 
@@ -98,6 +101,8 @@ export default function App() {
         <Route path="/:clubSlug/leaderboard" element={<Leaderboard />} />
         <Route path="/:clubSlug/records" element={<Records />} />
         <Route path="/:clubSlug/statlab" element={<StatLab />} />
+        <Route path="/:clubSlug/yearbook" element={<Yearbook />} />
+        <Route path="/:clubSlug/yearbook/:seasonSlug" element={<Yearbook />} />
         <Route path="/players/:playerId" element={<PlayerProfile />} />
         <Route path="/players/:playerId/share" element={<ShareCard />} />
 
