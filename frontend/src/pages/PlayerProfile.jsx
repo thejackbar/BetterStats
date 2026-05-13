@@ -1075,7 +1075,13 @@ export default function PlayerProfile() {
             {batting && (
               <div>
                 <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest mb-2 px-0.5">BATTING</div>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>INNINGS</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
+                      <AnimatedNum value={batting.batting_innings || 0} />
+                    </span>
+                  </div>
                   <div className="pb-card p-3 flex flex-col gap-1">
                     <Label>RUNS</Label>
                     <span className="font-mono text-2xl font-bold pb-num leading-none mt-1" style={{ color: 'var(--pb-accent)' }}>
