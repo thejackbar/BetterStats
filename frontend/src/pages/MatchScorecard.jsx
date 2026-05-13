@@ -189,7 +189,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
                     : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
                   }
                 </td>
-                <td className="py-2 pr-5 text-pb-dim text-[12px] capitalize whitespace-nowrap hidden sm:table-cell">
+                <td className="py-2 pr-5 font-mono text-[12px] text-pb-faint capitalize whitespace-nowrap hidden sm:table-cell">
                   {row.not_out ? 'not out' : row.dismissal_type || '—'}
                 </td>
                 <td className="py-2 px-3 text-right w-12">
@@ -202,8 +202,8 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
                   {row.not_out && <span className="text-pb-accent text-[11px]">*</span>}
                 </td>
                 <td className="py-2 px-2 font-mono text-[12px] text-pb-faint text-right w-10">{row.balls ?? '—'}</td>
-                <td className="py-2 px-2 font-mono text-[11px] text-pb-faintest text-right w-8 hidden md:table-cell">{row.fours ?? '—'}</td>
-                <td className="py-2 pr-4 font-mono text-[11px] text-pb-faintest text-right w-8 hidden md:table-cell">{row.sixes ?? '—'}</td>
+                <td className="py-2 px-2 font-mono text-[12px] text-pb-faint text-right w-8 hidden md:table-cell">{row.fours ?? '—'}</td>
+                <td className="py-2 pr-4 font-mono text-[12px] text-pb-faint text-right w-8 hidden md:table-cell">{row.sixes ?? '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -256,7 +256,7 @@ function BowlingCard({ label, teamName, bowling = [] }) {
                     : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
                   }
                 </td>
-                <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right">{row.overs ?? '—'}</td>
+                <td className="py-2 px-3 font-mono font-semibold text-[13px] text-pb-text text-right">{row.overs ?? '—'}</td>
                 <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right hidden sm:table-cell">{row.maidens ?? 0}</td>
                 <td className="py-2 px-3 font-mono font-semibold text-[13px] text-pb-text text-right">{row.runs ?? '—'}</td>
                 <td className="py-2 px-3 text-right">
