@@ -1059,37 +1059,102 @@ export default function PlayerProfile() {
         )}
 
         {/* Quick stat strip */}
-        {batting && (
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
-            <div className="pb-card p-4 flex flex-col gap-1">
-              <Label>RUNS</Label>
-              <span className="font-mono text-3xl font-semibold pb-num leading-none mt-1" style={{ color: 'var(--pb-accent)' }}>
-                <AnimatedNum value={batting.total_runs || 0} />
-              </span>
+        {(batting || bowling || fielding) && (
+          <div className="space-y-3 mb-6">
+            {/* Row 1 — Matches */}
+            <div className="pb-card p-4 flex items-center gap-4">
+              <div>
+                <Label>MATCHES</Label>
+                <span className="font-mono text-[36px] font-bold pb-num leading-none mt-1 text-pb-text">
+                  <AnimatedNum value={batting?.games || bowling?.games || 0} />
+                </span>
+              </div>
             </div>
-            <div className="pb-card p-4 flex flex-col gap-1">
-              <Label>AVERAGE</Label>
-              <span className="font-mono text-3xl font-semibold pb-num leading-none mt-1 text-pb-text">
-                {batting.batting_average != null ? Number(batting.batting_average).toFixed(2) : '—'}
-              </span>
-            </div>
-            <div className="pb-card p-4 flex flex-col gap-1">
-              <Label>HIGH SCORE</Label>
-              <span className="font-mono text-3xl font-semibold pb-num leading-none mt-1 text-pb-text">
-                {batting.high_score ?? '—'}
-              </span>
-            </div>
-            <div className="pb-card p-4 flex flex-col gap-1">
-              <Label>WICKETS</Label>
-              <span className="font-mono text-3xl font-semibold pb-num leading-none mt-1 text-pb-text">
-                <AnimatedNum value={bowling?.total_wickets || 0} />
-              </span>
-            </div>
-            <div className="pb-card p-4 flex flex-col gap-1">
-              <Label>MATCHES</Label>
-              <span className="font-mono text-3xl font-semibold pb-num leading-none mt-1 text-pb-text">
-                <AnimatedNum value={player.matches_played || 0} />
-              </span>
+
+            {/* Row 2 — Batting */}
+            {batting && (
+              <div>
+                <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest mb-2 px-0.5">BATTING</div>
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>RUNS</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1" style={{ color: 'var(--pb-accent)' }}>
+                      <AnimatedNum value={batting.total_runs || 0} />
+                    </span>
+                  </div>
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>AVG</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
+                      {batting.average != null ? Number(batting.average).toFixed(2) : '—'}
+                    </span>
+                  </div>
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>HIGH SCORE</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
+                      {batting.high_score ?? '—'}
+                    </span>
+                  </div>
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>50s</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
+                      {batting.fifties ?? '—'}
+                    </span>
+                  </div>
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>100s</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1" style={{ color: batting.hundreds > 0 ? 'var(--pb-amber)' : undefined }}>
+                      {batting.hundreds ?? '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Row 3 — Bowling + Fielding */}
+            <div>
+              <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest mb-2 px-0.5">BOWLING & FIELDING</div>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                {bowling && (<>
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>WICKETS</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1" style={{ color: 'var(--pb-accent)' }}>
+                      <AnimatedNum value={bowling.total_wickets || 0} />
+                    </span>
+                  </div>
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>AVG</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
+                      {bowling.average != null ? Number(bowling.average).toFixed(2) : '—'}
+                    </span>
+                  </div>
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>ECON</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
+                      {bowling.economy != null ? Number(bowling.economy).toFixed(2) : '—'}
+                    </span>
+                  </div>
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>BEST</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
+                      {bowling.best_bowling_figures || (bowling.best_figures_wickets != null ? `${bowling.best_figures_wickets}w` : '—')}
+                    </span>
+                  </div>
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>5-FORS</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
+                      {bowling.five_fors ?? '—'}
+                    </span>
+                  </div>
+                </>)}
+                {fielding && (
+                  <div className="pb-card p-3 flex flex-col gap-1">
+                    <Label>DISMISSALS</Label>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
+                      {fielding.total_dismissals ?? '—'}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
