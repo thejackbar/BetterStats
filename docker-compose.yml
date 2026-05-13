@@ -21,7 +21,11 @@ services:
       SYNC_DATABASE_URL: postgresql://cricket:${DB_PASSWORD}@db/betterstats
       SECRET_KEY: ${SECRET_KEY}
       PLAYHQ_BASE_URL: https://grassrootsapiproxy.cricket.com.au
+      PLAYHQ_API_KEY: ${PLAYHQ_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3002}
+    volumes:
+      - uploads:/app/uploads
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -39,3 +43,4 @@ services:
 
 volumes:
   pgdata:
+  uploads:

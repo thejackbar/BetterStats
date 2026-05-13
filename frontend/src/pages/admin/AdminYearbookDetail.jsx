@@ -1,7 +1,308 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { PbSpinner, Btn } from '../../lib/presskit'
+
+const AWARD_PRESETS = [
+  'Best & Fairest', 'Best Batter', 'Best Bowler', 'Best Fieldsman',
+  'Club Champion', 'Rookie of the Year', 'Most Improved',
+  'Most Valuable Player', "Club Person of the Year", "President's Award", 'Custom',
+]
+
+function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
+  const inputRef = useRef()
+  const [uploading, setUploading] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setErr(null)
+    const fd = new FormData()
+    fd.append('file', file)
+    try {
+      await api.uploadYearbookHero(orgId, seasonId, fd)
+      onRefresh()
+    } catch (ex) {
+      setErr(ex.message)
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleClear = async () => {
+    setErr(null)
+    try {
+      await api.clearYearbookHero(orgId, seasonId)
+      onRefresh()
+    } catch (ex) {
+      setErr(ex.message)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
+      <h2 className="text-[13px] font-semibold text-white/90 mb-1">Hero Image</h2>
+      <p className="text-[11px] text-white/40 mb-4">Shown as the yearbook cover background. Landscape photos work best.</p>
+      {heroPath ? (
+        <div className="mb-3">
+          <img
+            src={`/uploads/${heroPath}`}
+            alt="Hero"
+            className="w-full max-h-48 object-cover rounded-lg border border-white/10"
+          />
+          <div className="flex gap-2 mt-2">
+            <Btn onClick={() => inputRef.current?.click()} disabled={uploading}>
+              {uploading ? 'Uploading…' : 'Replace'}
+            </Btn>
+            <button
+              onClick={handleClear}
+              className="px-3 py-1.5 text-[12px] font-mono text-red-400/60 hover:text-red-400 transition"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className="w-full border-2 border-dashed border-white/15 rounded-lg py-8 text-center hover:border-white/25 transition-colors disabled:opacity-40"
+        >
+          <div className="text-white/40 text-[13px]">{uploading ? 'Uploading…' : '+ Upload Hero Image'}</div>
+          <div className="text-white/25 text-[11px] font-mono mt-1">JPG, PNG, WEBP up to 20MB</div>
+        </button>
+      )}
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+      {err && <p className="text-[11px] text-red-400/80 mt-2">{err}</p>}
+    </div>
+  )
+}
+
+function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
+  const inputRef = useRef()
+  const [uploading, setUploading] = useState(false)
+  const [deleting, setDeleting] = useState(null)
+  const [err, setErr] = useState(null)
+
+  const galleryImages = images.filter(i => i.image_type === 'gallery')
+
+  const handleFile = async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+    setUploading(true)
+    setErr(null)
+    try {
+      for (const file of files) {
+        const fd = new FormData()
+        fd.append('file', file)
+        await api.uploadYearbookGallery(orgId, seasonId, fd)
+      }
+      onRefresh()
+    } catch (ex) {
+      setErr(ex.message)
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleDelete = async (img) => {
+    setDeleting(img.id)
+    try {
+      await api.deleteYearbookImage(orgId, seasonId, img.id)
+      onRefresh()
+    } catch (ex) {
+      setErr(ex.message)
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-[13px] font-semibold text-white/90">Photo Gallery</h2>
+          <p className="text-[11px] text-white/40 mt-0.5">Team photos, match shots, presentations — shown on the public yearbook.</p>
+        </div>
+        <Btn onClick={() => inputRef.current?.click()} disabled={uploading}>
+          {uploading ? 'Uploading…' : '+ Add Photos'}
+        </Btn>
+      </div>
+      {galleryImages.length > 0 ? (
+        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-2">
+          {galleryImages.map(img => (
+            <div key={img.id} className="relative group aspect-square">
+              <img
+                src={`/uploads/${img.file_path}`}
+                alt=""
+                className="w-full h-full object-cover rounded-lg border border-white/8"
+              />
+              <button
+                onClick={() => handleDelete(img)}
+                disabled={deleting === img.id}
+                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white/70 hover:text-red-400 flex items-center justify-center text-[13px] opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-40"
+              >
+                {deleting === img.id ? '…' : '×'}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-[12px] text-white/25 italic mb-2">No photos yet.</p>
+      )}
+      <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFile} />
+      {err && <p className="text-[11px] text-red-400/80 mt-1">{err}</p>}
+    </div>
+  )
+}
+
+function ClubAwardsPanel({ orgId, seasonId, awards, players, onRefresh }) {
+  const [adding, setAdding] = useState(false)
+  const [awardName, setAwardName] = useState('')
+  const [customName, setCustomName] = useState('')
+  const [usePlayer, setUsePlayer] = useState(true)
+  const [playerId, setPlayerId] = useState('')
+  const [playerSearch, setPlayerSearch] = useState('')
+  const [nameOverride, setNameOverride] = useState('')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(null)
+  const [err, setErr] = useState(null)
+
+  const filteredPlayers = players.filter(p =>
+    !playerSearch || (p.display_name || p.name || '').toLowerCase().includes(playerSearch.toLowerCase())
+  )
+
+  const handleAdd = async () => {
+    const finalName = awardName === 'Custom' ? customName.trim() : awardName
+    if (!finalName) { setErr('Award name required.'); return }
+    if (usePlayer && !playerId) { setErr('Select a player or switch to free text.'); return }
+    if (!usePlayer && !nameOverride.trim()) { setErr('Recipient name required.'); return }
+    setSaving(true); setErr(null)
+    try {
+      await api.createYearbookAward(orgId, seasonId, {
+        award_name: finalName,
+        player_id: usePlayer ? playerId : null,
+        name_override: !usePlayer ? nameOverride.trim() : null,
+        notes: notes.trim() || null,
+        sort_order: awards.length,
+      })
+      setAdding(false); setAwardName(''); setCustomName(''); setPlayerId('')
+      setNameOverride(''); setNotes(''); setPlayerSearch('')
+      onRefresh()
+    } catch (ex) { setErr(ex.message) }
+    finally { setSaving(false) }
+  }
+
+  const handleDelete = async (award) => {
+    setDeleting(award.id)
+    try { await api.deleteYearbookAward(orgId, seasonId, award.id); onRefresh() }
+    catch (ex) { setErr(ex.message) }
+    finally { setDeleting(null) }
+  }
+
+  return (
+    <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-[13px] font-semibold text-white/90">Club Awards</h2>
+          <p className="text-[11px] text-white/40 mt-0.5">
+            {awards.length === 0 ? 'Season award winners — shown on the Awards tab.' : `${awards.length} award${awards.length !== 1 ? 's' : ''} recorded`}
+          </p>
+        </div>
+        {!adding && <Btn onClick={() => { setAdding(true); setErr(null) }}>+ Add Award</Btn>}
+      </div>
+
+      {awards.length > 0 && (
+        <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
+          {awards.map(a => (
+            <div key={a.id} className="flex items-start gap-4 px-4 py-3">
+              <div className="flex-1 min-w-0">
+                <span className="font-mono text-[10px] text-white/40 uppercase tracking-wide">{a.award_name}</span>
+                <div className="text-[13px] text-white/80 mt-0.5">{a.player_name || a.name_override || '—'}</div>
+                {a.notes && <div className="text-[11px] text-white/35 mt-0.5 italic">{a.notes}</div>}
+              </div>
+              <button
+                onClick={() => handleDelete(a)}
+                disabled={deleting === a.id}
+                className="shrink-0 text-white/20 hover:text-red-400/70 transition text-[12px] font-mono disabled:opacity-40 pt-0.5"
+              >
+                {deleting === a.id ? '…' : 'Delete'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adding && (
+        <div className="rounded-lg border border-white/10 bg-white/3 p-4 space-y-3">
+          {/* Award name presets */}
+          <div>
+            <label className="block text-[11px] font-mono text-white/40 mb-1.5">AWARD</label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {AWARD_PRESETS.map(p => (
+                <button key={p} onClick={() => setAwardName(p)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${awardName === p ? 'border-pb-accent/50 text-pb-accent bg-pb-accent/10' : 'border-white/10 text-white/30 hover:border-white/20 hover:text-white/50'}`}>
+                  {p}
+                </button>
+              ))}
+            </div>
+            {awardName === 'Custom' && (
+              <input type="text" value={customName} onChange={e => setCustomName(e.target.value)}
+                placeholder="Award name…"
+                className="w-full rounded bg-white/5 border border-white/10 text-white/80 text-[13px] px-3 py-2 focus:outline-none focus:border-white/25 placeholder:text-white/20" />
+            )}
+          </div>
+
+          {/* Player vs free text */}
+          <div className="flex items-center gap-2">
+            {[['Select Player', true], ['Free Text', false]].map(([label, val]) => (
+              <button key={label} onClick={() => setUsePlayer(val)}
+                className={`text-[11px] font-mono px-2.5 py-1 rounded border transition-colors ${usePlayer === val ? 'border-pb-accent/40 text-pb-accent bg-pb-accent/10' : 'border-white/10 text-white/30 hover:text-white/50'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {usePlayer ? (
+            <div>
+              <input type="text" value={playerSearch} onChange={e => setPlayerSearch(e.target.value)}
+                placeholder="Search players…"
+                className="w-full rounded-t bg-white/5 border border-white/10 border-b-0 text-white/80 text-[13px] px-3 py-2 focus:outline-none focus:border-white/25 placeholder:text-white/20" />
+              <div className="max-h-36 overflow-y-auto rounded-b bg-white/5 border border-white/10">
+                {filteredPlayers.slice(0, 25).map(p => (
+                  <button key={p.id} onClick={() => { setPlayerId(p.id); setPlayerSearch(p.display_name || p.name) }}
+                    className={`w-full text-left px-3 py-2 text-[13px] transition-colors ${playerId === p.id ? 'bg-pb-accent/15 text-white/90' : 'text-white/70 hover:bg-white/5'}`}>
+                    {p.display_name || p.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <input type="text" value={nameOverride} onChange={e => setNameOverride(e.target.value)}
+              placeholder="Recipient name…"
+              className="w-full rounded bg-white/5 border border-white/10 text-white/80 text-[13px] px-3 py-2 focus:outline-none focus:border-white/25 placeholder:text-white/20" />
+          )}
+
+          <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder="Optional note (e.g. season highlights)…"
+            className="w-full rounded bg-white/5 border border-white/10 text-white/80 text-[13px] px-3 py-2 focus:outline-none focus:border-white/25 placeholder:text-white/20" />
+
+          {err && <p className="text-[11px] text-red-400/80">{err}</p>}
+          <div className="flex items-center gap-2">
+            <Btn onClick={handleAdd} disabled={saving}>{saving ? 'Adding…' : 'Add Award'}</Btn>
+            <button onClick={() => { setAdding(false); setErr(null); setAwardName(''); setCustomName('') }}
+              className="px-3 py-1.5 text-[12px] font-mono text-white/30 hover:text-white/50 transition">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 const SECTION_PRESETS = [
   { type: 'presidents_report',  label: "President's Report" },
@@ -658,6 +959,31 @@ export default function AdminYearbookDetail() {
           </Btn>
         </div>
       </div>
+
+      {/* Hero Image */}
+      <HeroImagePanel
+        orgId={org.id}
+        seasonId={seasonId}
+        heroPath={yearbook.hero_image_path}
+        onRefresh={load}
+      />
+
+      {/* Gallery */}
+      <GalleryPanel
+        orgId={org.id}
+        seasonId={seasonId}
+        images={yearbook.images || []}
+        onRefresh={load}
+      />
+
+      {/* Club Awards */}
+      <ClubAwardsPanel
+        orgId={org.id}
+        seasonId={seasonId}
+        awards={yearbook.awards || []}
+        players={players}
+        onRefresh={load}
+      />
 
       {/* Editorial Sections */}
       <CustomSectionsPanel

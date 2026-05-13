@@ -114,7 +114,7 @@ function StatCallout({ value, label, sub, accent = false, className = '' }) {
 
 // ─── Overview tab ────────────────────────────────────────────────────────────
 
-function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, customSections }) {
+function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, customSections, galleryImages }) {
   const [overview, setOverview] = useState(null)
   const [superlatives, setSuperlatives] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -207,6 +207,21 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
           </div>
         </div>
       ))}
+
+      {/* Photo gallery */}
+      {galleryImages?.length > 0 && (
+        <SectionCard title="Photo Gallery">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 p-1">
+            {galleryImages.map(img => (
+              <a key={img.id} href={`/uploads/${img.file_path}`} target="_blank" rel="noopener noreferrer"
+                 className="aspect-video block overflow-hidden rounded">
+                <img src={`/uploads/${img.file_path}`} alt={img.caption || ''}
+                     className="w-full h-full object-cover hover:scale-105 transition-transform duration-200" />
+              </a>
+            ))}
+          </div>
+        </SectionCard>
+      )}
 
       {/* By the Numbers */}
       {superlatives && (
@@ -712,9 +727,9 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
       .finally(() => setLoading(false))
   }, [orgId, seasonId])
 
+  const clubAwards = yearbookData?.awards || []
   const honourBoard = yearbookData?.honour_board || []
 
-  // Group honour board by position
   const hbByPos = honourBoard.reduce((acc, h) => {
     if (!acc[h.position_title]) acc[h.position_title] = []
     acc[h.position_title].push(h)
@@ -723,6 +738,26 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
 
   return (
     <div className="space-y-6">
+      {/* Club Awards */}
+      {clubAwards.length > 0 && (
+        <SectionCard title="Club Awards">
+          <div className="grid sm:grid-cols-2 gap-px bg-white/5">
+            {clubAwards.map(a => (
+              <div key={a.id} className="bg-white/2 px-5 py-4">
+                <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">{a.award_name}</div>
+                <div className="text-[15px] font-semibold text-white/90">
+                  {a.player_id
+                    ? <PlayerLink id={a.player_id} name={a.player_name || a.name_override} slug={clubSlug} />
+                    : <span>{a.name_override}</span>
+                  }
+                </div>
+                {a.notes && <div className="text-[12px] text-white/40 mt-1 italic">{a.notes}</div>}
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
       {honourBoard.length > 0 && (
         <SectionCard title="Honour Board">
           <div className="divide-y divide-white/5">
@@ -1066,6 +1101,7 @@ export default function Yearbook() {
   const season = yearbook.season
   const narrative = yearbook.sections?.find(s => s.section_type === 'narrative' && s.is_enabled)?.content_markdown
   const customSections = yearbook.sections?.filter(s => s.section_type !== 'narrative' && s.is_enabled && s.content_markdown) || []
+  const galleryImages = yearbook.images?.filter(i => i.image_type === 'gallery') || []
 
   const orgId = club.id
   const seasonId = season?.id
@@ -1183,7 +1219,7 @@ export default function Yearbook() {
       {/* Tab content */}
       <div className="max-w-5xl mx-auto px-4 py-8">
         {activeTab === 'overview' && (
-          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} customSections={customSections} />
+          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} customSections={customSections} galleryImages={galleryImages} />
         )}
         {activeTab === 'results' && (
           <ResultsTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />

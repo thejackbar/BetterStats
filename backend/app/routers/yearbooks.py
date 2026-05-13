@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional
 import uuid
 import logging
+import shutil
+from pathlib import Path
 
 from app.models.db import get_db
 from app.config.settings import settings
@@ -12,6 +14,8 @@ from app.config.settings import settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/yearbooks", tags=["yearbooks"])
+
+UPLOAD_DIR = Path("/app/uploads")
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -136,6 +140,16 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
         text("SELECT * FROM yearbook_images WHERE yearbook_id = :yid ORDER BY image_type, sort_order"),
         {"yid": str(yb["id"])},
     )
+    awards = await db.execute(
+        text("""
+            SELECT a.*, COALESCE(p.display_name_override, p.name) AS player_name
+            FROM yearbook_club_awards a
+            LEFT JOIN players p ON p.id = a.player_id
+            WHERE a.yearbook_id = :yid
+            ORDER BY a.sort_order, a.id
+        """),
+        {"yid": str(yb["id"])},
+    )
 
     season = await db.execute(
         text("SELECT id, name, year FROM seasons WHERE id = :s"),
@@ -150,6 +164,7 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
         "sections": [dict(r) for r in sections.mappings().all()],
         "honour_board": [dict(r) for r in honour_board.mappings().all()],
         "images": [dict(r) for r in images.mappings().all()],
+        "awards": [dict(r) for r in awards.mappings().all()],
     }
 
 
@@ -1025,6 +1040,161 @@ async def delete_honour_board_entry(
     await db.execute(
         text("DELETE FROM yearbook_honour_board WHERE id = :id AND yearbook_id = :yid"),
         {"id": entry_id, "yid": str(yb["id"])},
+    )
+    await db.commit()
+    return {"status": "deleted"}
+
+
+# ─── Admin: image uploads ─────────────────────────────────────────────────────
+
+ALLOWED_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
+
+
+def _save_upload(file: UploadFile, org_id: str, prefix: str) -> str:
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_EXTS:
+        raise HTTPException(400, "Image files only (jpg, png, webp, gif)")
+    dest_dir = UPLOAD_DIR / "yearbooks" / org_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{prefix}_{uuid.uuid4().hex}{ext}"
+    with (dest_dir / filename).open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return f"yearbooks/{org_id}/{filename}"
+
+
+def _delete_file(rel_path: str | None) -> None:
+    if rel_path:
+        p = UPLOAD_DIR / rel_path
+        if p.exists():
+            p.unlink(missing_ok=True)
+
+
+@router.post("/{org_id}/{season_id}/upload/hero")
+async def upload_hero(
+    org_id: str,
+    season_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    yb = await _ensure_stub(db, org_id, season_id)
+    _delete_file(yb.get("hero_image_path"))
+    rel_path = _save_upload(file, org_id, "hero")
+    await db.execute(
+        text("UPDATE yearbooks SET hero_image_path = :p, updated_at = NOW() WHERE id = :id"),
+        {"p": rel_path, "id": str(yb["id"])},
+    )
+    await db.commit()
+    return {"path": rel_path}
+
+
+@router.delete("/{org_id}/{season_id}/upload/hero")
+async def clear_hero(org_id: str, season_id: str, db: AsyncSession = Depends(get_db)):
+    yb = await _ensure_stub(db, org_id, season_id)
+    _delete_file(yb.get("hero_image_path"))
+    await db.execute(
+        text("UPDATE yearbooks SET hero_image_path = NULL, updated_at = NOW() WHERE id = :id"),
+        {"id": str(yb["id"])},
+    )
+    await db.commit()
+    return {"status": "cleared"}
+
+
+@router.post("/{org_id}/{season_id}/upload/gallery")
+async def upload_gallery(
+    org_id: str,
+    season_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    yb = await _ensure_stub(db, org_id, season_id)
+    rel_path = _save_upload(file, org_id, "gallery")
+    result = await db.execute(
+        text("""
+            INSERT INTO yearbook_images (yearbook_id, file_path, image_type, sort_order)
+            VALUES (:yid, :path, 'gallery',
+                COALESCE((SELECT MAX(sort_order) + 1 FROM yearbook_images WHERE yearbook_id = :yid), 0))
+            RETURNING id
+        """),
+        {"yid": str(yb["id"]), "path": rel_path},
+    )
+    new_id = result.scalar()
+    await db.commit()
+    return {"id": new_id, "path": rel_path}
+
+
+@router.delete("/{org_id}/{season_id}/images/{image_id}")
+async def delete_gallery_image(
+    org_id: str,
+    season_id: str,
+    image_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    yb = await _ensure_stub(db, org_id, season_id)
+    row = await db.execute(
+        text("SELECT file_path FROM yearbook_images WHERE id = :id AND yearbook_id = :yid"),
+        {"id": image_id, "yid": str(yb["id"])},
+    )
+    img = row.mappings().first()
+    if img:
+        _delete_file(img["file_path"])
+        await db.execute(
+            text("DELETE FROM yearbook_images WHERE id = :id AND yearbook_id = :yid"),
+            {"id": image_id, "yid": str(yb["id"])},
+        )
+        await db.commit()
+    return {"status": "deleted"}
+
+
+# ─── Admin: club awards ───────────────────────────────────────────────────────
+
+class ClubAwardBody(BaseModel):
+    award_name: str
+    player_id: Optional[str] = None
+    name_override: Optional[str] = None
+    notes: Optional[str] = None
+    sort_order: int = 0
+
+
+@router.post("/{org_id}/{season_id}/awards")
+async def create_award(
+    org_id: str,
+    season_id: str,
+    body: ClubAwardBody,
+    db: AsyncSession = Depends(get_db),
+):
+    yb = await _ensure_stub(db, org_id, season_id)
+    result = await db.execute(
+        text("""
+            INSERT INTO yearbook_club_awards
+                (yearbook_id, award_name, player_id, name_override, notes, sort_order)
+            VALUES (:yid, :name, :pid, :nover, :notes, :order)
+            RETURNING id
+        """),
+        {
+            "yid": str(yb["id"]),
+            "name": body.award_name,
+            "pid": body.player_id,
+            "nover": body.name_override,
+            "notes": body.notes,
+            "order": body.sort_order,
+        },
+    )
+    new_id = result.scalar()
+    await db.commit()
+    return {"id": new_id, "status": "created"}
+
+
+@router.delete("/{org_id}/{season_id}/awards/{award_id}")
+async def delete_award(
+    org_id: str,
+    season_id: str,
+    award_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    yb = await _ensure_stub(db, org_id, season_id)
+    await db.execute(
+        text("DELETE FROM yearbook_club_awards WHERE id = :id AND yearbook_id = :yid"),
+        {"id": award_id, "yid": str(yb["id"])},
     )
     await db.commit()
     return {"status": "deleted"}
