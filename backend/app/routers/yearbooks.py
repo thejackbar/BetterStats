@@ -7,6 +7,7 @@ import uuid
 import logging
 
 from app.models.db import get_db
+from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -1035,3 +1036,247 @@ async def delete_honour_board_entry(
 async def trigger_stub_generation(org_id: str, db: AsyncSession = Depends(get_db)):
     created = await generate_stubs_for_org(db, org_id)
     return {"created": created}
+
+
+# ─── AI narrative generation ──────────────────────────────────────────────────
+
+def _fmt(n, dec=2):
+    if n is None:
+        return "—"
+    try:
+        return f"{float(n):.{dec}f}"
+    except (TypeError, ValueError):
+        return str(n)
+
+
+def _build_narrative_prompt(org_name: str, season_name: str, overview: dict,
+                             batting: list, bowling: list, superlatives: dict,
+                             milestones: list) -> str:
+    wins = overview.get("wins", 0) or 0
+    losses = overview.get("losses", 0) or 0
+    draws = overview.get("draws", 0) or 0
+    players = overview.get("total_players", 0) or 0
+    total_runs = overview.get("total_runs", 0) or 0
+    total_wkts = overview.get("total_wickets", 0) or 0
+
+    top_bat = batting[:5] if batting else []
+    top_bowl = bowling[:5] if bowling else []
+
+    bat_lines = "\n".join(
+        f"  - {p['name']}: {p.get('runs', 0)} runs, avg {_fmt(p.get('average'))}, HS {p.get('high_score', '—')}"
+        for p in top_bat
+    )
+    bowl_lines = "\n".join(
+        f"  - {p['name']}: {p.get('wickets', 0)} wickets, avg {_fmt(p.get('average'))}, best {p.get('best_figures', '—')}"
+        for p in top_bowl
+    )
+
+    sup = superlatives or {}
+    hs = sup.get("highest_score", {})
+    bb = sup.get("best_bowling", {})
+    bp = sup.get("best_partnership", {})
+
+    milestone_lines = ""
+    if milestones:
+        milestone_lines = "\nCareer milestones crossed this season:\n" + "\n".join(
+            f"  - {m.get('player_name', '?')}: {m.get('milestone_type', '')} {m.get('milestone_value', '')}"
+            for m in milestones[:8]
+        )
+
+    return f"""You are writing the "Season in Brief" editorial section for {org_name}'s {season_name} season yearbook.
+
+Season data:
+- Record: {wins}W {draws}D {losses}L from {int(wins)+int(draws)+int(losses)} games
+- {players} players represented the club
+- {int(total_runs):,} runs scored, {int(total_wkts)} wickets taken
+
+Leading batters:
+{bat_lines or "  No data"}
+
+Leading bowlers:
+{bowl_lines or "  No data"}
+
+Standout performances:
+{f"  - Highest score: {hs.get('name', '?')} {hs.get('runs', '?')}{'*' if hs.get('not_out') else ''}" if hs.get('player_id') else ""}
+{f"  - Best bowling: {bb.get('name', '?')} {bb.get('wickets', '?')}/{bb.get('runs_conceded', '?')}" if bb.get('player_id') else ""}
+{f"  - Best partnership: {bp.get('batter1_name', '?')} & {bp.get('batter2_name', '?')} — {bp.get('runs', '?')} runs" if bp.get('batter1_id') else ""}
+{milestone_lines}
+
+Write 3–4 paragraphs as a warm, conversational club yearbook narrative. Rules:
+- Open with a punchy one-sentence summary of the season's character (e.g. results, tone, any major storyline)
+- Reference specific players and numbers naturally — don't just list stats, weave them into sentences
+- Acknowledge both highlights and honest disappointments if the record warrants it
+- End on a forward-looking or celebratory note
+- Tone: casual and warm, like a club member who cares about the team wrote it — not corporate
+- Do NOT use nicknames unless they appear in the data
+- Do NOT use bullet points or headings — flowing prose only
+- Keep it under 350 words"""
+
+
+@router.post("/{org_id}/{season_id}/generate-narrative")
+async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Depends(get_db)):
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="Anthropic API key not configured")
+
+    try:
+        import anthropic as anthropic_sdk
+    except ImportError:
+        raise HTTPException(status_code=503, detail="anthropic package not installed")
+
+    yb = await _ensure_stub(db, org_id, season_id)
+
+    # Gather season stats concurrently via direct SQL
+    org_row = await db.execute(text("SELECT name FROM organisations WHERE id = :o"), {"o": org_id})
+    org_name = (org_row.mappings().first() or {}).get("name", "the club")
+
+    season_row = await db.execute(text("SELECT name FROM seasons WHERE id = :s"), {"s": season_id})
+    season_name = (season_row.mappings().first() or {}).get("name", "the season")
+
+    # Re-use the stats helpers defined earlier in this module
+    from app.routers.yearbooks import (
+        get_overview, get_batting_stats, get_bowling_stats,
+        get_superlatives, get_season_milestones,
+    )
+
+    # We need a mock Request object — easier to just inline the queries directly
+    params = {"o": org_id, "s": season_id}
+
+    ov_row = await db.execute(text("""
+        SELECT
+            COUNT(DISTINCT pss.player_id) AS total_players,
+            COALESCE(SUM(pss.runs), 0) AS total_runs,
+            COALESCE(SUM(pss.wickets), 0) AS total_wickets
+        FROM player_season_stats pss
+        JOIN seasons s ON s.id = pss.season_id
+        WHERE pss.season_id = :s AND s.organisation_id = :o
+    """), params)
+    overview = dict(ov_row.mappings().first() or {})
+
+    games_row = await db.execute(text("""
+        SELECT
+            COUNT(*) FILTER (WHERE gm.result = 'won') AS wins,
+            COUNT(*) FILTER (WHERE gm.result = 'lost') AS losses,
+            COUNT(*) FILTER (WHERE gm.result = 'draw') AS draws
+        FROM games gm
+        JOIN grades g ON g.id = gm.grade_id
+        WHERE g.season_id = :s
+          AND g.season_id IN (SELECT id FROM seasons WHERE organisation_id = :o)
+    """), params)
+    overview.update(dict(games_row.mappings().first() or {}))
+
+    bat_rows = await db.execute(text("""
+        SELECT COALESCE(p.display_name_override, p.name) AS name,
+               SUM(pss.runs) AS runs,
+               MAX(pss.high_score) AS high_score,
+               ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average
+        FROM player_season_stats pss JOIN players p ON p.id = pss.player_id
+        WHERE pss.season_id = :s AND p.organisation_id = :o
+        GROUP BY p.id, p.name, p.display_name_override
+        HAVING SUM(pss.batting_innings) >= 3
+        ORDER BY SUM(pss.runs) DESC NULLS LAST LIMIT 5
+    """), params)
+    batting = [dict(r) for r in bat_rows.mappings().all()]
+
+    bowl_rows = await db.execute(text("""
+        SELECT COALESCE(p.display_name_override, p.name) AS name,
+               SUM(pss.wickets) AS wickets,
+               MAX(pss.best_bowling_figures) AS best_figures,
+               ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average
+        FROM player_season_stats pss JOIN players p ON p.id = pss.player_id
+        WHERE pss.season_id = :s AND p.organisation_id = :o
+        GROUP BY p.id, p.name, p.display_name_override
+        HAVING SUM(pss.wickets) >= 3
+        ORDER BY SUM(pss.wickets) DESC NULLS LAST LIMIT 5
+    """), params)
+    bowling = [dict(r) for r in bowl_rows.mappings().all()]
+
+    hs_row = await db.execute(text("""
+        SELECT COALESCE(p.display_name_override, p.name) AS name, p.id AS player_id,
+               bi.runs, bi.not_out
+        FROM batting_innings bi JOIN players p ON p.id = bi.player_id
+        JOIN games gm ON gm.id = bi.game_id JOIN grades g ON g.id = gm.grade_id
+        WHERE g.season_id = :s AND p.organisation_id = :o
+        ORDER BY bi.runs DESC NULLS LAST LIMIT 1
+    """), params)
+    bb_row = await db.execute(text("""
+        SELECT COALESCE(p.display_name_override, p.name) AS name, p.id AS player_id,
+               bs.wickets, bs.runs AS runs_conceded
+        FROM bowling_spells bs JOIN players p ON p.id = bs.player_id
+        JOIN games gm ON gm.id = bs.game_id JOIN grades g ON g.id = gm.grade_id
+        WHERE g.season_id = :s AND p.organisation_id = :o
+        ORDER BY bs.wickets DESC NULLS LAST, bs.runs ASC NULLS LAST LIMIT 1
+    """), params)
+    bp_row = await db.execute(text("""
+        SELECT COALESCE(p1.display_name_override, p1.name) AS batter1_name,
+               COALESCE(p2.display_name_override, p2.name) AS batter2_name,
+               p1.id AS batter1_id, pt.runs, pt.wicket_number
+        FROM partnerships pt
+        JOIN players p1 ON p1.id = pt.batter1_id JOIN players p2 ON p2.id = pt.batter2_id
+        JOIN games gm ON gm.id = pt.game_id JOIN grades g ON g.id = gm.grade_id
+        WHERE g.season_id = :s AND p1.organisation_id = :o
+        ORDER BY pt.runs DESC NULLS LAST LIMIT 1
+    """), params)
+    superlatives = {
+        "highest_score": dict(hs_row.mappings().first() or {}),
+        "best_bowling": dict(bb_row.mappings().first() or {}),
+        "best_partnership": dict(bp_row.mappings().first() or {}),
+    }
+
+    s_dates = await db.execute(text("""
+        SELECT MIN(gm.played_at) AS first_game, MAX(gm.played_at) AS last_game
+        FROM games gm JOIN grades g ON g.id = gm.grade_id WHERE g.season_id = :s
+    """), {"s": season_id})
+    s_d = s_dates.mappings().first() or {}
+    milestones = []
+    if s_d.get("first_game"):
+        m_rows = await db.execute(text("""
+            SELECT m.milestone_type, m.milestone_value,
+                   COALESCE(p.display_name_override, p.name) AS player_name
+            FROM milestones m JOIN players p ON p.id = m.player_id
+            WHERE p.organisation_id = :o
+              AND m.achieved_at BETWEEN :f AND :l
+            ORDER BY m.achieved_at LIMIT 8
+        """), {"o": org_id, "f": s_d["first_game"], "l": s_d["last_game"]})
+        milestones = [dict(r) for r in m_rows.mappings().all()]
+
+    prompt = _build_narrative_prompt(org_name, season_name, overview, batting, bowling, superlatives, milestones)
+
+    client = anthropic_sdk.Anthropic(api_key=settings.anthropic_api_key)
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=600,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    narrative_text = message.content[0].text.strip()
+
+    # Upsert the narrative section
+    existing = await db.execute(
+        text("SELECT id FROM yearbook_sections WHERE yearbook_id = :yid AND section_type = 'narrative'"),
+        {"yid": str(yb["id"])},
+    )
+    existing_row = existing.mappings().first()
+
+    if existing_row:
+        await db.execute(
+            text("""
+                UPDATE yearbook_sections
+                SET ai_draft = :draft, updated_at = NOW()
+                WHERE id = :id
+            """),
+            {"draft": narrative_text, "id": existing_row["id"]},
+        )
+        section_id = existing_row["id"]
+    else:
+        result = await db.execute(
+            text("""
+                INSERT INTO yearbook_sections
+                    (yearbook_id, section_type, title, ai_draft, sort_order, is_enabled)
+                VALUES (:yid, 'narrative', 'Season in Brief', :draft, 0, true)
+                RETURNING id
+            """),
+            {"yid": str(yb["id"]), "draft": narrative_text},
+        )
+        section_id = result.scalar()
+
+    await db.commit()
+    return {"section_id": section_id, "narrative": narrative_text}

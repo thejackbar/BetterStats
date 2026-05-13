@@ -42,6 +42,7 @@ import ShareCard from './pages/ShareCard'
 import StatLab from './pages/StatLab'
 import Yearbook from './pages/Yearbook'
 import AdminYearbook from './pages/admin/AdminYearbook'
+import AdminYearbookDetail from './pages/admin/AdminYearbookDetail'
 
 // Game pages (game-level, UUID-based — no slug needed)
 import MatchScorecard from './pages/MatchScorecard'
@@ -84,6 +85,7 @@ export default function App() {
         <Route path="/admin/phq-match" element={<ProtectedRoute><AdminPhqMatch /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
         <Route path="/admin/yearbook" element={<ProtectedRoute><AdminYearbook /></ProtectedRoute>} />
+        <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute><AdminYearbookDetail /></ProtectedRoute>} />
         <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
         <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
 

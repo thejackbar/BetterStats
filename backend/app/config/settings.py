@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     cookie_secure: bool = True  # set False in local dev
     playhq_base_url: str = "https://grassrootsapiproxy.cricket.com.au"
     playhq_api_key: str = ""
+    anthropic_api_key: str = ""
     cors_origins: str = "http://localhost:3000"
 
     @property

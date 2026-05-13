@@ -218,6 +218,8 @@ export const api = {
   publishYearbook: (orgId, seasonId) => request(`/yearbooks/${orgId}/${seasonId}/publish`, { method: 'POST' }),
   unpublishYearbook: (orgId, seasonId) => request(`/yearbooks/${orgId}/${seasonId}/unpublish`, { method: 'POST' }),
   generateYearbookStubs: (orgId) => request(`/yearbooks/${orgId}/generate-stubs`, { method: 'POST' }),
+  generateYearbookNarrative: (orgId, seasonId) =>
+    request(`/yearbooks/${orgId}/${seasonId}/generate-narrative`, { method: 'POST' }),
   getYearbookOverview: (orgId, seasonId, gradeId) => {
     const params = new URLSearchParams()
     if (gradeId) params.set('grade_id', gradeId)
