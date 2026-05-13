@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
-import { PbSpinner, Label, Btn } from '../../lib/presskit'
-import { useClubData } from '../../hooks/useClubData'
+import { PbSpinner, Btn } from '../../lib/presskit'
 
 function _seasonSlug(name) {
   if (!name) return ''
@@ -14,22 +13,26 @@ function _seasonSlug(name) {
 }
 
 export default function AdminYearbook() {
-  const { org } = useClubData()
+  const [org, setOrg] = useState(null)
   const [yearbooks, setYearbooks] = useState(null)
   const [loading, setLoading] = useState(true)
   const [publishing, setPublishing] = useState(null)
   const [generating, setGenerating] = useState(false)
   const [msg, setMsg] = useState(null)
 
-  const load = () => {
+  useEffect(() => {
+    api.adminGetSettings().then(setOrg).catch(() => {})
+  }, [])
+
+  const load = useCallback(() => {
     if (!org?.id) return
     setLoading(true)
     api.listYearbooks(org.id)
       .then(setYearbooks)
       .finally(() => setLoading(false))
-  }
+  }, [org?.id])
 
-  useEffect(load, [org?.id])
+  useEffect(load, [load])
 
   const togglePublish = async (yb) => {
     setPublishing(yb.season_id)
