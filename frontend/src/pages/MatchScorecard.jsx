@@ -3,8 +3,8 @@ import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner, Card, ResultPill } from '../lib/presskit'
 
-// Cricket overs are base-6: 3.4 + 2.3 = 6.1 (not 5.7)
-function sumOvers(bowlingRows) {
+// Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
+function sumOversBalls(bowlingRows) {
   let totalBalls = 0
   for (const r of bowlingRows) {
     if (r.overs == null) continue
@@ -12,26 +12,22 @@ function sumOvers(bowlingRows) {
     const balls = Math.round((r.overs - whole) * 10)
     totalBalls += whole * 6 + balls
   }
-  if (!totalBalls) return null
-  return `${Math.floor(totalBalls / 6)}.${totalBalls % 6}`
+  return totalBalls
 }
 
+function ballsToOversStr(balls) {
+  if (!balls) return null
+  return `${Math.floor(balls / 6)}.${balls % 6}`
+}
+
+// Australian format: wickets/runs. All out (10 wkts) = just runs.
 function fmtScore(runs, wickets) {
   if (runs == null) return null
-  // 10 wickets = all out, show just runs
   if (wickets == null || wickets >= 10) return `${runs}`
-  return `${runs}/${wickets}`
+  return `${wickets}/${runs}`
 }
 
 function MatchHeader({ game, innings }) {
-  // Compute batting totals per innings
-  const totals = {}
-  for (const inn of innings) {
-    const runs = inn.batting.reduce((s, r) => s + (r.runs ?? 0), 0)
-    const wickets = inn.batting.filter(r => !r.not_out && r.dismissal_type).length
-    totals[inn.num] = { runs, wickets }
-  }
-
   const dateStr = game.played_at
     ? new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()
     : null
@@ -53,19 +49,17 @@ function MatchHeader({ game, innings }) {
 
       {/* Teams + result */}
       <div className="grid grid-cols-[1fr_auto_1fr]">
-        {/* Home */}
         <div className="px-5 sm:px-8 py-5 flex flex-col items-center justify-center text-center">
           <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest mb-1">HOME</div>
-          <div className="font-display font-bold text-[15px] sm:text-[18px] text-pb-text leading-tight tracking-tight">
+          <div className="font-display font-bold text-[15px] sm:text-[20px] text-pb-text leading-tight tracking-tight">
             {game.home_team || '—'}
           </div>
         </div>
 
-        {/* Result */}
-        <div className="px-4 sm:px-8 py-5 flex flex-col items-center justify-center gap-2 pb-hairline-l pb-hairline-r">
+        <div className="px-4 sm:px-8 py-5 flex flex-col items-center justify-center gap-2 pb-hairline-l pb-hairline-r min-w-[120px]">
           <ResultPill result={game.result || 'N/R'} />
           {game.winning_team && (
-            <div className="font-mono text-[11px] text-pb-text font-semibold text-center leading-tight max-w-[160px]">
+            <div className="font-mono text-[12px] text-pb-text font-semibold text-center leading-tight max-w-[180px]">
               {game.winning_team}
             </div>
           )}
@@ -74,36 +68,42 @@ function MatchHeader({ game, innings }) {
           )}
         </div>
 
-        {/* Away */}
         <div className="px-5 sm:px-8 py-5 flex flex-col items-center justify-center text-center">
           <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest mb-1">AWAY</div>
-          <div className="font-display font-bold text-[15px] sm:text-[18px] text-pb-text leading-tight tracking-tight">
+          <div className="font-display font-bold text-[15px] sm:text-[20px] text-pb-text leading-tight tracking-tight">
             {game.away_team || '—'}
           </div>
         </div>
       </div>
 
-      {/* Innings score strip */}
+      {/* Innings score strip — use innings_totals from backend for accurate scores */}
       {innings.length > 0 && (
-        <div className="pb-hairline-t flex divide-x" style={{ borderColor: 'var(--pb-hairline)' }}>
+        <div className="pb-hairline-t grid" style={{ gridTemplateColumns: `repeat(${innings.length}, 1fr)` }}>
           {innings.map((inn, i) => {
-            const t = totals[inn.num]
-            const overs = sumOvers(inn.bowling)
+            const t = (game.innings_totals || {})[inn.num]
+            const balls = sumOversBalls(inn.bowling)
+            const oversStr = ballsToOversStr(balls)
+            const rr = (t?.runs != null && balls > 0)
+              ? (t.runs / (balls / 6)).toFixed(2)
+              : null
             const score = t ? fmtScore(t.runs, t.wickets) : null
             return (
-              <div key={inn.num} className="flex-1 px-5 py-2.5 flex items-center justify-between gap-3 bg-pb-surface2/20">
-                <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">
+              <div
+                key={inn.num}
+                className={`px-5 py-3 flex items-center justify-between gap-4 bg-pb-surface2/20 ${i ? 'pb-hairline-l' : ''}`}
+              >
+                <span className="font-mono text-[10px] tracking-wide3 text-pb-faint shrink-0">
                   {i === 0 ? '1ST INNINGS' : '2ND INNINGS'}
                 </span>
-                <div className="flex items-baseline gap-2">
+                <div className="flex items-baseline gap-3">
                   {score != null && (
-                    <span className="font-mono font-bold text-[18px] pb-num" style={{ color: 'var(--pb-accent)' }}>
+                    <span className="font-mono font-bold text-[22px] pb-num leading-none" style={{ color: 'var(--pb-accent)' }}>
                       {score}
                     </span>
                   )}
-                  {overs && (
+                  {oversStr && (
                     <span className="font-mono text-[10px] text-pb-faint tracking-wide2">
-                      ({overs} ov)
+                      {oversStr} ov{rr ? ` · RR ${rr}` : ''}
                     </span>
                   )}
                 </div>
@@ -113,17 +113,17 @@ function MatchHeader({ game, innings }) {
         </div>
       )}
 
-      {/* Toss / Umpires strip */}
+      {/* Toss / Umpires */}
       {(game.toss || game.umpires) && (
         <div className="px-5 py-2.5 pb-hairline-t bg-pb-surface2/10 flex flex-wrap gap-x-6 gap-y-1">
           {game.toss && (
             <span className="font-mono text-[10.5px] text-pb-dim">
-              <span className="text-pb-faint">TOSS</span> {game.toss}
+              <span className="text-pb-faint mr-2">TOSS</span>{game.toss}
             </span>
           )}
           {game.umpires && (
             <span className="font-mono text-[10.5px] text-pb-dim">
-              <span className="text-pb-faint">UMPIRES</span> {game.umpires}
+              <span className="text-pb-faint mr-2">UMPIRES</span>{game.umpires}
             </span>
           )}
         </div>
@@ -132,144 +132,119 @@ function MatchHeader({ game, innings }) {
   )
 }
 
-function BattingTable({ batting = [] }) {
-  if (!batting.length) return <p className="text-pb-faint text-sm py-4 px-5">No batting data.</p>
+function BattingCard({ label, batting = [] }) {
+  if (!batting.length) return null
 
   const total = batting.reduce((s, r) => s + (r.runs ?? 0), 0)
   const wickets = batting.filter(r => !r.not_out && r.dismissal_type).length
 
   return (
-    <div className="overflow-x-auto pb-scroll">
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
-            <th className="font-medium py-2.5 pl-5">BATTER</th>
-            <th className="font-medium py-2.5 text-pb-faintest font-normal normal-case tracking-normal hidden sm:table-cell">Dismissal</th>
-            <th className="font-medium py-2.5 text-right" style={{ color: 'var(--pb-accent)' }}>R</th>
-            <th className="font-medium py-2.5 text-right">B</th>
-            <th className="font-medium py-2.5 text-right hidden sm:table-cell">4s</th>
-            <th className="font-medium py-2.5 text-right hidden sm:table-cell">6s</th>
-            <th className="font-medium py-2.5 pr-5 text-right hidden sm:table-cell">SR</th>
-          </tr>
-        </thead>
-        <tbody>
-          {batting.map((row, i) => (
-            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-              <td className="py-2.5 pl-5">
-                {row.player_id
-                  ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{row.player_name || '—'}</Link>
-                  : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
-                }
-              </td>
-              <td className="py-2.5 px-3 text-pb-faint text-xs capitalize max-w-[140px] truncate hidden sm:table-cell">
-                {row.not_out ? 'not out' : row.dismissal_type || '—'}
-              </td>
-              <td className="py-2.5 text-right">
-                <span
-                  className="font-mono font-bold pb-num"
-                  style={{ color: row.runs >= 100 ? 'var(--pb-amber)' : row.runs >= 50 ? 'var(--pb-accent)' : undefined }}
-                >
-                  {row.runs ?? '—'}
-                </span>
-                {row.not_out && <span className="text-pb-accent text-xs">*</span>}
-              </td>
-              <td className="py-2.5 font-mono text-pb-dim text-right">{row.balls ?? '—'}</td>
-              <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.fours ?? '—'}</td>
-              <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.sixes ?? '—'}</td>
-              <td className="py-2.5 pr-5 font-mono text-pb-faint text-right text-xs hidden sm:table-cell">
-                {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
-              </td>
+    <div className="pb-card overflow-hidden">
+      <div className="px-5 py-2.5 pb-hairline-b bg-pb-surface2/20 flex items-center justify-between">
+        <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">{label} · BATTING</span>
+        <span className="font-mono text-[13px] font-bold pb-num text-pb-text">{fmtScore(total, wickets)}</span>
+      </div>
+      <div className="overflow-x-auto pb-scroll">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+              <th className="font-medium py-2 pl-5 pr-2">BATTER</th>
+              <th className="font-medium py-2 px-3 text-pb-faintest font-normal normal-case tracking-normal hidden sm:table-cell text-left">Dismissal</th>
+              <th className="font-medium py-2 px-4 text-right" style={{ color: 'var(--pb-accent)' }}>R</th>
+              <th className="font-medium py-2 px-3 text-right text-pb-faint">B</th>
+              <th className="font-medium py-2 text-right text-[9px] hidden md:table-cell w-8">4s</th>
+              <th className="font-medium py-2 text-right text-[9px] hidden md:table-cell w-8">6s</th>
+              <th className="font-medium py-2 pr-4 text-right text-[9px] hidden md:table-cell w-10">SR</th>
             </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="pb-hairline-t bg-pb-surface2/30">
-            <td colSpan={2} className="py-2 pl-5 text-pb-dim font-semibold text-xs font-mono tracking-wide2">TOTAL (BATTING)</td>
-            <td className="py-2 font-mono font-bold text-pb-text text-right pb-num">{fmtScore(total, wickets)}</td>
-            <td colSpan={4} />
-          </tr>
-        </tfoot>
-      </table>
+          </thead>
+          <tbody>
+            {batting.map((row, i) => (
+              <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <td className="py-2 pl-5 pr-2">
+                  {row.player_id
+                    ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{row.player_name || '—'}</Link>
+                    : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
+                  }
+                </td>
+                <td className="py-2 px-3 text-pb-faint text-[11px] capitalize max-w-[120px] truncate hidden sm:table-cell">
+                  {row.not_out ? 'not out' : row.dismissal_type || '—'}
+                </td>
+                <td className="py-2 px-4 text-right">
+                  <span
+                    className="font-mono font-bold text-[15px] pb-num"
+                    style={{ color: row.runs >= 100 ? 'var(--pb-amber)' : row.runs >= 50 ? 'var(--pb-accent)' : undefined }}
+                  >
+                    {row.runs ?? '—'}
+                  </span>
+                  {row.not_out && <span className="text-pb-accent text-[11px]">*</span>}
+                </td>
+                <td className="py-2 px-3 font-mono text-[12px] text-pb-dim text-right">{row.balls ?? '—'}</td>
+                <td className="py-2 font-mono text-[11px] text-pb-faintest text-right hidden md:table-cell">{row.fours ?? '—'}</td>
+                <td className="py-2 font-mono text-[11px] text-pb-faintest text-right hidden md:table-cell">{row.sixes ?? '—'}</td>
+                <td className="py-2 pr-4 font-mono text-[11px] text-pb-faintest text-right hidden md:table-cell">
+                  {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
 
-function BowlingTable({ bowling = [] }) {
-  if (!bowling.length) return <p className="text-pb-faint text-sm py-4 px-5">No bowling data.</p>
+function BowlingCard({ label, bowling = [] }) {
+  if (!bowling.length) return null
 
-  return (
-    <div className="overflow-x-auto pb-scroll">
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
-            <th className="font-medium py-2.5 pl-5">BOWLER</th>
-            <th className="font-medium py-2.5 text-right">O</th>
-            <th className="font-medium py-2.5 text-right hidden sm:table-cell">M</th>
-            <th className="font-medium py-2.5 text-right">R</th>
-            <th className="font-medium py-2.5 text-right" style={{ color: 'var(--pb-accent)' }}>W</th>
-            <th className="font-medium py-2.5 text-right hidden sm:table-cell">ECON</th>
-            <th className="font-medium py-2.5 text-right hidden md:table-cell">WD</th>
-            <th className="font-medium py-2.5 pr-5 text-right hidden md:table-cell">NB</th>
-          </tr>
-        </thead>
-        <tbody>
-          {bowling.map((row, i) => (
-            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-              <td className="py-2.5 pl-5">
-                {row.player_id
-                  ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{row.player_name || '—'}</Link>
-                  : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
-                }
-              </td>
-              <td className="py-2.5 font-mono text-pb-dim text-right">{row.overs ?? '—'}</td>
-              <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.maidens ?? '—'}</td>
-              <td className="py-2.5 font-mono text-pb-dim text-right">{row.runs ?? '—'}</td>
-              <td className="py-2.5 text-right">
-                <span
-                  className="font-mono font-bold pb-num"
-                  style={{ color: row.wickets >= 5 ? 'var(--pb-amber)' : row.wickets >= 3 ? 'var(--pb-accent)' : undefined }}
-                >
-                  {row.wickets ?? '—'}
-                </span>
-              </td>
-              <td className="py-2.5 font-mono text-pb-dim text-right hidden sm:table-cell">
-                {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
-              </td>
-              <td className="py-2.5 font-mono text-pb-faint text-right hidden md:table-cell">{row.wides ?? '—'}</td>
-              <td className="py-2.5 pr-5 font-mono text-pb-faint text-right hidden md:table-cell">{row.no_balls ?? '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function InningsCard({ label, batting, bowling }) {
   return (
     <div className="pb-card overflow-hidden">
-      {/* Card header */}
-      <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/20 flex items-center justify-between">
-        <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">{label}</span>
+      <div className="px-5 py-2.5 pb-hairline-b bg-pb-surface2/20">
+        <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">{label} · BOWLING</span>
       </div>
-
-      {/* Batting */}
-      <div className="pb-hairline-b">
-        <div className="px-5 py-2 bg-pb-surface2/10 pb-hairline-b">
-          <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">BATTING</span>
-        </div>
-        <BattingTable batting={batting} />
+      <div className="overflow-x-auto pb-scroll">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+              <th className="font-medium py-2 pl-5">BOWLER</th>
+              <th className="font-medium py-2 px-3 text-right">O</th>
+              <th className="font-medium py-2 px-3 text-right hidden sm:table-cell">M</th>
+              <th className="font-medium py-2 px-3 text-right">R</th>
+              <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-accent)' }}>W</th>
+              <th className="font-medium py-2 px-3 text-right hidden sm:table-cell">ECON</th>
+              <th className="font-medium py-2 px-3 text-right hidden md:table-cell">WD</th>
+              <th className="font-medium py-2 pr-5 text-right hidden md:table-cell">NB</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bowling.map((row, i) => (
+              <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <td className="py-2 pl-5">
+                  {row.player_id
+                    ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{row.player_name || '—'}</Link>
+                    : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
+                  }
+                </td>
+                <td className="py-2 px-3 font-mono text-pb-dim text-right">{row.overs ?? '—'}</td>
+                <td className="py-2 px-3 font-mono text-pb-faint text-right hidden sm:table-cell">{row.maidens ?? '—'}</td>
+                <td className="py-2 px-3 font-mono text-pb-dim text-right">{row.runs ?? '—'}</td>
+                <td className="py-2 px-3 text-right">
+                  <span
+                    className="font-mono font-bold pb-num"
+                    style={{ color: row.wickets >= 5 ? 'var(--pb-amber)' : row.wickets >= 3 ? 'var(--pb-accent)' : undefined }}
+                  >
+                    {row.wickets ?? '—'}
+                  </span>
+                </td>
+                <td className="py-2 px-3 font-mono text-pb-dim text-right hidden sm:table-cell">
+                  {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
+                </td>
+                <td className="py-2 px-3 font-mono text-pb-faint text-right hidden md:table-cell">{row.wides ?? '—'}</td>
+                <td className="py-2 pr-5 font-mono text-pb-faint text-right hidden md:table-cell">{row.no_balls ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-
-      {/* Bowling */}
-      {bowling.length > 0 && (
-        <div>
-          <div className="px-5 py-2 bg-pb-surface2/10 pb-hairline-b">
-            <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">BOWLING</span>
-          </div>
-          <BowlingTable bowling={bowling} />
-        </div>
-      )}
     </div>
   )
 }
@@ -401,12 +376,13 @@ export default function MatchScorecard() {
     bowling: (game.bowling || []).filter(r => (r.innings_number || 1) === num),
   }))
 
-  const inn1 = innings[0] || { batting: [], bowling: [] }
-  const inn2 = innings[1] || { batting: [], bowling: [] }
+  const inn1 = innings[0] || { num: 1, batting: [], bowling: [] }
+  const inn2 = innings[1] || { num: 2, batting: [], bowling: [] }
+  const hasInn2 = inn2.batting.length > 0 || inn2.bowling.length > 0
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
-      <main className="max-w-[1200px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <main className="max-w-[1300px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <button
           onClick={() => navigate(-1)}
           className="flex items-center gap-1.5 font-mono text-[11px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors mb-5"
@@ -421,19 +397,20 @@ export default function MatchScorecard() {
             <div className="py-12 text-center text-pb-faint">No scorecard data available for this match.</div>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <InningsCard
-              label="1ST INNINGS"
-              batting={inn1.batting}
-              bowling={inn1.bowling}
-            />
-            {inn2.batting.length > 0 || inn2.bowling.length > 0 ? (
-              <InningsCard
-                label="2ND INNINGS"
-                batting={inn2.batting}
-                bowling={inn2.bowling}
-              />
-            ) : null}
+          <div className="space-y-4">
+            {/* Row 1 — Batting cards side by side */}
+            <div className={`grid gap-4 ${hasInn2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+              <BattingCard label="1ST INNINGS" batting={inn1.batting} />
+              {hasInn2 && <BattingCard label="2ND INNINGS" batting={inn2.batting} />}
+            </div>
+
+            {/* Row 2 — Bowling cards side by side */}
+            {(inn1.bowling.length > 0 || inn2.bowling.length > 0) && (
+              <div className={`grid gap-4 ${hasInn2 && inn2.bowling.length > 0 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+                {inn1.bowling.length > 0 && <BowlingCard label="1ST INNINGS" bowling={inn1.bowling} />}
+                {hasInn2 && inn2.bowling.length > 0 && <BowlingCard label="2ND INNINGS" bowling={inn2.bowling} />}
+              </div>
+            )}
           </div>
         )}
 
