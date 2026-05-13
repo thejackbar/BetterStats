@@ -210,6 +210,7 @@ async def get_playhq_scorecard(
         innings_totals[n] = {
             "runs": inn.get("total_runs"),
             "wickets": inn.get("total_wickets"),
+            "batting_team": inn.get("batting_team", ""),
         }
         for row in (inn.get("batting") or []):
             batting_flat.append({
