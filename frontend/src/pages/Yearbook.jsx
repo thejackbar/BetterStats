@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { PbSpinner, TabBar, Label, AnimatedNum } from '../lib/presskit'
 import { useClubTheme } from '../hooks/useClubTheme'
+import { useAuth } from '../contexts/AuthContext'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
   AreaChart, Area, CartesianGrid,
@@ -989,6 +990,7 @@ export default function Yearbook() {
 
   const handlePrint = () => window.print()
 
+  const { user } = useAuth()
   useClubTheme(club)
 
   // Load club
@@ -1097,6 +1099,23 @@ export default function Yearbook() {
   }
 
   if (loading || !yearbook) return <PbSpinner message="Loading yearbook…" />
+
+  if (yearbook.status !== 'published' && !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--pb-bg)' }}>
+        <div className="text-center px-4">
+          <div className="font-mono text-[11px] tracking-wide3 text-white/30 uppercase mb-3">
+            {club?.name} · Season Yearbook
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-2">{yearbook.season?.name || seasonSlug}</h1>
+          <p className="text-white/40 text-sm mb-6">This yearbook hasn't been published yet.</p>
+          <Link to={`/${clubSlug}/dashboard`} className="font-mono text-[12px]" style={{ color: 'var(--pb-accent)' }}>
+            ← Back to dashboard
+          </Link>
+        </div>
+      </div>
+    )
+  }
 
   const season = yearbook.season
   const narrative = yearbook.sections?.find(s => s.section_type === 'narrative' && s.is_enabled)?.content_markdown
