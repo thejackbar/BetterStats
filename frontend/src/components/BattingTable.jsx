@@ -6,10 +6,7 @@ const COLS = [
   { key: 'played_at', label: 'Date', fmt: v => v ? new Date(v).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—' },
   { key: 'grade_name', label: 'Grade' },
   { key: 'runs', label: 'Runs', sortable: true },
-  { key: 'balls', label: 'Balls', sortable: true },
-  { key: 'fours', label: '4s', sortable: true },
-  { key: 'sixes', label: '6s', sortable: true },
-  { key: 'strike_rate', label: 'SR', sortable: true, fmt: v => v != null ? Number(v).toFixed(1) : '—' },
+  { key: 'balls', label: 'B', sortable: true },
   { key: 'dismissal_type', label: 'Dismissal', fmt: v => v || '—' },
 ]
 
@@ -65,22 +62,14 @@ export default function BattingTable({ innings = [], showPlayer = false }) {
               </td>
               <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint">{row.grade_name || '—'}</td>
               <td className="py-2.5 px-3">
-                <span className={clsx(
-                  'font-mono font-bold text-sm',
-                  row.runs >= 100 ? 'text-pb-amber' : row.runs >= 50 ? 'text-pb-accent' : 'text-pb-text'
-                )}
-                style={row.runs >= 50 && row.runs < 100 ? { color: 'var(--pb-accent)' } : {}}
+                <span className={clsx('font-mono font-bold text-sm')}
+                  style={{ color: row.runs >= 100 ? 'var(--pb-amber)' : row.runs >= 50 ? 'var(--pb-accent)' : undefined }}
                 >
                   {row.runs ?? '—'}
                 </span>
                 {row.not_out && <span className="font-mono text-[11px] ml-0.5" style={{ color: 'var(--pb-accent)' }}>*</span>}
               </td>
               <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.balls ?? '—'}</td>
-              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.fours ?? '—'}</td>
-              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.sixes ?? '—'}</td>
-              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">
-                {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
-              </td>
               <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint capitalize">
                 {row.dismissal_type || (row.not_out ? 'not out' : '—')}
               </td>

@@ -18,6 +18,7 @@ export default function Players() {
 
   const [players, setPlayers] = useState([])
   const [battingStats, setBattingStats] = useState({})
+  const [bowlingStats, setBowlingStats] = useState({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
@@ -39,12 +40,19 @@ export default function Players() {
         setBattingStats(map)
       })
       .catch(() => {})
+    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000 })
+      .then(rows => {
+        const map = {}
+        rows.forEach(r => { map[r.player_id] = r })
+        setBowlingStats(map)
+      })
+      .catch(() => {})
   }, [orgId, selectedSeason, selectedGrade])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return players
-    return players.filter(p => p.name.toLowerCase().includes(q))
+    return players.filter(p => (p.display_name || p.name).toLowerCase().includes(q))
   }, [players, search])
 
   if (clubLoading) return <PbSpinner message="Loading players…" />
@@ -102,30 +110,35 @@ export default function Players() {
         {loading ? <PbSpinner /> : (
           <Card pad="p-0">
             <div className="overflow-x-auto pb-scroll">
-              <table className="w-full min-w-[700px] text-[14px]">
+              <table className="w-full min-w-[760px] text-[14px]">
                 <thead>
                   <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
                     <th className="font-medium py-3 pl-5">PLAYER</th>
+                    <th className="font-medium py-3 text-right">M</th>
                     <th className="font-medium py-3 text-right">INN</th>
                     <th className="font-medium py-3 text-right" style={{ color: 'var(--pb-accent)' }}>RUNS</th>
                     <th className="font-medium py-3 text-right">AVG</th>
-                    <th className="font-medium py-3 text-right hidden sm:table-cell">SR</th>
                     <th className="font-medium py-3 text-right">HS</th>
                     <th className="font-medium py-3 text-right hidden md:table-cell">50s</th>
                     <th className="font-medium py-3 text-right hidden md:table-cell">100s</th>
-                    <th className="font-medium py-3 text-right hidden lg:table-cell">6s</th>
+                    <th className="font-medium py-3 text-right hidden lg:table-cell" style={{ color: 'var(--pb-accent)' }}>WKTS</th>
+                    <th className="font-medium py-3 text-right hidden lg:table-cell">BEST</th>
                     <th className="font-medium py-3 pr-5 w-16"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="py-12 text-center text-pb-faint text-sm">
+                      <td colSpan={11} className="py-12 text-center text-pb-faint text-sm">
                         {search ? `No players matching "${search}"` : 'No players found.'}
                       </td>
                     </tr>
                   ) : filtered.map((player, i) => {
-                    const stats = battingStats[player.id]
+                    const b = battingStats[player.id]
+                    const bw = bowlingStats[player.id]
+                    const bestFigs = bw?.best_bowling_figures
+                      ? bw.best_bowling_figures.replace('-', '/')
+                      : (bw?.best_figures_wickets != null ? `${bw.best_figures_wickets}w` : null)
                     return (
                       <tr key={player.id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                         <td className="py-3 pl-5">
@@ -133,23 +146,30 @@ export default function Players() {
                             {player.display_name || player.name}
                           </Link>
                         </td>
-                        <td className="py-3 font-mono text-pb-dim text-right">{stats?.batting_innings ?? '—'}</td>
+                        <td className="py-3 font-mono text-pb-dim text-right">{b?.games ?? '—'}</td>
+                        <td className="py-3 font-mono text-pb-dim text-right">{b?.innings ?? '—'}</td>
                         <td className="py-3 text-right">
                           <span className="font-mono font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
-                            {stats?.total_runs ?? '—'}
+                            {b?.total_runs ?? '—'}
                           </span>
                         </td>
-                        <td className="py-3 font-mono text-pb-dim text-right">{stats?.average ?? '—'}</td>
-                        <td className="py-3 font-mono text-pb-dim text-right hidden sm:table-cell">{stats?.strike_rate ?? '—'}</td>
-                        <td className="py-3 font-mono text-pb-dim text-right">{stats?.high_score ?? '—'}</td>
-                        <td className="py-3 font-mono text-pb-dim text-right hidden md:table-cell">{stats?.fifties ?? '—'}</td>
+                        <td className="py-3 font-mono text-pb-dim text-right">{b?.average ?? '—'}</td>
+                        <td className="py-3 font-mono text-pb-dim text-right">{b?.high_score ?? '—'}</td>
+                        <td className="py-3 font-mono text-pb-dim text-right hidden md:table-cell">{b?.fifties ?? '—'}</td>
                         <td className="py-3 font-mono text-right hidden md:table-cell">
-                          <span className={stats?.hundreds > 0 ? 'font-bold pb-num' : 'text-pb-faintest'}
-                            style={stats?.hundreds > 0 ? { color: 'var(--pb-amber)' } : {}}>
-                            {stats?.hundreds ?? '—'}
+                          <span className={b?.hundreds > 0 ? 'font-bold pb-num' : 'text-pb-faintest'}
+                            style={b?.hundreds > 0 ? { color: 'var(--pb-amber)' } : {}}>
+                            {b?.hundreds ?? '—'}
                           </span>
                         </td>
-                        <td className="py-3 font-mono text-pb-dim text-right hidden lg:table-cell">{stats?.total_sixes ?? '—'}</td>
+                        <td className="py-3 text-right hidden lg:table-cell">
+                          <span className="font-mono font-bold pb-num" style={{ color: bw?.total_wickets > 0 ? 'var(--pb-accent)' : undefined }}>
+                            {bw?.total_wickets ?? '—'}
+                          </span>
+                        </td>
+                        <td className="py-3 font-mono text-pb-dim text-right hidden lg:table-cell">
+                          {bestFigs ?? '—'}
+                        </td>
                         <td className="py-3 pr-5 text-right">
                           <Link to={`/players/${player.id}`} className="font-mono text-[10px] text-pb-faint hover:text-pb-accent">
                             VIEW →

@@ -7,13 +7,12 @@ import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import SeasonSelector from '../components/SeasonSelector'
 import {
-  AnimatedNum, Label, Card, Btn, PageHeader, PbSpinner, FilterGroup,
+  Label, Card, PageHeader, PbSpinner,
 } from '../lib/presskit'
 
 const BATTING_SORTS = [
   { key: 'total_runs',    label: 'MOST RUNS' },
   { key: 'average',       label: 'AVERAGE' },
-  { key: 'strike_rate',   label: 'STRIKE RATE' },
   { key: 'high_score',    label: 'HIGH SCORE' },
   { key: 'fifties',       label: 'FIFTIES' },
   { key: 'hundreds',      label: 'CENTURIES' },
@@ -23,12 +22,12 @@ const BATTING_SORTS = [
 ]
 
 const BOWLING_SORTS = [
-  { key: 'total_wickets',         label: 'WICKETS' },
-  { key: 'economy',               label: 'ECONOMY' },
-  { key: 'average',               label: 'AVERAGE' },
-  { key: 'best_figures_wickets',  label: 'BEST SPELL' },
-  { key: 'five_fors',             label: 'FIVE-FORS' },
-  { key: 'total_maidens',         label: 'MAIDENS' },
+  { key: 'total_wickets',        label: 'WICKETS' },
+  { key: 'economy',              label: 'ECONOMY' },
+  { key: 'average',              label: 'AVERAGE' },
+  { key: 'best_figures_wickets', label: 'BEST FIGURES' },
+  { key: 'five_fors',            label: 'FIVE-FORS' },
+  { key: 'total_maidens',        label: 'MAIDENS' },
 ]
 
 const FIELDING_SORTS = [
@@ -57,25 +56,40 @@ function SortBtn({ label, active, onClick }) {
   )
 }
 
+// Columns to show for each batting sort type
+function getBattingCols(sortBy) {
+  const base = ['M', 'RUNS', 'AVG', 'HS']
+  if (sortBy === 'average')     return ['M', 'AVG', 'RUNS', 'INN', 'HS']
+  if (sortBy === 'high_score')  return ['M', 'HS', 'RUNS', 'AVG']
+  if (sortBy === 'fifties')     return ['M', '50s', 'RUNS', 'AVG']
+  if (sortBy === 'hundreds')    return ['M', '100s', 'RUNS', 'AVG']
+  if (sortBy === 'total_sixes') return ['M', '6s', 'RUNS']
+  if (sortBy === 'total_fours') return ['M', '4s', 'RUNS']
+  if (sortBy === 'ducks')       return ['M', 'DUCKS', 'INN']
+  return base
+}
+
 function BattingTable({ rows, sortBy }) {
   const primaryLabel = BATTING_SORTS.find(s => s.key === sortBy)?.label || 'VALUE'
   const primaryKey = sortBy || 'total_runs'
-  const isInverted = sortBy === 'ducks'
+  const cols = getBattingCols(sortBy)
 
   return (
     <Card pad="p-0">
       <div className="overflow-x-auto pb-scroll">
-        <table className="w-full min-w-[700px] text-[14px]">
+        <table className="w-full min-w-[560px] text-[14px]">
           <thead>
             <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
               <th className="font-medium py-3 pl-5 w-10">#</th>
               <th className="font-medium py-3">PLAYER</th>
-              <th className="font-medium py-3 text-right" style={{ color: 'var(--pb-accent)' }}>{primaryLabel}</th>
-              {sortBy !== 'total_runs' && <th className="font-medium py-3 text-right">RUNS</th>}
-              <th className="font-medium py-3 text-right">INN</th>
-              <th className="font-medium py-3 text-right">AVG</th>
-              <th className="font-medium py-3 text-right">HS</th>
-              <th className="font-medium py-3 pr-5 text-right hidden sm:table-cell">SR</th>
+              {cols.map(c => (
+                <th key={c} className="font-medium py-3 text-right pr-3"
+                  style={c === primaryLabel || c === 'RUNS' || c === 'AVG' || c === 'INN' || c === 'HS' || c === '50s' || c === '100s' || c === '6s' || c === '4s' || c === 'DUCKS' || c === 'M'
+                    ? (c === primaryLabel || (c === 'RUNS' && sortBy === 'total_runs') || (c === 'AVG' && sortBy === 'average') || (c === 'HS' && sortBy === 'high_score') || (c === '50s' && sortBy === 'fifties') || (c === '100s' && sortBy === 'hundreds') || (c === '6s' && sortBy === 'total_sixes') || (c === '4s' && sortBy === 'total_fours') || (c === 'DUCKS' && sortBy === 'ducks'))
+                      ? { color: 'var(--pb-accent)' } : {}
+                    : {}
+                  }>{c}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -84,20 +98,30 @@ function BattingTable({ rows, sortBy }) {
                 <td className="py-3 pl-5 font-mono text-pb-faint">{String(i + 1).padStart(2, '0')}</td>
                 <td className="py-3">
                   <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{p.name}</Link>
-                  {p.hundreds > 0 && <span className="ml-2 font-mono text-[10px] text-pb-faint">{p.hundreds}×💯</span>}
+                  {p.hundreds > 0 && sortBy !== 'hundreds' && <span className="ml-2 font-mono text-[10px] text-pb-faint">{p.hundreds}×💯</span>}
                 </td>
-                <td className="py-3 text-right">
-                  <span className="font-mono text-[15px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
-                    {p[primaryKey] ?? '—'}
-                  </span>
-                </td>
-                {sortBy !== 'total_runs' && (
-                  <td className="py-3 font-mono text-pb-text text-right">{p.total_runs ?? '—'}</td>
-                )}
-                <td className="py-3 font-mono text-pb-dim text-right">{p.batting_innings ?? '—'}</td>
-                <td className="py-3 font-mono text-pb-dim text-right">{p.average ?? '—'}</td>
-                <td className="py-3 font-mono text-pb-dim text-right">{p.high_score ?? '—'}</td>
-                <td className="py-3 pr-5 font-mono text-pb-dim text-right hidden sm:table-cell">{p.strike_rate ?? '—'}</td>
+                {cols.map(c => {
+                  let val
+                  const isPrimary = (c === 'RUNS' && sortBy === 'total_runs') || (c === 'AVG' && sortBy === 'average') || (c === 'HS' && sortBy === 'high_score') || (c === '50s' && sortBy === 'fifties') || (c === '100s' && sortBy === 'hundreds') || (c === '6s' && sortBy === 'total_sixes') || (c === '4s' && sortBy === 'total_fours') || (c === 'DUCKS' && sortBy === 'ducks')
+                  if (c === 'M')    val = p.games ?? '—'
+                  else if (c === 'RUNS')  val = p.total_runs ?? '—'
+                  else if (c === 'INN')   val = p.innings ?? '—'
+                  else if (c === 'AVG')   val = p.average ?? '—'
+                  else if (c === 'HS')    val = p.high_score ?? '—'
+                  else if (c === '50s')   val = p.fifties ?? '—'
+                  else if (c === '100s')  val = p.hundreds ?? '—'
+                  else if (c === '6s')    val = p.total_sixes ?? '—'
+                  else if (c === '4s')    val = p.total_fours ?? '—'
+                  else if (c === 'DUCKS') val = p.ducks ?? '—'
+                  return (
+                    <td key={c} className="py-3 pr-3 font-mono text-right">
+                      <span className={isPrimary ? 'text-[15px] font-bold pb-num' : 'text-pb-dim'}
+                            style={isPrimary ? { color: 'var(--pb-accent)' } : {}}>
+                        {val}
+                      </span>
+                    </td>
+                  )
+                })}
               </tr>
             ))}
           </tbody>
@@ -108,21 +132,21 @@ function BattingTable({ rows, sortBy }) {
 }
 
 function BowlingTable({ rows, sortBy }) {
-  const primaryLabel = BOWLING_SORTS.find(s => s.key === sortBy)?.label || 'WICKETS'
-  const primaryKey = sortBy || 'total_wickets'
-
   return (
     <Card pad="p-0">
       <div className="overflow-x-auto pb-scroll">
-        <table className="w-full min-w-[640px] text-[14px]">
+        <table className="w-full min-w-[560px] text-[14px]">
           <thead>
             <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
               <th className="font-medium py-3 pl-5 w-10">#</th>
               <th className="font-medium py-3">PLAYER</th>
-              <th className="font-medium py-3 text-right" style={{ color: 'var(--pb-accent)' }}>{primaryLabel}</th>
-              {sortBy !== 'total_wickets' && <th className="font-medium py-3 text-right">WKTS</th>}
-              <th className="font-medium py-3 text-right">AVG</th>
-              <th className="font-medium py-3 text-right">ECON</th>
+              <th className="font-medium py-3 text-right pr-3">M</th>
+              <th className="font-medium py-3 text-right pr-3" style={{ color: 'var(--pb-accent)' }}>
+                {BOWLING_SORTS.find(s => s.key === sortBy)?.label || 'WICKETS'}
+              </th>
+              {sortBy !== 'total_wickets' && <th className="font-medium py-3 text-right pr-3">WKTS</th>}
+              <th className="font-medium py-3 text-right pr-3">AVG</th>
+              <th className="font-medium py-3 text-right pr-3">ECON</th>
               <th className="font-medium py-3 pr-5 text-right">BEST</th>
             </tr>
           </thead>
@@ -134,20 +158,21 @@ function BowlingTable({ rows, sortBy }) {
                   <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{p.name}</Link>
                   {p.five_fors > 0 && <span className="ml-2 font-mono text-[10px] text-pb-faint">{p.five_fors}×5W</span>}
                 </td>
-                <td className="py-3 text-right">
+                <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.games ?? '—'}</td>
+                <td className="py-3 pr-3 text-right">
                   <span className="font-mono text-[15px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
-                    {primaryKey === 'best_figures_wickets'
-                      ? (p.best_figures_wickets != null ? `${p.best_figures_wickets}/${p.best_figures_runs ?? '?'}` : '—')
-                      : (p[primaryKey] ?? '—')}
+                    {sortBy === 'best_figures_wickets'
+                      ? (p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') : p.best_figures_wickets != null ? `${p.best_figures_wickets}w` : '—')
+                      : (p[sortBy] ?? '—')}
                   </span>
                 </td>
                 {sortBy !== 'total_wickets' && (
-                  <td className="py-3 font-mono text-pb-text text-right">{p.total_wickets ?? '—'}</td>
+                  <td className="py-3 pr-3 font-mono text-pb-text text-right">{p.total_wickets ?? '—'}</td>
                 )}
-                <td className="py-3 font-mono text-pb-dim text-right">{p.average ?? '—'}</td>
-                <td className="py-3 font-mono text-pb-dim text-right">{p.economy ?? '—'}</td>
+                <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.average ?? '—'}</td>
+                <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.economy ?? '—'}</td>
                 <td className="py-3 pr-5 font-mono text-pb-dim text-right">
-                  {p.best_figures_wickets != null ? `${p.best_figures_wickets}/${p.best_figures_runs ?? '?'}` : '—'}
+                  {p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') : p.best_figures_wickets != null ? `${p.best_figures_wickets}w` : '—'}
                 </td>
               </tr>
             ))}
@@ -170,10 +195,11 @@ function FieldingTable({ rows, sortBy }) {
             <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
               <th className="font-medium py-3 pl-5 w-10">#</th>
               <th className="font-medium py-3">PLAYER</th>
-              <th className="font-medium py-3 text-right" style={{ color: 'var(--pb-accent)' }}>{primaryLabel}</th>
-              <th className="font-medium py-3 text-right">CATCHES</th>
-              <th className="font-medium py-3 text-right">RUN OUTS</th>
-              <th className="font-medium py-3 pr-5 text-right">STUMPINGS</th>
+              <th className="font-medium py-3 text-right pr-3">M</th>
+              <th className="font-medium py-3 text-right pr-3" style={{ color: 'var(--pb-accent)' }}>{primaryLabel}</th>
+              {sortBy !== 'total_catches'   && <th className="font-medium py-3 text-right pr-3">CATCHES</th>}
+              {sortBy !== 'total_run_outs'  && <th className="font-medium py-3 text-right pr-3">RUN OUTS</th>}
+              {sortBy !== 'total_stumpings' && <th className="font-medium py-3 pr-5 text-right">STUMPINGS</th>}
             </tr>
           </thead>
           <tbody>
@@ -183,14 +209,15 @@ function FieldingTable({ rows, sortBy }) {
                 <td className="py-3">
                   <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{p.name}</Link>
                 </td>
-                <td className="py-3 text-right">
+                <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.games ?? '—'}</td>
+                <td className="py-3 pr-3 text-right">
                   <span className="font-mono text-[15px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
                     {p[primaryKey] ?? '—'}
                   </span>
                 </td>
-                <td className="py-3 font-mono text-pb-dim text-right">{p.total_catches ?? '—'}</td>
-                <td className="py-3 font-mono text-pb-dim text-right">{p.total_run_outs ?? '—'}</td>
-                <td className="py-3 pr-5 font-mono text-pb-dim text-right">{p.total_stumpings ?? '—'}</td>
+                {sortBy !== 'total_catches'   && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_catches ?? '—'}</td>}
+                {sortBy !== 'total_run_outs'  && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_run_outs ?? '—'}</td>}
+                {sortBy !== 'total_stumpings' && <td className="py-3 pr-5 font-mono text-pb-dim text-right">{p.total_stumpings ?? '—'}</td>}
               </tr>
             ))}
           </tbody>
@@ -225,13 +252,13 @@ export default function Leaderboard() {
     Promise.allSettled([
       api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: battingSort, limit: 30 }),
       api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: bowlingSort, limit: 30 }),
-      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 30 }),
+      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: fieldingSort, limit: 30 }),
     ]).then(([b, bw, f]) => {
       if (b.status === 'fulfilled') setBattingRows(b.value)
       if (bw.status === 'fulfilled') setBowlingRows(bw.value)
       if (f.status === 'fulfilled') setFieldingRows(f.value)
     }).finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGrade, battingSort, bowlingSort])
+  }, [orgId, selectedSeason, selectedGrade, battingSort, bowlingSort, fieldingSort])
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 

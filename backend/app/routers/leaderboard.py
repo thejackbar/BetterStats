@@ -47,8 +47,9 @@ async def fielding_leaderboard(
     org_id: str,
     season_id: Optional[str] = Query(None),
     grade_id: Optional[str] = Query(None),
+    sort_by: str = Query("total_dismissals"),
     limit: int = Query(20, le=50),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, limit)
+    rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit)
     return _stringify(rows)
