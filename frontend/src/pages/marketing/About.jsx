@@ -3,13 +3,17 @@ import { Link } from 'react-router-dom'
 
 export default function About() {
   return (
-    <div className="min-h-screen bg-navy-950 text-white">
+    <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
       <div className="max-w-3xl mx-auto px-4 py-16">
-        <h1 className="font-display font-bold text-4xl md:text-5xl mb-8">About BetterStats</h1>
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">About</p>
+        <h1 className="font-display font-bold text-[40px] md:text-[56px] leading-none tracking-tight mb-10">
+          ABOUT<br />
+          <span style={{ color: 'var(--pb-accent)' }}>BETTERSTATS.</span>
+        </h1>
 
-        <div className="prose prose-invert max-w-none space-y-6 text-slate-300 leading-relaxed">
+        <div className="space-y-6 text-pb-dim leading-relaxed">
           <p>
             BetterStats started as an internal stats platform for Applecross Cricket Club in Perth, Western Australia. Built by a club member who was tired of manually updating spreadsheets after every game, it's now being made available to other clubs who want the same thing.
           </p>
@@ -22,18 +26,20 @@ export default function About() {
             The platform plugs directly into PlayHQ, the national cricket management platform. If your club registers on PlayHQ, your stats come through automatically after every match — no data entry, no spreadsheets.
           </p>
 
-          <h2 className="font-display font-bold text-2xl text-white mt-10">Built by</h2>
-          <p>
-            Jack, a software developer and cricket club member based in Perth. Get in touch at{' '}
-            <a href="mailto:jack@klubpro.com" className="text-accent hover:underline">jack@klubpro.com</a>
-            {' '}— happy to chat about whether BetterStats is a good fit for your club.
-          </p>
+          <div className="pb-hairline-t pt-8">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-4">Built by</p>
+            <p>
+              Jack, a software developer and cricket club member based in Perth. Get in touch at{' '}
+              <a href="mailto:jack@klubpro.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>jack@klubpro.com</a>
+              {' '}— happy to chat about whether BetterStats is a good fit for your club.
+            </p>
+          </div>
         </div>
 
         <div className="mt-12 flex gap-4">
-          <Link to="/features" className="btn-ghost text-slate-300">Features</Link>
-          <Link to="/pricing" className="btn-ghost text-slate-300">Pricing</Link>
-          <Link to="/contact" className="btn-ghost text-slate-300">Get in touch</Link>
+          <Link to="/features" className="border pb-hairline text-pb-faint hover:text-pb-text px-4 py-2 rounded font-mono text-[10px] tracking-wide2 transition-colors">Features</Link>
+          <Link to="/pricing" className="border pb-hairline text-pb-faint hover:text-pb-text px-4 py-2 rounded font-mono text-[10px] tracking-wide2 transition-colors">Pricing</Link>
+          <Link to="/contact" className="border pb-hairline text-pb-faint hover:text-pb-text px-4 py-2 rounded font-mono text-[10px] tracking-wide2 transition-colors">Get in touch</Link>
         </div>
       </div>
     </div>

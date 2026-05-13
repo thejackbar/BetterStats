@@ -66,32 +66,46 @@ const SECTIONS = [
 
 export default function Features() {
   return (
-    <div className="min-h-screen bg-navy-950 text-white">
+    <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
       <div className="max-w-4xl mx-auto px-4 py-16">
-        <h1 className="font-display font-bold text-4xl md:text-5xl mb-4">Features</h1>
-        <p className="text-slate-300 text-lg mb-12">Everything your cricket club needs to run a proper stats platform.</p>
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">What's included</p>
+        <h1 className="font-display font-bold text-[48px] md:text-[60px] tracking-tight text-pb-text mb-4 leading-tight">Features.</h1>
+        <p className="text-pb-dim text-lg mb-16">Everything your cricket club needs to run a proper stats platform.</p>
 
-        <div className="space-y-12">
-          {SECTIONS.map(s => (
-            <div key={s.title} className="border-t border-navy-800 pt-10">
-              <h2 className="font-display font-bold text-2xl text-white mb-3">{s.title}</h2>
-              <p className="text-slate-300 mb-4">{s.desc}</p>
-              <ul className="space-y-2">
-                {s.points.map(p => (
-                  <li key={p} className="flex items-start gap-2 text-sm text-slate-400">
-                    <span className="text-accent mt-0.5">✓</span>
-                    {p}
-                  </li>
-                ))}
-              </ul>
+        <div className="space-y-0">
+          {SECTIONS.map((s, i) => (
+            <div key={s.title} className="pb-hairline-t py-10">
+              <div className="grid md:grid-cols-[1fr_2fr] gap-8">
+                <div>
+                  <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">{String(i + 1).padStart(2, '0')}</p>
+                  <h2 className="font-display font-bold text-[22px] text-pb-text leading-tight">{s.title}</h2>
+                </div>
+                <div>
+                  <p className="text-pb-dim mb-5 leading-relaxed">{s.desc}</p>
+                  <ul className="space-y-2">
+                    {s.points.map(p => (
+                      <li key={p} className="flex items-start gap-2.5 text-sm text-pb-dim">
+                        <span className="mt-0.5 font-mono" style={{ color: 'var(--pb-accent)' }}>✓</span>
+                        {p}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
             </div>
           ))}
         </div>
 
-        <div className="mt-16 text-center">
-          <Link to="/pricing" className="btn-primary text-base px-8 py-3">See pricing →</Link>
+        <div className="mt-16 text-center pb-hairline-t pt-10">
+          <Link
+            to="/pricing"
+            className="inline-block px-8 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
+            style={{ background: 'var(--pb-accent)' }}
+          >
+            SEE PRICING →
+          </Link>
         </div>
       </div>
     </div>

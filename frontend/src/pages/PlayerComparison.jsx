@@ -1,12 +1,12 @@
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useMemo } from 'react'
 import { useClub } from '../hooks/useClub'
+import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
-import LoadingSpinner from '../components/LoadingSpinner'
 import ClubInactive from './ClubInactive'
-import clsx from 'clsx'
+import { PageHeader, PbSpinner, Card } from '../lib/presskit'
 
-function PlayerSearch({ players, selected, onSelect, label }) {
+function PlayerSearch({ players, selected, onSelect, label, side }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
 
@@ -18,120 +18,140 @@ function PlayerSearch({ players, selected, onSelect, label }) {
 
   return (
     <div className="relative">
-      <label className="section-label mb-2 block">{label}</label>
-      <div className="relative">
-        {selected ? (
-          <div className="flex items-center gap-2 bg-navy-800 border border-accent/40 rounded-lg px-3 py-2">
-            <span className="text-white flex-1">{selected.name}</span>
-            <button onClick={() => { onSelect(null); setQuery('') }} className="text-slate-500 hover:text-white">×</button>
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">{label}</p>
+      {selected ? (
+        <div className="flex items-center gap-2 bg-pb-surface border pb-hairline rounded px-3 py-2.5">
+          <span className="text-pb-text font-semibold flex-1 text-sm">{selected.name}</span>
+          <button
+            onClick={() => { onSelect(null); setQuery('') }}
+            className="text-pb-faint hover:text-pb-text text-lg leading-none"
+          >
+            ×
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-pb-faint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder={`Search ${label.toLowerCase()}…`}
+              value={query}
+              onChange={e => { setQuery(e.target.value); setOpen(true) }}
+              onFocus={() => setOpen(true)}
+              onBlur={() => setTimeout(() => setOpen(false), 150)}
+              className="w-full bg-pb-surface border pb-hairline text-pb-text text-sm rounded pl-9 pr-4 py-2.5 focus:outline-none focus:border-pb-accent placeholder-pb-faint"
+            />
           </div>
-        ) : (
-          <>
-            <div className="relative">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                placeholder={`Search ${label.toLowerCase()}…`}
-                value={query}
-                onChange={e => { setQuery(e.target.value); setOpen(true) }}
-                onFocus={() => setOpen(true)}
-                onBlur={() => setTimeout(() => setOpen(false), 150)}
-                className="w-full bg-navy-800 border border-navy-600 text-white text-sm rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:border-accent placeholder-slate-500"
-              />
+          {open && filtered.length > 0 && (
+            <div className="absolute z-20 w-full mt-1 bg-pb-surface border pb-hairline rounded shadow-xl max-h-60 overflow-y-auto pb-scroll">
+              {filtered.map(p => (
+                <button
+                  key={p.id}
+                  onMouseDown={() => { onSelect(p); setQuery(''); setOpen(false) }}
+                  className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text transition-colors"
+                >
+                  {p.name}
+                </button>
+              ))}
             </div>
-            {open && filtered.length > 0 && (
-              <div className="absolute z-20 w-full mt-1 bg-navy-800 border border-navy-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
-                {filtered.map(p => (
-                  <button
-                    key={p.id}
-                    onMouseDown={() => { onSelect(p); setQuery(''); setOpen(false) }}
-                    className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-navy-700 hover:text-white transition-colors"
-                  >
-                    {p.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
 
 const BATTING_METRICS = [
-  { key: 'innings', label: 'Innings', higher: true },
-  { key: 'total_runs', label: 'Career Runs', higher: true },
-  { key: 'average', label: 'Batting Average', higher: true },
-  { key: 'strike_rate', label: 'Strike Rate', higher: true },
-  { key: 'high_score', label: 'Highest Score', higher: true },
-  { key: 'fifties', label: 'Fifties', higher: true },
-  { key: 'hundreds', label: 'Hundreds', higher: true },
-  { key: 'total_sixes', label: 'Sixes', higher: true },
-  { key: 'total_fours', label: 'Fours', higher: true },
-  { key: 'ducks', label: 'Ducks', higher: false },
+  { key: 'innings', label: 'INNINGS', higher: true },
+  { key: 'total_runs', label: 'CAREER RUNS', higher: true },
+  { key: 'average', label: 'BATTING AVG', higher: true },
+  { key: 'strike_rate', label: 'STRIKE RATE', higher: true },
+  { key: 'high_score', label: 'HIGH SCORE', higher: true },
+  { key: 'fifties', label: 'FIFTIES', higher: true },
+  { key: 'hundreds', label: 'CENTURIES', higher: true },
+  { key: 'total_sixes', label: 'SIXES', higher: true },
+  { key: 'total_fours', label: 'FOURS', higher: true },
+  { key: 'ducks', label: 'DUCKS', higher: false },
 ]
 
 const BOWLING_METRICS = [
-  { key: 'total_wickets', label: 'Career Wickets', higher: true },
-  { key: 'average', label: 'Bowling Average', higher: false },
-  { key: 'economy', label: 'Economy Rate', higher: false },
-  { key: 'best_figures_wickets', label: 'Best Spell', higher: true },
-  { key: 'five_fors', label: 'Five-fors', higher: true },
-  { key: 'total_maidens', label: 'Maidens', higher: true },
+  { key: 'total_wickets', label: 'CAREER WICKETS', higher: true },
+  { key: 'average', label: 'BOWLING AVG', higher: false },
+  { key: 'economy', label: 'ECONOMY', higher: false },
+  { key: 'best_figures_wickets', label: 'BEST SPELL', higher: true },
+  { key: 'five_fors', label: 'FIVE-FORS', higher: true },
+  { key: 'total_maidens', label: 'MAIDENS', higher: true },
 ]
 
 const FIELDING_METRICS = [
-  { key: 'total_catches', label: 'Catches', higher: true },
-  { key: 'total_run_outs', label: 'Run Outs', higher: true },
-  { key: 'total_stumpings', label: 'Stumpings', higher: true },
-  { key: 'total_dismissals', label: 'Total Dismissals', higher: true },
+  { key: 'total_catches', label: 'CATCHES', higher: true },
+  { key: 'total_run_outs', label: 'RUN OUTS', higher: true },
+  { key: 'total_stumpings', label: 'STUMPINGS', higher: true },
+  { key: 'total_dismissals', label: 'TOTAL DISMISSALS', higher: true },
 ]
 
-function CompareRow({ label, v1, v2, higher }) {
+function CompareBar({ v1, v2, higher }) {
   const n1 = parseFloat(v1)
   const n2 = parseFloat(v2)
-  const bothValid = !isNaN(n1) && !isNaN(n2) && v1 != null && v2 != null
+  if (isNaN(n1) || isNaN(n2) || (n1 === 0 && n2 === 0)) return null
+  const total = n1 + n2
+  const pct1 = total > 0 ? (n1 / total) * 100 : 50
+  const pct2 = 100 - pct1
+  const p1wins = higher ? n1 > n2 : n1 < n2
+  const p2wins = higher ? n2 > n1 : n2 < n1
+  return (
+    <div className="flex h-1 rounded overflow-hidden mt-1.5">
+      <div
+        className="transition-all duration-500"
+        style={{ width: `${pct1}%`, background: p1wins ? 'var(--pb-accent)' : 'var(--pb-hairline2)' }}
+      />
+      <div
+        className="transition-all duration-500"
+        style={{ width: `${pct2}%`, background: p2wins ? 'var(--pb-accent)' : 'var(--pb-hairline2)' }}
+      />
+    </div>
+  )
+}
 
-  let p1win = false
-  let p2win = false
-  if (bothValid && n1 !== n2) {
-    if (higher) {
-      p1win = n1 > n2
-      p2win = n2 > n1
-    } else {
-      p1win = n1 < n2
-      p2win = n2 < n1
-    }
-  }
+function CompareRow({ label, v1, v2, higher, isFirst }) {
+  const n1 = parseFloat(v1)
+  const n2 = parseFloat(v2)
+  const bothValid = !isNaN(n1) && !isNaN(n2) && v1 != null && v2 != null && n1 !== n2
+
+  const p1win = bothValid && (higher ? n1 > n2 : n1 < n2)
+  const p2win = bothValid && (higher ? n2 > n1 : n2 < n1)
 
   return (
-    <tr className="border-b border-navy-700/50">
-      <td className={clsx(
-        'px-4 py-3 text-center stat-number font-bold',
-        p1win ? 'text-green-400 bg-green-400/10' : 'text-white'
-      )}>
-        {v1 ?? '—'}
+    <tr className={isFirst ? '' : 'pb-hairline-t'}>
+      <td className="py-3 pl-5 w-[38%]">
+        <span className={`font-mono text-[15px] font-bold pb-num transition-colors ${p1win ? '' : 'text-pb-dim'}`}
+          style={p1win ? { color: 'var(--pb-accent)' } : {}}>
+          {v1 ?? '—'}
+        </span>
+        {p1win && <span className="ml-1.5 text-[10px] font-mono" style={{ color: 'var(--pb-accent)' }}>▲</span>}
       </td>
-      <td className="px-4 py-3 text-center text-xs text-slate-400 font-medium uppercase tracking-wider bg-navy-800/50">
-        {label}
+      <td className="py-3 text-center w-[24%]">
+        <span className="font-mono text-[10px] tracking-wide2 text-pb-faint">{label}</span>
+        <CompareBar v1={v1} v2={v2} higher={higher} />
       </td>
-      <td className={clsx(
-        'px-4 py-3 text-center stat-number font-bold',
-        p2win ? 'text-green-400 bg-green-400/10' : 'text-white'
-      )}>
-        {v2 ?? '—'}
+      <td className="py-3 pr-5 text-right w-[38%]">
+        {p2win && <span className="mr-1.5 text-[10px] font-mono" style={{ color: 'var(--pb-accent)' }}>▲</span>}
+        <span className={`font-mono text-[15px] font-bold pb-num transition-colors ${p2win ? '' : 'text-pb-dim'}`}
+          style={p2win ? { color: 'var(--pb-accent)' } : {}}>
+          {v2 ?? '—'}
+        </span>
       </td>
     </tr>
   )
 }
 
-function SectionHeader({ label }) {
+function SectionDivider({ label }) {
   return (
     <tr>
-      <td colSpan={3} className="px-4 py-2 text-xs uppercase tracking-widest text-slate-500 font-medium bg-navy-800/80 border-b border-navy-700">
+      <td colSpan={3} className="pt-5 pb-2 pl-5 font-mono text-[10px] tracking-wide3 text-pb-faint bg-pb-surface2/40 border-t border-b pb-hairline-t pb-hairline-b uppercase">
         {label}
       </td>
     </tr>
@@ -140,14 +160,14 @@ function SectionHeader({ label }) {
 
 export default function PlayerComparison() {
   const { clubSlug } = useParams()
-  const { orgId, inactive } = useClub(clubSlug)
+  const { club, orgId, inactive } = useClub(clubSlug)
+  useClubTheme(club)
 
   if (inactive) return <ClubInactive />
+
   const [players, setPlayers] = useState([])
   const [player1, setPlayer1] = useState(null)
   const [player2, setPlayer2] = useState(null)
-  const [stats1, setStats1] = useState(null)
-  const [stats2, setStats2] = useState(null)
   const [bat1, setBat1] = useState(null)
   const [bat2, setBat2] = useState(null)
   const [bowl1, setBowl1] = useState(null)
@@ -163,7 +183,7 @@ export default function PlayerComparison() {
   }, [orgId])
 
   useEffect(() => {
-    if (!player1) { setStats1(null); setBat1(null); setBowl1(null); setField1(null); return }
+    if (!player1) { setBat1(null); setBowl1(null); setField1(null); return }
     setLoading1(true)
     api.getPlayerStats(player1.id).then(data => {
       setBat1(data.career_batting || {})
@@ -173,7 +193,7 @@ export default function PlayerComparison() {
   }, [player1])
 
   useEffect(() => {
-    if (!player2) { setStats2(null); setBat2(null); setBowl2(null); setField2(null); return }
+    if (!player2) { setBat2(null); setBowl2(null); setField2(null); return }
     setLoading2(true)
     api.getPlayerStats(player2.id).then(data => {
       setBat2(data.career_batting || {})
@@ -182,93 +202,100 @@ export default function PlayerComparison() {
     }).catch(() => {}).finally(() => setLoading2(false))
   }, [player2])
 
-  const showComparison = player1 && player2
+  const showComparison = player1 && player2 && bat1 && bat2 && !loading1 && !loading2
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="mb-8">
-        <div className="accent-bar mb-3" />
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <h1 className="display-heading text-4xl md:text-5xl text-white">COMPARE PLAYERS</h1>
-          <Link to={`/${clubSlug}/dashboard`} className="btn-ghost border border-navy-600 text-sm">← Dashboard</Link>
+    <div className="min-h-screen bg-pb-bg text-pb-text">
+      <main className="max-w-[1300px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <PageHeader
+          eyebrow="HEAD TO HEAD"
+          title="Compare players."
+          meta={[<span key="s">Career stats, side by side.</span>]}
+        />
+
+        {/* Player pickers */}
+        <div className="grid md:grid-cols-2 gap-4 mb-6">
+          <PlayerSearch players={players} selected={player1} onSelect={setPlayer1} label="Player 1" side="left" />
+          <PlayerSearch players={players} selected={player2} onSelect={setPlayer2} label="Player 2" side="right" />
         </div>
-      </div>
 
-      {/* Player pickers */}
-      <div className="grid md:grid-cols-2 gap-4 mb-8">
-        <PlayerSearch players={players} selected={player1} onSelect={setPlayer1} label="Player 1" />
-        <PlayerSearch players={players} selected={player2} onSelect={setPlayer2} label="Player 2" />
-      </div>
-
-      {!showComparison && (
-        <div className="card p-12 text-center">
-          <p className="text-slate-500 text-lg">Select two players above to compare their stats</p>
-          <p className="text-slate-600 text-sm mt-2">Green highlights show the superior stat</p>
-        </div>
-      )}
-
-      {showComparison && (loading1 || loading2) && <LoadingSpinner message="Loading stats…" />}
-
-      {showComparison && !loading1 && !loading2 && bat1 && bat2 && (
-        <>
-          {/* Header */}
-          <div className="grid grid-cols-3 gap-0 mb-0">
-            <Link to={`/players/${player1.id}`} className="card rounded-b-none border-b-0 p-4 text-center hover:border-accent/50 transition-colors">
-              <div className="display-heading text-lg text-white">{player1.name}</div>
-              <div className="text-xs text-slate-500 mt-0.5">Player 1</div>
-            </Link>
-            <div className="flex items-center justify-center">
-              <span className="text-slate-600 font-display font-bold text-sm uppercase tracking-widest">vs</span>
+        {/* Empty state */}
+        {!player1 && !player2 && (
+          <Card>
+            <div className="py-12 text-center">
+              <p className="text-pb-faint text-sm">Select two players above to compare their career stats.</p>
+              <p className="text-pb-faintest text-xs mt-1">Accent colour highlights the superior stat.</p>
             </div>
-            <Link to={`/players/${player2.id}`} className="card rounded-b-none border-b-0 p-4 text-center hover:border-accent/50 transition-colors">
-              <div className="display-heading text-lg text-white">{player2.name}</div>
-              <div className="text-xs text-slate-500 mt-0.5">Player 2</div>
-            </Link>
-          </div>
+          </Card>
+        )}
 
-          {/* Comparison table */}
-          <div className="card rounded-t-none border-t-0 overflow-hidden">
-            <table className="w-full">
-              <tbody>
-                <SectionHeader label="Batting" />
-                {BATTING_METRICS.map(m => (
-                  <CompareRow
-                    key={m.key}
-                    label={m.label}
-                    v1={bat1[m.key]}
-                    v2={bat2[m.key]}
-                    higher={m.higher}
-                  />
-                ))}
-                <SectionHeader label="Bowling" />
-                {BOWLING_METRICS.map(m => (
-                  <CompareRow
-                    key={m.key}
-                    label={m.label}
-                    v1={bowl1?.[m.key]}
-                    v2={bowl2?.[m.key]}
-                    higher={m.higher}
-                  />
-                ))}
-                <SectionHeader label="Fielding" />
-                {FIELDING_METRICS.map(m => (
-                  <CompareRow
-                    key={m.key}
-                    label={m.label}
-                    v1={field1?.[m.key]}
-                    v2={field2?.[m.key]}
-                    higher={m.higher}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {/* Loading */}
+        {(loading1 || loading2) && player1 && player2 && <PbSpinner message="Loading stats…" />}
 
-          <p className="text-center text-slate-600 text-xs mt-3">
-            Green = superior stat · Career totals shown
-          </p>
-        </>
-      )}
+        {/* Comparison */}
+        {showComparison && (
+          <>
+            {/* Player headers */}
+            <div className="grid grid-cols-[1fr_auto_1fr] gap-0 mb-0">
+              <Link to={`/players/${player1.id}`} className="pb-card rounded-b-none border-b-0 p-4 text-left hover:bg-pb-surface2 transition-colors">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-0.5">PLAYER 1</p>
+                <p className="font-semibold text-pb-text text-base">{player1.name}</p>
+              </Link>
+              <div className="flex items-center justify-center px-4 bg-pb-surface border-t border-b pb-hairline-t pb-hairline-b">
+                <span className="font-mono text-[11px] tracking-wide3 text-pb-faintest font-bold">VS</span>
+              </div>
+              <Link to={`/players/${player2.id}`} className="pb-card rounded-b-none border-b-0 p-4 text-right hover:bg-pb-surface2 transition-colors">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-0.5">PLAYER 2</p>
+                <p className="font-semibold text-pb-text text-base">{player2.name}</p>
+              </Link>
+            </div>
+
+            {/* Table */}
+            <div className="pb-card rounded-t-none border-t-0 overflow-hidden">
+              <table className="w-full">
+                <tbody>
+                  <SectionDivider label="Batting" />
+                  {BATTING_METRICS.map((m, i) => (
+                    <CompareRow
+                      key={m.key}
+                      label={m.label}
+                      v1={bat1[m.key]}
+                      v2={bat2[m.key]}
+                      higher={m.higher}
+                      isFirst={i === 0}
+                    />
+                  ))}
+                  <SectionDivider label="Bowling" />
+                  {BOWLING_METRICS.map((m, i) => (
+                    <CompareRow
+                      key={m.key}
+                      label={m.label}
+                      v1={bowl1?.[m.key]}
+                      v2={bowl2?.[m.key]}
+                      higher={m.higher}
+                      isFirst={i === 0}
+                    />
+                  ))}
+                  <SectionDivider label="Fielding" />
+                  {FIELDING_METRICS.map((m, i) => (
+                    <CompareRow
+                      key={m.key}
+                      label={m.label}
+                      v1={field1?.[m.key]}
+                      v2={field2?.[m.key]}
+                      higher={m.higher}
+                      isFirst={i === 0}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-center text-pb-faintest font-mono text-[10px] mt-3 tracking-wide2">
+              ACCENT = SUPERIOR STAT · CAREER TOTALS
+            </p>
+          </>
+        )}
+      </main>
     </div>
   )
 }

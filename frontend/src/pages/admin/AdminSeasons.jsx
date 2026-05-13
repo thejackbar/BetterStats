@@ -12,21 +12,21 @@ export default function AdminSeasons() {
   return (
     <AdminLayout>
       <div className="max-w-2xl">
-        <h1 className="text-xl font-display font-bold text-white mb-4">Seasons</h1>
-        <p className="text-slate-400 text-sm mb-4">
+        <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Seasons</h1>
+        <p className="text-pb-faint text-sm mb-6 leading-relaxed">
           Seasons are created automatically when data is synced from PlayHQ.
         </p>
-        <div className="bg-navy-900 border border-navy-700 rounded-lg overflow-hidden">
+        <div className="pb-card overflow-hidden">
           {seasons.length === 0 && (
-            <div className="px-4 py-8 text-center text-slate-500 text-sm">No seasons found</div>
+            <div className="px-4 py-8 text-center font-mono text-[11px] text-pb-faint">No seasons found</div>
           )}
           {seasons.map((s, i) => (
-            <div key={s.id} className={`flex items-center justify-between px-4 py-3 ${i > 0 ? 'border-t border-navy-800' : ''}`}>
+            <div key={s.id} className={`flex items-center justify-between px-5 py-3 ${i > 0 ? 'pb-hairline-t' : ''}`}>
               <div>
-                <span className="text-white text-sm">{s.name}</span>
-                <span className="text-slate-500 text-xs ml-2">{s.year || ''}</span>
+                <span className="text-pb-text text-sm">{s.name}</span>
+                {s.year && <span className="font-mono text-[10px] text-pb-faintest ml-2">{s.year}</span>}
               </div>
-              <span className="text-slate-500 text-xs">
+              <span className="font-mono text-[10px] text-pb-faint">
                 {s.synced_at ? `Synced ${new Date(s.synced_at).toLocaleDateString('en-AU')}` : 'Not synced'}
               </span>
             </div>

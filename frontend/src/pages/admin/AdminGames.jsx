@@ -28,42 +28,44 @@ export default function AdminGames() {
   return (
     <AdminLayout>
       <div className="max-w-4xl">
-        <h1 className="text-xl font-display font-bold text-white mb-4">Matches</h1>
+        <h1 className="font-display font-bold text-2xl text-pb-text mb-4">Matches</h1>
 
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex items-center gap-3 mb-5">
           <select
             value={selectedSeason}
             onChange={e => setSelectedSeason(e.target.value)}
-            className="bg-navy-800 border border-navy-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
+            className="bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
           >
             {seasons.map(s => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
-          <span className="text-slate-500 text-xs">
+          <span className="font-mono text-[10px] text-pb-faint">
             Match data is synced from PlayHQ and is read-only here.
           </span>
         </div>
 
-        {error && <div className="text-red-400 text-sm bg-red-900/20 border border-red-800 rounded p-3">{error}</div>}
-        {loading && <div className="text-slate-400 text-sm">Loading…</div>}
+        {error && (
+          <div className="font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-4 py-3 mb-4">{error}</div>
+        )}
+        {loading && <div className="font-mono text-[11px] text-pb-faint">Loading…</div>}
 
         {!loading && !error && games.length === 0 && (
-          <div className="text-slate-500 text-sm">No matches found for this season.</div>
+          <div className="font-mono text-[11px] text-pb-faint">No matches found for this season.</div>
         )}
 
         {!loading && games.length > 0 && (
-          <div className="bg-navy-900 border border-navy-700 rounded-lg overflow-hidden">
-            <div className="grid grid-cols-[1fr_1fr_auto] text-xs text-slate-500 px-4 py-2 border-b border-navy-800">
-              <span>Teams</span>
-              <span>Result</span>
-              <span>Date</span>
+          <div className="pb-card overflow-hidden">
+            <div className="grid grid-cols-[1fr_1fr_auto] font-mono text-[10px] tracking-wide3 text-pb-faint px-5 py-2.5 bg-pb-surface2/40">
+              <span>TEAMS</span>
+              <span>RESULT</span>
+              <span>DATE</span>
             </div>
             {games.map((g, i) => (
-              <div key={g.id} className={`grid grid-cols-[1fr_1fr_auto] px-4 py-3 text-sm ${i > 0 ? 'border-t border-navy-800' : ''}`}>
-                <span className="text-white truncate">{g.home_team} v {g.away_team}</span>
-                <span className="text-slate-300 truncate">{g.result || '—'}</span>
-                <span className="text-slate-500 text-xs">{g.played_at || '—'}</span>
+              <div key={g.id} className={`grid grid-cols-[1fr_1fr_auto] px-5 py-3 text-sm ${i > 0 ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <span className="text-pb-text truncate">{g.home_team} v {g.away_team}</span>
+                <span className="text-pb-dim truncate">{g.result || '—'}</span>
+                <span className="font-mono text-[10px] text-pb-faintest">{g.played_at || '—'}</span>
               </div>
             ))}
           </div>

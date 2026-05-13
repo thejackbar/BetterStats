@@ -19,10 +19,12 @@ function fmtTime(iso) {
 
 function StatPill({ label, value, highlight }) {
   return (
-    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${
-      highlight ? 'bg-accent/10 border-accent/30 text-accent' : 'bg-navy-800 border-navy-700 text-slate-400'
+    <span className={`inline-flex items-center gap-1 font-mono text-[10px] px-2 py-0.5 rounded border ${
+      highlight
+        ? 'border-pb-accent/30 text-pb-accent bg-pb-accent/10'
+        : 'border-pb-hairline text-pb-faint bg-pb-surface2'
     }`}>
-      <span className="font-mono font-bold">{value}</span>
+      <span className="font-bold">{value}</span>
       <span>{label}</span>
     </span>
   )
@@ -37,6 +39,7 @@ export default function AdminSync() {
   const [syncRequests, setSyncRequests] = useState([])
   const [actionLoading, setActionLoading] = useState(null)
   const [hardRefreshing, setHardRefreshing] = useState(false)
+  const [syncWarnings, setSyncWarnings] = useState({})
 
   const orgId = settings?.id
 
@@ -45,18 +48,14 @@ export default function AdminSync() {
     try {
       const data = await api.getSyncLogs(id)
       setLogs(data || [])
-    } catch {
-      // silent
-    }
+    } catch { /* silent */ }
   }, [])
 
   const fetchSyncRequests = useCallback(async () => {
     try {
       const data = await api.adminListSyncRequests()
       setSyncRequests(data || [])
-    } catch {
-      // silent
-    }
+    } catch { /* silent */ }
   }, [])
 
   useEffect(() => {
@@ -66,8 +65,6 @@ export default function AdminSync() {
     }).catch(() => {})
     fetchSyncRequests()
   }, [fetchLogs, fetchSyncRequests])
-
-  const [syncWarnings, setSyncWarnings] = useState({}) // id → warning message
 
   const handleSyncRequestAction = async (id, action, forceNote) => {
     setActionLoading(id)
@@ -91,7 +88,6 @@ export default function AdminSync() {
   useEffect(() => {
     if (!polling || !orgId) return
     const interval = setInterval(() => fetchLogs(orgId), 4000)
-    // 2 hours max — hard refresh on a club with hundreds of historical games can take a while
     const timeout = setTimeout(() => {
       setPolling(false)
       setSyncing(false)
@@ -154,51 +150,53 @@ export default function AdminSync() {
   return (
     <AdminLayout>
       <div className="max-w-3xl">
-        <h1 className="text-2xl font-display font-bold text-white mb-6">Data Sync</h1>
+        <h1 className="font-display font-bold text-2xl text-pb-text mb-6">Data Sync</h1>
 
         {/* Trigger card */}
-        <div className="bg-navy-900 border border-navy-700 rounded-lg p-5 mb-8">
-          <h2 className="text-white font-semibold mb-4">Full Sync</h2>
+        <div className="pb-card p-5 mb-8">
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">Full Sync</p>
           <div className="flex flex-wrap gap-3">
             <button
               onClick={handleSync}
               disabled={syncing || hardRefreshing || !orgId}
-              className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}
             >
               {syncing ? (
                 <>
-                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Syncing…
+                  <span className="w-3 h-3 border-2 border-pb-bg/30 border-t-pb-bg rounded-full animate-spin" />
+                  SYNCING…
                 </>
-              ) : 'Sync Now'}
+              ) : 'SYNC NOW'}
             </button>
             <button
               onClick={handleHardRefresh}
               disabled={hardRefreshing || syncing || !orgId}
-              className="btn-ghost border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-pb-amber"
+              style={{ borderColor: 'var(--pb-amber)', background: 'transparent' }}
               title="Re-pulls every historical game and tops up any missing player data. Takes longer than a normal sync."
             >
               {hardRefreshing ? (
                 <>
-                  <span className="w-3.5 h-3.5 border-2 border-amber-300/40 border-t-amber-300 rounded-full animate-spin" />
-                  Hard refreshing…
+                  <span className="w-3 h-3 border-2 border-pb-amber/30 border-t-pb-amber rounded-full animate-spin" />
+                  HARD REFRESHING…
                 </>
-              ) : 'Hard Refresh'}
+              ) : 'HARD REFRESH'}
             </button>
           </div>
           {(syncing || hardRefreshing) && (
-            <p className="text-slate-500 text-xs mt-3">
-              Running in background — this page will update automatically as progress comes in.
-              A hard refresh on a club with hundreds of historical games can take an hour or longer.
+            <p className="font-mono text-[10px] text-pb-faint mt-3">
+              Running in background — this page will update automatically.
+              A hard refresh can take an hour or longer.
             </p>
           )}
           {settings && (
-            <div className="mt-4 pt-4 border-t border-navy-700">
-              <p className="text-slate-500 text-xs">
+            <div className="mt-4 pt-4 pb-hairline-t">
+              <p className="font-mono text-[10px] text-pb-faint">
                 PlayHQ ID:{' '}
                 {settings.playhq_id
-                  ? <span className="font-mono text-accent">{settings.playhq_id}</span>
-                  : <span className="text-amber-500">not set — game-level data (scorecards, partnerships) requires this</span>
+                  ? <span style={{ color: 'var(--pb-accent)' }}>{settings.playhq_id}</span>
+                  : <span style={{ color: 'var(--pb-amber)' }}>not set — game-level data requires this</span>
                 }
               </p>
             </div>
@@ -209,8 +207,8 @@ export default function AdminSync() {
         {syncRequests.length > 0 && (
           <div className="mb-8">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-white font-semibold">Player Sync Requests</h2>
-              <div className="flex items-center gap-3">
+              <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Player Sync Requests</p>
+              <div className="flex items-center gap-4">
                 {syncRequests.some(r => r.status !== 'pending') && (
                   <button
                     onClick={async () => {
@@ -222,15 +220,12 @@ export default function AdminSync() {
                         alert(`Failed to clear: ${e.message}`)
                       }
                     }}
-                    className="text-slate-500 hover:text-red-400 text-xs transition-colors"
+                    className="font-mono text-[10px] text-pb-faint hover:text-pb-red transition-colors"
                   >
                     Clear resolved
                   </button>
                 )}
-                <button
-                  onClick={fetchSyncRequests}
-                  className="text-slate-500 hover:text-white text-xs transition-colors"
-                >
+                <button onClick={fetchSyncRequests} className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors">
                   Refresh
                 </button>
               </div>
@@ -239,34 +234,34 @@ export default function AdminSync() {
               {syncRequests.map(req => (
                 <div
                   key={req.id}
-                  className={`bg-navy-900 border rounded-lg p-4 flex flex-wrap items-center justify-between gap-3 ${
-                    req.status === 'pending' ? 'border-amber-500/30' : 'border-navy-700'
+                  className={`pb-card p-4 flex flex-wrap items-center justify-between gap-3 ${
+                    req.status === 'pending' ? 'border-pb-amber/30' : ''
                   }`}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-white text-sm font-medium">{req.player_name}</p>
+                      <p className="text-pb-text text-sm font-medium">{req.player_name}</p>
                       {!req.playhq_id && req.status === 'pending' && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-pb-amber/30 text-pb-amber">
                           no PHQ ID
                         </span>
                       )}
                     </div>
-                    <p className="text-slate-500 text-xs mt-0.5">
+                    <p className="font-mono text-[10px] text-pb-faint mt-0.5">
                       {req.created_at ? new Date(req.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
                       {req.requester_note && ` — "${req.requester_note}"`}
                     </p>
                     {req.playhq_id && (
-                      <p className="text-slate-600 text-xs font-mono mt-0.5">{req.playhq_id}</p>
+                      <p className="font-mono text-[10px] text-pb-faintest mt-0.5">{req.playhq_id}</p>
                     )}
                     {syncWarnings[req.id] && (
-                      <div className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded p-2">
+                      <div className="mt-2 font-mono text-[10px] text-pb-amber bg-pb-amber/10 border border-pb-amber/20 rounded p-2">
                         <p className="mb-2">{syncWarnings[req.id]}</p>
                         {syncWarnings[req.id].includes('no PlayHQ ID') && (
                           <button
                             onClick={() => handleSyncRequestAction(req.id, 'approve', 'admin override — no PHQ ID')}
                             disabled={actionLoading === req.id}
-                            className="text-amber-400 underline text-xs disabled:opacity-50"
+                            className="underline text-pb-amber disabled:opacity-50"
                           >
                             Proceed anyway (name matching only)
                           </button>
@@ -279,25 +274,26 @@ export default function AdminSync() {
                       <button
                         onClick={() => handleSyncRequestAction(req.id, 'approve')}
                         disabled={actionLoading === req.id}
-                        className="btn-primary text-xs disabled:opacity-50"
+                        className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
+                        style={{ background: 'var(--pb-accent)' }}
                       >
                         {actionLoading === req.id ? 'Processing…' : 'Approve & Deep Sync'}
                       </button>
                       <button
                         onClick={() => handleSyncRequestAction(req.id, 'dismiss')}
                         disabled={actionLoading === req.id}
-                        className="btn-ghost text-xs text-slate-400 disabled:opacity-50"
+                        className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text transition disabled:opacity-50"
                       >
                         Dismiss
                       </button>
                     </div>
                   ) : (
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium shrink-0 ${
+                    <span className={`font-mono text-[10px] px-2 py-0.5 rounded border shrink-0 ${
                       req.status === 'approved'
-                        ? 'bg-accent/10 border-accent/30 text-accent'
-                        : 'bg-navy-800 border-navy-700 text-slate-500'
+                        ? 'border-pb-accent/30 text-pb-accent'
+                        : 'border-pb-hairline text-pb-faint'
                     }`}>
-                      {req.status}
+                      {req.status.toUpperCase()}
                     </span>
                   )}
                 </div>
@@ -309,8 +305,8 @@ export default function AdminSync() {
         {/* Log */}
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-white font-semibold">Sync History</h2>
-            <div className="flex items-center gap-3">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Sync History</p>
+            <div className="flex items-center gap-4">
               {logs.some(l => l.status !== 'running') && (
                 <button
                   onClick={async () => {
@@ -322,26 +318,21 @@ export default function AdminSync() {
                       alert(`Failed to clear: ${e.message}`)
                     }
                   }}
-                  className="text-slate-500 hover:text-red-400 text-xs transition-colors"
+                  className="font-mono text-[10px] text-pb-faint hover:text-pb-red transition-colors"
                 >
                   Clear history
                 </button>
               )}
-              <button
-                onClick={() => orgId && fetchLogs(orgId)}
-                className="text-slate-500 hover:text-white text-xs transition-colors"
-              >
+              <button onClick={() => orgId && fetchLogs(orgId)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors">
                 Refresh
               </button>
             </div>
           </div>
 
           {logs.length === 0 ? (
-            <div className="bg-navy-900 border border-navy-700 rounded-lg p-6 text-center">
-              <p className="text-slate-500 text-sm">No sync history yet.</p>
-              <p className="text-slate-600 text-xs mt-1">
-                Trigger a sync above to see results here.
-              </p>
+            <div className="pb-card p-8 text-center">
+              <p className="text-pb-faint text-sm">No sync history yet.</p>
+              <p className="font-mono text-[10px] text-pb-faintest mt-1">Trigger a sync above to see results here.</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -350,103 +341,64 @@ export default function AdminSync() {
                 const dur = fmtDuration(entry.started_at, entry.completed_at)
                 const isRunning = entry.status === 'running'
                 const isError = entry.status === 'error' || !!entry.error
-                const isOK = entry.status === 'success' && !isError
                 const isLatest = i === 0
                 return (
                   <div
                     key={entry.id || i}
-                    className={`bg-navy-900 border rounded-lg p-4 ${
-                      isError ? 'border-red-500/40'
-                        : isRunning ? 'border-amber-500/40'
-                        : isLatest ? 'border-accent/30'
-                        : 'border-navy-700'
+                    className={`pb-card p-4 ${
+                      isError ? 'border-pb-red/40'
+                        : isRunning ? 'border-pb-amber/40'
+                        : isLatest ? 'border-pb-accent/30'
+                        : ''
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-white text-sm font-medium">{fmtTime(entry.started_at)}</p>
+                          <p className="text-pb-text text-sm font-medium">{fmtTime(entry.started_at)}</p>
                           {entry.kind && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-navy-800 border border-navy-700 text-slate-400 font-mono">
+                            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded border pb-hairline text-pb-faint">
                               {entry.kind}
                             </span>
                           )}
                         </div>
-                        {dur && !isRunning && <p className="text-slate-600 text-xs mt-0.5">Completed in {dur}</p>}
-                        {isRunning && <p className="text-amber-400 text-xs mt-0.5">Running…</p>}
+                        {dur && !isRunning && <p className="font-mono text-[10px] text-pb-faintest mt-0.5">Completed in {dur}</p>}
+                        {isRunning && <p className="font-mono text-[10px] text-pb-amber mt-0.5">Running…</p>}
                       </div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                      <span className={`font-mono text-[10px] px-2 py-0.5 rounded border shrink-0 ${
                         isError
-                          ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                          ? 'border-pb-red/30 text-pb-red'
                           : isRunning
-                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                          : 'bg-accent/10 border-accent/30 text-accent'
+                          ? 'border-pb-amber/30 text-pb-amber'
+                          : 'border-pb-accent/30 text-pb-accent'
                       }`}>
-                        {isError ? 'Error' : isRunning ? 'Running' : 'OK'}
+                        {isError ? 'ERROR' : isRunning ? 'RUNNING' : 'OK'}
                       </span>
                     </div>
 
                     {isError ? (
-                      <p className="text-red-400 text-xs">{entry.error}</p>
+                      <p className="font-mono text-[10px] text-pb-red">{entry.error}</p>
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
-                        {s.seasons != null && (
-                          <StatPill label="seasons" value={s.seasons} />
-                        )}
-                        {s.players != null && (
-                          <StatPill label="players" value={s.players} />
-                        )}
-                        {s.season_stats != null && (
-                          <StatPill label="stat rows" value={s.season_stats} />
-                        )}
-                        {s.playhq_games_found != null && (
-                          <StatPill label="phq games" value={s.playhq_games_found} highlight={s.playhq_games_found > 0} />
-                        )}
-                        {s.playhq_games_final != null && (
-                          <StatPill label="phq final" value={s.playhq_games_final} highlight={s.playhq_games_final > 0} />
-                        )}
-                        {s.games_new != null && (
-                          <StatPill label="new games" value={s.games_new} highlight={s.games_new > 0} />
-                        )}
-                        {s.games_topped_up != null && (
-                          <StatPill label="topped up" value={s.games_topped_up} highlight={s.games_topped_up > 0} />
-                        )}
-                        {s.batting != null && (
-                          <StatPill label="batting rows" value={s.batting} highlight={s.batting > 0} />
-                        )}
-                        {s.bowling != null && (
-                          <StatPill label="bowling rows" value={s.bowling} highlight={s.bowling > 0} />
-                        )}
-                        {s.partnerships != null && (
-                          <StatPill label="partnerships" value={s.partnerships} highlight={s.partnerships > 0} />
-                        )}
-                        {s.games_skipped_done != null && (
-                          <StatPill label="already done" value={s.games_skipped_done} highlight={false} />
-                        )}
-                        {s.games_skipped_season != null && (
-                          <StatPill label="no season match" value={s.games_skipped_season} highlight={s.games_skipped_season > 0} />
-                        )}
-                        {s.games_skipped_no_stats != null && (
-                          <StatPill label="no stats" value={s.games_skipped_no_stats} highlight={s.games_skipped_no_stats > 0} />
-                        )}
-                        {s.gr_matches_seen != null && (
-                          <StatPill label="GR matches" value={s.gr_matches_seen} highlight={s.gr_matches_seen > 0} />
-                        )}
-                        {s.gr_games_new != null && (
-                          <StatPill label="GR new games" value={s.gr_games_new} highlight={s.gr_games_new > 0} />
-                        )}
-                        {s.gr_batting != null && (
-                          <StatPill label="GR batting" value={s.gr_batting} highlight={s.gr_batting > 0} />
-                        )}
-                        {s.gr_bowling != null && (
-                          <StatPill label="GR bowling" value={s.gr_bowling} highlight={s.gr_bowling > 0} />
-                        )}
-                        {s.gr_fielding != null && (
-                          <StatPill label="GR fielding" value={s.gr_fielding} highlight={s.gr_fielding > 0} />
-                        )}
-                        {s.gr_partnerships != null && (
-                          <StatPill label="GR partnerships" value={s.gr_partnerships} highlight={s.gr_partnerships > 0} />
-                        )}
+                        {s.seasons != null && <StatPill label="seasons" value={s.seasons} />}
+                        {s.players != null && <StatPill label="players" value={s.players} />}
+                        {s.season_stats != null && <StatPill label="stat rows" value={s.season_stats} />}
+                        {s.playhq_games_found != null && <StatPill label="phq games" value={s.playhq_games_found} highlight={s.playhq_games_found > 0} />}
+                        {s.playhq_games_final != null && <StatPill label="phq final" value={s.playhq_games_final} highlight={s.playhq_games_final > 0} />}
+                        {s.games_new != null && <StatPill label="new games" value={s.games_new} highlight={s.games_new > 0} />}
+                        {s.games_topped_up != null && <StatPill label="topped up" value={s.games_topped_up} highlight={s.games_topped_up > 0} />}
+                        {s.batting != null && <StatPill label="batting rows" value={s.batting} highlight={s.batting > 0} />}
+                        {s.bowling != null && <StatPill label="bowling rows" value={s.bowling} highlight={s.bowling > 0} />}
+                        {s.partnerships != null && <StatPill label="partnerships" value={s.partnerships} highlight={s.partnerships > 0} />}
+                        {s.games_skipped_done != null && <StatPill label="already done" value={s.games_skipped_done} />}
+                        {s.games_skipped_season != null && <StatPill label="no season match" value={s.games_skipped_season} highlight={s.games_skipped_season > 0} />}
+                        {s.games_skipped_no_stats != null && <StatPill label="no stats" value={s.games_skipped_no_stats} highlight={s.games_skipped_no_stats > 0} />}
+                        {s.gr_matches_seen != null && <StatPill label="GR matches" value={s.gr_matches_seen} highlight={s.gr_matches_seen > 0} />}
+                        {s.gr_games_new != null && <StatPill label="GR new games" value={s.gr_games_new} highlight={s.gr_games_new > 0} />}
+                        {s.gr_batting != null && <StatPill label="GR batting" value={s.gr_batting} highlight={s.gr_batting > 0} />}
+                        {s.gr_bowling != null && <StatPill label="GR bowling" value={s.gr_bowling} highlight={s.gr_bowling > 0} />}
+                        {s.gr_fielding != null && <StatPill label="GR fielding" value={s.gr_fielding} highlight={s.gr_fielding > 0} />}
+                        {s.gr_partnerships != null && <StatPill label="GR partnerships" value={s.gr_partnerships} highlight={s.gr_partnerships > 0} />}
                       </div>
                     )}
                   </div>

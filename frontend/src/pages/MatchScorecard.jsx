@@ -1,18 +1,9 @@
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
-import LoadingSpinner from '../components/LoadingSpinner'
-import clsx from 'clsx'
+import { PbSpinner, Card, ResultPill } from '../lib/presskit'
 
-function MatchSummary({ game }) {
-  const isWin = game.result === 'WIN'
-  const isLoss = game.result === 'LOSS'
-  const isDraw = ['DRAW', 'TIE', 'NO_RESULT'].includes(game.result)
-
-  const resultColor = isWin ? 'text-accent' : isLoss ? 'text-red-400' : 'text-slate-400'
-  const bannerBorder = isWin ? 'border-accent/20' : isLoss ? 'border-red-500/20' : 'border-navy-700'
-
-  // Build score summary from innings_totals
+function MatchHeader({ game }) {
   const totals = game.innings_totals || {}
   const inningNums = Object.keys(totals).map(Number).sort()
   const scoreLine = inningNums.map(n => {
@@ -20,36 +11,34 @@ function MatchSummary({ game }) {
     return `${t.runs}/${t.wickets}`
   }).join('  ·  ')
 
+  const result = game.result || 'N/R'
+
   return (
-    <div className={`card p-5 mb-6 border ${bannerBorder}`}>
-      {/* Grade / Season breadcrumb */}
-      <p className="section-label mb-3">
-        {game.season?.name}{game.grade?.name ? ` · ${game.grade.name}` : ''}
+    <div className="pb-card p-5 mb-5">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">
+        {[game.season?.name, game.grade?.name].filter(Boolean).join(' · ')}
         {game.played_at && (
-          <span className="ml-2">
+          <span className="ml-3">
             {new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </span>
         )}
       </p>
 
-      {/* Teams + result */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="display-heading text-3xl md:text-4xl text-white leading-tight">
+          <h1 className="font-display font-bold text-[26px] sm:text-[32px] text-pb-text leading-tight tracking-tight">
             {game.home_team}
-            <span className="text-slate-600 font-sans font-normal text-xl mx-3">vs</span>
+            <span className="text-pb-faint font-sans font-normal text-lg mx-3">vs</span>
             {game.away_team}
           </h1>
           {scoreLine && (
-            <p className="stat-number text-slate-300 text-lg mt-2 tracking-wider">{scoreLine}</p>
+            <p className="font-mono text-pb-dim text-base mt-1.5 tracking-wider">{scoreLine}</p>
           )}
         </div>
-        <div className="text-right shrink-0">
-          <div className={clsx('display-heading text-3xl font-bold', resultColor)}>
-            {game.result || 'N/R'}
-          </div>
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <ResultPill result={result} />
           {game.winning_team && (
-            <p className="text-sm text-slate-400 mt-1">{game.winning_team} won</p>
+            <p className="font-mono text-[11px] text-pb-faint">{game.winning_team} won</p>
           )}
         </div>
       </div>
@@ -58,61 +47,59 @@ function MatchSummary({ game }) {
 }
 
 function BattingTable({ batting = [] }) {
-  if (!batting.length) return <p className="text-slate-500 text-sm py-4 px-5">No batting data.</p>
+  if (!batting.length) return <p className="text-pb-faint text-sm py-4 px-5">No batting data.</p>
 
   const total = batting.reduce((s, r) => s + (r.runs ?? 0), 0)
   const wickets = batting.filter(r => !r.not_out && r.dismissal_type).length
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto pb-scroll">
+      <table className="w-full text-[13px]">
         <thead>
-          <tr className="border-b border-navy-700 bg-navy-800/30">
-            <th className="table-header pl-5">Batter</th>
-            <th className="table-header text-slate-500 font-normal normal-case tracking-normal">Dismissal</th>
-            <th className="table-header text-right pr-2">R</th>
-            <th className="table-header text-right pr-2">B</th>
-            <th className="table-header text-right pr-2">4s</th>
-            <th className="table-header text-right pr-2">6s</th>
-            <th className="table-header text-right pr-5">SR</th>
+          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+            <th className="font-medium py-2.5 pl-5">BATTER</th>
+            <th className="font-medium py-2.5 text-pb-faintest font-normal normal-case tracking-normal hidden sm:table-cell">Dismissal</th>
+            <th className="font-medium py-2.5 text-right" style={{ color: 'var(--pb-accent)' }}>R</th>
+            <th className="font-medium py-2.5 text-right">B</th>
+            <th className="font-medium py-2.5 text-right hidden sm:table-cell">4s</th>
+            <th className="font-medium py-2.5 text-right hidden sm:table-cell">6s</th>
+            <th className="font-medium py-2.5 pr-5 text-right hidden sm:table-cell">SR</th>
           </tr>
         </thead>
         <tbody>
           {batting.map((row, i) => (
-            <tr key={i} className="border-b border-navy-800/50 hover:bg-navy-800/20 transition-colors">
-              <td className="py-2.5 px-5">
+            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+              <td className="py-2.5 pl-5">
                 {row.player_id
-                  ? <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors font-medium">{row.player_name || '—'}</Link>
-                  : <span className="text-white font-medium">{row.player_name || '—'}</span>
+                  ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{row.player_name || '—'}</Link>
+                  : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
                 }
               </td>
-              <td className="py-2.5 px-3 text-slate-500 text-xs capitalize max-w-[140px] truncate">
+              <td className="py-2.5 px-3 text-pb-faint text-xs capitalize max-w-[140px] truncate hidden sm:table-cell">
                 {row.not_out ? 'not out' : row.dismissal_type || '—'}
               </td>
-              <td className="py-2.5 pr-2 text-right">
-                <span className={clsx(
-                  'stat-number font-bold',
-                  row.runs >= 100 ? 'text-amber-cricket' : row.runs >= 50 ? 'text-accent' : 'text-white'
-                )}>
+              <td className="py-2.5 text-right">
+                <span
+                  className="font-mono font-bold pb-num"
+                  style={{ color: row.runs >= 100 ? 'var(--pb-amber)' : row.runs >= 50 ? 'var(--pb-accent)' : undefined }}
+                >
                   {row.runs ?? '—'}
                 </span>
-                {row.not_out && <span className="text-accent text-xs">*</span>}
+                {row.not_out && <span className="text-pb-accent text-xs">*</span>}
               </td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-400">{row.balls ?? '—'}</td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-400">{row.fours ?? '—'}</td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-400">{row.sixes ?? '—'}</td>
-              <td className="py-2.5 pr-5 stat-number text-right text-slate-500 text-xs">
+              <td className="py-2.5 font-mono text-pb-dim text-right">{row.balls ?? '—'}</td>
+              <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.fours ?? '—'}</td>
+              <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.sixes ?? '—'}</td>
+              <td className="py-2.5 pr-5 font-mono text-pb-faint text-right text-xs hidden sm:table-cell">
                 {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
               </td>
             </tr>
           ))}
         </tbody>
         <tfoot>
-          <tr className="border-t border-navy-600 bg-navy-800/20">
-            <td colSpan={2} className="py-2 px-5 text-slate-400 font-semibold text-sm">Total</td>
-            <td className="py-2 pr-2 stat-number text-right font-bold text-white">
-              {total}/{wickets}
-            </td>
+          <tr className="pb-hairline-t bg-pb-surface2/30">
+            <td colSpan={2} className="py-2 pl-5 text-pb-dim font-semibold text-sm">Total</td>
+            <td className="py-2 font-mono font-bold text-pb-text text-right pb-num">{total}/{wickets}</td>
             <td colSpan={4} />
           </tr>
         </tfoot>
@@ -122,48 +109,48 @@ function BattingTable({ batting = [] }) {
 }
 
 function BowlingTable({ bowling = [] }) {
-  if (!bowling.length) return <p className="text-slate-500 text-sm py-4 px-5">No bowling data.</p>
+  if (!bowling.length) return <p className="text-pb-faint text-sm py-4 px-5">No bowling data.</p>
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto pb-scroll">
+      <table className="w-full text-[13px]">
         <thead>
-          <tr className="border-b border-navy-700 bg-navy-800/30">
-            <th className="table-header pl-5">Bowler</th>
-            <th className="table-header text-right pr-2">O</th>
-            <th className="table-header text-right pr-2">M</th>
-            <th className="table-header text-right pr-2">R</th>
-            <th className="table-header text-right pr-2">W</th>
-            <th className="table-header text-right pr-2">Econ</th>
-            <th className="table-header text-right pr-2">Wd</th>
-            <th className="table-header text-right pr-5">NB</th>
+          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+            <th className="font-medium py-2.5 pl-5">BOWLER</th>
+            <th className="font-medium py-2.5 text-right">O</th>
+            <th className="font-medium py-2.5 text-right hidden sm:table-cell">M</th>
+            <th className="font-medium py-2.5 text-right">R</th>
+            <th className="font-medium py-2.5 text-right" style={{ color: 'var(--pb-accent)' }}>W</th>
+            <th className="font-medium py-2.5 text-right hidden sm:table-cell">ECON</th>
+            <th className="font-medium py-2.5 text-right hidden md:table-cell">WD</th>
+            <th className="font-medium py-2.5 pr-5 text-right hidden md:table-cell">NB</th>
           </tr>
         </thead>
         <tbody>
           {bowling.map((row, i) => (
-            <tr key={i} className="border-b border-navy-800/50 hover:bg-navy-800/20 transition-colors">
-              <td className="py-2.5 px-5">
+            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+              <td className="py-2.5 pl-5">
                 {row.player_id
-                  ? <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors font-medium">{row.player_name || '—'}</Link>
-                  : <span className="text-white font-medium">{row.player_name || '—'}</span>
+                  ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{row.player_name || '—'}</Link>
+                  : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
                 }
               </td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-300">{row.overs ?? '—'}</td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-500">{row.maidens ?? '—'}</td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-300">{row.runs ?? '—'}</td>
-              <td className="py-2.5 pr-2 text-right">
-                <span className={clsx(
-                  'stat-number font-bold',
-                  row.wickets >= 5 ? 'text-amber-cricket' : row.wickets >= 3 ? 'text-accent' : 'text-white'
-                )}>
+              <td className="py-2.5 font-mono text-pb-dim text-right">{row.overs ?? '—'}</td>
+              <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.maidens ?? '—'}</td>
+              <td className="py-2.5 font-mono text-pb-dim text-right">{row.runs ?? '—'}</td>
+              <td className="py-2.5 text-right">
+                <span
+                  className="font-mono font-bold pb-num"
+                  style={{ color: row.wickets >= 5 ? 'var(--pb-amber)' : row.wickets >= 3 ? 'var(--pb-accent)' : undefined }}
+                >
                   {row.wickets ?? '—'}
                 </span>
               </td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-300">
+              <td className="py-2.5 font-mono text-pb-dim text-right hidden sm:table-cell">
                 {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
               </td>
-              <td className="py-2.5 pr-2 stat-number text-right text-slate-500">{row.wides ?? '—'}</td>
-              <td className="py-2.5 pr-5 stat-number text-right text-slate-500">{row.no_balls ?? '—'}</td>
+              <td className="py-2.5 font-mono text-pb-faint text-right hidden md:table-cell">{row.wides ?? '—'}</td>
+              <td className="py-2.5 pr-5 font-mono text-pb-faint text-right hidden md:table-cell">{row.no_balls ?? '—'}</td>
             </tr>
           ))}
         </tbody>
@@ -177,30 +164,30 @@ function InningsBlock({ num, title, batting, bowling }) {
   const wickets = batting.filter(r => !r.not_out && r.dismissal_type).length
 
   return (
-    <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-navy-700 bg-navy-800/20 flex items-center justify-between">
+    <div className="pb-card overflow-hidden">
+      <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/20 flex items-center justify-between">
         <div>
-          <p className="section-label text-xs">INNINGS {num}</p>
-          <h3 className="display-heading text-lg text-white">{title}</h3>
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-0.5">INNINGS {num}</p>
+          <h3 className="font-display font-bold text-[16px] text-pb-text tracking-tight">{title}</h3>
         </div>
         {batting.length > 0 && (
           <div className="text-right">
-            <span className="stat-number text-2xl font-bold text-white">{total}/{wickets}</span>
+            <span className="font-mono text-[22px] font-bold text-pb-text pb-num">{total}/{wickets}</span>
           </div>
         )}
       </div>
 
-      <div className="border-b border-navy-800/50">
-        <div className="px-5 py-2 bg-navy-800/10">
-          <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Batting</span>
+      <div className="pb-hairline-b">
+        <div className="px-5 py-2 bg-pb-surface2/10">
+          <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">BATTING</span>
         </div>
         <BattingTable batting={batting} />
       </div>
 
       {bowling.length > 0 && (
         <div>
-          <div className="px-5 py-2 bg-navy-800/10 border-b border-navy-800/50">
-            <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Bowling</span>
+          <div className="px-5 py-2 bg-pb-surface2/10 pb-hairline-b">
+            <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">BOWLING</span>
           </div>
           <BowlingTable bowling={bowling} />
         </div>
@@ -215,19 +202,21 @@ function FallOfWicketsSection({ fow = [] }) {
     const k = f.innings_number; if (!acc[k]) acc[k] = []; acc[k].push(f); return acc
   }, {})
   return (
-    <div className="card p-5">
-      <h3 className="display-heading text-base text-white mb-3">FALL OF WICKETS</h3>
+    <div className="pb-card p-5">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3">FALL OF WICKETS</p>
       {Object.entries(byInnings).map(([inn, items]) => (
         <div key={inn} className="mb-3 last:mb-0">
-          {Object.keys(byInnings).length > 1 && <p className="section-label mb-2">Innings {inn}</p>}
+          {Object.keys(byInnings).length > 1 && (
+            <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest mb-2 uppercase">Innings {inn}</p>
+          )}
           <div className="flex flex-wrap gap-2">
             {items.map((f, i) => (
-              <div key={i} className="bg-navy-800 border border-navy-700 rounded px-2.5 py-1 text-xs">
-                <span className="stat-number text-accent font-bold">{f.score_at_fall ?? '?'}</span>
-                <span className="text-slate-600 mx-1">-</span>
-                <span className="stat-number text-white">{f.wicket_number}</span>
+              <div key={i} className="bg-pb-surface border pb-hairline rounded px-2.5 py-1 text-xs">
+                <span className="font-mono font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>{f.score_at_fall ?? '?'}</span>
+                <span className="text-pb-faint mx-1">-</span>
+                <span className="font-mono text-pb-text">{f.wicket_number}</span>
                 {f.player_name && (
-                  <Link to={`/players/${f.player_id}`} className="text-slate-400 ml-1.5 hover:text-accent transition-colors">
+                  <Link to={`/players/${f.player_id}`} className="text-pb-faint ml-1.5 hover:text-pb-accent transition-colors">
                     {f.player_name}
                   </Link>
                 )}
@@ -246,43 +235,45 @@ function PartnershipsSection({ partnerships = [] }) {
     const k = p.innings_number; if (!acc[k]) acc[k] = []; acc[k].push(p); return acc
   }, {})
   return (
-    <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-navy-700">
-        <h3 className="display-heading text-base text-white">PARTNERSHIPS</h3>
+    <div className="pb-card overflow-hidden">
+      <div className="px-5 py-3 pb-hairline-b">
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">PARTNERSHIPS</p>
       </div>
       {Object.entries(byInnings).map(([inn, items]) => (
         <div key={inn}>
-          {Object.keys(byInnings).length > 1 && <p className="section-label px-5 pt-3 pb-1">Innings {inn}</p>}
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          {Object.keys(byInnings).length > 1 && (
+            <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest px-5 pt-3 pb-1 uppercase">Innings {inn}</p>
+          )}
+          <div className="overflow-x-auto pb-scroll">
+            <table className="w-full text-[13px]">
               <thead>
-                <tr className="border-b border-navy-700 bg-navy-800/20">
-                  <th className="table-header pl-5">Wkt</th>
-                  <th className="table-header">Batters</th>
-                  <th className="table-header text-right pr-5">Runs</th>
+                <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+                  <th className="font-medium py-2.5 pl-5">WKT</th>
+                  <th className="font-medium py-2.5">BATTERS</th>
+                  <th className="font-medium py-2.5 pr-5 text-right" style={{ color: 'var(--pb-accent)' }}>RUNS</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((p, i) => (
-                  <tr key={i} className="border-b border-navy-800/50">
-                    <td className="py-2 px-5 stat-number text-slate-500">{p.wicket_number}</td>
-                    <td className="py-2 px-3 text-slate-300 text-xs">
-                      <span className="flex gap-3">
+                  <tr key={i} className={i ? 'pb-hairline-t' : ''}>
+                    <td className="py-2 pl-5 font-mono text-pb-faint">{p.wicket_number}</td>
+                    <td className="py-2 px-3 text-pb-dim text-xs">
+                      <span className="flex flex-wrap gap-3">
                         {p.batter1_name && (
                           <span>
-                            <Link to={`/players/${p.batter1_id}`} className="hover:text-accent transition-colors">{p.batter1_name}</Link>
-                            {p.batter1_runs != null && <span className="text-slate-600 ml-1">({p.batter1_runs})</span>}
+                            <Link to={`/players/${p.batter1_id}`} className="hover:text-pb-accent transition-colors">{p.batter1_name}</Link>
+                            {p.batter1_runs != null && <span className="text-pb-faint ml-1">({p.batter1_runs})</span>}
                           </span>
                         )}
                         {p.batter2_name && (
                           <span>
-                            <Link to={`/players/${p.batter2_id}`} className="hover:text-accent transition-colors">{p.batter2_name}</Link>
-                            {p.batter2_runs != null && <span className="text-slate-600 ml-1">({p.batter2_runs})</span>}
+                            <Link to={`/players/${p.batter2_id}`} className="hover:text-pb-accent transition-colors">{p.batter2_name}</Link>
+                            {p.batter2_runs != null && <span className="text-pb-faint ml-1">({p.batter2_runs})</span>}
                           </span>
                         )}
                       </span>
                     </td>
-                    <td className="py-2 pr-5 stat-number text-right font-bold text-white">{p.runs ?? '—'}</td>
+                    <td className="py-2 pr-5 font-mono font-bold text-pb-text text-right pb-num">{p.runs ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -313,11 +304,14 @@ export default function MatchScorecard() {
       .finally(() => setLoading(false))
   }, [gameId, orgId])
 
-  if (loading) return <LoadingSpinner message="Loading scorecard…" />
-  if (error) return <div className="max-w-5xl mx-auto px-4 py-16 text-red-400">Error: {error}</div>
+  if (loading) return <PbSpinner message="Loading scorecard…" />
+  if (error) return (
+    <div className="min-h-screen bg-pb-bg text-pb-text flex items-center justify-center">
+      <p className="text-pb-red font-mono text-sm">Error: {error}</p>
+    </div>
+  )
   if (!game) return null
 
-  // Group batting and bowling by innings_number
   const inningsNums = [...new Set([
     ...(game.batting || []).map(r => r.innings_number || 1),
     ...(game.bowling || []).map(r => r.innings_number || 1),
@@ -329,46 +323,41 @@ export default function MatchScorecard() {
     bowling: (game.bowling || []).filter(r => (r.innings_number || 1) === num),
   }))
 
-  // Determine team name per innings: bowling team for inn 1 bats in inn 2 etc.
-  const teams = [game.home_team, game.away_team].filter(Boolean)
-  const getInningsTitle = (num, batting) => {
-    if (batting.length && batting[0].player_name) {
-      // Try to determine team from the winning_team / home/away assignment
-    }
-    // Fallback: just use home/away alternating
-    return num === 1 ? (game.home_team || `Innings ${num}`) : (game.away_team || `Innings ${num}`)
-  }
-
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <button
-        onClick={() => navigate(-1)}
-        className="flex items-center gap-1.5 text-slate-500 hover:text-white text-sm mb-5 transition-colors"
-      >
-        ← Back
-      </button>
-      <MatchSummary game={game} />
+    <div className="min-h-screen bg-pb-bg text-pb-text">
+      <main className="max-w-[900px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <button
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-1.5 font-mono text-[11px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors mb-5"
+        >
+          ← BACK
+        </button>
 
-      <div className="space-y-5">
-        {innings.map(({ num, batting, bowling }) => (
-          <InningsBlock
-            key={num}
-            num={num}
-            title={(num === 1 ? game.home_team : game.away_team)?.toUpperCase() || `INNINGS ${num}`}
-            batting={batting}
-            bowling={bowling}
-          />
-        ))}
+        <MatchHeader game={game} />
 
-        {innings.length === 0 && (
-          <div className="card p-8 text-center text-slate-500">
-            No scorecard data available for this match.
-          </div>
-        )}
+        <div className="space-y-5">
+          {innings.map(({ num, batting, bowling }) => (
+            <InningsBlock
+              key={num}
+              num={num}
+              title={(num === 1 ? game.home_team : game.away_team)?.toUpperCase() || `INNINGS ${num}`}
+              batting={batting}
+              bowling={bowling}
+            />
+          ))}
 
-        <FallOfWicketsSection fow={game.fall_of_wickets ?? []} />
-        <PartnershipsSection partnerships={game.partnerships ?? []} />
-      </div>
+          {innings.length === 0 && (
+            <Card>
+              <div className="py-12 text-center text-pb-faint">
+                No scorecard data available for this match.
+              </div>
+            </Card>
+          )}
+
+          <FallOfWicketsSection fow={game.fall_of_wickets ?? []} />
+          <PartnershipsSection partnerships={game.partnerships ?? []} />
+        </div>
+      </main>
     </div>
   )
 }

@@ -6,261 +6,197 @@ import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import SeasonSelector from '../components/SeasonSelector'
-import LoadingSpinner from '../components/LoadingSpinner'
-import clsx from 'clsx'
-
-const MAIN_TABS = [
-  { key: 'batting', label: 'Batting' },
-  { key: 'bowling', label: 'Bowling' },
-  { key: 'fielding', label: 'Fielding' },
-]
+import {
+  AnimatedNum, Label, Card, Btn, PageHeader, PbSpinner, FilterGroup,
+} from '../lib/presskit'
 
 const BATTING_SORTS = [
-  { key: 'total_runs', label: 'Runs' },
-  { key: 'average', label: 'Average' },
-  { key: 'strike_rate', label: 'Strike Rate' },
-  { key: 'high_score', label: 'High Score' },
-  { key: 'fifties', label: 'Fifties' },
-  { key: 'hundreds', label: 'Centuries' },
-  { key: 'total_sixes', label: 'Sixes' },
-  { key: 'total_fours', label: 'Fours' },
-  { key: 'ducks', label: 'Ducks' },
+  { key: 'total_runs',    label: 'MOST RUNS' },
+  { key: 'average',       label: 'AVERAGE' },
+  { key: 'strike_rate',   label: 'STRIKE RATE' },
+  { key: 'high_score',    label: 'HIGH SCORE' },
+  { key: 'fifties',       label: 'FIFTIES' },
+  { key: 'hundreds',      label: 'CENTURIES' },
+  { key: 'total_sixes',   label: 'SIXES' },
+  { key: 'total_fours',   label: 'FOURS' },
+  { key: 'ducks',         label: 'DUCKS' },
 ]
 
 const BOWLING_SORTS = [
-  { key: 'total_wickets', label: 'Wickets' },
-  { key: 'economy', label: 'Economy' },
-  { key: 'average', label: 'Average' },
-  { key: 'best_figures_wickets', label: 'Best Spell' },
-  { key: 'five_fors', label: 'Five-fors' },
-  { key: 'total_maidens', label: 'Maidens' },
+  { key: 'total_wickets',         label: 'WICKETS' },
+  { key: 'economy',               label: 'ECONOMY' },
+  { key: 'average',               label: 'AVERAGE' },
+  { key: 'best_figures_wickets',  label: 'BEST SPELL' },
+  { key: 'five_fors',             label: 'FIVE-FORS' },
+  { key: 'total_maidens',         label: 'MAIDENS' },
 ]
 
-function SubTabBar({ tabs, active, onSelect }) {
+const FIELDING_SORTS = [
+  { key: 'total_catches',   label: 'CATCHES' },
+  { key: 'total_run_outs',  label: 'RUN OUTS' },
+  { key: 'total_stumpings', label: 'STUMPINGS' },
+]
+
+const MAIN_TABS = [
+  { key: 'batting',  label: 'BATTING' },
+  { key: 'bowling',  label: 'BOWLING' },
+  { key: 'fielding', label: 'FIELDING' },
+]
+
+function SortBtn({ label, active, onClick }) {
   return (
-    <div className="flex flex-wrap gap-1 px-4 py-3 border-b border-navy-700 bg-navy-800/50">
-      {tabs.map(t => (
-        <button
-          key={t.key}
-          onClick={() => onSelect(t.key)}
-          className={clsx(
-            'px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-md transition-colors',
-            active === t.key
-              ? 'bg-accent text-navy-950'
-              : 'text-slate-400 hover:text-white hover:bg-navy-700'
-          )}
-        >
-          {t.label}
-        </button>
-      ))}
-    </div>
+    <button
+      onClick={onClick}
+      className={`relative px-3.5 py-2.5 text-[11px] font-mono font-semibold tracking-wide3 transition ${
+        active ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'
+      }`}
+    >
+      {label}
+      {active && <span className="absolute left-2 right-2 -bottom-px h-[2px]" style={{ background: 'var(--pb-accent)' }} />}
+    </button>
   )
 }
 
-function BattingLeaderboard({ orgId, seasonId, gradeId, sortBy }) {
-  const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    api.battingLeaderboard(orgId, { seasonId, gradeId, sortBy, limit: 30 })
-      .then(setRows)
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false))
-  }, [orgId, seasonId, gradeId, sortBy])
-
-  if (loading) return <LoadingSpinner />
-  if (!rows.length) return <p className="text-slate-500 text-sm py-8 text-center">No batting data yet.</p>
-
-  const primaryCol = sortBy || 'total_runs'
+function BattingTable({ rows, sortBy }) {
+  const primaryLabel = BATTING_SORTS.find(s => s.key === sortBy)?.label || 'VALUE'
+  const primaryKey = sortBy || 'total_runs'
+  const isInverted = sortBy === 'ducks'
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b border-navy-700">
-            <th className="table-header w-8">#</th>
-            <th className="table-header">Player</th>
-            <th className="table-header text-right">Inn</th>
-            <th className={clsx('table-header text-right', primaryCol === 'total_runs' && 'text-accent')}>Runs</th>
-            <th className={clsx('table-header text-right', primaryCol === 'average' && 'text-accent')}>Avg</th>
-            <th className={clsx('table-header text-right', primaryCol === 'strike_rate' && 'text-accent')}>SR</th>
-            <th className={clsx('table-header text-right', primaryCol === 'high_score' && 'text-accent')}>HS</th>
-            <th className={clsx('table-header text-right', primaryCol === 'fifties' && 'text-accent')}>50s</th>
-            <th className={clsx('table-header text-right', primaryCol === 'hundreds' && 'text-accent')}>100s</th>
-            <th className={clsx('table-header text-right', primaryCol === 'total_sixes' && 'text-accent')}>6s</th>
-            <th className={clsx('table-header text-right', primaryCol === 'total_fours' && 'text-accent')}>4s</th>
-            <th className={clsx('table-header text-right', primaryCol === 'ducks' && 'text-accent')}>0s</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={row.player_id} className="table-row">
-              <td className="table-cell text-slate-600 font-mono">{i + 1}</td>
-              <td className="table-cell">
-                <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors font-medium">
-                  {row.name}
-                </Link>
-              </td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.innings ?? '—'}</td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'total_runs' ? 'font-bold text-accent' : 'text-slate-300')}>
-                {row.total_runs ?? '—'}
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'average' ? 'font-bold text-accent' : 'text-white')}>
-                {row.average ?? '—'}
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'strike_rate' ? 'font-bold text-accent' : 'text-slate-300')}>
-                {row.strike_rate ?? '—'}
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'high_score' ? 'font-bold text-accent' : 'text-slate-300')}>
-                {row.high_score ?? '—'}
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'fifties' ? 'font-bold text-accent' : 'text-slate-300')}>
-                {row.fifties ?? '—'}
-              </td>
-              <td className="table-cell stat-number text-right">
-                <span className={row.hundreds > 0 ? 'text-amber-cricket font-bold' : (primaryCol === 'hundreds' ? 'text-accent font-bold' : 'text-slate-500')}>
-                  {row.hundreds ?? '—'}
-                </span>
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'total_sixes' ? 'font-bold text-accent' : 'text-slate-400')}>
-                {row.total_sixes ?? '—'}
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'total_fours' ? 'font-bold text-accent' : 'text-slate-400')}>
-                {row.total_fours ?? '—'}
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'ducks' ? 'font-bold text-red-400' : 'text-slate-500')}>
-                {row.ducks ?? '—'}
-              </td>
+    <Card pad="p-0">
+      <div className="overflow-x-auto pb-scroll">
+        <table className="w-full min-w-[700px] text-[14px]">
+          <thead>
+            <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+              <th className="font-medium py-3 pl-5 w-10">#</th>
+              <th className="font-medium py-3">PLAYER</th>
+              <th className="font-medium py-3 text-right" style={{ color: 'var(--pb-accent)' }}>{primaryLabel}</th>
+              {sortBy !== 'total_runs' && <th className="font-medium py-3 text-right">RUNS</th>}
+              <th className="font-medium py-3 text-right">INN</th>
+              <th className="font-medium py-3 text-right">AVG</th>
+              <th className="font-medium py-3 text-right">HS</th>
+              <th className="font-medium py-3 pr-5 text-right hidden sm:table-cell">SR</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((p, i) => (
+              <tr key={p.player_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <td className="py-3 pl-5 font-mono text-pb-faint">{String(i + 1).padStart(2, '0')}</td>
+                <td className="py-3">
+                  <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{p.name}</Link>
+                  {p.hundreds > 0 && <span className="ml-2 font-mono text-[10px] text-pb-faint">{p.hundreds}×💯</span>}
+                </td>
+                <td className="py-3 text-right">
+                  <span className="font-mono text-[15px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
+                    {p[primaryKey] ?? '—'}
+                  </span>
+                </td>
+                {sortBy !== 'total_runs' && (
+                  <td className="py-3 font-mono text-pb-text text-right">{p.total_runs ?? '—'}</td>
+                )}
+                <td className="py-3 font-mono text-pb-dim text-right">{p.batting_innings ?? '—'}</td>
+                <td className="py-3 font-mono text-pb-dim text-right">{p.average ?? '—'}</td>
+                <td className="py-3 font-mono text-pb-dim text-right">{p.high_score ?? '—'}</td>
+                <td className="py-3 pr-5 font-mono text-pb-dim text-right hidden sm:table-cell">{p.strike_rate ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   )
 }
 
-function BowlingLeaderboard({ orgId, seasonId, gradeId, sortBy }) {
-  const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    api.bowlingLeaderboard(orgId, { seasonId, gradeId, sortBy, limit: 30 })
-      .then(setRows)
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false))
-  }, [orgId, seasonId, gradeId, sortBy])
-
-  if (loading) return <LoadingSpinner />
-  if (!rows.length) return <p className="text-slate-500 text-sm py-8 text-center">No bowling data yet.</p>
-
-  const primaryCol = sortBy || 'total_wickets'
+function BowlingTable({ rows, sortBy }) {
+  const primaryLabel = BOWLING_SORTS.find(s => s.key === sortBy)?.label || 'WICKETS'
+  const primaryKey = sortBy || 'total_wickets'
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b border-navy-700">
-            <th className="table-header w-8">#</th>
-            <th className="table-header">Player</th>
-            <th className="table-header text-right">Games</th>
-            <th className="table-header text-right">Overs</th>
-            <th className={clsx('table-header text-right', primaryCol === 'total_wickets' && 'text-accent')}>Wkts</th>
-            <th className={clsx('table-header text-right', primaryCol === 'average' && 'text-accent')}>Avg</th>
-            <th className={clsx('table-header text-right', primaryCol === 'economy' && 'text-accent')}>Econ</th>
-            <th className={clsx('table-header text-right', primaryCol === 'best_figures_wickets' && 'text-accent')}>Best</th>
-            <th className={clsx('table-header text-right', primaryCol === 'total_maidens' && 'text-accent')}>Mdns</th>
-            <th className={clsx('table-header text-right', primaryCol === 'five_fors' && 'text-accent')}>5W</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={row.player_id} className="table-row">
-              <td className="table-cell text-slate-600 font-mono">{i + 1}</td>
-              <td className="table-cell">
-                <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors font-medium">
-                  {row.name}
-                </Link>
-              </td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.games ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.total_overs ?? '—'}</td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'total_wickets' ? 'font-bold text-accent' : 'text-white')}>
-                {row.total_wickets ?? '—'}
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'average' ? 'font-bold text-accent' : 'text-slate-300')}>
-                {row.average ?? '—'}
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'economy' ? 'font-bold text-accent' : 'text-slate-300')}>
-                {row.economy ?? '—'}
-              </td>
-              <td className="table-cell stat-number text-right">
-                <span className={row.best_figures_wickets >= 5 ? 'text-amber-cricket font-bold' : (primaryCol === 'best_figures_wickets' ? 'text-accent font-bold' : 'text-slate-300')}>
-                  {row.best_figures_wickets ?? '—'}
-                </span>
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'total_maidens' ? 'font-bold text-accent' : 'text-slate-400')}>
-                {row.total_maidens ?? '—'}
-              </td>
-              <td className={clsx('table-cell stat-number text-right', primaryCol === 'five_fors' ? 'font-bold text-accent' : 'text-slate-400')}>
-                {row.five_fors ?? '—'}
-              </td>
+    <Card pad="p-0">
+      <div className="overflow-x-auto pb-scroll">
+        <table className="w-full min-w-[640px] text-[14px]">
+          <thead>
+            <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+              <th className="font-medium py-3 pl-5 w-10">#</th>
+              <th className="font-medium py-3">PLAYER</th>
+              <th className="font-medium py-3 text-right" style={{ color: 'var(--pb-accent)' }}>{primaryLabel}</th>
+              {sortBy !== 'total_wickets' && <th className="font-medium py-3 text-right">WKTS</th>}
+              <th className="font-medium py-3 text-right">AVG</th>
+              <th className="font-medium py-3 text-right">ECON</th>
+              <th className="font-medium py-3 pr-5 text-right">BEST</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((p, i) => (
+              <tr key={p.player_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <td className="py-3 pl-5 font-mono text-pb-faint">{String(i + 1).padStart(2, '0')}</td>
+                <td className="py-3">
+                  <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{p.name}</Link>
+                  {p.five_fors > 0 && <span className="ml-2 font-mono text-[10px] text-pb-faint">{p.five_fors}×5W</span>}
+                </td>
+                <td className="py-3 text-right">
+                  <span className="font-mono text-[15px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
+                    {primaryKey === 'best_figures_wickets'
+                      ? (p.best_figures_wickets != null ? `${p.best_figures_wickets}/${p.best_figures_runs ?? '?'}` : '—')
+                      : (p[primaryKey] ?? '—')}
+                  </span>
+                </td>
+                {sortBy !== 'total_wickets' && (
+                  <td className="py-3 font-mono text-pb-text text-right">{p.total_wickets ?? '—'}</td>
+                )}
+                <td className="py-3 font-mono text-pb-dim text-right">{p.average ?? '—'}</td>
+                <td className="py-3 font-mono text-pb-dim text-right">{p.economy ?? '—'}</td>
+                <td className="py-3 pr-5 font-mono text-pb-dim text-right">
+                  {p.best_figures_wickets != null ? `${p.best_figures_wickets}/${p.best_figures_runs ?? '?'}` : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   )
 }
 
-function FieldingLeaderboard({ orgId, seasonId, gradeId }) {
-  const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    api.fieldingLeaderboard(orgId, { seasonId, gradeId, limit: 30 })
-      .then(setRows)
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false))
-  }, [orgId, seasonId, gradeId])
-
-  if (loading) return <LoadingSpinner />
-  if (!rows.length) return <p className="text-slate-500 text-sm py-8 text-center">No fielding data yet.</p>
+function FieldingTable({ rows, sortBy }) {
+  const primaryLabel = FIELDING_SORTS.find(s => s.key === sortBy)?.label || 'CATCHES'
+  const primaryKey = sortBy || 'total_catches'
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b border-navy-700">
-            <th className="table-header w-8">#</th>
-            <th className="table-header">Player</th>
-            <th className="table-header text-right">Games</th>
-            <th className="table-header text-right">Catches</th>
-            <th className="table-header text-right">Run Outs</th>
-            <th className="table-header text-right">Stumpings</th>
-            <th className="table-header text-right">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={row.player_id} className="table-row">
-              <td className="table-cell text-slate-600 font-mono">{i + 1}</td>
-              <td className="table-cell">
-                <Link to={`/players/${row.player_id}`} className="text-white hover:text-accent transition-colors font-medium">
-                  {row.name}
-                </Link>
-              </td>
-              <td className="table-cell stat-number text-right text-slate-400">{row.games ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.total_catches ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.total_run_outs ?? '—'}</td>
-              <td className="table-cell stat-number text-right text-slate-300">{row.total_stumpings ?? '—'}</td>
-              <td className="table-cell stat-number text-right font-bold text-accent">{row.total_dismissals ?? '—'}</td>
+    <Card pad="p-0">
+      <div className="overflow-x-auto pb-scroll">
+        <table className="w-full min-w-[460px] text-[14px]">
+          <thead>
+            <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+              <th className="font-medium py-3 pl-5 w-10">#</th>
+              <th className="font-medium py-3">PLAYER</th>
+              <th className="font-medium py-3 text-right" style={{ color: 'var(--pb-accent)' }}>{primaryLabel}</th>
+              <th className="font-medium py-3 text-right">CATCHES</th>
+              <th className="font-medium py-3 text-right">RUN OUTS</th>
+              <th className="font-medium py-3 pr-5 text-right">STUMPINGS</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((p, i) => (
+              <tr key={p.player_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <td className="py-3 pl-5 font-mono text-pb-faint">{String(i + 1).padStart(2, '0')}</td>
+                <td className="py-3">
+                  <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{p.name}</Link>
+                </td>
+                <td className="py-3 text-right">
+                  <span className="font-mono text-[15px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
+                    {p[primaryKey] ?? '—'}
+                  </span>
+                </td>
+                <td className="py-3 font-mono text-pb-dim text-right">{p.total_catches ?? '—'}</td>
+                <td className="py-3 font-mono text-pb-dim text-right">{p.total_run_outs ?? '—'}</td>
+                <td className="py-3 pr-5 font-mono text-pb-dim text-right">{p.total_stumpings ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   )
 }
 
@@ -268,77 +204,118 @@ export default function Leaderboard() {
   const { clubSlug } = useParams()
   const { club, orgId, inactive } = useClub(clubSlug)
   useClubTheme(club)
-  const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading } = useClubData(orgId)
 
   if (inactive) return <ClubInactive />
-  const [tab, setTab] = useState('batting')
+
+  const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading: clubLoading } = useClubData(orgId)
+
+  const [mainTab, setMainTab] = useState('batting')
   const [battingSort, setBattingSort] = useState('total_runs')
   const [bowlingSort, setBowlingSort] = useState('total_wickets')
+  const [fieldingSort, setFieldingSort] = useState('total_catches')
 
-  if (loading) return <LoadingSpinner message="Loading leaderboard…" />
+  const [battingRows, setBattingRows] = useState([])
+  const [bowlingRows, setBowlingRows] = useState([])
+  const [fieldingRows, setFieldingRows] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!orgId) return
+    setLoading(true)
+    Promise.allSettled([
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: battingSort, limit: 30 }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: bowlingSort, limit: 30 }),
+      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 30 }),
+    ]).then(([b, bw, f]) => {
+      if (b.status === 'fulfilled') setBattingRows(b.value)
+      if (bw.status === 'fulfilled') setBowlingRows(bw.value)
+      if (f.status === 'fulfilled') setFieldingRows(f.value)
+    }).finally(() => setLoading(false))
+  }, [orgId, selectedSeason, selectedGrade, battingSort, bowlingSort])
+
+  if (clubLoading) return <PbSpinner message="Loading club data…" />
+
+  const currentSeason = seasons?.find(s => s.id === selectedSeason)
+  const seasonLabel = currentSeason?.name || 'ALL SEASONS'
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      <div className="mb-8">
-        <div className="accent-bar mb-3" />
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="section-label mb-1">{org?.name}</p>
-            <h1 className="display-heading text-4xl md:text-5xl text-white">LEADERBOARD</h1>
-          </div>
-          <div className="flex gap-2">
-            <Link to={`/${clubSlug}/compare`} className="btn-ghost border border-navy-600 text-sm">Compare →</Link>
-            <Link to={`/${clubSlug}/dashboard`} className="btn-ghost border border-navy-600 text-sm">← Dashboard</Link>
-          </div>
-        </div>
-      </div>
-
-      <div className="mb-6">
-        <SeasonSelector
-          seasons={seasons}
-          grades={grades}
-          selectedSeason={selectedSeason}
-          setSelectedSeason={setSelectedSeason}
-          selectedGrade={selectedGrade}
-          setSelectedGrade={setSelectedGrade}
+    <div className="min-h-screen bg-pb-bg text-pb-text">
+      <main className="max-w-[1300px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <PageHeader
+          eyebrow={`CLUB LEADERBOARD · ${seasonLabel.toUpperCase()}`}
+          title="The ladder."
+          meta={[<span key="s">All categories. All grades.</span>]}
         />
-      </div>
 
-      {/* Main tabs */}
-      <div className="flex gap-1 border-b border-navy-700">
-        {MAIN_TABS.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={clsx(
-              'px-5 py-3 text-sm font-semibold uppercase tracking-wider transition-colors border-b-2 -mb-px',
-              tab === t.key
-                ? 'text-accent border-accent'
-                : 'text-slate-500 border-transparent hover:text-white'
+        {/* Season filter */}
+        <div className="mb-5">
+          <SeasonSelector
+            seasons={seasons}
+            grades={grades}
+            selectedSeason={selectedSeason}
+            setSelectedSeason={setSelectedSeason}
+            selectedGrade={selectedGrade}
+            setSelectedGrade={setSelectedGrade}
+          />
+        </div>
+
+        {/* Main tab: batting / bowling / fielding */}
+        <div className="flex flex-wrap gap-1 pb-hairline-b mb-4">
+          {MAIN_TABS.map(t => (
+            <button key={t.key} onClick={() => setMainTab(t.key)}
+              className={`relative px-3.5 py-2.5 text-[11px] font-mono font-semibold tracking-wide3 transition ${
+                mainTab === t.key ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'
+              }`}>
+              {t.label}
+              {mainTab === t.key && <span className="absolute left-2 right-2 -bottom-px h-[2px]" style={{ background: 'var(--pb-accent)' }} />}
+            </button>
+          ))}
+        </div>
+
+        {/* Sort sub-tabs */}
+        {mainTab === 'batting' && (
+          <div className="flex flex-wrap gap-1 mb-4 pb-hairline-b">
+            {BATTING_SORTS.map(s => (
+              <SortBtn key={s.key} label={s.label} active={battingSort === s.key} onClick={() => setBattingSort(s.key)} />
+            ))}
+          </div>
+        )}
+        {mainTab === 'bowling' && (
+          <div className="flex flex-wrap gap-1 mb-4 pb-hairline-b">
+            {BOWLING_SORTS.map(s => (
+              <SortBtn key={s.key} label={s.label} active={bowlingSort === s.key} onClick={() => setBowlingSort(s.key)} />
+            ))}
+          </div>
+        )}
+        {mainTab === 'fielding' && (
+          <div className="flex flex-wrap gap-1 mb-4 pb-hairline-b">
+            {FIELDING_SORTS.map(s => (
+              <SortBtn key={s.key} label={s.label} active={fieldingSort === s.key} onClick={() => setFieldingSort(s.key)} />
+            ))}
+          </div>
+        )}
+
+        {/* Table */}
+        {loading ? <PbSpinner /> : (
+          <>
+            {mainTab === 'batting' && (
+              battingRows.length === 0
+                ? <p className="text-pb-faint text-sm py-8 text-center">No batting data yet.</p>
+                : <BattingTable rows={battingRows} sortBy={battingSort} />
             )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="card rounded-t-none border-t-0 overflow-hidden">
-        {tab === 'batting' && (
-          <>
-            <SubTabBar tabs={BATTING_SORTS} active={battingSort} onSelect={setBattingSort} />
-            <BattingLeaderboard orgId={orgId} seasonId={selectedSeason} gradeId={selectedGrade} sortBy={battingSort} />
+            {mainTab === 'bowling' && (
+              bowlingRows.length === 0
+                ? <p className="text-pb-faint text-sm py-8 text-center">No bowling data yet.</p>
+                : <BowlingTable rows={bowlingRows} sortBy={bowlingSort} />
+            )}
+            {mainTab === 'fielding' && (
+              fieldingRows.length === 0
+                ? <p className="text-pb-faint text-sm py-8 text-center">No fielding data yet.</p>
+                : <FieldingTable rows={fieldingRows} sortBy={fieldingSort} />
+            )}
           </>
         )}
-        {tab === 'bowling' && (
-          <>
-            <SubTabBar tabs={BOWLING_SORTS} active={bowlingSort} onSelect={setBowlingSort} />
-            <BowlingLeaderboard orgId={orgId} seasonId={selectedSeason} gradeId={selectedGrade} sortBy={bowlingSort} />
-          </>
-        )}
-        {tab === 'fielding' && (
-          <FieldingLeaderboard orgId={orgId} seasonId={selectedSeason} gradeId={selectedGrade} />
-        )}
-      </div>
+      </main>
     </div>
   )
 }

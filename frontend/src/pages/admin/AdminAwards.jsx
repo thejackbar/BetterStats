@@ -19,7 +19,7 @@ export default function AdminAwards() {
 
   if (!orgId) return (
     <AdminLayout>
-      <div className="text-slate-400 text-sm">Loading…</div>
+      <div className="font-mono text-[11px] text-pb-faint">Loading…</div>
     </AdminLayout>
   )
 

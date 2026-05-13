@@ -4,7 +4,7 @@ import clsx from 'clsx'
 
 const COLS = [
   { key: 'played_at', label: 'Date', fmt: v => v ? new Date(v).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—' },
-  { key: 'opponent', label: 'Opponent', fmt: (_, row) => row.home_team && row.away_team ? '—' : '—' },
+  { key: 'grade_name', label: 'Grade' },
   { key: 'runs', label: 'Runs', sortable: true },
   { key: 'balls', label: 'Balls', sortable: true },
   { key: 'fours', label: '4s', sortable: true },
@@ -25,24 +25,24 @@ export default function BattingTable({ innings = [], showPlayer = false }) {
   const toggle = (key) => setSort(s => ({ key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc' }))
 
   const SortIcon = ({ colKey }) => {
-    if (sort.key !== colKey) return <span className="text-slate-700 ml-1">↕</span>
-    return <span className="text-accent ml-1">{sort.dir === 'asc' ? '↑' : '↓'}</span>
+    if (sort.key !== colKey) return <span className="text-pb-faintest ml-1">↕</span>
+    return <span className="ml-1" style={{ color: 'var(--pb-accent)' }}>{sort.dir === 'asc' ? '↑' : '↓'}</span>
   }
 
   if (innings.length === 0) {
-    return <p className="text-slate-500 text-sm py-6 text-center">No batting innings recorded.</p>
+    return <p className="font-mono text-[11px] text-pb-faint py-6 text-center">No batting innings recorded.</p>
   }
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left">
         <thead>
-          <tr className="border-b border-navy-700">
-            {showPlayer && <th className="table-header">Player</th>}
+          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 bg-pb-surface2/40">
+            {showPlayer && <th className="font-medium py-2.5 pl-4">PLAYER</th>}
             {COLS.map(col => (
               <th
                 key={col.key}
-                className={clsx('table-header', col.sortable && 'cursor-pointer hover:text-white select-none')}
+                className={clsx('font-medium py-2.5 px-3', col.sortable && 'cursor-pointer hover:text-pb-text select-none')}
                 onClick={col.sortable ? () => toggle(col.key) : undefined}
               >
                 {col.label}{col.sortable && <SortIcon colKey={col.key} />}
@@ -52,34 +52,36 @@ export default function BattingTable({ innings = [], showPlayer = false }) {
         </thead>
         <tbody>
           {sorted.map((row, i) => (
-            <tr key={i} className="table-row">
+            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
               {showPlayer && (
-                <td className="table-cell">
-                  <Link to={`/players/${row.player_id}`} className="text-accent hover:underline font-medium">
+                <td className="py-2.5 pl-4 text-sm">
+                  <Link to={`/players/${row.player_id}`} className="font-medium hover:underline" style={{ color: 'var(--pb-accent)' }}>
                     {row.player_name}
                   </Link>
                 </td>
               )}
-              <td className="table-cell text-slate-400 text-xs">
+              <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint">
                 {row.played_at ? new Date(row.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—'}
               </td>
-              <td className="table-cell text-xs text-slate-400">{row.grade_name || '—'}</td>
-              <td className="table-cell">
+              <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint">{row.grade_name || '—'}</td>
+              <td className="py-2.5 px-3">
                 <span className={clsx(
-                  'stat-number font-bold',
-                  row.runs >= 100 ? 'text-amber-cricket' : row.runs >= 50 ? 'text-accent' : 'text-white'
-                )}>
+                  'font-mono font-bold text-sm',
+                  row.runs >= 100 ? 'text-pb-amber' : row.runs >= 50 ? 'text-pb-accent' : 'text-pb-text'
+                )}
+                style={row.runs >= 50 && row.runs < 100 ? { color: 'var(--pb-accent)' } : {}}
+                >
                   {row.runs ?? '—'}
                 </span>
-                {row.not_out && <span className="text-accent text-xs ml-0.5">*</span>}
+                {row.not_out && <span className="font-mono text-[11px] ml-0.5" style={{ color: 'var(--pb-accent)' }}>*</span>}
               </td>
-              <td className="table-cell stat-number text-slate-300">{row.balls ?? '—'}</td>
-              <td className="table-cell stat-number text-slate-300">{row.fours ?? '—'}</td>
-              <td className="table-cell stat-number text-slate-300">{row.sixes ?? '—'}</td>
-              <td className="table-cell stat-number text-slate-300">
+              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.balls ?? '—'}</td>
+              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.fours ?? '—'}</td>
+              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.sixes ?? '—'}</td>
+              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">
                 {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
               </td>
-              <td className="table-cell text-slate-400 text-xs capitalize">
+              <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint capitalize">
                 {row.dismissal_type || (row.not_out ? 'not out' : '—')}
               </td>
             </tr>

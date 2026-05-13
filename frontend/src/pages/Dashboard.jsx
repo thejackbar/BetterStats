@@ -1,14 +1,16 @@
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useClubData, useRecentGames } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
 import SeasonSelector from '../components/SeasonSelector'
-import LoadingSpinner from '../components/LoadingSpinner'
 import ClubInactive from './ClubInactive'
 import { MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
-import clsx from 'clsx'
+import {
+  AnimatedNum, Sparkline, MiniBars, Label, Card, Btn,
+  ResultPill, Kpi, PageHeader, PbSpinner,
+} from '../lib/presskit'
 
 const SPONSOR_IMAGE = import.meta.env.VITE_SPONSOR_IMAGE || ''
 const SPONSOR_URL = import.meta.env.VITE_SPONSOR_URL || ''
@@ -19,213 +21,38 @@ function SponsorBanner() {
   const inner = (
     <div className="flex items-center justify-center gap-4 py-3 px-5">
       {SPONSOR_IMAGE && <img src={SPONSOR_IMAGE} alt="Sponsor" className="h-10 object-contain" />}
-      {SPONSOR_TEXT && <span className="text-slate-400 text-sm">{SPONSOR_TEXT}</span>}
+      {SPONSOR_TEXT && <span className="text-pb-dim text-sm">{SPONSOR_TEXT}</span>}
     </div>
   )
   return (
-    <div className="card border border-navy-700/50 mb-6">
-      <p className="section-label text-center pt-2 pb-0">PROUDLY SPONSORED BY</p>
+    <div className="pb-card mb-6">
+      <Label className="block text-center pt-3 pb-0">PROUDLY SPONSORED BY</Label>
       {SPONSOR_URL ? <a href={SPONSOR_URL} target="_blank" rel="noopener noreferrer">{inner}</a> : inner}
     </div>
   )
 }
 
-function ResultBadge({ result }) {
-  const cls = result === 'WIN' ? 'badge-win' : result === 'LOSS' ? 'badge-loss' : 'badge-draw'
-  return <span className={cls}>{result || 'N/R'}</span>
-}
-
-function ClickableStatCard({ label, value, sub, accent = false, active = false, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className={clsx(
-        'card p-4 flex flex-col gap-1 text-left w-full transition-all',
-        accent && 'border-accent/30 bg-accent/5',
-        active && 'ring-2 ring-accent',
-        onClick && 'hover:border-accent/50 cursor-pointer',
-      )}
-    >
-      <span className="section-label">{label}</span>
-      <span className={clsx(
-        'stat-number font-bold leading-none text-2xl',
-        accent ? 'text-accent' : 'text-white',
-      )}>
-        {value ?? '—'}
-      </span>
-      {sub && <span className="text-xs text-slate-500">{sub}</span>}
-    </button>
-  )
-}
-
-const COMPACT_SHOW = 4
-
-function RecentResults({ games, loading, orgId }) {
-  const [expanded, setExpanded] = useState(false)
-  if (loading) return <LoadingSpinner size="sm" />
-  if (!games.length) return <p className="text-slate-500 text-sm py-2">No recent games found.</p>
-  const visible = expanded ? games : games.slice(0, COMPACT_SHOW)
-  return (
-    <>
-      <div className="divide-y divide-navy-800">
-        {visible.map(game => (
-          <Link
-            key={game.id}
-            to={`/games/${game.id}?org=${orgId}`}
-            className="flex items-center justify-between py-2 px-1 hover:bg-navy-700/20 transition-colors group"
-          >
-            <div className="min-w-0">
-              <div className="text-sm text-white truncate">
-                {game.home_team} <span className="text-slate-600">v</span> {game.away_team}
-              </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-slate-600">{game.grade?.name}</span>
-                {game.played_at && (
-                  <span className="text-xs text-slate-700">
-                    {new Date(game.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
-                  </span>
-                )}
-              </div>
-            </div>
-            <ResultBadge result={game.result} />
-          </Link>
-        ))}
-      </div>
-      {games.length > COMPACT_SHOW && (
-        <button onClick={() => setExpanded(e => !e)} className="text-xs text-slate-500 hover:text-accent mt-2 transition-colors">
-          {expanded ? '↑ Show less' : `↓ Show ${games.length - COMPACT_SHOW} more`}
-        </button>
-      )}
-    </>
-  )
-}
-
-function UpcomingFixtures({ fixtures, loading }) {
-  const [expanded, setExpanded] = useState(false)
-  if (loading) return <LoadingSpinner size="sm" />
-  if (!fixtures.length) return <p className="text-slate-500 text-sm py-2">No upcoming fixtures.</p>
-  const visible = expanded ? fixtures : fixtures.slice(0, COMPACT_SHOW)
-  return (
-    <>
-      <div className="divide-y divide-navy-800">
-        {visible.map((f, i) => (
-          <div key={f.id || i} className="py-2 px-1">
-            <div className="text-sm text-white">
-              {f.home_team} <span className="text-slate-600">v</span> {f.away_team}
-            </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs text-slate-600">{f.grade}</span>
-              <span className="text-xs text-accent font-mono">
-                {new Date(f.date).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-      {fixtures.length > COMPACT_SHOW && (
-        <button onClick={() => setExpanded(e => !e)} className="text-xs text-slate-500 hover:text-accent mt-2 transition-colors">
-          {expanded ? '↑ Show less' : `↓ ${fixtures.length - COMPACT_SHOW} more`}
-        </button>
-      )}
-    </>
-  )
-}
-
-function BestPerformances({ orgId, seasons, selectedSeason, clubSlug }) {
-  const [records, setRecords] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [tab, setTab] = useState('batting')
-
-  useEffect(() => {
-    if (!orgId) return
-    setLoading(true)
-    api.getRecords(orgId, { seasonId: selectedSeason })
-      .then(setRecords)
-      .catch(() => setRecords(null))
-      .finally(() => setLoading(false))
-  }, [orgId, selectedSeason])
-
-  const batting = records?.batting?.top_high_scores?.slice(0, 5) || []
-  const bowling = records?.bowling?.best_innings_figures?.slice(0, 5) || []
-
-  return (
-    <div className="card p-5 mb-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="display-heading text-xl text-white">BEST PERFORMANCES</h2>
-        <Link to={`/${clubSlug}/records`} className="text-accent text-xs hover:underline">All records →</Link>
-      </div>
-      <div className="flex gap-1 mb-4 border-b border-navy-700">
-        {['batting', 'bowling'].map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors capitalize ${
-              tab === t ? 'border-accent text-accent' : 'border-transparent text-slate-400 hover:text-white'
-            }`}>{t}</button>
-        ))}
-      </div>
-      {loading ? <LoadingSpinner size="sm" /> : tab === 'batting' ? (
-        batting.length === 0 ? <p className="text-slate-500 text-sm">No data.</p> : (
-          <div className="space-y-1">
-            {batting.map((r, i) => (
-              <Link key={i} to={`/players/${r.player_id}`} className="flex items-center justify-between py-1.5 hover:opacity-80 transition-opacity">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-slate-600 font-mono text-xs w-4">{i + 1}</span>
-                  <span className="text-sm text-white truncate">{r.name}</span>
-                  <span className="text-xs text-slate-500">{r.season_name}</span>
-                </div>
-                <span className="stat-number text-accent font-bold ml-2">{r.runs}{r.not_out ? '*' : ''}</span>
-              </Link>
-            ))}
-          </div>
-        )
-      ) : (
-        bowling.length === 0 ? <p className="text-slate-500 text-sm">No data.</p> : (
-          <div className="space-y-1">
-            {bowling.map((r, i) => (
-              <Link key={i} to={`/players/${r.player_id}`} className="flex items-center justify-between py-1.5 hover:opacity-80 transition-opacity">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-slate-600 font-mono text-xs w-4">{i + 1}</span>
-                  <span className="text-sm text-white truncate">{r.name}</span>
-                  <span className="text-xs text-slate-500">{r.season_name}</span>
-                </div>
-                <span className="stat-number text-accent font-bold ml-2">{r.wickets}/{r.runs}</span>
-              </Link>
-            ))}
-          </div>
-        )
-      )}
-    </div>
-  )
-}
-
-const CATEGORY_LABELS = { batting: 'Batting', bowling: 'Bowling', fielding: 'Fielding', matches: 'Matches Played' }
-const CATEGORY_ORDER = ['batting', 'bowling', 'fielding', 'matches']
-
-function MilestoneCard({ m }) {
+function MilestoneRow({ m }) {
   const pct = Math.round((m.current / m.target) * 100)
   return (
     <Link to={`/players/${m.player_id}`} className="block hover:opacity-80 transition-opacity">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2 min-w-0">
-          <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.target} alt="" className="w-5 h-5" />
-          <span className="text-sm text-white font-medium truncate">{m.name}</span>
+          <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.target} alt="" className="w-4 h-4" />
+          <span className="text-pb-text text-[13px] font-semibold truncate">{m.name}</span>
         </div>
-        <span className="text-xs text-slate-400 ml-2 whitespace-nowrap">
-          <span className="stat-number text-accent font-bold">{m.needed.toLocaleString()}</span> {m.type} to go
+        <span className="font-mono text-[11px] text-pb-dim ml-2 whitespace-nowrap">
+          <span className="text-pb-text font-bold">{m.needed?.toLocaleString()}</span> to go
         </span>
       </div>
-      <div className="h-1.5 bg-navy-700 rounded-full overflow-hidden">
-        <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${pct}%` }} />
-      </div>
-      <div className="flex justify-between mt-0.5">
-        <span className="text-xs text-slate-600">{m.current.toLocaleString()} {m.type}</span>
-        <span className="text-xs text-slate-600">{m.target.toLocaleString()}</span>
+      <div className="h-1 bg-pb-hairline rounded-sm overflow-hidden">
+        <div className="h-full" style={{ width: `${Math.min(100, pct)}%`, background: "var(--pb-accent)" }} />
       </div>
     </Link>
   )
 }
 
-function AchievedMilestoneCard({ m }) {
-  const overBy = m.current - m.milestone
+function AchievedRow({ m }) {
   const dateLabel = m.achieved_at
     ? new Date(m.achieved_at + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
     : m.season_name || null
@@ -233,31 +60,25 @@ function AchievedMilestoneCard({ m }) {
     <Link to={`/players/${m.player_id}`} className="block hover:opacity-80 transition-opacity">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.trophy} alt="" className="w-5 h-5" />
-          <span className="text-sm text-white font-medium truncate">{m.name}</span>
+          <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.trophy} alt="" className="w-4 h-4" />
+          <span className="text-pb-text text-[13px] font-semibold truncate">{m.name}</span>
         </div>
         <div className="ml-2 text-right whitespace-nowrap">
-          <span className="stat-number text-accent font-bold">{m.milestone.toLocaleString()}</span>
-          <span className="text-xs text-slate-400 ml-1">{m.type}</span>
+          <span className="font-mono font-bold text-pb-text" style={{ color: "var(--pb-accent)" }}>{m.milestone?.toLocaleString()}</span>
+          <span className="font-mono text-[10px] text-pb-faint ml-1">{m.type}</span>
         </div>
       </div>
-      <div className="flex justify-between mt-0.5">
-        <span className="text-xs text-slate-500">Career total: {m.current.toLocaleString()}</span>
-        <span className="text-xs text-slate-600">
-          {dateLabel && `${m.achieved_at ? '' : 'Season: '}${dateLabel}`}
-          {overBy > 0 && ` · +${overBy.toLocaleString()} past`}
-        </span>
-      </div>
+      {dateLabel && <div className="font-mono text-[10px] text-pb-faint tracking-wide2 mt-0.5">{dateLabel}</div>}
     </Link>
   )
 }
 
-function UpcomingMilestones({ milestones, achieved, loading, achievedLoading }) {
-  const [activeTab, setActiveTab] = useState('batting')
-  const [page, setPage] = useState(1)
-  const [perPage, setPerPage] = useState(10)
+const MILESTONE_CATS = { batting: 'Batting', bowling: 'Bowling', fielding: 'Fielding', matches: 'Matches Played' }
 
-  if (loading && achievedLoading) return <LoadingSpinner size="sm" />
+function MilestonesSection({ milestones, achieved, loading, achievedLoading }) {
+  const [tab, setTab] = useState('batting')
+  const [page, setPage] = useState(1)
+  const PER_PAGE = 10
 
   const grouped = {}
   for (const m of milestones) {
@@ -265,100 +86,56 @@ function UpcomingMilestones({ milestones, achieved, loading, achievedLoading }) 
     if (!grouped[cat]) grouped[cat] = []
     grouped[cat].push(m)
   }
-
-  const upcomingTabs = CATEGORY_ORDER.filter(c => grouped[c])
+  const upcomingTabs = ['batting', 'bowling', 'fielding', 'matches'].filter(c => grouped[c])
   const allTabs = achieved.length > 0 ? [...upcomingTabs, 'achieved'] : upcomingTabs
-  const tab = allTabs.includes(activeTab) ? activeTab : (allTabs[0] || 'batting')
-  const isAchievedTab = tab === 'achieved'
-  const items = isAchievedTab ? achieved : (grouped[tab] || [])
-  const totalPages = Math.max(1, Math.ceil(items.length / perPage))
+  const activeTab = allTabs.includes(tab) ? tab : (allTabs[0] || 'batting')
+  const isAchieved = activeTab === 'achieved'
+  const items = isAchieved ? achieved : (grouped[activeTab] || [])
+  const totalPages = Math.max(1, Math.ceil(items.length / PER_PAGE))
   const safePage = Math.min(page, totalPages)
-  const pageItems = items.slice((safePage - 1) * perPage, safePage * perPage)
+  const pageItems = items.slice((safePage - 1) * PER_PAGE, safePage * PER_PAGE)
 
-  if (!allTabs.length) return <p className="text-slate-500 text-sm py-4">No milestones found.</p>
-
-  const switchTab = (cat) => { setActiveTab(cat); setPage(1) }
-  const changePerPage = (n) => { setPerPage(n); setPage(1) }
-
-  const tabLoading = isAchievedTab ? achievedLoading : loading
+  if ((loading && achievedLoading) || !allTabs.length) {
+    return loading ? <PbSpinner message="Loading milestones…" /> : <p className="text-pb-faint text-sm py-4">No milestones found.</p>
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between border-b border-navy-700 mb-4 flex-wrap gap-y-2">
+      <div className="flex items-center justify-between pb-hairline-b mb-4 flex-wrap gap-y-2">
         <div className="flex gap-1 flex-wrap">
           {allTabs.map(cat => (
             <button
               key={cat}
-              onClick={() => switchTab(cat)}
-              className={`px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
-                tab === cat
-                  ? 'border-accent text-accent'
-                  : 'border-transparent text-slate-400 hover:text-white'
+              onClick={() => { setTab(cat); setPage(1) }}
+              className={`px-3 py-2 text-[11px] font-mono font-semibold tracking-wide3 relative ${
+                cat === activeTab ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'
               }`}
             >
-              {cat === 'achieved' ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <ThiingIcon src={thiings.trophy} alt="" className="w-4 h-4" />
-                  Recently Achieved
-                </span>
-              ) : CATEGORY_LABELS[cat]}
-              <span className="ml-1.5 text-slate-600 font-mono">
-                {cat === 'achieved' ? achieved.length : (grouped[cat]?.length || 0)}
-              </span>
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 pb-1">
-          <span className="text-xs text-slate-500">Show</span>
-          {[10, 25, 50].map(n => (
-            <button
-              key={n}
-              onClick={() => changePerPage(n)}
-              className={`text-xs px-2 py-1 rounded transition-colors ${
-                perPage === n ? 'bg-accent text-navy-950 font-bold' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {n}
+              {cat === 'achieved' ? '★ ACHIEVED' : (MILESTONE_CATS[cat] || cat).toUpperCase()}
+              {cat === activeTab && <span className="absolute left-0 right-0 -bottom-px h-[2px]" style={{ background: "var(--pb-accent)" }} />}
             </button>
           ))}
         </div>
       </div>
-
-      {tabLoading ? <LoadingSpinner size="sm" /> : (
+      {(isAchieved ? achievedLoading : loading) ? <PbSpinner /> : (
         <>
-          <div className="space-y-3">
+          <ul className="flex flex-col gap-3">
             {pageItems.length === 0
-              ? <p className="text-slate-500 text-sm py-4">
-                  {isAchievedTab ? 'No milestones achieved this season.' : 'No upcoming milestones.'}
-                </p>
+              ? <p className="text-pb-faint text-sm py-4">{isAchieved ? 'No milestones achieved this season.' : 'No upcoming milestones.'}</p>
               : pageItems.map((m, i) => (
-                  isAchievedTab
-                    ? <AchievedMilestoneCard key={i} m={m} />
-                    : <MilestoneCard key={i} m={m} />
+                  <li key={i} className={i ? "pb-hairline-t pt-3" : ""}>
+                    {isAchieved ? <AchievedRow m={m} /> : <MilestoneRow m={m} />}
+                  </li>
                 ))
             }
-          </div>
-
+          </ul>
           {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4 pt-3 border-t border-navy-700">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={safePage === 1}
-                className="text-xs text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed px-2 py-1"
-              >
-                ← Prev
-              </button>
-              <span className="text-xs text-slate-500 font-mono">
-                {safePage} / {totalPages}
-                <span className="ml-2 text-slate-600">({items.length} total)</span>
-              </span>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={safePage === totalPages}
-                className="text-xs text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed px-2 py-1"
-              >
-                Next →
-              </button>
+            <div className="flex items-center justify-between mt-4 pt-3 pb-hairline-t">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage === 1}
+                className="font-mono text-[11px] text-pb-faint hover:text-pb-text disabled:opacity-30 px-2 py-1">← PREV</button>
+              <span className="font-mono text-[11px] text-pb-faint">{safePage} / {totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
+                className="font-mono text-[11px] text-pb-faint hover:text-pb-text disabled:opacity-30 px-2 py-1">NEXT →</button>
             </div>
           )}
         </>
@@ -367,24 +144,16 @@ function UpcomingMilestones({ milestones, achieved, loading, achievedLoading }) 
   )
 }
 
-const STAT_PANELS = {
-  batting: 'batting',
-  bowling: 'bowling',
-  results: 'results',
-  players: 'players',
-}
-
 export default function Dashboard() {
   const { clubSlug } = useParams()
   const { club, orgId, inactive } = useClub(clubSlug)
   useClubTheme(club)
-  const navigate = useNavigate()
 
   if (inactive) return <ClubInactive />
+
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading, error } = useClubData(orgId)
   const { games, loading: gamesLoading } = useRecentGames(orgId, { seasonId: selectedSeason, gradeId: selectedGrade })
 
-  const [players, setPlayers] = useState([])
   const [topBatters, setTopBatters] = useState([])
   const [topBowlers, setTopBowlers] = useState([])
   const [summary, setSummary] = useState(null)
@@ -395,7 +164,6 @@ export default function Dashboard() {
   const [milestonesLoading, setMilestonesLoading] = useState(true)
   const [achievedLoading, setAchievedLoading] = useState(true)
   const [fixturesLoading, setFixturesLoading] = useState(true)
-  const [activePanel, setActivePanel] = useState(null)
   const [syncing, setSyncing] = useState(false)
   const [syncDone, setSyncDone] = useState(false)
 
@@ -403,13 +171,11 @@ export default function Dashboard() {
     if (!orgId) return
     setStatsLoading(true)
     Promise.allSettled([
-      api.listPlayers(orgId),
       api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5 }),
       api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5 }),
       api.getOrgSummary(orgId, { seasonId: selectedSeason, gradeId: selectedGrade }),
     ])
-      .then(([p, b, bw, s]) => {
-        if (p.status === 'fulfilled') setPlayers(p.value)
+      .then(([b, bw, s]) => {
         if (b.status === 'fulfilled') setTopBatters(b.value)
         if (bw.status === 'fulfilled') setTopBowlers(bw.value)
         if (s.status === 'fulfilled') setSummary(s.value)
@@ -420,360 +186,237 @@ export default function Dashboard() {
   useEffect(() => {
     if (!orgId) return
     api.getUpcomingMilestones(orgId, 200)
-      .then(setMilestones)
-      .catch(() => setMilestones([]))
+      .then(setMilestones).catch(() => setMilestones([]))
       .finally(() => setMilestonesLoading(false))
     api.getRecentlyAchievedMilestones(orgId)
-      .then(setAchievedMilestones)
-      .catch(() => setAchievedMilestones([]))
+      .then(setAchievedMilestones).catch(() => setAchievedMilestones([]))
       .finally(() => setAchievedLoading(false))
     api.getOrgFixtures(orgId)
-      .then(setFixtures)
-      .catch(() => setFixtures([]))
+      .then(setFixtures).catch(() => setFixtures([]))
       .finally(() => setFixturesLoading(false))
   }, [orgId])
 
-  if (loading) return <LoadingSpinner message="Loading club data…" />
-  if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-red-400">Error: {error}</div>
+  if (loading) return <PbSpinner message="Loading club data…" />
+  if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-pb-red">Error: {error}</div>
   if (!org) return null
 
-  const winRate = summary ? `${summary.win_rate}%` : '—'
+  const handleSync = async () => {
+    if (syncing) return
+    setSyncing(true); setSyncDone(false)
+    try {
+      await api.triggerSync(orgId)
+      await new Promise(r => setTimeout(r, 8000))
+      setSyncDone(true)
+      setTimeout(() => setSyncDone(false), 3000)
+    } finally { setSyncing(false) }
+  }
+
+  const currentSeason = seasons?.find(s => s.id === selectedSeason)
+  const seasonLabel = currentSeason?.name || (seasons?.[0]?.name) || 'All Seasons'
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="accent-bar mb-3" />
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="display-heading text-4xl md:text-5xl text-white">{org.name.toUpperCase()}</h1>
-            {org.short_name && <p className="text-slate-500 font-mono text-sm mt-1">{org.short_name}</p>}
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            <Link to={`/${clubSlug}/players`} className="btn-ghost border border-navy-600">Players</Link>
-            <Link to={`/${clubSlug}/leaderboard`} className="btn-primary">Leaderboard</Link>
-            <Link to={`/${clubSlug}/compare`} className="btn-ghost border border-navy-600">Compare</Link>
-            <button
-              onClick={async () => {
-                if (syncing) return
-                setSyncing(true)
-                setSyncDone(false)
-                try {
-                  await api.triggerSync(orgId)
-                  await new Promise(r => setTimeout(r, 8000))
-                  setSyncDone(true)
-                  setTimeout(() => setSyncDone(false), 3000)
-                } finally {
-                  setSyncing(false)
-                }
-              }}
-              disabled={syncing}
-              className="btn-ghost border border-navy-600 flex items-center gap-2 disabled:opacity-60"
-            >
-              {syncing ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
-                  </svg>
-                  Syncing…
-                </>
-              ) : syncDone ? (
-                <>✓ Synced</>
-              ) : (
-                <>Sync ↻</>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Season filter */}
-      <div className="mb-8">
-        <SeasonSelector
-          seasons={seasons}
-          grades={grades}
-          selectedSeason={selectedSeason}
-          setSelectedSeason={setSelectedSeason}
-          selectedGrade={selectedGrade}
-          setSelectedGrade={setSelectedGrade}
+    <div className="min-h-screen bg-pb-bg text-pb-text">
+      <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <PageHeader
+          eyebrow={`${org.short_name || org.name} · CLUB DASHBOARD`}
+          title={org.name}
+          meta={[
+            summary && <span key="m">PLAYED <span className="text-pb-text">{summary.total_games}</span></span>,
+            summary && <span key="r"><span className="text-pb-text">{summary.total_runs?.toLocaleString()}</span> RUNS</span>,
+            summary && <span key="w"><span className="text-pb-text">{summary.total_wickets}</span> WICKETS</span>,
+            summary && <span key="p"><span className="text-pb-text">{summary.total_players}</span> PLAYERS</span>,
+          ].filter(Boolean)}
+          actions={[
+            <Btn key="sync" onClick={handleSync} disabled={syncing}>
+              {syncing ? 'Syncing…' : syncDone ? '✓ Synced' : 'Sync ↻'}
+            </Btn>,
+            <Link key="lb" to={`/${clubSlug}/leaderboard`} className="font-mono text-[11px] tracking-wide2 px-3.5 py-2 rounded text-[#08110b] hover:opacity-90 transition" style={{ background: "var(--pb-accent)" }}>
+              Leaderboard →
+            </Link>,
+          ]}
         />
-      </div>
 
-      {/* Summary stat tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
-        {selectedSeason && (
-          <div className="lg:col-span-2">
-            <ClickableStatCard
-              label="Win Rate"
-              value={winRate}
-              sub={summary ? `${summary.wins}W ${summary.losses}L ${summary.draws}D` : null}
-              accent
-              active={activePanel === 'results'}
-              onClick={() => setActivePanel(p => p === 'results' ? null : 'results')}
-            />
-          </div>
+        {/* Season / Grade filter */}
+        <div className="mb-6">
+          <SeasonSelector
+            seasons={seasons}
+            grades={grades}
+            selectedSeason={selectedSeason}
+            setSelectedSeason={setSelectedSeason}
+            selectedGrade={selectedGrade}
+            setSelectedGrade={setSelectedGrade}
+          />
+        </div>
+
+        {/* Summary KPIs */}
+        {summary && (
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+              <Kpi label="WIN RATE" value={parseInt(summary.win_rate) || 0} suffix="%" accent />
+              <Kpi label="TOTAL RUNS" value={summary.total_runs || 0} />
+              <Kpi label="TOTAL WICKETS" value={summary.total_wickets || 0} />
+              <Kpi label="PLAYERS" value={summary.total_players || 0} />
+            </div>
+
+            {/* W/L/D breakdown */}
+            <div className="pb-card p-4 mb-6 flex items-center gap-4 flex-wrap">
+              <Label>RESULTS BREAKDOWN</Label>
+              <div className="flex gap-4 font-mono text-[12px]">
+                <span style={{ color: "var(--pb-accent)" }}><span className="font-bold">{summary.wins}</span> W</span>
+                <span style={{ color: "var(--pb-red)" }}><span className="font-bold">{summary.losses}</span> L</span>
+                <span className="text-pb-dim"><span className="font-bold">{summary.draws}</span> D</span>
+              </div>
+              {summary.highest_score && (
+                <div className="ml-auto font-mono text-[11px] text-pb-dim tracking-wide2">
+                  HS <span className="text-pb-text">{summary.highest_score}</span>
+                </div>
+              )}
+            </div>
+          </>
         )}
-        <div className="lg:col-span-2">
-          <ClickableStatCard
-            label="Club Runs"
-            value={summary ? summary.total_runs?.toLocaleString() : '—'}
-            sub={summary ? `HS: ${summary.highest_score}` : null}
-            active={activePanel === 'batting'}
-            onClick={() => setActivePanel(p => p === 'batting' ? null : 'batting')}
-          />
-        </div>
-        <div className="lg:col-span-2">
-          <ClickableStatCard
-            label="Club Wickets"
-            value={summary ? summary.total_wickets?.toLocaleString() : '—'}
-            active={activePanel === 'bowling'}
-            onClick={() => setActivePanel(p => p === 'bowling' ? null : 'bowling')}
-          />
-        </div>
-        <div className="lg:col-span-2">
-          <ClickableStatCard
-            label="Players"
-            value={summary ? summary.total_players : players.length}
-            sub={selectedSeason
-              ? (summary ? `${summary.total_players} this season` : null)
-              : `${summary ? summary.seasons : seasons.length} seasons`}
-            active={activePanel === 'players'}
-            onClick={() => setActivePanel(p => p === 'players' ? null : 'players')}
-          />
-        </div>
-      </div>
 
-      {/* Expandable stat panel */}
-      {activePanel && (
-        <div className="card p-5 mb-6 border-accent/30">
-          {activePanel === 'batting' && (
-            <>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="display-heading text-lg text-white">TOP BATTERS</h2>
-                <Link to={`/${clubSlug}/leaderboard`} className="text-accent text-xs hover:underline">Full leaderboard →</Link>
-              </div>
-              {statsLoading ? <LoadingSpinner size="sm" /> : topBatters.length === 0 ? (
-                <p className="text-slate-500 text-sm">No data yet.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-navy-700">
-                        <th className="table-header">#</th>
-                        <th className="table-header">Player</th>
-                        <th className="table-header text-right">Runs</th>
-                        <th className="table-header text-right">Avg</th>
-                        <th className="table-header text-right">SR</th>
-                        <th className="table-header text-right">HS</th>
-                        <th className="table-header text-right">6s</th>
-                        <th className="table-header text-right">4s</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topBatters.map((p, i) => (
-                        <tr key={p.player_id} className="table-row">
-                          <td className="table-cell text-slate-600 font-mono">{i + 1}</td>
-                          <td className="table-cell">
-                            <Link to={`/players/${p.player_id}`} className="text-white hover:text-accent">{p.name}</Link>
-                          </td>
-                          <td className="table-cell stat-number text-right font-bold text-accent">{p.total_runs}</td>
-                          <td className="table-cell stat-number text-right text-white">{p.average ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-300">{p.strike_rate ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-300">{p.high_score ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-400">{p.total_sixes ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-400">{p.total_fours ?? '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-
-          {activePanel === 'bowling' && (
-            <>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="display-heading text-lg text-white">TOP BOWLERS</h2>
-                <Link to={`/${clubSlug}/leaderboard`} className="text-accent text-xs hover:underline">Full leaderboard →</Link>
-              </div>
-              {statsLoading ? <LoadingSpinner size="sm" /> : topBowlers.length === 0 ? (
-                <p className="text-slate-500 text-sm">No data yet.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-navy-700">
-                        <th className="table-header">#</th>
-                        <th className="table-header">Player</th>
-                        <th className="table-header text-right">Wkts</th>
-                        <th className="table-header text-right">Avg</th>
-                        <th className="table-header text-right">Econ</th>
-                        <th className="table-header text-right">Best</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topBowlers.map((p, i) => (
-                        <tr key={p.player_id} className="table-row">
-                          <td className="table-cell text-slate-600 font-mono">{i + 1}</td>
-                          <td className="table-cell">
-                            <Link to={`/players/${p.player_id}`} className="text-white hover:text-accent">{p.name}</Link>
-                          </td>
-                          <td className="table-cell stat-number text-right font-bold text-accent">{p.total_wickets}</td>
-                          <td className="table-cell stat-number text-right text-white">{p.average ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-300">{p.economy ?? '—'}</td>
-                          <td className="table-cell stat-number text-right text-slate-300">{p.best_figures_wickets ?? '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-
-          {activePanel === 'results' && (
-            <>
-              <h2 className="display-heading text-lg text-white mb-4">RESULTS BREAKDOWN</h2>
-              {statsLoading || !summary ? <LoadingSpinner size="sm" /> : (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="text-center">
-                    <div className="stat-number text-4xl font-bold text-accent">{summary.wins}</div>
-                    <div className="section-label mt-1">WINS</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="stat-number text-4xl font-bold text-red-400">{summary.losses}</div>
-                    <div className="section-label mt-1">LOSSES</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="stat-number text-4xl font-bold text-slate-400">{summary.draws}</div>
-                    <div className="section-label mt-1">DRAWS</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="stat-number text-4xl font-bold text-white">{summary.total_games}</div>
-                    <div className="section-label mt-1">TOTAL GAMES</div>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {activePanel === 'players' && (
-            <>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="display-heading text-lg text-white">ALL PLAYERS</h2>
-                <Link to={`/${clubSlug}/players`} className="text-accent text-xs hover:underline">Player search →</Link>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1 max-h-60 overflow-y-auto pr-1">
-                {players.map(p => (
-                  <Link
-                    key={p.id}
-                    to={`/players/${p.id}`}
-                    className="text-sm text-slate-300 hover:text-accent py-1.5 px-2 rounded hover:bg-navy-700/30 transition-colors truncate"
-                  >
-                    {p.name}
-                  </Link>
+        {/* Two-col: leaders + milestones */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 mb-6">
+          {/* Top run-scorers */}
+          <Card className="xl:col-span-1" title={`TOP BATTERS · ${seasonLabel.toUpperCase()}`}
+                action={<Link to={`/${clubSlug}/leaderboard`} className="text-2xs font-mono tracking-wide2 text-pb-dim hover:text-pb-text">ALL →</Link>}>
+            {statsLoading ? <PbSpinner /> : topBatters.length === 0 ? (
+              <p className="text-pb-faint text-sm py-2">No data yet.</p>
+            ) : (
+              <ol className="flex flex-col">
+                {topBatters.map((p, i) => (
+                  <li key={p.player_id} className={`flex items-center gap-3 py-2.5 ${i ? "pb-hairline-t" : ""}`}>
+                    <span className="font-mono text-[10px] text-pb-faint w-4">{i + 1}</span>
+                    <Link to={`/players/${p.player_id}`} className="flex-1 min-w-0">
+                      <div className="text-pb-text text-[14px] font-semibold truncate">{p.name}</div>
+                      <div className="text-pb-faint font-mono text-[10.5px] tracking-wide2">
+                        AVG {p.average ?? '—'} · SR {p.strike_rate ?? '—'} · HS {p.high_score ?? '—'}
+                      </div>
+                    </Link>
+                    <span className="font-mono text-pb-text text-[14px] font-bold pb-num w-12 text-right" style={{ color: "var(--pb-accent)" }}>
+                      {p.total_runs}
+                    </span>
+                  </li>
                 ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
+              </ol>
+            )}
+          </Card>
 
-      {/* Top Batters + Top Bowlers */}
-      <div className="grid md:grid-cols-2 gap-4 mb-6">
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="display-heading text-lg text-white">TOP BATTERS</h2>
-            <Link to={`/${clubSlug}/leaderboard`} className="text-accent text-xs hover:underline">See all →</Link>
-          </div>
-          {statsLoading ? <LoadingSpinner size="sm" /> : topBatters.length === 0 ? (
-            <p className="text-slate-500 text-sm">No data yet.</p>
+          {/* Top wicket-takers */}
+          <Card title={`TOP BOWLERS · ${seasonLabel.toUpperCase()}`}
+                action={<Link to={`/${clubSlug}/leaderboard`} className="text-2xs font-mono tracking-wide2 text-pb-dim hover:text-pb-text">ALL →</Link>}>
+            {statsLoading ? <PbSpinner /> : topBowlers.length === 0 ? (
+              <p className="text-pb-faint text-sm py-2">No data yet.</p>
+            ) : (
+              <ol className="flex flex-col">
+                {topBowlers.map((p, i) => (
+                  <li key={p.player_id} className={`flex items-center gap-3 py-2.5 ${i ? "pb-hairline-t" : ""}`}>
+                    <span className="font-mono text-[10px] text-pb-faint w-4">{i + 1}</span>
+                    <Link to={`/players/${p.player_id}`} className="flex-1 min-w-0">
+                      <div className="text-pb-text text-[14px] font-semibold truncate">{p.name}</div>
+                      <div className="text-pb-faint font-mono text-[10.5px] tracking-wide2">
+                        AVG {p.average ?? '—'} · ECON {p.economy ?? '—'} · BEST {p.best_figures_wickets ?? '—'}
+                      </div>
+                    </Link>
+                    <span className="font-mono text-pb-text text-[14px] font-bold pb-num w-12 text-right" style={{ color: "var(--pb-accent)" }}>
+                      {p.total_wickets}w
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Card>
+
+          {/* Upcoming milestones preview */}
+          <Card title="MILESTONES IN REACH"
+                action={<span className="text-2xs font-mono tracking-wide2 text-pb-faint">CLOSEST FIRST</span>}>
+            {milestonesLoading ? <PbSpinner /> : (
+              <ul className="flex flex-col gap-3">
+                {milestones.slice(0, 5).length === 0
+                  ? <p className="text-pb-faint text-sm py-2">No upcoming milestones.</p>
+                  : milestones.slice(0, 5).map((m, i) => (
+                      <li key={i} className={i ? "pb-hairline-t pt-3" : ""}><MilestoneRow m={m} /></li>
+                    ))
+                }
+              </ul>
+            )}
+          </Card>
+        </div>
+
+        {/* Recent results */}
+        <Card title="RECENT MATCHES" className="mb-6"
+              action={<span className="text-2xs font-mono tracking-wide2 text-pb-faint">{games.length} GAMES</span>}>
+          {gamesLoading ? <PbSpinner /> : games.length === 0 ? (
+            <p className="text-pb-faint text-sm py-2">No recent games found.</p>
           ) : (
-            <div className="space-y-1">
-              {topBatters.map((p, i) => (
-                <Link key={p.player_id} to={`/players/${p.player_id}`} className="flex items-center justify-between py-1.5 hover:opacity-80 transition-opacity">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-slate-600 font-mono text-xs w-4">{i + 1}</span>
-                    <span className="text-sm text-white truncate">{p.name}</span>
-                  </div>
-                  <div className="flex items-center gap-3 ml-2">
-                    <span className="text-xs text-slate-500">avg {p.average ?? '—'}</span>
-                    <span className="stat-number text-accent font-bold">{p.total_runs}</span>
-                  </div>
-                </Link>
-              ))}
+            <div className="overflow-x-auto pb-scroll -mx-2">
+              <table className="w-full min-w-[560px] text-[13px]">
+                <thead>
+                  <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                    <th className="font-medium pb-2 pl-2">DATE</th>
+                    <th className="font-medium pb-2">MATCH</th>
+                    <th className="font-medium pb-2">GRADE</th>
+                    <th className="font-medium pb-2 pr-2">RESULT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {games.map((g, i) => (
+                    <tr key={g.id} className={`${i ? "pb-hairline-t" : ""} hover:bg-pb-surface2 cursor-pointer`}>
+                      <td className="py-2.5 pl-2 font-mono text-pb-dim text-[12px]">
+                        {g.played_at ? new Date(g.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—'}
+                      </td>
+                      <td className="py-2.5">
+                        <Link to={`/games/${g.id}?org=${orgId}`} className="text-pb-text hover:text-pb-accent font-medium">
+                          {g.home_team} <span className="text-pb-faint text-[11px]">v</span> {g.away_team}
+                        </Link>
+                      </td>
+                      <td className="py-2.5 font-mono text-pb-faint text-[11px] tracking-wide2">{g.grade?.name || '—'}</td>
+                      <td className="py-2.5 pr-2"><ResultPill result={g.result} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
-        </div>
+        </Card>
 
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="display-heading text-lg text-white">TOP BOWLERS</h2>
-            <Link to={`/${clubSlug}/leaderboard`} className="text-accent text-xs hover:underline">See all →</Link>
-          </div>
-          {statsLoading ? <LoadingSpinner size="sm" /> : topBowlers.length === 0 ? (
-            <p className="text-slate-500 text-sm">No data yet.</p>
-          ) : (
-            <div className="space-y-1">
-              {topBowlers.map((p, i) => (
-                <Link key={p.player_id} to={`/players/${p.player_id}`} className="flex items-center justify-between py-1.5 hover:opacity-80 transition-opacity">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-slate-600 font-mono text-xs w-4">{i + 1}</span>
-                    <span className="text-sm text-white truncate">{p.name}</span>
+        {/* Upcoming fixtures */}
+        {!fixturesLoading && fixtures.length > 0 && (
+          <Card title="UPCOMING FIXTURES" className="mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {fixtures.slice(0, 6).map((f, i) => (
+                <div key={f.id || i} className="pb-card-2 p-4 rounded border border-pb-hairline">
+                  <Label>{f.grade}</Label>
+                  <div className="text-pb-text font-display text-[20px] font-semibold leading-tight mt-2.5">
+                    {f.home_team} <span className="text-pb-faint text-base">v</span> {f.away_team}
                   </div>
-                  <div className="flex items-center gap-3 ml-2">
-                    <span className="text-xs text-slate-500">econ {p.economy ?? '—'}</span>
-                    <span className="stat-number text-accent font-bold">{p.total_wickets}w</span>
+                  <div className="font-mono text-pb-faint text-[11px] tracking-wide2 mt-1">
+                    {new Date(f.date).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
-          )}
+          </Card>
+        )}
+
+        <SponsorBanner />
+
+        {/* Full milestones */}
+        <Card title="MILESTONES" className="mb-6">
+          <MilestonesSection
+            milestones={milestones}
+            achieved={achievedMilestones}
+            loading={milestonesLoading}
+            achievedLoading={achievedLoading}
+          />
+        </Card>
+
+        <div className="mt-10 pt-6 pb-hairline-t text-center">
+          <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest">
+            POWERED BY <Link to="/" className="hover:text-pb-dim transition-colors">BETTERSTATS</Link>
+          </p>
         </div>
-      </div>
-
-      {/* Best Performances */}
-      <BestPerformances orgId={orgId} seasons={seasons} selectedSeason={selectedSeason} clubSlug={clubSlug} />
-
-      {/* Recent Results + Upcoming Fixtures */}
-      <div className="grid lg:grid-cols-3 gap-4 mb-6">
-        <div className="lg:col-span-2 card p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="display-heading text-base text-white">RECENT RESULTS</h2>
-            <span className="section-label">{games.length} games</span>
-          </div>
-          <RecentResults games={games} loading={gamesLoading} orgId={orgId} />
-        </div>
-        <div className="card p-4">
-          <h2 className="display-heading text-base text-white mb-2">UPCOMING FIXTURES</h2>
-          <UpcomingFixtures fixtures={fixtures} loading={fixturesLoading} />
-        </div>
-      </div>
-
-      <SponsorBanner />
-
-      {/* Milestones */}
-      <div className="card p-5 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="display-heading text-xl text-white">MILESTONES</h2>
-          <span className="section-label">Closest first</span>
-        </div>
-        <UpcomingMilestones
-          milestones={milestones}
-          achieved={achievedMilestones}
-          loading={milestonesLoading}
-          achievedLoading={achievedLoading}
-        />
-      </div>
-
-      <div className="mt-12 pt-6 border-t border-navy-800 text-center">
-        <p className="text-slate-700 text-xs">
-          Powered by{' '}
-          <a href="/" className="hover:text-slate-500 transition-colors">BetterStats</a>
-        </p>
-      </div>
+      </main>
     </div>
   )
 }

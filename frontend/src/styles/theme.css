@@ -1,0 +1,54 @@
+/* BetterStats — Press Box theme */
+
+:root {
+  --pb-bg:        #0a0d14;
+  --pb-surface:   #10141d;
+  --pb-surface2:  #161b27;
+  --pb-hairline:  #1d2331;
+  --pb-hairline2: #262d3d;
+
+  --pb-text:     #e6e8ef;
+  --pb-dim:      #8a90a2;
+  --pb-faint:    #5b6072;
+  --pb-faintest: #3a3f50;
+
+  --pb-accent: #16c784;
+  --pb-red:    #ef5b5b;
+  --pb-amber:  #f5b542;
+}
+
+.pb-num { font-variant-numeric: tabular-nums; }
+
+.pb-scroll::-webkit-scrollbar              { width: 8px; height: 8px; }
+.pb-scroll::-webkit-scrollbar-thumb        { background: var(--pb-hairline2); border-radius: 8px; }
+.pb-scroll::-webkit-scrollbar-track        { background: transparent; }
+
+@keyframes pb-ticker {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.pb-ticker { animation: pb-ticker 38s linear infinite; }
+.pb-ticker-slow { animation-duration: 60s; }
+
+@keyframes pb-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+.pb-pulse { animation: pb-pulse 1.8s ease-in-out infinite; }
+
+@keyframes pb-rise {
+  from { transform: translateY(6px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+.pb-rise { animation: pb-rise 700ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
+.pb-card {
+  background: var(--pb-surface);
+  border: 1px solid var(--pb-hairline);
+  border-radius: 6px;
+}
+.pb-card-2 { background: var(--pb-surface2); }
+.pb-hairline-t { border-top: 1px solid var(--pb-hairline); }
+.pb-hairline-b { border-bottom: 1px solid var(--pb-hairline); }
+.pb-hairline-r { border-right: 1px solid var(--pb-hairline); }
+.pb-dashed-t   { border-top: 1px dashed var(--pb-hairline); }
