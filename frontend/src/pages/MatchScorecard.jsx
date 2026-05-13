@@ -176,8 +176,8 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
               <th className="font-medium py-2 pr-3 text-left font-mono text-[10px] text-pb-faintest hidden sm:table-cell">DISMISSAL</th>
               <th className="font-medium py-2 px-3 text-right w-12" style={{ color: 'var(--pb-accent)' }}>R</th>
               <th className="font-medium py-2 px-2 text-right w-10">B</th>
-              <th className="font-medium py-2 px-2 text-right w-8 font-mono text-[10px] text-pb-faintest hidden md:table-cell">4s</th>
-              <th className="font-medium py-2 pr-4 text-right w-8 font-mono text-[10px] text-pb-faintest hidden md:table-cell">6s</th>
+              <th className="font-medium py-2 px-2 text-right w-8 font-mono text-[10px] max-md:hidden" style={{ color: 'var(--pb-faintest)' }}>4s</th>
+              <th className="font-medium py-2 pr-4 text-right w-8 font-mono text-[10px] max-md:hidden" style={{ color: 'var(--pb-faintest)' }}>6s</th>
             </tr>
           </thead>
           <tbody>
@@ -202,8 +202,8 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
                   {row.not_out && <span className="text-pb-accent text-[11px]">*</span>}
                 </td>
                 <td className="py-2 px-2 font-mono text-[12px] text-pb-faint text-right w-10">{row.balls ?? '—'}</td>
-                <td className="py-2 px-2 font-mono text-[12px] text-pb-faint text-right w-8 hidden md:table-cell">{row.fours ?? '—'}</td>
-                <td className="py-2 pr-4 font-mono text-[12px] text-pb-faint text-right w-8 hidden md:table-cell">{row.sixes ?? '—'}</td>
+                <td className="py-2 px-2 font-mono text-[12px] text-right w-8 max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.fours ?? '—'}</td>
+                <td className="py-2 pr-4 font-mono text-[12px] text-right w-8 max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.sixes ?? '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -243,8 +243,8 @@ function BowlingCard({ label, teamName, bowling = [] }) {
               <th className="font-medium py-2 px-3 text-right">R</th>
               <th className="font-medium py-2 px-3 text-right" style={{ color: 'var(--pb-accent)' }}>W</th>
               <th className="font-medium py-2 px-3 text-right hidden sm:table-cell">ECON</th>
-              <th className="font-medium py-2 px-3 text-right hidden md:table-cell">WD</th>
-              <th className="font-medium py-2 pr-5 text-right hidden md:table-cell">NB</th>
+              <th className="font-medium py-2 px-3 text-right font-mono text-[10px] max-md:hidden" style={{ color: 'var(--pb-faintest)' }}>WD</th>
+              <th className="font-medium py-2 pr-5 text-right font-mono text-[10px] max-md:hidden" style={{ color: 'var(--pb-faintest)' }}>NB</th>
             </tr>
           </thead>
           <tbody>
@@ -270,8 +270,8 @@ function BowlingCard({ label, teamName, bowling = [] }) {
                 <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right hidden sm:table-cell">
                   {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
                 </td>
-                <td className="py-2 px-3 font-mono text-[12px] text-pb-faint text-right hidden md:table-cell">{row.wides ?? 0}</td>
-                <td className="py-2 pr-5 font-mono text-[12px] text-pb-faint text-right hidden md:table-cell">{row.no_balls ?? 0}</td>
+                <td className="py-2 px-3 font-mono text-[12px] text-right max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.wides ?? 0}</td>
+                <td className="py-2 pr-5 font-mono text-[12px] text-right max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.no_balls ?? 0}</td>
               </tr>
             ))}
           </tbody>
