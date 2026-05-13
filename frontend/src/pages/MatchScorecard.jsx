@@ -173,11 +173,11 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
           <thead>
             <tr className="text-pb-faintest font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/30">
               <th className="font-medium py-2 pl-5 pr-3">BATTER</th>
-              <th className="font-medium py-2 pr-3 text-left hidden sm:table-cell">DISMISSAL</th>
+              <th className="font-medium py-2 pr-3 text-left font-mono text-[10px] text-pb-faintest hidden sm:table-cell">DISMISSAL</th>
               <th className="font-medium py-2 px-3 text-right w-12" style={{ color: 'var(--pb-accent)' }}>R</th>
               <th className="font-medium py-2 px-2 text-right w-10">B</th>
-              <th className="font-medium py-2 px-2 text-right w-8 hidden md:table-cell">4s</th>
-              <th className="font-medium py-2 pr-4 text-right w-8 hidden md:table-cell">6s</th>
+              <th className="font-medium py-2 px-2 text-right w-8 font-mono text-[10px] text-pb-faintest hidden md:table-cell">4s</th>
+              <th className="font-medium py-2 pr-4 text-right w-8 font-mono text-[10px] text-pb-faintest hidden md:table-cell">6s</th>
             </tr>
           </thead>
           <tbody>
