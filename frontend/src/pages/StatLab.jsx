@@ -65,9 +65,12 @@ const GRADE_STAT_GROUPS = [
 ]
 
 const OPERATORS = [
-  { key: 'gte', label: '≥' }, { key: 'gt',  label: '>' },
-  { key: 'eq',  label: '=' }, { key: 'lte', label: '≤' },
-  { key: 'lt',  label: '<' }, { key: 'ne',  label: '≠' },
+  { key: 'gte', label: 'at least' },
+  { key: 'gt',  label: 'more than' },
+  { key: 'eq',  label: 'exactly' },
+  { key: 'lte', label: 'at most' },
+  { key: 'lt',  label: 'less than' },
+  { key: 'ne',  label: 'not equal' },
 ]
 
 const GROUP_TABS = [
@@ -292,7 +295,7 @@ export default function StatLab() {
                             </optgroup>
                           ))}
                         </select>
-                        <select className={selectCls + ' w-10 text-center'} value={f.op} onChange={e => updateFilter(f.id, { op: e.target.value })}>
+                        <select className={selectCls + ' w-24'} value={f.op} onChange={e => updateFilter(f.id, { op: e.target.value })}>
                           {OPERATORS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                         </select>
                         <input className={inputCls + ' w-16'} type="number" value={f.value} placeholder="0" onChange={e => updateFilter(f.id, { value: e.target.value })} />

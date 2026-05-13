@@ -125,12 +125,17 @@ async def get_fielding_leaderboard(
     org_id: str,
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
+    sort_by: str = "total_dismissals",
     limit: int = 20,
 ) -> list[dict]:
+    ALLOWED_SORTS = {"total_catches", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
+    if sort_by not in ALLOWED_SORTS:
+        sort_by = "total_dismissals"
+
     base = """
         SELECT
             p.id AS player_id,
-            p.name,
+            COALESCE(p.display_name_override, p.name) AS name,
             SUM(pss.matches) AS games,
             SUM(pss.catches) AS total_catches,
             SUM(pss.run_outs) AS total_run_outs,
@@ -145,7 +150,7 @@ async def get_fielding_leaderboard(
     if season_id:
         base += " AND pss.season_id = :season_id"
         params["season_id"] = season_id
-    base += " GROUP BY p.id, p.name ORDER BY total_dismissals DESC NULLS LAST LIMIT :limit"
+    base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
     return [dict(r) for r in result.mappings()]
@@ -792,7 +797,7 @@ async def get_batting_leaderboard_extended(
     base = """
         SELECT
             p.id AS player_id,
-            p.name,
+            COALESCE(p.display_name_override, p.name) AS name,
             SUM(pss.batting_innings) AS innings,
             SUM(pss.runs) AS total_runs,
             MAX(pss.high_score) AS high_score,
@@ -813,7 +818,7 @@ async def get_batting_leaderboard_extended(
     if season_id:
         base += " AND pss.season_id = :season_id"
         params["season_id"] = season_id
-    base += f" GROUP BY p.id, p.name ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
+    base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
     return [dict(r) for r in result.mappings()]
@@ -837,7 +842,7 @@ async def get_bowling_leaderboard_extended(
     base = """
         SELECT
             p.id AS player_id,
-            p.name,
+            COALESCE(p.display_name_override, p.name) AS name,
             SUM(pss.matches) AS games,
             SUM(pss.wickets) AS total_wickets,
             ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average,
@@ -856,7 +861,7 @@ async def get_bowling_leaderboard_extended(
     if season_id:
         base += " AND pss.season_id = :season_id"
         params["season_id"] = season_id
-    base += f" GROUP BY p.id, p.name ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
+    base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
     return [dict(r) for r in result.mappings()]

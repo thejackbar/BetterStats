@@ -250,10 +250,11 @@ export const api = {
     if (limit) params.set('limit', limit)
     return request(`/leaderboard/bowling?${params}`)
   },
-  fieldingLeaderboard: (orgId, { seasonId, gradeId, limit } = {}) => {
+  fieldingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
+    if (sortBy) params.set('sort_by', sortBy)
     if (limit) params.set('limit', limit)
     return request(`/leaderboard/fielding?${params}`)
   },

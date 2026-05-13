@@ -15,6 +15,7 @@ export function useClubTheme(club) {
     const style = document.createElement('style')
     style.id = 'club-theme'
     style.textContent = `
+      :root { --pb-accent: ${colour}; }
       .text-accent { color: ${colour} !important; }
       .bg-accent, .btn-primary { background-color: ${colour} !important; }
       .border-accent { border-color: ${colour} !important; }

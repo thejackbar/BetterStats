@@ -34,12 +34,16 @@ function SponsorBanner() {
 
 function MilestoneRow({ m }) {
   const pct = Math.round((m.current / m.target) * 100)
+  const milestoneLabel = m.target ? `${m.target?.toLocaleString()} ${m.type || ''}` : ''
   return (
     <Link to={`/players/${m.player_id}`} className="block hover:opacity-80 transition-opacity">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2 min-w-0">
           <ThiingIcon src={MILESTONE_ICON_SRC[m.type] || thiings.target} alt="" className="w-4 h-4" />
-          <span className="text-pb-text text-[13px] font-semibold truncate">{m.name}</span>
+          <div className="min-w-0">
+            <span className="text-pb-text text-[13px] font-semibold truncate block">{m.name}</span>
+            {milestoneLabel && <span className="font-mono text-[10px] text-pb-faint tracking-wide2">{milestoneLabel}</span>}
+          </div>
         </div>
         <span className="font-mono text-[11px] text-pb-dim ml-2 whitespace-nowrap">
           <span className="text-pb-text font-bold">{m.needed?.toLocaleString()}</span> to go
@@ -251,8 +255,8 @@ export default function Dashboard() {
         {/* Summary KPIs */}
         {summary && (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-              <Kpi label="WIN RATE" value={parseInt(summary.win_rate) || 0} suffix="%" accent />
+            <div className={`grid gap-3 mb-3 ${summary.total_games > 0 ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 sm:grid-cols-3'}`}>
+              {summary.total_games > 0 && <Kpi label="WIN RATE" value={parseInt(summary.win_rate) || 0} suffix="%" accent />}
               <Kpi label="TOTAL RUNS" value={summary.total_runs || 0} />
               <Kpi label="TOTAL WICKETS" value={summary.total_wickets || 0} />
               <Kpi label="PLAYERS" value={summary.total_players || 0} />
@@ -290,7 +294,7 @@ export default function Dashboard() {
                     <Link to={`/players/${p.player_id}`} className="flex-1 min-w-0">
                       <div className="text-pb-text text-[14px] font-semibold truncate">{p.name}</div>
                       <div className="text-pb-faint font-mono text-[10.5px] tracking-wide2">
-                        AVG {p.average ?? '—'} · SR {p.strike_rate ?? '—'} · HS {p.high_score ?? '—'}
+                        AVG {p.average ?? '—'} · HS {p.high_score ?? '—'}
                       </div>
                     </Link>
                     <span className="font-mono text-pb-text text-[14px] font-bold pb-num w-12 text-right" style={{ color: "var(--pb-accent)" }}>
@@ -315,7 +319,10 @@ export default function Dashboard() {
                     <Link to={`/players/${p.player_id}`} className="flex-1 min-w-0">
                       <div className="text-pb-text text-[14px] font-semibold truncate">{p.name}</div>
                       <div className="text-pb-faint font-mono text-[10.5px] tracking-wide2">
-                        AVG {p.average ?? '—'} · ECON {p.economy ?? '—'} · BEST {p.best_figures_wickets ?? '—'}
+                        AVG {p.average ?? '—'} · ECON {p.economy ?? '—'} · BEST {
+                          p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') :
+                          p.best_figures_wickets != null ? `${p.best_figures_wickets}w` : '—'
+                        }
                       </div>
                     </Link>
                     <span className="font-mono text-pb-text text-[14px] font-bold pb-num w-12 text-right" style={{ color: "var(--pb-accent)" }}>
