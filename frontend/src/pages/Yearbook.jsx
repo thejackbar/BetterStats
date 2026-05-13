@@ -97,9 +97,9 @@ function SectionCard({ title, label, children, className = '' }) {
   )
 }
 
-function StatCallout({ value, label, sub, accent = false }) {
+function StatCallout({ value, label, sub, accent = false, className = '' }) {
   return (
-    <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
+    <div className={`flex flex-col items-center justify-center py-6 px-4 text-center ${className}`}>
       <div
         className="text-5xl font-bold tabular-nums leading-none mb-2"
         style={{ color: accent ? 'var(--pb-accent)' : 'white' }}
@@ -140,7 +140,7 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
   return (
     <div className="space-y-8">
       {/* Headline stat trio */}
-      <div className="grid grid-cols-3 sm:grid-cols-5 gap-px bg-white/8 rounded-xl overflow-hidden">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-white/8 rounded-xl overflow-hidden">
         <StatCallout value={overview?.total_players ?? '—'} label="Players" accent />
         <StatCallout value={fmtRuns(overview?.total_runs)} label="Club Runs" />
         <StatCallout value={fmtRuns(overview?.total_wickets)} label="Wickets" />
@@ -148,6 +148,7 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
         <StatCallout
           value={totalGames > 0 ? `${Math.round(wins / totalGames * 100)}%` : '—'}
           label="Win Rate"
+          className="col-span-2 sm:col-span-1"
         />
       </div>
 
@@ -942,6 +943,16 @@ export default function Yearbook() {
   const [gradeId, setGradeId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const handleShare = () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  const handlePrint = () => window.print()
 
   useClubTheme(club)
 
@@ -1031,26 +1042,66 @@ export default function Yearbook() {
             : `linear-gradient(135deg, color-mix(in srgb, var(--pb-accent) 20%, var(--pb-bg)), var(--pb-bg))`,
         }}
       >
-        <div className="max-w-5xl mx-auto px-4 py-12 sm:py-16">
-          {club.logo_url && (
-            <img src={club.logo_url} alt={club.name} className="w-16 h-16 object-contain mb-4 opacity-90" />
-          )}
-          <div className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase mb-2">
-            {club.name} · Season Yearbook
+        <div className="max-w-5xl mx-auto px-4 py-10 sm:py-14">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              {club.logo_url && (
+                <img src={club.logo_url} alt={club.name} className="w-12 h-12 sm:w-16 sm:h-16 object-contain mb-3 opacity-90" />
+              )}
+              <div className="font-mono text-[10px] sm:text-[11px] tracking-wide3 text-white/40 uppercase mb-2">
+                {club.name} · Season Yearbook
+              </div>
+              <h1 className="text-2xl sm:text-4xl font-bold text-white leading-tight mb-2">
+                {season?.name || seasonSlug}
+              </h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                {yearbook.status === 'draft' && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono tracking-wide3 border border-white/20 text-white/40">
+                    DRAFT
+                  </span>
+                )}
+                {/* Season switcher */}
+                {yearbooks?.filter(yb => yb.status === 'published').length > 1 && (
+                  <select
+                    value={seasonSlug || ''}
+                    onChange={e => navigate(`/${clubSlug}/yearbook/${e.target.value}`)}
+                    className="print:hidden text-[11px] font-mono bg-white/8 border border-white/15 rounded px-2 py-1 text-white/60 focus:outline-none"
+                  >
+                    {yearbooks.filter(yb => yb.status === 'published').map(yb => {
+                      const sl = _seasonSlug(yb.season_name)
+                      return <option key={yb.season_id} value={sl}>{yb.season_name}</option>
+                    })}
+                  </select>
+                )}
+              </div>
+            </div>
+            {/* Hero actions */}
+            <div className="print:hidden flex flex-col sm:flex-row items-end sm:items-center gap-2 shrink-0 pt-1">
+              <button
+                onClick={handleShare}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-white/20 text-[11px] font-mono text-white/50 hover:text-white/70 hover:border-white/30 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                {copied ? 'Copied!' : 'Share'}
+              </button>
+              <button
+                onClick={handlePrint}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-white/20 text-[11px] font-mono text-white/50 hover:text-white/70 hover:border-white/30 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                Print
+              </button>
+            </div>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-bold text-white leading-tight mb-1">
-            {season?.name || seasonSlug}
-          </h1>
-          {yearbook.status === 'draft' && (
-            <span className="inline-block mt-2 px-2 py-0.5 rounded text-[10px] font-mono tracking-wide3 border border-white/20 text-white/40">
-              DRAFT — not published
-            </span>
-          )}
         </div>
       </div>
 
       {/* Tab bar + grade filter */}
-      <div className="sticky top-0 z-30 border-b border-white/8 backdrop-blur-sm"
+      <div className="print:hidden sticky top-0 z-30 border-b border-white/8 backdrop-blur-sm"
            style={{ background: 'color-mix(in srgb, var(--pb-bg) 92%, transparent)' }}>
         <div className="max-w-5xl mx-auto px-4">
           <div className="flex items-center justify-between gap-4">
