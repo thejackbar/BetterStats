@@ -27,6 +27,15 @@ function fmtScore(runs, wickets) {
   return `${runs}/${wickets}`
 }
 
+// Shorten "Firstname Lastname" → "F Lastname" in dismissal strings
+function fmtDismissal(text) {
+  if (!text) return '—'
+  return text.replace(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/g, match => {
+    const words = match.trim().split(/\s+/)
+    return `${words[0][0]} ${words[words.length - 1]}`
+  })
+}
+
 function MatchHeader({ game, innings }) {
   const dateStr = game.played_at
     ? new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()
@@ -61,18 +70,33 @@ function MatchHeader({ game, innings }) {
     }
   }
 
+  // Win/loss background tints
+  const winner = (game.winning_team || '').toLowerCase().trim()
+  const homeWon = !!winner && !!(homeTeam) && (
+    winner === homeTeam.toLowerCase().trim() ||
+    winner.includes(homeTeam.toLowerCase().split(' ')[0]) ||
+    homeTeam.toLowerCase().includes(winner.split(' ')[0])
+  )
+  const awayTeam = game.away_team || ''
+  const awayWon = !!winner && !homeWon
+  const winBg = 'rgba(22,199,132,0.07)'
+  const lossBg = 'rgba(220,38,38,0.07)'
+
   return (
     <div className="pb-card overflow-hidden mb-5">
       {/* Teams + scores — main hero */}
       <div className="grid grid-cols-[1fr_auto_1fr]">
         {/* Home */}
-        <div className="px-5 sm:px-8 pt-5 pb-4 flex flex-col items-center text-center gap-1">
+        <div
+          className="px-5 sm:px-8 pt-5 pb-4 flex flex-col items-center text-center gap-1"
+          style={winner ? { background: homeWon ? winBg : lossBg } : undefined}
+        >
           <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">HOME</div>
-          <div className="font-display font-bold text-[18px] sm:text-[22px] tracking-tight leading-tight" style={{ color: 'var(--pb-accent)' }}>
+          <div className="font-display font-bold text-[18px] sm:text-[22px] text-pb-text tracking-tight leading-tight">
             {homeTeam || '—'}
           </div>
           {homeInn && fmtScore(homeInn.runs, homeInn.wickets) != null && (
-            <div className="font-mono font-bold text-[36px] sm:text-[48px] leading-none" style={{ color: 'var(--pb-accent)' }}>
+            <div className="font-mono font-bold text-[36px] sm:text-[48px] leading-none" style={{ color: homeWon ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
               {fmtScore(homeInn.runs, homeInn.wickets)}
             </div>
           )}
@@ -103,13 +127,16 @@ function MatchHeader({ game, innings }) {
         </div>
 
         {/* Away */}
-        <div className="px-5 sm:px-8 pt-5 pb-4 flex flex-col items-center text-center gap-1">
+        <div
+          className="px-5 sm:px-8 pt-5 pb-4 flex flex-col items-center text-center gap-1"
+          style={winner ? { background: awayWon ? winBg : lossBg } : undefined}
+        >
           <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">AWAY</div>
           <div className="font-display font-bold text-[18px] sm:text-[22px] text-pb-text tracking-tight leading-tight">
-            {game.away_team || '—'}
+            {awayTeam || '—'}
           </div>
           {awayInn && fmtScore(awayInn.runs, awayInn.wickets) != null && (
-            <div className="font-mono font-bold text-[36px] sm:text-[48px] leading-none text-pb-dim">
+            <div className="font-mono font-bold text-[36px] sm:text-[48px] leading-none" style={{ color: awayWon ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
               {fmtScore(awayInn.runs, awayInn.wickets)}
             </div>
           )}
@@ -189,8 +216,8 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
                     : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
                   }
                 </td>
-                <td className="py-2 pr-5 font-mono text-[12px] capitalize whitespace-nowrap max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
-                  {row.not_out ? 'not out' : row.dismissal_type || '—'}
+                <td className="py-2 pr-5 font-mono text-[12px] whitespace-nowrap max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
+                  {row.not_out ? 'not out' : fmtDismissal(row.dismissal_type)}
                 </td>
                 <td className="py-2 px-3 text-right w-12">
                   <span
