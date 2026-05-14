@@ -107,16 +107,11 @@ async def list_seasons(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.routers.organisations import _season_sort_key
     result = await db.execute(
-        select(Season)
-        .where(Season.organisation_id == club.id)
-        .order_by(
-            Season.display_order.asc().nullslast(),
-            _text("CAST(SUBSTRING(seasons.name FROM '[0-9]{4}') AS INTEGER) DESC NULLS LAST"),
-            Season.name.desc(),
-        )
+        select(Season).where(Season.organisation_id == club.id)
     )
-    seasons = result.scalars().all()
+    seasons = sorted(result.scalars().all(), key=_season_sort_key)
     return [
         {"id": str(s.id), "name": s.name, "year": s.year, "synced_at": s.synced_at, "display_order": s.display_order}
         for s in seasons

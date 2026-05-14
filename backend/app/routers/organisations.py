@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
+import re as _re
 from pydantic import BaseModel
 import uuid
 from datetime import date
@@ -94,18 +95,19 @@ async def get_organisation(org_id: str, db: AsyncSession = Depends(get_db)):
     return org
 
 
+def _season_sort_key(s):
+    m = _re.search(r'[0-9]{4}', s.name or '')
+    year = int(m.group()) if m else 0
+    order = s.display_order if s.display_order is not None else 999999
+    return (order, -year, s.name or '')
+
+
 @router.get("/{org_id}/seasons")
 async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(Season)
-        .where(Season.organisation_id == uuid.UUID(org_id))
-        .order_by(
-            Season.display_order.asc().nullslast(),
-            text("CAST(SUBSTRING(seasons.name FROM '[0-9]{4}') AS INTEGER) DESC NULLS LAST"),
-            Season.name.desc(),
-        )
+        select(Season).where(Season.organisation_id == uuid.UUID(org_id))
     )
-    seasons = result.scalars().all()
+    seasons = sorted(result.scalars().all(), key=_season_sort_key)
     return [
         {"id": str(s.id), "name": s.name, "year": s.year, "synced_at": s.synced_at}
         for s in seasons
