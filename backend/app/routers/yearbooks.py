@@ -224,25 +224,48 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
         """),
         {"o": org_id},
     )
+    # Empty `season` means "All Time" in the Achievements admin form.
+    # Empty `season_end` (for Office Bearer) means "Present" — role is ongoing
+    # — and therefore should appear on every yearbook from the start year on.
     match_key_set = set(match_keys)
     pulled_rows = []
     for row in all_ach.mappings().all():
         s_token, e_token = row["season"], row["season_end"]
+
+        if not s_token:
+            pulled_rows.append(dict(row))
+            continue
+
         if s_token in match_key_set or (e_token and e_token in match_key_set):
             pulled_rows.append(dict(row))
             continue
+
         if target_year is None:
             continue
-        s_year, e_year = _year_from(s_token), _year_from(e_token)
+
+        s_year = _year_from(s_token)
         if s_year is None:
             continue
-        if e_year is None:
-            if s_year == target_year:
-                pulled_rows.append(dict(row))
-        else:
+
+        if e_token:
+            e_year = _year_from(e_token)
+            if e_year is None:
+                if s_year == target_year:
+                    pulled_rows.append(dict(row))
+                continue
             lo, hi = (s_year, e_year) if s_year <= e_year else (e_year, s_year)
             if lo <= target_year <= hi:
                 pulled_rows.append(dict(row))
+        else:
+            # No season_end: for Office Bearer this is the "Present" sentinel
+            # → ongoing, match any year from the start onward. Other categories
+            # are single-season.
+            if row["category"] == "Office Bearer":
+                if target_year >= s_year:
+                    pulled_rows.append(dict(row))
+            else:
+                if s_year == target_year:
+                    pulled_rows.append(dict(row))
 
     return {
         **yb,
