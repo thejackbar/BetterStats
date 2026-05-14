@@ -763,6 +763,7 @@ async def get_grade_breakdown(
 
     result = []
     for grade in grade_list:
+        gid = str(grade["id"])
         stats = await db.execute(
             text("""
                 SELECT
@@ -771,9 +772,13 @@ async def get_grade_breakdown(
                     SUM(pss.wickets) AS wickets,
                     MAX(pss.high_score) AS high_score
                 FROM player_season_stats pss
-                WHERE pss.season_id = :s AND pss.grade_id = :gid
+                WHERE pss.season_id = :s
+                  AND pss.player_id IN (
+                      SELECT DISTINCT bi.player_id FROM batting_innings bi
+                      JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid
+                  )
             """),
-            {"s": season_id, "gid": str(grade["id"])},
+            {"s": season_id, "gid": gid},
         )
         grade_stats = dict(stats.mappings().first() or {})
 
@@ -782,11 +787,15 @@ async def get_grade_breakdown(
             text("""
                 SELECT COALESCE(p.display_name_override, p.name) AS name, p.id, SUM(pss.runs) AS runs
                 FROM player_season_stats pss JOIN players p ON p.id = pss.player_id
-                WHERE pss.season_id = :s AND pss.grade_id = :gid
+                WHERE pss.season_id = :s
+                  AND pss.player_id IN (
+                      SELECT DISTINCT bi.player_id FROM batting_innings bi
+                      JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid
+                  )
                 GROUP BY p.id, p.name, p.display_name_override
                 ORDER BY SUM(pss.runs) DESC NULLS LAST LIMIT 1
             """),
-            {"s": season_id, "gid": str(grade["id"])},
+            {"s": season_id, "gid": gid},
         )
         top_bat = dict(tb.mappings().first() or {})
 
@@ -795,11 +804,15 @@ async def get_grade_breakdown(
             text("""
                 SELECT COALESCE(p.display_name_override, p.name) AS name, p.id, SUM(pss.wickets) AS wickets
                 FROM player_season_stats pss JOIN players p ON p.id = pss.player_id
-                WHERE pss.season_id = :s AND pss.grade_id = :gid
+                WHERE pss.season_id = :s
+                  AND pss.player_id IN (
+                      SELECT DISTINCT bs.player_id FROM bowling_spells bs
+                      JOIN games gm ON gm.id = bs.game_id WHERE gm.grade_id = :gid
+                  )
                 GROUP BY p.id, p.name, p.display_name_override
                 ORDER BY SUM(pss.wickets) DESC NULLS LAST LIMIT 1
             """),
-            {"s": season_id, "gid": str(grade["id"])},
+            {"s": season_id, "gid": gid},
         )
         top_bowl = dict(tw.mappings().first() or {})
 
@@ -1289,7 +1302,7 @@ Write 3–4 paragraphs as a warm, conversational club yearbook narrative. Rules:
 - Tone: casual and warm, like a club member who cares about the team wrote it — not corporate
 - Do NOT use nicknames unless they appear in the data
 - Do NOT use bullet points or headings — flowing prose only
-- Keep it under 350 words"""
+- Aim for 450–500 words — enough to fill a full page of the yearbook"""
 
 
 @router.post("/{org_id}/{season_id}/generate-narrative")
@@ -1420,10 +1433,10 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
 
     prompt = _build_narrative_prompt(org_name, season_name, overview, batting, bowling, superlatives, milestones)
 
-    client = anthropic_sdk.Anthropic(api_key=settings.anthropic_api_key)
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=600,
+    client = anthropic_sdk.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    message = await client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=800,
         messages=[{"role": "user", "content": prompt}],
     )
     narrative_text = message.content[0].text.strip()
