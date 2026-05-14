@@ -806,8 +806,7 @@ async def get_grade_breakdown(
             text("""
                 SELECT
                     COUNT(DISTINCT bi.player_id) AS players,
-                    SUM(bi.runs) AS runs,
-                    MAX(bi.runs) AS high_score
+                    SUM(bi.runs) AS runs
                 FROM batting_innings bi
                 JOIN games gm ON gm.id = bi.game_id
                 JOIN players p ON p.id = bi.player_id
@@ -816,6 +815,22 @@ async def get_grade_breakdown(
             {"gids": gids, "o": org_id},
         )
         grade_bat_stats = dict(stats.mappings().first() or {})
+
+        # High score with player name
+        hs = await db.execute(
+            text("""
+                SELECT bi.runs AS high_score, bi.not_out,
+                    COALESCE(p.display_name_override, p.name) AS high_score_name,
+                    p.id AS high_score_player_id
+                FROM batting_innings bi
+                JOIN games gm ON gm.id = bi.game_id
+                JOIN players p ON p.id = bi.player_id
+                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
+                ORDER BY bi.runs DESC NULLS LAST LIMIT 1
+            """),
+            {"gids": gids, "o": org_id},
+        )
+        hs_row = dict(hs.mappings().first() or {})
 
         wkt_stats = await db.execute(
             text("""
@@ -862,6 +877,22 @@ async def get_grade_breakdown(
         )
         top_bowl = dict(tw.mappings().first() or {})
 
+        # Best bowling figures in a single spell for this grade
+        bb = await db.execute(
+            text("""
+                SELECT bs.wickets AS bb_wickets, bs.runs_conceded AS bb_runs,
+                    COALESCE(p.display_name_override, p.name) AS bb_name,
+                    p.id AS bb_player_id
+                FROM bowling_spells bs
+                JOIN games gm ON gm.id = bs.game_id
+                JOIN players p ON p.id = bs.player_id
+                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
+                ORDER BY bs.wickets DESC NULLS LAST, bs.runs_conceded ASC NULLS LAST LIMIT 1
+            """),
+            {"gids": gids, "o": org_id},
+        )
+        bb_row = dict(bb.mappings().first() or {})
+
         # Wins and losses across all grade IDs with this name
         wl = await db.execute(
             text("""
@@ -879,7 +910,16 @@ async def get_grade_breakdown(
             "name": grade["name"],
             "game_count": grade["game_count"],
             **grade_stats,
+            **grade_bowl_stats,
             **wl_stats,
+            "high_score": hs_row.get("high_score"),
+            "high_score_not_out": hs_row.get("not_out"),
+            "high_score_name": hs_row.get("high_score_name"),
+            "high_score_player_id": hs_row.get("high_score_player_id"),
+            "best_bowling_wickets": bb_row.get("bb_wickets"),
+            "best_bowling_runs": bb_row.get("bb_runs"),
+            "best_bowling_name": bb_row.get("bb_name"),
+            "best_bowling_player_id": bb_row.get("bb_player_id"),
             "top_batter": top_bat,
             "top_bowler": top_bowl,
         })
