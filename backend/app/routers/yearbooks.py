@@ -223,11 +223,11 @@ async def get_overview(
         text(f"""
             SELECT
                 COUNT(*) AS total_games,
-                COUNT(*) FILTER (WHERE gm.result = 'won') AS wins,
-                COUNT(*) FILTER (WHERE gm.result = 'lost') AS losses,
-                COUNT(*) FILTER (WHERE gm.result = 'draw') AS draws,
-                COUNT(*) FILTER (WHERE gm.result = 'tie') AS ties,
-                COUNT(*) FILTER (WHERE gm.result NOT IN ('won','lost','draw','tie') OR gm.result IS NULL) AS other
+                COUNT(*) FILTER (WHERE LOWER(gm.result) = 'won') AS wins,
+                COUNT(*) FILTER (WHERE LOWER(gm.result) = 'lost') AS losses,
+                COUNT(*) FILTER (WHERE LOWER(gm.result) = 'draw') AS draws,
+                COUNT(*) FILTER (WHERE LOWER(gm.result) = 'tie') AS ties,
+                COUNT(*) FILTER (WHERE LOWER(gm.result) NOT IN ('won','lost','draw','tie') OR gm.result IS NULL) AS other
             FROM games gm
             JOIN grades g ON g.id = gm.grade_id
             WHERE g.season_id = :s
@@ -551,12 +551,45 @@ async def get_superlatives(
     )
     most_ducks = dict(md.mappings().first() or {})
 
+    # Most runs in a season (individual)
+    mr_ind = await db.execute(
+        text(f"""
+            SELECT p.id AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   SUM(pss.runs) AS runs,
+                   ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average
+            FROM player_season_stats pss JOIN players p ON p.id = pss.player_id
+            WHERE pss.season_id = :s AND p.organisation_id = :o
+            GROUP BY p.id, p.name, p.display_name_override
+            ORDER BY SUM(pss.runs) DESC NULLS LAST LIMIT 1
+        """),
+        params,
+    )
+    most_runs = dict(mr_ind.mappings().first() or {})
+
+    # Most wickets in a season (individual)
+    mw_ind = await db.execute(
+        text(f"""
+            SELECT p.id AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   SUM(pss.wickets) AS wickets,
+                   ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average
+            FROM player_season_stats pss JOIN players p ON p.id = pss.player_id
+            WHERE pss.season_id = :s AND p.organisation_id = :o
+            GROUP BY p.id, p.name, p.display_name_override
+            HAVING SUM(pss.wickets) > 0
+            ORDER BY SUM(pss.wickets) DESC NULLS LAST LIMIT 1
+        """),
+        params,
+    )
+    most_wickets = dict(mw_ind.mappings().first() or {})
+
     return {
         "highest_score": highest_score,
         "best_bowling": best_bowling,
         "best_partnership": best_partnership,
         "highest_team_innings": highest_team_innings,
         "most_ducks": most_ducks,
+        "most_runs": most_runs,
+        "most_wickets": most_wickets,
     }
 
 
@@ -751,11 +784,14 @@ async def get_grade_breakdown(
 
     grades = await db.execute(
         text("""
-            SELECT DISTINCT g.id, g.name
+            SELECT DISTINCT ON (g.name) g.id, g.name,
+                COUNT(gm.id) AS game_count
             FROM grades g
             JOIN seasons s ON s.id = g.season_id
+            LEFT JOIN games gm ON gm.grade_id = g.id
             WHERE g.season_id = :s AND s.organisation_id = :o
-            ORDER BY g.name
+            GROUP BY g.id, g.name
+            ORDER BY g.name, COUNT(gm.id) DESC
         """),
         params,
     )
@@ -816,9 +852,22 @@ async def get_grade_breakdown(
         )
         top_bowl = dict(tw.mappings().first() or {})
 
+        # Wins and losses for this grade
+        wl = await db.execute(
+            text("""
+                SELECT
+                    COUNT(*) FILTER (WHERE LOWER(gm.result) = 'won') AS wins,
+                    COUNT(*) FILTER (WHERE LOWER(gm.result) = 'lost') AS losses
+                FROM games gm WHERE gm.grade_id = :gid
+            """),
+            {"gid": gid},
+        )
+        wl_stats = dict(wl.mappings().first() or {})
+
         result.append({
             **grade,
             **grade_stats,
+            **wl_stats,
             "top_batter": top_bat,
             "top_bowler": top_bowl,
         })
@@ -1346,9 +1395,9 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
 
     games_row = await db.execute(text("""
         SELECT
-            COUNT(*) FILTER (WHERE gm.result = 'won') AS wins,
-            COUNT(*) FILTER (WHERE gm.result = 'lost') AS losses,
-            COUNT(*) FILTER (WHERE gm.result = 'draw') AS draws
+            COUNT(*) FILTER (WHERE LOWER(gm.result) = 'won') AS wins,
+            COUNT(*) FILTER (WHERE LOWER(gm.result) = 'lost') AS losses,
+            COUNT(*) FILTER (WHERE LOWER(gm.result) = 'draw') AS draws
         FROM games gm
         JOIN grades g ON g.id = gm.grade_id
         WHERE g.season_id = :s
