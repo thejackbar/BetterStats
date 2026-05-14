@@ -443,6 +443,7 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
 function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
   const [data, setData] = useState(null)
   const [dismissals, setDismissals] = useState(null)
+  const [partnerships, setPartnerships] = useState(null)
   const [minInnings, setMinInnings] = useState(1)
   const [loading, setLoading] = useState(true)
 
@@ -451,9 +452,11 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
     Promise.all([
       api.getYearbookBatting(orgId, seasonId, { gradeId, minInnings }),
       api.getYearbookDismissals(orgId, seasonId, gradeId),
-    ]).then(([b, d]) => {
+      api.getYearbookPartnerships(orgId, seasonId, gradeId),
+    ]).then(([b, d, p]) => {
       setData(b)
       setDismissals(d)
+      setPartnerships(p)
     }).finally(() => setLoading(false))
   }, [orgId, seasonId, gradeId, minInnings])
 
@@ -582,6 +585,49 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
           </SectionCard>
         )
       })()}
+
+      {partnerships && (
+        <div className="grid sm:grid-cols-2 gap-6">
+          <SectionCard title="Top Partnerships">
+            {partnerships.top_partnerships?.length ? (
+              <YbTable
+                headers={['Batters', 'Wkt', 'Runs']}
+                rows={partnerships.top_partnerships.map((p, i) => [
+                  <span>
+                    <span className="font-mono text-[11px] text-white/25 mr-2">{i + 1}</span>
+                    <PlayerLink id={p.batter1_id} name={p.batter1_name} slug={clubSlug} />
+                    <span className="text-white/40 mx-1">&amp;</span>
+                    <PlayerLink id={p.batter2_id} name={p.batter2_name} slug={clubSlug} />
+                  </span>,
+                  ORDINALS[(p.wicket_number || 1) - 1],
+                  <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.runs}</span>,
+                ])}
+              />
+            ) : (
+              <p className="text-white/30 text-sm italic px-5 py-4">No partnership data.</p>
+            )}
+          </SectionCard>
+
+          <SectionCard title="Best Partnership by Wicket">
+            {partnerships.by_wicket?.length ? (
+              <YbTable
+                headers={['Wicket', 'Batters', 'Runs']}
+                rows={partnerships.by_wicket.map(p => [
+                  <span className="text-white/50">{ORDINALS[(p.wicket_number || 1) - 1]}</span>,
+                  <span>
+                    <PlayerLink id={p.batter1_id} name={p.batter1_name} slug={clubSlug} />
+                    <span className="text-white/40 mx-1">&amp;</span>
+                    <PlayerLink id={p.batter2_id} name={p.batter2_name} slug={clubSlug} />
+                  </span>,
+                  <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.runs}</span>,
+                ])}
+              />
+            ) : (
+              <p className="text-white/30 text-sm italic px-5 py-4">No partnership data.</p>
+            )}
+          </SectionCard>
+        </div>
+      )}
     </div>
   )
 }
@@ -590,19 +636,14 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
 
 function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
   const [data, setData] = useState(null)
-  const [partnerships, setPartnerships] = useState(null)
   const [minWickets, setMinWickets] = useState(1)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([
-      api.getYearbookBowling(orgId, seasonId, { gradeId, minWickets }),
-      api.getYearbookPartnerships(orgId, seasonId, gradeId),
-    ]).then(([b, p]) => {
-      setData(b)
-      setPartnerships(p)
-    }).finally(() => setLoading(false))
+    api.getYearbookBowling(orgId, seasonId, { gradeId, minWickets })
+      .then(setData)
+      .finally(() => setLoading(false))
   }, [orgId, seasonId, gradeId, minWickets])
 
   if (loading) return <PbSpinner />
@@ -673,48 +714,6 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
         </SectionCard>
       )}
 
-      {partnerships && (
-        <div className="grid sm:grid-cols-2 gap-6">
-          <SectionCard title="Top Partnerships">
-            {partnerships.top_partnerships?.length ? (
-              <YbTable
-                headers={['Batters', 'Wkt', 'Runs']}
-                rows={partnerships.top_partnerships.map((p, i) => [
-                  <span>
-                    <span className="font-mono text-[11px] text-white/25 mr-2">{i + 1}</span>
-                    <PlayerLink id={p.batter1_id} name={p.batter1_name} slug={clubSlug} />
-                    <span className="text-white/40 mx-1">&amp;</span>
-                    <PlayerLink id={p.batter2_id} name={p.batter2_name} slug={clubSlug} />
-                  </span>,
-                  ORDINALS[(p.wicket_number || 1) - 1],
-                  <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.runs}</span>,
-                ])}
-              />
-            ) : (
-              <p className="text-white/30 text-sm italic px-5 py-4">No partnership data.</p>
-            )}
-          </SectionCard>
-
-          <SectionCard title="Best Partnership by Wicket">
-            {partnerships.by_wicket?.length ? (
-              <YbTable
-                headers={['Wicket', 'Batters', 'Runs']}
-                rows={partnerships.by_wicket.map(p => [
-                  <span className="text-white/50">{ORDINALS[(p.wicket_number || 1) - 1]}</span>,
-                  <span>
-                    <PlayerLink id={p.batter1_id} name={p.batter1_name} slug={clubSlug} />
-                    <span className="text-white/40 mx-1">&amp;</span>
-                    <PlayerLink id={p.batter2_id} name={p.batter2_name} slug={clubSlug} />
-                  </span>,
-                  <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.runs}</span>,
-                ])}
-              />
-            ) : (
-              <p className="text-white/30 text-sm italic px-5 py-4">No partnership data.</p>
-            )}
-          </SectionCard>
-        </div>
-      )}
     </div>
   )
 }
