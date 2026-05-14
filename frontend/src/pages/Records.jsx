@@ -29,7 +29,6 @@ function RankNum({ rank }) {
   )
 }
 
-// Badge shown on records set in the most recent season
 function NewBadge() {
   return (
     <span className="ml-1.5 font-mono text-[9px] tracking-wide2 px-1 py-0.5 rounded"
@@ -79,12 +78,9 @@ function RecordTable({ headers, rows }) {
   )
 }
 
-// ── Batting tab ────────────────────────────────────────────────────────
 function BattingTab({ data, latestSeason }) {
   if (!data) return <PbSpinner />
-
   const isNew = (seasonName) => latestSeason && seasonName && seasonName === latestSeason
-
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <RecordSection title="MOST CAREER RUNS" empty={!data.top_career_runs?.length}>
@@ -97,7 +93,6 @@ function BattingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="HIGHEST INDIVIDUAL SCORES" empty={!data.top_high_scores?.length}>
         <RecordTable
           headers={['Player', 'Score', 'Season']}
@@ -108,7 +103,6 @@ function BattingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="BEST BATTING AVERAGE" filter="MIN. 10 DISMISSALS" empty={!data.top_batting_avg?.length}>
         <RecordTable
           headers={['Player', 'Avg', 'M', 'Runs', 'Inn']}
@@ -119,7 +113,6 @@ function BattingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="MOST HUNDREDS" empty={!data.most_hundreds?.length}>
         <RecordTable
           headers={['Player', '100s', 'M', 'Runs']}
@@ -130,7 +123,6 @@ function BattingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="MOST FIFTIES" empty={!data.most_fifties?.length}>
         <RecordTable
           headers={['Player', '50s', 'M', 'Runs']}
@@ -141,7 +133,6 @@ function BattingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       {data.most_runs_season?.length > 0 && (
         <RecordSection title="MOST RUNS IN A SEASON">
           <RecordTable
@@ -154,7 +145,6 @@ function BattingTab({ data, latestSeason }) {
           />
         </RecordSection>
       )}
-
       {data.most_sixes?.length > 0 && (
         <RecordSection title="MOST SIXES (CAREER)">
           <RecordTable
@@ -171,12 +161,9 @@ function BattingTab({ data, latestSeason }) {
   )
 }
 
-// ── Bowling tab ────────────────────────────────────────────────────────
 function BowlingTab({ data, latestSeason }) {
   if (!data) return <PbSpinner />
-
   const isNew = (seasonName) => latestSeason && seasonName && seasonName === latestSeason
-
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <RecordSection title="MOST CAREER WICKETS" empty={!data.top_career_wickets?.length}>
@@ -189,7 +176,6 @@ function BowlingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="BEST INNINGS FIGURES" empty={!data.best_innings_figures?.length}>
         <RecordTable
           headers={['Player', 'Figures', 'Season']}
@@ -200,7 +186,6 @@ function BowlingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="BEST BOWLING AVERAGE" filter="MIN. 20 WICKETS" empty={!data.top_bowling_avg?.length}>
         <RecordTable
           headers={['Player', 'Avg', 'Wkts', 'M']}
@@ -211,7 +196,6 @@ function BowlingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="BEST ECONOMY RATE" filter="MIN. 50 OVERS" empty={!data.top_economy?.length}>
         <RecordTable
           headers={['Player', 'Econ', 'Wkts', 'Ov']}
@@ -222,7 +206,6 @@ function BowlingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       {data.most_five_fors?.length > 0 && (
         <RecordSection title="MOST FIVE-WICKET HAULS">
           <RecordTable
@@ -235,7 +218,6 @@ function BowlingTab({ data, latestSeason }) {
           />
         </RecordSection>
       )}
-
       {data.most_wickets_season?.length > 0 && (
         <RecordSection title="MOST WICKETS IN A SEASON">
           <RecordTable
@@ -252,11 +234,9 @@ function BowlingTab({ data, latestSeason }) {
   )
 }
 
-// ── Partnerships tab ────────────────────────────────────────────────────
 function PartnershipsTab({ data }) {
   if (!data) return <PbSpinner />
 
-  // Build the all-time records table: best partnership per wicket position (wicket_1[0]..wicket_10[0])
   const allTimeRecords = ORDINALS.map((ord, wi) => {
     const rec = (data[`wicket_${wi + 1}`] || [])[0]
     if (!rec) return null
@@ -265,7 +245,6 @@ function PartnershipsTab({ data }) {
 
   return (
     <div className="space-y-6">
-      {/* All-Time Records: best partnership per wicket position */}
       {allTimeRecords.length > 0 && (
         <div className="pb-card overflow-hidden">
           <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
@@ -288,7 +267,7 @@ function PartnershipsTab({ data }) {
                     <td className="py-2.5 px-3 font-mono text-pb-faint">{r.ordinal}</td>
                     <td className="py-2.5 px-3">
                       <PlayerLink id={r.player1_id} name={r.player1_name} />
-                      <span className="text-pb-faintest mx-1">&</span>
+                      <span className="text-pb-faintest mx-1">&amp;</span>
                       <PlayerLink id={r.player2_id} name={r.player2_name} />
                     </td>
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
@@ -301,7 +280,6 @@ function PartnershipsTab({ data }) {
         </div>
       )}
 
-      {/* Top 25 partnerships across all grades and wickets */}
       {data.top_partnerships?.length > 0 && (
         <div className="pb-card overflow-hidden">
           <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
@@ -324,7 +302,7 @@ function PartnershipsTab({ data }) {
                     <td className="py-2.5 px-3 font-mono text-pb-faint"><RankNum rank={i+1} /></td>
                     <td className="py-2.5 px-3">
                       <PlayerLink id={r.player1_id} name={r.player1_name} />
-                      <span className="text-pb-faintest mx-1">&</span>
+                      <span className="text-pb-faintest mx-1">&amp;</span>
                       <PlayerLink id={r.player2_id} name={r.player2_name} />
                     </td>
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
@@ -337,7 +315,6 @@ function PartnershipsTab({ data }) {
         </div>
       )}
 
-      {/* Per-grade partnership records (best per wicket within each grade) */}
       {data.by_grade && Object.entries(data.by_grade).length > 0 && (
         <div className="pb-card overflow-hidden">
           <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
@@ -363,7 +340,7 @@ function PartnershipsTab({ data }) {
                         <td className="py-2 px-3 font-mono text-pb-faint">{ORDINALS[(r.wicket_number || 1) - 1]}</td>
                         <td className="py-2 px-3">
                           <PlayerLink id={r.player1_id} name={r.player1_name} />
-                          <span className="text-pb-faintest mx-1">&</span>
+                          <span className="text-pb-faintest mx-1">&amp;</span>
                           <PlayerLink id={r.player2_id} name={r.player2_name} />
                         </td>
                         <td className="py-2 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
@@ -384,10 +361,8 @@ function PartnershipsTab({ data }) {
   )
 }
 
-// ── Team tab ─────────────────────────────────────────────────────────────
 function TeamTab({ data }) {
   if (!data) return <PbSpinner />
-
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <RecordSection title="MOST MATCHES PLAYED" empty={!data.most_matches?.length}>
@@ -400,7 +375,6 @@ function TeamTab({ data }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="MOST SEASONS PLAYED" empty={!data.most_seasons?.length}>
         <RecordTable
           headers={['Player', 'Seasons', 'Matches']}
@@ -415,10 +389,8 @@ function TeamTab({ data }) {
   )
 }
 
-// ── All-Rounders tab ──────────────────────────────────────────────────────
 function AllRoundersTab({ data }) {
   if (!data) return <PbSpinner />
-
   return (
     <div className="space-y-4">
       <div className="pb-card overflow-hidden">
@@ -501,7 +473,6 @@ export default function Records() {
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
-  // Most recent season name for "NEW" badge detection
   const latestSeason = seasons?.[0]?.name || null
 
   return (
@@ -512,8 +483,6 @@ export default function Records() {
           title="The record books."
           meta={[<span key="x">Every club benchmark, since day one.</span>]}
         />
-
-        {/* Filters */}
         <div className="mb-5">
           <SeasonSelector
             seasons={seasons}
@@ -524,10 +493,7 @@ export default function Records() {
             setSelectedGrade={setSelectedGrade}
           />
         </div>
-
-        {/* Tabs */}
         <TabBar tabs={TABS} active={tab} onChange={setTab} />
-
         {loading ? <PbSpinner message="Loading records…" /> : !records ? (
           <p className="text-pb-faint text-sm py-8 text-center">No records data available.</p>
         ) : (

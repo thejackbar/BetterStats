@@ -13,23 +13,24 @@ async def get_career_batting(session: AsyncSession, player_id: str, season_id: O
         text(f"""
             SELECT
                 p.id AS player_id,
-                p.name,
-                p.organisation_id,
+                COALESCE(p.display_name_override, p.name) AS name,
                 COALESCE(SUM(pss.batting_innings), 0) AS innings,
                 COALESCE(SUM(pss.runs), 0) AS total_runs,
+                COALESCE(SUM(pss.not_outs), 0) AS not_outs,
                 MAX(pss.high_score) AS high_score,
-                ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average,
-                ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2) AS strike_rate,
-                COALESCE(SUM(pss.fifties), 0) AS fifties,
-                COALESCE(SUM(pss.hundreds), 0) AS hundreds,
+                ROUND(
+                    SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0),
+                    2
+                ) AS average,
                 COALESCE(SUM(pss.fours), 0) AS total_fours,
                 COALESCE(SUM(pss.sixes), 0) AS total_sixes,
                 COALESCE(SUM(pss.ducks), 0) AS ducks,
-                COALESCE(SUM(pss.matches), 0) AS games
-            FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id{season_clause}
-            WHERE p.id = :pid
-            GROUP BY p.id, p.name, p.organisation_id
+                COALESCE(SUM(pss.fifties), 0) AS fifties,
+                COALESCE(SUM(pss.hundreds), 0) AS hundreds
+            FROM player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            WHERE pss.player_id = :pid {season_clause}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """),
         params,
     )
@@ -46,22 +47,19 @@ async def get_career_bowling(session: AsyncSession, player_id: str, season_id: O
         text(f"""
             SELECT
                 p.id AS player_id,
-                p.name,
-                p.organisation_id,
-                COALESCE(SUM(pss.matches), 0) AS games,
+                COALESCE(p.display_name_override, p.name) AS name,
                 COALESCE(SUM(pss.wickets), 0) AS total_wickets,
+                COALESCE(SUM(pss.overs), 0) AS total_overs,
+                COALESCE(SUM(pss.maidens), 0) AS total_maidens,
                 ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average,
                 ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy,
+                COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
                 MAX(pss.best_bowling_wickets) AS best_figures_wickets,
-                MAX(pss.best_bowling_figures) AS best_bowling_figures,
-                COALESCE(SUM(pss.maidens), 0) AS total_maidens,
-                COALESCE(SUM(pss.overs), 0) AS total_overs,
-                COALESCE(SUM(pss.runs_conceded), 0) AS total_runs,
-                COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors
-            FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id{season_clause}
-            WHERE p.id = :pid
-            GROUP BY p.id, p.name, p.organisation_id
+                MAX(pss.best_bowling_figures) AS best_bowling_figures
+            FROM player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            WHERE pss.player_id = :pid {season_clause}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """),
         params,
     )
@@ -77,83 +75,16 @@ async def get_career_fielding(session: AsyncSession, player_id: str, season_id: 
     result = await session.execute(
         text(f"""
             SELECT
-                p.id AS player_id,
-                p.name,
-                p.organisation_id,
-                COALESCE(SUM(pss.matches), 0) AS games,
                 COALESCE(SUM(pss.catches), 0) AS total_catches,
-                COALESCE(SUM(pss.catches_wk), 0) AS total_catches_wk,
-                COALESCE(SUM(pss.catches_non_wk), 0) AS total_catches_non_wk,
                 COALESCE(SUM(pss.run_outs), 0) AS total_run_outs,
-                COALESCE(SUM(pss.assisted_run_outs), 0) AS total_assisted_run_outs,
-                COALESCE(SUM(pss.unassisted_run_outs), 0) AS total_unassisted_run_outs,
-                COALESCE(SUM(pss.stumpings), 0) AS total_stumpings,
-                COALESCE(SUM(pss.catches + pss.run_outs + pss.stumpings), 0) AS total_dismissals
-            FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id{season_clause}
-            WHERE p.id = :pid
-            GROUP BY p.id, p.name, p.organisation_id
+                COALESCE(SUM(pss.stumpings), 0) AS total_stumpings
+            FROM player_season_stats pss
+            WHERE pss.player_id = :pid {season_clause}
         """),
         params,
     )
     row = result.mappings().first()
     return dict(row) if row else None
-
-
-async def get_batting_leaderboard(
-    session: AsyncSession,
-    org_id: str,
-    season_id: Optional[str] = None,
-    grade_id: Optional[str] = None,
-    limit: int = 20,
-) -> list[dict]:
-    return await get_batting_leaderboard_extended(session, org_id, season_id, grade_id, "total_runs", limit)
-
-
-async def get_bowling_leaderboard(
-    session: AsyncSession,
-    org_id: str,
-    season_id: Optional[str] = None,
-    grade_id: Optional[str] = None,
-    limit: int = 20,
-) -> list[dict]:
-    return await get_bowling_leaderboard_extended(session, org_id, season_id, grade_id, "total_wickets", limit)
-
-
-async def get_fielding_leaderboard(
-    session: AsyncSession,
-    org_id: str,
-    season_id: Optional[str] = None,
-    grade_id: Optional[str] = None,
-    sort_by: str = "total_dismissals",
-    limit: int = 20,
-) -> list[dict]:
-    ALLOWED_SORTS = {"total_catches", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
-    if sort_by not in ALLOWED_SORTS:
-        sort_by = "total_dismissals"
-
-    base = """
-        SELECT
-            p.id AS player_id,
-            COALESCE(p.display_name_override, p.name) AS name,
-            SUM(pss.matches) AS games,
-            SUM(pss.catches) AS total_catches,
-            SUM(pss.run_outs) AS total_run_outs,
-            SUM(pss.stumpings) AS total_stumpings,
-            SUM(pss.catches + pss.run_outs + pss.stumpings) AS total_dismissals
-        FROM player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        JOIN seasons s ON s.id = pss.season_id
-        WHERE p.organisation_id = :org_id
-    """
-    params: dict = {"org_id": org_id, "limit": limit}
-    if season_id:
-        base += " AND pss.season_id = :season_id"
-        params["season_id"] = season_id
-    base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
-
-    result = await session.execute(text(base), params)
-    return [dict(r) for r in result.mappings()]
 
 
 async def get_player_batting_innings(
@@ -162,40 +93,41 @@ async def get_player_batting_innings(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
 ) -> list[dict]:
-    clauses = ["bi.player_id = :pid"]
     params: dict = {"pid": player_id}
+    clauses = ["bi.player_id = :pid"]
     if season_id:
         clauses.append("s.id = :sid")
         params["sid"] = season_id
     if grade_id:
-        clauses.append("gr.id = :gid")
+        clauses.append("g.grade_id = :gid")
         params["gid"] = grade_id
     where = " AND ".join(clauses)
     result = await session.execute(
         text(f"""
             SELECT
+                bi.id,
+                bi.game_id,
+                bi.player_id,
+                bi.innings_number,
+                bi.batting_position,
                 bi.runs,
-                bi.balls,
+                bi.not_out,
+                bi.dismissal_type,
+                bi.dismissal_bowler_id,
+                bi.dismissal_fielder_id,
                 bi.fours,
                 bi.sixes,
+                bi.balls_faced,
                 bi.strike_rate,
-                bi.dismissal_type,
-                bi.not_out,
-                bi.batting_position,
-                bi.innings_number,
-                g.home_team,
-                g.away_team,
-                g.played_at::text,
-                g.result,
+                g.played_at,
                 gr.name AS grade_name,
-                s.name AS season_name,
-                s.year AS season_year
+                s.name AS season_name
             FROM batting_innings bi
             JOIN games g ON g.id = bi.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             WHERE {where}
-            ORDER BY g.played_at DESC
+            ORDER BY g.played_at DESC NULLS LAST
         """),
         params,
     )
@@ -208,18 +140,22 @@ async def get_player_bowling_spells(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
 ) -> list[dict]:
-    clauses = ["bs.player_id = :pid"]
     params: dict = {"pid": player_id}
+    clauses = ["bs.player_id = :pid"]
     if season_id:
         clauses.append("s.id = :sid")
         params["sid"] = season_id
     if grade_id:
-        clauses.append("gr.id = :gid")
+        clauses.append("g.grade_id = :gid")
         params["gid"] = grade_id
     where = " AND ".join(clauses)
     result = await session.execute(
         text(f"""
             SELECT
+                bs.id,
+                bs.game_id,
+                bs.player_id,
+                bs.innings_number,
                 bs.overs,
                 bs.maidens,
                 bs.runs,
@@ -227,20 +163,15 @@ async def get_player_bowling_spells(
                 bs.wides,
                 bs.no_balls,
                 bs.economy,
-                bs.innings_number,
-                g.home_team,
-                g.away_team,
-                g.played_at::text,
-                g.result,
+                g.played_at,
                 gr.name AS grade_name,
-                s.name AS season_name,
-                s.year AS season_year
+                s.name AS season_name
             FROM bowling_spells bs
             JOIN games g ON g.id = bs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             WHERE {where}
-            ORDER BY g.played_at DESC
+            ORDER BY g.played_at DESC NULLS LAST
         """),
         params,
     )
@@ -251,26 +182,14 @@ async def get_dismissal_breakdown(session: AsyncSession, player_id: str) -> list
     result = await session.execute(
         text("""
             SELECT
-                CASE
-                    WHEN bi.not_out THEN 'not out'
-                    WHEN bi.dismissal_type IS NULL THEN 'unknown'
-                    WHEN bi.dismissal_type = 'b' OR bi.dismissal_type LIKE 'b %' THEN 'bowled'
-                    WHEN bi.dismissal_type = 'c' OR bi.dismissal_type LIKE 'c %' THEN 'caught'
-                    WHEN bi.dismissal_type = 'lbw' OR bi.dismissal_type LIKE 'lbw %'
-                         OR bi.dismissal_type = 'leg before wicket'
-                         OR bi.dismissal_type LIKE 'leg before wicket%' THEN 'lbw'
-                    WHEN bi.dismissal_type = 'st' OR bi.dismissal_type LIKE 'st %' THEN 'stumped'
-                    WHEN bi.dismissal_type LIKE 'run out%' THEN 'run out'
-                    WHEN bi.dismissal_type = 'hit wicket' OR bi.dismissal_type LIKE 'hit wicket%' THEN 'hit wicket'
-                    WHEN bi.dismissal_type LIKE 'ret%' THEN 'retired'
-                    ELSE bi.dismissal_type
-                END AS dismissal_type,
+                COALESCE(bi.dismissal_type, 'unknown') AS dismissal_type,
                 COUNT(*) AS count
             FROM batting_innings bi
             WHERE bi.player_id = :pid
-              AND bi.runs IS NOT NULL
-            GROUP BY 1
-            ORDER BY COUNT(*) DESC
+              AND bi.dismissal_type IS NOT NULL
+              AND bi.dismissal_type NOT IN ('absent', 'did not bat', 'dnb')
+            GROUP BY bi.dismissal_type
+            ORDER BY count DESC
         """),
         {"pid": player_id},
     )
@@ -358,22 +277,21 @@ async def get_season_by_season(session: AsyncSession, player_id: str) -> list[di
                 pss.wickets AS total_wickets,
                 pss.runs_conceded AS bowling_runs_conceded,
                 pss.overs AS total_overs,
-                pss.bowling_average,
-                pss.bowling_economy AS economy,
-                pss.best_bowling_wickets,
                 pss.best_bowling_figures,
+                pss.best_bowling_wickets AS best_bowling_wickets,
+                ROUND(pss.runs_conceded::numeric / NULLIF(pss.bowling_balls, 0) * 6, 2) AS economy,
+                pss.bowling_average,
                 pss.five_wicket_innings AS five_fors,
                 pss.maidens AS total_maidens,
                 pss.catches AS total_catches,
-                pss.catches_wk AS total_catches_wk,
                 pss.run_outs AS total_run_outs,
                 pss.stumpings AS total_stumpings
             FROM player_season_stats pss
             JOIN seasons s ON s.id = pss.season_id
             WHERE pss.player_id = :pid
-            ORDER BY s.year DESC NULLS LAST, s.name
+            ORDER BY s.year DESC NULLS LAST, s.name DESC
         """),
-        {"pid": player_id}
+        {"pid": player_id},
     )
     return [dict(r) for r in result.mappings()]
 
@@ -382,21 +300,13 @@ async def get_player_milestones(session: AsyncSession, player_id: str) -> list[d
     result = await session.execute(
         text("""
             SELECT
-                m.id, m.milestone_type, m.milestone_value, m.achieved_at, m.detail,
-                m.game_id
-            FROM milestones m
-            WHERE m.player_id = :pid
-            ORDER BY
-                CASE m.milestone_type
-                    WHEN 'runs' THEN 1
-                    WHEN 'wickets' THEN 2
-                    WHEN 'matches' THEN 3
-                    WHEN 'catches' THEN 4
-                    ELSE 5
-                END,
-                m.milestone_value DESC
+                pm.id, pm.player_id, pm.milestone_type, pm.milestone_value,
+                pm.achieved_at, pm.detail
+            FROM player_milestones pm
+            WHERE pm.player_id = :pid
+            ORDER BY pm.milestone_value DESC
         """),
-        {"pid": player_id}
+        {"pid": player_id},
     )
     return [dict(r) for r in result.mappings()]
 
@@ -405,28 +315,24 @@ async def get_player_partnerships(session: AsyncSession, player_id: str) -> list
     result = await session.execute(
         text("""
             SELECT
-                CASE WHEN pt.batter1_id = :pid THEN pt.batter2_id::text ELSE pt.batter1_id::text END AS partner_id,
-                CASE WHEN pt.batter1_id = :pid
-                     THEN COALESCE(p2.display_name_override, p2.name)
-                     ELSE COALESCE(p1.display_name_override, p1.name)
+                CASE
+                    WHEN pt.batter1_id = :pid THEN pt.batter2_id
+                    ELSE pt.batter1_id
+                END AS partner_id,
+                CASE
+                    WHEN pt.batter1_id = :pid THEN COALESCE(p2.display_name_override, p2.name)
+                    ELSE COALESCE(p1.display_name_override, p1.name)
                 END AS partner_name,
                 COUNT(*) AS partnership_count,
-                COALESCE(SUM(pt.runs), 0) AS total_runs,
-                MAX(pt.runs) AS best_runs,
-                MAX(g.played_at)::text AS last_played
+                SUM(pt.runs) AS total_runs,
+                MAX(pt.runs) AS best_runs
             FROM partnerships pt
-            JOIN games g ON g.id = pt.game_id
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE (pt.batter1_id = :pid OR pt.batter2_id = :pid)
-              AND pt.runs IS NOT NULL AND pt.runs > 0
-            GROUP BY
-                CASE WHEN pt.batter1_id = :pid THEN pt.batter2_id::text ELSE pt.batter1_id::text END,
-                CASE WHEN pt.batter1_id = :pid
-                     THEN COALESCE(p2.display_name_override, p2.name)
-                     ELSE COALESCE(p1.display_name_override, p1.name)
-                END
-            ORDER BY total_runs DESC
+              AND pt.runs IS NOT NULL
+            GROUP BY partner_id, partner_name
+            ORDER BY best_runs DESC NULLS LAST
             LIMIT 20
         """),
         {"pid": player_id},
@@ -434,24 +340,46 @@ async def get_player_partnerships(session: AsyncSession, player_id: str) -> list
     return [dict(r) for r in result.mappings()]
 
 
-async def get_game_fall_of_wickets(session: AsyncSession, game_id: str) -> list[dict]:
-    result = await session.execute(
+async def get_player_activity(session: AsyncSession, player_id: str) -> dict:
+    batting_res = await session.execute(
         text("""
             SELECT
-                fow.wicket_number,
-                fow.innings_number,
-                fow.score_at_fall,
-                fow.overs_at_fall,
-                p.name AS player_name,
-                fow.player_id::text
-            FROM fall_of_wickets fow
-            LEFT JOIN players p ON p.id = fow.player_id
-            WHERE fow.game_id = :gid
-            ORDER BY fow.innings_number, fow.wicket_number
+                bi.runs,
+                bi.not_out,
+                bi.dismissal_type,
+                g.played_at,
+                gr.name AS grade_name
+            FROM batting_innings bi
+            JOIN games g ON g.id = bi.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            WHERE bi.player_id = :pid
+              AND bi.dismissal_type NOT IN ('absent', 'did not bat', 'dnb')
+            ORDER BY g.played_at DESC NULLS LAST
+            LIMIT 20
         """),
-        {"gid": game_id},
+        {"pid": player_id},
     )
-    return [dict(r) for r in result.mappings()]
+    bowling_res = await session.execute(
+        text("""
+            SELECT
+                bs.wickets,
+                bs.runs,
+                bs.overs,
+                g.played_at,
+                gr.name AS grade_name
+            FROM bowling_spells bs
+            JOIN games g ON g.id = bs.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            WHERE bs.player_id = :pid
+            ORDER BY g.played_at DESC NULLS LAST
+            LIMIT 20
+        """),
+        {"pid": player_id},
+    )
+    return {
+        "batting": [dict(r) for r in batting_res.mappings()],
+        "bowling": [dict(r) for r in bowling_res.mappings()],
+    }
 
 
 async def get_upcoming_milestones_for_org(
@@ -459,324 +387,83 @@ async def get_upcoming_milestones_for_org(
     org_id: str,
     limit: int = 20,
 ) -> list[dict]:
+    RUN_MILESTONES = [50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 5000]
+    WICKET_MILESTONES = [10, 25, 50, 75, 100, 150, 200]
+    MATCH_MILESTONES = [10, 25, 50, 100, 150, 200]
+
     result = await session.execute(
         text("""
-            WITH recent_seasons AS (
-                SELECT s.id
-                FROM seasons s
-                JOIN player_season_stats pss ON pss.season_id = s.id
-                JOIN players p ON p.id = pss.player_id
-                WHERE p.organisation_id = :org_id
-                GROUP BY s.id, s.year, s.name
-                ORDER BY s.year DESC NULLS LAST, s.name DESC
-                LIMIT 3
-            ),
-            active_players AS (
-                SELECT DISTINCT pss.player_id
-                FROM player_season_stats pss
-                WHERE pss.season_id IN (SELECT id FROM recent_seasons)
-            )
             SELECT
                 p.id AS player_id,
-                p.name,
-                COALESCE(SUM(pss.runs), 0) AS career_runs,
-                COALESCE(SUM(pss.wickets), 0) AS career_wickets,
-                COALESCE(SUM(pss.matches), 0) AS career_matches,
-                COALESCE(SUM(pss.catches), 0) AS career_catches
+                COALESCE(p.display_name_override, p.name) AS name,
+                COALESCE(SUM(pss.runs), 0) AS total_runs,
+                COALESCE(SUM(pss.wickets), 0) AS total_wickets,
+                COALESCE(SUM(pss.matches), 0) AS total_matches
             FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              AND p.id IN (SELECT player_id FROM active_players)
-            GROUP BY p.id, p.name
-            HAVING COALESCE(SUM(pss.runs), 0) > 0 OR COALESCE(SUM(pss.wickets), 0) > 0
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """),
-        {"org_id": org_id}
+        {"org_id": org_id},
     )
-    rows = [dict(r) for r in result.mappings()]
-
-    RUN_MILESTONES = [
-        50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000,
-        6000, 7000, 8000, 9000, 10000, 12500, 15000, 17500, 20000,
-        25000, 30000, 35000, 40000, 45000, 50000,
-    ]
-    WICKET_MILESTONES = [
-        10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500,
-        600, 700, 800, 900, 1000, 1500, 2000, 2500, 3000, 4000, 5000,
-    ]
-    MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000]
-    CATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000]
-
-    def next_milestone(current, milestones):
-        for m in milestones:
-            if current < m:
-                return m
-        return None
-
-    # Score formula: milestone_value² / needed
-    # Heavily weights milestone size so 500-from-9000 beats 1-from-100
-    def importance_score(target, needed):
-        return (target ** 2) / (needed + 1)
+    players = [dict(r) for r in result.mappings()]
 
     upcoming = []
-    for row in rows:
-        runs = int(row["career_runs"] or 0)
-        wickets = int(row["career_wickets"] or 0)
-        matches = int(row["career_matches"] or 0)
-        catches = int(row["career_catches"] or 0)
-        player_id = str(row["player_id"])
-        name = row["name"]
+    for player in players:
+        total_runs = int(player.get("total_runs") or 0)
+        total_wickets = int(player.get("total_wickets") or 0)
+        total_matches = int(player.get("total_matches") or 0)
+        for m in RUN_MILESTONES:
+            if total_runs < m:
+                upcoming.append({"player_id": str(player["player_id"]), "name": player["name"], "type": "runs", "current": total_runs, "target": m, "needed": m - total_runs})
+                break
+        for m in WICKET_MILESTONES:
+            if total_wickets < m:
+                upcoming.append({"player_id": str(player["player_id"]), "name": player["name"], "type": "wickets", "current": total_wickets, "target": m, "needed": m - total_wickets})
+                break
+        for m in MATCH_MILESTONES:
+            if total_matches < m:
+                upcoming.append({"player_id": str(player["player_id"]), "name": player["name"], "type": "matches", "current": total_matches, "target": m, "needed": m - total_matches})
+                break
 
-        CATEGORY_MAP = {
-            "runs": "batting",
-            "wickets": "bowling",
-            "matches": "matches",
-            "catches": "fielding",
-        }
-        for stat, current, milestones in [
-            ("runs", runs, RUN_MILESTONES),
-            ("wickets", wickets, WICKET_MILESTONES),
-            ("matches", matches, MATCH_MILESTONES),
-            ("catches", catches, CATCH_MILESTONES),
-        ]:
-            target = next_milestone(current, milestones)
-            if target is None:
-                continue
-            needed = target - current
-            upcoming.append({
-                "player_id": player_id,
-                "name": name,
-                "type": stat,
-                "category": CATEGORY_MAP[stat],
-                "current": current,
-                "target": target,
-                "needed": needed,
-                "score": importance_score(target, needed),
-            })
-
-    upcoming.sort(key=lambda x: x["score"], reverse=True)
-
-    # Return top 50 per category — frontend handles pagination
-    per_cat = 50
-    counts: dict = {}
-    result = []
-    for item in upcoming:
-        cat = item["category"]
-        if counts.get(cat, 0) < per_cat:
-            result.append(item)
-            counts[cat] = counts.get(cat, 0) + 1
-    return result
+    upcoming.sort(key=lambda x: x["needed"])
+    return upcoming[:limit]
 
 
-async def get_recently_achieved_milestones_for_org(
+async def get_batting_leaderboard(
     session: AsyncSession,
     org_id: str,
+    season_id: Optional[str] = None,
+    grade_id: Optional[str] = None,
+    limit: int = 20,
 ) -> list[dict]:
-    # Fetch the 3 most recent non-Winter seasons, returned oldest-first so we can
-    # simulate cumulative totals season-by-season to pinpoint when each milestone crossed.
-    seasons_result = await session.execute(
-        text("""
-            SELECT sub.id, sub.year, sub.name
-            FROM (
-                SELECT s.id, s.year, s.name
-                FROM seasons s
-                JOIN player_season_stats pss ON pss.season_id = s.id
-                JOIN players p ON p.id = pss.player_id
-                WHERE p.organisation_id = :org_id
-                  AND s.name NOT ILIKE '%winter%'
-                GROUP BY s.id, s.year, s.name
-                ORDER BY s.year DESC NULLS LAST, s.name DESC
-                LIMIT 3
-            ) sub
-            ORDER BY sub.year ASC NULLS LAST, sub.name ASC
-        """),
-        {"org_id": org_id}
-    )
-    recent_seasons = [dict(r) for r in seasons_result.mappings()]
-    if not recent_seasons:
-        return []
-
-    # Safe to interpolate — IDs are UUIDs from our own DB query
-    sid_list = ", ".join(f"'{s['id']}'" for s in recent_seasons)
-
-    # Fetch recorded milestone dates for active players (set by sync when first detected)
-    dates_result = await session.execute(
-        text(f"""
-            SELECT player_id, milestone_type, milestone_value, achieved_at
-            FROM milestones
-            WHERE player_id IN (
-                SELECT DISTINCT pss.player_id FROM player_season_stats pss
-                WHERE pss.season_id IN ({sid_list})
-            ) AND achieved_at IS NOT NULL
-        """)
-    )
-    milestone_date_map = {
-        (str(r["player_id"]), r["milestone_type"], int(r["milestone_value"])): r["achieved_at"]
-        for r in dates_result.mappings()
-    }
-
-    data_result = await session.execute(
-        text(f"""
-            WITH active_players AS (
-                SELECT DISTINCT pss.player_id
-                FROM player_season_stats pss
-                WHERE pss.season_id IN ({sid_list})
-            ),
-            prior_totals AS (
-                SELECT
-                    p.id AS player_id,
-                    p.name,
-                    COALESCE(SUM(pss.runs), 0) AS prior_runs,
-                    COALESCE(SUM(pss.wickets), 0) AS prior_wickets,
-                    COALESCE(SUM(pss.matches), 0) AS prior_matches,
-                    COALESCE(SUM(pss.catches), 0) AS prior_catches
-                FROM players p
-                LEFT JOIN player_season_stats pss ON pss.player_id = p.id
-                    AND pss.season_id NOT IN ({sid_list})
-                WHERE p.organisation_id = :org_id
-                  AND p.id IN (SELECT player_id FROM active_players)
-                GROUP BY p.id, p.name
-            )
-            SELECT
-                pt.player_id,
-                pt.name,
-                pt.prior_runs, pt.prior_wickets, pt.prior_matches, pt.prior_catches,
-                pss.season_id,
-                COALESCE(pss.runs, 0) AS season_runs,
-                COALESCE(pss.wickets, 0) AS season_wickets,
-                COALESCE(pss.matches, 0) AS season_matches,
-                COALESCE(pss.catches, 0) AS season_catches
-            FROM prior_totals pt
-            LEFT JOIN player_season_stats pss ON pss.player_id = pt.player_id
-                AND pss.season_id IN ({sid_list})
-        """),
-        {"org_id": org_id}
-    )
-    rows = [dict(r) for r in data_result.mappings()]
-
-    # Group per-season stats by player
-    player_data: dict = {}
-    for row in rows:
-        pid = str(row["player_id"])
-        if pid not in player_data:
-            player_data[pid] = {
-                "name": row["name"],
-                "prior": {
-                    "runs": int(row["prior_runs"] or 0),
-                    "wickets": int(row["prior_wickets"] or 0),
-                    "matches": int(row["prior_matches"] or 0),
-                    "catches": int(row["prior_catches"] or 0),
-                },
-                "seasons": {},
-            }
-        if row["season_id"]:
-            player_data[pid]["seasons"][str(row["season_id"])] = {
-                "runs": int(row["season_runs"] or 0),
-                "wickets": int(row["season_wickets"] or 0),
-                "matches": int(row["season_matches"] or 0),
-                "catches": int(row["season_catches"] or 0),
-            }
-
-    RUN_MILESTONES = [
-        50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000,
-        6000, 7000, 8000, 9000, 10000, 12500, 15000, 17500, 20000,
-        25000, 30000, 35000, 40000, 45000, 50000,
-    ]
-    WICKET_MILESTONES = [
-        10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500,
-        600, 700, 800, 900, 1000, 1500, 2000, 2500, 3000, 4000, 5000,
-    ]
-    MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000]
-    CATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000]
-
-    CATEGORY_MAP = {
-        "runs": "batting",
-        "wickets": "bowling",
-        "matches": "matches",
-        "catches": "fielding",
-    }
-    MILESTONE_LISTS = {
-        "runs": RUN_MILESTONES,
-        "wickets": WICKET_MILESTONES,
-        "matches": MATCH_MILESTONES,
-        "catches": CATCH_MILESTONES,
-    }
-
-    achieved = []
-    for pid, pdata in player_data.items():
-        # Pre-compute all-time career total for display
-        career_total = dict(pdata["prior"])
-        for s in recent_seasons:
-            ss = pdata["seasons"].get(str(s["id"]), {})
-            for stat in career_total:
-                career_total[stat] += ss.get(stat, 0)
-
-        # Simulate cumulative totals oldest→newest to find which season each milestone crossed
-        running = dict(pdata["prior"])
-        for season in recent_seasons:
-            ss = pdata["seasons"].get(str(season["id"]), {})
-            for stat, milestones in MILESTONE_LISTS.items():
-                before = running[stat]
-                after = before + ss.get(stat, 0)
-                for m in milestones:
-                    if before < m <= after:
-                        achieved_at = milestone_date_map.get((pid, stat, m))
-                        achieved.append({
-                            "player_id": pid,
-                            "name": pdata["name"],
-                            "type": stat,
-                            "category": CATEGORY_MAP[stat],
-                            "milestone": m,
-                            "current": career_total[stat],
-                            "season_year": season["year"] or 0,
-                            "season_name": season["name"],
-                            "achieved_at": achieved_at.isoformat() if achieved_at else None,
-                        })
-            for stat in running:
-                running[stat] += ss.get(stat, 0)
-
-    # Dated entries first (most recent date first), then undated by season year desc
-    achieved.sort(key=lambda x: (
-        0 if x["achieved_at"] else 1,
-        -(int(x["achieved_at"].replace("-", "")) if x["achieved_at"] else 0),
-        -x["season_year"],
-        -x["milestone"],
-    ))
-    return achieved
-
-
-async def get_player_activity(session: AsyncSession, player_id: str) -> dict:
+    where = "WHERE p.organisation_id = :org_id"
+    params: dict = {"org_id": org_id, "limit": limit}
+    if season_id:
+        where += " AND pss.season_id = :season_id"
+        params["season_id"] = season_id
     result = await session.execute(
-        text("""
+        text(f"""
             SELECT
-                COALESCE(SUM(pss.matches), 0) AS total_matches,
-                COALESCE(SUM(pss.batting_innings), 0) AS total_innings,
-                COALESCE(SUM(pss.ducks), 0) AS total_ducks,
-                COALESCE(SUM(pss.sixes), 0) AS total_sixes,
-                COALESCE(SUM(pss.fours), 0) AS total_fours,
-                COALESCE(SUM(pss.wickets), 0) AS total_wickets,
-                MAX(pss.best_bowling_wickets) AS best_spell_wickets,
-                MAX(pss.best_bowling_figures) AS best_bowling_figures
+                p.id AS player_id,
+                COALESCE(p.display_name_override, p.name) AS name,
+                SUM(pss.matches) AS games,
+                SUM(pss.batting_innings) AS innings,
+                SUM(pss.runs) AS total_runs,
+                MAX(pss.high_score) AS high_score,
+                ROUND(
+                    SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0),
+                    2
+                ) AS average
             FROM player_season_stats pss
-            WHERE pss.player_id = :pid
+            JOIN players p ON p.id = pss.player_id
+            {where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ORDER BY total_runs DESC NULLS LAST LIMIT :limit
         """),
-        {"pid": player_id}
+        params,
     )
-    row = dict(result.mappings().first() or {})
-    return {
-        "last_game_date": None,
-        "last_bat_date": None,
-        "last_bowl_date": None,
-        "last_wicket_date": None,
-        "last_duck_date": None,
-        "total_innings": int(row.get("total_innings") or 0),
-        "total_ducks": int(row.get("total_ducks") or 0),
-        "total_sixes": int(row.get("total_sixes") or 0),
-        "total_fours": int(row.get("total_fours") or 0),
-        "total_wickets": int(row.get("total_wickets") or 0),
-        "best_spell_wickets": int(row.get("best_spell_wickets") or 0),
-        "best_bowling_figures": row.get("best_bowling_figures"),
-        "wicketless_spells": 0,
-    }
+    return [dict(r) for r in result.mappings()]
 
 
 async def get_batting_leaderboard_extended(
@@ -788,8 +475,8 @@ async def get_batting_leaderboard_extended(
     limit: int = 20,
 ) -> list[dict]:
     ALLOWED_SORTS = {
-        "total_runs", "average", "strike_rate", "total_sixes",
-        "total_fours", "ducks", "high_score", "fifties", "hundreds", "innings",
+        "total_runs", "average", "high_score", "fifties", "hundreds",
+        "total_sixes", "total_fours", "ducks", "innings",
     }
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_runs"
@@ -798,17 +485,64 @@ async def get_batting_leaderboard_extended(
         SELECT
             p.id AS player_id,
             COALESCE(p.display_name_override, p.name) AS name,
+            SUM(pss.matches) AS games,
             SUM(pss.batting_innings) AS innings,
             SUM(pss.runs) AS total_runs,
             MAX(pss.high_score) AS high_score,
-            ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average,
-            ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2) AS strike_rate,
+            ROUND(
+                SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0),
+                2
+            ) AS average,
             SUM(pss.fifties) AS fifties,
             SUM(pss.hundreds) AS hundreds,
-            COALESCE(SUM(pss.sixes), 0) AS total_sixes,
-            COALESCE(SUM(pss.fours), 0) AS total_fours,
-            SUM(pss.ducks) AS ducks,
-            SUM(pss.matches) AS games
+            SUM(pss.sixes) AS total_sixes,
+            SUM(pss.fours) AS total_fours,
+            SUM(pss.ducks) AS ducks
+        FROM player_season_stats pss
+        JOIN players p ON p.id = pss.player_id
+        JOIN seasons s ON s.id = pss.season_id
+        WHERE p.organisation_id = :org_id
+    """
+    params: dict = {"org_id": org_id, "limit": limit}
+    if season_id:
+        base += " AND pss.season_id = :season_id"
+        params["season_id"] = season_id
+    base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
+
+    result = await session.execute(text(base), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def get_bowling_leaderboard(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str] = None,
+    grade_id: Optional[str] = None,
+    limit: int = 20,
+) -> list[dict]:
+    return await get_bowling_leaderboard_extended(session, org_id, season_id, grade_id, "total_wickets", limit)
+
+
+async def get_fielding_leaderboard_extended(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str] = None,
+    grade_id: Optional[str] = None,
+    sort_by: str = "total_catches",
+    limit: int = 20,
+) -> list[dict]:
+    ALLOWED_SORTS = {"total_catches", "total_run_outs", "total_stumpings"}
+    if sort_by not in ALLOWED_SORTS:
+        sort_by = "total_catches"
+
+    base = """
+        SELECT
+            p.id AS player_id,
+            COALESCE(p.display_name_override, p.name) AS name,
+            SUM(pss.matches) AS games,
+            SUM(pss.catches) AS total_catches,
+            SUM(pss.run_outs) AS total_run_outs,
+            SUM(pss.stumpings) AS total_stumpings
         FROM player_season_stats pss
         JOIN players p ON p.id = pss.player_id
         JOIN seasons s ON s.id = pss.season_id
@@ -952,13 +686,234 @@ async def get_club_summary(
         "wins": 0,
         "losses": 0,
         "draws": 0,
-        "win_rate": 0,
+        "seasons": int(row.get("seasons") or 0),
+        "total_players": int(row.get("total_players") or 0),
         "total_runs": int(row.get("total_runs") or 0),
         "total_wickets": int(row.get("total_wickets") or 0),
-        "highest_score": int(row.get("highest_score") or 0),
-        "total_players": int(row.get("total_players") or 0),
-        "seasons": int(row.get("seasons") or 0),
+        "highest_score": row.get("highest_score"),
     }
+
+
+async def get_grade_leaderboard(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str] = None,
+) -> list[dict]:
+    where = "WHERE p.organisation_id = :org_id"
+    params: dict = {"org_id": org_id}
+    if season_id:
+        where += " AND pss.season_id = :season_id"
+        params["season_id"] = season_id
+
+    result = await session.execute(
+        text(f"""
+            SELECT
+                COALESCE(gml.canonical_name, gr.name) AS grade_name,
+                SUM(pss.runs) AS total_runs,
+                SUM(pss.wickets) AS total_wickets,
+                COUNT(DISTINCT pss.player_id) AS players
+            FROM player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            JOIN grades gr ON gr.season_id = pss.season_id
+            LEFT JOIN grade_merge_logs gml
+                ON gml.org_id = p.organisation_id
+               AND gml.alias_name = gr.name
+               AND gml.undone_at IS NULL
+            {where}
+            GROUP BY COALESCE(gml.canonical_name, gr.name)
+            ORDER BY total_runs DESC
+        """),
+        params,
+    )
+    return [dict(r) for r in result.mappings()]
+
+
+async def get_org_game_ids(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str] = None,
+) -> list[str]:
+    params: dict = {"org_id": org_id}
+    clause = ""
+    if season_id:
+        clause = " AND gr.season_id = :season_id"
+        params["season_id"] = season_id
+    result = await session.execute(
+        text(f"""
+            SELECT g.id::text
+            FROM games g
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = :org_id {clause}
+            ORDER BY g.played_at DESC NULLS LAST
+        """),
+        params,
+    )
+    return [r[0] for r in result]
+
+
+async def get_game_scorecard(session: AsyncSession, game_id: str) -> Optional[dict]:
+    result = await session.execute(
+        text("""
+            SELECT
+                g.id::text AS game_id,
+                g.home_team,
+                g.away_team,
+                g.result,
+                g.played_at,
+                gr.name AS grade_name,
+                s.name AS season_name
+            FROM games g
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE g.id = :gid
+        """),
+        {"gid": game_id},
+    )
+    game_row = result.mappings().first()
+    if not game_row:
+        return None
+    game = dict(game_row)
+
+    batting_res = await session.execute(
+        text("""
+            SELECT
+                bi.innings_number,
+                bi.batting_position,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                p.id::text AS player_id,
+                bi.runs,
+                bi.not_out,
+                bi.dismissal_type,
+                bi.fours,
+                bi.sixes,
+                bi.balls_faced
+            FROM batting_innings bi
+            JOIN players p ON p.id = bi.player_id
+            WHERE bi.game_id = :gid
+            ORDER BY bi.innings_number, bi.batting_position
+        """),
+        {"gid": game_id},
+    )
+    batting = [dict(r) for r in batting_res.mappings()]
+
+    bowling_res = await session.execute(
+        text("""
+            SELECT
+                bs.innings_number,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                p.id::text AS player_id,
+                bs.overs,
+                bs.maidens,
+                bs.runs,
+                bs.wickets,
+                bs.economy
+            FROM bowling_spells bs
+            JOIN players p ON p.id = bs.player_id
+            WHERE bs.game_id = :gid
+            ORDER BY bs.innings_number, bs.wickets DESC NULLS LAST
+        """),
+        {"gid": game_id},
+    )
+    bowling = [dict(r) for r in bowling_res.mappings()]
+
+    fielding_res = await session.execute(
+        text("""
+            SELECT
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                p.id::text AS player_id,
+                fs.catches,
+                fs.run_outs,
+                fs.stumpings
+            FROM fielding_stats fs
+            JOIN players p ON p.id = fs.player_id
+            WHERE fs.game_id = :gid
+        """),
+        {"gid": game_id},
+    )
+    fielding = [dict(r) for r in fielding_res.mappings()]
+
+    partnerships_res = await session.execute(
+        text("""
+            SELECT
+                pt.innings_number,
+                pt.wicket_number,
+                pt.runs,
+                pt.batter1_id::text,
+                COALESCE(p1.display_name_override, p1.name) AS batter1_name,
+                pt.batter2_id::text,
+                COALESCE(p2.display_name_override, p2.name) AS batter2_name
+            FROM partnerships pt
+            LEFT JOIN players p1 ON p1.id = pt.batter1_id
+            LEFT JOIN players p2 ON p2.id = pt.batter2_id
+            WHERE pt.game_id = :gid
+            ORDER BY pt.innings_number, pt.wicket_number
+        """),
+        {"gid": game_id},
+    )
+    partnerships = [dict(r) for r in partnerships_res.mappings()]
+
+    return {
+        **game,
+        "batting": batting,
+        "bowling": bowling,
+        "fielding": fielding,
+        "partnerships": partnerships,
+    }
+
+
+async def get_game_by_playhq_id(session: AsyncSession, playhq_game_id: str) -> Optional[dict]:
+    result = await session.execute(
+        text("""
+            SELECT g.id::text, g.home_team, g.away_team, g.result, g.played_at,
+                   gr.name AS grade_name, s.name AS season_name
+            FROM games g
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE g.playhq_game_id = :gid
+        """),
+        {"gid": playhq_game_id},
+    )
+    row = result.mappings().first()
+    return dict(row) if row else None
+
+
+async def get_recent_games(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str] = None,
+    grade_id: Optional[str] = None,
+    limit: int = 20,
+) -> list[dict]:
+    params: dict = {"org_id": org_id, "limit": limit}
+    clauses = ["s.organisation_id = :org_id"]
+    if season_id:
+        clauses.append("s.id = :season_id")
+        params["season_id"] = season_id
+    if grade_id:
+        clauses.append("g.grade_id = :grade_id")
+        params["grade_id"] = grade_id
+    where = " AND ".join(clauses)
+    result = await session.execute(
+        text(f"""
+            SELECT
+                g.id::text AS game_id,
+                g.home_team,
+                g.away_team,
+                g.result,
+                g.played_at,
+                gr.name AS grade_name,
+                s.name AS season_name
+            FROM games g
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE {where}
+            ORDER BY g.played_at DESC NULLS LAST
+            LIMIT :limit
+        """),
+        params,
+    )
+    return [dict(r) for r in result.mappings()]
 
 
 async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dict]:
@@ -966,15 +921,12 @@ async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dic
         text("""
             SELECT
                 pt.wicket_number,
-                pt.innings_number,
                 pt.runs,
-                pt.balls,
-                pt.batter1_runs,
-                pt.batter2_runs,
-                pt.batter1_id::text,
-                pt.batter2_id::text,
-                p1.name AS batter1_name,
-                p2.name AS batter2_name
+                pt.innings_number,
+                COALESCE(p1.display_name_override, p1.name) AS batter1_name,
+                p1.id::text AS batter1_id,
+                COALESCE(p2.display_name_override, p2.name) AS batter2_name,
+                p2.id::text AS batter2_id
             FROM partnerships pt
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
