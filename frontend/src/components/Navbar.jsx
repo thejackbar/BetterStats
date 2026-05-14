@@ -75,7 +75,7 @@ export default function Navbar() {
           </div>
           <div className="hidden md:block leading-tight">
             <div className="text-pb-text text-[13px] font-semibold tracking-tight">{displayName}</div>
-            <div className="text-pb-faint text-[10px] font-mono tracking-wide2">BETTERSTATS · v5.0.1.4</div>
+            <div className="text-pb-faint text-[10px] font-mono tracking-wide2">BETTERSTATS · v5.0.2</div>
           </div>
           <div className="md:hidden text-pb-text text-[13px] font-bold tracking-wide2">{displayShort}</div>
         </Link>

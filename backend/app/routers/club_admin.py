@@ -110,13 +110,33 @@ async def list_seasons(
     result = await db.execute(
         select(Season)
         .where(Season.organisation_id == club.id)
-        .order_by(Season.year.desc().nullslast(), Season.name.desc())
+        .order_by(Season.display_order.asc().nullslast(), Season.year.desc().nullslast(), Season.name.asc())
     )
     seasons = result.scalars().all()
     return [
-        {"id": str(s.id), "name": s.name, "year": s.year, "synced_at": s.synced_at}
+        {"id": str(s.id), "name": s.name, "year": s.year, "synced_at": s.synced_at, "display_order": s.display_order}
         for s in seasons
     ]
+
+
+class SeasonReorderItem(BaseModel):
+    id: str
+    display_order: int
+
+
+@router.put("/seasons/reorder")
+async def reorder_seasons(
+    items: list[SeasonReorderItem],
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    for item in items:
+        season = await db.get(Season, uuid.UUID(item.id))
+        if season and season.organisation_id == club.id:
+            season.display_order = item.display_order
+    await db.commit()
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
