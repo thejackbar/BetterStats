@@ -160,7 +160,7 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
   )
 }
 
-function ClubAwardsPanel({ orgId, seasonId, awards, players, onRefresh }) {
+function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, players, onRefresh }) {
   const [adding, setAdding] = useState(false)
   const [awardName, setAwardName] = useState('')
   const [customName, setCustomName] = useState('')
@@ -205,17 +205,56 @@ function ClubAwardsPanel({ orgId, seasonId, awards, players, onRefresh }) {
     finally { setDeleting(null) }
   }
 
+  const pulled = pulledAwards || []
+  const totalCount = awards.length + pulled.length
+
   return (
     <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-[13px] font-semibold text-white/90">Club Awards</h2>
           <p className="text-[11px] text-white/40 mt-0.5">
-            {awards.length === 0 ? 'Season award winners — shown on the Awards tab.' : `${awards.length} award${awards.length !== 1 ? 's' : ''} recorded`}
+            {totalCount === 0 ? 'Season award winners — shown on the Awards tab.' : `${totalCount} award${totalCount !== 1 ? 's' : ''} for this season`}
+            {pulled.length > 0 && (
+              <span className="ml-1 text-white/30">
+                · {pulled.length} from <Link to="/admin/awards" className="text-pb-accent/70 hover:text-pb-accent underline-offset-2 hover:underline">Awards admin</Link>
+              </span>
+            )}
           </p>
         </div>
         {!adding && <Btn onClick={() => { setAdding(true); setErr(null) }}>+ Add Award</Btn>}
       </div>
+
+      {pulled.length > 0 && (
+        <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
+          {pulled.map(a => (
+            <div key={`pulled-${a.id}`} className="flex items-start gap-4 px-4 py-3 bg-white/[0.015]">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-[10px] text-white/40 uppercase tracking-wide">
+                    {a.achievement}
+                  </span>
+                  {a.subcategory && (
+                    <span className="font-mono text-[10px] text-white/25">· {a.subcategory}</span>
+                  )}
+                  <span className="font-mono text-[9px] text-pb-accent/60 border border-pb-accent/25 rounded px-1.5 py-px tracking-wide">
+                    {a.category?.toUpperCase()}
+                  </span>
+                </div>
+                <div className="text-[13px] text-white/80 mt-0.5">{a.player_name || '—'}</div>
+                {a.detail && <div className="text-[11px] text-white/35 mt-0.5 italic">{a.detail}</div>}
+              </div>
+              <Link
+                to="/admin/awards"
+                className="shrink-0 text-white/25 hover:text-white/60 transition text-[11px] font-mono pt-0.5"
+                title="Manage in Awards admin"
+              >
+                Edit →
+              </Link>
+            </div>
+          ))}
+        </div>
+      )}
 
       {awards.length > 0 && (
         <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
@@ -981,6 +1020,7 @@ export default function AdminYearbookDetail() {
         orgId={org.id}
         seasonId={seasonId}
         awards={yearbook.awards || []}
+        pulledAwards={yearbook.pulled_awards || []}
         players={players}
         onRefresh={load}
       />

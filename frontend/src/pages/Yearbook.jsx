@@ -888,6 +888,7 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
   }, [orgId, seasonId])
 
   const clubAwards = yearbookData?.awards || []
+  const pulledAwards = yearbookData?.pulled_awards || []
   const honourBoard = yearbookData?.honour_board || []
 
   const hbByPos = honourBoard.reduce((acc, h) => {
@@ -896,9 +897,24 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
     return acc
   }, {})
 
+  const pulledByCategory = pulledAwards.reduce((acc, a) => {
+    const cat = a.category || 'Other'
+    if (!acc[cat]) acc[cat] = []
+    acc[cat].push(a)
+    return acc
+  }, {})
+  const CATEGORY_ORDER = [
+    'Club Award', 'Premiership', 'Association Award',
+    'Hall of Fame', 'Life Membership', 'Office Bearer', 'Milestone',
+  ]
+  const orderedCategories = [
+    ...CATEGORY_ORDER.filter(c => pulledByCategory[c]),
+    ...Object.keys(pulledByCategory).filter(c => !CATEGORY_ORDER.includes(c)),
+  ]
+
   return (
     <div className="space-y-6">
-      {/* Club Awards */}
+      {/* Club Awards (added directly to the yearbook) */}
       {clubAwards.length > 0 && (
         <SectionCard title="Club Awards">
           <div className="grid sm:grid-cols-2 gap-px bg-white/5">
@@ -917,6 +933,29 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
           </div>
         </SectionCard>
       )}
+
+      {/* Pulled from /admin/awards, grouped by category */}
+      {orderedCategories.map(cat => (
+        <SectionCard key={cat} title={cat === 'Club Award' ? 'Club Awards' : (cat.endsWith('s') ? cat : `${cat}s`)}>
+          <div className="grid sm:grid-cols-2 gap-px bg-white/5">
+            {pulledByCategory[cat].map(a => (
+              <div key={`pulled-${a.id}`} className="bg-white/2 px-5 py-4">
+                <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">
+                  {a.achievement}
+                  {a.subcategory && <span className="text-white/30 normal-case ml-1.5">· {a.subcategory}</span>}
+                </div>
+                <div className="text-[15px] font-semibold text-white/90">
+                  {a.player_id
+                    ? <PlayerLink id={a.player_id} name={a.player_name} slug={clubSlug} />
+                    : <span>{a.player_name || '—'}</span>
+                  }
+                </div>
+                {a.detail && <div className="text-[12px] text-white/40 mt-1 italic">{a.detail}</div>}
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      ))}
 
       {honourBoard.length > 0 && (
         <SectionCard title="Honour Board">
@@ -963,7 +1002,8 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
         </SectionCard>
       )}
 
-      {honourBoard.length === 0 && !loading && milestones?.length === 0 && (
+      {honourBoard.length === 0 && !loading && milestones?.length === 0 &&
+       clubAwards.length === 0 && pulledAwards.length === 0 && (
         <div className="rounded-xl border border-white/8 border-dashed px-6 py-8 text-center">
           <p className="font-mono text-[11px] text-white/30 uppercase tracking-wide3">Awards & Honour Board</p>
           <p className="text-white/25 text-sm mt-2">
