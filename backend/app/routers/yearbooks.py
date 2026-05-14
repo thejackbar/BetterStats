@@ -176,22 +176,73 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
     )
     season_row = season.mappings().first()
 
+    # Build org-wide season-id → start-year map so we can resolve
+    # `player_achievements.season` (which may be a UUID or a text key) to
+    # a year and bracket-match multi-season roles via `season_end`.
+    org_seasons = await db.execute(
+        text("SELECT id, name, year FROM seasons WHERE organisation_id = :o"),
+        {"o": org_id},
+    )
+    year_by_id: dict[str, int] = {}
+    for r in org_seasons.mappings().all():
+        yr = r["year"]
+        if yr is None and r["name"]:
+            import re as _re
+            mm = _re.search(r"(\d{4})", r["name"])
+            yr = int(mm.group(1)) if mm else None
+        if yr is not None:
+            year_by_id[str(r["id"])] = yr
+
+    def _year_from(token: str | None) -> int | None:
+        if not token:
+            return None
+        if token in year_by_id:
+            return year_by_id[token]
+        import re as _re
+        m = _re.search(r"(\d{4})", token)
+        return int(m.group(1)) if m else None
+
+    target_year: int | None = None
+    if season_row:
+        target_year = season_row.get("year") or _year_from(season_row.get("name"))
+
     match_keys = _season_match_keys(
         season_id, season_row["name"] if season_row else None
     )
-    pulled = await db.execute(
+
+    # Pull all org achievements, then filter in Python so we can honour both
+    # exact-string season matches AND date-spanning ranges (season → season_end).
+    all_ach = await db.execute(
         text("""
             SELECT a.id, a.category, a.subcategory, a.achievement, a.detail,
-                   a.season, a.player_id,
+                   a.season, a.season_end, a.player_id,
                    COALESCE(p.display_name_override, p.name, a.player_name) AS player_name
             FROM player_achievements a
             LEFT JOIN players p ON p.id = a.player_id
             WHERE a.org_id = :o
-              AND a.season = ANY(:keys)
             ORDER BY a.category, a.subcategory NULLS LAST, a.achievement, a.id
         """),
-        {"o": org_id, "keys": match_keys},
+        {"o": org_id},
     )
+    match_key_set = set(match_keys)
+    pulled_rows = []
+    for row in all_ach.mappings().all():
+        s_token, e_token = row["season"], row["season_end"]
+        if s_token in match_key_set or (e_token and e_token in match_key_set):
+            pulled_rows.append(dict(row))
+            continue
+        if target_year is None:
+            continue
+        s_year, e_year = _year_from(s_token), _year_from(e_token)
+        if s_year is None:
+            continue
+        if e_year is None:
+            if s_year == target_year:
+                pulled_rows.append(dict(row))
+        else:
+            lo, hi = (s_year, e_year) if s_year <= e_year else (e_year, s_year)
+            if lo <= target_year <= hi:
+                pulled_rows.append(dict(row))
 
     return {
         **yb,
@@ -201,7 +252,7 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
         "honour_board": [dict(r) for r in honour_board.mappings().all()],
         "images": [dict(r) for r in images.mappings().all()],
         "awards": [dict(r) for r in awards.mappings().all()],
-        "pulled_awards": [dict(r) for r in pulled.mappings().all()],
+        "pulled_awards": pulled_rows,
     }
 
 
