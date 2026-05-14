@@ -780,111 +780,109 @@ async def get_grade_breakdown(
     season_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    # Unique grade names for this season. Same name can appear under multiple
-    # IDs across sync runs — use a subquery keyed on name+season to aggregate.
-    names_rows = await db.execute(
+    grades_rows = await db.execute(
         text("""
-            SELECT g.name, COUNT(DISTINCT gm.id) AS game_count
+            SELECT DISTINCT ON (g.name) g.id, g.name,
+                COUNT(gm.id) AS game_count
             FROM grades g
             JOIN seasons s ON s.id = g.season_id
             LEFT JOIN games gm ON gm.grade_id = g.id
             WHERE g.season_id = :s AND s.organisation_id = :o
-            GROUP BY g.name
-            ORDER BY g.name
+            GROUP BY g.id, g.name
+            ORDER BY g.name, COUNT(gm.id) DESC
         """),
         {"o": org_id, "s": season_id},
     )
-    grade_list = [dict(r) for r in names_rows.mappings().all()]
-
-    # Subquery snippet: all grade IDs with this name in this season
-    GRADE_IDS = "(SELECT id FROM grades WHERE season_id = :s AND name = :gname)"
+    grade_list = [dict(r) for r in grades_rows.mappings().all()]
 
     result = []
     for grade in grade_list:
-        p = {"s": season_id, "gname": grade["name"], "o": org_id}
+        gid = str(grade["id"])
+        p = {"gid": gid, "o": org_id, "s": season_id}
 
         stats = await db.execute(
-            text(f"""
+            text("""
                 SELECT COUNT(DISTINCT bi.player_id) AS players, SUM(bi.runs) AS runs
                 FROM batting_innings bi
                 JOIN games gm ON gm.id = bi.game_id
                 JOIN players pl ON pl.id = bi.player_id
-                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+                WHERE gm.grade_id = :gid AND pl.organisation_id = :o
             """), p)
         grade_bat_stats = dict(stats.mappings().first() or {})
 
         wkt_row = await db.execute(
-            text(f"""
+            text("""
                 SELECT SUM(bs.wickets) AS wickets
                 FROM bowling_spells bs
                 JOIN games gm ON gm.id = bs.game_id
                 JOIN players pl ON pl.id = bs.player_id
-                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+                WHERE gm.grade_id = :gid AND pl.organisation_id = :o
             """), p)
         grade_bowl_stats = dict(wkt_row.mappings().first() or {})
 
         hs = await db.execute(
-            text(f"""
+            text("""
                 SELECT bi.runs AS high_score, bi.not_out,
                     COALESCE(pl.display_name_override, pl.name) AS high_score_name,
                     pl.id AS high_score_player_id
                 FROM batting_innings bi
                 JOIN games gm ON gm.id = bi.game_id
                 JOIN players pl ON pl.id = bi.player_id
-                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+                WHERE gm.grade_id = :gid AND pl.organisation_id = :o
                 ORDER BY bi.runs DESC NULLS LAST LIMIT 1
             """), p)
         hs_row = dict(hs.mappings().first() or {})
 
         tb = await db.execute(
-            text(f"""
+            text("""
                 SELECT COALESCE(pl.display_name_override, pl.name) AS name,
                     pl.id, SUM(bi.runs) AS runs
                 FROM batting_innings bi
                 JOIN games gm ON gm.id = bi.game_id
                 JOIN players pl ON pl.id = bi.player_id
-                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+                WHERE gm.grade_id = :gid AND pl.organisation_id = :o
                 GROUP BY pl.id, pl.name, pl.display_name_override
                 ORDER BY SUM(bi.runs) DESC NULLS LAST LIMIT 1
             """), p)
         top_bat = dict(tb.mappings().first() or {})
 
         tw = await db.execute(
-            text(f"""
+            text("""
                 SELECT COALESCE(pl.display_name_override, pl.name) AS name,
                     pl.id, SUM(bs.wickets) AS wickets
                 FROM bowling_spells bs
                 JOIN games gm ON gm.id = bs.game_id
                 JOIN players pl ON pl.id = bs.player_id
-                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+                WHERE gm.grade_id = :gid AND pl.organisation_id = :o
                 GROUP BY pl.id, pl.name, pl.display_name_override
                 ORDER BY SUM(bs.wickets) DESC NULLS LAST LIMIT 1
             """), p)
         top_bowl = dict(tw.mappings().first() or {})
 
         bb = await db.execute(
-            text(f"""
+            text("""
                 SELECT bs.wickets AS bb_wickets, bs.runs_conceded AS bb_runs,
                     COALESCE(pl.display_name_override, pl.name) AS bb_name,
                     pl.id AS bb_player_id
                 FROM bowling_spells bs
                 JOIN games gm ON gm.id = bs.game_id
                 JOIN players pl ON pl.id = bs.player_id
-                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+                WHERE gm.grade_id = :gid AND pl.organisation_id = :o
                 ORDER BY bs.wickets DESC NULLS LAST, bs.runs_conceded ASC NULLS LAST LIMIT 1
             """), p)
         bb_row = dict(bb.mappings().first() or {})
 
         wl = await db.execute(
-            text(f"""
+            text("""
                 SELECT
                     COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('win','won')) AS wins,
                     COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('loss','lost')) AS losses
-                FROM games gm WHERE gm.grade_id IN {GRADE_IDS}
+                FROM games gm WHERE gm.grade_id = :gid
             """), p)
         wl_stats = dict(wl.mappings().first() or {})
 
         result.append({
+            "id": gid,
             "name": grade["name"],
             "game_count": grade["game_count"],
             **grade_bat_stats,
