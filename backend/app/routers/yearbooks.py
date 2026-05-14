@@ -525,7 +525,7 @@ async def get_allrounder_stats(
                 ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS bat_avg,
                 SUM(pss.wickets) AS wickets,
                 ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS bowl_avg,
-                ROUND(SUM(pss.runs) * 1.5 + SUM(pss.wickets) * 10, 1) AS allrounder_index
+                ROUND(SUM(pss.runs) * 1.5 + SUM(pss.wickets) * 10, 2) AS allrounder_index
             FROM player_season_stats pss
             JOIN players p ON p.id = pss.player_id
             WHERE pss.season_id = :s
