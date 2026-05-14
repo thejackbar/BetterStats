@@ -57,7 +57,7 @@ function abbrev(name) {
 
 // ─── Shared table components ─────────────────────────────────────────────────
 
-function YbTable({ headers, rows, className = '' }) {
+function YbTable({ headers, rows, rowStyles = [], className = '' }) {
   return (
     <div className={`overflow-x-auto ${className}`}>
       <table className="w-full text-[13px]">
@@ -70,7 +70,7 @@ function YbTable({ headers, rows, className = '' }) {
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} className="border-b border-white/5 hover:bg-white/3 transition-colors">
+            <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors" style={rowStyles[i] || {}}>
               {row.map((cell, j) => (
                 <td key={j} className={`py-2.5 px-3 font-mono ${j > 0 ? 'text-right text-white/60' : 'text-white/90'}`}>
                   {cell}
@@ -378,8 +378,15 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
         <SectionCard key={gradeName} title={gradeName}>
           <YbTable
             headers={['Date', 'Opponent', 'Result', 'Top Bat', 'Top Bowl']}
+            rowStyles={games.map(g =>
+              g.result === 'won'
+                ? { background: 'rgba(74,222,128,0.07)' }
+                : g.result === 'lost'
+                ? { background: 'rgba(248,113,113,0.07)' }
+                : { background: 'rgba(255,255,255,0.02)' }
+            )}
             rows={games.map(g => {
-              const resultColor = g.result === 'won' ? 'var(--pb-accent)' : g.result === 'lost' ? '#f87171' : 'var(--pb-amber)'
+              const resultColor = g.result === 'won' ? '#4ade80' : g.result === 'lost' ? '#f87171' : 'rgba(255,255,255,0.4)'
               return [
                 <span className="text-white/40 text-[12px]">{fmtDate(g.played_at) || '—'}</span>,
                 <span>{g.home_team && g.away_team ? `${g.home_team} vs ${g.away_team}` : (g.home_team || g.away_team || '—')}</span>,
