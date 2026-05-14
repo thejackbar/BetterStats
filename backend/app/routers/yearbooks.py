@@ -861,14 +861,14 @@ async def get_grade_breakdown(
 
         bb = await db.execute(
             text("""
-                SELECT bs.wickets AS bb_wickets, bs.runs_conceded AS bb_runs,
+                SELECT bs.wickets AS bb_wickets, bs.runs AS bb_runs,
                     COALESCE(pl.display_name_override, pl.name) AS bb_name,
                     pl.id AS bb_player_id
                 FROM bowling_spells bs
                 JOIN games gm ON gm.id = bs.game_id
                 JOIN players pl ON pl.id = bs.player_id
                 WHERE gm.grade_id = :gid AND pl.organisation_id = :o
-                ORDER BY bs.wickets DESC NULLS LAST, bs.runs_conceded ASC NULLS LAST LIMIT 1
+                ORDER BY bs.wickets DESC NULLS LAST, bs.runs ASC NULLS LAST LIMIT 1
             """), p)
         bb_row = dict(bb.mappings().first() or {})
 
