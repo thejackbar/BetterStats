@@ -102,12 +102,17 @@ def _season_sort_key(s):
     return (order, -year, s.name or '')
 
 
+def _year_from_name(name):
+    m = _re.search(r'[0-9]{4}', name or '')
+    return int(m.group()) if m else 0
+
+
 @router.get("/{org_id}/seasons")
 async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Season).where(Season.organisation_id == uuid.UUID(org_id))
     )
-    seasons = sorted(result.scalars().all(), key=_season_sort_key)
+    seasons = sorted(result.scalars().all(), key=lambda s: (-_year_from_name(s.name), s.name or ''))
     return [
         {"id": str(s.id), "name": s.name, "year": s.year, "synced_at": s.synced_at}
         for s in seasons

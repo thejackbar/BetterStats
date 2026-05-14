@@ -202,6 +202,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE seasons ADD COLUMN IF NOT EXISTS display_order INTEGER"
         ))
+        await conn.execute(text(
+            "UPDATE seasons SET display_order = NULL WHERE display_order IS NOT NULL"
+        ))
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
