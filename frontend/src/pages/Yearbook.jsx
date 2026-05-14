@@ -96,7 +96,7 @@ function YbTable({ headers, rows, rowStyles = [], className = '' }) {
           {rows.map((row, i) => (
             <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors" style={rowStyles[i] || {}}>
               {row.map((cell, j) => (
-                <td key={j} className={`py-2.5 px-3 font-mono ${j > 0 ? 'text-right text-white/60' : 'text-white/90'}`}>
+                <td key={j} className={`py-2.5 px-3 font-mono whitespace-nowrap ${j > 0 ? 'text-right text-white/60' : 'text-white/90'}`}>
                   {cell}
                 </td>
               ))}
@@ -166,7 +166,7 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
     <div className="space-y-8">
       {/* Headline stat trio */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-white/8 rounded-xl overflow-hidden">
-        <StatCallout value={overview?.total_players ?? '—'} label="Players" accent />
+        <StatCallout value={overview?.total_players ?? '—'} label="Players" />
         <StatCallout value={fmtRuns(overview?.total_runs)} label="Club Runs" />
         <StatCallout value={fmtRuns(overview?.total_wickets)} label="Wickets" />
         <StatCallout value={`${wins}W ${draws}D ${losses}L`} label="Record" />
@@ -191,13 +191,13 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
                 <XAxis type="number" hide />
                 <YAxis type="category" dataKey="name" hide />
                 <Tooltip content={<ChartTooltip />} />
-                <Bar dataKey="Won" stackId="a" fill="var(--pb-accent)" radius={[4,0,0,4]} />
+                <Bar dataKey="Won" stackId="a" fill="#4ade80" radius={[4,0,0,4]} />
                 <Bar dataKey="Drew" stackId="a" fill="rgba(255,255,255,0.2)" />
                 <Bar dataKey="Lost" stackId="a" fill="#f87171" radius={[0,4,4,0]} />
               </BarChart>
             </ResponsiveContainer>
             <div className="flex justify-center gap-6 mt-2">
-              {[['Won', 'var(--pb-accent)'], ['Drew', 'rgba(255,255,255,0.3)'], ['Lost', '#f87171']].map(([l, c]) => (
+              {[['Won', '#4ade80'], ['Drew', 'rgba(255,255,255,0.3)'], ['Lost', '#f87171']].map(([l, c]) => (
                 <div key={l} className="flex items-center gap-1.5">
                   <div className="w-2.5 h-2.5 rounded-sm" style={{ background: c }} />
                   <span className="text-[11px] font-mono text-white/40">{l}</span>
@@ -215,11 +215,6 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
           <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed whitespace-pre-wrap">
             {narrative}
           </div>
-        </div>
-      ) : (
-        <div className="rounded-xl border border-white/8 border-dashed bg-white/2 px-6 py-5 text-center">
-          <p className="font-mono text-[11px] text-white/30 uppercase tracking-wide3">Season in Brief</p>
-          <p className="text-white/25 text-sm mt-1">Editorial content coming in v4.1 — admin can write or AI-generate this section.</p>
         </div>
       )}
 
@@ -266,7 +261,6 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
                 name={superlatives.most_runs.name}
                 playerId={superlatives.most_runs.player_id}
                 clubSlug={clubSlug}
-                accent
               />
             )}
             {superlatives?.most_wickets?.player_id && (
@@ -318,7 +312,7 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
               <SupCard label="Half Centuries" value={overview.total_fifties} />
             )}
             {overview?.total_hundreds > 0 && (
-              <SupCard label="Centuries" value={overview.total_hundreds} accent />
+              <SupCard label="Centuries" value={overview.total_hundreds} />
             )}
           </div>
         </div>
@@ -394,8 +388,8 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
               <AreaChart data={progressionData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
                 <defs>
                   <linearGradient id="winsGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--pb-accent)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="var(--pb-accent)" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#4ade80" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#4ade80" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="lossesGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#f87171" stopOpacity={0.2} />
@@ -406,7 +400,7 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
                 <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
                 <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
                 <Tooltip content={<ChartTooltip />} />
-                <Area type="monotone" dataKey="Wins" stroke="var(--pb-accent)" strokeWidth={2} fill="url(#winsGrad)" dot={false} />
+                <Area type="monotone" dataKey="Wins" stroke="#4ade80" strokeWidth={2} fill="url(#winsGrad)" dot={false} />
                 <Area type="monotone" dataKey="Losses" stroke="#f87171" strokeWidth={1.5} fill="url(#lossesGrad)" dot={false} />
               </AreaChart>
             </ResponsiveContainer>
