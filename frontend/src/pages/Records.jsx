@@ -29,7 +29,6 @@ function RankNum({ rank }) {
   )
 }
 
-// Badge shown on records set in the most recent season
 function NewBadge() {
   return (
     <span className="ml-1.5 font-mono text-[9px] tracking-wide2 px-1 py-0.5 rounded"
@@ -79,12 +78,9 @@ function RecordTable({ headers, rows }) {
   )
 }
 
-// ── Batting tab ────────────────────────────────────────────────────────
 function BattingTab({ data, latestSeason }) {
   if (!data) return <PbSpinner />
-
   const isNew = (seasonName) => latestSeason && seasonName && seasonName === latestSeason
-
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <RecordSection title="MOST CAREER RUNS" empty={!data.top_career_runs?.length}>
@@ -97,7 +93,6 @@ function BattingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="HIGHEST INDIVIDUAL SCORES" empty={!data.top_high_scores?.length}>
         <RecordTable
           headers={['Player', 'Score', 'Season']}
@@ -108,7 +103,6 @@ function BattingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="BEST BATTING AVERAGE" filter="MIN. 10 DISMISSALS" empty={!data.top_batting_avg?.length}>
         <RecordTable
           headers={['Player', 'Avg', 'M', 'Runs', 'Inn']}
@@ -119,7 +113,6 @@ function BattingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="MOST HUNDREDS" empty={!data.most_hundreds?.length}>
         <RecordTable
           headers={['Player', '100s', 'M', 'Runs']}
@@ -130,7 +123,6 @@ function BattingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="MOST FIFTIES" empty={!data.most_fifties?.length}>
         <RecordTable
           headers={['Player', '50s', 'M', 'Runs']}
@@ -141,7 +133,6 @@ function BattingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       {data.most_runs_season?.length > 0 && (
         <RecordSection title="MOST RUNS IN A SEASON">
           <RecordTable
@@ -154,7 +145,6 @@ function BattingTab({ data, latestSeason }) {
           />
         </RecordSection>
       )}
-
       {data.most_sixes?.length > 0 && (
         <RecordSection title="MOST SIXES (CAREER)">
           <RecordTable
@@ -171,12 +161,9 @@ function BattingTab({ data, latestSeason }) {
   )
 }
 
-// ── Bowling tab ────────────────────────────────────────────────────────
 function BowlingTab({ data, latestSeason }) {
   if (!data) return <PbSpinner />
-
   const isNew = (seasonName) => latestSeason && seasonName && seasonName === latestSeason
-
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <RecordSection title="MOST CAREER WICKETS" empty={!data.top_career_wickets?.length}>
@@ -189,7 +176,6 @@ function BowlingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="BEST INNINGS FIGURES" empty={!data.best_innings_figures?.length}>
         <RecordTable
           headers={['Player', 'Figures', 'Season']}
@@ -200,7 +186,6 @@ function BowlingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="BEST BOWLING AVERAGE" filter="MIN. 20 WICKETS" empty={!data.top_bowling_avg?.length}>
         <RecordTable
           headers={['Player', 'Avg', 'Wkts', 'M']}
@@ -211,7 +196,6 @@ function BowlingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="BEST ECONOMY RATE" filter="MIN. 50 OVERS" empty={!data.top_economy?.length}>
         <RecordTable
           headers={['Player', 'Econ', 'Wkts', 'Ov']}
@@ -222,7 +206,6 @@ function BowlingTab({ data, latestSeason }) {
           ])}
         />
       </RecordSection>
-
       {data.most_five_fors?.length > 0 && (
         <RecordSection title="MOST FIVE-WICKET HAULS">
           <RecordTable
@@ -235,7 +218,6 @@ function BowlingTab({ data, latestSeason }) {
           />
         </RecordSection>
       )}
-
       {data.most_wickets_season?.length > 0 && (
         <RecordSection title="MOST WICKETS IN A SEASON">
           <RecordTable
@@ -252,98 +234,135 @@ function BowlingTab({ data, latestSeason }) {
   )
 }
 
-// ── Partnerships tab ────────────────────────────────────────────────────
 function PartnershipsTab({ data }) {
   if (!data) return <PbSpinner />
 
+  const allTimeRecords = ORDINALS.map((ord, wi) => {
+    const rec = (data[`wicket_${wi + 1}`] || [])[0]
+    if (!rec) return null
+    return { ...rec, wicket: wi + 1, ordinal: ord }
+  }).filter(Boolean)
+
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <RecordSection title="TOP PARTNERSHIPS (ALL WICKETS)" empty={!data.top_partnerships?.length}>
-        <RecordTable
-          headers={['Partnership', 'Runs', 'Season']}
-          rows={(data.top_partnerships || []).map((r, i) => [
-            <span key={i}><RankNum rank={i+1} />
-              <PlayerLink id={r.player1_id} name={r.player1_name} />
-              <span className="text-pb-faintest mx-1">&</span>
-              <PlayerLink id={r.player2_id} name={r.player2_name} />
-            </span>,
-            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.runs}</span>,
-            <span className="text-pb-faintest text-[11px]">{r.season_name}</span>,
-          ])}
-        />
-      </RecordSection>
-
-      {ORDINALS.map((ord, wi) => {
-        const key = `wicket_${wi + 1}`
-        const recs = data[key] || []
-        if (!recs.length) return null
-        return (
-          <RecordSection key={wi} title={`${ord.toUpperCase()} WICKET PARTNERSHIPS`}>
-            <RecordTable
-              headers={['Partnership', 'Runs', 'Season']}
-              rows={recs.map((r, i) => [
-                <span key={i}><RankNum rank={i+1} />
-                  <PlayerLink id={r.player1_id} name={r.player1_name} />
-                  <span className="text-pb-faintest mx-1">&</span>
-                  <PlayerLink id={r.player2_id} name={r.player2_name} />
-                </span>,
-                <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.runs}</span>,
-                <span className="text-pb-faintest text-[11px]">{r.season_name}</span>,
-              ])}
-            />
-          </RecordSection>
-        )
-      })}
-
-      {/* By-grade partnership records */}
-      {data.by_grade && Object.entries(data.by_grade).length > 0 && (
-        <div className="md:col-span-2">
-          <div className="pb-card overflow-hidden mb-4">
-            <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
-              <Label style={{ color: 'var(--pb-accent)' }}>WICKET PARTNERSHIPS BY GRADE</Label>
-            </div>
-            <div className="grid gap-0 md:grid-cols-2">
-              {Object.entries(data.by_grade).sort(([a], [b]) => a.localeCompare(b)).map(([grade, records], gi) => (
-                <div key={grade} className={`${gi % 2 === 0 ? 'md:border-r' : ''} pb-hairline-r`}>
-                  <div className="px-5 py-2.5 pb-hairline-b">
-                    <span className="font-mono text-[11px] tracking-wide2 text-pb-dim font-semibold">{grade}</span>
-                  </div>
-                  <table className="w-full text-[12px]">
-                    <thead>
-                      <tr className="text-pb-faintest font-mono text-[10px] tracking-wide3">
-                        <th className="py-2 px-3 text-left">WKT</th>
-                        <th className="py-2 px-3 text-left">PARTNERSHIP</th>
-                        <th className="py-2 px-3 text-right">RUNS</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {records.sort((a, b) => (a.wicket_number ?? 0) - (b.wicket_number ?? 0)).map((r, i) => (
-                        <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-                          <td className="py-2 px-3 font-mono text-pb-faint">{ORDINALS[(r.wicket_number || 1) - 1]}</td>
-                          <td className="py-2 px-3">
-                            <PlayerLink id={r.player1_id} name={r.player1_name} />
-                            <span className="text-pb-faintest mx-1">&</span>
-                            <PlayerLink id={r.player2_id} name={r.player2_name} />
-                          </td>
-                          <td className="py-2 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
-            </div>
+    <div className="space-y-6">
+      {allTimeRecords.length > 0 && (
+        <div className="pb-card overflow-hidden">
+          <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
+            <Label style={{ color: 'var(--pb-accent)' }}>ALL TIME RECORDS</Label>
+            <p className="font-mono text-[10px] text-pb-faintest mt-0.5">Best partnership ever recorded at each wicket position across all grades.</p>
+          </div>
+          <div className="overflow-x-auto pb-scroll">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                  <th className="py-2.5 px-3 font-medium w-12">WKT</th>
+                  <th className="py-2.5 px-3 font-medium">PARTNERSHIP</th>
+                  <th className="py-2.5 px-3 font-medium text-right">RUNS</th>
+                  <th className="py-2.5 px-3 font-medium text-right">GRADE / SEASON</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allTimeRecords.map((r, i) => (
+                  <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                    <td className="py-2.5 px-3 font-mono text-pb-faint">{r.ordinal}</td>
+                    <td className="py-2.5 px-3">
+                      <PlayerLink id={r.player1_id} name={r.player1_name} />
+                      <span className="text-pb-faintest mx-1">&amp;</span>
+                      <PlayerLink id={r.player2_id} name={r.player2_name} />
+                    </td>
+                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.season_name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
+      )}
+
+      {data.top_partnerships?.length > 0 && (
+        <div className="pb-card overflow-hidden">
+          <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
+            <Label style={{ color: 'var(--pb-accent)' }}>TOP 25 PARTNERSHIPS</Label>
+            <p className="font-mono text-[10px] text-pb-faintest mt-0.5">Highest individual partnerships across all grades and wickets.</p>
+          </div>
+          <div className="overflow-x-auto pb-scroll">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                  <th className="py-2.5 px-3 font-medium w-10">#</th>
+                  <th className="py-2.5 px-3 font-medium">PARTNERSHIP</th>
+                  <th className="py-2.5 px-3 font-medium text-right">RUNS</th>
+                  <th className="py-2.5 px-3 font-medium text-right">GRADE / SEASON</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.top_partnerships || []).map((r, i) => (
+                  <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                    <td className="py-2.5 px-3 font-mono text-pb-faint"><RankNum rank={i+1} /></td>
+                    <td className="py-2.5 px-3">
+                      <PlayerLink id={r.player1_id} name={r.player1_name} />
+                      <span className="text-pb-faintest mx-1">&amp;</span>
+                      <PlayerLink id={r.player2_id} name={r.player2_name} />
+                    </td>
+                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.season_name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {data.by_grade && Object.entries(data.by_grade).length > 0 && (
+        <div className="pb-card overflow-hidden">
+          <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
+            <Label style={{ color: 'var(--pb-accent)' }}>WICKET PARTNERSHIPS BY GRADE</Label>
+          </div>
+          <div className="grid gap-0 md:grid-cols-2">
+            {Object.entries(data.by_grade).sort(([a], [b]) => a.localeCompare(b)).map(([grade, records], gi) => (
+              <div key={grade} className={`${gi % 2 === 0 ? 'md:border-r pb-hairline-r' : ''} ${gi >= 2 ? 'pb-hairline-t' : ''}`}>
+                <div className="px-5 py-2.5 pb-hairline-b">
+                  <span className="font-mono text-[11px] tracking-wide2 text-pb-dim font-semibold">{grade}</span>
+                </div>
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="text-pb-faintest font-mono text-[10px] tracking-wide3">
+                      <th className="py-2 px-3 text-left">WKT</th>
+                      <th className="py-2 px-3 text-left">PARTNERSHIP</th>
+                      <th className="py-2 px-3 text-right">RUNS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...records].sort((a, b) => (a.wicket_number ?? 0) - (b.wicket_number ?? 0)).map((r, i) => (
+                      <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                        <td className="py-2 px-3 font-mono text-pb-faint">{ORDINALS[(r.wicket_number || 1) - 1]}</td>
+                        <td className="py-2 px-3">
+                          <PlayerLink id={r.player1_id} name={r.player1_name} />
+                          <span className="text-pb-faintest mx-1">&amp;</span>
+                          <PlayerLink id={r.player2_id} name={r.player2_name} />
+                        </td>
+                        <td className="py-2 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!allTimeRecords.length && !data.top_partnerships?.length && !Object.keys(data.by_grade || {}).length && (
+        <p className="text-pb-faint text-sm py-4">No partnership records available.</p>
       )}
     </div>
   )
 }
 
-// ── Team tab ─────────────────────────────────────────────────────────────
 function TeamTab({ data }) {
   if (!data) return <PbSpinner />
-
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <RecordSection title="MOST MATCHES PLAYED" empty={!data.most_matches?.length}>
@@ -356,7 +375,6 @@ function TeamTab({ data }) {
           ])}
         />
       </RecordSection>
-
       <RecordSection title="MOST SEASONS PLAYED" empty={!data.most_seasons?.length}>
         <RecordTable
           headers={['Player', 'Seasons', 'Matches']}
@@ -367,20 +385,58 @@ function TeamTab({ data }) {
           ])}
         />
       </RecordSection>
+    </div>
+  )
+}
 
-      {data.top_allrounders?.length > 0 && (
-        <RecordSection title="BEST ALL-ROUNDERS">
-          <RecordTable
-            headers={['Player', 'Runs', 'Wkts', 'Matches']}
-            rows={(data.top_allrounders || []).map((r, i) => [
-              <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} /></span>,
-              r.runs ?? '—',
-              <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.wickets}</span>,
-              r.matches ?? '—',
-            ])}
-          />
-        </RecordSection>
-      )}
+function AllRoundersTab({ data }) {
+  if (!data) return <PbSpinner />
+  return (
+    <div className="space-y-4">
+      <div className="pb-card overflow-hidden">
+        <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
+          <Label style={{ color: 'var(--pb-accent)' }}>BEST ALL-ROUNDERS (CAREER)</Label>
+          <p className="font-mono text-[10px] text-pb-faintest mt-0.5">
+            Index Score = (Runs × 1.5) + (Wickets × 10) · Min. 100 runs &amp; 5 wickets
+          </p>
+        </div>
+        {!data.top_allrounders?.length ? (
+          <p className="text-pb-faintest text-sm px-5 py-4 italic">No data yet.</p>
+        ) : (
+          <div className="overflow-x-auto pb-scroll">
+            <table className="w-full min-w-[600px] text-[13px]">
+              <thead>
+                <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                  <th className="py-2.5 px-3 font-medium w-10">#</th>
+                  <th className="py-2.5 px-3 font-medium">PLAYER</th>
+                  <th className="py-2.5 px-3 font-medium text-right">M</th>
+                  <th className="py-2.5 px-3 font-medium text-right">RUNS</th>
+                  <th className="py-2.5 px-3 font-medium text-right">BAT AVG</th>
+                  <th className="py-2.5 px-3 font-medium text-right">WKTS</th>
+                  <th className="py-2.5 px-3 font-medium text-right">BWL AVG</th>
+                  <th className="py-2.5 px-3 font-medium text-right" style={{ color: 'var(--pb-accent)' }}>INDEX</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.top_allrounders || []).map((r, i) => (
+                  <tr key={r.player_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                    <td className="py-2.5 px-3 font-mono text-pb-faint"><RankNum rank={i+1} /></td>
+                    <td className="py-2.5 px-3"><PlayerLink id={r.player_id} name={r.name} /></td>
+                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.matches ?? '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.runs ?? '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.batting_average ?? '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.wickets ?? '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.bowling_average ?? '—'}</td>
+                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>
+                      {r.index_score != null ? Number(r.index_score).toFixed(0) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -389,6 +445,7 @@ const TABS = [
   { key: 'batting',      label: 'BATTING' },
   { key: 'bowling',      label: 'BOWLING' },
   { key: 'partnerships', label: 'PARTNERSHIPS' },
+  { key: 'allrounders',  label: 'ALL-ROUNDERS' },
   { key: 'team',         label: 'TEAM' },
 ]
 
@@ -416,7 +473,6 @@ export default function Records() {
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
-  // Most recent season name for "NEW" badge detection
   const latestSeason = seasons?.[0]?.name || null
 
   return (
@@ -427,8 +483,6 @@ export default function Records() {
           title="The record books."
           meta={[<span key="x">Every club benchmark, since day one.</span>]}
         />
-
-        {/* Filters */}
         <div className="mb-5">
           <SeasonSelector
             seasons={seasons}
@@ -439,10 +493,7 @@ export default function Records() {
             setSelectedGrade={setSelectedGrade}
           />
         </div>
-
-        {/* Tabs */}
         <TabBar tabs={TABS} active={tab} onChange={setTab} />
-
         {loading ? <PbSpinner message="Loading records…" /> : !records ? (
           <p className="text-pb-faint text-sm py-8 text-center">No records data available.</p>
         ) : (
@@ -450,6 +501,7 @@ export default function Records() {
             {tab === 'batting'      && <BattingTab      data={records.batting}       latestSeason={latestSeason} />}
             {tab === 'bowling'      && <BowlingTab      data={records.bowling}       latestSeason={latestSeason} />}
             {tab === 'partnerships' && <PartnershipsTab data={records.partnerships} />}
+            {tab === 'allrounders'  && <AllRoundersTab  data={records.allrounders} />}
             {tab === 'team'         && <TeamTab         data={records.team} />}
           </>
         )}
