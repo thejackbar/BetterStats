@@ -1400,6 +1400,20 @@ export default function Yearbook() {
                 ))}
               </div>
             </div>
+            {grades.length > 1 && !['overview', 'grades'].includes(activeTab) && (
+              <div className="shrink-0">
+                <select
+                  value={gradeId || ''}
+                  onChange={e => setGradeId(e.target.value || null)}
+                  className="text-[11px] font-mono bg-pb-surface2 border border-white/15 rounded px-2 py-1.5 text-white/70 focus:outline-none"
+                >
+                  <option value="">All Grades</option>
+                  {grades.map(g => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
       </div>
