@@ -801,58 +801,64 @@ async def get_grade_breakdown(
     for grade in grade_list:
         gids = grade["grade_ids"]  # list of all IDs with this name
 
+        # Stats from actual game-level rows for this grade only
         stats = await db.execute(
             text("""
                 SELECT
-                    COUNT(DISTINCT pss.player_id) AS players,
-                    SUM(pss.runs) AS runs,
-                    SUM(pss.wickets) AS wickets,
-                    MAX(pss.high_score) AS high_score
-                FROM player_season_stats pss
-                WHERE pss.season_id = :s
-                  AND pss.player_id IN (
-                      SELECT DISTINCT bi.player_id FROM batting_innings bi
-                      JOIN games gm ON gm.id = bi.game_id
-                      WHERE gm.grade_id = ANY(:gids)
-                  )
+                    COUNT(DISTINCT bi.player_id) AS players,
+                    SUM(bi.runs) AS runs,
+                    MAX(bi.runs) AS high_score
+                FROM batting_innings bi
+                JOIN games gm ON gm.id = bi.game_id
+                JOIN players p ON p.id = bi.player_id
+                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
             """),
-            {"s": season_id, "gids": gids},
+            {"gids": gids, "o": org_id},
         )
-        grade_stats = dict(stats.mappings().first() or {})
+        grade_bat_stats = dict(stats.mappings().first() or {})
 
-        # Top batter
+        wkt_stats = await db.execute(
+            text("""
+                SELECT SUM(bs.wickets) AS wickets
+                FROM bowling_spells bs
+                JOIN games gm ON gm.id = bs.game_id
+                JOIN players p ON p.id = bs.player_id
+                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
+            """),
+            {"gids": gids, "o": org_id},
+        )
+        grade_bowl_stats = dict(wkt_stats.mappings().first() or {})
+        grade_stats = {**grade_bat_stats, **grade_bowl_stats}
+
+        # Top batter by runs in this grade
         tb = await db.execute(
             text("""
-                SELECT COALESCE(p.display_name_override, p.name) AS name, p.id, SUM(pss.runs) AS runs
-                FROM player_season_stats pss JOIN players p ON p.id = pss.player_id
-                WHERE pss.season_id = :s
-                  AND pss.player_id IN (
-                      SELECT DISTINCT bi.player_id FROM batting_innings bi
-                      JOIN games gm ON gm.id = bi.game_id
-                      WHERE gm.grade_id = ANY(:gids)
-                  )
+                SELECT COALESCE(p.display_name_override, p.name) AS name, p.id,
+                    SUM(bi.runs) AS runs
+                FROM batting_innings bi
+                JOIN games gm ON gm.id = bi.game_id
+                JOIN players p ON p.id = bi.player_id
+                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
                 GROUP BY p.id, p.name, p.display_name_override
-                ORDER BY SUM(pss.runs) DESC NULLS LAST LIMIT 1
+                ORDER BY SUM(bi.runs) DESC NULLS LAST LIMIT 1
             """),
-            {"s": season_id, "gids": gids},
+            {"gids": gids, "o": org_id},
         )
         top_bat = dict(tb.mappings().first() or {})
 
-        # Top bowler
+        # Top bowler by wickets in this grade
         tw = await db.execute(
             text("""
-                SELECT COALESCE(p.display_name_override, p.name) AS name, p.id, SUM(pss.wickets) AS wickets
-                FROM player_season_stats pss JOIN players p ON p.id = pss.player_id
-                WHERE pss.season_id = :s
-                  AND pss.player_id IN (
-                      SELECT DISTINCT bs.player_id FROM bowling_spells bs
-                      JOIN games gm ON gm.id = bs.game_id
-                      WHERE gm.grade_id = ANY(:gids)
-                  )
+                SELECT COALESCE(p.display_name_override, p.name) AS name, p.id,
+                    SUM(bs.wickets) AS wickets
+                FROM bowling_spells bs
+                JOIN games gm ON gm.id = bs.game_id
+                JOIN players p ON p.id = bs.player_id
+                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
                 GROUP BY p.id, p.name, p.display_name_override
-                ORDER BY SUM(pss.wickets) DESC NULLS LAST LIMIT 1
+                ORDER BY SUM(bs.wickets) DESC NULLS LAST LIMIT 1
             """),
-            {"s": season_id, "gids": gids},
+            {"gids": gids, "o": org_id},
         )
         top_bowl = dict(tw.mappings().first() or {})
 
