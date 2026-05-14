@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
   AreaChart, Area, CartesianGrid,
+  PieChart, Pie, Cell,
 } from 'recharts'
 
 // ─── Utility helpers ────────────────────────────────────────────────────────
@@ -29,13 +30,36 @@ function fmt(n, dec = 2) {
 function PlayerLink({ id, name, slug }) {
   if (!id) return <span>{name}</span>
   return (
-    <Link to={`/${slug}/players/${id}`} className="hover:underline" style={{ color: 'var(--pb-accent)' }}>
+    <Link to={`/players/${id}`} className="hover:underline" style={{ color: 'var(--pb-accent)' }}>
       {name}
     </Link>
   )
 }
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
+
+const DISMISSAL_LABELS = {
+  bowled: 'Bowled',
+  caught: 'Caught',
+  'caught and bowled': 'Caught & Bowled',
+  lbw: 'LBW',
+  'run out': 'Run Out',
+  stumped: 'Stumped',
+  'hit wicket': 'Hit Wicket',
+  'handled the ball': 'Handled the Ball',
+  'obstructing the field': 'Obstructing the Field',
+  'timed out': 'Timed Out',
+  'retired hurt': 'Retired Hurt',
+  'retired out': 'Retired Out',
+  'did not bat': 'Did Not Bat',
+  absent: 'Absent',
+  dnb: 'Did Not Bat',
+  unknown: 'Not Out / Unknown',
+}
+const DISMISSAL_COLORS = [
+  'var(--pb-accent)', '#60a5fa', '#f59e0b', '#e879f9',
+  '#fb923c', '#34d399', '#f87171', '#a78bfa', '#38bdf8', '#facc15',
+]
 
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
@@ -57,7 +81,7 @@ function abbrev(name) {
 
 // ─── Shared table components ─────────────────────────────────────────────────
 
-function YbTable({ headers, rows, className = '' }) {
+function YbTable({ headers, rows, rowStyles = [], className = '' }) {
   return (
     <div className={`overflow-x-auto ${className}`}>
       <table className="w-full text-[13px]">
@@ -70,7 +94,7 @@ function YbTable({ headers, rows, className = '' }) {
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} className="border-b border-white/5 hover:bg-white/3 transition-colors">
+            <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors" style={rowStyles[i] || {}}>
               {row.map((cell, j) => (
                 <td key={j} className={`py-2.5 px-3 font-mono ${j > 0 ? 'text-right text-white/60' : 'text-white/90'}`}>
                   {cell}
@@ -378,8 +402,15 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
         <SectionCard key={gradeName} title={gradeName}>
           <YbTable
             headers={['Date', 'Opponent', 'Result', 'Top Bat', 'Top Bowl']}
+            rowStyles={games.map(g =>
+              g.result === 'won'
+                ? { background: 'rgba(74,222,128,0.07)' }
+                : g.result === 'lost'
+                ? { background: 'rgba(248,113,113,0.07)' }
+                : { background: 'rgba(255,255,255,0.02)' }
+            )}
             rows={games.map(g => {
-              const resultColor = g.result === 'won' ? 'var(--pb-accent)' : g.result === 'lost' ? '#f87171' : 'var(--pb-amber)'
+              const resultColor = g.result === 'won' ? '#4ade80' : g.result === 'lost' ? '#f87171' : 'rgba(255,255,255,0.4)'
               return [
                 <span className="text-white/40 text-[12px]">{fmtDate(g.played_at) || '—'}</span>,
                 <span>{g.home_team && g.away_team ? `${g.home_team} vs ${g.away_team}` : (g.home_team || g.away_team || '—')}</span>,
@@ -412,6 +443,7 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
 function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
   const [data, setData] = useState(null)
   const [dismissals, setDismissals] = useState(null)
+  const [partnerships, setPartnerships] = useState(null)
   const [minInnings, setMinInnings] = useState(1)
   const [loading, setLoading] = useState(true)
 
@@ -420,9 +452,11 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
     Promise.all([
       api.getYearbookBatting(orgId, seasonId, { gradeId, minInnings }),
       api.getYearbookDismissals(orgId, seasonId, gradeId),
-    ]).then(([b, d]) => {
+      api.getYearbookPartnerships(orgId, seasonId, gradeId),
+    ]).then(([b, d, p]) => {
       setData(b)
       setDismissals(d)
+      setPartnerships(p)
     }).finally(() => setLoading(false))
   }, [orgId, seasonId, gradeId, minInnings])
 
@@ -446,26 +480,7 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
       </div>
 
       {data?.length > 0 && (
-        <SectionCard title="Runs Scored — Top Players">
-          <div className="px-4 py-4">
-            <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
-              <BarChart
-                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), runs: parseInt(p.runs || 0), id: p.player_id }))}
-                layout="vertical"
-                margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
-              >
-                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
-                <Tooltip content={<ChartTooltip />} />
-                <Bar dataKey="runs" name="runs" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </SectionCard>
-      )}
-
-      <SectionCard title="Batting Honours">
-        {data?.length ? (
+        <SectionCard title="Batting Honours">
           <YbTable
             headers={['Player', 'M', 'Inn', 'Runs', 'Avg', 'SR', 'HS', '50s', '100s', 'Ducks']}
             rows={data.map((p, i) => [
@@ -486,122 +501,90 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
               p.ducks ?? '—',
             ])}
           />
-        ) : (
-          <p className="text-white/30 text-sm italic px-5 py-4">No batting data for this selection.</p>
-        )}
-      </SectionCard>
-
-      {dismissals?.length > 0 && (
-        <SectionCard title="How We Got Out">
-          <div className="p-5">
-            <div className="space-y-2">
-              {dismissals.map(d => {
-                const total = dismissals.reduce((s, x) => s + parseInt(x.count || 0), 0)
-                const pct = total > 0 ? Math.round(parseInt(d.count) / total * 100) : 0
-                return (
-                  <div key={d.dismissal_type} className="flex items-center gap-3">
-                    <span className="text-[12px] text-white/60 w-32 capitalize">{d.dismissal_type.replace(/_/g, ' ')}</span>
-                    <div className="flex-1 h-2 rounded-full bg-white/8 overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{ width: `${pct}%`, background: 'var(--pb-accent)', opacity: 0.7 }}
-                      />
-                    </div>
-                    <span className="font-mono text-[11px] text-white/40 w-12 text-right">{d.count}</span>
-                    <span className="font-mono text-[11px] text-white/25 w-8 text-right">{pct}%</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
         </SectionCard>
       )}
-    </div>
-  )
-}
 
-// ─── Bowling tab ──────────────────────────────────────────────────────────────
-
-function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
-  const [data, setData] = useState(null)
-  const [partnerships, setPartnerships] = useState(null)
-  const [minWickets, setMinWickets] = useState(1)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    Promise.all([
-      api.getYearbookBowling(orgId, seasonId, { gradeId, minWickets }),
-      api.getYearbookPartnerships(orgId, seasonId, gradeId),
-    ]).then(([b, p]) => {
-      setData(b)
-      setPartnerships(p)
-    }).finally(() => setLoading(false))
-  }, [orgId, seasonId, gradeId, minWickets])
-
-  if (loading) return <PbSpinner />
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] font-mono text-white/40 tracking-wide3 uppercase">Min wickets:</span>
-        {[1, 5, 10, 20].map(n => (
-          <button
-            key={n}
-            onClick={() => setMinWickets(n)}
-            className={`px-3 py-1 rounded font-mono text-[11px] tracking-wide border transition-colors ${
-              minWickets === n
-                ? 'border-white/30 bg-white/10 text-white'
-                : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
-            }`}
-          >{n}+</button>
-        ))}
-      </div>
+      {!data?.length && (
+        <SectionCard title="Batting Honours">
+          <p className="text-white/30 text-sm italic px-5 py-4">No batting data for this selection.</p>
+        </SectionCard>
+      )}
 
       {data?.length > 0 && (
-        <SectionCard title="Wickets Taken — Top Bowlers">
+        <SectionCard title="Runs Scored — Top Players">
           <div className="px-4 py-4">
             <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
               <BarChart
-                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), wickets: parseInt(p.wickets || 0) }))}
+                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), runs: parseInt(p.runs || 0), id: p.player_id }))}
                 layout="vertical"
                 margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
               >
                 <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
                 <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
                 <Tooltip content={<ChartTooltip />} />
-                <Bar dataKey="wickets" name="wickets" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
+                <Bar dataKey="runs" name="runs" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </SectionCard>
       )}
 
-      <SectionCard title="Bowling Honours">
-        {data?.length ? (
-          <YbTable
-            headers={['Player', 'M', 'Wkts', 'Overs', 'Avg', 'Econ', 'SR', 'Best', '5WI']}
-            rows={data.map((p, i) => [
-              <span className="flex items-center gap-2">
-                <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
-                <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
-              </span>,
-              p.matches ?? '—',
-              <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.wickets ?? '—'}</span>,
-              fmt(p.overs, 1),
-              fmt(p.average),
-              fmt(p.economy),
-              fmt(p.strike_rate, 1),
-              p.best_figures || '—',
-              p.five_fors > 0
-                ? <span style={{ color: 'var(--pb-amber)' }}>{p.five_fors}</span>
-                : (p.five_fors ?? '—'),
-            ])}
-          />
-        ) : (
-          <p className="text-white/30 text-sm italic px-5 py-4">No bowling data for this selection.</p>
-        )}
-      </SectionCard>
+      {dismissals?.length > 0 && (() => {
+        const total = dismissals.reduce((s, x) => s + parseInt(x.count || 0), 0)
+        const pieData = dismissals.map(d => ({
+          name: DISMISSAL_LABELS[d.dismissal_type?.toLowerCase()] || d.dismissal_type?.replace(/_/g, ' ') || 'Unknown',
+          value: parseInt(d.count || 0),
+          pct: total > 0 ? Math.round(parseInt(d.count) / total * 100) : 0,
+        }))
+        return (
+          <SectionCard title="How We Got Out">
+            <div className="flex flex-col sm:flex-row items-center gap-4 px-4 py-5">
+              <div className="shrink-0">
+                <PieChart width={200} height={200}>
+                  <Pie
+                    data={pieData}
+                    cx={100}
+                    cy={100}
+                    innerRadius={58}
+                    outerRadius={90}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {pieData.map((_, i) => (
+                      <Cell key={i} fill={DISMISSAL_COLORS[i % DISMISSAL_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null
+                      const d = payload[0]
+                      return (
+                        <div style={{ background: '#0c1a10', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+                          <div style={{ color: d.payload.fill, fontWeight: 600 }}>{d.name}</div>
+                          <div style={{ color: 'rgba(255,255,255,0.6)' }}>{d.value} ({d.payload.pct}%)</div>
+                        </div>
+                      )
+                    }}
+                  />
+                </PieChart>
+              </div>
+              <div className="flex-1 space-y-1.5 min-w-0">
+                {pieData.map((d, i) => (
+                  <div key={i} className="flex items-center gap-2.5">
+                    <span
+                      className="shrink-0 w-2.5 h-2.5 rounded-full"
+                      style={{ background: DISMISSAL_COLORS[i % DISMISSAL_COLORS.length] }}
+                    />
+                    <span className="text-[12px] text-white/70 flex-1 truncate">{d.name}</span>
+                    <span className="font-mono text-[11px] text-white/50 shrink-0">{d.value}</span>
+                    <span className="font-mono text-[11px] text-white/30 w-8 text-right shrink-0">{d.pct}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </SectionCard>
+        )
+      })()}
 
       {partnerships && (
         <div className="grid sm:grid-cols-2 gap-6">
@@ -645,6 +628,122 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
           </SectionCard>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Bowling tab ──────────────────────────────────────────────────────────────
+
+function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
+  const [data, setData] = useState(null)
+  const [minWickets, setMinWickets] = useState(1)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    api.getYearbookBowling(orgId, seasonId, { gradeId, minWickets })
+      .then(setData)
+      .finally(() => setLoading(false))
+  }, [orgId, seasonId, gradeId, minWickets])
+
+  if (loading) return <PbSpinner />
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[11px] font-mono text-white/40 tracking-wide3 uppercase">Min wickets:</span>
+        {[1, 5, 10, 20].map(n => (
+          <button
+            key={n}
+            onClick={() => setMinWickets(n)}
+            className={`px-3 py-1 rounded font-mono text-[11px] tracking-wide border transition-colors ${
+              minWickets === n
+                ? 'border-white/30 bg-white/10 text-white'
+                : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+            }`}
+          >{n}+</button>
+        ))}
+      </div>
+
+      {data?.length > 0 && (
+        <SectionCard title="Bowling Honours">
+          <YbTable
+            headers={['Player', 'M', 'Wkts', 'Overs', 'Avg', 'Econ', 'SR', 'Best', '5WI']}
+            rows={data.map((p, i) => [
+              <span className="flex items-center gap-2">
+                <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
+                <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
+              </span>,
+              p.matches ?? '—',
+              <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.wickets ?? '—'}</span>,
+              fmt(p.overs, 1),
+              fmt(p.average),
+              fmt(p.economy),
+              fmt(p.strike_rate, 1),
+              p.best_figures || '—',
+              p.five_fors > 0
+                ? <span style={{ color: 'var(--pb-amber)' }}>{p.five_fors}</span>
+                : (p.five_fors ?? '—'),
+            ])}
+          />
+        </SectionCard>
+      )}
+
+      {!data?.length && (
+        <SectionCard title="Bowling Honours">
+          <p className="text-white/30 text-sm italic px-5 py-4">No bowling data for this selection.</p>
+        </SectionCard>
+      )}
+
+      {data?.length > 0 && (
+        <SectionCard title="Wickets Taken — Top Bowlers">
+          <div className="px-4 py-4">
+            <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
+              <BarChart
+                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), wickets: parseInt(p.wickets || 0) }))}
+                layout="vertical"
+                margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
+              >
+                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="wickets" name="wickets" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      )}
+
+      {data?.length > 0 && (() => {
+        const figRows = data
+          .filter(p => p.best_wickets != null && p.best_wickets > 0)
+          .slice()
+          .sort((a, b) => {
+            if (b.best_wickets !== a.best_wickets) return b.best_wickets - a.best_wickets
+            const runsA = a.best_figures ? parseInt(a.best_figures.split('/')[1] || '9999') : 9999
+            const runsB = b.best_figures ? parseInt(b.best_figures.split('/')[1] || '9999') : 9999
+            return runsA - runsB
+          })
+          .slice(0, 20)
+        return figRows.length > 0 ? (
+          <SectionCard title="Best Bowling Figures">
+            <YbTable
+              headers={['Player', 'Best', 'Wkts', 'Overs', 'Avg']}
+              rows={figRows.map((p, i) => [
+                <span className="flex items-center gap-2">
+                  <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
+                  <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
+                </span>,
+                <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.best_figures || '—'}</span>,
+                p.wickets ?? '—',
+                fmt(p.overs, 1),
+                fmt(p.average),
+              ])}
+            />
+          </SectionCard>
+        ) : null
+      })()}
+
     </div>
   )
 }
@@ -712,6 +811,81 @@ function FieldingTab({ orgId, seasonId, gradeId, clubSlug }) {
           />
         </SectionCard>
       )}
+    </div>
+  )
+}
+
+// ─── All Rounders tab ─────────────────────────────────────────────────────────
+
+function AllroundersTab({ orgId, seasonId, gradeId, clubSlug }) {
+  const [data, setData] = useState(null)
+  const [minRuns, setMinRuns] = useState(100)
+  const [minWickets, setMinWickets] = useState(5)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    api.getYearbookAllrounders(orgId, seasonId, { gradeId, minRuns, minWickets })
+      .then(setData)
+      .finally(() => setLoading(false))
+  }, [orgId, seasonId, gradeId, minRuns, minWickets])
+
+  if (loading) return <PbSpinner />
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-mono text-white/40 tracking-wide3 uppercase">Min runs:</span>
+          {[50, 100, 200, 300].map(n => (
+            <button
+              key={n}
+              onClick={() => setMinRuns(n)}
+              className={`px-3 py-1 rounded font-mono text-[11px] tracking-wide border transition-colors ${
+                minRuns === n
+                  ? 'border-white/30 bg-white/10 text-white'
+                  : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+              }`}
+            >{n}+</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-mono text-white/40 tracking-wide3 uppercase">Min wickets:</span>
+          {[3, 5, 10, 20].map(n => (
+            <button
+              key={n}
+              onClick={() => setMinWickets(n)}
+              className={`px-3 py-1 rounded font-mono text-[11px] tracking-wide border transition-colors ${
+                minWickets === n
+                  ? 'border-white/30 bg-white/10 text-white'
+                  : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+              }`}
+            >{n}+</button>
+          ))}
+        </div>
+      </div>
+
+      <SectionCard title="All Rounders">
+        {data?.length ? (
+          <YbTable
+            headers={['Player', 'M', 'Runs', 'Bat Avg', 'Wkts', 'Bowl Avg', 'Index']}
+            rows={data.map((p, i) => [
+              <span className="flex items-center gap-2">
+                <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
+                <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
+              </span>,
+              p.matches ?? '—',
+              fmtRuns(p.runs),
+              fmt(p.bat_avg),
+              p.wickets ?? '—',
+              fmt(p.bowl_avg),
+              <span style={{ color: 'var(--pb-amber)', fontWeight: 600 }}>{p.allrounder_index ?? '—'}</span>,
+            ])}
+          />
+        ) : (
+          <p className="text-white/30 text-sm italic px-5 py-4">No all-rounders meet these thresholds. Try lowering the minimums.</p>
+        )}
+      </SectionCard>
     </div>
   )
 }
@@ -821,6 +995,7 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
 function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
   const [players, setPlayers] = useState(null)
   const [expanded, setExpanded] = useState(null)
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -833,11 +1008,20 @@ function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
   if (loading) return <PbSpinner />
   if (!players?.length) return <p className="text-white/30 text-sm italic py-8 text-center">No player data for this selection.</p>
 
+  const filteredPlayers = players.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+
   return (
     <div>
-      <p className="text-[12px] text-white/30 mb-4 font-mono">{players.length} players · click any card for full breakdown</p>
+      <input
+        type="text"
+        placeholder="Search players..."
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        className="w-full sm:w-64 bg-white/5 border border-white/15 rounded px-3 py-1.5 text-[13px] text-white/80 placeholder-white/30 focus:outline-none focus:border-white/30 mb-4"
+      />
+      <p className="text-[12px] text-white/30 mb-4 font-mono">{filteredPlayers.length} players · click any card for full breakdown</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        {players.map(p => (
+        {filteredPlayers.map(p => (
           <div
             key={p.player_id}
             onClick={() => setExpanded(expanded === p.player_id ? null : p.player_id)}
@@ -848,8 +1032,15 @@ function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
             }`}
           >
             <div className="px-4 py-3">
-              <div className="font-medium text-[13px] text-white/90 leading-tight">{p.name}</div>
-              <div className="font-mono text-[11px] text-white/40 mt-0.5">{p.matches}M</div>
+              <div className="font-medium text-[13px] text-white/90 leading-tight mb-1.5">{p.name}</div>
+              <div className="grid grid-cols-3 gap-x-2 gap-y-1">
+                <div><span className="font-mono text-[10px] text-white/40">M </span><span className="font-mono text-[10px] text-white/70">{p.matches ?? '—'}</span></div>
+                <div><span className="font-mono text-[10px] text-white/40">Runs </span><span className="font-mono text-[10px] text-white/70">{p.runs != null ? fmtRuns(p.runs) : '—'}</span></div>
+                <div><span className="font-mono text-[10px] text-white/40">Avg </span><span className="font-mono text-[10px] text-white/70">{fmt(p.bat_avg)}</span></div>
+                <div><span className="font-mono text-[10px] text-white/40">Wkts </span><span className="font-mono text-[10px] text-white/70">{p.wickets ?? '—'}</span></div>
+                <div><span className="font-mono text-[10px] text-white/40">Bowl </span><span className="font-mono text-[10px] text-white/70">{fmt(p.bowl_avg)}</span></div>
+                <div><span className="font-mono text-[10px] text-white/40">Ct </span><span className="font-mono text-[10px] text-white/70">{p.catches ?? p.dismissals ?? '—'}</span></div>
+              </div>
             </div>
             {expanded === p.player_id && (
               <div className="border-t border-white/8 px-4 py-3 space-y-1">
@@ -885,7 +1076,7 @@ function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
                 )}
                 <div className="pt-1">
                   <Link
-                    to={`/${clubSlug}/players/${p.player_id}`}
+                    to={`/players/${p.player_id}`}
                     className="text-[11px] font-mono tracking-wide"
                     style={{ color: 'var(--pb-accent)' }}
                     onClick={e => e.stopPropagation()}
@@ -963,6 +1154,7 @@ const TABS = [
   { id: 'batting', label: 'Batting' },
   { id: 'bowling', label: 'Bowling' },
   { id: 'fielding', label: 'Fielding' },
+  { id: 'allrounders', label: 'All Rounders' },
   { id: 'awards', label: 'Awards' },
   { id: 'players', label: 'Players' },
   { id: 'grades', label: 'Grades' },
@@ -1251,6 +1443,9 @@ export default function Yearbook() {
         )}
         {activeTab === 'fielding' && (
           <FieldingTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />
+        )}
+        {activeTab === 'allrounders' && (
+          <AllroundersTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />
         )}
         {activeTab === 'awards' && (
           <AwardsTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} yearbookData={yearbook} />
