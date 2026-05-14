@@ -112,7 +112,7 @@ async def list_seasons(
         .where(Season.organisation_id == club.id)
         .order_by(
             Season.display_order.asc().nullslast(),
-            _text("CAST(SUBSTRING(seasons.name FROM '\\d{4}') AS INTEGER) DESC NULLS LAST"),
+            _text("CAST(SUBSTRING(seasons.name FROM '[0-9]{4}') AS INTEGER) DESC NULLS LAST"),
             Season.name.desc(),
         )
     )

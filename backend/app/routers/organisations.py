@@ -101,7 +101,7 @@ async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
         .where(Season.organisation_id == uuid.UUID(org_id))
         .order_by(
             Season.display_order.asc().nullslast(),
-            text("CAST(SUBSTRING(seasons.name FROM '\\d{4}') AS INTEGER) DESC NULLS LAST"),
+            text("CAST(SUBSTRING(seasons.name FROM '[0-9]{4}') AS INTEGER) DESC NULLS LAST"),
             Season.name.desc(),
         )
     )
