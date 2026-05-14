@@ -780,26 +780,27 @@ async def get_grade_breakdown(
     season_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    params: dict = {"o": org_id, "s": season_id}
-
-    grades = await db.execute(
+    # Get unique grade names with all their IDs (same name can have multiple IDs
+    # across sync runs; aggregate all of them together for accurate stats).
+    names_rows = await db.execute(
         text("""
-            SELECT DISTINCT ON (g.name) g.id, g.name,
+            SELECT g.name, ARRAY_AGG(g.id::text) AS grade_ids,
                 COUNT(gm.id) AS game_count
             FROM grades g
             JOIN seasons s ON s.id = g.season_id
             LEFT JOIN games gm ON gm.grade_id = g.id
             WHERE g.season_id = :s AND s.organisation_id = :o
-            GROUP BY g.id, g.name
-            ORDER BY g.name, COUNT(gm.id) DESC
+            GROUP BY g.name
+            ORDER BY g.name
         """),
-        params,
+        {"o": org_id, "s": season_id},
     )
-    grade_list = [dict(r) for r in grades.mappings().all()]
+    grade_list = [dict(r) for r in names_rows.mappings().all()]
 
     result = []
     for grade in grade_list:
-        gid = str(grade["id"])
+        gids = grade["grade_ids"]  # list of all IDs with this name
+
         stats = await db.execute(
             text("""
                 SELECT
@@ -811,10 +812,11 @@ async def get_grade_breakdown(
                 WHERE pss.season_id = :s
                   AND pss.player_id IN (
                       SELECT DISTINCT bi.player_id FROM batting_innings bi
-                      JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid
+                      JOIN games gm ON gm.id = bi.game_id
+                      WHERE gm.grade_id = ANY(:gids)
                   )
             """),
-            {"s": season_id, "gid": gid},
+            {"s": season_id, "gids": gids},
         )
         grade_stats = dict(stats.mappings().first() or {})
 
@@ -826,12 +828,13 @@ async def get_grade_breakdown(
                 WHERE pss.season_id = :s
                   AND pss.player_id IN (
                       SELECT DISTINCT bi.player_id FROM batting_innings bi
-                      JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid
+                      JOIN games gm ON gm.id = bi.game_id
+                      WHERE gm.grade_id = ANY(:gids)
                   )
                 GROUP BY p.id, p.name, p.display_name_override
                 ORDER BY SUM(pss.runs) DESC NULLS LAST LIMIT 1
             """),
-            {"s": season_id, "gid": gid},
+            {"s": season_id, "gids": gids},
         )
         top_bat = dict(tb.mappings().first() or {})
 
@@ -843,29 +846,32 @@ async def get_grade_breakdown(
                 WHERE pss.season_id = :s
                   AND pss.player_id IN (
                       SELECT DISTINCT bs.player_id FROM bowling_spells bs
-                      JOIN games gm ON gm.id = bs.game_id WHERE gm.grade_id = :gid
+                      JOIN games gm ON gm.id = bs.game_id
+                      WHERE gm.grade_id = ANY(:gids)
                   )
                 GROUP BY p.id, p.name, p.display_name_override
                 ORDER BY SUM(pss.wickets) DESC NULLS LAST LIMIT 1
             """),
-            {"s": season_id, "gid": gid},
+            {"s": season_id, "gids": gids},
         )
         top_bowl = dict(tw.mappings().first() or {})
 
-        # Wins and losses for this grade
+        # Wins and losses across all grade IDs with this name
         wl = await db.execute(
             text("""
                 SELECT
                     COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('win','won')) AS wins,
                     COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('loss','lost')) AS losses
-                FROM games gm WHERE gm.grade_id = :gid
+                FROM games gm WHERE gm.grade_id = ANY(:gids)
             """),
-            {"gid": gid},
+            {"gids": gids},
         )
         wl_stats = dict(wl.mappings().first() or {})
 
         result.append({
-            **grade,
+            "id": gids[0],
+            "name": grade["name"],
+            "game_count": grade["game_count"],
             **grade_stats,
             **wl_stats,
             "top_batter": top_bat,
