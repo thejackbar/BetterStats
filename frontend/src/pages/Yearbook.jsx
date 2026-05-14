@@ -453,26 +453,7 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
       </div>
 
       {data?.length > 0 && (
-        <SectionCard title="Runs Scored — Top Players">
-          <div className="px-4 py-4">
-            <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
-              <BarChart
-                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), runs: parseInt(p.runs || 0), id: p.player_id }))}
-                layout="vertical"
-                margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
-              >
-                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
-                <Tooltip content={<ChartTooltip />} />
-                <Bar dataKey="runs" name="runs" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </SectionCard>
-      )}
-
-      <SectionCard title="Batting Honours">
-        {data?.length ? (
+        <SectionCard title="Batting Honours">
           <YbTable
             headers={['Player', 'M', 'Inn', 'Runs', 'Avg', 'SR', 'HS', '50s', '100s', 'Ducks']}
             rows={data.map((p, i) => [
@@ -493,10 +474,33 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
               p.ducks ?? '—',
             ])}
           />
-        ) : (
+        </SectionCard>
+      )}
+
+      {!data?.length && (
+        <SectionCard title="Batting Honours">
           <p className="text-white/30 text-sm italic px-5 py-4">No batting data for this selection.</p>
-        )}
-      </SectionCard>
+        </SectionCard>
+      )}
+
+      {data?.length > 0 && (
+        <SectionCard title="Runs Scored — Top Players">
+          <div className="px-4 py-4">
+            <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
+              <BarChart
+                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), runs: parseInt(p.runs || 0), id: p.player_id }))}
+                layout="vertical"
+                margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
+              >
+                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="runs" name="runs" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      )}
 
       {dismissals?.length > 0 && (
         <SectionCard title="How We Got Out">
@@ -566,26 +570,7 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
       </div>
 
       {data?.length > 0 && (
-        <SectionCard title="Wickets Taken — Top Bowlers">
-          <div className="px-4 py-4">
-            <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
-              <BarChart
-                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), wickets: parseInt(p.wickets || 0) }))}
-                layout="vertical"
-                margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
-              >
-                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
-                <Tooltip content={<ChartTooltip />} />
-                <Bar dataKey="wickets" name="wickets" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </SectionCard>
-      )}
-
-      <SectionCard title="Bowling Honours">
-        {data?.length ? (
+        <SectionCard title="Bowling Honours">
           <YbTable
             headers={['Player', 'M', 'Wkts', 'Overs', 'Avg', 'Econ', 'SR', 'Best', '5WI']}
             rows={data.map((p, i) => [
@@ -605,10 +590,33 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
                 : (p.five_fors ?? '—'),
             ])}
           />
-        ) : (
+        </SectionCard>
+      )}
+
+      {!data?.length && (
+        <SectionCard title="Bowling Honours">
           <p className="text-white/30 text-sm italic px-5 py-4">No bowling data for this selection.</p>
-        )}
-      </SectionCard>
+        </SectionCard>
+      )}
+
+      {data?.length > 0 && (
+        <SectionCard title="Wickets Taken — Top Bowlers">
+          <div className="px-4 py-4">
+            <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
+              <BarChart
+                data={data.slice(0, 15).map(p => ({ name: abbrev(p.name), wickets: parseInt(p.wickets || 0) }))}
+                layout="vertical"
+                margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
+              >
+                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="wickets" name="wickets" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      )}
 
       {partnerships && (
         <div className="grid sm:grid-cols-2 gap-6">
