@@ -32,6 +32,25 @@ def _season_slug(season_name: str) -> str:
     return season_name.lower().replace(" ", "-")
 
 
+def _season_match_keys(season_id: str, season_name: str | None) -> list[str]:
+    """Achievement rows store `season` as either the season UUID (when added via
+    the form) or a text key like '2025_26' (when CSV-imported). Build the set of
+    strings to match against `player_achievements.season` for a given season."""
+    import re
+    keys: set[str] = {str(season_id)}
+    if not season_name:
+        return list(keys)
+    keys.add(season_name)
+    m = re.search(r"(\d{4})/(\d{2,4})", season_name)
+    if m:
+        y1, y2 = m.group(1), m.group(2)[-2:]
+        keys.update({f"{y1}_{y2}", f"{y1}-{y2}", f"{y1}/{y2}"})
+    m = re.search(r"(\d{4})", season_name)
+    if m:
+        keys.add(m.group(1))
+    return list(keys)
+
+
 async def _ensure_stub(db: AsyncSession, org_id: str, season_id: str) -> dict:
     """Get or create a yearbook stub for a season."""
     row = await db.execute(
@@ -157,6 +176,23 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
     )
     season_row = season.mappings().first()
 
+    match_keys = _season_match_keys(
+        season_id, season_row["name"] if season_row else None
+    )
+    pulled = await db.execute(
+        text("""
+            SELECT a.id, a.category, a.subcategory, a.achievement, a.detail,
+                   a.season, a.player_id,
+                   COALESCE(p.display_name_override, p.name, a.player_name) AS player_name
+            FROM player_achievements a
+            LEFT JOIN players p ON p.id = a.player_id
+            WHERE a.org_id = :o
+              AND a.season = ANY(:keys)
+            ORDER BY a.category, a.subcategory NULLS LAST, a.achievement, a.id
+        """),
+        {"o": org_id, "keys": match_keys},
+    )
+
     return {
         **yb,
         "id": str(yb["id"]),
@@ -165,6 +201,7 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
         "honour_board": [dict(r) for r in honour_board.mappings().all()],
         "images": [dict(r) for r in images.mappings().all()],
         "awards": [dict(r) for r in awards.mappings().all()],
+        "pulled_awards": [dict(r) for r in pulled.mappings().all()],
     }
 
 
