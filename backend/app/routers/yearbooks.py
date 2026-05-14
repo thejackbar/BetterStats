@@ -1302,7 +1302,7 @@ Write 3–4 paragraphs as a warm, conversational club yearbook narrative. Rules:
 - Tone: casual and warm, like a club member who cares about the team wrote it — not corporate
 - Do NOT use nicknames unless they appear in the data
 - Do NOT use bullet points or headings — flowing prose only
-- Keep it under 350 words"""
+- Aim for 450–500 words — enough to fill a full page of the yearbook"""
 
 
 @router.post("/{org_id}/{season_id}/generate-narrative")
@@ -1436,7 +1436,7 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
     client = anthropic_sdk.AsyncAnthropic(api_key=settings.anthropic_api_key)
     message = await client.messages.create(
         model="claude-haiku-4-5",
-        max_tokens=600,
+        max_tokens=800,
         messages=[{"role": "user", "content": prompt}],
     )
     narrative_text = message.content[0].text.strip()
