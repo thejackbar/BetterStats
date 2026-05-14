@@ -253,6 +253,31 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
         <div>
           <p className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase mb-4">By The Numbers</p>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {overview?.total_runs > 0 && (
+              <SupCard label="Total Runs" value={fmtRuns(overview.total_runs)} />
+            )}
+            {overview?.total_wickets > 0 && (
+              <SupCard label="Total Wickets" value={overview.total_wickets} />
+            )}
+            {superlatives?.most_runs?.player_id && (
+              <SupCard
+                label="Most Runs"
+                value={fmtRuns(superlatives.most_runs.runs)}
+                name={superlatives.most_runs.name}
+                playerId={superlatives.most_runs.player_id}
+                clubSlug={clubSlug}
+                accent
+              />
+            )}
+            {superlatives?.most_wickets?.player_id && (
+              <SupCard
+                label="Most Wickets"
+                value={superlatives.most_wickets.wickets}
+                name={superlatives.most_wickets.name}
+                playerId={superlatives.most_wickets.player_id}
+                clubSlug={clubSlug}
+              />
+            )}
             {superlatives.highest_score?.player_id && (
               <SupCard
                 label="Highest Score"
@@ -294,16 +319,6 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
             )}
             {overview?.total_hundreds > 0 && (
               <SupCard label="Centuries" value={overview.total_hundreds} accent />
-            )}
-            {superlatives.most_ducks?.player_id && (
-              <SupCard
-                label="Golden Ducks (Season)"
-                value={superlatives.most_ducks.ducks}
-                name={superlatives.most_ducks.name}
-                playerId={superlatives.most_ducks.player_id}
-                clubSlug={clubSlug}
-                muted
-              />
             )}
           </div>
         </div>
@@ -361,8 +376,8 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
 
   let cumWins = 0, cumLosses = 0
   const progressionData = allGames.map(g => {
-    if (g.result === 'won') cumWins++
-    else if (g.result === 'lost') cumLosses++
+    if (g.result?.toLowerCase() === 'won') cumWins++
+    else if (g.result?.toLowerCase() === 'lost') cumLosses++
     return {
       date: fmtDate(g.played_at),
       Wins: cumWins,
@@ -403,19 +418,19 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
           <YbTable
             headers={['Date', 'Opponent', 'Result', 'Top Bat', 'Top Bowl']}
             rowStyles={games.map(g =>
-              g.result === 'won'
+              g.result?.toLowerCase() === 'won'
                 ? { background: 'rgba(74,222,128,0.07)' }
-                : g.result === 'lost'
+                : g.result?.toLowerCase() === 'lost'
                 ? { background: 'rgba(248,113,113,0.07)' }
                 : { background: 'rgba(255,255,255,0.02)' }
             )}
             rows={games.map(g => {
-              const resultColor = g.result === 'won' ? '#4ade80' : g.result === 'lost' ? '#f87171' : 'rgba(255,255,255,0.4)'
+              const resultColor = g.result?.toLowerCase() === 'won' ? '#4ade80' : g.result?.toLowerCase() === 'lost' ? '#f87171' : 'rgba(255,255,255,0.4)'
               return [
                 <span className="text-white/40 text-[12px]">{fmtDate(g.played_at) || '—'}</span>,
                 <span>{g.home_team && g.away_team ? `${g.home_team} vs ${g.away_team}` : (g.home_team || g.away_team || '—')}</span>,
                 <span className="font-semibold" style={{ color: resultColor }}>
-                  {g.result ? g.result.charAt(0).toUpperCase() + g.result.slice(1) : '—'}
+                  {g.result ? g.result.charAt(0).toUpperCase() + g.result.slice(1).toLowerCase() : '—'}
                 </span>,
                 g.top_batter ? (
                   <span>
@@ -752,18 +767,13 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
 
 function FieldingTab({ orgId, seasonId, gradeId, clubSlug }) {
   const [data, setData] = useState(null)
-  const [allrounders, setAllrounders] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([
-      api.getYearbookFielding(orgId, seasonId, { gradeId }),
-      api.getYearbookAllrounders(orgId, seasonId, { gradeId }),
-    ]).then(([f, a]) => {
-      setData(f)
-      setAllrounders(a)
-    }).finally(() => setLoading(false))
+    api.getYearbookFielding(orgId, seasonId, { gradeId })
+      .then(setData)
+      .finally(() => setLoading(false))
   }, [orgId, seasonId, gradeId])
 
   if (loading) return <PbSpinner />
@@ -792,25 +802,6 @@ function FieldingTab({ orgId, seasonId, gradeId, clubSlug }) {
         )}
       </SectionCard>
 
-      {allrounders?.length > 0 && (
-        <SectionCard title="All-Rounder Index" label="100+ runs & 5+ wickets">
-          <YbTable
-            headers={['Player', 'M', 'Runs', 'Bat Avg', 'Wkts', 'Bowl Avg', 'Index']}
-            rows={allrounders.map((p, i) => [
-              <span className="flex items-center gap-2">
-                <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
-                <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
-              </span>,
-              p.matches ?? '—',
-              fmtRuns(p.runs),
-              fmt(p.bat_avg),
-              p.wickets ?? '—',
-              fmt(p.bowl_avg),
-              <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.allrounder_index ?? '—'}</span>,
-            ])}
-          />
-        </SectionCard>
-      )}
     </div>
   )
 }
@@ -1116,6 +1107,12 @@ function GradesTab({ orgId, seasonId, clubSlug }) {
             <StatCallout value={fmtRuns(g.runs)} label="Runs" />
             <StatCallout value={g.wickets ?? '—'} label="Wickets" />
           </div>
+          {(g.wins > 0 || g.losses > 0) && (
+            <div className="flex gap-4 px-5 py-2 border-t border-white/5">
+              <span className="font-mono text-[11px]" style={{ color: '#4ade80' }}>{g.wins ?? 0}W</span>
+              <span className="font-mono text-[11px]" style={{ color: '#f87171' }}>{g.losses ?? 0}L</span>
+            </div>
+          )}
           <div className="border-t border-white/5 px-5 py-3 space-y-2">
             {g.top_batter?.name && (
               <div className="flex items-center gap-3 text-[12px]">
