@@ -110,7 +110,11 @@ async def list_seasons(
     result = await db.execute(
         select(Season)
         .where(Season.organisation_id == club.id)
-        .order_by(Season.display_order.asc().nullslast(), Season.year.desc().nullslast(), Season.name.asc())
+        .order_by(
+            Season.display_order.asc().nullslast(),
+            _text("CAST(SUBSTRING(seasons.name FROM '\\d{4}') AS INTEGER) DESC NULLS LAST"),
+            Season.name.desc(),
+        )
     )
     seasons = result.scalars().all()
     return [

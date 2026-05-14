@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from pydantic import BaseModel
 import uuid
 from datetime import date
@@ -99,7 +99,11 @@ async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Season)
         .where(Season.organisation_id == uuid.UUID(org_id))
-        .order_by(Season.display_order.asc().nullslast(), Season.year.desc().nullslast(), Season.name.asc())
+        .order_by(
+            Season.display_order.asc().nullslast(),
+            text("CAST(SUBSTRING(seasons.name FROM '\\d{4}') AS INTEGER) DESC NULLS LAST"),
+            Season.name.desc(),
+        )
     )
     seasons = result.scalars().all()
     return [
