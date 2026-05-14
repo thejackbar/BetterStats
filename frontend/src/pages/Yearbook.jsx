@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
   AreaChart, Area, CartesianGrid,
+  PieChart, Pie, Cell,
 } from 'recharts'
 
 // ─── Utility helpers ────────────────────────────────────────────────────────
@@ -36,6 +37,29 @@ function PlayerLink({ id, name, slug }) {
 }
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
+
+const DISMISSAL_LABELS = {
+  bowled: 'Bowled',
+  caught: 'Caught',
+  'caught and bowled': 'Caught & Bowled',
+  lbw: 'LBW',
+  'run out': 'Run Out',
+  stumped: 'Stumped',
+  'hit wicket': 'Hit Wicket',
+  'handled the ball': 'Handled the Ball',
+  'obstructing the field': 'Obstructing the Field',
+  'timed out': 'Timed Out',
+  'retired hurt': 'Retired Hurt',
+  'retired out': 'Retired Out',
+  'did not bat': 'Did Not Bat',
+  absent: 'Absent',
+  dnb: 'Did Not Bat',
+  unknown: 'Not Out / Unknown',
+}
+const DISMISSAL_COLORS = [
+  'var(--pb-accent)', '#60a5fa', '#f59e0b', '#e879f9',
+  '#fb923c', '#34d399', '#f87171', '#a78bfa', '#38bdf8', '#facc15',
+]
 
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
@@ -502,31 +526,62 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
         </SectionCard>
       )}
 
-      {dismissals?.length > 0 && (
-        <SectionCard title="How We Got Out">
-          <div className="p-5">
-            <div className="space-y-2">
-              {dismissals.map(d => {
-                const total = dismissals.reduce((s, x) => s + parseInt(x.count || 0), 0)
-                const pct = total > 0 ? Math.round(parseInt(d.count) / total * 100) : 0
-                return (
-                  <div key={d.dismissal_type} className="flex items-center gap-3">
-                    <span className="text-[12px] text-white/60 w-32 capitalize">{d.dismissal_type.replace(/_/g, ' ')}</span>
-                    <div className="flex-1 h-2 rounded-full bg-white/8 overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{ width: `${pct}%`, background: 'var(--pb-accent)', opacity: 0.7 }}
-                      />
-                    </div>
-                    <span className="font-mono text-[11px] text-white/40 w-12 text-right">{d.count}</span>
-                    <span className="font-mono text-[11px] text-white/25 w-8 text-right">{pct}%</span>
+      {dismissals?.length > 0 && (() => {
+        const total = dismissals.reduce((s, x) => s + parseInt(x.count || 0), 0)
+        const pieData = dismissals.map(d => ({
+          name: DISMISSAL_LABELS[d.dismissal_type?.toLowerCase()] || d.dismissal_type?.replace(/_/g, ' ') || 'Unknown',
+          value: parseInt(d.count || 0),
+          pct: total > 0 ? Math.round(parseInt(d.count) / total * 100) : 0,
+        }))
+        return (
+          <SectionCard title="How We Got Out">
+            <div className="flex flex-col sm:flex-row items-center gap-4 px-4 py-5">
+              <div className="shrink-0">
+                <PieChart width={200} height={200}>
+                  <Pie
+                    data={pieData}
+                    cx={100}
+                    cy={100}
+                    innerRadius={58}
+                    outerRadius={90}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {pieData.map((_, i) => (
+                      <Cell key={i} fill={DISMISSAL_COLORS[i % DISMISSAL_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null
+                      const d = payload[0]
+                      return (
+                        <div style={{ background: '#0c1a10', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+                          <div style={{ color: d.payload.fill, fontWeight: 600 }}>{d.name}</div>
+                          <div style={{ color: 'rgba(255,255,255,0.6)' }}>{d.value} ({d.payload.pct}%)</div>
+                        </div>
+                      )
+                    }}
+                  />
+                </PieChart>
+              </div>
+              <div className="flex-1 space-y-1.5 min-w-0">
+                {pieData.map((d, i) => (
+                  <div key={i} className="flex items-center gap-2.5">
+                    <span
+                      className="shrink-0 w-2.5 h-2.5 rounded-full"
+                      style={{ background: DISMISSAL_COLORS[i % DISMISSAL_COLORS.length] }}
+                    />
+                    <span className="text-[12px] text-white/70 flex-1 truncate">{d.name}</span>
+                    <span className="font-mono text-[11px] text-white/50 shrink-0">{d.value}</span>
+                    <span className="font-mono text-[11px] text-white/30 w-8 text-right shrink-0">{d.pct}%</span>
                   </div>
-                )
-              })}
+                ))}
+              </div>
             </div>
-          </div>
-        </SectionCard>
-      )}
+          </SectionCard>
+        )
+      })()}
     </div>
   )
 }
