@@ -1126,10 +1126,30 @@ function GradesTab({ orgId, seasonId, clubSlug }) {
                 </span>
               </div>
             )}
-            <div className="flex items-center gap-3 text-[12px]">
-              <span className="text-white/40 w-24 font-mono text-[10px] uppercase tracking-wide">HS</span>
-              <span className="text-white/60">{g.high_score ?? '—'}</span>
-            </div>
+            {g.high_score != null && (
+              <div className="flex items-center gap-3 text-[12px]">
+                <span className="text-white/40 w-24 font-mono text-[10px] uppercase tracking-wide">HS</span>
+                <span className="flex-1">
+                  {g.high_score_player_id
+                    ? <PlayerLink id={g.high_score_player_id} name={g.high_score_name} slug={clubSlug} />
+                    : <span className="text-white/60">{g.high_score_name}</span>
+                  }
+                  <span className="text-white/40 ml-2">{g.high_score}{g.high_score_not_out ? '*' : ''}</span>
+                </span>
+              </div>
+            )}
+            {g.best_bowling_wickets != null && (
+              <div className="flex items-center gap-3 text-[12px]">
+                <span className="text-white/40 w-24 font-mono text-[10px] uppercase tracking-wide">Best Bowl</span>
+                <span className="flex-1">
+                  {g.best_bowling_player_id
+                    ? <PlayerLink id={g.best_bowling_player_id} name={g.best_bowling_name} slug={clubSlug} />
+                    : <span className="text-white/60">{g.best_bowling_name}</span>
+                  }
+                  <span className="text-white/40 ml-2">{g.best_bowling_wickets}/{g.best_bowling_runs}</span>
+                </span>
+              </div>
+            )}
           </div>
         </SectionCard>
       ))}
