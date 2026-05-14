@@ -529,14 +529,18 @@ async def get_records(
                COALESCE(SUM(pss.runs), 0)    AS runs,
                COALESCE(SUM(pss.wickets), 0) AS wickets,
                COALESCE(SUM(pss.matches), 0) AS matches,
-               ROUND(COALESCE(SUM(pss.runs), 0) * 1.5 + COALESCE(SUM(pss.wickets), 0) * 10, 2) AS score
+               ROUND(SUM(pss.runs)::numeric /
+                   NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS batting_average,
+               ROUND(SUM(pss.runs_conceded)::numeric /
+                   NULLIF(SUM(pss.wickets), 0), 2) AS bowling_average,
+               ROUND(COALESCE(SUM(pss.runs), 0) * 1.5 + COALESCE(SUM(pss.wickets), 0) * 10, 2) AS index_score
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
         WHERE p.organisation_id = :org_id
           """ + pss_season_clause + """
         GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         HAVING SUM(pss.runs) >= 100 AND SUM(pss.wickets) >= 5
-        ORDER BY score DESC LIMIT :limit
+        ORDER BY index_score DESC LIMIT :limit
     """)
 
     # Flatten by_wicket into wicket_1 ... wicket_10 and normalise field names
@@ -598,8 +602,10 @@ async def get_records(
         },
         "partnerships": partnerships_flat,
         "team": {
-            "most_matches":    most_matches,
-            "most_seasons":    most_seasons,
+            "most_matches": most_matches,
+            "most_seasons": most_seasons,
+        },
+        "allrounders": {
             "top_allrounders": top_allrounders,
         },
     }
