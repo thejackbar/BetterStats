@@ -240,8 +240,8 @@ export const api = {
     if (gradeId) params.set('grade_id', gradeId)
     return request(`/yearbooks/${orgId}/${seasonId}/stats/fielding?${params}`)
   },
-  getYearbookAllrounders: (orgId, seasonId, { gradeId } = {}) => {
-    const params = new URLSearchParams()
+  getYearbookAllrounders: (orgId, seasonId, { gradeId, minRuns = 100, minWickets = 5 } = {}) => {
+    const params = new URLSearchParams({ min_runs: minRuns, min_wickets: minWickets })
     if (gradeId) params.set('grade_id', gradeId)
     return request(`/yearbooks/${orgId}/${seasonId}/stats/allrounders?${params}`)
   },

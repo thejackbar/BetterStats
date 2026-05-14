@@ -30,7 +30,7 @@ function fmt(n, dec = 2) {
 function PlayerLink({ id, name, slug }) {
   if (!id) return <span>{name}</span>
   return (
-    <Link to={`/${slug}/players/${id}`} className="hover:underline" style={{ color: 'var(--pb-accent)' }}>
+    <Link to={`/players/${id}`} className="hover:underline" style={{ color: 'var(--pb-accent)' }}>
       {name}
     </Link>
   )
@@ -714,6 +714,36 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
         </SectionCard>
       )}
 
+      {data?.length > 0 && (() => {
+        const figRows = data
+          .filter(p => p.best_wickets != null && p.best_wickets > 0)
+          .slice()
+          .sort((a, b) => {
+            if (b.best_wickets !== a.best_wickets) return b.best_wickets - a.best_wickets
+            const runsA = a.best_figures ? parseInt(a.best_figures.split('/')[1] || '9999') : 9999
+            const runsB = b.best_figures ? parseInt(b.best_figures.split('/')[1] || '9999') : 9999
+            return runsA - runsB
+          })
+          .slice(0, 20)
+        return figRows.length > 0 ? (
+          <SectionCard title="Best Bowling Figures">
+            <YbTable
+              headers={['Player', 'Best', 'Wkts', 'Overs', 'Avg']}
+              rows={figRows.map((p, i) => [
+                <span className="flex items-center gap-2">
+                  <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
+                  <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
+                </span>,
+                <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.best_figures || '—'}</span>,
+                p.wickets ?? '—',
+                fmt(p.overs, 1),
+                fmt(p.average),
+              ])}
+            />
+          </SectionCard>
+        ) : null
+      })()}
+
     </div>
   )
 }
@@ -781,6 +811,81 @@ function FieldingTab({ orgId, seasonId, gradeId, clubSlug }) {
           />
         </SectionCard>
       )}
+    </div>
+  )
+}
+
+// ─── All Rounders tab ─────────────────────────────────────────────────────────
+
+function AllroundersTab({ orgId, seasonId, gradeId, clubSlug }) {
+  const [data, setData] = useState(null)
+  const [minRuns, setMinRuns] = useState(100)
+  const [minWickets, setMinWickets] = useState(5)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    api.getYearbookAllrounders(orgId, seasonId, { gradeId, minRuns, minWickets })
+      .then(setData)
+      .finally(() => setLoading(false))
+  }, [orgId, seasonId, gradeId, minRuns, minWickets])
+
+  if (loading) return <PbSpinner />
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-mono text-white/40 tracking-wide3 uppercase">Min runs:</span>
+          {[50, 100, 200, 300].map(n => (
+            <button
+              key={n}
+              onClick={() => setMinRuns(n)}
+              className={`px-3 py-1 rounded font-mono text-[11px] tracking-wide border transition-colors ${
+                minRuns === n
+                  ? 'border-white/30 bg-white/10 text-white'
+                  : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+              }`}
+            >{n}+</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-mono text-white/40 tracking-wide3 uppercase">Min wickets:</span>
+          {[3, 5, 10, 20].map(n => (
+            <button
+              key={n}
+              onClick={() => setMinWickets(n)}
+              className={`px-3 py-1 rounded font-mono text-[11px] tracking-wide border transition-colors ${
+                minWickets === n
+                  ? 'border-white/30 bg-white/10 text-white'
+                  : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+              }`}
+            >{n}+</button>
+          ))}
+        </div>
+      </div>
+
+      <SectionCard title="All Rounders">
+        {data?.length ? (
+          <YbTable
+            headers={['Player', 'M', 'Runs', 'Bat Avg', 'Wkts', 'Bowl Avg', 'Index']}
+            rows={data.map((p, i) => [
+              <span className="flex items-center gap-2">
+                <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
+                <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
+              </span>,
+              p.matches ?? '—',
+              fmtRuns(p.runs),
+              fmt(p.bat_avg),
+              p.wickets ?? '—',
+              fmt(p.bowl_avg),
+              <span style={{ color: 'var(--pb-amber)', fontWeight: 600 }}>{p.allrounder_index ?? '—'}</span>,
+            ])}
+          />
+        ) : (
+          <p className="text-white/30 text-sm italic px-5 py-4">No all-rounders meet these thresholds. Try lowering the minimums.</p>
+        )}
+      </SectionCard>
     </div>
   )
 }
@@ -890,6 +995,7 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
 function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
   const [players, setPlayers] = useState(null)
   const [expanded, setExpanded] = useState(null)
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -902,11 +1008,20 @@ function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
   if (loading) return <PbSpinner />
   if (!players?.length) return <p className="text-white/30 text-sm italic py-8 text-center">No player data for this selection.</p>
 
+  const filteredPlayers = players.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+
   return (
     <div>
-      <p className="text-[12px] text-white/30 mb-4 font-mono">{players.length} players · click any card for full breakdown</p>
+      <input
+        type="text"
+        placeholder="Search players..."
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        className="w-full sm:w-64 bg-white/5 border border-white/15 rounded px-3 py-1.5 text-[13px] text-white/80 placeholder-white/30 focus:outline-none focus:border-white/30 mb-4"
+      />
+      <p className="text-[12px] text-white/30 mb-4 font-mono">{filteredPlayers.length} players · click any card for full breakdown</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        {players.map(p => (
+        {filteredPlayers.map(p => (
           <div
             key={p.player_id}
             onClick={() => setExpanded(expanded === p.player_id ? null : p.player_id)}
@@ -917,8 +1032,15 @@ function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
             }`}
           >
             <div className="px-4 py-3">
-              <div className="font-medium text-[13px] text-white/90 leading-tight">{p.name}</div>
-              <div className="font-mono text-[11px] text-white/40 mt-0.5">{p.matches}M</div>
+              <div className="font-medium text-[13px] text-white/90 leading-tight mb-1.5">{p.name}</div>
+              <div className="grid grid-cols-3 gap-x-2 gap-y-1">
+                <div><span className="font-mono text-[10px] text-white/40">M </span><span className="font-mono text-[10px] text-white/70">{p.matches ?? '—'}</span></div>
+                <div><span className="font-mono text-[10px] text-white/40">Runs </span><span className="font-mono text-[10px] text-white/70">{p.runs != null ? fmtRuns(p.runs) : '—'}</span></div>
+                <div><span className="font-mono text-[10px] text-white/40">Avg </span><span className="font-mono text-[10px] text-white/70">{fmt(p.bat_avg)}</span></div>
+                <div><span className="font-mono text-[10px] text-white/40">Wkts </span><span className="font-mono text-[10px] text-white/70">{p.wickets ?? '—'}</span></div>
+                <div><span className="font-mono text-[10px] text-white/40">Bowl </span><span className="font-mono text-[10px] text-white/70">{fmt(p.bowl_avg)}</span></div>
+                <div><span className="font-mono text-[10px] text-white/40">Ct </span><span className="font-mono text-[10px] text-white/70">{p.catches ?? p.dismissals ?? '—'}</span></div>
+              </div>
             </div>
             {expanded === p.player_id && (
               <div className="border-t border-white/8 px-4 py-3 space-y-1">
@@ -954,7 +1076,7 @@ function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
                 )}
                 <div className="pt-1">
                   <Link
-                    to={`/${clubSlug}/players/${p.player_id}`}
+                    to={`/players/${p.player_id}`}
                     className="text-[11px] font-mono tracking-wide"
                     style={{ color: 'var(--pb-accent)' }}
                     onClick={e => e.stopPropagation()}
@@ -1032,6 +1154,7 @@ const TABS = [
   { id: 'batting', label: 'Batting' },
   { id: 'bowling', label: 'Bowling' },
   { id: 'fielding', label: 'Fielding' },
+  { id: 'allrounders', label: 'All Rounders' },
   { id: 'awards', label: 'Awards' },
   { id: 'players', label: 'Players' },
   { id: 'grades', label: 'Grades' },
@@ -1320,6 +1443,9 @@ export default function Yearbook() {
         )}
         {activeTab === 'fielding' && (
           <FieldingTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />
+        )}
+        {activeTab === 'allrounders' && (
+          <AllroundersTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />
         )}
         {activeTab === 'awards' && (
           <AwardsTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} yearbookData={yearbook} />
