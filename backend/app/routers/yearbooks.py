@@ -857,8 +857,9 @@ async def get_season_players(
     db: AsyncSession = Depends(get_db),
 ):
     params: dict = {"o": org_id, "s": season_id}
-    grade_where = "AND pss.grade_id = :gid" if grade_id else ""
+    grade_where = ""
     if grade_id:
+        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM batting_innings bi JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
         params["gid"] = grade_id
 
     rows = await db.execute(
@@ -873,6 +874,7 @@ async def get_season_players(
                 ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS bat_avg,
                 SUM(pss.wickets) AS wickets,
                 ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS bowl_avg,
+                SUM(pss.catches) AS catches,
                 SUM(pss.catches + pss.run_outs + pss.stumpings) AS dismissals,
                 SUM(pss.fifties) AS fifties,
                 SUM(pss.hundreds) AS hundreds
