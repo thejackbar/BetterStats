@@ -51,6 +51,7 @@ export const api = {
   getPlayerDismissals: (playerId) => request(`/players/${playerId}/dismissals`),
   getPlayerByPosition: (playerId) => request(`/players/${playerId}/by-position`),
   getPlayerByGrade: (playerId) => request(`/players/${playerId}/by-grade`),
+  getPlayerBowlingByGrade: (playerId) => request(`/players/${playerId}/bowling-by-grade`),
   getPlayerSeasons: (playerId) => request(`/players/${playerId}/seasons`),
   getPlayerMilestones: (playerId) => request(`/players/${playerId}/milestones`),
   getPlayerPartnerships: (playerId) => request(`/players/${playerId}/partnerships`),
