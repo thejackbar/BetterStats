@@ -209,7 +209,7 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
       )}
 
       {/* Narrative / Season in Brief */}
-      {narrative ? (
+      {narrative && (
         <div className="rounded-xl border border-white/8 bg-white/3 px-6 py-5">
           <p className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-3">Season in Brief</p>
           <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed whitespace-pre-wrap">
