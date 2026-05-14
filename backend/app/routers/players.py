@@ -11,6 +11,7 @@ from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
     get_player_batting_innings, get_player_bowling_spells,
     get_dismissal_breakdown, get_batting_by_position, get_batting_by_grade,
+    get_bowling_by_grade,
     get_season_by_season, get_player_milestones, get_player_partnerships,
     get_player_activity, get_upcoming_milestones_for_org,
 )
@@ -105,6 +106,14 @@ async def get_player_by_grade(player_id: str, db: AsyncSession = Depends(get_db)
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     return await get_batting_by_grade(db, player_id, str(player.organisation_id))
+
+
+@router.get("/{player_id}/bowling-by-grade")
+async def get_player_bowling_by_grade(player_id: str, db: AsyncSession = Depends(get_db)):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await get_bowling_by_grade(db, player_id, str(player.organisation_id))
 
 
 @router.get("/{player_id}/seasons")

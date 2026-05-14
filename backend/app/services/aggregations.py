@@ -861,9 +861,62 @@ async def get_bowling_leaderboard_extended(
     if season_id:
         base += " AND pss.season_id = :season_id"
         params["season_id"] = season_id
-    base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
+    sort_dir = "ASC" if sort_by in ("economy", "average") else "DESC"
+    base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} {sort_dir} NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Optional[str] = None) -> list[dict]:
+    result = await session.execute(
+        text("""
+            WITH grade_spells AS (
+                SELECT
+                    COALESCE(am.canonical_name, gr.name) AS grade_name,
+                    bs.wickets,
+                    bs.runs,
+                    bs.overs,
+                    bs.maidens
+                FROM bowling_spells bs
+                JOIN games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                LEFT JOIN LATERAL (
+                    SELECT canonical_name FROM grade_merge_logs gml
+                    WHERE gml.org_id = CAST(:org_id AS UUID)
+                      AND gml.alias_name = gr.name
+                      AND gml.undone_at IS NULL
+                    LIMIT 1
+                ) am ON TRUE
+                WHERE bs.player_id = :pid
+                  AND bs.wickets IS NOT NULL
+            ),
+            best_per_grade AS (
+                SELECT DISTINCT ON (grade_name)
+                    grade_name,
+                    wickets AS best_wickets,
+                    runs AS best_runs
+                FROM grade_spells
+                ORDER BY grade_name, wickets DESC, runs ASC
+            )
+            SELECT
+                gs.grade_name,
+                COUNT(*) AS spells,
+                COALESCE(SUM(gs.wickets), 0) AS wickets,
+                COALESCE(SUM(gs.runs), 0) AS runs_conceded,
+                COALESCE(SUM(gs.overs), 0) AS total_overs,
+                COALESCE(SUM(gs.maidens), 0) AS maidens,
+                ROUND(SUM(gs.runs)::numeric / NULLIF(SUM(gs.wickets), 0), 2) AS average,
+                ROUND(SUM(gs.runs)::numeric / NULLIF(SUM(gs.overs), 0), 2) AS economy,
+                bp.best_wickets,
+                bp.best_runs
+            FROM grade_spells gs
+            JOIN best_per_grade bp ON bp.grade_name = gs.grade_name
+            GROUP BY gs.grade_name, bp.best_wickets, bp.best_runs
+            ORDER BY SUM(gs.wickets) DESC
+        """),
+        {"pid": player_id, "org_id": org_id},
+    )
     return [dict(r) for r in result.mappings()]
 
 
