@@ -376,8 +376,8 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
 
   let cumWins = 0, cumLosses = 0
   const progressionData = allGames.map(g => {
-    if (g.result?.toLowerCase() === 'won') cumWins++
-    else if (g.result?.toLowerCase() === 'lost') cumLosses++
+    if (['win','won'].includes(g.result?.toLowerCase())) cumWins++
+    else if (['loss','lost'].includes(g.result?.toLowerCase())) cumLosses++
     return {
       date: fmtDate(g.played_at),
       Wins: cumWins,
@@ -418,14 +418,14 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
           <YbTable
             headers={['Date', 'Opponent', 'Result', 'Top Bat', 'Top Bowl']}
             rowStyles={games.map(g =>
-              g.result?.toLowerCase() === 'won'
+              ['win','won'].includes(g.result?.toLowerCase())
                 ? { background: 'rgba(74,222,128,0.07)' }
-                : g.result?.toLowerCase() === 'lost'
+                : ['loss','lost'].includes(g.result?.toLowerCase())
                 ? { background: 'rgba(248,113,113,0.07)' }
                 : { background: 'rgba(255,255,255,0.02)' }
             )}
             rows={games.map(g => {
-              const resultColor = g.result?.toLowerCase() === 'won' ? '#4ade80' : g.result?.toLowerCase() === 'lost' ? '#f87171' : 'rgba(255,255,255,0.4)'
+              const resultColor = ['win','won'].includes(g.result?.toLowerCase()) ? '#4ade80' : ['loss','lost'].includes(g.result?.toLowerCase()) ? '#f87171' : 'rgba(255,255,255,0.4)'
               return [
                 <span className="text-white/40 text-[12px]">{fmtDate(g.played_at) || '—'}</span>,
                 <span>{g.home_team && g.away_team ? `${g.home_team} vs ${g.away_team}` : (g.home_team || g.away_team || '—')}</span>,

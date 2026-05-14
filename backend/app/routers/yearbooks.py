@@ -223,11 +223,11 @@ async def get_overview(
         text(f"""
             SELECT
                 COUNT(*) AS total_games,
-                COUNT(*) FILTER (WHERE LOWER(gm.result) = 'won') AS wins,
-                COUNT(*) FILTER (WHERE LOWER(gm.result) = 'lost') AS losses,
-                COUNT(*) FILTER (WHERE LOWER(gm.result) = 'draw') AS draws,
-                COUNT(*) FILTER (WHERE LOWER(gm.result) = 'tie') AS ties,
-                COUNT(*) FILTER (WHERE LOWER(gm.result) NOT IN ('won','lost','draw','tie') OR gm.result IS NULL) AS other
+                COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('win','won')) AS wins,
+                COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('loss','lost')) AS losses,
+                COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('draw','drew','tie')) AS draws,
+                COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('draw','drew','tie')) AS ties,
+                COUNT(*) FILTER (WHERE LOWER(gm.result) NOT IN ('win','won','loss','lost','draw','drew','tie') OR gm.result IS NULL) AS other
             FROM games gm
             JOIN grades g ON g.id = gm.grade_id
             WHERE g.season_id = :s
@@ -856,8 +856,8 @@ async def get_grade_breakdown(
         wl = await db.execute(
             text("""
                 SELECT
-                    COUNT(*) FILTER (WHERE LOWER(gm.result) = 'won') AS wins,
-                    COUNT(*) FILTER (WHERE LOWER(gm.result) = 'lost') AS losses
+                    COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('win','won')) AS wins,
+                    COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('loss','lost')) AS losses
                 FROM games gm WHERE gm.grade_id = :gid
             """),
             {"gid": gid},
@@ -1395,9 +1395,9 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
 
     games_row = await db.execute(text("""
         SELECT
-            COUNT(*) FILTER (WHERE LOWER(gm.result) = 'won') AS wins,
-            COUNT(*) FILTER (WHERE LOWER(gm.result) = 'lost') AS losses,
-            COUNT(*) FILTER (WHERE LOWER(gm.result) = 'draw') AS draws
+            COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('win','won')) AS wins,
+            COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('loss','lost')) AS losses,
+            COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('draw','drew','tie')) AS draws
         FROM games gm
         JOIN grades g ON g.id = gm.grade_id
         WHERE g.season_id = :s
