@@ -110,6 +110,8 @@ export const api = {
   adminPatchPlayer: (playerId, data) =>
     request(`/club-admin/players/${playerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminListSeasons: () => request('/club-admin/seasons'),
+  adminReorderSeasons: (items) =>
+    request('/club-admin/seasons/reorder', { method: 'PUT', body: JSON.stringify(items) }),
   adminListGames: (seasonId) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)

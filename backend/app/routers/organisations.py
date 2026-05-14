@@ -99,7 +99,7 @@ async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Season)
         .where(Season.organisation_id == uuid.UUID(org_id))
-        .order_by(Season.year.desc().nullslast(), Season.name.asc())
+        .order_by(Season.display_order.asc().nullslast(), Season.year.desc().nullslast(), Season.name.asc())
     )
     seasons = result.scalars().all()
     return [

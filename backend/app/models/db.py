@@ -86,6 +86,7 @@ class Season(Base):
     name = Column(Text, nullable=False)
     year = Column(Integer)
     synced_at = Column(TIMESTAMP(timezone=True))
+    display_order = Column(Integer, nullable=True)
 
     organisation = relationship("Organisation", back_populates="seasons")
     grades = relationship("Grade", back_populates="season")
