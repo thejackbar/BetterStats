@@ -199,6 +199,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_yearbook_awards_yearbook ON yearbook_club_awards(yearbook_id)"
         ))
+        await conn.execute(text(
+            "ALTER TABLE seasons ADD COLUMN IF NOT EXISTS display_order INTEGER"
+        ))
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
