@@ -529,7 +529,7 @@ async def get_records(
                COALESCE(SUM(pss.runs), 0)    AS runs,
                COALESCE(SUM(pss.wickets), 0) AS wickets,
                COALESCE(SUM(pss.matches), 0) AS matches,
-               (COALESCE(SUM(pss.runs), 0) + COALESCE(SUM(pss.wickets), 0) * 20) AS score
+               ROUND(COALESCE(SUM(pss.runs), 0) * 1.5 + COALESCE(SUM(pss.wickets), 0) * 10, 1) AS score
         FROM players p
         JOIN player_season_stats pss ON pss.player_id = p.id
         WHERE p.organisation_id = :org_id
