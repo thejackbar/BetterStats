@@ -780,12 +780,11 @@ async def get_grade_breakdown(
     season_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    # Get unique grade names with all their IDs (same name can have multiple IDs
-    # across sync runs; aggregate all of them together for accurate stats).
+    # Unique grade names for this season. Same name can appear under multiple
+    # IDs across sync runs — use a subquery keyed on name+season to aggregate.
     names_rows = await db.execute(
         text("""
-            SELECT g.name, ARRAY_AGG(g.id::text) AS grade_ids,
-                COUNT(gm.id) AS game_count
+            SELECT g.name, COUNT(DISTINCT gm.id) AS game_count
             FROM grades g
             JOIN seasons s ON s.id = g.season_id
             LEFT JOIN games gm ON gm.grade_id = g.id
@@ -797,119 +796,98 @@ async def get_grade_breakdown(
     )
     grade_list = [dict(r) for r in names_rows.mappings().all()]
 
+    # Subquery snippet: all grade IDs with this name in this season
+    GRADE_IDS = "(SELECT id FROM grades WHERE season_id = :s AND name = :gname)"
+
     result = []
     for grade in grade_list:
-        gids = grade["grade_ids"]  # list of all IDs with this name
+        p = {"s": season_id, "gname": grade["name"], "o": org_id}
 
-        # Stats from actual game-level rows for this grade only
         stats = await db.execute(
-            text("""
-                SELECT
-                    COUNT(DISTINCT bi.player_id) AS players,
-                    SUM(bi.runs) AS runs
+            text(f"""
+                SELECT COUNT(DISTINCT bi.player_id) AS players, SUM(bi.runs) AS runs
                 FROM batting_innings bi
                 JOIN games gm ON gm.id = bi.game_id
-                JOIN players p ON p.id = bi.player_id
-                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
-            """),
-            {"gids": gids, "o": org_id},
-        )
+                JOIN players pl ON pl.id = bi.player_id
+                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+            """), p)
         grade_bat_stats = dict(stats.mappings().first() or {})
 
-        # High score with player name
-        hs = await db.execute(
-            text("""
-                SELECT bi.runs AS high_score, bi.not_out,
-                    COALESCE(p.display_name_override, p.name) AS high_score_name,
-                    p.id AS high_score_player_id
-                FROM batting_innings bi
-                JOIN games gm ON gm.id = bi.game_id
-                JOIN players p ON p.id = bi.player_id
-                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
-                ORDER BY bi.runs DESC NULLS LAST LIMIT 1
-            """),
-            {"gids": gids, "o": org_id},
-        )
-        hs_row = dict(hs.mappings().first() or {})
-
-        wkt_stats = await db.execute(
-            text("""
+        wkt_row = await db.execute(
+            text(f"""
                 SELECT SUM(bs.wickets) AS wickets
                 FROM bowling_spells bs
                 JOIN games gm ON gm.id = bs.game_id
-                JOIN players p ON p.id = bs.player_id
-                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
-            """),
-            {"gids": gids, "o": org_id},
-        )
-        grade_bowl_stats = dict(wkt_stats.mappings().first() or {})
-        grade_stats = {**grade_bat_stats, **grade_bowl_stats}
+                JOIN players pl ON pl.id = bs.player_id
+                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+            """), p)
+        grade_bowl_stats = dict(wkt_row.mappings().first() or {})
 
-        # Top batter by runs in this grade
-        tb = await db.execute(
-            text("""
-                SELECT COALESCE(p.display_name_override, p.name) AS name, p.id,
-                    SUM(bi.runs) AS runs
+        hs = await db.execute(
+            text(f"""
+                SELECT bi.runs AS high_score, bi.not_out,
+                    COALESCE(pl.display_name_override, pl.name) AS high_score_name,
+                    pl.id AS high_score_player_id
                 FROM batting_innings bi
                 JOIN games gm ON gm.id = bi.game_id
-                JOIN players p ON p.id = bi.player_id
-                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
-                GROUP BY p.id, p.name, p.display_name_override
+                JOIN players pl ON pl.id = bi.player_id
+                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+                ORDER BY bi.runs DESC NULLS LAST LIMIT 1
+            """), p)
+        hs_row = dict(hs.mappings().first() or {})
+
+        tb = await db.execute(
+            text(f"""
+                SELECT COALESCE(pl.display_name_override, pl.name) AS name,
+                    pl.id, SUM(bi.runs) AS runs
+                FROM batting_innings bi
+                JOIN games gm ON gm.id = bi.game_id
+                JOIN players pl ON pl.id = bi.player_id
+                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+                GROUP BY pl.id, pl.name, pl.display_name_override
                 ORDER BY SUM(bi.runs) DESC NULLS LAST LIMIT 1
-            """),
-            {"gids": gids, "o": org_id},
-        )
+            """), p)
         top_bat = dict(tb.mappings().first() or {})
 
-        # Top bowler by wickets in this grade
         tw = await db.execute(
-            text("""
-                SELECT COALESCE(p.display_name_override, p.name) AS name, p.id,
-                    SUM(bs.wickets) AS wickets
+            text(f"""
+                SELECT COALESCE(pl.display_name_override, pl.name) AS name,
+                    pl.id, SUM(bs.wickets) AS wickets
                 FROM bowling_spells bs
                 JOIN games gm ON gm.id = bs.game_id
-                JOIN players p ON p.id = bs.player_id
-                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
-                GROUP BY p.id, p.name, p.display_name_override
+                JOIN players pl ON pl.id = bs.player_id
+                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
+                GROUP BY pl.id, pl.name, pl.display_name_override
                 ORDER BY SUM(bs.wickets) DESC NULLS LAST LIMIT 1
-            """),
-            {"gids": gids, "o": org_id},
-        )
+            """), p)
         top_bowl = dict(tw.mappings().first() or {})
 
-        # Best bowling figures in a single spell for this grade
         bb = await db.execute(
-            text("""
+            text(f"""
                 SELECT bs.wickets AS bb_wickets, bs.runs_conceded AS bb_runs,
-                    COALESCE(p.display_name_override, p.name) AS bb_name,
-                    p.id AS bb_player_id
+                    COALESCE(pl.display_name_override, pl.name) AS bb_name,
+                    pl.id AS bb_player_id
                 FROM bowling_spells bs
                 JOIN games gm ON gm.id = bs.game_id
-                JOIN players p ON p.id = bs.player_id
-                WHERE gm.grade_id = ANY(:gids) AND p.organisation_id = :o
+                JOIN players pl ON pl.id = bs.player_id
+                WHERE gm.grade_id IN {GRADE_IDS} AND pl.organisation_id = :o
                 ORDER BY bs.wickets DESC NULLS LAST, bs.runs_conceded ASC NULLS LAST LIMIT 1
-            """),
-            {"gids": gids, "o": org_id},
-        )
+            """), p)
         bb_row = dict(bb.mappings().first() or {})
 
-        # Wins and losses across all grade IDs with this name
         wl = await db.execute(
-            text("""
+            text(f"""
                 SELECT
                     COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('win','won')) AS wins,
                     COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('loss','lost')) AS losses
-                FROM games gm WHERE gm.grade_id = ANY(:gids)
-            """),
-            {"gids": gids},
-        )
+                FROM games gm WHERE gm.grade_id IN {GRADE_IDS}
+            """), p)
         wl_stats = dict(wl.mappings().first() or {})
 
         result.append({
-            "id": gids[0],
             "name": grade["name"],
             "game_count": grade["game_count"],
-            **grade_stats,
+            **grade_bat_stats,
             **grade_bowl_stats,
             **wl_stats,
             "high_score": hs_row.get("high_score"),
