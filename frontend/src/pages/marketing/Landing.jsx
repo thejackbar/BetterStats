@@ -61,7 +61,7 @@ export default function Landing() {
         <h2 className="font-display font-bold text-4xl text-pb-text mb-3 tracking-tight">Your club deserves better stats.</h2>
         <p className="text-pb-faint font-mono text-[11px] tracking-wide2 mb-8">$250/year. Setup included. No lock-in.</p>
         <a
-          href="https://docs.google.com/forms/d/e/1FAIpQLSdTODO/viewform"
+          href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform?usp=header"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-block px-10 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
