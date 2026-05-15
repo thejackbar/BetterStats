@@ -153,7 +153,7 @@ function AddForm({ orgId, onSaved, onCancel, existingDefs }) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function AdminAwardDefinitions() {
   const { user } = useAuth()
-  const orgId = user?.org_id
+  const [orgId, setOrgId] = useState(null)
   const [defs, setDefs] = useState(null)
   const [filterCat, setFilterCat] = useState('')
   const [filterSearch, setFilterSearch] = useState('')
@@ -161,6 +161,14 @@ export default function AdminAwardDefinitions() {
   const [saving, setSaving] = useState(null)
   const [seeding, setSeeding] = useState(false)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (user?.club_id) {
+      setOrgId(user.club_id)
+    } else {
+      api.adminGetSettings().then(s => setOrgId(s.id)).catch(() => {})
+    }
+  }, [user])
 
   const load = () => {
     if (!orgId) return
