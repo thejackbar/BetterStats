@@ -366,7 +366,7 @@ async def get_records(
             COALESCE(p2.display_name_override, p2.name) AS batter2_name,
             pt.runs, pt.wicket_number,
             g.played_at::text,
-            gr.name AS grade_name,
+            COALESCE(am.canonical_name, gr.name) AS grade_name,
             s.name AS season_name,
             EXTRACT(YEAR FROM g.played_at)::int AS season_year,
             false AS is_manual
@@ -374,6 +374,13 @@ async def get_records(
         JOIN games g ON g.id = pt.game_id
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
+        LEFT JOIN LATERAL (
+            SELECT canonical_name FROM grade_merge_logs gml
+            WHERE gml.org_id = CAST(:org_id AS UUID)
+              AND gml.alias_name = gr.name
+              AND gml.undone_at IS NULL
+            LIMIT 1
+        ) am ON TRUE
         LEFT JOIN players p1 ON p1.id = pt.batter1_id
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
         WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
@@ -390,7 +397,7 @@ async def get_records(
             COALESCE(p2.display_name_override, p2.name) AS batter2_name,
             pt.runs, pt.wicket_number,
             g.played_at::text,
-            gr.name AS grade_name,
+            COALESCE(am.canonical_name, gr.name) AS grade_name,
             s.name AS season_name,
             EXTRACT(YEAR FROM g.played_at)::int AS season_year,
             false AS is_manual,
@@ -399,6 +406,13 @@ async def get_records(
         JOIN games g ON g.id = pt.game_id
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
+        LEFT JOIN LATERAL (
+            SELECT canonical_name FROM grade_merge_logs gml
+            WHERE gml.org_id = CAST(:org_id AS UUID)
+              AND gml.alias_name = gr.name
+              AND gml.undone_at IS NULL
+            LIMIT 1
+        ) am ON TRUE
         LEFT JOIN players p1 ON p1.id = pt.batter1_id
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
         WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
@@ -417,7 +431,7 @@ async def get_records(
     partnerships_by_grade_rows = await q("""
         WITH ranked AS (
             SELECT
-                gr.name AS grade_name,
+                COALESCE(am.canonical_name, gr.name) AS grade_name,
                 s.name AS season_name,
                 pt.wicket_number,
                 p1.id::text AS batter1_id,
@@ -427,11 +441,21 @@ async def get_records(
                 pt.runs,
                 g.played_at::text,
                 EXTRACT(YEAR FROM g.played_at)::int AS season_year,
-                ROW_NUMBER() OVER (PARTITION BY gr.name, pt.wicket_number ORDER BY pt.runs DESC) AS rn
+                ROW_NUMBER() OVER (
+                    PARTITION BY COALESCE(am.canonical_name, gr.name), pt.wicket_number
+                    ORDER BY pt.runs DESC
+                ) AS rn
             FROM partnerships pt
             JOIN games g ON g.id = pt.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN LATERAL (
+                SELECT canonical_name FROM grade_merge_logs gml
+                WHERE gml.org_id = CAST(:org_id AS UUID)
+                  AND gml.alias_name = gr.name
+                  AND gml.undone_at IS NULL
+                LIMIT 1
+            ) am ON TRUE
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
