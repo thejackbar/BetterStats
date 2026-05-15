@@ -280,7 +280,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
   const wicketBuckets = ORDINALS.map((ord, wi) => ({
     ordinal: ord,
     wicket: wi + 1,
-    records: (data[`wicket_${wi + 1}`] || []),
+    records: (data[`wicket_${wi + 1}`] || []).slice(0, 10),
   })).filter(b => b.records.length > 0)
 
   return (

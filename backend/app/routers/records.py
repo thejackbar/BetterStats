@@ -592,6 +592,12 @@ async def get_records(
     # Re-sort top_partnerships by runs desc and cap at 25
     partnerships_flat["top_partnerships"].sort(key=lambda r: (r.get("runs") or 0), reverse=True)
     partnerships_flat["top_partnerships"] = partnerships_flat["top_partnerships"][:25]
+    # Re-sort per-wicket buckets by runs desc and cap at 10
+    for wk in range(1, 11):
+        key = f"wicket_{wk}"
+        if key in partnerships_flat:
+            partnerships_flat[key].sort(key=lambda r: (r.get("runs") or 0), reverse=True)
+            partnerships_flat[key] = partnerships_flat[key][:10]
 
     return {
         "batting": {
