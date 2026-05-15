@@ -571,7 +571,7 @@ async def get_records(
             for grade, rows in by_grade_wicket.items()
         },
     }
-    # Add manual records merged into top_partnerships and per-wicket buckets
+    # Add manual records merged into top_partnerships, per-wicket buckets, and by_grade
     for mr in manual_rows:
         nr = {
             "player1_id":    mr.get("batter1_id"),
@@ -589,6 +589,8 @@ async def get_records(
         if wk:
             key = f"wicket_{wk}"
             partnerships_flat.setdefault(key, []).append(nr)
+        grade = mr.get("grade_name") or "Unknown"
+        partnerships_flat["by_grade"].setdefault(grade, []).append(nr)
     # Re-sort top_partnerships by runs desc and cap at 25
     partnerships_flat["top_partnerships"].sort(key=lambda r: (r.get("runs") or 0), reverse=True)
     partnerships_flat["top_partnerships"] = partnerships_flat["top_partnerships"][:25]
@@ -598,6 +600,18 @@ async def get_records(
         if key in partnerships_flat:
             partnerships_flat[key].sort(key=lambda r: (r.get("runs") or 0), reverse=True)
             partnerships_flat[key] = partnerships_flat[key][:10]
+    # For each grade, keep only the best partnership per wicket (manual may beat game records)
+    for grade in list(partnerships_flat["by_grade"].keys()):
+        best: dict[int, dict] = {}
+        for r in partnerships_flat["by_grade"][grade]:
+            wk = r.get("wicket_number") or 0
+            if not wk:
+                continue
+            if wk not in best or (r.get("runs") or 0) > (best[wk].get("runs") or 0):
+                best[wk] = r
+        partnerships_flat["by_grade"][grade] = sorted(
+            best.values(), key=lambda r: r.get("wicket_number") or 0
+        )
 
     return {
         "batting": {
