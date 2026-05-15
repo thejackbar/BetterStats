@@ -324,20 +324,23 @@ export const api = {
   },
 
   // Leaderboard
-  battingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit } = {}) => {
+  battingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit, minRuns } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
     if (sortBy) params.set('sort_by', sortBy)
     if (limit) params.set('limit', limit)
+    if (minRuns != null) params.set('min_runs', minRuns)
     return request(`/leaderboard/batting?${params}`)
   },
-  bowlingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit } = {}) => {
+  bowlingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit, minOvers, minWickets } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
     if (sortBy) params.set('sort_by', sortBy)
     if (limit) params.set('limit', limit)
+    if (minOvers != null) params.set('min_overs', minOvers)
+    if (minWickets != null) params.set('min_wickets', minWickets)
     return request(`/leaderboard/bowling?${params}`)
   },
   fieldingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit } = {}) => {

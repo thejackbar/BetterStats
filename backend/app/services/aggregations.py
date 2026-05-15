@@ -786,6 +786,7 @@ async def get_batting_leaderboard_extended(
     grade_id: Optional[str] = None,
     sort_by: str = "total_runs",
     limit: int = 20,
+    min_runs: int = 0,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_runs", "average", "strike_rate", "total_sixes",
@@ -818,7 +819,11 @@ async def get_batting_leaderboard_extended(
     if season_id:
         base += " AND pss.season_id = :season_id"
         params["season_id"] = season_id
-    base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
+    base += " GROUP BY p.id, COALESCE(p.display_name_override, p.name)"
+    if min_runs > 0:
+        base += " HAVING SUM(pss.runs) >= :min_runs"
+        params["min_runs"] = min_runs
+    base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
     return [dict(r) for r in result.mappings()]
@@ -831,6 +836,8 @@ async def get_bowling_leaderboard_extended(
     grade_id: Optional[str] = None,
     sort_by: str = "total_wickets",
     limit: int = 20,
+    min_overs: int = 0,
+    min_wickets: int = 0,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_wickets", "average", "economy", "best_figures_wickets",
@@ -861,8 +868,18 @@ async def get_bowling_leaderboard_extended(
     if season_id:
         base += " AND pss.season_id = :season_id"
         params["season_id"] = season_id
+    base += " GROUP BY p.id, COALESCE(p.display_name_override, p.name)"
+    having_clauses = []
+    if min_overs > 0:
+        having_clauses.append("COALESCE(SUM(pss.bowling_balls), 0) / 6.0 >= :min_overs")
+        params["min_overs"] = min_overs
+    if min_wickets > 0:
+        having_clauses.append("SUM(pss.wickets) >= :min_wickets")
+        params["min_wickets"] = min_wickets
+    if having_clauses:
+        base += " HAVING " + " AND ".join(having_clauses)
     sort_dir = "ASC" if sort_by in ("economy", "average") else "DESC"
-    base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} {sort_dir} NULLS LAST LIMIT :limit"
+    base += f" ORDER BY {sort_by} {sort_dir} NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
     return [dict(r) for r in result.mappings()]

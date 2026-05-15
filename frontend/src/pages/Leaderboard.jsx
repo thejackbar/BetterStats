@@ -42,6 +42,21 @@ const MAIN_TABS = [
   { key: 'fielding', label: 'FIELDING' },
 ]
 
+function MinFilterInput({ label, value, onChange }) {
+  return (
+    <div className="flex items-center gap-2 px-1 py-2 mb-3">
+      <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{label}</span>
+      <input
+        type="number"
+        min="0"
+        value={value}
+        onChange={e => onChange(Math.max(0, parseInt(e.target.value) || 0))}
+        className="w-20 px-2 py-1 rounded text-[12px] font-mono text-pb-text bg-pb-surface2 border border-pb-hairline focus:outline-none focus:border-pb-accent text-right"
+      />
+    </div>
+  )
+}
+
 function SortBtn({ label, active, onClick }) {
   return (
     <button
@@ -98,7 +113,6 @@ function BattingTable({ rows, sortBy }) {
                 <td className="py-3 pl-5 font-mono text-pb-faint">{String(i + 1).padStart(2, '0')}</td>
                 <td className="py-3">
                   <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{p.name}</Link>
-                  {p.hundreds > 0 && sortBy !== 'hundreds' && <span className="ml-2 font-mono text-[10px] text-pb-faint">{p.hundreds}×💯</span>}
                 </td>
                 {cols.map(c => {
                   let val
@@ -241,24 +255,32 @@ export default function Leaderboard() {
   const [bowlingSort, setBowlingSort] = useState('total_wickets')
   const [fieldingSort, setFieldingSort] = useState('total_catches')
 
+  const [minRuns, setMinRuns] = useState(500)
+  const [minOvers, setMinOvers] = useState(100)
+  const [minWickets, setMinWickets] = useState(50)
+
   const [battingRows, setBattingRows] = useState([])
   const [bowlingRows, setBowlingRows] = useState([])
   const [fieldingRows, setFieldingRows] = useState([])
   const [loading, setLoading] = useState(true)
 
+  const effectiveMinRuns = battingSort === 'average' ? minRuns : 0
+  const effectiveMinOvers = bowlingSort === 'economy' ? minOvers : 0
+  const effectiveMinWickets = bowlingSort === 'average' ? minWickets : 0
+
   useEffect(() => {
     if (!orgId) return
     setLoading(true)
     Promise.allSettled([
-      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: battingSort, limit: 30 }),
-      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: bowlingSort, limit: 30 }),
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets }),
       api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: fieldingSort, limit: 30 }),
     ]).then(([b, bw, f]) => {
       if (b.status === 'fulfilled') setBattingRows(b.value)
       if (bw.status === 'fulfilled') setBowlingRows(bw.value)
       if (f.status === 'fulfilled') setFieldingRows(f.value)
     }).finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGrade, battingSort, bowlingSort, fieldingSort])
+  }, [orgId, selectedSeason, selectedGrade, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets])
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
@@ -307,12 +329,21 @@ export default function Leaderboard() {
             ))}
           </div>
         )}
+        {mainTab === 'batting' && battingSort === 'average' && (
+          <MinFilterInput label="Min. runs" value={minRuns} onChange={setMinRuns} />
+        )}
         {mainTab === 'bowling' && (
           <div className="flex flex-wrap gap-1 mb-4 pb-hairline-b">
             {BOWLING_SORTS.map(s => (
               <SortBtn key={s.key} label={s.label} active={bowlingSort === s.key} onClick={() => setBowlingSort(s.key)} />
             ))}
           </div>
+        )}
+        {mainTab === 'bowling' && bowlingSort === 'economy' && (
+          <MinFilterInput label="Min. overs" value={minOvers} onChange={setMinOvers} />
+        )}
+        {mainTab === 'bowling' && bowlingSort === 'average' && (
+          <MinFilterInput label="Min. wickets" value={minWickets} onChange={setMinWickets} />
         )}
         {mainTab === 'fielding' && (
           <div className="flex flex-wrap gap-1 mb-4 pb-hairline-b">
