@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { PbSpinner, TabBar, Label, AnimatedNum } from '../lib/presskit'
+import { resolveAwardLabel } from '../lib/achievementOptions'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { useAuth } from '../contexts/AuthContext'
 import {
@@ -877,7 +878,7 @@ function AllroundersTab({ orgId, seasonId, gradeId, clubSlug }) {
 
 // ─── Awards tab (Honour Board + Club Awards from achievements) ────────────────
 
-function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
+function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs }) {
   const [milestones, setMilestones] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -941,7 +942,7 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData }) {
             {pulledByCategory[cat].map(a => (
               <div key={`pulled-${a.id}`} className="bg-white/2 px-5 py-4">
                 <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">
-                  {a.achievement}
+                  {resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)}
                   {a.subcategory && <span className="text-white/30 normal-case ml-1.5">· {a.subcategory}</span>}
                 </div>
                 <div className="text-[15px] font-semibold text-white/90">
@@ -1223,6 +1224,7 @@ export default function Yearbook() {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [awardDefs, setAwardDefs] = useState([])
 
   const handleShare = () => {
     navigator.clipboard.writeText(window.location.href).then(() => {
@@ -1239,7 +1241,7 @@ export default function Yearbook() {
   // Load club
   useEffect(() => {
     api.getClubBySlug(clubSlug)
-      .then(setClub)
+      .then(c => { setClub(c); api.listAwardDefinitions(c.id).then(d => setAwardDefs(d || [])).catch(() => {}) })
       .catch(() => setNotFound(true))
   }, [clubSlug])
 
@@ -1499,7 +1501,7 @@ export default function Yearbook() {
           <AllroundersTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />
         )}
         {activeTab === 'awards' && (
-          <AwardsTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} yearbookData={yearbook} />
+          <AwardsTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} yearbookData={yearbook} awardDefs={awardDefs} />
         )}
         {activeTab === 'players' && (
           <PlayersTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />
