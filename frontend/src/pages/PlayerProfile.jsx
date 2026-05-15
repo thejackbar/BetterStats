@@ -1149,7 +1149,7 @@ export default function PlayerProfile() {
         <div className="flex items-center gap-2 font-mono text-[10.5px] tracking-wide2 text-pb-faint mb-4">
           {orgSlug && <Link to={`/${orgSlug}/players`} className="hover:text-pb-text">PLAYERS</Link>}
           {orgSlug && <span>/</span>}
-          <span className="text-pb-dim">{fmtName(player.name).toUpperCase()}</span>
+          <span className="text-pb-dim">{fmtName(player.display_name).toUpperCase()}</span>
         </div>
 
         {/* Hero */}
@@ -1157,7 +1157,7 @@ export default function PlayerProfile() {
           <div>
             <Label>{org?.name || ''} · {player.role || 'PLAYER'}</Label>
             <h1 className="font-display text-[48px] sm:text-[72px] font-bold tracking-tight leading-[0.92] mt-1.5 text-pb-text">
-              {fmtName(player.name)}
+              {fmtName(player.display_name)}
             </h1>
             {/* Header achievement badges */}
             {headerAchievements.length > 0 && (
