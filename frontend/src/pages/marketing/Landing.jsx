@@ -29,7 +29,7 @@ export default function Landing() {
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <a
-            href="https://docs.google.com/forms/d/e/1FAIpQLSdTODO/viewform"
+            href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform?usp=header"
             target="_blank"
             rel="noopener noreferrer"
             className="px-8 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
