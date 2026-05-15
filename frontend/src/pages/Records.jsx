@@ -397,24 +397,23 @@ function AllRoundersTab({ data }) {
         <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
           <Label style={{ color: 'var(--pb-accent)' }}>BEST ALL-ROUNDERS (CAREER)</Label>
           <p className="font-mono text-[10px] text-pb-faintest mt-0.5">
-            Index Score = (Runs × 1.5) + (Wickets × 10) · Min. 100 runs &amp; 5 wickets
+            Minimum 1,000 runs &amp; 100 wickets
           </p>
         </div>
         {!data.top_allrounders?.length ? (
           <p className="text-pb-faintest text-sm px-5 py-4 italic">No data yet.</p>
         ) : (
           <div className="overflow-x-auto pb-scroll">
-            <table className="w-full min-w-[600px] text-[13px]">
+            <table className="w-full min-w-[560px] text-[13px]">
               <thead>
                 <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
                   <th className="py-2.5 px-3 font-medium w-10">#</th>
                   <th className="py-2.5 px-3 font-medium">PLAYER</th>
                   <th className="py-2.5 px-3 font-medium text-right">M</th>
-                  <th className="py-2.5 px-3 font-medium text-right">RUNS</th>
+                  <th className="py-2.5 px-3 font-medium text-right" style={{ color: 'var(--pb-accent)' }}>RUNS</th>
                   <th className="py-2.5 px-3 font-medium text-right">BAT AVG</th>
-                  <th className="py-2.5 px-3 font-medium text-right">WKTS</th>
+                  <th className="py-2.5 px-3 font-medium text-right" style={{ color: 'var(--pb-accent)' }}>WKTS</th>
                   <th className="py-2.5 px-3 font-medium text-right">BWL AVG</th>
-                  <th className="py-2.5 px-3 font-medium text-right" style={{ color: 'var(--pb-accent)' }}>INDEX</th>
                 </tr>
               </thead>
               <tbody>
@@ -423,13 +422,10 @@ function AllRoundersTab({ data }) {
                     <td className="py-2.5 px-3 font-mono text-pb-faint"><RankNum rank={i+1} /></td>
                     <td className="py-2.5 px-3"><PlayerLink id={r.player_id} name={r.name} /></td>
                     <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.matches ?? '—'}</td>
-                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.runs ?? '—'}</td>
+                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs ?? '—'}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.batting_average ?? '—'}</td>
-                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.wickets ?? '—'}</td>
+                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.wickets ?? '—'}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.bowling_average ?? '—'}</td>
-                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>
-                      {r.index_score != null ? Number(r.index_score).toFixed(0) : '—'}
-                    </td>
                   </tr>
                 ))}
               </tbody>
