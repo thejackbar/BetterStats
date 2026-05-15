@@ -168,7 +168,7 @@ function MatchHeader({ game, innings }) {
   )
 }
 
-function BattingCard({ label, teamName, batting = [], inningsTotal }) {
+function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n => n }) {
   if (!batting.length) return null
 
   // Use backend total if available, otherwise sum batting rows
@@ -248,7 +248,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
   )
 }
 
-function BowlingCard({ label, teamName, bowling = [] }) {
+function BowlingCard({ label, teamName, bowling = [], fmtName = n => n }) {
   if (!bowling.length) return null
 
   return (
@@ -309,7 +309,7 @@ function BowlingCard({ label, teamName, bowling = [] }) {
   )
 }
 
-function FallOfWicketsSection({ fow = [] }) {
+function FallOfWicketsSection({ fow = [], fmtName = n => n }) {
   if (!fow.length) return null
   const byInnings = fow.reduce((acc, f) => {
     const k = f.innings_number; if (!acc[k]) acc[k] = []; acc[k].push(f); return acc
@@ -477,6 +477,7 @@ export default function MatchScorecard() {
                 teamName={inn1Team}
                 batting={inn1.batting}
                 inningsTotal={t1}
+                fmtName={fmtName}
               />
               {hasInn2 && (
                 <BattingCard
@@ -484,6 +485,7 @@ export default function MatchScorecard() {
                   teamName={inn2Team}
                   batting={inn2.batting}
                   inningsTotal={t2}
+                  fmtName={fmtName}
                 />
               )}
             </div>
@@ -492,17 +494,17 @@ export default function MatchScorecard() {
             {(inn1.bowling.length > 0 || inn2.bowling.length > 0) && (
               <div className={`grid gap-4 ${hasInn2 && inn2.bowling.length > 0 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
                 {inn1.bowling.length > 0 && (
-                  <BowlingCard label="INNINGS 1" teamName={inn2Team} bowling={inn1.bowling} />
+                  <BowlingCard label="INNINGS 1" teamName={inn2Team} bowling={inn1.bowling} fmtName={fmtName} />
                 )}
                 {hasInn2 && inn2.bowling.length > 0 && (
-                  <BowlingCard label="INNINGS 2" teamName={inn1Team} bowling={inn2.bowling} />
+                  <BowlingCard label="INNINGS 2" teamName={inn1Team} bowling={inn2.bowling} fmtName={fmtName} />
                 )}
               </div>
             )}
           </div>
         )}
 
-        <FallOfWicketsSection fow={game.fall_of_wickets ?? []} />
+        <FallOfWicketsSection fow={game.fall_of_wickets ?? []} fmtName={fmtName} />
         <PartnershipsSection partnerships={game.partnerships ?? []} />
       </main>
     </div>
