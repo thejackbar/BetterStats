@@ -1,7 +1,6 @@
 // Navbar — PressNav design with slug-based routing
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { Ticker } from "../lib/presskit";
 import { useAuth } from "../contexts/AuthContext";
 
 const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games'];
@@ -51,20 +50,12 @@ export default function Navbar() {
             to={`/${slug}`}
             className="flex items-center gap-3 mr-6 shrink-0 group"
           >
-            {club?.logo_url ? (
-              <img
-                src={club.logo_url}
-                alt=""
-                className="w-8 h-8 rounded object-contain"
-              />
-            ) : (
-              <div
-                className="w-8 h-8 rounded flex items-center justify-center text-[11px] font-mono font-bold"
-                style={{ background: "var(--pb-accent)", color: "#000" }}
-              >
-                {displayShort}
-              </div>
-            )}
+            <div
+              className="w-8 h-8 rounded flex items-center justify-center text-[11px] font-mono font-bold"
+              style={{ background: "var(--pb-accent)", color: "#000" }}
+            >
+              {displayShort}
+            </div>
           <div className="hidden md:block leading-tight">
             <div className="text-pb-text text-[13px] font-semibold tracking-tight">{displayName}</div>
             <div className="text-pb-faint text-[10px] font-mono tracking-wide2">BETTERSTATS · v5.1.1</div>
@@ -102,16 +93,6 @@ export default function Navbar() {
             ))}
           </nav>
 
-          {/* Ticker — right side */}
-          {org?.ticker_items?.length > 0 && (
-            <div className="hidden lg:block ml-4 shrink-0 max-w-[240px] overflow-hidden">
-              <Ticker
-                items={org.ticker_items}
-                className="text-pb-faint text-[10px] font-mono tracking-wide2 text-pb-dim flex items-center"
-                speed={42}
-              />
-            </div>
-          )}
         </div>
       </div>
     </header>
