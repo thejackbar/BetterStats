@@ -124,7 +124,7 @@ async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depe
     result = await db.execute(
         select(Grade)
         .where(Grade.season_id == uuid.UUID(season_id))
-        .order_by(Grade.name)
+        .order_by(text("(regexp_replace(grades.name, '[^0-9].*', ''))::int NULLS LAST"), Grade.name)
     )
     grades = result.scalars().all()
     if grades:
@@ -140,9 +140,12 @@ async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depe
     try:
         api_grades = await playhq_partner_client.get_season_grades(season_id)
         if api_grades:
+            def _grade_sort_key(x):
+                m = _re.match(r'^(\d+)', x["name"])
+                return (int(m.group(1)) if m else float('inf'), x["name"])
             return sorted(
                 [{"id": g["id"], "name": g.get("name", "")} for g in api_grades if g.get("id")],
-                key=lambda x: x["name"],
+                key=_grade_sort_key,
             )
     except Exception:
         pass

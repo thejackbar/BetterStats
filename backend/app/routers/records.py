@@ -28,7 +28,7 @@ async def get_records_grades(
     )
     if season_id:
         q = q.where(Grade.season_id == uuid.UUID(season_id))
-    result = await db.execute(q.order_by(Grade.name))
+    result = await db.execute(q.order_by(text("(regexp_replace(grades.name, '[^0-9].*', ''))::int NULLS LAST"), Grade.name))
     grades = result.scalars().all()
     if grades:
         seen: set[str] = set()
