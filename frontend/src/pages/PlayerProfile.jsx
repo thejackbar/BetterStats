@@ -59,8 +59,8 @@ function formatRange(inst, seasons) {
   return start || end || null
 }
 
-function formatAchievementBadge(a, seasons) {
-  const label = a.achievement || a.subcategory || a.category
+function formatAchievementBadge(a, seasons, awardDefs) {
+  const label = resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement) || a.subcategory || a.category
   if (a.category === 'Milestone' && a.subcategory === 'Cap Number' && a.detail) return `${label} ${a.detail}`
   if (a._instances && a._instances.length > 1) {
     const ranges = a._instances.map(i => formatRange(i, seasons)).filter(Boolean)
@@ -87,6 +87,8 @@ function headerPriority(a) {
     return 9
   }
   if (a.category === 'Premiership') return 4
+  if (a.category === 'Club Award' && a.subcategory === 'Perpetual') return 3.5
+  if (a.category === "Club Award" && a.subcategory === "Women's Perpetual") return 3.5
   if (a.category === 'Association Award') return 6
   if (a.category === 'Club Award') return 7
   if (a.category === 'Office Bearer') return 8
@@ -1060,6 +1062,7 @@ export default function PlayerProfile() {
   const [upcomingMilestones, setUpcomingMilestones] = useState([])
   const [milestones, setMilestones] = useState([])
   const [achievements, setAchievements] = useState([])
+  const [awardDefs, setAwardDefs] = useState([])
   const [dismissals, setDismissals] = useState([])
   const [partnerships, setPartnerships] = useState([])
   const [byGrade, setByGrade] = useState([])
@@ -1083,6 +1086,7 @@ export default function PlayerProfile() {
     api.getOrgSeasons(oid).then(setSeasons).catch(() => {})
     api.getOrg(oid).then(setOrg).catch(() => {})
     api.listAchievements(oid, { playerId }).then(setAchievements).catch(() => setAchievements([]))
+    api.listAwardDefinitions(oid).then(d => setAwardDefs(d || [])).catch(() => {})
   }, [data?.player?.organisation_id, playerId])
 
   useEffect(() => {
@@ -1158,7 +1162,7 @@ export default function PlayerProfile() {
               <div className="flex flex-wrap gap-2 mt-3">
                 {headerAchievements.map(a => (
                   <span key={a.id} className="font-mono text-[10px] tracking-wide2 px-2.5 py-1 rounded-sm border text-[11px]" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)', color: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' }}>
-                    {formatAchievementBadge(a, seasons)}
+                    {formatAchievementBadge(a, seasons, awardDefs)}
                   </span>
                 ))}
               </div>
