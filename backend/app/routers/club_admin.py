@@ -97,6 +97,57 @@ async def patch_player(
     }
 
 
+class PlayerCreate(BaseModel):
+    first_name: str
+    last_name: str
+    playhq_id: Optional[str] = None
+    display_name_override: Optional[str] = None
+
+
+@router.post("/players")
+async def create_player(
+    data: PlayerCreate,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    first = data.first_name.strip()
+    last = data.last_name.strip()
+    if not first or not last:
+        raise HTTPException(status_code=422, detail="First name and last name are required")
+
+    name = f"{last}, {first}"
+    phq_id = data.playhq_id.strip() if data.playhq_id else None
+    override = data.display_name_override.strip() or None if data.display_name_override else None
+
+    if phq_id:
+        conflict = await db.execute(
+            select(Player).where(
+                Player.organisation_id == club.id,
+                Player.playhq_id == phq_id,
+            )
+        )
+        if conflict.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Another player already has this PlayHQ ID")
+
+    player = Player(
+        id=uuid.uuid4(),
+        name=name,
+        organisation_id=club.id,
+        playhq_id=phq_id,
+        display_name_override=override,
+    )
+    db.add(player)
+    await db.commit()
+    return {
+        "id": str(player.id),
+        "name": player.name,
+        "display_name": player.display_name,
+        "display_name_override": player.display_name_override,
+        "playhq_id": player.playhq_id,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Seasons
 # ---------------------------------------------------------------------------
@@ -190,6 +241,7 @@ class SettingsPatch(BaseModel):
     primary_color: Optional[str] = None
     accent_color: Optional[str] = None
     theme_mode: Optional[str] = None
+    player_name_format: Optional[str] = None
 
 
 @router.get("/settings")
@@ -210,6 +262,7 @@ async def get_settings(
         "hero_image_url": club.hero_image_url,
         "is_active": club.is_active,
         "playhq_id": club.playhq_id,
+        "player_name_format": club.player_name_format or "last_first",
     }
 
 
@@ -230,6 +283,8 @@ async def patch_settings(
         club.accent_color = data.accent_color.strip()
     if data.theme_mode is not None and data.theme_mode in ("light", "dark", "auto"):
         club.theme_mode = data.theme_mode
+    if data.player_name_format is not None and data.player_name_format in ("last_first", "first_last", "first_initial_last", "last_first_initial"):
+        club.player_name_format = data.player_name_format
     await db.commit()
     return {"status": "updated"}
 

@@ -9,6 +9,7 @@ import SeasonSelector from '../components/SeasonSelector'
 import {
   Label, Card, PageHeader, PbSpinner,
 } from '../lib/presskit'
+import { useNameFormat } from '../lib/nameFormat'
 
 const BATTING_SORTS = [
   { key: 'total_runs',    label: 'MOST RUNS' },
@@ -84,7 +85,7 @@ function getBattingCols(sortBy) {
   return base
 }
 
-function BattingTable({ rows, sortBy }) {
+function BattingTable({ rows, sortBy, fmt = n => n }) {
   const primaryLabel = BATTING_SORTS.find(s => s.key === sortBy)?.label || 'VALUE'
   const primaryKey = sortBy || 'total_runs'
   const cols = getBattingCols(sortBy)
@@ -112,7 +113,7 @@ function BattingTable({ rows, sortBy }) {
               <tr key={p.player_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                 <td className="py-3 pl-5 font-mono text-pb-faint">{String(i + 1).padStart(2, '0')}</td>
                 <td className="py-3">
-                  <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{p.name}</Link>
+                  <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{fmt(p.name)}</Link>
                 </td>
                 {cols.map(c => {
                   let val
@@ -145,7 +146,7 @@ function BattingTable({ rows, sortBy }) {
   )
 }
 
-function BowlingTable({ rows, sortBy }) {
+function BowlingTable({ rows, sortBy, fmt = n => n }) {
   return (
     <Card pad="p-0">
       <div className="overflow-x-auto pb-scroll">
@@ -169,7 +170,7 @@ function BowlingTable({ rows, sortBy }) {
               <tr key={p.player_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                 <td className="py-3 pl-5 font-mono text-pb-faint">{String(i + 1).padStart(2, '0')}</td>
                 <td className="py-3">
-                  <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{p.name}</Link>
+                  <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{fmt(p.name)}</Link>
                   {p.five_fors > 0 && <span className="ml-2 font-mono text-[10px] text-pb-faint">{p.five_fors}×5W</span>}
                 </td>
                 <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.games ?? '—'}</td>
@@ -197,7 +198,7 @@ function BowlingTable({ rows, sortBy }) {
   )
 }
 
-function FieldingTable({ rows, sortBy }) {
+function FieldingTable({ rows, sortBy, fmt = n => n }) {
   const primaryLabel = FIELDING_SORTS.find(s => s.key === sortBy)?.label || 'CATCHES'
   const primaryKey = sortBy || 'total_catches'
 
@@ -221,7 +222,7 @@ function FieldingTable({ rows, sortBy }) {
               <tr key={p.player_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                 <td className="py-3 pl-5 font-mono text-pb-faint">{String(i + 1).padStart(2, '0')}</td>
                 <td className="py-3">
-                  <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{p.name}</Link>
+                  <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{fmt(p.name)}</Link>
                 </td>
                 <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.games ?? '—'}</td>
                 <td className="py-3 pr-3 text-right">
@@ -245,6 +246,7 @@ export default function Leaderboard() {
   const { clubSlug } = useParams()
   const { club, orgId, inactive } = useClub(clubSlug)
   useClubTheme(club)
+  const fmt = useNameFormat(club)
 
   if (inactive) return <ClubInactive />
 
@@ -359,17 +361,17 @@ export default function Leaderboard() {
             {mainTab === 'batting' && (
               battingRows.length === 0
                 ? <p className="text-pb-faint text-sm py-8 text-center">No batting data yet.</p>
-                : <BattingTable rows={battingRows} sortBy={battingSort} />
+                : <BattingTable rows={battingRows} sortBy={battingSort} fmt={fmt} />
             )}
             {mainTab === 'bowling' && (
               bowlingRows.length === 0
                 ? <p className="text-pb-faint text-sm py-8 text-center">No bowling data yet.</p>
-                : <BowlingTable rows={bowlingRows} sortBy={bowlingSort} />
+                : <BowlingTable rows={bowlingRows} sortBy={bowlingSort} fmt={fmt} />
             )}
             {mainTab === 'fielding' && (
               fieldingRows.length === 0
                 ? <p className="text-pb-faint text-sm py-8 text-center">No fielding data yet.</p>
-                : <FieldingTable rows={fieldingRows} sortBy={fieldingSort} />
+                : <FieldingTable rows={fieldingRows} sortBy={fieldingSort} fmt={fmt} />
             )}
           </>
         )}

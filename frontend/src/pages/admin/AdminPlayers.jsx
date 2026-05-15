@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import { nameMatchesSearch, formatPlayerName } from '../../lib/nameFormat'
 
 export default function AdminPlayers() {
   const [players, setPlayers] = useState([])
@@ -8,16 +9,28 @@ export default function AdminPlayers() {
   const [editing, setEditing] = useState(null) // { id, field, value }
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const [nameFormat, setNameFormat] = useState('last_first')
+  const [showCreate, setShowCreate] = useState(false)
+  const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', playhq_id: '', display_name_override: '' })
+  const [creating, setCreating] = useState(false)
+  const [createMsg, setCreateMsg] = useState('')
 
   useEffect(() => {
     api.adminListPlayers().then(setPlayers).catch(() => {})
+    api.adminGetSettings().then(s => setNameFormat(s.player_name_format || 'last_first')).catch(() => {})
   }, [])
 
-  const filtered = players.filter(p =>
-    p.name.toLowerCase().includes(filter.toLowerCase()) ||
-    (p.display_name_override || '').toLowerCase().includes(filter.toLowerCase()) ||
-    (p.playhq_id || '').toLowerCase().includes(filter.toLowerCase())
-  )
+  const fmt = (name) => formatPlayerName(name, nameFormat)
+
+  const filtered = players.filter(p => {
+    const q = filter.trim()
+    if (!q) return true
+    return (
+      nameMatchesSearch(p.name, q) ||
+      nameMatchesSearch(p.display_name_override, q) ||
+      (p.playhq_id || '').toLowerCase().includes(q.toLowerCase())
+    )
+  })
 
   const startEdit = (p, field) => setEditing({
     id: p.id,
@@ -59,13 +72,111 @@ export default function AdminPlayers() {
     }
   }
 
+  const submitCreate = async (e) => {
+    e.preventDefault()
+    setCreating(true)
+    setCreateMsg('')
+    try {
+      const payload = {
+        first_name: createForm.first_name.trim(),
+        last_name: createForm.last_name.trim(),
+        playhq_id: createForm.playhq_id.trim() || null,
+        display_name_override: createForm.display_name_override.trim() || null,
+      }
+      const created = await api.adminCreatePlayer(payload)
+      setPlayers(ps => [...ps, created].sort((a, b) => a.name.localeCompare(b.name)))
+      setCreateForm({ first_name: '', last_name: '', playhq_id: '', display_name_override: '' })
+      setShowCreate(false)
+      setMsg('Player created')
+      setTimeout(() => setMsg(''), 2500)
+    } catch (err) {
+      setCreateMsg(err.message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
   return (
     <AdminLayout>
       <div className="max-w-4xl">
         <div className="flex items-center justify-between mb-5">
           <h1 className="font-display font-bold text-2xl text-pb-text">Players</h1>
-          {msg && <span className="font-mono text-[11px] tracking-wide2" style={{ color: 'var(--pb-accent)' }}>{msg.toUpperCase()}</span>}
+          <div className="flex items-center gap-3">
+            {msg && <span className="font-mono text-[11px] tracking-wide2" style={{ color: 'var(--pb-accent)' }}>{msg.toUpperCase()}</span>}
+            <button
+              onClick={() => { setShowCreate(v => !v); setCreateMsg('') }}
+              className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}
+            >
+              {showCreate ? 'CANCEL' : '+ ADD PLAYER'}
+            </button>
+          </div>
         </div>
+
+        {showCreate && (
+          <form onSubmit={submitCreate} className="pb-card px-5 py-4 mb-4">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">New Player</p>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="font-mono text-[10px] text-pb-faintest block mb-1">First Name *</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={createForm.first_name}
+                  onChange={e => setCreateForm(f => ({ ...f, first_name: e.target.value }))}
+                  required
+                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+                  placeholder="e.g. John"
+                />
+              </div>
+              <div>
+                <label className="font-mono text-[10px] text-pb-faintest block mb-1">Last Name *</label>
+                <input
+                  type="text"
+                  value={createForm.last_name}
+                  onChange={e => setCreateForm(f => ({ ...f, last_name: e.target.value }))}
+                  required
+                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+                  placeholder="e.g. Smith"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="font-mono text-[10px] text-pb-faintest block mb-1">PlayHQ ID (optional)</label>
+                <input
+                  type="text"
+                  value={createForm.playhq_id}
+                  onChange={e => setCreateForm(f => ({ ...f, playhq_id: e.target.value }))}
+                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none focus:border-pb-amber"
+                  style={{ '--tw-border-opacity': 1 }}
+                  placeholder="e.g. a1b2c3d4-e5f6-..."
+                />
+              </div>
+              <div>
+                <label className="font-mono text-[10px] text-pb-faintest block mb-1">Display name override (optional)</label>
+                <input
+                  type="text"
+                  value={createForm.display_name_override}
+                  onChange={e => setCreateForm(f => ({ ...f, display_name_override: e.target.value }))}
+                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+                  placeholder="Custom display name"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={creating}
+                className="px-4 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                {creating ? 'CREATING…' : 'CREATE PLAYER'}
+              </button>
+              {createMsg && <span className="font-mono text-[11px] text-pb-red">{createMsg}</span>}
+            </div>
+          </form>
+        )}
 
         <div className="relative mb-4">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-pb-faint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -73,7 +184,7 @@ export default function AdminPlayers() {
           </svg>
           <input
             type="text"
-            placeholder="Filter by name, display name or PHQ ID…"
+            placeholder="Search by name (any order), display name or PHQ ID…"
             value={filter}
             onChange={e => setFilter(e.target.value)}
             className="w-full bg-pb-surface border pb-hairline rounded pl-9 pr-4 py-2.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent placeholder-pb-faintest"
@@ -150,9 +261,9 @@ export default function AdminPlayers() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-pb-text text-sm font-medium">
-                      {p.display_name}
+                      {p.display_name_override || fmt(p.name)}
                       {p.display_name_override && (
-                        <span className="ml-2 font-mono text-[10px] text-pb-faint">(PlayHQ: {p.name})</span>
+                        <span className="ml-2 font-mono text-[10px] text-pb-faint">(raw: {p.name})</span>
                       )}
                     </p>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">

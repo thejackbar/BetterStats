@@ -42,6 +42,8 @@ class OrganisationOut(BaseModel):
     accent_color: str | None = None
     logo_url: str | None = None
     hero_image_url: str | None = None
+    theme_mode: str | None = None
+    player_name_format: str | None = None
 
     class Config:
         from_attributes = True

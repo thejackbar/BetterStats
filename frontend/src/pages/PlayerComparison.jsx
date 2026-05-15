@@ -5,15 +5,15 @@ import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import { PageHeader, PbSpinner, Card } from '../lib/presskit'
+import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 
-function PlayerSearch({ players, selected, onSelect, label, side }) {
+function PlayerSearch({ players, selected, onSelect, label, side, fmt = n => n }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return players.slice(0, 20)
-    return players.filter(p => p.name.toLowerCase().includes(q)).slice(0, 20)
+    if (!query.trim()) return players.slice(0, 20)
+    return players.filter(p => nameMatchesSearch(p.name, query)).slice(0, 20)
   }, [players, query])
 
   return (
@@ -21,7 +21,7 @@ function PlayerSearch({ players, selected, onSelect, label, side }) {
       <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">{label}</p>
       {selected ? (
         <div className="flex items-center gap-2 bg-pb-surface border pb-hairline rounded px-3 py-2.5">
-          <span className="text-pb-text font-semibold flex-1 text-sm">{selected.name}</span>
+          <span className="text-pb-text font-semibold flex-1 text-sm">{fmt(selected.name)}</span>
           <button
             onClick={() => { onSelect(null); setQuery('') }}
             className="text-pb-faint hover:text-pb-text text-lg leading-none"
@@ -53,7 +53,7 @@ function PlayerSearch({ players, selected, onSelect, label, side }) {
                   onMouseDown={() => { onSelect(p); setQuery(''); setOpen(false) }}
                   className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text transition-colors"
                 >
-                  {p.name}
+                  {fmt(p.name)}
                 </button>
               ))}
             </div>
@@ -162,6 +162,7 @@ export default function PlayerComparison() {
   const { clubSlug } = useParams()
   const { club, orgId, inactive } = useClub(clubSlug)
   useClubTheme(club)
+  const fmt = useNameFormat(club)
 
   if (inactive) return <ClubInactive />
 
@@ -215,8 +216,8 @@ export default function PlayerComparison() {
 
         {/* Player pickers */}
         <div className="grid md:grid-cols-2 gap-4 mb-6">
-          <PlayerSearch players={players} selected={player1} onSelect={setPlayer1} label="Player 1" side="left" />
-          <PlayerSearch players={players} selected={player2} onSelect={setPlayer2} label="Player 2" side="right" />
+          <PlayerSearch players={players} selected={player1} onSelect={setPlayer1} label="Player 1" side="left" fmt={fmt} />
+          <PlayerSearch players={players} selected={player2} onSelect={setPlayer2} label="Player 2" side="right" fmt={fmt} />
         </div>
 
         {/* Empty state */}
@@ -239,14 +240,14 @@ export default function PlayerComparison() {
             <div className="grid grid-cols-[1fr_auto_1fr] gap-0 mb-0">
               <Link to={`/players/${player1.id}`} className="pb-card rounded-b-none border-b-0 p-4 text-left hover:bg-pb-surface2 transition-colors">
                 <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-0.5">PLAYER 1</p>
-                <p className="font-semibold text-pb-text text-base">{player1.name}</p>
+                <p className="font-semibold text-pb-text text-base">{fmt(player1.name)}</p>
               </Link>
               <div className="flex items-center justify-center px-4 bg-pb-surface border-t border-b pb-hairline-t pb-hairline-b">
                 <span className="font-mono text-[11px] tracking-wide3 text-pb-faintest font-bold">VS</span>
               </div>
               <Link to={`/players/${player2.id}`} className="pb-card rounded-b-none border-b-0 p-4 text-right hover:bg-pb-surface2 transition-colors">
                 <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-0.5">PLAYER 2</p>
-                <p className="font-semibold text-pb-text text-base">{player2.name}</p>
+                <p className="font-semibold text-pb-text text-base">{fmt(player2.name)}</p>
               </Link>
             </div>
 

@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { api } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useClubTheme } from '../hooks/useClubTheme'
+import { useNameFormat } from '../lib/nameFormat'
 import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
 import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
@@ -1070,6 +1071,7 @@ export default function PlayerProfile() {
   const [syncRequestLoading, setSyncRequestLoading] = useState(false)
 
   useClubTheme(org)
+  const fmtName = useNameFormat(org)
 
   useEffect(() => {
     if (!playerId) return
@@ -1143,7 +1145,7 @@ export default function PlayerProfile() {
         <div className="flex items-center gap-2 font-mono text-[10.5px] tracking-wide2 text-pb-faint mb-4">
           {orgSlug && <Link to={`/${orgSlug}/players`} className="hover:text-pb-text">PLAYERS</Link>}
           {orgSlug && <span>/</span>}
-          <span className="text-pb-dim">{player.name.toUpperCase()}</span>
+          <span className="text-pb-dim">{fmtName(player.name).toUpperCase()}</span>
         </div>
 
         {/* Hero */}
@@ -1151,7 +1153,7 @@ export default function PlayerProfile() {
           <div>
             <Label>{org?.name || ''} · {player.role || 'PLAYER'}</Label>
             <h1 className="font-display text-[48px] sm:text-[72px] font-bold tracking-tight leading-[0.92] mt-1.5 text-pb-text">
-              {player.name}
+              {fmtName(player.name)}
             </h1>
             {/* Header achievement badges */}
             {headerAchievements.length > 0 && (
