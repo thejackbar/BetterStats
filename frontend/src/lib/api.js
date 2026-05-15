@@ -123,6 +123,19 @@ export const api = {
   adminGetSettings: () => request('/club-admin/settings'),
   adminPatchSettings: (data) =>
     request('/club-admin/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  adminUploadLogo: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/club-admin/logo`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  adminDeleteLogo: () => request('/club-admin/logo', { method: 'DELETE' }),
   adminListPartnershipRecords: () => request('/club-admin/partnership-records'),
   adminCreatePartnershipRecord: (data) =>
     request('/club-admin/partnership-records', { method: 'POST', body: JSON.stringify(data) }),

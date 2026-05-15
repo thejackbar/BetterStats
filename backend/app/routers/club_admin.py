@@ -9,6 +9,7 @@ import uuid
 import io
 import csv
 import re
+from pathlib import Path
 
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
@@ -289,6 +290,62 @@ async def patch_settings(
         club.player_name_format = data.player_name_format
     await db.commit()
     return {"status": "updated"}
+
+
+# ---------------------------------------------------------------------------
+# Club logo (white-labelling)
+# ---------------------------------------------------------------------------
+
+LOGO_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+LOGO_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _remove_uploaded_logo(logo_url: Optional[str]) -> None:
+    """Delete a previously uploaded logo file. No-op for external URLs."""
+    if not logo_url or not logo_url.startswith("/uploads/logos/"):
+        return
+    p = Path("/app") / logo_url.lstrip("/")
+    p.unlink(missing_ok=True)
+
+
+@router.post("/logo")
+async def upload_logo(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in LOGO_ALLOWED_EXTS:
+        raise HTTPException(400, "Image files only (jpg, png, webp, gif)")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > LOGO_MAX_BYTES:
+        raise HTTPException(400, "Logo must be 2 MB or smaller")
+
+    org_id = str(club.id)
+    dest_dir = Path("/app/uploads") / "logos" / org_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    _remove_uploaded_logo(club.logo_url)
+    filename = f"logo_{uuid.uuid4().hex}{ext}"
+    (dest_dir / filename).write_bytes(data)
+
+    club.logo_url = f"/uploads/logos/{org_id}/{filename}"
+    await db.commit()
+    return {"logo_url": club.logo_url}
+
+
+@router.delete("/logo")
+async def delete_logo(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    _remove_uploaded_logo(club.logo_url)
+    club.logo_url = None
+    await db.commit()
+    return {"status": "cleared"}
 
 
 # ---------------------------------------------------------------------------
