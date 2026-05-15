@@ -367,11 +367,13 @@ async def get_records(
             pt.runs, pt.wicket_number,
             g.played_at::text,
             gr.name AS grade_name,
+            s.name AS season_name,
             EXTRACT(YEAR FROM g.played_at)::int AS season_year,
             false AS is_manual
         FROM partnerships pt
         JOIN games g ON g.id = pt.game_id
         JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
         LEFT JOIN players p1 ON p1.id = pt.batter1_id
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
         WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
@@ -389,12 +391,14 @@ async def get_records(
             pt.runs, pt.wicket_number,
             g.played_at::text,
             gr.name AS grade_name,
+            s.name AS season_name,
             EXTRACT(YEAR FROM g.played_at)::int AS season_year,
             false AS is_manual,
             ROW_NUMBER() OVER (PARTITION BY pt.wicket_number ORDER BY pt.runs DESC) AS rn
         FROM partnerships pt
         JOIN games g ON g.id = pt.game_id
         JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
         LEFT JOIN players p1 ON p1.id = pt.batter1_id
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
         WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
@@ -414,6 +418,7 @@ async def get_records(
         WITH ranked AS (
             SELECT
                 gr.name AS grade_name,
+                s.name AS season_name,
                 pt.wicket_number,
                 p1.id::text AS batter1_id,
                 COALESCE(p1.display_name_override, p1.name) AS batter1_name,
@@ -426,6 +431,7 @@ async def get_records(
             FROM partnerships pt
             JOIN games g ON g.id = pt.game_id
             JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
@@ -546,13 +552,15 @@ async def get_records(
     # Flatten by_wicket into wicket_1 ... wicket_10 and normalise field names
     def normalise_partnership(r: dict) -> dict:
         return {
-            "player1_id":   r.get("batter1_id"),
-            "player1_name": r.get("batter1_name"),
-            "player2_id":   r.get("batter2_id"),
-            "player2_name": r.get("batter2_name"),
-            "runs":         r.get("runs"),
-            "season_name":  r.get("grade_name") or (str(r["season_year"]) if r.get("season_year") else None),
-            "is_manual":    r.get("is_manual", False),
+            "player1_id":    r.get("batter1_id"),
+            "player1_name":  r.get("batter1_name"),
+            "player2_id":    r.get("batter2_id"),
+            "player2_name":  r.get("batter2_name"),
+            "runs":          r.get("runs"),
+            "wicket_number": r.get("wicket_number"),
+            "grade_name":    r.get("grade_name"),
+            "season_name":   r.get("season_name") or (str(r["season_year"]) if r.get("season_year") else None),
+            "is_manual":     r.get("is_manual", False),
         }
 
     partnerships_flat = {
@@ -566,21 +574,24 @@ async def get_records(
     # Add manual records merged into top_partnerships and per-wicket buckets
     for mr in manual_rows:
         nr = {
-            "player1_id":   mr.get("batter1_id"),
-            "player1_name": mr.get("batter1_name"),
-            "player2_id":   mr.get("batter2_id"),
-            "player2_name": mr.get("batter2_name"),
-            "runs":         mr.get("runs"),
-            "season_name":  mr.get("grade_name") or (str(mr["season_year"]) if mr.get("season_year") else None),
-            "is_manual":    True,
+            "player1_id":    mr.get("batter1_id"),
+            "player1_name":  mr.get("batter1_name"),
+            "player2_id":    mr.get("batter2_id"),
+            "player2_name":  mr.get("batter2_name"),
+            "runs":          mr.get("runs"),
+            "wicket_number": mr.get("wicket_number"),
+            "grade_name":    mr.get("grade_name"),
+            "season_name":   str(mr["season_year"]) if mr.get("season_year") else None,
+            "is_manual":     True,
         }
         partnerships_flat["top_partnerships"].append(nr)
         wk = mr.get("wicket_number")
         if wk:
             key = f"wicket_{wk}"
             partnerships_flat.setdefault(key, []).append(nr)
-    # Re-sort top_partnerships by runs desc
+    # Re-sort top_partnerships by runs desc and cap at 25
     partnerships_flat["top_partnerships"].sort(key=lambda r: (r.get("runs") or 0), reverse=True)
+    partnerships_flat["top_partnerships"] = partnerships_flat["top_partnerships"][:25]
 
     return {
         "batting": {
