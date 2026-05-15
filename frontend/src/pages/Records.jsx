@@ -235,6 +235,36 @@ function BowlingTab({ data, latestSeason, fmt = n => n }) {
   )
 }
 
+function gradeOrder(name) {
+  const m = name.match(/^(\d+)/)
+  return m ? parseInt(m[1]) : 999
+}
+
+function PartnershipTable({ rows, headers, fmt }) {
+  return (
+    <table className="w-full text-[13px]">
+      <thead>
+        <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+          {headers.map((h, i) => (
+            <th key={i} className={`py-2.5 px-3 font-medium ${h.right ? 'text-right' : ''}`}>{h.label}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+            {r.map((cell, j) => (
+              <td key={j} className={`py-2.5 px-3 font-mono ${headers[j].right ? 'text-right text-pb-faintest text-[11px]' : ''}`}>
+                {cell}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 function PartnershipsTab({ data, fmt = n => n }) {
   if (!data) return <PbSpinner />
 
@@ -244,8 +274,18 @@ function PartnershipsTab({ data, fmt = n => n }) {
     return { ...rec, wicket: wi + 1, ordinal: ord }
   }).filter(Boolean)
 
+  const gradeEntries = Object.entries(data.by_grade || {})
+    .sort(([a], [b]) => gradeOrder(a) - gradeOrder(b))
+
+  const wicketBuckets = ORDINALS.map((ord, wi) => ({
+    ordinal: ord,
+    wicket: wi + 1,
+    records: (data[`wicket_${wi + 1}`] || []),
+  })).filter(b => b.records.length > 0)
+
   return (
     <div className="space-y-6">
+      {/* Chart 1: All Time Records */}
       {allTimeRecords.length > 0 && (
         <div className="pb-card overflow-hidden">
           <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
@@ -272,7 +312,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                       <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
                     </td>
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
-                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.season_name}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name}</td>
                   </tr>
                 ))}
               </tbody>
@@ -281,6 +321,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
         </div>
       )}
 
+      {/* Chart 2: Top 25 Partnerships */}
       {data.top_partnerships?.length > 0 && (
         <div className="pb-card overflow-hidden">
           <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
@@ -294,7 +335,9 @@ function PartnershipsTab({ data, fmt = n => n }) {
                   <th className="py-2.5 px-3 font-medium w-10">#</th>
                   <th className="py-2.5 px-3 font-medium">PARTNERSHIP</th>
                   <th className="py-2.5 px-3 font-medium text-right">RUNS</th>
-                  <th className="py-2.5 px-3 font-medium text-right">GRADE / SEASON</th>
+                  <th className="py-2.5 px-3 font-medium text-right">WKT</th>
+                  <th className="py-2.5 px-3 font-medium text-right">GRADE</th>
+                  <th className="py-2.5 px-3 font-medium text-right">SEASON</th>
                 </tr>
               </thead>
               <tbody>
@@ -307,7 +350,9 @@ function PartnershipsTab({ data, fmt = n => n }) {
                       <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
                     </td>
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
-                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.season_name}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.wicket_number ? ORDINALS[r.wicket_number - 1] : '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name || '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.season_name || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -316,13 +361,15 @@ function PartnershipsTab({ data, fmt = n => n }) {
         </div>
       )}
 
-      {data.by_grade && Object.entries(data.by_grade).length > 0 && (
+      {/* By Grade: best partnership per wicket, two-column grid */}
+      {gradeEntries.length > 0 && (
         <div className="pb-card overflow-hidden">
           <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
-            <Label style={{ color: 'var(--pb-accent)' }}>WICKET PARTNERSHIPS BY GRADE</Label>
+            <Label style={{ color: 'var(--pb-accent)' }}>WICKET RECORDS BY GRADE</Label>
+            <p className="font-mono text-[10px] text-pb-faintest mt-0.5">Best partnership at each wicket, per grade.</p>
           </div>
           <div className="grid gap-0 md:grid-cols-2">
-            {Object.entries(data.by_grade).sort(([a], [b]) => a.localeCompare(b)).map(([grade, records], gi) => (
+            {gradeEntries.map(([grade, records], gi) => (
               <div key={grade} className={`${gi % 2 === 0 ? 'md:border-r pb-hairline-r' : ''} ${gi >= 2 ? 'pb-hairline-t' : ''}`}>
                 <div className="px-5 py-2.5 pb-hairline-b">
                   <span className="font-mono text-[11px] tracking-wide2 text-pb-dim font-semibold">{grade}</span>
@@ -333,6 +380,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                       <th className="py-2 px-3 text-left">WKT</th>
                       <th className="py-2 px-3 text-left">PARTNERSHIP</th>
                       <th className="py-2 px-3 text-right">RUNS</th>
+                      <th className="py-2 px-3 text-right">SEASON</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -345,6 +393,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                           <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
                         </td>
                         <td className="py-2 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
+                        <td className="py-2 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.season_name || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -355,7 +404,52 @@ function PartnershipsTab({ data, fmt = n => n }) {
         </div>
       )}
 
-      {!allTimeRecords.length && !data.top_partnerships?.length && !Object.keys(data.by_grade || {}).length && (
+      {/* Records by Wicket: top 10 per wicket */}
+      {wicketBuckets.length > 0 && (
+        <div className="space-y-4">
+          <div className="px-1">
+            <Label style={{ color: 'var(--pb-accent)' }}>RECORDS BY WICKET</Label>
+            <p className="font-mono text-[10px] text-pb-faintest mt-1">Top 10 partnerships at each wicket position across all grades.</p>
+          </div>
+          {wicketBuckets.map(({ ordinal, wicket, records }) => (
+            <div key={wicket} className="pb-card overflow-hidden">
+              <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
+                <Label style={{ color: 'var(--pb-accent)' }}>{ordinal} WICKET — TOP 10 PARTNERSHIPS</Label>
+              </div>
+              <div className="overflow-x-auto pb-scroll">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                      <th className="py-2.5 px-3 font-medium w-10">#</th>
+                      <th className="py-2.5 px-3 font-medium">PARTNERSHIP</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RUNS</th>
+                      <th className="py-2.5 px-3 font-medium text-right">GRADE</th>
+                      <th className="py-2.5 px-3 font-medium text-right">SEASON</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {records.map((r, i) => (
+                      <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                        <td className="py-2.5 px-3 font-mono text-pb-faint"><RankNum rank={i+1} /></td>
+                        <td className="py-2.5 px-3">
+                          <PlayerLink id={r.player1_id} name={r.player1_name} fmt={fmt} />
+                          <span className="text-pb-faintest mx-1">&amp;</span>
+                          <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
+                        <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name || '—'}</td>
+                        <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.season_name || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!allTimeRecords.length && !data.top_partnerships?.length && !gradeEntries.length && (
         <p className="text-pb-faint text-sm py-4">No partnership records available.</p>
       )}
     </div>
