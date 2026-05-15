@@ -4,39 +4,43 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { Ticker } from "../lib/presskit";
 import { useAuth } from "../contexts/AuthContext";
 
-export default function Navbar({ club, org }) {
-  const location = useLocation();
+const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games'];
+
+function useSlug() {
+  const { pathname } = useLocation();
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments.length >= 2 && CLUB_SECTIONS.includes(segments[1])) {
+    return segments[0];
+  }
+  return sessionStorage.getItem('bs_last_slug') || null;
+}
+
+export default function Navbar() {
   const { user } = useAuth();
-  const slug = club?.slug || "";
+  const slug = useSlug();
 
-  // Determine active section from path
-  const path = location.pathname;
-  const inSection = (seg) => path.includes(`/${slug}/${seg}`) || path.includes(`/${seg}`);
-
-  const displayName = org?.name || club?.name || "BetterStats";
+  const displayName = slug
+    ? (sessionStorage.getItem(`bs_club_${slug}`) ? (() => { try { return JSON.parse(sessionStorage.getItem(`bs_club_${slug}`)).name } catch { return slug } })() : slug)
+    : "BetterStats";
   const displayShort = displayName
     .split(" ")
     .map((w) => w[0])
     .join("")
     .toUpperCase()
-    .slice(0, 4);
+    .slice(0, 4) || "BS";
 
-  const NAV = [
-    { label: "Home",        href: `/${slug}` },
+  const NAV = slug ? [
+    { label: "Dashboard",   href: `/${slug}/dashboard` },
     { label: "Players",     href: `/${slug}/players` },
     { label: "Leaderboard", href: `/${slug}/leaderboard` },
     { label: "Records",     href: `/${slug}/records` },
-    { label: "Yearbooks",   href: `/${slug}/yearbooks` },
+    { label: "Yearbook",    href: `/${slug}/yearbook` },
     { label: "Games",       href: `/${slug}/games` },
-    { label: "StatLab",     href: `/${slug}/statlab` },
+    { label: "Stat Lab",    href: `/${slug}/statlab` },
     { label: "Compare",     href: `/${slug}/compare` },
-  ];
-
-  const adminLinks = user ? [
-    { label: "Admin",       href: `/${slug}/admin` },
   ] : [];
 
-  const allLinks = [...NAV, ...adminLinks];
+  const allLinks = [...NAV];
 
   return (
     <header className="sticky top-0 z-50 bg-pb-surface pb-hairline-b">
@@ -63,7 +67,7 @@ export default function Navbar({ club, org }) {
             )}
           <div className="hidden md:block leading-tight">
             <div className="text-pb-text text-[13px] font-semibold tracking-tight">{displayName}</div>
-            <div className="text-pb-faint text-[10px] font-mono tracking-wide2">BETTERSTATS · v5.1.0</div>
+            <div className="text-pb-faint text-[10px] font-mono tracking-wide2">BETTERSTATS · v5.1.1</div>
           </div>
           <div className="md:hidden text-pb-text text-[13px] font-bold tracking-wide2">{displayShort}</div>
         </Link>
