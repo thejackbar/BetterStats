@@ -539,7 +539,7 @@ async def get_records(
         WHERE p.organisation_id = :org_id
           """ + pss_season_clause + """
         GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.runs) >= 100 AND SUM(pss.wickets) >= 5
+        HAVING SUM(pss.runs) >= 1000 AND SUM(pss.wickets) >= 100
         ORDER BY index_score DESC LIMIT :limit
     """)
 
