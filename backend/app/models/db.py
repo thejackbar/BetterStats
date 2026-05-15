@@ -56,6 +56,7 @@ class Organisation(Base):
     hero_image_url = Column(Text, nullable=True)
     theme_mode = Column(Text, default="auto", nullable=True)
     contact_email = Column(Text, nullable=True)
+    player_name_format = Column(Text, default="last_first", nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

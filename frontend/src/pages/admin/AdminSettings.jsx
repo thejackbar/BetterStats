@@ -19,6 +19,7 @@ export default function AdminSettings() {
         primary_color: s.primary_color || '#16c784',
         accent_color: s.accent_color || '#243352',
         theme_mode: s.theme_mode || 'auto',
+        player_name_format: s.player_name_format || 'last_first',
       })
     }).catch(() => {})
   }, [])
@@ -118,6 +119,21 @@ export default function AdminSettings() {
               <option value="dark">Dark</option>
               <option value="light">Light</option>
             </select>
+          </div>
+
+          <div>
+            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-1.5">Player name format</label>
+            <select
+              value={form.player_name_format}
+              onChange={e => setForm(f => ({ ...f, player_name_format: e.target.value }))}
+              className="bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+            >
+              <option value="last_first">Last Name, First Name (e.g. Smith, John)</option>
+              <option value="first_last">First Name Last Name (e.g. John Smith)</option>
+              <option value="first_initial_last">First Initial Last Name (e.g. J. Smith)</option>
+              <option value="last_first_initial">Last Name, First Initial (e.g. Smith, J.)</option>
+            </select>
+            <p className="font-mono text-[10px] text-pb-faintest mt-1">Applies to all player names across the site</p>
           </div>
 
           <div className="pt-2 flex items-center gap-4">

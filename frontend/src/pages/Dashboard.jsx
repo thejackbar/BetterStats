@@ -6,6 +6,7 @@ import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
 import SeasonSelector from '../components/SeasonSelector'
 import ClubInactive from './ClubInactive'
+import { useNameFormat } from '../lib/nameFormat'
 import { MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import {
   AnimatedNum, Sparkline, MiniBars, Label, Card, Btn,
@@ -94,6 +95,7 @@ export default function Dashboard() {
   const { clubSlug } = useParams()
   const { club, orgId, inactive } = useClub(clubSlug)
   useClubTheme(club)
+  const fmt = useNameFormat(club)
 
   if (inactive) return <ClubInactive />
 
@@ -229,7 +231,7 @@ export default function Dashboard() {
                   <li key={p.player_id} className={`flex items-center gap-3 py-2.5 ${i ? "pb-hairline-t" : ""}`}>
                     <span className="font-mono text-[10px] text-pb-faint w-4">{i + 1}</span>
                     <Link to={`/players/${p.player_id}`} className="flex-1 min-w-0">
-                      <div className="text-pb-text text-[14px] font-semibold truncate">{p.name}</div>
+                      <div className="text-pb-text text-[14px] font-semibold truncate">{fmt(p.name)}</div>
                       <div className="text-pb-faint font-mono text-[10.5px] tracking-wide2">
                         AVG {p.average ?? '—'} · HS {p.high_score ?? '—'}
                       </div>
@@ -254,7 +256,7 @@ export default function Dashboard() {
                   <li key={p.player_id} className={`flex items-center gap-3 py-2.5 ${i ? "pb-hairline-t" : ""}`}>
                     <span className="font-mono text-[10px] text-pb-faint w-4">{i + 1}</span>
                     <Link to={`/players/${p.player_id}`} className="flex-1 min-w-0">
-                      <div className="text-pb-text text-[14px] font-semibold truncate">{p.name}</div>
+                      <div className="text-pb-text text-[14px] font-semibold truncate">{fmt(p.name)}</div>
                       <div className="text-pb-faint font-mono text-[10.5px] tracking-wide2">
                         AVG {p.average ?? '—'} · ECON {p.economy ?? '—'} · BEST {
                           p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') :

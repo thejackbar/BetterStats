@@ -30,4 +30,5 @@ async def get_club_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
         "hero_image_url": org.hero_image_url,
         "theme_mode": org.theme_mode,
         "contact_email": org.contact_email,
+        "player_name_format": org.player_name_format or "last_first",
     }

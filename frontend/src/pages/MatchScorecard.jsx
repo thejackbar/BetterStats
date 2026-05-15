@@ -2,6 +2,7 @@ import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner, Card, ResultPill } from '../lib/presskit'
+import { useNameFormat } from '../lib/nameFormat'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
 function sumOversBalls(bowlingRows) {
@@ -212,8 +213,8 @@ function BattingCard({ label, teamName, batting = [], inningsTotal }) {
               <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                 <td className="py-2 pl-5 pr-3 whitespace-nowrap">
                   {row.player_id
-                    ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{row.player_name || '—'}</Link>
-                    : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
+                    ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
+                    : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
                   }
                 </td>
                 <td className="py-2 pr-5 font-mono text-[12px] whitespace-nowrap max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
@@ -279,8 +280,8 @@ function BowlingCard({ label, teamName, bowling = [] }) {
               <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                 <td className="py-2 pl-5 whitespace-nowrap">
                   {row.player_id
-                    ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{row.player_name || '—'}</Link>
-                    : <span className="text-pb-text font-semibold">{row.player_name || '—'}</span>
+                    ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
+                    : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
                   }
                 </td>
                 <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{row.overs ?? '—'}</td>
@@ -329,7 +330,7 @@ function FallOfWicketsSection({ fow = [] }) {
                 <span className="font-mono text-pb-text">{f.wicket_number}</span>
                 {f.player_name && (
                   <Link to={`/players/${f.player_id}`} className="text-pb-faint ml-1.5 hover:text-pb-accent transition-colors">
-                    {f.player_name}
+                    {fmtName(f.player_name)}
                   </Link>
                 )}
               </div>
@@ -405,6 +406,8 @@ export default function MatchScorecard() {
   const [game, setGame] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [orgData, setOrgData] = useState(null)
+  const fmtName = useNameFormat(orgData)
 
   useEffect(() => {
     const fetch = orgId
@@ -415,6 +418,10 @@ export default function MatchScorecard() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [gameId, orgId])
+
+  useEffect(() => {
+    if (orgId) api.getOrg(orgId).then(setOrgData).catch(() => {})
+  }, [orgId])
 
   if (loading) return <PbSpinner message="Loading scorecard…" />
   if (error) return (

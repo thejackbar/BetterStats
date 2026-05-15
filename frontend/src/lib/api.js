@@ -108,6 +108,8 @@ export const api = {
 
   // Club admin
   adminListPlayers: () => request('/club-admin/players'),
+  adminCreatePlayer: (data) =>
+    request('/club-admin/players', { method: 'POST', body: JSON.stringify(data) }),
   adminPatchPlayer: (playerId, data) =>
     request(`/club-admin/players/${playerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminListSeasons: () => request('/club-admin/seasons'),

@@ -7,11 +7,13 @@ import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import SeasonSelector from '../components/SeasonSelector'
 import { PageHeader, PbSpinner, Card } from '../lib/presskit'
+import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 
 export default function Players() {
   const { clubSlug } = useParams()
   const { club, orgId, inactive } = useClub(clubSlug)
   useClubTheme(club)
+  const fmt = useNameFormat(club)
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading: clubLoading } = useClubData(orgId)
 
   if (inactive) return <ClubInactive />
@@ -50,9 +52,8 @@ export default function Players() {
   }, [orgId, selectedSeason, selectedGrade])
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return players
-    return players.filter(p => (p.display_name || p.name).toLowerCase().includes(q))
+    if (!search.trim()) return players
+    return players.filter(p => nameMatchesSearch(p.display_name || p.name, search))
   }, [players, search])
 
   if (clubLoading) return <PbSpinner message="Loading players…" />
@@ -142,7 +143,7 @@ export default function Players() {
                       <tr key={player.id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                         <td className="py-3 pl-5">
                           <Link to={`/players/${player.id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">
-                            {player.display_name || player.name}
+                            {fmt(player.display_name || player.name)}
                           </Link>
                         </td>
                         <td className="py-3 font-mono text-pb-dim text-right">{b?.games ?? '—'}</td>
