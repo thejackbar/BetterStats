@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from pydantic import BaseModel
 from typing import Optional
 import uuid
@@ -33,7 +33,7 @@ async def list_players(
     result = await db.execute(
         select(Player)
         .where(Player.organisation_id == uuid.UUID(org_id))
-        .order_by(Player.name)
+        .order_by(func.coalesce(Player.display_name_override, Player.name))
     )
     players = result.scalars().all()
     return [
