@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from pydantic import BaseModel
 from typing import Optional
 import uuid
@@ -40,7 +40,9 @@ async def list_players(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Player).where(Player.organisation_id == club.id).order_by(Player.name)
+        select(Player).where(Player.organisation_id == club.id).order_by(
+            func.coalesce(Player.display_name_override, Player.name)
+        )
     )
     players = result.scalars().all()
     return [
