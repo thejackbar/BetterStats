@@ -25,6 +25,7 @@ import SuperUsers from './pages/admin/SuperUsers'
 
 // Admin wrappers for existing tools
 import AdminAwards from './pages/admin/AdminAwards'
+import AdminAwardDefinitions from './pages/admin/AdminAwardDefinitions'
 import AdminMerge from './pages/admin/AdminMerge'
 import AdminGrades from './pages/admin/AdminGrades'
 import AdminSync from './pages/admin/AdminSync'
@@ -78,6 +79,7 @@ export default function App() {
         <Route path="/admin/games" element={<ProtectedRoute><AdminGames /></ProtectedRoute>} />
         <Route path="/admin/seasons" element={<ProtectedRoute><AdminSeasons /></ProtectedRoute>} />
         <Route path="/admin/awards" element={<ProtectedRoute><AdminAwards /></ProtectedRoute>} />
+        <Route path="/admin/award-definitions" element={<ProtectedRoute><AdminAwardDefinitions /></ProtectedRoute>} />
         <Route path="/admin/merge" element={<ProtectedRoute><AdminMerge /></ProtectedRoute>} />
         <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
         <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />

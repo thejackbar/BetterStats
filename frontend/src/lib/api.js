@@ -302,6 +302,18 @@ export const api = {
   deleteYearbookAward: (orgId, seasonId, awardId) =>
     request(`/yearbooks/${orgId}/${seasonId}/awards/${awardId}`, { method: 'DELETE' }),
 
+  // Award Definitions
+  listAwardDefinitions: (orgId) =>
+    request(`/award-definitions?org_id=${orgId}`),
+  createAwardDefinition: (data) =>
+    request('/award-definitions', { method: 'POST', body: JSON.stringify(data) }),
+  updateAwardDefinition: (id, data) =>
+    request(`/award-definitions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAwardDefinition: (id) =>
+    request(`/award-definitions/${id}`, { method: 'DELETE' }),
+  seedAwardDefinitions: (orgId, template = 'global') =>
+    request(`/award-definitions/seed?org_id=${orgId}&template=${template}`, { method: 'POST' }),
+
   // StatLab
   statlabQuery: (orgId, { mode = 'career', seasonId, groupBy = 'player', sortBy = 'runs', sortDir = 'desc', limit = 100, filters = [] } = {}) => {
     const params = new URLSearchParams({ org_id: orgId, mode, group_by: groupBy, sort_by: sortBy, sort_dir: sortDir, limit })

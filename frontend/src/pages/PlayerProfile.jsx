@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { api } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useClubTheme } from '../hooks/useClubTheme'
-import { getSubcategories, getAchievements } from '../lib/achievementOptions'
+import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
 import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import {
@@ -810,6 +810,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   const canEdit = !!user
   const [achievements, setAchievements] = useState(null)
   const [seasons, setSeasons] = useState([])
+  const [awardDefs, setAwardDefs] = useState([])
   const [adding, setAdding] = useState(false)
   const [editId, setEditId] = useState(null)
   const [form, setForm] = useState({ season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
@@ -822,10 +823,11 @@ function AchievementsSection({ playerId, orgId, playerName }) {
     if (!orgId) return
     api.listAchievements(orgId, { playerId }).then(setAchievements).catch(() => setAchievements([]))
     api.getOrgSeasons(orgId).then(data => setSeasons(data || [])).catch(() => {})
+    api.listAwardDefinitions(orgId).then(data => setAwardDefs(data || [])).catch(() => {})
   }, [playerId, orgId])
 
-  const subcatOptions = getSubcategories(form.category)
-  const achievementOptions = getAchievements(form.category, form.subcategory)
+  const subcatOptions = getSubcategoriesFromDefs(awardDefs, form.category)
+  const achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
   const seasonMap = Object.fromEntries(seasons.map(s => [s.id, s.name]))
   const seasonDisplay = (s) => !s || s === 'All Time' ? 'All Time' : (seasonMap[s] || s.replace(/_/g, '/'))
 
@@ -896,7 +898,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
         <ThiingIcon src={CATEGORY_ICON_SRC[a.category] || thiings.trophy} alt="" className="w-7 h-7 shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest uppercase mb-0.5">{a.category}</div>
-          <div className="text-pb-text text-[14px] font-semibold leading-tight">{a.achievement}</div>
+          <div className="text-pb-text text-[14px] font-semibold leading-tight">{resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)}</div>
           {(a.subcategory || a.detail) && (
             <div className="font-mono text-[11px] text-pb-dim mt-0.5">
               {a.subcategory && <span>{a.subcategory}</span>}
@@ -954,7 +956,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               <Label className="block mb-1">Subcategory</Label>
               {customSubcat
                 ? <input className={inputCls} value={form.subcategory} onChange={e => setForm(f => ({ ...f, subcategory: e.target.value }))} placeholder="Subcategory" />
-                : <select className={selectCls} value={form.subcategory} onChange={e => { if (e.target.value === '__other__') { setCustomSubcat(true); setForm(f => ({ ...f, subcategory: '' })) } else { setForm(f => ({ ...f, subcategory: e.target.value })) } }}>
+                : <select className={selectCls} value={form.subcategory} onChange={e => { if (e.target.value === '__other__') { setCustomSubcat(true); setForm(f => ({ ...f, subcategory: '', achievement: '' })) } else { setForm(f => ({ ...f, subcategory: e.target.value, achievement: '' })) } }}>
                     <option value="">— none —</option>
                     {subcatOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                     {subcatOptions.length > 0 && <option value="__other__">Other…</option>}
@@ -965,7 +967,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               <Label className="block mb-1">Achievement *</Label>
               {customAchievement
                 ? <input className={inputCls} value={form.achievement} onChange={e => setForm(f => ({ ...f, achievement: e.target.value }))} placeholder="Achievement" />
-                : <select className={selectCls} value={form.achievement} onChange={e => { if (e.target.value === '__other__') { setCustomAchievement(true); setForm(f => ({ ...f, achievement: '' })) } else { setForm(f => ({ ...f, achievement: e.target.value })) } }}>
+                : <select className={selectCls} value={form.achievement} onChange={e => { if (e.target.value === '__other__') { setCustomAchievement(true); setForm(f => ({ ...f, achievement: '' })) } else { setCustomAchievement(false); setForm(f => ({ ...f, achievement: e.target.value })) } }}>
                     <option value="">— select —</option>
                     {achievementOptions.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
                     <option value="__other__">Other…</option>

@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config.settings import settings
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -205,6 +205,33 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "UPDATE seasons SET display_order = NULL WHERE display_order IS NOT NULL"
         ))
+        # Award definitions table (customisable per-org award catalog)
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS org_award_definitions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                category TEXT NOT NULL,
+                subcategory TEXT,
+                achievement TEXT,
+                display_name TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_award_defs_org ON org_award_definitions(org_id)"
+        ))
+        # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
+        from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
+        acc_row = await conn.execute(
+            text("SELECT id FROM organisations WHERE slug = 'applecross' LIMIT 1")
+        )
+        acc = acc_row.mappings().first()
+        if acc:
+            seeded = await seed_org_definitions(conn, str(acc["id"]), APPLECROSS_TEMPLATE)
+            if seeded:
+                logger.info(f"Seeded {seeded} award definitions for Applecross")
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -247,6 +274,7 @@ app.include_router(records.router)
 app.include_router(webhooks.router)
 app.include_router(admin.router)
 app.include_router(achievements.router)
+app.include_router(award_definitions.router)
 app.include_router(statlab.router)
 app.include_router(yearbooks.router)
 

@@ -1,7 +1,7 @@
 import { useParams } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
-import { ACHIEVEMENT_TREE, getSubcategories, getAchievements } from '../lib/achievementOptions'
+import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
 import { PbSpinner } from '../lib/presskit'
 import { CATEGORY_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 
@@ -138,12 +138,12 @@ function ImportPanel({ orgId, onImported }) {
   )
 }
 
-function AchievementFields({ form, setForm, seasons }) {
+function AchievementFields({ form, setForm, seasons, awardDefs }) {
   const [customSubcat, setCustomSubcat] = useState(false)
   const [customAchievement, setCustomAchievement] = useState(false)
 
-  const subcatOptions = getSubcategories(form.category)
-  const achievementOptions = getAchievements(form.category, form.subcategory)
+  const subcatOptions = getSubcategoriesFromDefs(awardDefs, form.category)
+  const achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
 
   const setCategory = (cat) => {
     setForm(f => ({ ...f, category: cat, subcategory: '', achievement: '' }))
@@ -190,7 +190,7 @@ function AchievementFields({ form, setForm, seasons }) {
         {!customSubcat && subcatOptions.length > 0 ? (
           <select className={INPUT_CLS} value={form.subcategory} onChange={e => setSubcat(e.target.value)}>
             <option value="">— Select —</option>
-            {subcatOptions.map(s => <option key={s}>{s}</option>)}
+            {subcatOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             <option value="__other__">Other…</option>
           </select>
         ) : (
@@ -206,7 +206,7 @@ function AchievementFields({ form, setForm, seasons }) {
         {!customAchievement && achievementOptions.length > 0 ? (
           <select className={INPUT_CLS} value={form.achievement} onChange={e => setAchievement(e.target.value)}>
             <option value="">— Select —</option>
-            {achievementOptions.map(a => <option key={a}>{a}</option>)}
+            {achievementOptions.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
             <option value="__other__">Other…</option>
           </select>
         ) : (
@@ -226,7 +226,7 @@ function AchievementFields({ form, setForm, seasons }) {
   )
 }
 
-function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel }) {
+function AchievementForm({ orgId, initial, players, seasons, awardDefs, onSave, onCancel }) {
   const [form, setForm] = useState(initial || { season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', player_name: '', player_id: null, detail: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -262,7 +262,7 @@ function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel })
             onChange={({ name, id }) => setForm(f => ({ ...f, player_name: name, player_id: id }))}
           />
         </div>
-        <AchievementFields form={form} setForm={setForm} seasons={seasons} />
+        <AchievementFields form={form} setForm={setForm} seasons={seasons} awardDefs={awardDefs} />
       </div>
       {error && <p className="font-mono text-[10px] text-pb-red mb-2">{error}</p>}
       <div className="flex gap-2">
@@ -285,7 +285,7 @@ function AchievementForm({ orgId, initial, players, seasons, onSave, onCancel })
   )
 }
 
-function BulkAddPanel({ orgId, players, seasons, onSave, onCancel }) {
+function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) {
   const [form, setForm] = useState({ season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
   const [selectedPlayers, setSelectedPlayers] = useState([])
   const [saving, setSaving] = useState(false)
@@ -329,7 +329,7 @@ function BulkAddPanel({ orgId, players, seasons, onSave, onCancel }) {
       <p className="font-mono text-[10px] text-pb-faintest mb-4">Select an achievement, then add all players who received it. One record is created per player.</p>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-        <AchievementFields form={form} setForm={setForm} seasons={seasons} />
+        <AchievementFields form={form} setForm={setForm} seasons={seasons} awardDefs={awardDefs} />
       </div>
 
       <div className="mb-4">
@@ -393,6 +393,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
   const [achievements, setAchievements] = useState(null)
   const [players, setPlayers] = useState([])
   const [seasons, setSeasons] = useState([])
+  const [awardDefs, setAwardDefs] = useState([])
   const [loading, setLoading] = useState(true)
   const [filterSeason, setFilterSeason] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
@@ -413,6 +414,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
     load()
     api.listPlayers(orgId).then(data => setPlayers(data || [])).catch(() => {})
     api.getOrgSeasons(orgId).then(data => setSeasons(data || [])).catch(() => {})
+    api.listAwardDefinitions(orgId).then(data => setAwardDefs(data || [])).catch(() => {})
   }, [orgId])
 
   const handleDelete = async (id) => {
@@ -482,11 +484,11 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
       <ImportPanel orgId={orgId} onImported={load} />
 
       {showBulk && (
-        <BulkAddPanel orgId={orgId} players={players} seasons={seasons} onSave={handleSaved} onCancel={() => setShowBulk(false)} />
+        <BulkAddPanel orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} onSave={handleSaved} onCancel={() => setShowBulk(false)} />
       )}
 
       {showAdd && !editItem && (
-        <AchievementForm orgId={orgId} players={players} seasons={seasons} onSave={handleSaved} onCancel={() => setShowAdd(false)} />
+        <AchievementForm orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} onSave={handleSaved} onCancel={() => setShowAdd(false)} />
       )}
 
       {/* Filters */}
@@ -545,7 +547,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
                     <div className="px-4 py-2.5 flex items-center gap-2 group hover:bg-pb-surface2 transition-colors">
                       <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                         <span className="text-pb-text text-sm font-medium truncate">{a.player_name}</span>
-                        <span className="text-pb-dim text-sm truncate">{a.achievement}</span>
+                        <span className="text-pb-dim text-sm truncate">{resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)}</span>
                         {a.subcategory && <span className="font-mono text-[10px] text-pb-faint">{a.subcategory}</span>}
                         {a.season_end && (
                           <span className="font-mono text-[10px] text-pb-faint">
@@ -576,6 +578,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
                           initial={editItem}
                           players={players}
                           seasons={seasons}
+                          awardDefs={awardDefs}
                           onSave={handleSaved}
                           onCancel={() => setEditItem(null)}
                         />

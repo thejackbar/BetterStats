@@ -287,12 +287,61 @@ export const ACHIEVEMENT_TREE = {
   },
 }
 
-// Flat list of all subcategories per category
+// Flat list of all subcategories per category (hardcoded fallback)
 export function getSubcategories(category) {
   return Object.keys(ACHIEVEMENT_TREE[category] || {})
 }
 
-// Flat list of all achievement options for category+subcategory
+// Flat list of all achievement options for category+subcategory (hardcoded fallback)
 export function getAchievements(category, subcategory) {
   return (ACHIEVEMENT_TREE[category] || {})[subcategory] || []
+}
+
+// ─── Org-definition helpers ───────────────────────────────────────────────────
+
+// Resolve what label to display for an award. Uses display_name if the org has
+// defined one for this exact (category, subcategory, achievement) triple.
+export function resolveAwardLabel(defs, category, subcategory, achievement) {
+  if (!defs?.length || !achievement) return achievement || ''
+  const def = defs.find(
+    d => d.category === category &&
+         (d.subcategory || null) === (subcategory || null) &&
+         (d.achievement || null) === (achievement || null)
+  )
+  return def?.display_name || achievement
+}
+
+// Returns [{value, label}] subcategory options from org defs for a category.
+// Falls back to hardcoded tree if no defs available.
+export function getSubcategoriesFromDefs(defs, category) {
+  if (defs?.length) {
+    const active = defs.filter(d => d.active !== false && d.category === category)
+    const seen = new Set()
+    const out = []
+    for (const d of active) {
+      if (d.subcategory && !seen.has(d.subcategory)) {
+        seen.add(d.subcategory)
+        out.push({ value: d.subcategory, label: d.subcategory })
+      }
+    }
+    if (out.length) return out
+  }
+  return getSubcategories(category).map(s => ({ value: s, label: s }))
+}
+
+// Returns [{value, label}] achievement options from org defs for category+subcategory.
+// label = display_name if set, else achievement. Falls back to hardcoded tree.
+export function getAchievementsFromDefs(defs, category, subcategory) {
+  if (defs?.length) {
+    const active = defs.filter(
+      d => d.active !== false && d.category === category && d.subcategory === subcategory
+    )
+    if (active.length) {
+      return active.map(d => ({
+        value: d.achievement || '',
+        label: d.display_name || d.achievement || '',
+      })).filter(o => o.value)
+    }
+  }
+  return getAchievements(category, subcategory).map(a => ({ value: a, label: a }))
 }
