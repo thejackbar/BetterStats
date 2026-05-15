@@ -2,6 +2,10 @@
 import React from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { useClub } from "../hooks/useClub";
+import betterStatsLogo from "../assets/betterstatslogo_white.png";
+
+export const SITE_VERSION = "v5.3.2";
 
 const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games'];
 
@@ -17,10 +21,13 @@ function useSlug() {
 export default function Navbar() {
   const { user } = useAuth();
   const slug = useSlug();
+  const { club } = useClub(slug);
 
-  const displayName = slug
-    ? (sessionStorage.getItem(`bs_club_${slug}`) ? (() => { try { return JSON.parse(sessionStorage.getItem(`bs_club_${slug}`)).name } catch { return slug } })() : slug)
-    : "BetterStats";
+  // White-labelling: when a club has uploaded a custom logo, it takes the
+  // top-left slot and the BetterStats logo moves to the top-right.
+  const customLogo = club?.logo_url || null;
+
+  const displayName = club?.name || slug || "BetterStats";
   const displayShort = displayName
     .split(" ")
     .map((w) => w[0])
@@ -50,15 +57,16 @@ export default function Navbar() {
             to={`/${slug}`}
             className="flex items-center gap-3 mr-6 shrink-0 group"
           >
-            <div
-              className="w-8 h-8 rounded flex items-center justify-center text-[11px] font-mono font-bold"
-              style={{ background: "var(--pb-accent)", color: "#000" }}
-            >
-              {displayShort}
-            </div>
+            <img
+              src={customLogo || betterStatsLogo}
+              alt={customLogo ? displayName : "BetterStats"}
+              className="w-8 h-8 rounded object-contain"
+            />
           <div className="hidden md:block leading-tight">
             <div className="text-pb-text text-[13px] font-semibold tracking-tight">{displayName}</div>
-            <div className="text-pb-faint text-[10px] font-mono tracking-wide2">BETTERSTATS · v5.3</div>
+            <div className="text-pb-faint text-[10px] font-mono tracking-wide2">
+              {customLogo ? slug?.toUpperCase() : "BETTERSTATS"} · {SITE_VERSION}
+            </div>
           </div>
           <div className="md:hidden text-pb-text text-[13px] font-bold tracking-wide2">{displayShort}</div>
         </Link>
@@ -92,6 +100,25 @@ export default function Navbar() {
               </NavLink>
             ))}
           </nav>
+
+          {/* White-label: BetterStats logo sits top-right when the club
+              supplies its own logo for the top-left slot. */}
+          {customLogo && (
+            <Link
+              to="/"
+              className="flex items-center gap-1.5 shrink-0 ml-3 group"
+              title="Powered by BetterStats"
+            >
+              <span className="hidden sm:block text-pb-faint text-[9px] font-mono tracking-wide2 uppercase">
+                Powered by
+              </span>
+              <img
+                src={betterStatsLogo}
+                alt="BetterStats"
+                className="w-6 h-6 object-contain opacity-75 group-hover:opacity-100 transition"
+              />
+            </Link>
+          )}
 
         </div>
       </div>

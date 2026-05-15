@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import betterStatsLogo from '../../assets/betterstatslogo_white.png'
 
 const NAV_LINKS = [
   { to: '/admin', label: 'Dashboard', exact: true },
@@ -44,12 +45,11 @@ export default function AdminLayout({ children }) {
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
           <div className="flex items-center gap-3">
             <Link to="/" className="flex items-center gap-2 group">
-              <span
-                className="w-7 h-7 rounded font-mono font-bold text-xs flex items-center justify-center text-pb-bg"
-                style={{ background: 'var(--pb-accent)' }}
-              >
-                BS
-              </span>
+              <img
+                src={betterStatsLogo}
+                alt="BetterStats"
+                className="w-7 h-7 object-contain"
+              />
               <span className="font-display font-bold text-base tracking-wider uppercase text-pb-text group-hover:text-pb-accent transition-colors">
                 BetterStats
               </span>

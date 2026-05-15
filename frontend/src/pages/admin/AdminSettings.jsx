@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
@@ -9,10 +9,14 @@ export default function AdminSettings() {
   const [form, setForm] = useState({})
   const [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
+  const [logoUrl, setLogoUrl] = useState(null)
+  const [logoBusy, setLogoBusy] = useState(false)
+  const fileRef = useRef(null)
 
   useEffect(() => {
     api.adminGetSettings().then(s => {
       setSettings(s)
+      setLogoUrl(s.logo_url || null)
       setForm({
         name: s.name || '',
         contact_email: s.contact_email || '',
@@ -23,6 +27,42 @@ export default function AdminSettings() {
       })
     }).catch(() => {})
   }, [])
+
+  const flash = (text) => {
+    setMsg(text)
+    setTimeout(() => setMsg(''), 3000)
+  }
+
+  const handleLogoSelect = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setLogoBusy(true)
+    setMsg('')
+    try {
+      const res = await api.adminUploadLogo(file)
+      setLogoUrl(res.logo_url)
+      flash('Logo updated')
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setLogoBusy(false)
+    }
+  }
+
+  const handleLogoRemove = async () => {
+    setLogoBusy(true)
+    setMsg('')
+    try {
+      await api.adminDeleteLogo()
+      setLogoUrl(null)
+      flash('Logo removed')
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setLogoBusy(false)
+    }
+  }
 
   const save = async (e) => {
     e.preventDefault()
@@ -106,6 +146,49 @@ export default function AdminSettings() {
                 />
               </div>
             </div>
+          </div>
+
+          <div>
+            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-1.5">Club logo</label>
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded border pb-hairline bg-pb-surface2 flex items-center justify-center overflow-hidden shrink-0">
+                {logoUrl
+                  ? <img src={logoUrl} alt="Club logo" className="w-full h-full object-contain" />
+                  : <span className="font-mono text-[9px] text-pb-faintest">No logo</span>}
+              </div>
+              <div className="flex flex-col gap-2 min-w-0">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={logoBusy}
+                    className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2 transition disabled:opacity-50"
+                  >
+                    {logoBusy ? 'Working…' : (logoUrl ? 'Replace logo' : 'Upload logo')}
+                  </button>
+                  {logoUrl && (
+                    <button
+                      type="button"
+                      onClick={handleLogoRemove}
+                      disabled={logoBusy}
+                      className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-red transition disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  PNG, JPG, WEBP or GIF · max 2 MB. With a custom logo set, it appears top-left and the BetterStats logo moves to the top-right.
+                </p>
+              </div>
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={handleLogoSelect}
+            />
           </div>
 
           <div>
