@@ -71,7 +71,7 @@ export default function BowlingTable({ spells = [], showPlayer = false }) {
                 )}
                 <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint whitespace-nowrap">
                   {row.game_id
-                    ? <Link to={`/games/${row.game_id}/scorecard`} className="hover:text-pb-accent transition-colors">{dateStr}</Link>
+                    ? <Link to={`/games/${row.game_id}`} className="hover:text-pb-accent transition-colors">{dateStr}</Link>
                     : dateStr}
                 </td>
                 <td className="py-2.5 px-3 font-mono text-[11px] text-pb-dim max-w-[180px] truncate">{match}</td>
