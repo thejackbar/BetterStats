@@ -23,8 +23,6 @@ export default function BowlingTable({ spells = [], showPlayer = false }) {
   }
 
   const cols = [
-    { key: 'played_at', label: 'Date', sortable: false },
-    { key: 'grade_name', label: 'Grade', sortable: false },
     { key: 'overs', label: 'O', sortable: true },
     { key: 'maidens', label: 'M', sortable: true },
     { key: 'runs', label: 'R', sortable: true },
@@ -40,6 +38,11 @@ export default function BowlingTable({ spells = [], showPlayer = false }) {
         <thead>
           <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 bg-pb-surface2/40">
             {showPlayer && <th className="font-medium py-2.5 pl-4">PLAYER</th>}
+            <th className="font-medium py-2.5 px-3 cursor-pointer hover:text-pb-text select-none" onClick={() => toggle('played_at')}>
+              DATE<SortIcon colKey="played_at" />
+            </th>
+            <th className="font-medium py-2.5 px-3">MATCH</th>
+            <th className="font-medium py-2.5 px-3">GRADE</th>
             {cols.map(col => (
               <th
                 key={col.key}
@@ -52,39 +55,48 @@ export default function BowlingTable({ spells = [], showPlayer = false }) {
           </tr>
         </thead>
         <tbody>
-          {sorted.map((row, i) => (
-            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-              {showPlayer && (
-                <td className="py-2.5 pl-4 text-sm">
-                  <Link to={`/players/${row.player_id}`} className="font-medium hover:underline" style={{ color: 'var(--pb-accent)' }}>
-                    {row.player_name}
-                  </Link>
-                </td>
-              )}
-              <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint">
-                {row.played_at ? new Date(row.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—'}
-              </td>
-              <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint">{row.grade_name || '—'}</td>
-              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.overs ?? '—'}</td>
-              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.maidens ?? '—'}</td>
-              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.runs ?? '—'}</td>
-              <td className="py-2.5 px-3">
-                <span className={clsx(
-                  'font-mono font-bold text-sm',
-                  row.wickets >= 5 ? 'text-pb-amber' : row.wickets >= 3 ? 'text-pb-accent' : 'text-pb-text'
+          {sorted.map((row, i) => {
+            const dateStr = row.played_at ? new Date(row.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—'
+            const match = row.home_team && row.away_team
+              ? `${row.home_team} vs ${row.away_team}`
+              : (row.home_team || row.away_team || '—')
+            return (
+              <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                {showPlayer && (
+                  <td className="py-2.5 pl-4 text-sm">
+                    <Link to={`/players/${row.player_id}`} className="font-medium hover:underline" style={{ color: 'var(--pb-accent)' }}>
+                      {row.player_name}
+                    </Link>
+                  </td>
                 )}
-                style={row.wickets >= 3 && row.wickets < 5 ? { color: 'var(--pb-accent)' } : {}}
-                >
-                  {row.wickets ?? '—'}
-                </span>
-              </td>
-              <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">
-                {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
-              </td>
-              <td className="py-2.5 px-3 font-mono text-sm text-pb-faint">{row.wides ?? '—'}</td>
-              <td className="py-2.5 px-3 font-mono text-sm text-pb-faint">{row.no_balls ?? '—'}</td>
-            </tr>
-          ))}
+                <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint whitespace-nowrap">
+                  {row.game_id
+                    ? <Link to={`/games/${row.game_id}/scorecard`} className="hover:text-pb-accent transition-colors">{dateStr}</Link>
+                    : dateStr}
+                </td>
+                <td className="py-2.5 px-3 font-mono text-[11px] text-pb-dim max-w-[180px] truncate">{match}</td>
+                <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint">{row.grade_name || '—'}</td>
+                <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.overs ?? '—'}</td>
+                <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.maidens ?? '—'}</td>
+                <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.runs ?? '—'}</td>
+                <td className="py-2.5 px-3">
+                  <span className={clsx(
+                    'font-mono font-bold text-sm',
+                    row.wickets >= 5 ? 'text-pb-amber' : row.wickets >= 3 ? 'text-pb-accent' : 'text-pb-text'
+                  )}
+                  style={row.wickets >= 3 && row.wickets < 5 ? { color: 'var(--pb-accent)' } : {}}
+                  >
+                    {row.wickets ?? '—'}
+                  </span>
+                </td>
+                <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">
+                  {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
+                </td>
+                <td className="py-2.5 px-3 font-mono text-sm text-pb-faint">{row.wides ?? '—'}</td>
+                <td className="py-2.5 px-3 font-mono text-sm text-pb-faint">{row.no_balls ?? '—'}</td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
