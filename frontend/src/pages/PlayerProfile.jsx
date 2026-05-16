@@ -480,13 +480,218 @@ function FieldingTab({ fielding, seasonStats }) {
   )
 }
 
+// ── Career progression charts ────────────────────────────────────────────
+
+// Running career batting average progression — one point per innings, chronological
+function CareerAvgProgressionChart({ innings }) {
+  if (!innings?.length) return null
+  // innings arrives DESC, reverse to chronological ASC
+  const asc = [...innings].reverse()
+  let totalRuns = 0, dismissals = 0
+  const points = asc.map((inn, i) => {
+    totalRuns += (inn.runs ?? 0)
+    if (!inn.not_out) dismissals++
+    return {
+      i: i + 1,
+      avg: dismissals > 0 ? Math.round((totalRuns / dismissals) * 100) / 100 : null,
+      runs: inn.runs,
+      label: inn.played_at ? new Date(inn.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: '2-digit' }) : `#${i + 1}`,
+    }
+  })
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={points} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
+        <XAxis dataKey="i" tick={{ fontSize: 10, fill: 'var(--pb-faint)', fontFamily: 'monospace' }} label={{ value: 'Innings', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--pb-faint)' }} />
+        <YAxis tick={{ fontSize: 10, fill: 'var(--pb-faint)', fontFamily: 'monospace' }} width={36} />
+        <Tooltip
+          contentStyle={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline)', borderRadius: 6, fontSize: 11 }}
+          formatter={(v) => [v != null ? v.toFixed(2) : '—', 'Average']}
+          labelFormatter={(i) => points[i - 1] ? `Inn #${i} — ${points[i - 1].label} (${points[i - 1].runs})` : `Inn #${i}`}
+        />
+        <Line type="monotone" dataKey="avg" stroke="var(--pb-accent)" dot={false} strokeWidth={2} connectNulls />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
+// Score distribution histogram
+function ScoreDistributionChart({ innings }) {
+  if (!innings?.length) return null
+  const bands = [
+    { label: '0', min: 0, max: 0 },
+    { label: '1–9', min: 1, max: 9 },
+    { label: '10–19', min: 10, max: 19 },
+    { label: '20–29', min: 20, max: 29 },
+    { label: '30–39', min: 30, max: 39 },
+    { label: '40–49', min: 40, max: 49 },
+    { label: '50–74', min: 50, max: 74 },
+    { label: '75–99', min: 75, max: 99 },
+    { label: '100+', min: 100, max: Infinity },
+  ]
+  const data = bands.map(b => ({
+    label: b.label,
+    count: innings.filter(i => (i.runs ?? 0) >= b.min && (i.runs ?? 0) <= b.max).length,
+    highlight: b.min >= 50,
+  }))
+  return (
+    <ResponsiveContainer width="100%" height={180}>
+      <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" vertical={false} />
+        <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--pb-faint)', fontFamily: 'monospace' }} />
+        <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: 'var(--pb-faint)', fontFamily: 'monospace' }} width={28} />
+        <Tooltip
+          contentStyle={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline)', borderRadius: 6, fontSize: 11 }}
+          formatter={(v) => [v, 'Innings']}
+        />
+        <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+          {data.map((entry, i) => (
+            <Cell key={i} fill={entry.label === '100+' ? 'var(--pb-amber)' : entry.highlight ? 'var(--pb-accent)' : 'var(--pb-surface2)'} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+// Running career bowling average + economy progression
+function CareerBowlingProgressionChart({ spells }) {
+  if (!spells?.length) return null
+  const asc = [...spells].reverse()
+  let totalRuns = 0, totalWickets = 0, totalOvers = 0
+  const points = asc.map((s, i) => {
+    totalRuns += (s.runs ?? 0)
+    totalWickets += (s.wickets ?? 0)
+    totalOvers += parseFloat(s.overs ?? 0)
+    return {
+      i: i + 1,
+      avg: totalWickets > 0 ? Math.round((totalRuns / totalWickets) * 100) / 100 : null,
+      econ: totalOvers > 0 ? Math.round((totalRuns / totalOvers) * 100) / 100 : null,
+    }
+  })
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={points} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
+        <XAxis dataKey="i" tick={{ fontSize: 10, fill: 'var(--pb-faint)', fontFamily: 'monospace' }} label={{ value: 'Spells', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--pb-faint)' }} />
+        <YAxis tick={{ fontSize: 10, fill: 'var(--pb-faint)', fontFamily: 'monospace' }} width={36} />
+        <Tooltip
+          contentStyle={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline)', borderRadius: 6, fontSize: 11 }}
+          formatter={(v, name) => [v != null ? v.toFixed(2) : '—', name]}
+        />
+        <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'monospace' }} />
+        <Line type="monotone" dataKey="avg" name="Average" stroke="var(--pb-accent)" dot={false} strokeWidth={2} connectNulls />
+        <Line type="monotone" dataKey="econ" name="Economy" stroke="var(--pb-amber)" dot={false} strokeWidth={2} connectNulls />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ── Innings / Spell history tables ───────────────────────────────────────
+
+function InningsHistoryTable({ innings }) {
+  return (
+    <div className="overflow-x-auto pb-scroll">
+      <table className="w-full min-w-[560px] text-[13px]">
+        <thead>
+          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3">
+            <th className="py-3 pl-5 text-left pb-2">DATE</th>
+            <th className="py-3 text-left pb-2">MATCH</th>
+            <th className="py-3 text-left pb-2">GRADE</th>
+            <th className="py-3 text-right pb-2">INN</th>
+            <th className="py-3 text-right pb-2">R</th>
+            <th className="py-3 text-right pb-2">B</th>
+            <th className="py-3 text-right pb-2">SR</th>
+            <th className="py-3 pr-5 text-right pb-2">HO</th>
+          </tr>
+        </thead>
+        <tbody>
+          {innings.map((row, i) => {
+            const dateStr = row.played_at ? new Date(row.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: '2-digit' }) : '—'
+            const match = row.home_team && row.away_team ? `${row.home_team} vs ${row.away_team}` : (row.home_team || row.away_team || '—')
+            const ho = row.not_out ? 'not out' : (row.dismissal_type || '—')
+            return (
+              <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <td className="py-2.5 pl-5 font-mono text-[11px] text-pb-faint whitespace-nowrap">
+                  {row.game_id
+                    ? <Link to={`/games/${row.game_id}/scorecard`} className="hover:text-pb-accent transition-colors">{dateStr}</Link>
+                    : dateStr}
+                </td>
+                <td className="py-2.5 font-mono text-[11px] text-pb-dim max-w-[180px] truncate">{match}</td>
+                <td className="py-2.5 font-mono text-[11px] text-pb-faint">{row.grade_name || '—'}</td>
+                <td className="py-2.5 font-mono text-[11px] text-pb-faint text-right">{row.innings_number ?? '—'}</td>
+                <td className="py-2.5 text-right">
+                  <span className="font-mono font-bold text-sm" style={{ color: (row.runs ?? 0) >= 100 ? 'var(--pb-amber)' : (row.runs ?? 0) >= 50 ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
+                    {row.runs ?? '—'}
+                  </span>
+                  {row.not_out && <span className="font-mono text-[10px] ml-0.5" style={{ color: 'var(--pb-accent)' }}>*</span>}
+                </td>
+                <td className="py-2.5 font-mono text-sm text-pb-dim text-right">{row.balls ?? '—'}</td>
+                <td className="py-2.5 font-mono text-[11px] text-pb-faint text-right">{row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}</td>
+                <td className="py-2.5 pr-5 font-mono text-[11px] text-pb-faint text-right capitalize">{ho}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function SpellHistoryTable({ spells }) {
+  return (
+    <div className="overflow-x-auto pb-scroll">
+      <table className="w-full min-w-[520px] text-[13px]">
+        <thead>
+          <tr className="text-pb-faint font-mono text-[10px] tracking-wide3">
+            <th className="py-3 pl-5 text-left pb-2">DATE</th>
+            <th className="py-3 text-left pb-2">MATCH</th>
+            <th className="py-3 text-left pb-2">GRADE</th>
+            <th className="py-3 text-right pb-2">O</th>
+            <th className="py-3 text-right pb-2">M</th>
+            <th className="py-3 text-right pb-2">R</th>
+            <th className="py-3 text-right pb-2">W</th>
+            <th className="py-3 pr-5 text-right pb-2">ECON</th>
+          </tr>
+        </thead>
+        <tbody>
+          {spells.map((row, i) => {
+            const dateStr = row.played_at ? new Date(row.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: '2-digit' }) : '—'
+            const match = row.home_team && row.away_team ? `${row.home_team} vs ${row.away_team}` : (row.home_team || row.away_team || '—')
+            return (
+              <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <td className="py-2.5 pl-5 font-mono text-[11px] text-pb-faint whitespace-nowrap">
+                  {row.game_id
+                    ? <Link to={`/games/${row.game_id}/scorecard`} className="hover:text-pb-accent transition-colors">{dateStr}</Link>
+                    : dateStr}
+                </td>
+                <td className="py-2.5 font-mono text-[11px] text-pb-dim max-w-[180px] truncate">{match}</td>
+                <td className="py-2.5 font-mono text-[11px] text-pb-faint">{row.grade_name || '—'}</td>
+                <td className="py-2.5 font-mono text-sm text-pb-dim text-right">{row.overs ?? '—'}</td>
+                <td className="py-2.5 font-mono text-[11px] text-pb-faint text-right">{row.maidens ?? '—'}</td>
+                <td className="py-2.5 font-mono text-sm text-pb-dim text-right">{row.runs ?? '—'}</td>
+                <td className="py-2.5 text-right">
+                  <span className="font-mono font-bold text-sm" style={{ color: (row.wickets ?? 0) >= 5 ? 'var(--pb-amber)' : (row.wickets ?? 0) >= 3 ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
+                    {row.wickets ?? '—'}
+                  </span>
+                </td>
+                <td className="py-2.5 pr-5 font-mono text-[11px] text-pb-faint text-right">{row.economy != null ? Number(row.economy).toFixed(2) : '—'}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ── Analysis tab ─────────────────────────────────────────────────────────
 const ANALYSIS_SUBTABS = [
   { key: 'batting',  label: 'BATTING' },
   { key: 'bowling',  label: 'BOWLING' },
 ]
 
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade }) {
+function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, battingInnings = [], bowlingSpells = [] }) {
   const [subTab, setSubTab] = useState('batting')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -512,6 +717,22 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
 
       {subTab === 'batting' && (
         <div className="space-y-6">
+          {/* Career average progression */}
+          {battingInnings.length > 5 && (
+            <Card title="CAREER BATTING AVERAGE PROGRESSION">
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Running career average after each innings, chronological.</p>
+              <CareerAvgProgressionChart innings={battingInnings} />
+            </Card>
+          )}
+
+          {/* Score distribution */}
+          {battingInnings.length > 0 && (
+            <Card title="SCORE DISTRIBUTION">
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">How often scores fall in each run band.</p>
+              <ScoreDistributionChart innings={battingInnings} />
+            </Card>
+          )}
+
           {/* Runs & Wickets by season */}
           {seasonStats?.length > 0 && (
             <Card title="RUNS & WICKETS BY SEASON">
@@ -642,6 +863,13 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
             </Card>
           )}
 
+          {/* Innings history */}
+          {battingInnings.length > 0 && (
+            <Card title="INNINGS HISTORY" pad="p-0">
+              <InningsHistoryTable innings={battingInnings} />
+            </Card>
+          )}
+
           {!hasBattingData && (
             <p className="text-pb-faint text-sm py-4">No batting analysis data available. Game-level data may still be syncing.</p>
           )}
@@ -662,6 +890,14 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                   <Bar dataKey="total_wickets" name="Wickets" fill="#3b82f6" radius={[3,3,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
+            </Card>
+          )}
+
+          {/* Career bowling progression */}
+          {bowlingSpells.length > 5 && (
+            <Card title="CAREER BOWLING PROGRESSION">
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Running career bowling average and economy after each spell, chronological.</p>
+              <CareerBowlingProgressionChart spells={bowlingSpells} />
             </Card>
           )}
 
@@ -729,6 +965,13 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                   </tbody>
                 </table>
               </div>
+            </Card>
+          )}
+
+          {/* Spell history */}
+          {bowlingSpells.length > 0 && (
+            <Card title="SPELL HISTORY" pad="p-0">
+              <SpellHistoryTable spells={bowlingSpells} />
             </Card>
           )}
 
@@ -1122,6 +1365,8 @@ export default function PlayerProfile() {
   const batting = data.career_batting
   const bowling = data.career_bowling
   const fielding = data.career_fielding
+  const battingInnings = data.batting_innings ?? []
+  const bowlingSpells = data.bowling_spells ?? []
   const orgSlug = org ? (sessionStorage.getItem('bs_last_slug') || '') : ''
 
   // Ranked achievements for the header badges
@@ -1319,7 +1564,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} battingInnings={battingInnings} bowlingSpells={bowlingSpells} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.name} />}
       </main>
