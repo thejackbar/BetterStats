@@ -69,9 +69,6 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
         border: `1px solid ${hexWithAlpha(accent, 0.2)}`,
       }}
     >
-      {/* Accent bar */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: accent }} />
-
       {/* Watermark */}
       <div style={{
         position: 'absolute', bottom: 20, right: 24,
@@ -366,7 +363,7 @@ export default function ShareCard() {
         <div className="overflow-x-auto pb-4">
           <div
             className="magic-glow-wrapper"
-            style={{ '--magic-gradient': `linear-gradient(to left, ${org?.accent_color || '#16c784'} 0%, #0d2a4e 100%)` }}
+            style={{ '--magic-gradient': `linear-gradient(to left, ${org?.primary_color || '#16c784'} 0%, ${org?.accent_color || '#0d2a4e'} 100%)` }}
           >
             <ShareCardVisual
               player={player}
