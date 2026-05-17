@@ -1058,14 +1058,12 @@ async def get_player_rankings(
                 FROM fielding_agg
             )
             SELECT
-                CASE WHEN br.runs_rank <= 100 THEN br.runs_rank ELSE NULL END AS runs_rank,
-                CASE WHEN bw.wickets_rank <= 100 THEN bw.wickets_rank ELSE NULL END AS wickets_rank,
-                CASE WHEN fr.catches_rank <= 100 THEN fr.catches_rank ELSE NULL END AS catches_rank
-            FROM
-                (SELECT :player_id::uuid AS pid) base
-                LEFT JOIN batting_ranked br ON br.player_id = base.pid
-                LEFT JOIN bowling_ranked bw ON bw.player_id = base.pid
-                LEFT JOIN fielding_ranked fr ON fr.player_id = base.pid
+                (SELECT CASE WHEN runs_rank <= 100 THEN runs_rank ELSE NULL END
+                 FROM batting_ranked WHERE player_id = :player_id) AS runs_rank,
+                (SELECT CASE WHEN wickets_rank <= 100 THEN wickets_rank ELSE NULL END
+                 FROM bowling_ranked WHERE player_id = :player_id) AS wickets_rank,
+                (SELECT CASE WHEN catches_rank <= 100 THEN catches_rank ELSE NULL END
+                 FROM fielding_ranked WHERE player_id = :player_id) AS catches_rank
         """),
         params,
     )
