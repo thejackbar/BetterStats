@@ -537,8 +537,8 @@ async def sync_grassroots_game_level_data(
         return stats
 
     # ── DISCOVERY PHASE ──────────────────────────────────────────────────
-    # Short-lived session: enumerate seasons and known players. Read-only.
-    seasons: list[tuple] = []
+    # Short-lived session: enumerate grades and known players. Read-only.
+    grades: list[tuple] = []  # (grade_id, season_id, grade_name)
     known_player_ids: set[uuid.UUID] = set()
     async with async_session_maker() as session:
         org = await session.get(Organisation, org_uuid)
@@ -546,11 +546,13 @@ async def sync_grassroots_game_level_data(
             logger.warning(f"GR-sync: org {org_id_str} not found")
             return stats
 
-        seasons_res = await session.execute(
-            select(Season).where(Season.organisation_id == org_uuid)
+        grades_res = await session.execute(
+            select(Grade.id, Grade.season_id, Grade.name)
+            .join(Season, Grade.season_id == Season.id)
+            .where(Season.organisation_id == org_uuid)
         )
-        seasons = [(s.id, s.name) for s in seasons_res.scalars().all()]
-        logger.info(f"GR-sync: {len(seasons)} seasons for org {org_uuid}")
+        grades = [(str(r[0]), r[1], r[2]) for r in grades_res.all()]
+        logger.info(f"GR-sync: {len(grades)} grades for org {org_uuid}")
 
         player_res = await session.execute(
             select(Player.id).where(Player.organisation_id == org_uuid)
@@ -579,35 +581,28 @@ async def sync_grassroots_game_level_data(
             merged_away[removed] = target
         logger.info(f"GR-sync: {len(merged_away)} merged-away player redirects loaded")
 
-    # Enumerate match IDs by fanning out across teams-per-season.
+    # Enumerate match IDs by fanning out across all known grades.
+    # /scores/grades/{id}/matches works for all seasons including pre-2000,
+    # unlike the old fixturesladders teams path which had no records for old seasons.
     seen_match_ids: set[str] = set()
     match_to_season: dict[str, uuid.UUID] = {}
-    for season_id, season_name in seasons:
+    for grade_id, season_id, grade_name in grades:
+        stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
         try:
-            teams = await playhq_client.get_teams(org_id_str, str(season_id))
+            matches = await gr.get_grade_matches(grade_id)
         except Exception as e:
-            logger.warning(f"GR-sync: get_teams failed for season {season_name}: {e}")
+            logger.warning(f"GR-sync: grade {grade_id} ({grade_name}) matches failed: {e}")
             continue
-        for team in teams:
-            team_id = team.get("id")
-            if not team_id:
-                continue
-            stats["gr_teams_scanned"] += 1
-            try:
-                matches = await gr.get_team_matches(team_id)
-            except Exception as e:
-                logger.warning(f"GR-sync: team {team_id} matches failed: {e}")
-                continue
-            for m in matches:
-                mid = m.get("id")
-                if mid and mid not in seen_match_ids:
-                    seen_match_ids.add(mid)
-                    match_to_season[mid] = season_id
+        for m in matches:
+            mid = m.get("id")
+            if mid and mid not in seen_match_ids:
+                seen_match_ids.add(mid)
+                match_to_season[mid] = season_id
         if run_id:
             await update_sync_run(run_id, stats)
 
     stats["gr_matches_seen"] = len(seen_match_ids)
-    logger.info(f"GR-sync: discovered {len(seen_match_ids)} unique match IDs across {stats['gr_teams_scanned']} teams")
+    logger.info(f"GR-sync: discovered {len(seen_match_ids)} unique match IDs across {stats['gr_teams_scanned']} grades")
     if run_id:
         await update_sync_run(run_id, stats)
 

@@ -1,10 +1,12 @@
 """Grassroots /scores/* client — Cricket Australia's pre-PlayHQ match data.
 
-The grassrootsapiproxy hosts /scores/teams/{id}/matches and
-/scores/matches/{id}?responseModifier=includeScorecard, both unauthenticated
-beyond the standard jsconfig flag. These reach historical match data going
-back to at least 1975 (pre-PlayHQ-migration). Post-migration games return 204 — that
-signals "not mine" cleanly, no de-dup needed.
+Key unauthenticated endpoints on grassrootsapiproxy.cricket.com.au:
+  /scores/grades/{grade_id}/matches          — all matches in a grade (primary discovery)
+  /scores/teams/{team_id}/matches            — all matches a team played (fallback)
+  /scores/matches/{id}?responseModifier=includeScorecard — full scorecard
+
+Data reaches back to at least 1975. Post-migration PlayHQ games return 204 —
+that signals "not mine" cleanly, no de-dup needed.
 
 participantId values in the response correspond directly to our players.id
 column (both are Grassroots GUIDs), so no extra mapping table is required.
@@ -30,6 +32,7 @@ _HEADERS = {
     "Referer": "https://play.cricket.com.au/",
 }
 
+_grade_matches_cache: dict[str, list] = {}  # grade_id -> matches
 _matches_cache: dict[str, list] = {}  # team_id -> matches
 _scorecard_cache: dict[str, Optional[dict]] = {}  # match_id -> scorecard or None
 
@@ -45,6 +48,31 @@ async def _get(url: str, params: dict | None = None) -> httpx.Response:
                 await asyncio.sleep(1.0)
                 r = await client.get(url, params=p, headers=_HEADERS)
             return r
+
+
+async def get_grade_matches(grade_id: str) -> list[dict]:
+    """Return all matches in a grade.
+
+    Uses /scores/grades/{grade_id}/matches — unauthenticated, works for all
+    seasons including pre-2000 data. Preferred over team-based discovery
+    because it doesn't require fixturesladders (which has no records for
+    old seasons).
+    """
+    if grade_id in _grade_matches_cache:
+        return _grade_matches_cache[grade_id]
+    try:
+        r = await _get(f"{BASE_URL}/scores/grades/{grade_id}/matches")
+        if r.status_code != 200:
+            logger.debug(f"GR scores: /grades/{grade_id}/matches → {r.status_code}")
+            _grade_matches_cache[grade_id] = []
+            return []
+        data = r.json()
+        matches = data.get("matches") or []
+        _grade_matches_cache[grade_id] = matches
+        return matches
+    except Exception as e:
+        logger.warning(f"GR scores: /grades/{grade_id}/matches failed: {e}")
+        return []
 
 
 async def get_team_matches(team_id: str) -> list[dict]:
