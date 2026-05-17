@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { useNameFormat } from '../lib/nameFormat'
+import { usePageMeta } from '../hooks/usePageMeta'
 import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
 import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
@@ -1319,6 +1320,26 @@ export default function PlayerProfile() {
   useClubTheme(org)
   const fmtName = useNameFormat(org)
 
+  const player = data?.player
+  const batting = data?.career_batting
+  const bowling = data?.career_bowling
+  const metaName = player ? fmtName(player.display_name) : null
+  const metaDesc = (() => {
+    if (!player || !batting) return null
+    const parts = []
+    if (batting.total_runs != null) parts.push(`${batting.total_runs} runs`)
+    if (batting.innings != null) parts.push(`${batting.innings} innings`)
+    if (bowling?.total_wickets != null) parts.push(`${bowling.total_wickets} wickets`)
+    if (batting.games != null) parts.push(`${batting.games} matches`)
+    const club = org?.name ? `${org.name} cricket` : 'club cricket'
+    return parts.length ? `${parts.join(' · ')} — ${club} statistics on BetterStats.` : null
+  })()
+  usePageMeta({
+    title: metaName ? `${metaName} — BetterStats` : null,
+    description: metaDesc,
+    image: org?.logo_url || null,
+  })
+
   useEffect(() => {
     if (!playerId) return
     api.getPlayerSeasons(playerId).then(setSeasonStats).catch(() => setSeasonStats([]))
@@ -1361,9 +1382,7 @@ export default function PlayerProfile() {
   if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-pb-red">Error: {error}</div>
   if (!data?.player) return null
 
-  const player = data.player
-  const batting = data.career_batting
-  const bowling = data.career_bowling
+  // player, batting, bowling already declared above hooks for usePageMeta
   const fielding = data.career_fielding
   const battingInnings = data.batting_innings ?? []
   const bowlingSpells = data.bowling_spells ?? []
