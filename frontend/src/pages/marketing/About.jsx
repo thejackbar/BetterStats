@@ -23,15 +23,15 @@ export default function About() {
           </p>
 
           <p>
-            The platform plugs directly into PlayHQ, the national cricket management platform. If your club registers on PlayHQ, your stats come through automatically after every match — no data entry, no spreadsheets.
+            Once your club is set up, stats come through automatically after every match — no data entry, no spreadsheets, no chasing scorers. Your full history going back decades is pulled in on first sync, and everything stays up to date from there.
           </p>
 
           <div className="pb-hairline-t pt-8">
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-4">Built by</p>
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-4">Get in touch</p>
             <p>
-              Jack, a software developer and cricket club member based in Perth. Get in touch at{' '}
-              <a href="mailto:jack@klubpro.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>jack@klubpro.com</a>
-              {' '}— happy to chat about whether BetterStats is a good fit for your club.
+              Have a question or want to know if BetterStats is right for your club? Reach out at{' '}
+              <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a>
+              {' '}— happy to chat.
             </p>
           </div>
         </div>
