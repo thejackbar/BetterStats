@@ -246,7 +246,8 @@ async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full"):
     from app.services.sync import finish_sync_run
     import logging
     try:
-        await sync_organisation(org_id, run_id=run_id, kind=kind)
+        stats = await sync_organisation(org_id, run_id=run_id, kind=kind)
+        await finish_sync_run(run_id, stats if isinstance(stats, dict) else {})
     except Exception as exc:
         import traceback
         logging.getLogger(__name__).error(f"Sync crashed for {org_id}: {exc}\n{traceback.format_exc()}")
