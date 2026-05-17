@@ -1,0 +1,7 @@
+name = "betterstats-og-worker"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+
+[[routes]]
+pattern = "betterstats.bltbox.com/*"
+zone_name = "bltbox.com"
