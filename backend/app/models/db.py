@@ -117,6 +117,7 @@ class Player(Base):
     display_name_override = Column(Text, nullable=True)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"))
     playhq_id = Column(Text, nullable=True)
+    photo_url = Column(Text, nullable=True)
     # claimed / user_id retained as columns but no longer used in business logic
     claimed = Column(Boolean, default=False)
     user_id = Column(UUID(as_uuid=True), nullable=True)

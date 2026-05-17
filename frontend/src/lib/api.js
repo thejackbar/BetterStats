@@ -57,6 +57,11 @@ export const api = {
   getPlayerPartnerships: (playerId) => request(`/players/${playerId}/partnerships`),
   getPlayerActivity: (playerId) => request(`/players/${playerId}/activity`),
   getPlayerUpcomingMilestones: (playerId) => request(`/players/${playerId}/upcoming-milestones`),
+  getPlayerRankings: (playerId, { seasonId } = {}) => {
+    const params = new URLSearchParams()
+    if (seasonId) params.set('season_id', seasonId)
+    return request(`/players/${playerId}/rankings?${params}`)
+  },
   requestPlayerSync: (playerId, note) =>
     request(`/players/${playerId}/request-sync`, { method: 'POST', body: JSON.stringify({ note }) }),
 
@@ -136,6 +141,19 @@ export const api = {
       })
   },
   adminDeleteLogo: () => request('/club-admin/logo', { method: 'DELETE' }),
+  adminUploadPlayerPhoto: (playerId, file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/club-admin/players/${playerId}/photo`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  adminDeletePlayerPhoto: (playerId) => request(`/club-admin/players/${playerId}/photo`, { method: 'DELETE' }),
   adminListPartnershipRecords: () => request('/club-admin/partnership-records'),
   adminCreatePartnershipRecord: (data) =>
     request('/club-admin/partnership-records', { method: 'POST', body: JSON.stringify(data) }),
