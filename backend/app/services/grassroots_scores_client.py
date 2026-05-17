@@ -3,7 +3,7 @@
 The grassrootsapiproxy hosts /scores/teams/{id}/matches and
 /scores/matches/{id}?responseModifier=includeScorecard, both unauthenticated
 beyond the standard jsconfig flag. These reach historical match data going
-back to ~2002 (pre-PlayHQ-migration). Post-migration games return 204 — that
+back to at least 1975 (pre-PlayHQ-migration). Post-migration games return 204 — that
 signals "not mine" cleanly, no de-dup needed.
 
 participantId values in the response correspond directly to our players.id
