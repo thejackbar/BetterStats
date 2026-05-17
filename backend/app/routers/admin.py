@@ -8,8 +8,9 @@ import json
 
 from app.models.db import (
     Player, PlayerSeasonStats, BattingInnings, BowlingSpell,
-    FieldingStat, FallOfWicket, Partnership, Milestone, get_db,
+    FieldingStat, FallOfWicket, Partnership, Milestone, User, get_db,
 )
+from app.routers.auth import get_current_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -42,7 +43,7 @@ async def _enrich_player(db: AsyncSession, p: Player) -> dict:
 
 
 @router.get("/player-info")
-async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Return enriched stats for a single player (used by manual merge UI)."""
     p = await db.get(Player, uuid.UUID(player_id))
     if not p or str(p.organisation_id) != org_id:
@@ -51,7 +52,7 @@ async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depend
 
 
 @router.get("/merge-candidates")
-async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db)):
+async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Return pairs of players within an org that look like duplicates."""
     result = await db.execute(
         select(Player).where(Player.organisation_id == uuid.UUID(org_id))
@@ -98,7 +99,7 @@ class IgnorePairRequest(BaseModel):
 
 
 @router.post("/ignore-pair")
-async def ignore_pair(req: IgnorePairRequest, db: AsyncSession = Depends(get_db)):
+async def ignore_pair(req: IgnorePairRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Permanently suppress a suggested duplicate pair."""
     a, b = sorted([req.player_a_id, req.player_b_id])
     await db.execute(
@@ -114,7 +115,7 @@ async def ignore_pair(req: IgnorePairRequest, db: AsyncSession = Depends(get_db)
 
 
 @router.get("/merge-history")
-async def get_merge_history(org_id: str, db: AsyncSession = Depends(get_db)):
+async def get_merge_history(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Return recent merges for an org that can be undone."""
     rows = await db.execute(
         text("""
@@ -148,7 +149,7 @@ class MergeRequest(BaseModel):
 
 
 @router.post("/merge-players")
-async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db)):
+async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Merge remove_player into keep_player, reassigning all records."""
     keep_id = uuid.UUID(req.keep_player_id)
     remove_id = uuid.UUID(req.remove_player_id)
@@ -273,7 +274,7 @@ def _resolve_canonical_grade(canonical_chain: dict[str, str], name: str) -> str:
 
 
 @router.get("/grades-with-stats")
-async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)):
+async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """List distinct grade names in an org with aggregate stats, applying active merges."""
     raw = await db.execute(
         text("""
@@ -340,7 +341,7 @@ class MergeGradesRequest(BaseModel):
 
 
 @router.post("/merge-grades")
-async def merge_grades(req: MergeGradesRequest, db: AsyncSession = Depends(get_db)):
+async def merge_grades(req: MergeGradesRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Mark `alias_name` as a variant of `canonical_name` for the given org."""
     alias = req.alias_name.strip()
     canonical = req.canonical_name.strip()
@@ -399,7 +400,7 @@ async def merge_grades(req: MergeGradesRequest, db: AsyncSession = Depends(get_d
 
 
 @router.get("/grade-merge-history")
-async def grade_merge_history(org_id: str, db: AsyncSession = Depends(get_db)):
+async def grade_merge_history(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     rows = await db.execute(
         text("""
             SELECT id, merged_at, alias_name, canonical_name, undone_at
@@ -428,7 +429,7 @@ class UndoGradeMergeRequest(BaseModel):
 
 
 @router.post("/undo-grade-merge")
-async def undo_grade_merge(req: UndoGradeMergeRequest, db: AsyncSession = Depends(get_db)):
+async def undo_grade_merge(req: UndoGradeMergeRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     result = await db.execute(
         text("""
             UPDATE grade_merge_logs
@@ -445,7 +446,7 @@ async def undo_grade_merge(req: UndoGradeMergeRequest, db: AsyncSession = Depend
 
 
 @router.post("/undo-merge")
-async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db)):
+async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Reverse a previous merge: re-create removed player and reassign records back."""
     log_row = await db.execute(
         text("SELECT * FROM merge_logs WHERE id = :id AND org_id = :org_id"),
