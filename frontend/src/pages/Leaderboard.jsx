@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { useClubData } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
+import { usePageMeta } from '../hooks/usePageMeta'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import SeasonSelector from '../components/SeasonSelector'
@@ -247,6 +248,11 @@ export default function Leaderboard() {
   const { club, orgId, inactive } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
+  usePageMeta({
+    title: club?.name ? `${club.name} Leaderboard — BetterStats` : null,
+    description: club?.name ? `Top batting, bowling, and fielding statistics for ${club.name}.` : null,
+    image: club?.logo_url || null,
+  })
 
   if (inactive) return <ClubInactive />
 
