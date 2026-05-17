@@ -536,7 +536,7 @@ async def sync_grassroots_game_level_data(
         logger.warning(f"GR-sync: invalid org_id_str {org_id_str!r}")
         return stats
 
-    # ── DISCOVERY PHASE ──────────────────────────────────────────────────
+    # ── DISCOVERY PHASE ────────────────────────────────────────────────────────
     # Short-lived session: enumerate grades and known players. Read-only.
     grades: list[tuple] = []  # (grade_id, season_id, grade_name)
     known_player_ids: set[uuid.UUID] = set()
@@ -584,6 +584,10 @@ async def sync_grassroots_game_level_data(
     # Enumerate match IDs by fanning out across all known grades.
     # /scores/grades/{id}/matches works for all seasons including pre-2000,
     # unlike the old fixturesladders teams path which had no records for old seasons.
+    # Each match in the response includes teams[].owningOrganisation.id — filter
+    # to only matches where our org is one of the participants, since large grades
+    # return every match between all teams in the competition.
+    org_id_str_lower = org_id_str.lower()
     seen_match_ids: set[str] = set()
     match_to_season: dict[str, uuid.UUID] = {}
     for grade_id, season_id, grade_name in grades:
@@ -595,9 +599,17 @@ async def sync_grassroots_game_level_data(
             continue
         for m in matches:
             mid = m.get("id")
-            if mid and mid not in seen_match_ids:
-                seen_match_ids.add(mid)
-                match_to_season[mid] = season_id
+            if not mid or mid in seen_match_ids:
+                continue
+            teams = m.get("teams") or []
+            org_playing = any(
+                (t.get("owningOrganisation") or {}).get("id", "").lower() == org_id_str_lower
+                for t in teams
+            )
+            if not org_playing:
+                continue
+            seen_match_ids.add(mid)
+            match_to_season[mid] = season_id
         if run_id:
             await update_sync_run(run_id, stats)
 
@@ -606,7 +618,7 @@ async def sync_grassroots_game_level_data(
     if run_id:
         await update_sync_run(run_id, stats)
 
-    # ── PER-GAME PROCESSING ─────────────────────────────────────────────
+    # ── PER-GAME PROCESSING ───────────────────────────────────────────────────
     processed = 0
     for match_id_str in seen_match_ids:
         processed += 1
