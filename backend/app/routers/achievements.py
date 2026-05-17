@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -43,6 +43,10 @@ def _normalise(name: str) -> str:
         parts = name.split(", ", 1)
         name = f"{parts[1]} {parts[0]}"
     return re.sub(r"\s+", " ", name).lower()
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
 async def _resolve_player(db: AsyncSession, player_name: str, org_id: str) -> Optional[str]:
@@ -376,6 +380,51 @@ def _parse_csv(content: bytes) -> list[dict]:
     ]
 
 
+async def _load_existing(db: AsyncSession, org_id: str) -> list:
+    result = await db.execute(
+        text("SELECT player_id, player_name, season, category, achievement FROM player_achievements WHERE org_id = :org_id"),
+        {"org_id": org_id},
+    )
+    return result.mappings().all()
+
+
+def _is_duplicate(player_id, player_name_norm: str, season: str, category_norm: str, achievement_norm: str, existing) -> bool:
+    for ex in existing:
+        if player_id and ex["player_id"]:
+            player_match = str(player_id) == str(ex["player_id"])
+        else:
+            player_match = player_name_norm == _norm(ex["player_name"])
+        if not player_match:
+            continue
+        if (
+            _norm(ex["season"] or "") == _norm(season or "") and
+            _norm(ex["category"]) == category_norm and
+            _norm(ex["achievement"]) == achievement_norm
+        ):
+            return True
+    return False
+
+
+async def _insert_achievement(db: AsyncSession, org_id: str, player_id, player_name: str, season, subcategory, category: str, achievement: str, detail):
+    await db.execute(
+        text("""
+            INSERT INTO player_achievements
+                (org_id, player_id, player_name, season, category, subcategory, achievement, detail)
+            VALUES (:org_id, :player_id, :player_name, :season, :category, :subcategory, :achievement, :detail)
+        """),
+        {
+            "org_id": org_id,
+            "player_id": player_id,
+            "player_name": player_name,
+            "season": season,
+            "category": category,
+            "subcategory": subcategory,
+            "achievement": achievement,
+            "detail": detail,
+        },
+    )
+
+
 @router.post("/import")
 async def import_achievements(
     org_id: str = Query(...),
@@ -393,10 +442,13 @@ async def import_achievements(
     if not rows:
         raise HTTPException(status_code=400, detail="No data found in file")
 
+    existing = await _load_existing(db, org_id)
+
     created = 0
     skipped = 0
     errors = []
     unmatched_players = []
+    skipped_duplicates = []
 
     for i, row in enumerate(rows, 2):
         player_name = row.get("player_name", "").strip()
@@ -416,7 +468,6 @@ async def import_achievements(
             skipped += 1
             continue
 
-        # Handle "Not awarded" or empty player entries
         if player_name.lower() in ("not awarded", "n/a", ""):
             skipped += 1
             continue
@@ -425,23 +476,20 @@ async def import_achievements(
         if not player_id:
             unmatched_players.append(player_name)
 
-        await db.execute(
-            text("""
-                INSERT INTO player_achievements
-                    (org_id, player_id, player_name, season, category, subcategory, achievement, detail)
-                VALUES (:org_id, :player_id, :player_name, :season, :category, :subcategory, :achievement, :detail)
-            """),
-            {
-                "org_id": org_id,
-                "player_id": player_id,
+        if _is_duplicate(player_id, _normalise(player_name), season, _norm(category), _norm(achievement), existing):
+            skipped_duplicates.append({
+                "row": i,
                 "player_name": player_name,
+                "player_id": player_id,
                 "season": season,
                 "category": category,
                 "subcategory": subcategory,
                 "achievement": achievement,
                 "detail": detail,
-            },
-        )
+            })
+            continue
+
+        await _insert_achievement(db, org_id, player_id, player_name, season, subcategory, category, achievement, detail)
         created += 1
 
     await db.commit()
@@ -452,4 +500,40 @@ async def import_achievements(
         "skipped": skipped,
         "errors": errors,
         "unmatched_players": list(set(unmatched_players)),
+        "skipped_duplicates": skipped_duplicates,
     }
+
+
+class ForceImportRow(BaseModel):
+    player_name: str
+    player_id: Optional[str] = None
+    season: Optional[str] = None
+    subcategory: Optional[str] = None
+    category: str
+    achievement: str
+    detail: Optional[str] = None
+
+
+class ForceImportBody(BaseModel):
+    rows: list[ForceImportRow]
+
+
+@router.post("/import/force")
+async def force_import_achievements(
+    org_id: str = Query(...),
+    body: ForceImportBody = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    created = 0
+    for row in body.rows:
+        player_id = row.player_id
+        if not player_id:
+            player_id = await _resolve_player(db, row.player_name, org_id)
+        await _insert_achievement(
+            db, org_id, player_id, row.player_name,
+            row.season or None, row.subcategory or None,
+            row.category, row.achievement, row.detail or None,
+        )
+        created += 1
+    await db.commit()
+    return {"status": "imported", "created": created}

@@ -229,6 +229,11 @@ export const api = {
       credentials: 'include',
     }).then(r => r.json())
   },
+  forceImportAchievements: (orgId, rows) =>
+    request(`/achievements/import/force?org_id=${orgId}`, {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    }),
 
   // Yearbooks
   listYearbooks: (orgId) => request(`/yearbooks/${orgId}`),

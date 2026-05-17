@@ -60,8 +60,10 @@ function PlayerAutocomplete({ players, value, onChange }) {
 function ImportPanel({ orgId, onImported }) {
   const fileRef = useRef(null)
   const [importing, setImporting] = useState(false)
+  const [forcing, setForcing] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  const [checkedDupes, setCheckedDupes] = useState({})
 
   const handleDownloadTemplate = async () => {
     const token = localStorage.getItem('bs_token')
@@ -82,6 +84,7 @@ function ImportPanel({ orgId, onImported }) {
     setImporting(true)
     setResult(null)
     setError(null)
+    setCheckedDupes({})
     try {
       const res = await api.importAchievements(orgId, file)
       setResult(res)
@@ -93,6 +96,37 @@ function ImportPanel({ orgId, onImported }) {
       if (fileRef.current) fileRef.current.value = ''
     }
   }
+
+  const toggleDupe = (idx) => setCheckedDupes(prev => ({ ...prev, [idx]: !prev[idx] }))
+  const toggleAll = () => {
+    const dupes = result?.skipped_duplicates || []
+    const allChecked = dupes.every((_, i) => checkedDupes[i])
+    setCheckedDupes(allChecked ? {} : Object.fromEntries(dupes.map((_, i) => [i, true])))
+  }
+
+  const handleForceImport = async () => {
+    const dupes = result?.skipped_duplicates || []
+    const rows = dupes.filter((_, i) => checkedDupes[i])
+    if (!rows.length) return
+    setForcing(true)
+    try {
+      await api.forceImportAchievements(orgId, rows)
+      setResult(prev => ({
+        ...prev,
+        created: (prev.created || 0) + rows.length,
+        skipped_duplicates: dupes.filter((_, i) => !checkedDupes[i]),
+      }))
+      setCheckedDupes({})
+      onImported()
+    } catch (err) {
+      setError(err.message || 'Force import failed')
+    } finally {
+      setForcing(false)
+    }
+  }
+
+  const dupes = result?.skipped_duplicates || []
+  const checkedCount = Object.values(checkedDupes).filter(Boolean).length
 
   return (
     <div className="pb-card p-5 mb-6">
@@ -129,6 +163,52 @@ function ImportPanel({ orgId, onImported }) {
                   <span key={n} className="font-mono text-[10px] bg-pb-surface border pb-hairline text-pb-amber px-2 py-0.5 rounded">{n}</span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {dupes.length > 0 && (
+            <div className="mt-3 pt-3 border-t pb-hairline">
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-mono text-[10px] text-pb-amber">
+                  ⚠ {dupes.length} duplicate{dupes.length !== 1 ? 's' : ''} skipped — already exist in the database
+                </p>
+                <button
+                  onClick={toggleAll}
+                  className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline"
+                >
+                  {dupes.every((_, i) => checkedDupes[i]) ? 'Deselect all' : 'Select all'}
+                </button>
+              </div>
+              <div className="space-y-1 max-h-48 overflow-y-auto pb-scroll">
+                {dupes.map((d, i) => (
+                  <label key={i} className="flex items-start gap-2 cursor-pointer group py-0.5">
+                    <input
+                      type="checkbox"
+                      checked={!!checkedDupes[i]}
+                      onChange={() => toggleDupe(i)}
+                      className="mt-0.5 accent-[var(--pb-accent)] flex-shrink-0"
+                    />
+                    <span className="font-mono text-[10px] text-pb-dim group-hover:text-pb-text leading-relaxed">
+                      <span className="text-pb-text">{d.player_name}</span>
+                      {d.season && <span className="text-pb-faint"> · {d.season.replace(/_/g, '/')}</span>}
+                      {' · '}{d.category}
+                      {d.subcategory && <span className="text-pb-faint"> / {d.subcategory}</span>}
+                      {' · '}{d.achievement}
+                      {d.detail && <span className="text-pb-faint italic"> ({d.detail})</span>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {checkedCount > 0 && (
+                <button
+                  onClick={handleForceImport}
+                  disabled={forcing}
+                  className="mt-3 px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
+                  style={{ background: 'var(--pb-accent)' }}
+                >
+                  {forcing ? 'Importing…' : `Force import ${checkedCount} selected`}
+                </button>
+              )}
             </div>
           )}
         </div>
