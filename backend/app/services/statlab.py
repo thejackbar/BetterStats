@@ -246,7 +246,7 @@ async def query_grades(
                       AND bi.dismissal_type IS NOT NULL
                 )                                                                                AS ducks
             FROM org_games og
-            LEFT JOIN batting_innings bi ON bi.game_id = og.game_id
+            LEFT JOIN batting_innings bi ON bi.game_id = og.game_id AND (bi.did_not_bat IS NOT TRUE)
             GROUP BY {group_cols}
         ),
         bowl AS (

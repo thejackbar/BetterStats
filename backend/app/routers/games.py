@@ -316,6 +316,7 @@ async def get_scorecard(
             "dismissal_type": bi.dismissal_type,
             "not_out": bi.not_out,
             "batting_position": bi.batting_position,
+            "did_not_bat": bool(bi.did_not_bat),
         }
         for bi, p in batting_rows
     ]
@@ -351,12 +352,22 @@ async def get_scorecard(
     # Derive innings totals from batting data for the summary strip
     innings_totals: dict[int, dict] = {}
     for row in batting_flat:
+        if row["did_not_bat"]:
+            continue
         n = row["innings_number"]
         if n not in innings_totals:
-            innings_totals[n] = {"runs": 0, "wickets": 0, "team": None}
+            innings_totals[n] = {"runs": 0, "wickets": 0, "extras": 0, "team": None}
         innings_totals[n]["runs"] += row["runs"] or 0
         if not row["not_out"] and row["dismissal_type"]:
             innings_totals[n]["wickets"] += 1
+
+    # Add extras (wides + no-balls) from bowling per innings
+    for row in bowling_flat:
+        n = row["innings_number"]
+        if n not in innings_totals:
+            innings_totals[n] = {"runs": 0, "wickets": 0, "extras": 0, "team": None}
+        innings_totals[n].setdefault("extras", 0)
+        innings_totals[n]["extras"] += (row["wides"] or 0) + (row["no_balls"] or 0)
 
     fow = await get_game_fall_of_wickets(db, game.id)
     partnerships = await get_game_partnerships(db, game.id)

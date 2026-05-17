@@ -169,14 +169,17 @@ function MatchHeader({ game, innings }) {
 }
 
 function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n => n }) {
-  if (!batting.length) return null
+  const batted = batting.filter(r => !r.did_not_bat)
+  const dnb = batting.filter(r => r.did_not_bat)
+  if (!batted.length && !dnb.length) return null
 
   // Use backend total if available, otherwise sum batting rows
-  const total = inningsTotal?.runs ?? batting.reduce((s, r) => s + (r.runs ?? 0), 0)
+  const total = inningsTotal?.runs ?? batted.reduce((s, r) => s + (r.runs ?? 0), 0)
   const wickets = inningsTotal?.runs != null
     ? inningsTotal.wickets
-    : batting.filter(r => !r.not_out && r.dismissal_type).length
+    : batted.filter(r => !r.not_out && r.dismissal_type).length
   const score = fmtScore(total, wickets)
+  const extras = inningsTotal?.extras ?? null
 
   return (
     <div className="pb-card overflow-hidden">
@@ -209,7 +212,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
             </tr>
           </thead>
           <tbody>
-            {batting.map((row, i) => (
+            {batted.map((row, i) => (
               <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                 <td className="py-2 pl-5 pr-3 whitespace-nowrap">
                   {row.player_id
@@ -236,11 +239,33 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
             ))}
           </tbody>
           <tfoot>
+            {extras != null && extras > 0 && (
+              <tr className="pb-hairline-t">
+                <td className="py-1.5 pl-5 font-mono text-[11px] text-pb-faint" colSpan={2}>Extras</td>
+                <td className="py-1.5 px-3 font-mono text-[13px] text-pb-faint text-right">{extras}</td>
+                <td colSpan={3} />
+              </tr>
+            )}
             <tr className="pb-hairline-t bg-pb-surface2/20">
               <td colSpan={2} className="py-2 pl-5 font-mono text-[10px] tracking-wide2 text-pb-faint hidden sm:table-cell">BATTING TOTAL</td>
               <td className="py-2 px-3 font-mono font-bold text-pb-text text-right pb-num">{score ?? '—'}</td>
               <td colSpan={3} />
             </tr>
+            {dnb.length > 0 && (
+              <tr className="pb-hairline-t">
+                <td colSpan={6} className="px-5 py-2 font-mono text-[10px] text-pb-faintest italic">
+                  DNB: {dnb.map((r, i) => (
+                    <span key={i}>
+                      {i > 0 && ', '}
+                      {r.player_id
+                        ? <Link to={`/players/${r.player_id}`} className="hover:text-pb-accent transition-colors">{fmtName(r.player_name) || '—'}</Link>
+                        : (fmtName(r.player_name) || '—')
+                      }
+                    </span>
+                  ))}
+                </td>
+              </tr>
+            )}
           </tfoot>
         </table>
       </div>

@@ -174,6 +174,7 @@ class BattingInnings(Base):
     dismissal_type = Column(Text)
     not_out = Column(Boolean, default=False)
     batting_position = Column(Integer)
+    did_not_bat = Column(Boolean, default=False)
 
     game = relationship("Game", back_populates="batting_innings")
     player = relationship("Player", back_populates="batting_innings")

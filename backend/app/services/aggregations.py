@@ -197,6 +197,7 @@ async def get_player_batting_innings(
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             WHERE {where}
+              AND (bi.did_not_bat IS NOT TRUE)
             ORDER BY g.played_at DESC
         """),
         params,
@@ -272,6 +273,7 @@ async def get_dismissal_breakdown(session: AsyncSession, player_id: str) -> list
             FROM batting_innings bi
             WHERE bi.player_id = :pid
               AND bi.runs IS NOT NULL
+              AND (bi.did_not_bat IS NOT TRUE)
             GROUP BY 1
             ORDER BY COUNT(*) DESC
         """),
@@ -298,6 +300,7 @@ async def get_batting_by_position(session: AsyncSession, player_id: str) -> list
             WHERE bi.player_id = :pid
               AND bi.batting_position IS NOT NULL
               AND bi.runs IS NOT NULL
+              AND (bi.did_not_bat IS NOT TRUE)
             GROUP BY bi.batting_position
             ORDER BY bi.batting_position
         """),
@@ -339,6 +342,7 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str, org_id: Op
             ) gdn ON TRUE
             WHERE bi.player_id = :pid
               AND bi.runs IS NOT NULL
+              AND (bi.did_not_bat IS NOT TRUE)
             GROUP BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
             ORDER BY SUM(bi.runs) DESC
         """),

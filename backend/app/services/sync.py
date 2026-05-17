@@ -759,10 +759,16 @@ async def sync_grassroots_game_level_data(
                         if dt_id == 0:
                             continue
                         dt_long = row.get("dismissalType") or ""
-                        # "Absent" / "Did Not Bat" aren't innings (no ball faced) — CA's
-                        # aggregate API excludes them, so we must too or we end up with
-                        # 1-2 row over-counts vs the season summary.
-                        if dt_long.lower() in ("absent", "did not bat", "dnb"):
+                        is_dnb = dt_long.lower() in ("absent", "did not bat", "dnb")
+                        if is_dnb:
+                            # Store as DNB row (did_not_bat=True) so scorecards can list
+                            # the player, but exclude from innings counts / averages.
+                            session.add(BattingInnings(
+                                game_id=match_uuid, player_id=pid, innings_number=inn_num,
+                                batting_position=row.get("batOrder"),
+                                runs=None, balls=None, fours=None, sixes=None,
+                                not_out=False, dismissal_type=None, did_not_bat=True,
+                            ))
                             continue
                         not_out = dt_id == 1
                         dt_short = _GR_DISMISSAL_SHORT.get(dt_long, dt_long.lower())
@@ -775,6 +781,7 @@ async def sync_grassroots_game_level_data(
                             sixes=row.get("sixesScored") or 0,
                             not_out=not_out,
                             dismissal_type=dt_short or None,
+                            did_not_bat=False,
                         ))
                         bat_count += 1
 

@@ -17,6 +17,7 @@ export function useClubData(orgId) {
       .then(([orgData, seasonsData]) => {
         setOrg(orgData)
         setSeasons(seasonsData)
+        if (seasonsData.length > 0) setSelectedSeason(seasonsData[0].id)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))

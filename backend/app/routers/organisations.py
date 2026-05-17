@@ -293,7 +293,7 @@ async def get_org_results(
     if grade_id:
         query += " AND gr.id = :grade_id"
         params["grade_id"] = grade_id
-    query += " ORDER BY g.played_at DESC LIMIT 2000"
+    query += " ORDER BY g.played_at DESC"
     rows = await db.execute(text(query), params)
     return [
         {

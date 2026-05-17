@@ -59,7 +59,7 @@ function GameRow({ game }) {
 }
 
 function GradeSection({ gradeName, games }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   return (
     <div className="mb-4">
       <button
@@ -122,8 +122,16 @@ export default function GamesPage() {
       if (!map.has(key)) map.set(key, [])
       map.get(key).push(g)
     }
-    // Sort grades alphabetically
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
+    // Sort grades numerically by leading digit, then alphabetically
+    const gradeKey = name => {
+      const m = name.match(/^(\d+)/)
+      return m ? [parseInt(m[1], 10), name] : [Infinity, name]
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => {
+      const [an, as] = gradeKey(a)
+      const [bn, bs] = gradeKey(b)
+      return an !== bn ? an - bn : as.localeCompare(bs)
+    })
   }, [games])
 
   const currentSeason = seasons?.find(s => s.id === selectedSeason)
