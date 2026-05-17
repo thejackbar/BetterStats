@@ -14,6 +14,8 @@ const INCLUDED = [
   'Email support',
 ]
 
+const FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform'
+
 export default function Pricing() {
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
@@ -26,11 +28,12 @@ export default function Pricing() {
           <p className="text-pb-dim text-lg">One plan. Everything included. No surprises.</p>
         </div>
 
-        <div className="max-w-sm mx-auto">
-          <div className="pb-card p-8 text-center" style={{ borderColor: 'var(--pb-accent)', borderWidth: '1px' }}>
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Annual subscription</p>
-            <div className="font-display font-bold text-[72px] text-pb-text leading-none mb-1">$250</div>
-            <p className="font-mono text-[11px] tracking-wide2 text-pb-faint mb-8">PER CLUB PER YEAR</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+          {/* Monthly */}
+          <div className="pb-card p-8 text-center">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Monthly</p>
+            <div className="font-display font-bold text-[64px] text-pb-text leading-none mb-1">$49</div>
+            <p className="font-mono text-[11px] tracking-wide2 text-pb-faint mb-8">PER CLUB PER MONTH</p>
 
             <ul className="text-left space-y-3 mb-8">
               {INCLUDED.map(item => (
@@ -42,7 +45,36 @@ export default function Pricing() {
             </ul>
 
             <a
-              href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform"
+              href={FORM_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-text text-center border pb-hairline hover:text-pb-text"
+            >
+              REQUEST ACCESS
+            </a>
+            <p className="font-mono text-[10px] text-pb-faintest mt-3">
+              No lock-in. Cancel anytime.
+            </p>
+          </div>
+
+          {/* Annual */}
+          <div className="pb-card p-8 text-center" style={{ borderColor: 'var(--pb-accent)', borderWidth: '1px' }}>
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Annual</p>
+            <div className="font-display font-bold text-[64px] text-pb-text leading-none mb-1">$400</div>
+            <p className="font-mono text-[11px] tracking-wide2 text-pb-faint mb-1">PER CLUB PER YEAR</p>
+            <p className="font-mono text-[10px] tracking-wide2 mb-8" style={{ color: 'var(--pb-accent)' }}>SAVE $188 vs MONTHLY</p>
+
+            <ul className="text-left space-y-3 mb-8">
+              {INCLUDED.map(item => (
+                <li key={item} className="flex items-start gap-2.5 text-sm text-pb-dim">
+                  <span className="mt-0.5 shrink-0 font-mono" style={{ color: 'var(--pb-accent)' }}>✓</span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+
+            <a
+              href={FORM_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="block w-full py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg text-center"
