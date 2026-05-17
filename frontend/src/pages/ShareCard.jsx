@@ -335,17 +335,50 @@ export default function ShareCard() {
           </div>
         )}
 
+        <style>{`
+          .magic-glow-wrapper {
+            padding: 5px;
+            border-radius: 1rem;
+            overflow: visible;
+            background: var(--magic-gradient);
+            position: relative;
+            z-index: 1;
+            display: inline-block;
+          }
+          .magic-glow-wrapper::after {
+            position: absolute;
+            content: "";
+            top: 30px;
+            left: 0;
+            right: 0;
+            z-index: -1;
+            height: 100%;
+            width: 100%;
+            transform: scale(0.8);
+            filter: blur(28px);
+            background: var(--magic-gradient);
+            transition: opacity .5s;
+          }
+          .magic-glow-wrapper:hover::after {
+            opacity: 0;
+          }
+        `}</style>
         <div className="overflow-x-auto pb-4">
-          <ShareCardVisual
-            player={player}
-            cb={cb}
-            cbw={cbw}
-            cf={cf}
-            season={seasonLabel}
-            org={org}
-            rankings={rankings}
-            photoUrl={player.photo_url}
-          />
+          <div
+            className="magic-glow-wrapper"
+            style={{ '--magic-gradient': `linear-gradient(to left, ${org?.accent_color || '#16c784'} 0%, #0d2a4e 100%)` }}
+          >
+            <ShareCardVisual
+              player={player}
+              cb={cb}
+              cbw={cbw}
+              cf={cf}
+              season={seasonLabel}
+              org={org}
+              rankings={rankings}
+              photoUrl={player.photo_url}
+            />
+          </div>
         </div>
 
         <div className="mt-6 flex gap-3 items-center">
