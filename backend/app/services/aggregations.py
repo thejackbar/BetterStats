@@ -1021,32 +1021,41 @@ async def get_player_rankings(
 
     result = await session.execute(
         text(f"""
-            WITH batting_ranked AS (
-                SELECT
-                    pss.player_id,
-                    RANK() OVER (ORDER BY SUM(pss.runs) DESC NULLS LAST) AS runs_rank
+            WITH batting_agg AS (
+                SELECT pss.player_id, SUM(pss.runs) AS total_runs
+                FROM player_season_stats pss
+                JOIN players p ON p.id = pss.player_id
+                WHERE p.organisation_id = :org_id{season_clause}
+                GROUP BY pss.player_id
+            ),
+            batting_ranked AS (
+                SELECT player_id,
+                       RANK() OVER (ORDER BY total_runs DESC NULLS LAST) AS runs_rank
+                FROM batting_agg
+            ),
+            bowling_agg AS (
+                SELECT pss.player_id, SUM(pss.wickets) AS total_wickets
                 FROM player_season_stats pss
                 JOIN players p ON p.id = pss.player_id
                 WHERE p.organisation_id = :org_id{season_clause}
                 GROUP BY pss.player_id
             ),
             bowling_ranked AS (
-                SELECT
-                    pss.player_id,
-                    RANK() OVER (ORDER BY SUM(pss.wickets) DESC NULLS LAST) AS wickets_rank
+                SELECT player_id,
+                       RANK() OVER (ORDER BY total_wickets DESC NULLS LAST) AS wickets_rank
+                FROM bowling_agg
+            ),
+            fielding_agg AS (
+                SELECT pss.player_id, SUM(pss.catches) AS total_catches
                 FROM player_season_stats pss
                 JOIN players p ON p.id = pss.player_id
                 WHERE p.organisation_id = :org_id{season_clause}
                 GROUP BY pss.player_id
             ),
             fielding_ranked AS (
-                SELECT
-                    pss.player_id,
-                    RANK() OVER (ORDER BY SUM(pss.catches) DESC NULLS LAST) AS catches_rank
-                FROM player_season_stats pss
-                JOIN players p ON p.id = pss.player_id
-                WHERE p.organisation_id = :org_id{season_clause}
-                GROUP BY pss.player_id
+                SELECT player_id,
+                       RANK() OVER (ORDER BY total_catches DESC NULLS LAST) AS catches_rank
+                FROM fielding_agg
             )
             SELECT
                 CASE WHEN br.runs_rank <= 100 THEN br.runs_rank ELSE NULL END AS runs_rank,
