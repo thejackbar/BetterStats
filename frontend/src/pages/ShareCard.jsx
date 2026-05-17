@@ -141,14 +141,13 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
           <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 12px' }}>
             Batting
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
             {[
               { label: 'M', value: cb.games },
               { label: 'Inns', value: cb.innings },
               { label: 'Runs', value: cb.total_runs, highlight: true },
               { label: 'HS', value: cb.high_score },
               { label: 'Ave', value: cb.average },
-              { label: 'SR', value: cb.strike_rate },
             ].map(({ label, value, highlight }) => (
               <div key={label} style={{ textAlign: 'center' }}>
                 <div style={{
@@ -170,12 +169,12 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
             <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
               {cb.hundreds > 0 && (
                 <span style={{ background: hexWithAlpha(accent, 0.1), border: `1px solid ${hexWithAlpha(accent, 0.3)}`, borderRadius: 6, padding: '3px 10px', fontSize: 11, color: accent }}>
-                  {cb.hundreds} {cb.hundreds === 1 ? '100' : '100s'}
+                  {cb.hundreds} x {cb.hundreds === 1 ? '100' : '100s'}
                 </span>
               )}
               {cb.fifties > 0 && (
                 <span style={{ background: hexWithAlpha(accent, 0.1), border: `1px solid ${hexWithAlpha(accent, 0.3)}`, borderRadius: 6, padding: '3px 10px', fontSize: 11, color: accent }}>
-                  {cb.fifties} {cb.fifties === 1 ? '50' : '50s'}
+                  {cb.fifties} x {cb.fifties === 1 ? '50' : '50s'}
                 </span>
               )}
             </div>
@@ -189,12 +188,11 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
           <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 12px' }}>
             Bowling
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
             {[
               { label: 'Wkts', value: cbw.total_wickets, highlight: true },
               { label: 'Ave', value: cbw.average },
               { label: 'Econ', value: cbw.economy },
-              { label: 'SR', value: cbw.bowling_strike_rate },
               { label: 'Best', value: cbw.best_bowling_figures || (cbw.best_figures_wickets ? `${cbw.best_figures_wickets}w` : '—') },
             ].map(({ label, value, highlight }) => (
               <div key={label} style={{ textAlign: 'center' }}>
@@ -216,7 +214,7 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
           {cbw.five_fors > 0 && (
             <div style={{ marginTop: 12 }}>
               <span style={{ background: hexWithAlpha(accent, 0.1), border: `1px solid ${hexWithAlpha(accent, 0.3)}`, borderRadius: 6, padding: '3px 10px', fontSize: 11, color: accent }}>
-                {cbw.five_fors} {cbw.five_fors === 1 ? '5-for' : '5-fors'}
+                {cbw.five_fors} x {cbw.five_fors === 1 ? '5fa' : '5fas'}
               </span>
             </div>
           )}
