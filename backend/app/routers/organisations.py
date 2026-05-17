@@ -267,6 +267,50 @@ async def trigger_sync(org_id: str, background_tasks: BackgroundTasks):
     return {"status": "sync_started", "org_id": org_id, "run_id": str(run_id)}
 
 
+@router.get("/{org_id}/results")
+async def get_org_results(
+    org_id: str,
+    season_id: str | None = None,
+    grade_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all synced game results for the org from the DB, grouped-friendly flat list."""
+    query = """
+        SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
+               COALESCE(gr.display_name_override, gr.name) AS grade_name,
+               gr.id AS grade_id,
+               s.id AS season_id, s.name AS season_name
+        FROM games g
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        WHERE s.organisation_id = :org_id
+    """
+    params: dict = {"org_id": org_id}
+    if season_id:
+        query += " AND s.id = :season_id"
+        params["season_id"] = season_id
+    if grade_id:
+        query += " AND gr.id = :grade_id"
+        params["grade_id"] = grade_id
+    query += " ORDER BY g.played_at DESC LIMIT 2000"
+    rows = await db.execute(text(query), params)
+    return [
+        {
+            "id": str(r.id),
+            "played_at": r.played_at.isoformat() if r.played_at else None,
+            "home_team": r.home_team,
+            "away_team": r.away_team,
+            "result": r.result,
+            "winning_team": r.winning_team,
+            "grade_name": r.grade_name,
+            "grade_id": str(r.grade_id),
+            "season_id": str(r.season_id),
+            "season_name": r.season_name,
+        }
+        for r in rows
+    ]
+
+
 @router.get("/{org_id}/sync-logs")
 async def get_sync_logs(org_id: str, db: AsyncSession = Depends(get_db)):
     from app.models.db import SyncRun

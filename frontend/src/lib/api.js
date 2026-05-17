@@ -73,6 +73,12 @@ export const api = {
     if (limit) params.set('limit', limit)
     return request(`/games?${params}`)
   },
+  getOrgResults: (orgId, { seasonId, gradeId } = {}) => {
+    const params = new URLSearchParams({ org_id: orgId })
+    if (seasonId) params.set('season_id', seasonId)
+    if (gradeId) params.set('grade_id', gradeId)
+    return request(`/organisations/${orgId}/results?${params}`)
+  },
   getScorecard: (gameId) => request(`/games/${gameId}/scorecard`),
   getPlayHQGame: (orgId, gameId) => request(`/games/playhq/${gameId}?org_id=${encodeURIComponent(orgId)}`),
   getPlayHQScorecard: (orgId, gameId) => request(`/games/playhq/${gameId}/scorecard?org_id=${encodeURIComponent(orgId)}`),
