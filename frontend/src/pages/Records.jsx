@@ -90,7 +90,7 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
           rows={(data.top_career_runs || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
             <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.runs?.toLocaleString()}</span>,
-            r.matches ?? '—', r.innings ?? '—', r.average ?? '—', r.high_score ?? '—',
+            r.matches ?? '—', r.innings ?? '—', r.average != null ? Number(r.average).toFixed(2) : '—', r.high_score ?? '—',
           ])}
         />
       </RecordSection>
@@ -109,7 +109,7 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
           headers={['Player', 'Avg', 'M', 'Runs', 'Inn']}
           rows={(data.top_batting_avg || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
-            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.average}</span>,
+            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.average != null ? Number(r.average).toFixed(2) : '—'}</span>,
             r.matches ?? '—', r.runs ?? '—', r.innings ?? '—',
           ])}
         />
@@ -173,7 +173,7 @@ function BowlingTab({ data, latestSeason, fmt = n => n }) {
           rows={(data.top_career_wickets || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
             <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.wickets}</span>,
-            r.matches ?? '—', r.average ?? '—', r.economy ?? '—',
+            r.matches ?? '—', r.average != null ? Number(r.average).toFixed(2) : '—', r.economy != null ? Number(r.economy).toFixed(2) : '—',
           ])}
         />
       </RecordSection>
@@ -192,7 +192,7 @@ function BowlingTab({ data, latestSeason, fmt = n => n }) {
           headers={['Player', 'Avg', 'Wkts', 'M']}
           rows={(data.top_bowling_avg || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
-            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.average}</span>,
+            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.average != null ? Number(r.average).toFixed(2) : '—'}</span>,
             r.wickets ?? '—', r.matches ?? '—',
           ])}
         />
@@ -202,7 +202,7 @@ function BowlingTab({ data, latestSeason, fmt = n => n }) {
           headers={['Player', 'Econ', 'Wkts', 'Ov']}
           rows={(data.top_economy || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
-            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.economy}</span>,
+            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.economy != null ? Number(r.economy).toFixed(2) : '—'}</span>,
             r.wickets ?? '—', r.overs ?? '—',
           ])}
         />
@@ -518,9 +518,9 @@ function AllRoundersTab({ data, fmt = n => n }) {
                     <td className="py-2.5 px-3"><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></td>
                     <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.matches ?? '—'}</td>
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs ?? '—'}</td>
-                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.batting_average ?? '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.batting_average != null ? Number(r.batting_average).toFixed(2) : '—'}</td>
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.wickets ?? '—'}</td>
-                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.bowling_average ?? '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{r.bowling_average != null ? Number(r.bowling_average).toFixed(2) : '—'}</td>
                   </tr>
                 ))}
               </tbody>

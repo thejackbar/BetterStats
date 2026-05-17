@@ -153,7 +153,7 @@ export default function Players() {
                             {b?.total_runs ?? '—'}
                           </span>
                         </td>
-                        <td className="py-3 font-mono text-pb-dim text-right">{b?.average ?? '—'}</td>
+                        <td className="py-3 font-mono text-pb-dim text-right">{b?.average != null ? Number(b.average).toFixed(2) : '—'}</td>
                         <td className="py-3 font-mono text-pb-dim text-right">{b?.high_score ?? '—'}</td>
                         <td className="py-3 font-mono text-pb-dim text-right hidden md:table-cell">{b?.fifties ?? '—'}</td>
                         <td className="py-3 text-right hidden lg:table-cell">

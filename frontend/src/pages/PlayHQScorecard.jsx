@@ -121,7 +121,7 @@ function BattingTable({ batting = [] }) {
               <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.fours ?? '—'}</td>
               <td className="py-2.5 font-mono text-pb-faint text-right hidden sm:table-cell">{row.sixes ?? '—'}</td>
               <td className="py-2.5 pr-5 font-mono text-pb-faint text-right hidden sm:table-cell">
-                {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
+                {row.strike_rate != null ? Number(row.strike_rate).toFixed(2) : '—'}
               </td>
             </tr>
           ))}

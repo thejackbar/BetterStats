@@ -29,7 +29,7 @@ const MAIN_TABS = [
 
 function fmt(val, dec = false) {
   if (val == null || val === '' || val === undefined) return '—'
-  if (dec) return typeof val === 'number' ? val.toFixed(2) : val
+  if (dec) return Number(val).toFixed(2)
   return val
 }
 
@@ -628,7 +628,7 @@ function InningsHistoryTable({ innings }) {
                   {row.not_out && <span className="font-mono text-[10px] ml-0.5" style={{ color: 'var(--pb-accent)' }}>*</span>}
                 </td>
                 <td className="py-2.5 font-mono text-sm text-pb-dim text-right">{row.balls ?? '—'}</td>
-                <td className="py-2.5 font-mono text-[11px] text-pb-faint text-right">{row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}</td>
+                <td className="py-2.5 font-mono text-[11px] text-pb-faint text-right">{row.strike_rate != null ? Number(row.strike_rate).toFixed(2) : '—'}</td>
                 <td className="py-2.5 pr-5 font-mono text-[11px] text-pb-faint text-right capitalize">{ho}</td>
               </tr>
             )

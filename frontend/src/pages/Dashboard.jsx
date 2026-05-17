@@ -233,7 +233,7 @@ export default function Dashboard() {
                     <Link to={`/players/${p.player_id}`} className="flex-1 min-w-0">
                       <div className="text-pb-text text-[14px] font-semibold truncate">{fmt(p.name)}</div>
                       <div className="text-pb-faint font-mono text-[10.5px] tracking-wide2">
-                        AVG {p.average ?? '—'} · HS {p.high_score ?? '—'}
+                        AVG {p.average != null ? Number(p.average).toFixed(2) : '—'} · HS {p.high_score ?? '—'}
                       </div>
                     </Link>
                     <span className="font-mono text-pb-text text-[14px] font-bold pb-num w-12 text-right" style={{ color: "var(--pb-accent)" }}>
@@ -258,7 +258,7 @@ export default function Dashboard() {
                     <Link to={`/players/${p.player_id}`} className="flex-1 min-w-0">
                       <div className="text-pb-text text-[14px] font-semibold truncate">{fmt(p.name)}</div>
                       <div className="text-pb-faint font-mono text-[10.5px] tracking-wide2">
-                        AVG {p.average ?? '—'} · ECON {p.economy ?? '—'} · BEST {
+                        AVG {p.average != null ? Number(p.average).toFixed(2) : '—'} · ECON {p.economy != null ? Number(p.economy).toFixed(2) : '—'} · BEST {
                           p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') :
                           p.best_figures_wickets != null ? `${p.best_figures_wickets}w` : '—'
                         }

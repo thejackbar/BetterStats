@@ -689,7 +689,7 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
               fmt(p.overs, 1),
               fmt(p.average),
               fmt(p.economy),
-              fmt(p.strike_rate, 1),
+              fmt(p.strike_rate),
               p.best_figures || '—',
               p.five_fors > 0
                 ? <span style={{ color: 'var(--pb-amber)' }}>{p.five_fors}</span>
