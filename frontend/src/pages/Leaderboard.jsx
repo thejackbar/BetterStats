@@ -172,7 +172,6 @@ function BowlingTable({ rows, sortBy, fmt = n => n }) {
                 <td className="py-3 pl-5 font-mono text-pb-faint">{String(i + 1).padStart(2, '0')}</td>
                 <td className="py-3">
                   <Link to={`/players/${p.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent">{fmt(p.name)}</Link>
-                  {p.five_fors > 0 && <span className="ml-2 font-mono text-[10px] text-pb-faint">{p.five_fors}×5W</span>}
                 </td>
                 <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.games ?? '—'}</td>
                 <td className="py-3 pr-3 text-right">
