@@ -281,16 +281,13 @@ export default function ShareCard() {
     if (loading) return
     setStatsLoading(true)
     const seasonId = selectedSeason || undefined
-    Promise.all([
-      api.getPlayerStats(playerId, { seasonId }),
-      api.getPlayerRankings(playerId, { seasonId }),
-    ])
-      .then(([d, r]) => {
-        setData(prev => prev ? { ...prev, ...d } : d)
-        setRankings(r)
-      })
+    api.getPlayerStats(playerId, { seasonId })
+      .then(d => setData(prev => prev ? { ...prev, ...d } : d))
       .catch(() => {})
       .finally(() => setStatsLoading(false))
+    api.getPlayerRankings(playerId, { seasonId })
+      .then(setRankings)
+      .catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSeason])
 
