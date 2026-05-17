@@ -45,7 +45,7 @@ export default function Privacy() {
 
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Access and correction</h2>
-            <p>You may request access to or correction of any personal information we hold about you by contacting <a href="mailto:jack@klubpro.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>jack@klubpro.com</a>. We will respond within 30 days.</p>
+            <p>You may request access to or correction of any personal information we hold about you by contacting <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a>. We will respond within 30 days.</p>
           </section>
 
           <section>
@@ -55,7 +55,7 @@ export default function Privacy() {
 
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Contact</h2>
-            <p><a href="mailto:jack@klubpro.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>jack@klubpro.com</a></p>
+            <p><a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a></p>
           </section>
         </div>
       </div>

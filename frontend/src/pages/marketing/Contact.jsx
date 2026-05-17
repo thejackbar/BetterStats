@@ -35,8 +35,8 @@ export default function Contact() {
           <div className="pb-card p-6">
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">Email directly</p>
             <p className="text-pb-dim text-sm mb-3">For anything else, drop a line to:</p>
-            <a href="mailto:jack@klubpro.com" className="font-mono text-sm hover:underline" style={{ color: 'var(--pb-accent)' }}>
-              jack@klubpro.com
+            <a href="mailto:betterstatsau@gmail.com" className="font-mono text-sm hover:underline" style={{ color: 'var(--pb-accent)' }}>
+              betterstatsau@gmail.com
             </a>
           </div>
         </div>

@@ -54,7 +54,7 @@ export default function Terms() {
           ))}
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">9. Contact</h2>
-            <p>Questions about these terms: <a href="mailto:jack@klubpro.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>jack@klubpro.com</a></p>
+            <p>Questions about these terms: <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a></p>
           </section>
         </div>
       </div>

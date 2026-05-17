@@ -98,8 +98,8 @@ export default function Login() {
 
         <p className="text-center font-mono text-[10px] tracking-wide2 text-pb-faintest mt-6">
           Forgot your password? Contact{' '}
-          <a href="mailto:jack@klubpro.com" className="text-pb-faint hover:text-pb-text transition-colors">
-            jack@klubpro.com
+          <a href="mailto:betterstatsau@gmail.com" className="text-pb-faint hover:text-pb-text transition-colors">
+            betterstatsau@gmail.com
           </a>
         </p>
       </div>
