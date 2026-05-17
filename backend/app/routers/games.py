@@ -108,7 +108,7 @@ async def list_games(
             "away_team": game.away_team,
             "result": game.result,
             "winning_team": game.winning_team,
-            "grade": {"id": str(grade.id), "name": grade.name},
+            "grade": {"id": str(grade.id), "name": grade.display_name, "raw_name": grade.name},
             "season": {"id": str(season.id), "name": season.name, "year": season.year},
         }
         for game, grade, season in result.all()
@@ -368,7 +368,7 @@ async def get_scorecard(
         "played_at": game.played_at.isoformat() if game.played_at else None,
         "result": game.result,
         "winning_team": game.winning_team,
-        "grade": {"id": str(grade.id), "name": grade.name} if grade else None,
+        "grade": {"id": str(grade.id), "name": grade.display_name, "raw_name": grade.name} if grade else None,
         "season": {"id": str(season.id), "name": season.name} if season else None,
         "innings_totals": innings_totals,
         "batting": batting_flat,

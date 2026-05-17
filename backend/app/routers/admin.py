@@ -279,6 +279,7 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
         text("""
             SELECT
                 gr.name AS grade_name,
+                COALESCE(MAX(gr.display_name_override), gr.name) AS display_name,
                 COUNT(DISTINCT g.id) AS games,
                 COUNT(DISTINCT bi.player_id) AS players,
                 COALESCE(SUM(bi.runs), 0) AS runs
@@ -304,6 +305,9 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
     )
     alias_to_canonical = {r["alias_name"]: r["canonical_name"] for r in log_rows.mappings().all()}
 
+    # Map original name -> display_name for lookup after merge resolution
+    display_name_map = {row["grade_name"]: row["display_name"] for row in raw_rows}
+
     bucket: dict[str, dict] = {}
     aliases_by_canonical: dict[str, list[str]] = {}
     for row in raw_rows:
@@ -311,6 +315,7 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
         canonical = _resolve_canonical_grade(alias_to_canonical, name)
         slot = bucket.setdefault(canonical, {
             "grade_name": canonical,
+            "display_name": display_name_map.get(canonical, canonical),
             "games": 0,
             "players": 0,
             "runs": 0,
@@ -324,7 +329,7 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
             aliases_by_canonical.setdefault(canonical, []).append(name)
 
     out = list(bucket.values())
-    out.sort(key=lambda r: r["grade_name"].lower())
+    out.sort(key=lambda r: r["display_name"].lower())
     return out
 
 

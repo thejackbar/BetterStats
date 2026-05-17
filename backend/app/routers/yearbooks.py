@@ -724,13 +724,13 @@ async def get_match_results(
                 gm.id AS game_id,
                 gm.home_team, gm.away_team, gm.result, gm.winning_team,
                 gm.played_at,
-                g.id AS grade_id, g.name AS grade_name
+                g.id AS grade_id, COALESCE(g.display_name_override, g.name) AS grade_name
             FROM games gm
             JOIN grades g ON g.id = gm.grade_id
             JOIN seasons s ON s.id = g.season_id
             WHERE g.season_id = :s AND s.organisation_id = :o
               {grade_where}
-            ORDER BY g.name, gm.played_at NULLS LAST
+            ORDER BY COALESCE(g.display_name_override, g.name), gm.played_at NULLS LAST
         """),
         params,
     )

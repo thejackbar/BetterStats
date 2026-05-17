@@ -200,6 +200,9 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_yearbook_awards_yearbook ON yearbook_club_awards(yearbook_id)"
         ))
         await conn.execute(text(
+            "ALTER TABLE grades ADD COLUMN IF NOT EXISTS display_name_override TEXT"
+        ))
+        await conn.execute(text(
             "ALTER TABLE seasons ADD COLUMN IF NOT EXISTS display_order INTEGER"
         ))
         await conn.execute(text(

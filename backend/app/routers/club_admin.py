@@ -194,6 +194,68 @@ async def reorder_seasons(
 
 
 # ---------------------------------------------------------------------------
+# Grades — display name overrides
+# ---------------------------------------------------------------------------
+
+@router.get("/grades")
+async def list_grades(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """List distinct grade names for this org with any display_name_override set."""
+    from sqlalchemy import text
+    rows = await db.execute(
+        text("""
+            SELECT
+                gr.name AS original_name,
+                COALESCE(MAX(gr.display_name_override), gr.name) AS display_name,
+                MAX(gr.display_name_override) AS display_name_override,
+                COUNT(DISTINCT g.id) AS games
+            FROM grades gr
+            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN games g ON g.grade_id = gr.id
+            WHERE s.organisation_id = :org_id
+            GROUP BY gr.name
+            ORDER BY gr.name
+        """),
+        {"org_id": str(club.id)},
+    )
+    return [dict(r) for r in rows.mappings().all()]
+
+
+class GradeRenamePatch(BaseModel):
+    original_name: str
+    display_name_override: Optional[str] = None
+
+
+@router.patch("/grades/rename")
+async def rename_grade(
+    data: GradeRenamePatch,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set or clear a display_name_override on all grade rows with the given name in this org."""
+    from sqlalchemy import text
+    override = data.display_name_override.strip() if data.display_name_override else None
+    override = override or None
+    result = await db.execute(
+        text("""
+            UPDATE grades gr
+            SET display_name_override = :override
+            FROM seasons s
+            WHERE gr.season_id = s.id
+              AND s.organisation_id = :org_id
+              AND gr.name = :original_name
+        """),
+        {"override": override, "org_id": str(club.id), "original_name": data.original_name},
+    )
+    await db.commit()
+    return {"updated": result.rowcount, "original_name": data.original_name, "display_name_override": override}
+
+
+# ---------------------------------------------------------------------------
 # Games (read-only list — PlayHQ is source of truth)
 # ---------------------------------------------------------------------------
 
@@ -207,7 +269,7 @@ async def list_games(
     from sqlalchemy import text
     query = """
         SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
-               gr.name AS grade_name, s.name AS season_name
+               COALESCE(gr.display_name_override, gr.name) AS grade_name, s.name AS season_name
         FROM games g
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
@@ -717,7 +779,7 @@ async def _do_import_partnership_records(file, club, db):
             dup_res = await db.execute(_text("""
                 SELECT pt.runs, pt.wicket_number,
                        EXTRACT(YEAR FROM g.played_at)::int AS season_year,
-                       gr.name AS grade_name
+                       COALESCE(gr.display_name_override, gr.name) AS grade_name
                 FROM partnerships pt
                 JOIN games g ON g.id = pt.game_id
                 JOIN grades gr ON gr.id = g.grade_id

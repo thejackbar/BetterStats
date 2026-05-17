@@ -100,10 +100,15 @@ class Grade(Base):
     id = Column(UUID(as_uuid=True), primary_key=True)
     season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="CASCADE"))
     name = Column(Text, nullable=False)
+    display_name_override = Column(Text, nullable=True)
     playhq_id = Column(Text, nullable=True)
 
     season = relationship("Season", back_populates="grades")
     games = relationship("Game", back_populates="grade")
+
+    @property
+    def display_name(self) -> str:
+        return self.display_name_override or self.name
 
 
 class Player(Base):

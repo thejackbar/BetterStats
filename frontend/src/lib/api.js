@@ -111,7 +111,15 @@ export const api = {
       body: JSON.stringify({ merge_log_id: mergeLogId, org_id: orgId }),
     }),
 
-  // Club admin
+  // Club admin — grades
+  adminListGrades: () => request('/club-admin/grades'),
+  adminRenameGrade: (originalName, displayNameOverride) =>
+    request('/club-admin/grades/rename', {
+      method: 'PATCH',
+      body: JSON.stringify({ original_name: originalName, display_name_override: displayNameOverride }),
+    }),
+
+  // Club admin — players
   adminListPlayers: () => request('/club-admin/players'),
   adminCreatePlayer: (data) =>
     request('/club-admin/players', { method: 'POST', body: JSON.stringify(data) }),

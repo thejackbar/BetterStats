@@ -189,7 +189,7 @@ async def get_player_batting_innings(
                 g.away_team,
                 g.played_at::text,
                 g.result,
-                gr.name AS grade_name,
+                COALESCE(gr.display_name_override, gr.name) AS grade_name,
                 s.name AS season_name,
                 s.year AS season_year
             FROM batting_innings bi
@@ -235,7 +235,7 @@ async def get_player_bowling_spells(
                 g.away_team,
                 g.played_at::text,
                 g.result,
-                gr.name AS grade_name,
+                COALESCE(gr.display_name_override, gr.name) AS grade_name,
                 s.name AS season_name,
                 s.year AS season_year
             FROM bowling_spells bs
@@ -310,7 +310,7 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str, org_id: Op
     result = await session.execute(
         text("""
             SELECT
-                COALESCE(am.canonical_name, gr.name) AS grade_name,
+                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
                 COUNT(*) AS innings,
                 SUM(bi.runs) AS runs,
                 ROUND(
@@ -329,9 +329,17 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str, org_id: Op
                   AND gml.undone_at IS NULL
                 LIMIT 1
             ) am ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT gr2.display_name_override FROM grades gr2
+                JOIN seasons s2 ON s2.id = gr2.season_id
+                WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                  AND gr2.display_name_override IS NOT NULL
+                LIMIT 1
+            ) gdn ON TRUE
             WHERE bi.player_id = :pid
               AND bi.runs IS NOT NULL
-            GROUP BY COALESCE(am.canonical_name, gr.name)
+            GROUP BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
             ORDER BY SUM(bi.runs) DESC
         """),
         {"pid": player_id, "org_id": org_id},
@@ -893,7 +901,7 @@ async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Op
         text("""
             WITH grade_spells AS (
                 SELECT
-                    COALESCE(am.canonical_name, gr.name) AS grade_name,
+                    COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
                     bs.wickets,
                     bs.runs,
                     bs.overs,
@@ -908,6 +916,14 @@ async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Op
                       AND gml.undone_at IS NULL
                     LIMIT 1
                 ) am ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT gr2.display_name_override FROM grades gr2
+                    JOIN seasons s2 ON s2.id = gr2.season_id
+                    WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                      AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                      AND gr2.display_name_override IS NOT NULL
+                    LIMIT 1
+                ) gdn ON TRUE
                 WHERE bs.player_id = :pid
                   AND bs.wickets IS NOT NULL
             ),
