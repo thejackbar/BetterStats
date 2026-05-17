@@ -22,7 +22,7 @@ export default function Contact() {
               Fill out the form below and we'll be in touch to get your club set up.
             </p>
             <a
-              href="https://docs.google.com/forms/d/e/1FAIpQLSdTODO/viewform"
+              href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-block px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition text-pb-bg"
