@@ -88,6 +88,46 @@ export default function Pricing() {
           </div>
         </div>
 
+        {/* DeepAnalytics — Coming Soon */}
+        <div className="mt-16 max-w-2xl mx-auto">
+          <div className="pb-card p-8 opacity-75" style={{ borderStyle: 'dashed', borderWidth: '1px', borderColor: 'var(--pb-faint)' }}>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Coming soon</p>
+                <h2 className="font-display font-bold text-2xl text-pb-text tracking-tight">DeepAnalytics</h2>
+              </div>
+              <span className="font-mono text-[10px] tracking-wide3 px-3 py-1 rounded-full border" style={{ borderColor: 'var(--pb-faint)', color: 'var(--pb-faint)' }}>
+                IN DEVELOPMENT
+              </span>
+            </div>
+            <p className="text-pb-dim text-sm mb-6">
+              Cross-club intelligence for serious cricket. DeepAnalytics gives your club access to aggregated stats from across the competition — so you can make smarter selections, prepare better for opposition, and benchmark your players against the rest of the league.
+            </p>
+            <ul className="space-y-3 mb-6">
+              {[
+                'Opposition analysis — batting and bowling tendencies by player',
+                'Cross-club leaderboards and percentile rankings',
+                'Selection insights — compare your squad against the competition',
+                'Grade-wide averages and benchmarking',
+              ].map(item => (
+                <li key={item} className="flex items-start gap-2.5 text-sm text-pb-dim">
+                  <span className="mt-0.5 shrink-0 font-mono text-pb-faint">◦</span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+            <a
+              href={FORM_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block px-6 py-2.5 border rounded font-mono text-[11px] tracking-wide3 font-semibold text-pb-dim hover:text-pb-text transition-colors"
+              style={{ borderColor: 'var(--pb-faint)' }}
+            >
+              REGISTER INTEREST
+            </a>
+          </div>
+        </div>
+
         <div className="mt-20 pb-hairline-t pt-12 text-center">
           <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4">GOT QUESTIONS?</p>
           <h2 className="font-display font-bold text-3xl text-pb-text mb-4 tracking-tight">Not sure if it's right for you?</h2>
