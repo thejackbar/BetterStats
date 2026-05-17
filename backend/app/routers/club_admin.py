@@ -53,6 +53,7 @@ async def list_players(
             "display_name": p.display_name,
             "display_name_override": p.display_name_override,
             "playhq_id": p.playhq_id,
+            "photo_url": p.photo_url,
         }
         for p in players
     ]
@@ -344,6 +345,71 @@ async def delete_logo(
 ):
     _remove_uploaded_logo(club.logo_url)
     club.logo_url = None
+    await db.commit()
+    return {"status": "cleared"}
+
+
+# ---------------------------------------------------------------------------
+# Player photo upload
+# ---------------------------------------------------------------------------
+
+PHOTO_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+PHOTO_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _remove_player_photo(photo_url: Optional[str]) -> None:
+    if not photo_url or not photo_url.startswith("/uploads/players/"):
+        return
+    p = Path("/app") / photo_url.lstrip("/")
+    p.unlink(missing_ok=True)
+
+
+@router.post("/players/{player_id}/photo")
+async def upload_player_photo(
+    player_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    import uuid as _uuid
+    player = await db.get(Player, _uuid.UUID(player_id))
+    if not player or str(player.organisation_id) != str(club.id):
+        raise HTTPException(404, "Player not found")
+
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in PHOTO_ALLOWED_EXTS:
+        raise HTTPException(400, "Image files only (jpg, png, webp, gif)")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > PHOTO_MAX_BYTES:
+        raise HTTPException(400, "Photo must be 2 MB or smaller")
+
+    dest_dir = Path("/app/uploads") / "players" / player_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    _remove_player_photo(player.photo_url)
+    filename = f"photo_{_uuid.uuid4().hex}{ext}"
+    (dest_dir / filename).write_bytes(data)
+
+    player.photo_url = f"/uploads/players/{player_id}/{filename}"
+    await db.commit()
+    return {"photo_url": player.photo_url}
+
+
+@router.delete("/players/{player_id}/photo")
+async def delete_player_photo(
+    player_id: str,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    import uuid as _uuid
+    player = await db.get(Player, _uuid.UUID(player_id))
+    if not player or str(player.organisation_id) != str(club.id):
+        raise HTTPException(404, "Player not found")
+    _remove_player_photo(player.photo_url)
+    player.photo_url = None
     await db.commit()
     return {"status": "cleared"}
 

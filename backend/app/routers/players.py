@@ -14,6 +14,7 @@ from app.services.aggregations import (
     get_bowling_by_grade,
     get_season_by_season, get_player_milestones, get_player_partnerships,
     get_player_activity, get_upcoming_milestones_for_org,
+    get_player_rankings,
 )
 
 router = APIRouter(prefix="/players", tags=["players"])
@@ -75,7 +76,7 @@ async def get_player_stats(
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id)
 
     return {
-        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id},
+        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url},
         "career_batting": _str_keys(batting),
         "career_bowling": _str_keys(bowling),
         "career_fielding": _str_keys(fielding),
@@ -114,6 +115,18 @@ async def get_player_bowling_by_grade(player_id: str, db: AsyncSession = Depends
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     return await get_bowling_by_grade(db, player_id, str(player.organisation_id))
+
+
+@router.get("/{player_id}/rankings")
+async def get_player_rankings_endpoint(
+    player_id: str,
+    season_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await get_player_rankings(db, player_id, str(player.organisation_id), season_id)
 
 
 @router.get("/{player_id}/seasons")

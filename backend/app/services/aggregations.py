@@ -57,7 +57,8 @@ async def get_career_bowling(session: AsyncSession, player_id: str, season_id: O
                 COALESCE(SUM(pss.maidens), 0) AS total_maidens,
                 COALESCE(SUM(pss.overs), 0) AS total_overs,
                 COALESCE(SUM(pss.runs_conceded), 0) AS total_runs,
-                COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors
+                COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
+                ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS bowling_strike_rate
             FROM players p
             LEFT JOIN player_season_stats pss ON pss.player_id = p.id{season_clause}
             WHERE p.id = :pid
@@ -1003,3 +1004,67 @@ async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dic
         {"gid": game_id},
     )
     return [dict(r) for r in result.mappings()]
+
+
+async def get_player_rankings(
+    session: AsyncSession,
+    player_id: str,
+    org_id: str,
+    season_id: Optional[str] = None,
+) -> dict:
+    """Return the player's rank for runs, wickets, and catches within their org.
+    Returns None for each category if the player is outside the top 100."""
+    season_clause = " AND pss.season_id = :season_id" if season_id else ""
+    params: dict = {"org_id": org_id, "player_id": player_id}
+    if season_id:
+        params["season_id"] = season_id
+
+    result = await session.execute(
+        text(f"""
+            WITH batting_ranked AS (
+                SELECT
+                    pss.player_id,
+                    RANK() OVER (ORDER BY SUM(pss.runs) DESC NULLS LAST) AS runs_rank
+                FROM player_season_stats pss
+                JOIN players p ON p.id = pss.player_id
+                WHERE p.organisation_id = :org_id{season_clause}
+                GROUP BY pss.player_id
+            ),
+            bowling_ranked AS (
+                SELECT
+                    pss.player_id,
+                    RANK() OVER (ORDER BY SUM(pss.wickets) DESC NULLS LAST) AS wickets_rank
+                FROM player_season_stats pss
+                JOIN players p ON p.id = pss.player_id
+                WHERE p.organisation_id = :org_id{season_clause}
+                GROUP BY pss.player_id
+            ),
+            fielding_ranked AS (
+                SELECT
+                    pss.player_id,
+                    RANK() OVER (ORDER BY SUM(pss.catches) DESC NULLS LAST) AS catches_rank
+                FROM player_season_stats pss
+                JOIN players p ON p.id = pss.player_id
+                WHERE p.organisation_id = :org_id{season_clause}
+                GROUP BY pss.player_id
+            )
+            SELECT
+                CASE WHEN br.runs_rank <= 100 THEN br.runs_rank ELSE NULL END AS runs_rank,
+                CASE WHEN bw.wickets_rank <= 100 THEN bw.wickets_rank ELSE NULL END AS wickets_rank,
+                CASE WHEN fr.catches_rank <= 100 THEN fr.catches_rank ELSE NULL END AS catches_rank
+            FROM
+                (SELECT :player_id::uuid AS pid) base
+                LEFT JOIN batting_ranked br ON br.player_id = base.pid
+                LEFT JOIN bowling_ranked bw ON bw.player_id = base.pid
+                LEFT JOIN fielding_ranked fr ON fr.player_id = base.pid
+        """),
+        params,
+    )
+    row = result.mappings().first()
+    if not row:
+        return {"runs_rank": None, "wickets_rank": None, "catches_rank": None}
+    return {
+        "runs_rank": row["runs_rank"],
+        "wickets_rank": row["wickets_rank"],
+        "catches_rank": row["catches_rank"],
+    }

@@ -14,6 +14,7 @@ export default function AdminPlayers() {
   const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', playhq_id: '', display_name_override: '' })
   const [creating, setCreating] = useState(false)
   const [createMsg, setCreateMsg] = useState('')
+  const [uploadingPhotoFor, setUploadingPhotoFor] = useState(null) // player id
 
   useEffect(() => {
     api.adminListPlayers().then(setPlayers).catch(() => {})
@@ -93,6 +94,35 @@ export default function AdminPlayers() {
       setCreateMsg(err.message)
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handlePhotoUpload = async (playerId, file) => {
+    if (!file) return
+    setUploadingPhotoFor(playerId)
+    try {
+      const result = await api.adminUploadPlayerPhoto(playerId, file)
+      setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, photo_url: result.photo_url } : p))
+      setMsg('Photo saved')
+      setTimeout(() => setMsg(''), 2500)
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setUploadingPhotoFor(null)
+    }
+  }
+
+  const handlePhotoDelete = async (playerId) => {
+    setUploadingPhotoFor(playerId)
+    try {
+      await api.adminDeletePlayerPhoto(playerId)
+      setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, photo_url: null } : p))
+      setMsg('Photo removed')
+      setTimeout(() => setMsg(''), 2500)
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setUploadingPhotoFor(null)
     }
   }
 
@@ -303,6 +333,27 @@ export default function AdminPlayers() {
                         className="font-mono text-[10px] text-pb-faintest hover:text-pb-red px-2 py-1 transition-colors"
                       >
                         ✕ PHQ
+                      </button>
+                    )}
+                    <label
+                      className={`font-mono text-[10px] px-2 py-1 transition-colors cursor-pointer ${p.photo_url ? 'text-pb-accent/70 hover:text-pb-accent' : 'text-pb-faint hover:text-pb-accent'} ${uploadingPhotoFor === p.id ? 'opacity-50 pointer-events-none' : ''}`}
+                      title={p.photo_url ? 'Replace photo' : 'Upload photo'}
+                    >
+                      {uploadingPhotoFor === p.id ? '…' : (p.photo_url ? 'Photo ✓' : 'Photo')}
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.webp,.gif"
+                        className="hidden"
+                        onChange={e => handlePhotoUpload(p.id, e.target.files?.[0])}
+                      />
+                    </label>
+                    {p.photo_url && (
+                      <button
+                        onClick={() => handlePhotoDelete(p.id)}
+                        disabled={uploadingPhotoFor === p.id}
+                        className="font-mono text-[10px] text-pb-faintest hover:text-pb-red px-2 py-1 transition-colors disabled:opacity-50"
+                      >
+                        ✕ photo
                       </button>
                     )}
                   </div>

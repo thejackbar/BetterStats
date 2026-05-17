@@ -1,10 +1,10 @@
 import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner } from '../lib/presskit'
+import betterStatsLogo from '../assets/betterstatslogo_white.png'
 
 function hexWithAlpha(hex, alpha) {
-  // hex like "#rrggbb" → "rgba(r,g,b,a)"
   if (!hex || hex[0] !== '#' || hex.length !== 7) return `rgba(22,199,132,${alpha})`
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
@@ -12,8 +12,48 @@ function hexWithAlpha(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`
 }
 
-function ShareCardVisual({ player, cb, cbw, cf, season, org }) {
+function RankBadge({ rank, label, accent }) {
+  if (!rank) return null
+  const ordinal = rank === 1 ? '1st' : rank === 2 ? '2nd' : rank === 3 ? '3rd' : `${rank}th`
+  return (
+    <span style={{
+      background: hexWithAlpha(accent, 0.15),
+      border: `1px solid ${hexWithAlpha(accent, 0.4)}`,
+      borderRadius: 5,
+      padding: '2px 8px',
+      fontSize: 10,
+      color: accent,
+      fontFamily: "'JetBrains Mono', monospace",
+      letterSpacing: 0.5,
+    }}>
+      #{ordinal} {label}
+    </span>
+  )
+}
+
+function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl }) {
   const accent = org?.accent_color || '#16c784'
+
+  // Fallback chain: player photo → club logo → BetterStats logo.
+  // Rebuild when props change (org loads async after first render).
+  const fallbackChain = [photoUrl, org?.logo_url, betterStatsLogo].filter(Boolean)
+  const [imgSrc, setImgSrc] = useState(fallbackChain[0] || betterStatsLogo)
+  const [fallbackIdx, setFallbackIdx] = useState(0)
+
+  useEffect(() => {
+    const first = [photoUrl, org?.logo_url, betterStatsLogo].find(Boolean) || betterStatsLogo
+    setImgSrc(first)
+    setFallbackIdx(0)
+  }, [photoUrl, org?.logo_url])
+
+  const handleImgError = () => {
+    const next = fallbackIdx + 1
+    if (next < fallbackChain.length) {
+      setFallbackIdx(next)
+      setImgSrc(fallbackChain[next])
+    }
+  }
+
   return (
     <div
       id="share-card"
@@ -42,32 +82,58 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org }) {
         BetterStats
       </div>
 
-      {/* Org + season */}
-      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
-        {org?.logo_url && (
-          <img src={org.logo_url} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4 }} />
-        )}
-        <div>
-          {org && (
-            <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 13, color: accent, letterSpacing: 2, textTransform: 'uppercase', margin: 0 }}>
-              {org.name}
-            </p>
+      {/* Header: org + player photo */}
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {org?.logo_url && (
+            <img src={org.logo_url} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4 }} />
           )}
-          {season && (
-            <p style={{ fontSize: 12, color: '#64748b', margin: '2px 0 0' }}>{season}</p>
-          )}
+          <div>
+            {org && (
+              <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 13, color: accent, letterSpacing: 2, textTransform: 'uppercase', margin: 0 }}>
+                {org.name}
+              </p>
+            )}
+            {season && (
+              <p style={{ fontSize: 12, color: '#64748b', margin: '2px 0 0' }}>{season}</p>
+            )}
+          </div>
         </div>
+
+        {/* Player photo */}
+        <img
+          src={imgSrc}
+          alt=""
+          onError={handleImgError}
+          style={{
+            width: 64,
+            height: 64,
+            objectFit: 'cover',
+            borderRadius: 8,
+            border: `2px solid ${hexWithAlpha(accent, 0.3)}`,
+            flexShrink: 0,
+          }}
+        />
       </div>
 
       {/* Player name */}
       <h1 style={{
         fontFamily: "'Barlow Condensed', sans-serif",
         fontSize: 52, fontWeight: 800, lineHeight: 1,
-        color: '#fff', margin: '0 0 24px', textTransform: 'uppercase',
+        color: '#fff', margin: '0 0 10px', textTransform: 'uppercase',
         letterSpacing: 1,
       }}>
         {player?.name || ''}
       </h1>
+
+      {/* Ranking badges */}
+      {rankings && (rankings.runs_rank || rankings.wickets_rank || rankings.catches_rank) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+          <RankBadge rank={rankings.runs_rank} label="runs" accent={accent} />
+          <RankBadge rank={rankings.wickets_rank} label="wickets" accent={accent} />
+          <RankBadge rank={rankings.catches_rank} label="catches" accent={accent} />
+        </div>
+      )}
 
       {/* Batting stats row */}
       {cb && (
@@ -123,11 +189,12 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org }) {
           <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 12px' }}>
             Bowling
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
             {[
               { label: 'Wkts', value: cbw.total_wickets, highlight: true },
               { label: 'Ave', value: cbw.average },
               { label: 'Econ', value: cbw.economy },
+              { label: 'SR', value: cbw.bowling_strike_rate },
               { label: 'Best', value: cbw.best_bowling_figures || (cbw.best_figures_wickets ? `${cbw.best_figures_wickets}w` : '—') },
             ].map(({ label, value, highlight }) => (
               <div key={label} style={{ textAlign: 'center' }}>
@@ -146,16 +213,31 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org }) {
               </div>
             ))}
           </div>
+          {cbw.five_fors > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <span style={{ background: hexWithAlpha(accent, 0.1), border: `1px solid ${hexWithAlpha(accent, 0.3)}`, borderRadius: 6, padding: '3px 10px', fontSize: 11, color: accent }}>
+                {cbw.five_fors} {cbw.five_fors === 1 ? '5-for' : '5-fors'}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
       {/* Fielding */}
-      {cf && (cf.total_catches > 0 || cf.total_stumpings > 0) && (
+      {cf && (cf.total_catches > 0 || cf.total_stumpings > 0 || cf.total_run_outs > 0) && (
         <div style={{ borderTop: '1px solid rgba(30,41,59,0.8)', paddingTop: 12, marginTop: 16 }}>
+          <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 8px' }}>
+            Fielding
+          </p>
           <div style={{ display: 'flex', gap: 20 }}>
             {cf.total_catches > 0 && (
               <span style={{ fontSize: 12, color: '#94a3b8' }}>
                 <span style={{ fontFamily: "'JetBrains Mono', monospace", color: '#fff', fontWeight: 700 }}>{cf.total_catches}</span> catches
+              </span>
+            )}
+            {cf.total_run_outs > 0 && (
+              <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", color: '#fff', fontWeight: 700 }}>{cf.total_run_outs}</span> run outs
               </span>
             )}
             {cf.total_stumpings > 0 && (
@@ -176,11 +258,11 @@ export default function ShareCard() {
   const [org, setOrg] = useState(null)
   const [seasons, setSeasons] = useState([])
   const [selectedSeason, setSelectedSeason] = useState('')
+  const [rankings, setRankings] = useState(null)
   const [loading, setLoading] = useState(true)
   const [statsLoading, setStatsLoading] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  // Initial load: pull career stats and the org's seasons + branding.
   useEffect(() => {
     api.getPlayerStats(playerId)
       .then(d => {
@@ -189,18 +271,24 @@ export default function ShareCard() {
           api.getOrg(d.player.organisation_id).then(setOrg).catch(() => {})
           api.getOrgSeasons(d.player.organisation_id).then(setSeasons).catch(() => {})
         }
+        api.getPlayerRankings(playerId).then(setRankings).catch(() => {})
       })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [playerId])
 
-  // Refetch stats when the user picks a different season so the card actually
-  // reflects the dropdown. Empty string = career (no season_id sent).
   useEffect(() => {
     if (loading) return
     setStatsLoading(true)
-    api.getPlayerStats(playerId, { seasonId: selectedSeason || undefined })
-      .then(d => setData(prev => prev ? { ...prev, ...d } : d))
+    const seasonId = selectedSeason || undefined
+    Promise.all([
+      api.getPlayerStats(playerId, { seasonId }),
+      api.getPlayerRankings(playerId, { seasonId }),
+    ])
+      .then(([d, r]) => {
+        setData(prev => prev ? { ...prev, ...d } : d)
+        setRankings(r)
+      })
       .catch(() => {})
       .finally(() => setStatsLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -211,7 +299,7 @@ export default function ShareCard() {
 
   const { player, career_batting: cb, career_bowling: cbw, career_fielding: cf } = data
   const seasonLabel = selectedSeason
-    ? seasons.find(s => s.id === selectedSeason)?.name
+    ? (seasons.find(s => s.id === selectedSeason)?.name ?? 'Season')
     : 'Career Statistics'
 
   const handleShare = async () => {
@@ -260,6 +348,8 @@ export default function ShareCard() {
             cf={cf}
             season={seasonLabel}
             org={org}
+            rankings={rankings}
+            photoUrl={player.photo_url}
           />
         </div>
 
