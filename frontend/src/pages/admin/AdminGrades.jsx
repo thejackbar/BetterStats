@@ -16,7 +16,7 @@ function GradePicker({ grades, value, onChange, placeholder, exclude }) {
         .filter(g => g.grade_name !== exclude)
         .map(g => (
           <option key={g.grade_name} value={g.grade_name}>
-            {g.grade_name} ({g.games} games · {g.runs} runs)
+            {g.display_name} ({g.games} games · {g.runs} runs)
           </option>
         ))}
     </select>
@@ -98,7 +98,10 @@ function GradeList({ grades }) {
           {grades.map((g, i) => (
             <tr key={g.grade_name} className={`${i ? 'pb-hairline-t' : ''} align-top hover:bg-pb-surface2`}>
               <td className="py-2.5 pl-5">
-                <div className="text-pb-text">{g.grade_name}</div>
+                <div className="text-pb-text">{g.display_name}</div>
+                {g.display_name !== g.grade_name && (
+                  <div className="font-mono text-[10px] text-pb-faintest mt-0.5">raw: {g.grade_name}</div>
+                )}
                 {g.aliases?.length > 0 && (
                   <div className="font-mono text-[10px] text-pb-faintest mt-0.5">
                     Includes: {g.aliases.join(', ')}
@@ -175,6 +178,134 @@ function MergeHistory({ orgId, refreshKey, onChanged }) {
   )
 }
 
+function RenameGrades() {
+  const [grades, setGrades] = useState(null)
+  const [editing, setEditing] = useState(null) // { original_name, value }
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  function load() {
+    api.adminListGrades().then(setGrades).catch(() => setGrades([]))
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function saveRename() {
+    if (!editing) return
+    setSaving(true)
+    setError(null)
+    try {
+      await api.adminRenameGrade(editing.original_name, editing.value || null)
+      setEditing(null)
+      load()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function clearOverride(originalName) {
+    setSaving(true)
+    setError(null)
+    try {
+      await api.adminRenameGrade(originalName, null)
+      load()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!grades) return <PbSpinner message="Loading grades…" />
+
+  return (
+    <div className="mt-10">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2 uppercase">Rename Grades</p>
+      <p className="text-pb-dim text-sm mb-4 leading-relaxed">
+        Set a display name for a grade. The display name is shown everywhere instead of the original sync'd name.
+        Useful for shortening sponsor-suffixed names like "One Day Grade 5 - Black" → "One Day Grade 5".
+      </p>
+      {error && (
+        <div className="mb-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
+      )}
+      <div className="pb-card overflow-hidden">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+              <th className="font-medium py-2.5 pl-5">ORIGINAL NAME</th>
+              <th className="font-medium py-2.5">DISPLAY NAME</th>
+              <th className="font-medium py-2.5 pr-5 text-right">GAMES</th>
+            </tr>
+          </thead>
+          <tbody>
+            {grades.map((g, i) => (
+              <tr key={g.original_name} className={`${i ? 'pb-hairline-t' : ''} align-middle`}>
+                <td className="py-2.5 pl-5 text-pb-dim font-mono text-[11px] max-w-[220px] truncate">{g.original_name}</td>
+                <td className="py-2 pr-3">
+                  {editing?.original_name === g.original_name ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={editing.value}
+                        onChange={e => setEditing(ed => ({ ...ed, value: e.target.value }))}
+                        placeholder="Blank to clear override"
+                        className="flex-1 bg-pb-surface2 border rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none"
+                        style={{ borderColor: 'var(--pb-accent)' }}
+                        onKeyDown={e => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') setEditing(null) }}
+                      />
+                      <button
+                        onClick={saveRename}
+                        disabled={saving}
+                        className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50 shrink-0"
+                        style={{ background: 'var(--pb-accent)' }}
+                      >
+                        SAVE
+                      </button>
+                      <button
+                        onClick={() => setEditing(null)}
+                        className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors shrink-0"
+                      >
+                        CANCEL
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`flex-1 text-sm ${g.display_name_override ? 'text-pb-text font-medium' : 'text-pb-faintest italic'}`}
+                      >
+                        {g.display_name_override || 'no override'}
+                      </span>
+                      <button
+                        onClick={() => setEditing({ original_name: g.original_name, value: g.display_name_override || '' })}
+                        className="font-mono text-[10px] border pb-hairline rounded px-3 py-1 text-pb-faint hover:text-pb-text transition-colors shrink-0"
+                      >
+                        Edit
+                      </button>
+                      {g.display_name_override && (
+                        <button
+                          onClick={() => clearOverride(g.original_name)}
+                          disabled={saving}
+                          className="font-mono text-[10px] border pb-hairline rounded px-3 py-1 text-pb-red/60 hover:text-pb-red transition-colors shrink-0 disabled:opacity-50"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </td>
+                <td className="py-2.5 pr-5 font-mono text-pb-dim text-right text-[11px]">{g.games}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminGrades() {
   const { user } = useAuth()
   const [orgId, setOrgId] = useState(null)
@@ -217,9 +348,9 @@ export default function AdminGrades() {
   return (
     <AdminLayout>
       <div className="max-w-3xl">
-        <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Merge Grades</h1>
+        <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Grades</h1>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
-          Combine grades that are actually the same competition but were named differently across seasons.
+          Merge grades that are the same competition under different names, or set display name overrides.
         </p>
 
         <MergeBuilder orgId={orgId} grades={grades || []} onMerged={refresh} />
@@ -230,6 +361,8 @@ export default function AdminGrades() {
         <GradeList grades={grades || []} />
 
         <MergeHistory orgId={orgId} refreshKey={historyKey} onChanged={refresh} />
+
+        <RenameGrades />
       </div>
     </AdminLayout>
   )

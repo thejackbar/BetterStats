@@ -209,7 +209,7 @@ async def query_grades(
         WITH org_games AS (
             SELECT
                 g.id                                       AS game_id,
-                COALESCE(am.canonical_name, gr.name)       AS grade_name,
+                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
                 s.name                                     AS season_name,
                 COALESCE(s.year, 0)                        AS season_year
             FROM games g
@@ -222,6 +222,14 @@ async def query_grades(
                   AND gml.undone_at IS NULL
                 LIMIT 1
             ) am ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT gr2.display_name_override FROM grades gr2
+                JOIN seasons s2 ON s2.id = gr2.season_id
+                WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                  AND gr2.display_name_override IS NOT NULL
+                LIMIT 1
+            ) gdn ON TRUE
             WHERE s.organisation_id = :org_id {season_clause}
         ),
         bat AS (
