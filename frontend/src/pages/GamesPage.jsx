@@ -102,6 +102,13 @@ export default function GamesPage() {
     loading: clubLoading,
   } = useClubData(orgId)
 
+  // Default to most recent season on first load
+  useEffect(() => {
+    if (seasons.length > 0 && selectedSeason == null) {
+      setSelectedSeason(seasons[0].id)
+    }
+  }, [seasons, selectedSeason, setSelectedSeason])
+
   const [games, setGames] = useState([])
   const [loading, setLoading] = useState(true)
 

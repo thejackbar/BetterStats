@@ -397,15 +397,19 @@ function PartnershipsSection({ partnerships = [] }) {
                     <td className="py-2 pl-5 font-mono text-pb-faint">{p.wicket_number}</td>
                     <td className="py-2 px-3 text-pb-dim text-xs">
                       <span className="flex flex-wrap gap-3">
-                        {p.batter1_name && (
+                        {(p.batter1_name || p.batter1_id) && (
                           <span>
-                            <Link to={`/players/${p.batter1_id}`} className="hover:text-pb-accent transition-colors">{p.batter1_name}</Link>
+                            {p.batter1_name
+                              ? <Link to={`/players/${p.batter1_id}`} className="hover:text-pb-accent transition-colors">{p.batter1_name}</Link>
+                              : <span className="text-pb-faintest italic">Unknown</span>}
                             {p.batter1_runs != null && <span className="text-pb-faint ml-1">({p.batter1_runs})</span>}
                           </span>
                         )}
-                        {p.batter2_name && (
+                        {(p.batter2_name || p.batter2_id) && (
                           <span>
-                            <Link to={`/players/${p.batter2_id}`} className="hover:text-pb-accent transition-colors">{p.batter2_name}</Link>
+                            {p.batter2_name
+                              ? <Link to={`/players/${p.batter2_id}`} className="hover:text-pb-accent transition-colors">{p.batter2_name}</Link>
+                              : <span className="text-pb-faintest italic">Unknown</span>}
                             {p.batter2_runs != null && <span className="text-pb-faint ml-1">({p.batter2_runs})</span>}
                           </span>
                         )}
