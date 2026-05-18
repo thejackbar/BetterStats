@@ -376,10 +376,11 @@ export const api = {
   },
 
   // Records
-  getRecords: (orgId, { seasonId, gradeId } = {}) => {
+  getRecords: (orgId, { seasonId, gradeId, gradeName } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
+    if (gradeName) params.set('grade_name', gradeName)
     return request(`/records/${orgId}?${params}`)
   },
   getRecordsGrades: (orgId, seasonId) => {

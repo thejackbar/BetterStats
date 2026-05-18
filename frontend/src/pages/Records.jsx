@@ -548,20 +548,27 @@ export default function Records() {
 
   if (inactive) return <ClubInactive />
 
-  const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading: clubLoading } = useClubData(orgId)
+  const { org, seasons, selectedSeason, setSelectedSeason, loading: clubLoading } = useClubData(orgId)
 
+  const [orgGrades, setOrgGrades] = useState([])
+  const [selectedGradeName, setSelectedGradeName] = useState(null)
   const [tab, setTab] = useState('batting')
   const [records, setRecords] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!orgId) return
+    api.getOrgGrades(orgId).then(setOrgGrades).catch(() => setOrgGrades([]))
+  }, [orgId])
+
+  useEffect(() => {
+    if (!orgId) return
     setLoading(true)
-    api.getRecords(orgId, { seasonId: selectedSeason, gradeId: selectedGrade })
+    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName })
       .then(setRecords)
       .catch(() => setRecords(null))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGrade])
+  }, [orgId, selectedSeason, selectedGradeName])
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
@@ -575,15 +582,30 @@ export default function Records() {
           title="The record books."
           meta={[<span key="x">Every club benchmark, since day one.</span>]}
         />
-        <div className="mb-5">
+        <div className="mb-5 flex flex-wrap gap-3 items-center">
           <SeasonSelector
             seasons={seasons}
-            grades={grades}
+            grades={[]}
             selectedSeason={selectedSeason}
             setSelectedSeason={setSelectedSeason}
-            selectedGrade={selectedGrade}
-            setSelectedGrade={setSelectedGrade}
+            selectedGrade={null}
+            setSelectedGrade={() => {}}
           />
+          {orgGrades.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Grade</label>
+              <select
+                value={selectedGradeName || ''}
+                onChange={e => setSelectedGradeName(e.target.value || null)}
+                className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
+              >
+                <option value="">All grades</option>
+                {orgGrades.map(g => (
+                  <option key={g.name} value={g.name}>{g.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <TabBar tabs={TABS} active={tab} onChange={setTab} />
         {loading ? <PbSpinner message="Loading records…" /> : !records ? (

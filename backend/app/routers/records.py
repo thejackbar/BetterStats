@@ -109,6 +109,7 @@ async def get_records(
     org_id: str,
     season_id: str | None = Query(None),
     grade_id: str | None = Query(None),
+    grade_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     # If grade_id supplied, resolve grade name (for manual record filtering) and season if missing
@@ -137,21 +138,32 @@ async def get_records(
         p["season_id"] = season_id
     if grade_id:
         p["grade_id"] = grade_id
+    if grade_name:
+        p["grade_name"] = grade_name
 
     # Clauses for game-level queries (partnerships) that already JOIN games g
     game_season_clause = " JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id" if season_id else ""
-    game_grade_clause  = " AND g.grade_id = :grade_id" if grade_id else ""
 
     # Partnership queries now always JOIN grades gr for grade_name; season filter via WHERE
     partnership_season_clause = " AND gr.season_id = :season_id" if season_id else ""
 
-    # Clauses for top_pairs which has no pre-existing games join
-    pairs_game_join = (
-        " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id"
-        if season_id else
-        (" JOIN games g ON g.id = pt.game_id" if grade_id else "")
-    )
-    pairs_grade_clause = " AND g.grade_id = :grade_id" if grade_id else ""
+    # Grade filter clause — prefer grade_name (cross-season) over grade_id (season-specific)
+    if grade_name:
+        game_grade_clause  = " AND COALESCE(gr.display_name_override, gr.name) = :grade_name"
+        pairs_grade_clause = " AND COALESCE(gr.display_name_override, gr.name) = :grade_name"
+        pairs_game_join = (
+            " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id"
+            if season_id else
+            " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
+        )
+    else:
+        game_grade_clause  = " AND g.grade_id = :grade_id" if grade_id else ""
+        pairs_grade_clause = " AND g.grade_id = :grade_id" if grade_id else ""
+        pairs_game_join = (
+            " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id"
+            if season_id else
+            (" JOIN games g ON g.id = pt.game_id" if grade_id else "")
+        )
 
     # Inline WHERE additions for player_season_stats aggregate queries
     pss_season_clause  = "AND pss.season_id = :season_id " if season_id else ""
