@@ -407,10 +407,10 @@ async def get_records(
                    COALESCE(SUM(bs.wickets), 0) AS wickets,
                    COUNT(DISTINCT bs.game_id) AS matches,
                    COUNT(*) FILTER (WHERE bs.wickets >= 5) AS five_fors,
-                   ROUND(SUM(bs.runs_conceded)::numeric /
+                   ROUND(SUM(bs.runs)::numeric /
                        NULLIF(SUM(bs.wickets), 0), 2) AS average,
-                   ROUND(SUM(bs.runs_conceded)::numeric /
-                       NULLIF(SUM(bs.balls), 0) * 6, 2) AS economy
+                   ROUND(SUM(bs.runs)::numeric /
+                       NULLIF(SUM(bs.overs), 0), 2) AS economy
             FROM players p {_bowl_join}
             {_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -441,11 +441,11 @@ async def get_records(
             WITH best AS (
                 SELECT DISTINCT ON (p.id)
                     p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-                    bs.wickets, bs.runs_conceded AS runs, s.name AS season_name
+                    bs.wickets, bs.runs, s.name AS season_name
                 FROM players p {_bowl_join}
                 {_bowl_where}
                   AND bs.wickets > 0
-                ORDER BY p.id, bs.wickets DESC, bs.runs_conceded ASC
+                ORDER BY p.id, bs.wickets DESC, bs.runs ASC
             )
             SELECT * FROM best ORDER BY wickets DESC, runs ASC LIMIT :limit
         """)
@@ -471,7 +471,7 @@ async def get_records(
     if grade_name:
         top_bowling_avg = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-                   ROUND(SUM(bs.runs_conceded)::numeric /
+                   ROUND(SUM(bs.runs)::numeric /
                        NULLIF(SUM(bs.wickets), 0), 2) AS average,
                    COALESCE(SUM(bs.wickets), 0) AS wickets,
                    COUNT(DISTINCT bs.game_id) AS matches
@@ -500,14 +500,14 @@ async def get_records(
     if grade_name:
         top_economy = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-                   ROUND(SUM(bs.runs_conceded)::numeric /
-                       NULLIF(SUM(bs.balls), 0) * 6, 2) AS economy,
+                   ROUND(SUM(bs.runs)::numeric /
+                       NULLIF(SUM(bs.overs), 0), 2) AS economy,
                    COALESCE(SUM(bs.wickets), 0) AS wickets,
-                   ROUND(SUM(bs.balls)::numeric / 6, 1) AS overs
+                   ROUND(SUM(bs.overs), 1) AS overs
             FROM players p {_bowl_join}
             {_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-            HAVING SUM(bs.balls) >= 300
+            HAVING SUM(bs.overs) >= 50
             ORDER BY economy ASC LIMIT :limit
         """)
     else:
@@ -888,7 +888,7 @@ async def get_records(
             bowl AS (
                 SELECT bs.player_id,
                        COALESCE(SUM(bs.wickets), 0) AS wickets,
-                       COALESCE(SUM(bs.runs_conceded), 0) AS runs_conceded,
+                       COALESCE(SUM(bs.runs), 0) AS runs_conceded,
                        COUNT(DISTINCT bs.game_id) AS games
                 FROM bowling_spells bs
                 JOIN games g ON g.id = bs.game_id

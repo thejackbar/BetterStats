@@ -5,7 +5,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useClub } from "../hooks/useClub";
 import betterStatsLogo from "../assets/betterstatslogo_white.png";
 
-export const SITE_VERSION = "v5.8.0";
+export const SITE_VERSION = "v5.8.1";
 
 const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games'];
 
