@@ -269,10 +269,13 @@ async def debug_gr_scorecard(game_id: str):
     sample = {}
     for inn in innings:
         batting = inn.get("batting") or []
-        if batting:
+        if batting and "first_batting_row_keys" not in sample:
             sample["first_batting_row_keys"] = list(batting[0].keys())
             sample["first_batting_row"] = batting[0]
-            break
+        bowling = inn.get("bowling") or []
+        if bowling and "first_bowling_row_keys" not in sample:
+            sample["first_bowling_row_keys"] = list(bowling[0].keys())
+            sample["first_bowling_row"] = bowling[0]
     # Expose all innings-level keys (minus batting/bowling/fielding arrays)
     sample["innings_objects"] = [
         {k: v for k, v in inn.items() if k not in ("batting", "bowling", "fielding", "fallOfWickets")}
@@ -461,8 +464,10 @@ async def get_scorecard(
 
             # Build pid→shortName map from both playing and non-playing members.
             # Track opp roster pids (players + non-playing = DNB candidates).
+            # Also track our team roster pids for the same reason.
             pid_to_name: dict[str, str] = {}
             opp_roster_pids: set[str] = set()
+            our_team_roster_pids: set[str] = set()
             for _team in (gr_data.get("teams") or []):
                 _team_name = (_team.get("displayName") or _team.get("name") or "").lower()
                 _is_our_team = bool(org_word and org_word in _team_name)
@@ -473,7 +478,9 @@ async def get_scorecard(
                              _pl.get("name") or "")
                     if _pid and _name:
                         pid_to_name[_pid] = _name
-                    if not _is_our_team and _pid:
+                    if _is_our_team and _pid:
+                        our_team_roster_pids.add(_pid)
+                    elif not _is_our_team and _pid:
                         opp_roster_pids.add(_pid)
 
             # Accumulate our own DNB players missing from DB (pre-migration games).
@@ -488,9 +495,23 @@ async def get_scorecard(
             # Track opp pids seen in innings (incl. DNB) and which inn nums opp batted in.
             opp_all_batting_pids: set[str] = set()
             opp_batting_inn_nums: set[int] = set()
+            # Track our pids seen batting in GR innings (to avoid re-adding as DNB).
+            our_batting_pids_seen_in_gr: set[uuid.UUID] = set()
+            # Innings-level extras from GR (byes/leg-byes not on bowling rows).
+            gr_inn_byes: dict[int, int] = {}
 
             for inn in (gr_data.get("innings") or []):
                 inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+
+                # Read innings-level extras breakdown (byes, leg-byes, penalties).
+                # GR may not put these on individual bowling rows.
+                _ext = inn.get("extras") or {}
+                if isinstance(_ext, dict):
+                    _b = (_ext.get("byesScored") or _ext.get("byes") or 0)
+                    _lb = (_ext.get("legByesScored") or _ext.get("legByes") or 0)
+                    _pen = (_ext.get("penalties") or _ext.get("penaltyRuns") or 0)
+                    if _b + _lb + _pen:
+                        gr_inn_byes[inn_num] = gr_inn_byes.get(inn_num, 0) + _b + _lb + _pen
 
                 for row in (inn.get("batting") or []):
                     pid_str = row.get("participantId")
@@ -502,6 +523,7 @@ async def get_scorecard(
                         continue
 
                     if pid in known_ids:
+                        our_batting_pids_seen_in_gr.add(pid)
                         dt_text = row.get("dismissalText")
                         if dt_text:
                             our_dismissal_text[pid] = dt_text
@@ -582,7 +604,10 @@ async def get_scorecard(
                         "no_balls": row.get("noBalls"),
                         "economy": econ,
                     })
-                    opp_extras[inn_num] = opp_extras.get(inn_num, 0) + (row.get("wideBalls") or 0) + (row.get("noBalls") or 0)
+                    # Try both GR field-name variants (wideBalls confirmed in sync.py; widesScored as fallback)
+                    _w = (row.get("wideBalls") or row.get("widesScored") or row.get("wides") or 0)
+                    _nb = (row.get("noBalls") or row.get("noBallsScored") or row.get("noBallsBowled") or 0)
+                    opp_extras[inn_num] = opp_extras.get(inn_num, 0) + _w + _nb
 
             # Enrich our batting_flat with GR dismissal text (e.g. "c K Verdonk b W Dagg").
             if our_dismissal_text or our_dismissal_text_by_name:
@@ -604,6 +629,30 @@ async def get_scorecard(
                         nk = _name_key(bf_row["player_name"])
                         if nk in our_dismissal_text_by_name:
                             bf_row["dismissal_type"] = our_dismissal_text_by_name[nk]
+
+            # Inject DNB rows for our own roster members absent from innings batting.
+            # Covers players who only appear in teams[].nonPlayingMembers[] (not in batting array).
+            if our_team_roster_pids:
+                _our_inn = min(
+                    (r["innings_number"] for r in batting_flat if not r.get("did_not_bat")),
+                    default=1,
+                )
+                for ros_pid_str in our_team_roster_pids:
+                    try:
+                        ros_pid = uuid.UUID(ros_pid_str)
+                    except ValueError:
+                        continue
+                    if ros_pid not in known_ids:
+                        continue  # UUID-mismatched; can't map to DB player reliably
+                    if ros_pid in db_batting_pids:
+                        continue  # already has a batting row
+                    if ros_pid in our_batting_pids_seen_in_gr:
+                        continue  # appeared in GR innings (batted or already flagged)
+                    if ros_pid in our_missing_dnb:
+                        continue  # already captured from innings batting array
+                    if not pid_to_name.get(ros_pid_str):
+                        continue
+                    our_missing_dnb[ros_pid] = (_our_inn, None)
 
             # Inject DNB rows for opp roster/non-playing members absent from innings batting.
             # GR includes nonPlayingMembers in teams[] — covers Oscar Brown / Sachin Dhadli style cases.
@@ -680,9 +729,12 @@ async def get_scorecard(
                     innings_totals[inn_num_t]["batting_team"] = our_display_name or game.home_team or ""
                 else:
                     innings_totals[inn_num_t]["batting_team"] = opp_display_name or game.away_team or ""
-                # Add opp extras to the innings where opposition bowled (= innings where we batted)
+                # Add opp extras (wides/no-balls) to the innings where opposition bowled
                 if inn_num_t in opp_extras and inn_num_t in our_batting_inns:
                     innings_totals[inn_num_t]["extras"] = innings_totals[inn_num_t].get("extras", 0) + opp_extras[inn_num_t]
+                # Add innings-level byes/leg-byes from GR (not tracked per bowling row)
+                if inn_num_t in gr_inn_byes:
+                    innings_totals[inn_num_t]["extras"] = innings_totals[inn_num_t].get("extras", 0) + gr_inn_byes[inn_num_t]
 
     except Exception as e:
         import traceback
