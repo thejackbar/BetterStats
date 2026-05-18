@@ -289,6 +289,24 @@ async def debug_gr_scorecard(game_id: str):
     match_summary = data.get("matchSummary") or {}
     sample["match_summary_keys"] = list(match_summary.keys())
     sample["match_summary_teams"] = match_summary.get("teams") or []
+    # Full team rosters: players + nonPlayingMembers per team
+    sample["team_rosters"] = []
+    for t in teams:
+        t_name = t.get("displayName") or t.get("name") or ""
+        members = []
+        for p in (t.get("players") or []):
+            members.append({
+                "type": "player",
+                "participantId": p.get("participantId") or p.get("id"),
+                "playerShortName": p.get("playerShortName") or p.get("displayName") or p.get("name"),
+            })
+        for p in (t.get("nonPlayingMembers") or []):
+            members.append({
+                "type": "nonPlaying",
+                "participantId": p.get("participantId") or p.get("id"),
+                "playerShortName": p.get("playerShortName") or p.get("displayName") or p.get("name"),
+            })
+        sample["team_rosters"].append({"team": t_name, "members": members})
     return sample
 
 
@@ -550,6 +568,12 @@ async def get_scorecard(
                         dt_text = row.get("dismissalText")
                         if dt_text and (row.get("dismissalType") or "").lower() not in _DNB:
                             our_dismissal_text_by_name[nk] = dt_text
+                        continue
+
+                    # Player is in our team's GR roster but UUID doesn't match DB —
+                    # the our_team_roster_pids injection below will handle them as DNB.
+                    # Don't add to opp_batting to avoid duplication.
+                    if pid_str in our_team_roster_pids:
                         continue
 
                     # dismissalText is pre-formatted: "c S Aplin b W Dagg", "b W Dagg", etc.
