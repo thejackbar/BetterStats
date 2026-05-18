@@ -1,30 +1,31 @@
 /* 3D honour badge cards — adapted from Uiverse.io by Smit-Prajapati */
 
 .hb-parent {
-  perspective: 1000px;
-  width: 100%;
-  min-height: 220px;
+  perspective: 800px;
+  width: 160px;
+  height: 160px;
+  flex-shrink: 0;
 }
 
 .hb-card {
-  height: 100%;
-  min-height: 220px;
-  border-radius: 36px;
+  width: 160px;
+  height: 160px;
+  border-radius: 24px;
   background: var(--hb-gradient);
   transition: all 0.5s ease-in-out;
   transform-style: preserve-3d;
-  box-shadow: var(--hb-shadow-a) 40px 50px 25px -40px, var(--hb-shadow-b) 0px 25px 25px -5px;
+  box-shadow: var(--hb-shadow-a) 20px 30px 15px -20px, var(--hb-shadow-b) 0px 15px 15px -3px;
   position: relative;
 }
 
 .hb-glass {
   transform-style: preserve-3d;
   position: absolute;
-  inset: 8px;
-  border-radius: 40px;
+  inset: 5px;
+  border-radius: 26px;
   border-top-right-radius: 100%;
   background: linear-gradient(0deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.75) 100%);
-  transform: translate3d(0, 0, 25px);
+  transform: translate3d(0, 0, 16px);
   border-left: 1px solid white;
   border-bottom: 1px solid white;
   transition: all 0.5s ease-in-out;
@@ -45,36 +46,36 @@
   border-radius: 50%;
   top: 0;
   right: 0;
-  box-shadow: rgba(100,100,111,0.15) -10px 10px 20px 0;
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
+  box-shadow: rgba(100,100,111,0.12) -6px 6px 12px 0;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   background: var(--hb-circle-bg);
   transition: all 0.5s ease-in-out;
 }
 
-.hb-circle1 { width: 140px; transform: translate3d(0,0,20px); top: 8px; right: 8px; }
-.hb-circle2 { width: 110px; transform: translate3d(0,0,40px); top: 10px; right: 10px; backdrop-filter: blur(1px); -webkit-backdrop-filter: blur(1px); transition-delay: 0.4s; }
-.hb-circle3 { width: 84px;  transform: translate3d(0,0,60px); top: 17px; right: 17px; transition-delay: 0.8s; }
-.hb-circle4 { width: 58px;  transform: translate3d(0,0,80px); top: 23px; right: 23px; transition-delay: 1.2s; }
+.hb-circle1 { width: 86px;  transform: translate3d(0,0,12px); top: 5px; right: 5px; }
+.hb-circle2 { width: 68px;  transform: translate3d(0,0,24px); top: 6px;  right: 6px;  backdrop-filter: blur(1px); -webkit-backdrop-filter: blur(1px); transition-delay: 0.4s; }
+.hb-circle3 { width: 52px;  transform: translate3d(0,0,36px); top: 11px; right: 11px; transition-delay: 0.8s; }
+.hb-circle4 { width: 36px;  transform: translate3d(0,0,48px); top: 16px; right: 16px; transition-delay: 1.2s; }
 .hb-circle5 {
-  width: 36px;
-  transform: translate3d(0,0,100px);
-  top: 30px; right: 30px;
+  width: 22px;
+  transform: translate3d(0,0,60px);
+  top: 20px; right: 20px;
   display: grid;
   place-content: center;
   transition-delay: 1.6s;
 }
 
 .hb-content {
-  padding: 80px 56px 0 24px;
-  transform: translate3d(0, 0, 26px);
+  padding: 52px 36px 0 14px;
+  transform: translate3d(0, 0, 17px);
   position: relative;
 }
 
 .hb-category {
   font-family: ui-monospace, monospace;
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  font-size: 7.5px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   margin-bottom: 2px;
   color: var(--hb-text-dim);
@@ -83,54 +84,54 @@
 .hb-title {
   color: var(--hb-text);
   font-weight: 800;
-  font-size: 15px;
+  font-size: 11.5px;
   line-height: 1.25;
 }
 
 .hb-sub {
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 9px;
   color: var(--hb-text-dim);
-  margin-top: 3px;
+  margin-top: 2px;
 }
 
 .hb-detail {
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 9px;
   color: var(--hb-accent);
-  margin-left: 4px;
+  margin-left: 3px;
 }
 
 .hb-bottom {
-  padding: 8px 12px;
+  padding: 4px 8px;
   transform-style: preserve-3d;
   position: absolute;
-  bottom: 16px;
-  left: 16px;
-  right: 16px;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  transform: translate3d(0, 0, 26px);
+  transform: translate3d(0, 0, 17px);
 }
 
 .hb-season {
   font-family: ui-monospace, monospace;
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: 8px;
+  letter-spacing: 0.06em;
   color: var(--hb-text-dim);
 }
 
 .hb-count {
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 9px;
   color: var(--hb-text-dim);
   font-weight: 700;
 }
 
 .hb-admin-btns {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   opacity: 0;
   transition: opacity 0.15s;
 }
@@ -140,9 +141,9 @@
 }
 
 .hb-edit-btn {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-size: 8px;
+  padding: 1px 4px;
+  border-radius: 3px;
   background: rgba(255,255,255,0.5);
   color: var(--hb-text);
   border: none;
@@ -153,9 +154,9 @@
 .hb-edit-btn:hover { background: rgba(255,255,255,0.8); }
 
 .hb-del-btn {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-size: 8px;
+  padding: 1px 4px;
+  border-radius: 3px;
   background: rgba(220,50,50,0.2);
   color: #c00;
   border: none;
@@ -168,10 +169,10 @@
 /* Hover 3D tilt */
 .hb-parent:hover .hb-card {
   transform: rotate3d(1, 1, 0, 22deg);
-  box-shadow: var(--hb-shadow-a-h) 30px 50px 25px -40px, var(--hb-shadow-b-h) 0px 25px 30px 0;
+  box-shadow: var(--hb-shadow-a-h) 20px 30px 15px -20px, var(--hb-shadow-b-h) 0px 15px 20px 0;
 }
 
-.hb-parent:hover .hb-card .hb-circle2 { transform: translate3d(0,0,60px); }
-.hb-parent:hover .hb-card .hb-circle3 { transform: translate3d(0,0,80px); }
-.hb-parent:hover .hb-card .hb-circle4 { transform: translate3d(0,0,100px); }
-.hb-parent:hover .hb-card .hb-circle5 { transform: translate3d(0,0,120px); }
+.hb-parent:hover .hb-card .hb-circle2 { transform: translate3d(0,0,36px); }
+.hb-parent:hover .hb-card .hb-circle3 { transform: translate3d(0,0,48px); }
+.hb-parent:hover .hb-card .hb-circle4 { transform: translate3d(0,0,60px); }
+.hb-parent:hover .hb-card .hb-circle5 { transform: translate3d(0,0,72px); }

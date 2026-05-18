@@ -1201,7 +1201,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
             <span className="hb-circle hb-circle3" />
             <span className="hb-circle hb-circle4" />
             <span className="hb-circle hb-circle5">
-              <img src={iconSrc} alt="" style={{ width: 18, height: 18, objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
+              <img src={iconSrc} alt="" style={{ width: 12, height: 12, objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
             </span>
           </div>
           <div className="hb-glass" />
@@ -1309,7 +1309,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
       {honours.length > 0 && (
         <div>
           <Label className="block mb-3">HONOURS</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="flex flex-wrap gap-4">
             {honours.map(a => (
               <HonourBadge key={a.id} a={a} theme="honour"
                 onEdit={() => openEdit(a)}
@@ -1321,7 +1321,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
       {rolesList.length > 0 && (
         <div>
           <Label className="block mb-3">ROLES</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="flex flex-wrap gap-4">
             {rolesList.map((g, i) => {
               const seasons_str = g.instances.map(inst => formatSeasonShort(inst.season, seasons)).filter(Boolean).join(', ')
               const synth = { ...g.instances[0], subcategory: g.subcategory, achievement: g.achievement }
@@ -1339,7 +1339,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
       {awards.length > 0 && (
         <div>
           <Label className="block mb-3">AWARDS</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="flex flex-wrap gap-4">
             {awards.map(a => (
               <HonourBadge key={a.id} a={a} theme="award"
                 onEdit={() => openEdit(a)}
@@ -1351,7 +1351,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
       {milestones.length > 0 && (
         <div>
           <Label className="block mb-3">MILESTONES</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="flex flex-wrap gap-4">
             {milestones.map(a => (
               <HonourBadge key={a.id} a={a} theme="milestone"
                 onEdit={() => openEdit(a)}
