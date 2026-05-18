@@ -125,13 +125,15 @@ async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
 async def get_org_grades(org_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         text("""
-            SELECT DISTINCT COALESCE(g.display_name_override, g.name) AS display_name
-            FROM grades g
-            JOIN seasons s ON s.id = g.season_id
-            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            SELECT display_name FROM (
+                SELECT DISTINCT COALESCE(g.display_name_override, g.name) AS display_name
+                FROM grades g
+                JOIN seasons s ON s.id = g.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+            ) sub
             ORDER BY
-                NULLIF(regexp_replace(COALESCE(g.display_name_override, g.name), '[^0-9].*', ''), '')::int NULLS LAST,
-                COALESCE(g.display_name_override, g.name)
+                NULLIF(regexp_replace(display_name, '[^0-9].*', ''), '')::int NULLS LAST,
+                display_name
         """),
         {"org_id": org_id},
     )
