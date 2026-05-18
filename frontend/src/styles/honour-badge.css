@@ -14,7 +14,6 @@
   background: var(--pb-surface, #10141d);
   border: 1.5px solid var(--hb-border);
   transition: transform 0.45s ease, box-shadow 0.45s ease, border-color 0.45s ease;
-  /* No transform-style: preserve-3d — it prevents overflow: hidden from clipping */
   box-shadow: 0 4px 16px var(--hb-shadow-b);
   position: relative;
   overflow: hidden;
@@ -44,13 +43,13 @@
   z-index: 1;
 }
 
-/* Content */
+/* Content — text area, clears icon and bottom season row */
 .hb-content {
   position: absolute;
   top: 12px;
   left: 12px;
-  right: 48px;  /* clear the icon */
-  bottom: 32px; /* clear the footer */
+  right: 48px;  /* clear icon */
+  bottom: 28px; /* clear season */
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -89,22 +88,17 @@
   overflow: hidden;
 }
 
-/* Footer */
-.hb-bottom {
+/* Season — absolutely positioned, full card width */
+.hb-season {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 30px;
-  padding: 0 10px;
+  height: 26px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
-  gap: 6px;
   border-top: 1px solid var(--hb-border);
-  overflow: hidden;
-}
-
-.hb-season {
   font-family: ui-monospace, monospace;
   font-size: 8px;
   letter-spacing: 0.06em;
@@ -112,17 +106,17 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1;
-  min-width: 0;
 }
 
-/* Admin buttons */
+/* Admin buttons — hover overlay, bottom-right */
 .hb-admin-btns {
+  position: absolute;
+  bottom: 3px;
+  right: 8px;
   display: flex;
   gap: 3px;
   opacity: 0;
   transition: opacity 0.15s;
-  flex-shrink: 0;
 }
 
 .hb-parent:hover .hb-admin-btns { opacity: 1; }

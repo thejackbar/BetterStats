@@ -1196,15 +1196,13 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               </span>
             )}
           </div>
-          <div className="hb-bottom">
-            <span className="hb-season">{season}</span>
-            {canEdit && (
-              <div className="hb-admin-btns">
-                {onEdit && <button className="hb-edit-btn" onClick={onEdit}>Edit</button>}
-                {onDelete && <button className="hb-del-btn" onClick={onDelete}>✕</button>}
-              </div>
-            )}
-          </div>
+          <div className="hb-season">{season}</div>
+          {canEdit && (
+            <div className="hb-admin-btns">
+              {onEdit && <button className="hb-edit-btn" onClick={onEdit}>Edit</button>}
+              {onDelete && <button className="hb-del-btn" onClick={onDelete}>✕</button>}
+            </div>
+          )}
         </div>
       </div>
     )
