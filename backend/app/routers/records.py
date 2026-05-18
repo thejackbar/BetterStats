@@ -28,7 +28,7 @@ async def get_records_grades(
     )
     if season_id:
         q = q.where(Grade.season_id == uuid.UUID(season_id))
-    result = await db.execute(q.order_by(text("(regexp_replace(grades.name, '[^0-9].*', ''))::int NULLS LAST"), Grade.name))
+    result = await db.execute(q.order_by(text("NULLIF(regexp_replace(grades.name, '[^0-9].*', ''), '')::int NULLS LAST"), Grade.name))
     grades = result.scalars().all()
     if grades:
         seen: set[str] = set()
@@ -168,205 +168,413 @@ async def get_records(
     # Inline WHERE additions for player_season_stats aggregate queries
     pss_season_clause  = "AND pss.season_id = :season_id " if season_id else ""
 
+    # When grade_name active: game-level join/where templates for batting and bowling
+    _gw_season = "AND s.id = :season_id" if season_id else ""
+    _bat_join = (
+        "JOIN batting_innings bi ON bi.player_id = p.id"
+        " JOIN games g ON g.id = bi.game_id"
+        " JOIN grades gr ON gr.id = g.grade_id"
+        " JOIN seasons s ON s.id = gr.season_id"
+    )
+    _bat_where = (
+        "WHERE p.organisation_id = :org_id"
+        " AND COALESCE(gr.display_name_override, gr.name) = :grade_name"
+        f" {_gw_season}"
+        " AND NOT COALESCE(bi.did_not_bat, FALSE)"
+        " AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')"
+    )
+    _bowl_join = (
+        "JOIN bowling_spells bs ON bs.player_id = p.id"
+        " JOIN games g ON g.id = bs.game_id"
+        " JOIN grades gr ON gr.id = g.grade_id"
+        " JOIN seasons s ON s.id = gr.season_id"
+    )
+    _bowl_where = (
+        "WHERE p.organisation_id = :org_id"
+        " AND COALESCE(gr.display_name_override, gr.name) = :grade_name"
+        f" {_gw_season}"
+    )
+
     async def q(sql: str, params: dict | None = None) -> list[dict]:
         rows = await db.execute(text(sql), params or p)
         return [dict(r) for r in rows.mappings().all()]
 
     # ── Batting ────────────────────────────────────────────────────────────────────────
 
-    top_career_runs = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               COALESCE(SUM(pss.runs), 0)            AS runs,
-               COALESCE(SUM(pss.batting_innings), 0) AS innings,
-               COALESCE(SUM(pss.not_outs), 0)        AS not_outs,
-               COALESCE(SUM(pss.matches), 0)         AS matches,
-               MAX(pss.high_score)                   AS high_score,
-               ROUND(SUM(pss.runs)::numeric /
-                   NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.runs) > 0
-        ORDER BY runs DESC LIMIT :limit
-    """)
+    if grade_name:
+        top_career_runs = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(bi.runs), 0) AS runs,
+                   COUNT(*) AS innings,
+                   COUNT(*) FILTER (WHERE bi.not_out) AS not_outs,
+                   COUNT(DISTINCT bi.game_id) AS matches,
+                   MAX(bi.runs) AS high_score,
+                   ROUND(SUM(bi.runs)::numeric /
+                       NULLIF(COUNT(*) - COUNT(*) FILTER (WHERE bi.not_out), 0), 2) AS average
+            FROM players p {_bat_join}
+            {_bat_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(bi.runs) > 0
+            ORDER BY runs DESC LIMIT :limit
+        """)
+    else:
+        top_career_runs = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.runs), 0)            AS runs,
+                   COALESCE(SUM(pss.batting_innings), 0) AS innings,
+                   COALESCE(SUM(pss.not_outs), 0)        AS not_outs,
+                   COALESCE(SUM(pss.matches), 0)         AS matches,
+                   MAX(pss.high_score)                   AS high_score,
+                   ROUND(SUM(pss.runs)::numeric /
+                       NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(pss.runs) > 0
+            ORDER BY runs DESC LIMIT :limit
+        """)
 
-    top_high_scores = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               pss.high_score AS runs,
-               pss.is_hs_not_out AS not_out,
-               s.name AS season_name
-        FROM player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        JOIN seasons s ON s.id = pss.season_id
-        WHERE p.organisation_id = :org_id
-          """ + ("AND pss.season_id = :season_id " if season_id else "") + """
-          AND pss.high_score IS NOT NULL AND pss.high_score > 0
-        ORDER BY pss.high_score DESC LIMIT :limit
-    """)
+    if grade_name:
+        top_high_scores = await q(f"""
+            WITH best AS (
+                SELECT DISTINCT ON (p.id)
+                    p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                    bi.runs, bi.not_out, s.name AS season_name
+                FROM players p {_bat_join}
+                {_bat_where}
+                  AND bi.runs IS NOT NULL AND bi.runs > 0
+                ORDER BY p.id, bi.runs DESC
+            )
+            SELECT * FROM best ORDER BY runs DESC LIMIT :limit
+        """)
+    else:
+        top_high_scores = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   pss.high_score AS runs,
+                   pss.is_hs_not_out AS not_out,
+                   s.name AS season_name
+            FROM player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            JOIN seasons s ON s.id = pss.season_id
+            WHERE p.organisation_id = :org_id
+              """ + ("AND pss.season_id = :season_id " if season_id else "") + """
+              AND pss.high_score IS NOT NULL AND pss.high_score > 0
+            ORDER BY pss.high_score DESC LIMIT :limit
+        """)
 
-    top_batting_avg = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               ROUND(SUM(pss.runs)::numeric /
-                   NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average,
-               COALESCE(SUM(pss.runs), 0)            AS runs,
-               COALESCE(SUM(pss.batting_innings), 0) AS innings,
-               COALESCE(SUM(pss.matches), 0)         AS matches
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING (SUM(pss.batting_innings) - SUM(pss.not_outs)) >= 10
-        ORDER BY average DESC LIMIT :limit
-    """)
+    if grade_name:
+        top_batting_avg = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   ROUND(SUM(bi.runs)::numeric /
+                       NULLIF(COUNT(*) - COUNT(*) FILTER (WHERE bi.not_out), 0), 2) AS average,
+                   COALESCE(SUM(bi.runs), 0) AS runs,
+                   COUNT(*) AS innings,
+                   COUNT(DISTINCT bi.game_id) AS matches
+            FROM players p {_bat_join}
+            {_bat_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING (COUNT(*) - COUNT(*) FILTER (WHERE bi.not_out)) >= 10
+            ORDER BY average DESC LIMIT :limit
+        """)
+    else:
+        top_batting_avg = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   ROUND(SUM(pss.runs)::numeric /
+                       NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average,
+                   COALESCE(SUM(pss.runs), 0)            AS runs,
+                   COALESCE(SUM(pss.batting_innings), 0) AS innings,
+                   COALESCE(SUM(pss.matches), 0)         AS matches
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING (SUM(pss.batting_innings) - SUM(pss.not_outs)) >= 10
+            ORDER BY average DESC LIMIT :limit
+        """)
 
-    most_fifties = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               COALESCE(SUM(pss.fifties), 0)  AS fifties,
-               COALESCE(SUM(pss.runs), 0)     AS runs,
-               COALESCE(SUM(pss.matches), 0)  AS matches
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.fifties) > 0
-        ORDER BY fifties DESC LIMIT :limit
-    """)
+    if grade_name:
+        most_fifties = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) AS fifties,
+                   COALESCE(SUM(bi.runs), 0) AS runs,
+                   COUNT(DISTINCT bi.game_id) AS matches
+            FROM players p {_bat_join}
+            {_bat_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) > 0
+            ORDER BY fifties DESC LIMIT :limit
+        """)
+    else:
+        most_fifties = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.fifties), 0)  AS fifties,
+                   COALESCE(SUM(pss.runs), 0)     AS runs,
+                   COALESCE(SUM(pss.matches), 0)  AS matches
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(pss.fifties) > 0
+            ORDER BY fifties DESC LIMIT :limit
+        """)
 
-    most_hundreds = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               COALESCE(SUM(pss.hundreds), 0) AS hundreds,
-               COALESCE(SUM(pss.runs), 0)     AS runs,
-               COALESCE(SUM(pss.matches), 0)  AS matches
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.hundreds) > 0
-        ORDER BY hundreds DESC LIMIT :limit
-    """)
+    if grade_name:
+        most_hundreds = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COUNT(*) FILTER (WHERE bi.runs >= 100) AS hundreds,
+                   COALESCE(SUM(bi.runs), 0) AS runs,
+                   COUNT(DISTINCT bi.game_id) AS matches
+            FROM players p {_bat_join}
+            {_bat_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING COUNT(*) FILTER (WHERE bi.runs >= 100) > 0
+            ORDER BY hundreds DESC LIMIT :limit
+        """)
+    else:
+        most_hundreds = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.hundreds), 0) AS hundreds,
+                   COALESCE(SUM(pss.runs), 0)     AS runs,
+                   COALESCE(SUM(pss.matches), 0)  AS matches
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(pss.hundreds) > 0
+            ORDER BY hundreds DESC LIMIT :limit
+        """)
 
-    most_ducks = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               COALESCE(SUM(pss.ducks), 0)          AS ducks,
-               COALESCE(SUM(pss.batting_innings), 0) AS innings
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.ducks) > 0
-        ORDER BY ducks DESC LIMIT :limit
-    """)
+    if grade_name:
+        most_ducks = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COUNT(*) FILTER (WHERE bi.runs = 0 AND NOT COALESCE(bi.not_out, FALSE)) AS ducks,
+                   COUNT(*) AS innings
+            FROM players p {_bat_join}
+            {_bat_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING COUNT(*) FILTER (WHERE bi.runs = 0 AND NOT COALESCE(bi.not_out, FALSE)) > 0
+            ORDER BY ducks DESC LIMIT :limit
+        """)
+    else:
+        most_ducks = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.ducks), 0)          AS ducks,
+                   COALESCE(SUM(pss.batting_innings), 0) AS innings
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(pss.ducks) > 0
+            ORDER BY ducks DESC LIMIT :limit
+        """)
 
-    most_runs_season = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               pss.runs, pss.batting_innings AS innings,
-               s.name AS season_name, s.year AS season_year
-        FROM player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        JOIN seasons s ON s.id = pss.season_id
-        WHERE p.organisation_id = :org_id AND pss.runs > 0
-          """ + ("AND pss.season_id = :season_id " if season_id else "") + """
-        ORDER BY pss.runs DESC LIMIT :limit
-    """)
+    if grade_name:
+        most_runs_season = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   SUM(bi.runs) AS runs,
+                   COUNT(*) AS innings,
+                   s.name AS season_name, s.year AS season_year
+            FROM players p {_bat_join}
+            {_bat_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), s.id, s.name, s.year
+            HAVING SUM(bi.runs) > 0
+            ORDER BY runs DESC LIMIT :limit
+        """)
+    else:
+        most_runs_season = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   pss.runs, pss.batting_innings AS innings,
+                   s.name AS season_name, s.year AS season_year
+            FROM player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            JOIN seasons s ON s.id = pss.season_id
+            WHERE p.organisation_id = :org_id AND pss.runs > 0
+              """ + ("AND pss.season_id = :season_id " if season_id else "") + """
+            ORDER BY pss.runs DESC LIMIT :limit
+        """)
 
     # ── Bowling ────────────────────────────────────────────────────────────────────────
 
-    top_career_wickets = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               COALESCE(SUM(pss.wickets), 0)      AS wickets,
-               COALESCE(SUM(pss.matches), 0)      AS matches,
-               COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
-               ROUND(SUM(pss.runs_conceded)::numeric /
-                   NULLIF(SUM(pss.wickets), 0), 2) AS average,
-               ROUND(SUM(pss.runs_conceded)::numeric /
-                   NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.wickets) > 0
-        ORDER BY wickets DESC LIMIT :limit
-    """)
+    if grade_name:
+        top_career_wickets = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(bs.wickets), 0) AS wickets,
+                   COUNT(DISTINCT bs.game_id) AS matches,
+                   COUNT(*) FILTER (WHERE bs.wickets >= 5) AS five_fors,
+                   ROUND(SUM(bs.runs_conceded)::numeric /
+                       NULLIF(SUM(bs.wickets), 0), 2) AS average,
+                   ROUND(SUM(bs.runs_conceded)::numeric /
+                       NULLIF(SUM(bs.balls), 0) * 6, 2) AS economy
+            FROM players p {_bowl_join}
+            {_bowl_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(bs.wickets) > 0
+            ORDER BY wickets DESC LIMIT :limit
+        """)
+    else:
+        top_career_wickets = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.wickets), 0)      AS wickets,
+                   COALESCE(SUM(pss.matches), 0)      AS matches,
+                   COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
+                   ROUND(SUM(pss.runs_conceded)::numeric /
+                       NULLIF(SUM(pss.wickets), 0), 2) AS average,
+                   ROUND(SUM(pss.runs_conceded)::numeric /
+                       NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(pss.wickets) > 0
+            ORDER BY wickets DESC LIMIT :limit
+        """)
 
-    best_innings_figures = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               SPLIT_PART(pss.best_bowling_figures, '-', 1)::integer AS wickets,
-               SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer AS runs,
-               s.name AS season_name
-        FROM player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        JOIN seasons s ON s.id = pss.season_id
-        WHERE p.organisation_id = :org_id
-          """ + ("AND pss.season_id = :season_id " if season_id else "") + """
-          AND pss.best_bowling_figures IS NOT NULL
-          AND pss.best_bowling_figures LIKE '%-%'
-          AND pss.best_bowling_wickets > 0
-        ORDER BY pss.best_bowling_wickets DESC,
-                 SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer ASC
-        LIMIT :limit
-    """)
+    if grade_name:
+        best_innings_figures = await q(f"""
+            WITH best AS (
+                SELECT DISTINCT ON (p.id)
+                    p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                    bs.wickets, bs.runs_conceded AS runs, s.name AS season_name
+                FROM players p {_bowl_join}
+                {_bowl_where}
+                  AND bs.wickets > 0
+                ORDER BY p.id, bs.wickets DESC, bs.runs_conceded ASC
+            )
+            SELECT * FROM best ORDER BY wickets DESC, runs ASC LIMIT :limit
+        """)
+    else:
+        best_innings_figures = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   SPLIT_PART(pss.best_bowling_figures, '-', 1)::integer AS wickets,
+                   SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer AS runs,
+                   s.name AS season_name
+            FROM player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            JOIN seasons s ON s.id = pss.season_id
+            WHERE p.organisation_id = :org_id
+              """ + ("AND pss.season_id = :season_id " if season_id else "") + """
+              AND pss.best_bowling_figures IS NOT NULL
+              AND pss.best_bowling_figures LIKE '%-%'
+              AND pss.best_bowling_wickets > 0
+            ORDER BY pss.best_bowling_wickets DESC,
+                     SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer ASC
+            LIMIT :limit
+        """)
 
-    top_bowling_avg = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               ROUND(SUM(pss.runs_conceded)::numeric /
-                   NULLIF(SUM(pss.wickets), 0), 2) AS average,
-               COALESCE(SUM(pss.wickets), 0) AS wickets,
-               COALESCE(SUM(pss.matches), 0) AS matches
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.wickets) >= 20
-        ORDER BY average ASC LIMIT :limit
-    """)
+    if grade_name:
+        top_bowling_avg = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   ROUND(SUM(bs.runs_conceded)::numeric /
+                       NULLIF(SUM(bs.wickets), 0), 2) AS average,
+                   COALESCE(SUM(bs.wickets), 0) AS wickets,
+                   COUNT(DISTINCT bs.game_id) AS matches
+            FROM players p {_bowl_join}
+            {_bowl_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(bs.wickets) >= 20
+            ORDER BY average ASC LIMIT :limit
+        """)
+    else:
+        top_bowling_avg = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   ROUND(SUM(pss.runs_conceded)::numeric /
+                       NULLIF(SUM(pss.wickets), 0), 2) AS average,
+                   COALESCE(SUM(pss.wickets), 0) AS wickets,
+                   COALESCE(SUM(pss.matches), 0) AS matches
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(pss.wickets) >= 20
+            ORDER BY average ASC LIMIT :limit
+        """)
 
-    top_economy = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               ROUND(SUM(pss.runs_conceded)::numeric /
-                   NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy,
-               COALESCE(SUM(pss.wickets), 0) AS wickets,
-               COALESCE(SUM(pss.overs), 0)   AS overs
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.bowling_balls) >= 300
-        ORDER BY economy ASC LIMIT :limit
-    """)
+    if grade_name:
+        top_economy = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   ROUND(SUM(bs.runs_conceded)::numeric /
+                       NULLIF(SUM(bs.balls), 0) * 6, 2) AS economy,
+                   COALESCE(SUM(bs.wickets), 0) AS wickets,
+                   ROUND(SUM(bs.balls)::numeric / 6, 1) AS overs
+            FROM players p {_bowl_join}
+            {_bowl_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(bs.balls) >= 300
+            ORDER BY economy ASC LIMIT :limit
+        """)
+    else:
+        top_economy = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   ROUND(SUM(pss.runs_conceded)::numeric /
+                       NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy,
+                   COALESCE(SUM(pss.wickets), 0) AS wickets,
+                   COALESCE(SUM(pss.overs), 0)   AS overs
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(pss.bowling_balls) >= 300
+            ORDER BY economy ASC LIMIT :limit
+        """)
 
-    most_five_fors = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
-               COALESCE(SUM(pss.wickets), 0)             AS wickets
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.five_wicket_innings) > 0
-        ORDER BY five_fors DESC LIMIT :limit
-    """)
+    if grade_name:
+        most_five_fors = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COUNT(*) FILTER (WHERE bs.wickets >= 5) AS five_fors,
+                   COALESCE(SUM(bs.wickets), 0) AS wickets
+            FROM players p {_bowl_join}
+            {_bowl_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING COUNT(*) FILTER (WHERE bs.wickets >= 5) > 0
+            ORDER BY five_fors DESC LIMIT :limit
+        """)
+    else:
+        most_five_fors = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
+                   COALESCE(SUM(pss.wickets), 0)             AS wickets
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(pss.five_wicket_innings) > 0
+            ORDER BY five_fors DESC LIMIT :limit
+        """)
 
-    most_wickets_season = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               pss.wickets, pss.bowling_innings AS innings,
-               s.name AS season_name, s.year AS season_year
-        FROM player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        JOIN seasons s ON s.id = pss.season_id
-        WHERE p.organisation_id = :org_id AND pss.wickets > 0
-          """ + ("AND pss.season_id = :season_id " if season_id else "") + """
-        ORDER BY pss.wickets DESC LIMIT :limit
-    """)
+    if grade_name:
+        most_wickets_season = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   SUM(bs.wickets)::int AS wickets,
+                   COUNT(DISTINCT bs.game_id) AS innings,
+                   s.name AS season_name, s.year AS season_year
+            FROM players p {_bowl_join}
+            {_bowl_where}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), s.id, s.name, s.year
+            HAVING SUM(bs.wickets) > 0
+            ORDER BY wickets DESC LIMIT :limit
+        """)
+    else:
+        most_wickets_season = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   pss.wickets, pss.bowling_innings AS innings,
+                   s.name AS season_name, s.year AS season_year
+            FROM player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            JOIN seasons s ON s.id = pss.season_id
+            WHERE p.organisation_id = :org_id AND pss.wickets > 0
+              """ + ("AND pss.season_id = :season_id " if season_id else "") + """
+            ORDER BY pss.wickets DESC LIMIT :limit
+        """)
 
     # ── Partnerships ──────────────────────────────────────────────────────────────────────
 
@@ -568,50 +776,162 @@ async def get_records(
 
     # ── Team / fielding ───────────────────────────────────────────────────────────────────────
 
-    most_matches = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               COALESCE(SUM(pss.matches), 0)          AS matches,
-               COUNT(DISTINCT pss.season_id)           AS seasons
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.matches) > 0
-        ORDER BY matches DESC LIMIT :limit
-    """)
+    if grade_name:
+        most_matches = await q(f"""
+            WITH appearances AS (
+                SELECT bi.player_id, bi.game_id, gr.season_id
+                FROM batting_innings bi
+                JOIN games g ON g.id = bi.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  {_gw_season}
+                UNION
+                SELECT bs.player_id, bs.game_id, gr.season_id
+                FROM bowling_spells bs
+                JOIN games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  {_gw_season}
+            )
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COUNT(DISTINCT ap.game_id) AS matches,
+                   COUNT(DISTINCT ap.season_id) AS seasons
+            FROM players p
+            JOIN appearances ap ON ap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING COUNT(DISTINCT ap.game_id) > 0
+            ORDER BY matches DESC LIMIT :limit
+        """)
+    else:
+        most_matches = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.matches), 0)          AS matches,
+                   COUNT(DISTINCT pss.season_id)           AS seasons
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(pss.matches) > 0
+            ORDER BY matches DESC LIMIT :limit
+        """)
 
-    most_seasons = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               COUNT(DISTINCT pss.season_id)           AS seasons,
-               COALESCE(SUM(pss.matches), 0)          AS matches
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING COUNT(DISTINCT pss.season_id) > 0
-        ORDER BY seasons DESC LIMIT :limit
-    """)
+    if grade_name:
+        most_seasons = await q(f"""
+            WITH appearances AS (
+                SELECT bi.player_id, gr.season_id
+                FROM batting_innings bi
+                JOIN games g ON g.id = bi.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  {_gw_season}
+                UNION
+                SELECT bs.player_id, gr.season_id
+                FROM bowling_spells bs
+                JOIN games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  {_gw_season}
+            )
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COUNT(DISTINCT ap.season_id) AS seasons,
+                   COUNT(DISTINCT ap.season_id) AS matches
+            FROM players p
+            JOIN appearances ap ON ap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING COUNT(DISTINCT ap.season_id) > 0
+            ORDER BY seasons DESC LIMIT :limit
+        """)
+    else:
+        most_seasons = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COUNT(DISTINCT pss.season_id)           AS seasons,
+                   COALESCE(SUM(pss.matches), 0)          AS matches
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING COUNT(DISTINCT pss.season_id) > 0
+            ORDER BY seasons DESC LIMIT :limit
+        """)
 
-    top_allrounders = await q("""
-        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-               COALESCE(SUM(pss.runs), 0)    AS runs,
-               COALESCE(SUM(pss.wickets), 0) AS wickets,
-               COALESCE(SUM(pss.matches), 0) AS matches,
-               ROUND(SUM(pss.runs)::numeric /
-                   NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS batting_average,
-               ROUND(SUM(pss.runs_conceded)::numeric /
-                   NULLIF(SUM(pss.wickets), 0), 2) AS bowling_average,
-               ROUND(COALESCE(SUM(pss.runs), 0) * 1.5 + COALESCE(SUM(pss.wickets), 0) * 10, 2) AS index_score
-        FROM players p
-        JOIN player_season_stats pss ON pss.player_id = p.id
-        WHERE p.organisation_id = :org_id
-          """ + pss_season_clause + """
-        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-        HAVING SUM(pss.runs) >= 1000 AND SUM(pss.wickets) >= 100
-        ORDER BY index_score DESC LIMIT :limit
-    """)
+    if grade_name:
+        top_allrounders = await q(f"""
+            WITH bat AS (
+                SELECT bi.player_id,
+                       COALESCE(SUM(bi.runs), 0) AS runs,
+                       COUNT(*) AS innings,
+                       COUNT(*) FILTER (WHERE bi.not_out) AS not_outs,
+                       COUNT(DISTINCT bi.game_id) AS games
+                FROM batting_innings bi
+                JOIN games g ON g.id = bi.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  {_gw_season}
+                  AND NOT COALESCE(bi.did_not_bat, FALSE)
+                  AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')
+                GROUP BY bi.player_id
+            ),
+            bowl AS (
+                SELECT bs.player_id,
+                       COALESCE(SUM(bs.wickets), 0) AS wickets,
+                       COALESCE(SUM(bs.runs_conceded), 0) AS runs_conceded,
+                       COUNT(DISTINCT bs.game_id) AS games
+                FROM bowling_spells bs
+                JOIN games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  {_gw_season}
+                GROUP BY bs.player_id
+            )
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(bat.runs, 0) AS runs,
+                   COALESCE(bowl.wickets, 0) AS wickets,
+                   GREATEST(COALESCE(bat.games, 0), COALESCE(bowl.games, 0)) AS matches,
+                   ROUND(bat.runs::numeric / NULLIF(bat.innings - bat.not_outs, 0), 2) AS batting_average,
+                   ROUND(bowl.runs_conceded::numeric / NULLIF(bowl.wickets, 0), 2) AS bowling_average,
+                   ROUND(COALESCE(bat.runs, 0) * 1.5 + COALESCE(bowl.wickets, 0) * 10, 2) AS index_score
+            FROM players p
+            JOIN bat ON bat.player_id = p.id
+            JOIN bowl ON bowl.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bat.runs >= 1000 AND bowl.wickets >= 100
+            ORDER BY index_score DESC LIMIT :limit
+        """)
+    else:
+        top_allrounders = await q("""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.runs), 0)    AS runs,
+                   COALESCE(SUM(pss.wickets), 0) AS wickets,
+                   COALESCE(SUM(pss.matches), 0) AS matches,
+                   ROUND(SUM(pss.runs)::numeric /
+                       NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS batting_average,
+                   ROUND(SUM(pss.runs_conceded)::numeric /
+                       NULLIF(SUM(pss.wickets), 0), 2) AS bowling_average,
+                   ROUND(COALESCE(SUM(pss.runs), 0) * 1.5 + COALESCE(SUM(pss.wickets), 0) * 10, 2) AS index_score
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              """ + pss_season_clause + """
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING SUM(pss.runs) >= 1000 AND SUM(pss.wickets) >= 100
+            ORDER BY index_score DESC LIMIT :limit
+        """)
 
     # Flatten by_wicket into wicket_1 ... wicket_10 and normalise field names
     def normalise_partnership(r: dict) -> dict:
