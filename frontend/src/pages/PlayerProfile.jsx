@@ -1585,7 +1585,7 @@ export default function PlayerProfile() {
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
         {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} battingInnings={battingInnings} bowlingSpells={bowlingSpells} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
-        {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.name} />}
+        {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
       </main>
     </div>
   )
