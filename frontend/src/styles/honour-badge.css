@@ -116,18 +116,6 @@
   min-width: 0;
 }
 
-.hb-count {
-  font-family: ui-monospace, monospace;
-  font-size: 8px;
-  font-weight: 700;
-  color: var(--hb-accent-text);
-  background: var(--hb-icon-bg);
-  border: 1px solid var(--hb-border);
-  padding: 1px 6px;
-  border-radius: 10px;
-  flex-shrink: 0;
-}
-
 /* Admin buttons */
 .hb-admin-btns {
   display: flex;

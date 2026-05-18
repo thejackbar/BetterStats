@@ -1174,7 +1174,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
     },
   }
 
-  const HonourBadge = ({ a, theme = 'award', count = null, seasonsStr = null, onEdit, onDelete }) => {
+  const HonourBadge = ({ a, theme = 'award', seasonsStr = null, onEdit, onDelete }) => {
     const iconSrc = CATEGORY_ICON_SRC[a.category] || thiings.trophy
     const label = resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)
     const sub = a.subcategory
@@ -1198,7 +1198,6 @@ function AchievementsSection({ playerId, orgId, playerName }) {
           </div>
           <div className="hb-bottom">
             <span className="hb-season">{season}</span>
-            {count != null && count > 1 && <span className="hb-count">{count}×</span>}
             {canEdit && (
               <div className="hb-admin-btns">
                 {onEdit && <button className="hb-edit-btn" onClick={onEdit}>Edit</button>}
@@ -1302,15 +1301,17 @@ function AchievementsSection({ playerId, orgId, playerName }) {
           <Label className="block mb-3">ROLES</Label>
           <div className="flex flex-wrap gap-4">
             {rolesList.map((g, i) => {
-              // instances sorted most-recent-first; show range for 3+, list for 1–2
+              // instances sorted most-recent-first
               const shorts = g.instances.map(inst => formatSeasonShort(inst.season, seasons)).filter(Boolean)
-              const seasons_str = shorts.length >= 3
-                ? `${shorts[shorts.length - 1]} – ${shorts[0]}`
-                : shorts.join(', ')
+              const n = g.instances.length
+              const seasons_str = n === 1
+                ? shorts[0]
+                : n === 2
+                  ? shorts.join(', ')
+                  : `${n}× · ${shorts[shorts.length - 1]}–${shorts[0]}`
               const synth = { ...g.instances[0], subcategory: g.subcategory, achievement: g.achievement, detail: null }
               return (
                 <HonourBadge key={i} a={synth} theme="role"
-                  count={g.instances.length}
                   seasonsStr={seasons_str || undefined}
                   onEdit={() => openEdit(g.instances[0])}
                   onDelete={() => handleDelete(g.instances[0].id)} />
