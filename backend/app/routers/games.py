@@ -471,7 +471,11 @@ async def get_scorecard(
             # Accumulate our own DNB players missing from DB (pre-migration games).
             our_missing_dnb: dict[uuid.UUID, tuple[int, int | None]] = {}
             # GR-sourced dismissal text for our players (enriches batting_flat after loop).
+            # Keyed by GR UUID (for players whose DB uuid matches GR).
             our_dismissal_text: dict[uuid.UUID, str] = {}
+            # Keyed by name key (surname, initial) — covers players whose DB uuid is a PlayHQ
+            # uuid that doesn't match GR's uuid, e.g. Daniel Baker.
+            our_dismissal_text_by_name: dict[tuple, str] = {}
 
             # Track opp pids seen in innings (incl. DNB) and which inn nums opp batted in.
             opp_all_batting_pids: set[str] = set()
@@ -508,7 +512,13 @@ async def get_scorecard(
 
                     # playerShortName is on each batting row (confirmed by gr-debug).
                     name = row.get("playerShortName") or pid_to_name.get(pid_str, "Unknown")
-                    if _name_key(name) in our_batting_fingerprints:
+                    nk = _name_key(name)
+                    if nk in our_batting_fingerprints:
+                        # Still capture dismissal — this player is ours but has a GR UUID that
+                        # doesn't match their DB PlayHQ UUID (uuid-namespace mismatch).
+                        dt_text = row.get("dismissalText")
+                        if dt_text and (row.get("dismissalType") or "").lower() not in _DNB:
+                            our_dismissal_text_by_name[nk] = dt_text
                         continue
 
                     # dismissalText is pre-formatted: "c S Aplin b W Dagg", "b W Dagg", etc.
@@ -567,15 +577,25 @@ async def get_scorecard(
                     opp_extras[inn_num] = opp_extras.get(inn_num, 0) + (row.get("wideBalls") or 0) + (row.get("noBalls") or 0)
 
             # Enrich our batting_flat with GR dismissal text (e.g. "c K Verdonk b W Dagg").
-            if our_dismissal_text:
+            if our_dismissal_text or our_dismissal_text_by_name:
                 for bf_row in batting_flat:
-                    if bf_row.get("player_id") and not bf_row.get("did_not_bat"):
+                    if bf_row.get("did_not_bat"):
+                        continue
+                    enriched = False
+                    # Primary: GR UUID matches DB UUID exactly.
+                    if bf_row.get("player_id") and our_dismissal_text:
                         try:
                             bf_pid = uuid.UUID(bf_row["player_id"])
                             if bf_pid in our_dismissal_text:
                                 bf_row["dismissal_type"] = our_dismissal_text[bf_pid]
+                                enriched = True
                         except (ValueError, KeyError):
                             pass
+                    # Fallback: name-key match for PlayHQ-uuid-vs-GR-uuid mismatch players.
+                    if not enriched and our_dismissal_text_by_name and bf_row.get("player_name"):
+                        nk = _name_key(bf_row["player_name"])
+                        if nk in our_dismissal_text_by_name:
+                            bf_row["dismissal_type"] = our_dismissal_text_by_name[nk]
 
             # Inject DNB rows for opp roster/non-playing members absent from innings batting.
             # GR includes nonPlayingMembers in teams[] — covers Oscar Brown / Sachin Dhadli style cases.
