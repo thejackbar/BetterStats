@@ -391,7 +391,7 @@ async def get_records(
         ) gdn ON TRUE
         LEFT JOIN players p1 ON p1.id = pt.batter1_id
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
-        WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
+        WHERE (p1.organisation_id = :org_id AND p2.organisation_id = :org_id)
           """ + partnership_season_clause + game_grade_clause + """
           AND pt.runs IS NOT NULL AND pt.runs > 0
         ORDER BY pt.runs DESC LIMIT :limit
@@ -431,7 +431,7 @@ async def get_records(
         ) gdn ON TRUE
         LEFT JOIN players p1 ON p1.id = pt.batter1_id
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
-        WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
+        WHERE (p1.organisation_id = :org_id AND p2.organisation_id = :org_id)
           """ + partnership_season_clause + game_grade_clause + """
           AND pt.runs IS NOT NULL AND pt.runs > 0 AND pt.wicket_number BETWEEN 1 AND 10
     """)
@@ -482,7 +482,7 @@ async def get_records(
             ) gdn ON TRUE
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
-            WHERE (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
+            WHERE (p1.organisation_id = :org_id AND p2.organisation_id = :org_id)
               """ + partnership_season_clause + game_grade_clause + """
               AND pt.runs IS NOT NULL AND pt.runs > 0 AND pt.wicket_number BETWEEN 1 AND 10
         )

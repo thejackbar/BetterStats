@@ -616,7 +616,7 @@ async def get_superlatives(
             JOIN grades g ON g.id = gm.grade_id
             JOIN seasons s ON s.id = g.season_id
             WHERE g.season_id = :s AND s.organisation_id = :o
-              AND p1.organisation_id = :o
+              AND p1.organisation_id = :o AND p2.organisation_id = :o
             ORDER BY pt.runs DESC NULLS LAST
             LIMIT 1
         """),
@@ -817,7 +817,7 @@ async def get_partnership_stats(
             JOIN players p2 ON p2.id = pt.batter2_id
             JOIN games gm ON gm.id = pt.game_id
             JOIN grades g ON g.id = gm.grade_id
-            WHERE g.season_id = :s AND p1.organisation_id = :o
+            WHERE g.season_id = :s AND p1.organisation_id = :o AND p2.organisation_id = :o
               {grade_where}
             ORDER BY pt.runs DESC NULLS LAST
             LIMIT 10
@@ -838,7 +838,7 @@ async def get_partnership_stats(
             JOIN players p2 ON p2.id = pt.batter2_id
             JOIN games gm ON gm.id = pt.game_id
             JOIN grades g ON g.id = gm.grade_id
-            WHERE g.season_id = :s AND p1.organisation_id = :o
+            WHERE g.season_id = :s AND p1.organisation_id = :o AND p2.organisation_id = :o
               {grade_where}
             ORDER BY pt.wicket_number, pt.runs DESC NULLS LAST
         """),
