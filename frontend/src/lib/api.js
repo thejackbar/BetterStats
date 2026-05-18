@@ -24,6 +24,7 @@ export const api = {
   listOrgs: () => request('/organisations'),
   getOrg: (orgId) => request(`/organisations/${orgId}`),
   getOrgSeasons: (orgId) => request(`/organisations/${orgId}/seasons`),
+  getOrgGrades: (orgId) => request(`/organisations/${orgId}/grades`),
   getSeasonGrades: (orgId, seasonId) => request(`/organisations/${orgId}/seasons/${seasonId}/grades`),
   triggerSync: (orgId) => request(`/organisations/${orgId}/sync`, { method: 'POST' }),
   getSyncLogs: (orgId) => request(`/organisations/${orgId}/sync-logs`),
@@ -388,29 +389,32 @@ export const api = {
   },
 
   // Leaderboard
-  battingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit, minRuns } = {}) => {
+  battingLeaderboard: (orgId, { seasonId, gradeName, gradeId, sortBy, limit, minRuns } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
-    if (gradeId) params.set('grade_id', gradeId)
+    if (gradeName) params.set('grade_name', gradeName)
+    else if (gradeId) params.set('grade_id', gradeId)
     if (sortBy) params.set('sort_by', sortBy)
     if (limit) params.set('limit', limit)
     if (minRuns != null) params.set('min_runs', minRuns)
     return request(`/leaderboard/batting?${params}`)
   },
-  bowlingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit, minOvers, minWickets } = {}) => {
+  bowlingLeaderboard: (orgId, { seasonId, gradeName, gradeId, sortBy, limit, minOvers, minWickets } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
-    if (gradeId) params.set('grade_id', gradeId)
+    if (gradeName) params.set('grade_name', gradeName)
+    else if (gradeId) params.set('grade_id', gradeId)
     if (sortBy) params.set('sort_by', sortBy)
     if (limit) params.set('limit', limit)
     if (minOvers != null) params.set('min_overs', minOvers)
     if (minWickets != null) params.set('min_wickets', minWickets)
     return request(`/leaderboard/bowling?${params}`)
   },
-  fieldingLeaderboard: (orgId, { seasonId, gradeId, sortBy, limit } = {}) => {
+  fieldingLeaderboard: (orgId, { seasonId, gradeName, gradeId, sortBy, limit } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
-    if (gradeId) params.set('grade_id', gradeId)
+    if (gradeName) params.set('grade_name', gradeName)
+    else if (gradeId) params.set('grade_id', gradeId)
     if (sortBy) params.set('sort_by', sortBy)
     if (limit) params.set('limit', limit)
     return request(`/leaderboard/fielding?${params}`)

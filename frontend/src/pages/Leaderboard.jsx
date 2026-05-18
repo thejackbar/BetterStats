@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useClubData } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
@@ -255,7 +255,34 @@ export default function Leaderboard() {
 
   if (inactive) return <ClubInactive />
 
-  const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading: clubLoading } = useClubData(orgId)
+  const { org, seasons, selectedSeason, setSelectedSeason, loading: clubLoading } = useClubData(orgId)
+
+  // Grade state is managed locally so it uses grade names (not UUIDs) for cross-season filtering
+  const [gradeOptions, setGradeOptions] = useState([])
+  const [selectedGrade, setSelectedGrade] = useState(null) // grade display name or null
+  const allGradeOptionsRef = useRef([])
+
+  useEffect(() => {
+    if (!orgId) return
+    api.getOrgGrades(orgId)
+      .then(data => {
+        allGradeOptionsRef.current = data
+        setGradeOptions(data)
+      })
+      .catch(() => {})
+  }, [orgId])
+
+  useEffect(() => {
+    if (!orgId) return
+    setSelectedGrade(null)
+    if (!selectedSeason) {
+      setGradeOptions(allGradeOptionsRef.current)
+      return
+    }
+    api.getSeasonGrades(orgId, selectedSeason)
+      .then(data => setGradeOptions(data.map(g => ({ id: g.name, name: g.name }))))
+      .catch(() => setGradeOptions(allGradeOptionsRef.current))
+  }, [orgId, selectedSeason])
 
   const [mainTab, setMainTab] = useState('batting')
   const [battingSort, setBattingSort] = useState('total_runs')
@@ -279,9 +306,9 @@ export default function Leaderboard() {
     if (!orgId) return
     setLoading(true)
     Promise.allSettled([
-      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns }),
-      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets }),
-      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: fieldingSort, limit: 30 }),
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGrade, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGrade, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets }),
+      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGrade, sortBy: fieldingSort, limit: 30 }),
     ]).then(([b, bw, f]) => {
       if (b.status === 'fulfilled') setBattingRows(b.value)
       if (bw.status === 'fulfilled') setBowlingRows(bw.value)
@@ -307,7 +334,7 @@ export default function Leaderboard() {
         <div className="mb-5">
           <SeasonSelector
             seasons={seasons}
-            grades={grades}
+            grades={gradeOptions}
             selectedSeason={selectedSeason}
             setSelectedSeason={setSelectedSeason}
             selectedGrade={selectedGrade}

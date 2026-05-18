@@ -121,6 +121,22 @@ async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
     ]
 
 
+@router.get("/{org_id}/grades")
+async def get_org_grades(org_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        text("""
+            SELECT DISTINCT COALESCE(gr.display_name_override, gr.name) AS name
+            FROM grades gr
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = :org_id
+            ORDER BY name
+        """),
+        {"org_id": org_id},
+    )
+    rows = result.mappings().all()
+    return [{"id": r["name"], "name": r["name"]} for r in rows]
+
+
 @router.get("/{org_id}/seasons/{season_id}/grades")
 async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -133,9 +149,10 @@ async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depe
         seen: set[str] = set()
         out = []
         for g in grades:
-            if g.name not in seen:
-                seen.add(g.name)
-                out.append({"id": str(g.id), "name": g.name})
+            display = g.display_name_override or g.name
+            if display not in seen:
+                seen.add(display)
+                out.append({"id": str(g.id), "name": display})
         return out
 
     # No grades in DB — try the cheap per-season PlayHQ endpoint (single call per season)

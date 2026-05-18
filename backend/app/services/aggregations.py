@@ -128,10 +128,14 @@ async def get_fielding_leaderboard(
     grade_id: Optional[str] = None,
     sort_by: str = "total_dismissals",
     limit: int = 20,
+    grade_name: Optional[str] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {"total_catches", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_dismissals"
+
+    if grade_name:
+        return await _fielding_leaderboard_by_grade(session, org_id, season_id, grade_name, sort_by, limit)
 
     base = """
         SELECT
@@ -154,6 +158,46 @@ async def get_fielding_leaderboard(
     base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def _fielding_leaderboard_by_grade(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str],
+    grade_name: str,
+    sort_by: str,
+    limit: int,
+) -> list[dict]:
+    where = """
+        p.organisation_id = :org_id
+        AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+    """
+    params: dict = {"org_id": org_id, "grade_name": grade_name, "limit": limit}
+    if season_id:
+        where += " AND s.id = :season_id"
+        params["season_id"] = season_id
+
+    sql = f"""
+        SELECT
+            p.id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS name,
+            COUNT(DISTINCT fs.game_id) AS games,
+            COALESCE(SUM(fs.catches), 0) AS total_catches,
+            COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
+            COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
+            COALESCE(SUM(fs.catches) + SUM(fs.run_outs) + SUM(fs.stumpings), 0) AS total_dismissals
+        FROM fielding_stats fs
+        JOIN games g ON g.id = fs.game_id
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        JOIN players p ON p.id = fs.player_id
+        WHERE {where}
+        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+        ORDER BY {sort_by} DESC NULLS LAST
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
@@ -802,6 +846,7 @@ async def get_batting_leaderboard_extended(
     sort_by: str = "total_runs",
     limit: int = 20,
     min_runs: int = 0,
+    grade_name: Optional[str] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_runs", "average", "strike_rate", "total_sixes",
@@ -809,6 +854,9 @@ async def get_batting_leaderboard_extended(
     }
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_runs"
+
+    if grade_name:
+        return await _batting_leaderboard_by_grade(session, org_id, season_id, grade_name, sort_by, limit, min_runs)
 
     base = """
         SELECT
@@ -844,6 +892,64 @@ async def get_batting_leaderboard_extended(
     return [dict(r) for r in result.mappings()]
 
 
+async def _batting_leaderboard_by_grade(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str],
+    grade_name: str,
+    sort_by: str,
+    limit: int,
+    min_runs: int,
+) -> list[dict]:
+    where = """
+        p.organisation_id = :org_id
+        AND NOT COALESCE(bi.did_not_bat, false)
+        AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+    """
+    params: dict = {"org_id": org_id, "grade_name": grade_name, "limit": limit}
+    if season_id:
+        where += " AND s.id = :season_id"
+        params["season_id"] = season_id
+
+    having = ""
+    if min_runs > 0:
+        having = "HAVING COALESCE(SUM(bi.runs), 0) >= :min_runs"
+        params["min_runs"] = min_runs
+
+    sql = f"""
+        SELECT
+            p.id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS name,
+            COUNT(DISTINCT bi.game_id) AS games,
+            COUNT(bi.id) AS innings,
+            COALESCE(SUM(bi.runs), 0) AS total_runs,
+            MAX(bi.runs) AS high_score,
+            ROUND(
+                COALESCE(SUM(bi.runs), 0)::numeric
+                / NULLIF(COUNT(bi.id) - COUNT(bi.id) FILTER (WHERE COALESCE(bi.not_out, false)), 0),
+                2
+            ) AS average,
+            ROUND(COALESCE(SUM(bi.runs), 0)::numeric / NULLIF(SUM(bi.balls), 0) * 100, 2) AS strike_rate,
+            COUNT(bi.id) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) AS fifties,
+            COUNT(bi.id) FILTER (WHERE bi.runs >= 100) AS hundreds,
+            COALESCE(SUM(bi.sixes), 0) AS total_sixes,
+            COALESCE(SUM(bi.fours), 0) AS total_fours,
+            COUNT(bi.id) FILTER (WHERE bi.runs = 0 AND NOT COALESCE(bi.not_out, false)) AS ducks
+        FROM batting_innings bi
+        JOIN games g ON g.id = bi.game_id
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        JOIN players p ON p.id = bi.player_id
+        WHERE {where}
+        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+        {having}
+        ORDER BY {sort_by} DESC NULLS LAST
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
 async def get_bowling_leaderboard_extended(
     session: AsyncSession,
     org_id: str,
@@ -853,6 +959,7 @@ async def get_bowling_leaderboard_extended(
     limit: int = 20,
     min_overs: int = 0,
     min_wickets: int = 0,
+    grade_name: Optional[str] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_wickets", "average", "economy", "best_figures_wickets",
@@ -860,6 +967,9 @@ async def get_bowling_leaderboard_extended(
     }
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_wickets"
+
+    if grade_name:
+        return await _bowling_leaderboard_by_grade(session, org_id, season_id, grade_name, sort_by, limit, min_overs, min_wickets)
 
     base = """
         SELECT
@@ -897,6 +1007,84 @@ async def get_bowling_leaderboard_extended(
     base += f" ORDER BY {sort_by} {sort_dir} NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def _bowling_leaderboard_by_grade(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str],
+    grade_name: str,
+    sort_by: str,
+    limit: int,
+    min_overs: int,
+    min_wickets: int,
+) -> list[dict]:
+    cte_season_filter = " AND s2.id = :season_id" if season_id else ""
+    season_filter = " AND s.id = :season_id" if season_id else ""
+    params: dict = {"org_id": org_id, "grade_name": grade_name, "limit": limit}
+    if season_id:
+        params["season_id"] = season_id
+
+    having_clauses = []
+    if min_overs > 0:
+        having_clauses.append(
+            "SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)) / 6.0 >= :min_overs"
+        )
+        params["min_overs"] = min_overs
+    if min_wickets > 0:
+        having_clauses.append("COALESCE(SUM(bs.wickets), 0) >= :min_wickets")
+        params["min_wickets"] = min_wickets
+    having = ("HAVING " + " AND ".join(having_clauses)) if having_clauses else ""
+    sort_dir = "ASC" if sort_by in ("economy", "average") else "DESC"
+
+    sql = f"""
+        WITH best_spell AS (
+            SELECT DISTINCT ON (bs2.player_id)
+                bs2.player_id,
+                bs2.wickets AS best_figures_wickets,
+                bs2.wickets::text || '-' || bs2.runs::text AS best_bowling_figures
+            FROM bowling_spells bs2
+            JOIN games g2 ON g2.id = bs2.game_id
+            JOIN grades gr2 ON gr2.id = g2.grade_id
+            JOIN seasons s2 ON s2.id = gr2.season_id
+            JOIN players p2 ON p2.id = bs2.player_id
+            WHERE p2.organisation_id = :org_id
+              AND COALESCE(gr2.display_name_override, gr2.name) = :grade_name
+              {cte_season_filter}
+            ORDER BY bs2.player_id, bs2.wickets DESC, bs2.runs ASC
+        )
+        SELECT
+            p.id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS name,
+            COUNT(DISTINCT bs.game_id) AS games,
+            COALESCE(SUM(bs.wickets), 0) AS total_wickets,
+            ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
+            ROUND(
+                SUM(bs.runs)::numeric * 6
+                / NULLIF(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)), 0),
+                2
+            ) AS economy,
+            COALESCE(SUM(bs.maidens), 0) AS total_maidens,
+            COALESCE(SUM(bs.overs), 0) AS total_overs,
+            COUNT(bs.id) FILTER (WHERE bs.wickets >= 5) AS five_fors,
+            bsp.best_figures_wickets,
+            bsp.best_bowling_figures
+        FROM bowling_spells bs
+        JOIN games g ON g.id = bs.game_id
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        JOIN players p ON p.id = bs.player_id
+        LEFT JOIN best_spell bsp ON bsp.player_id = bs.player_id
+        WHERE p.organisation_id = :org_id
+          AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+          {season_filter}
+        GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsp.best_figures_wickets, bsp.best_bowling_figures
+        {having}
+        ORDER BY {sort_by} {sort_dir} NULLS LAST
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
