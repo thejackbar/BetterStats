@@ -241,6 +241,7 @@ class Partnership(Base):
     balls = Column(Integer)
     batter1_runs = Column(Integer)
     batter2_runs = Column(Integer)
+    is_club_innings = Column(Boolean, nullable=True)
 
     game = relationship("Game", back_populates="partnerships")
     batter1 = relationship("Player", foreign_keys=[batter1_id])
