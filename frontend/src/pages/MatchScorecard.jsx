@@ -170,7 +170,9 @@ function MatchHeader({ game, innings }) {
 }
 
 function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n => n }) {
-  const batted = batting.filter(r => !r.did_not_bat)
+  const batted = batting
+    .filter(r => !r.did_not_bat)
+    .sort((a, b) => (a.batting_position ?? 999) - (b.batting_position ?? 999))
   const dnb = batting.filter(r => r.did_not_bat)
   if (!batted.length && !dnb.length) return null
 

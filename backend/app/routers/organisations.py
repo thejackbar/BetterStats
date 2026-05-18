@@ -276,6 +276,11 @@ async def get_org_results(
     db: AsyncSession = Depends(get_db),
 ):
     """Return all synced game results for the org from the DB, grouped-friendly flat list."""
+    # Use org name (first word) to filter to games where our club is one of the teams.
+    # Old syncs stored all games in a grade (including non-org games); this removes those.
+    org = await db.get(Organisation, uuid.UUID(org_id))
+    org_word = (org.name or "").split()[0] if org and org.name else ""
+
     query = """
         SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
                COALESCE(gr.display_name_override, gr.name) AS grade_name,
@@ -285,21 +290,12 @@ async def get_org_results(
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
         WHERE s.organisation_id = :org_id
-        AND (
-            g.result IS NOT NULL
-            OR EXISTS (
-                SELECT 1 FROM batting_innings bi
-                JOIN players p ON p.id = bi.player_id
-                WHERE bi.game_id = g.id AND p.organisation_id = :org_id
-            )
-            OR EXISTS (
-                SELECT 1 FROM bowling_spells bs
-                JOIN players p ON p.id = bs.player_id
-                WHERE bs.game_id = g.id AND p.organisation_id = :org_id
-            )
-        )
     """
     params: dict = {"org_id": org_id}
+
+    if org_word:
+        query += " AND (g.home_team ILIKE :org_pat OR g.away_team ILIKE :org_pat)"
+        params["org_pat"] = f"%{org_word}%"
     if season_id:
         query += " AND s.id = :season_id"
         params["season_id"] = season_id
