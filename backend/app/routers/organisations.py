@@ -145,7 +145,7 @@ async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depe
     result = await db.execute(
         select(Grade)
         .where(Grade.season_id == uuid.UUID(season_id))
-        .order_by(text("(regexp_replace(grades.name, '[^0-9].*', ''))::int NULLS LAST"), Grade.name)
+        .order_by(text("NULLIF(regexp_replace(grades.name, '[^0-9].*', ''), '')::int NULLS LAST"), Grade.name)
     )
     grades = result.scalars().all()
     if grades:
