@@ -406,7 +406,7 @@ async def get_scorecard(
         import re as _re
         gr_data = await get_match_scorecard(str(game.id))
         if gr_data:
-            # Build set of our org's player IDs + name map for dismissal enrichment
+            # Our players: UUID → display_name (for dismissal enrichment on our batting)
             if season:
                 pid_res = await db.execute(
                     select(Player.id, Player.display_name)
@@ -418,72 +418,59 @@ async def get_scorecard(
                 known_id_to_name = {}
                 known_ids = set()
 
-            def _short_name(display_name: str | None) -> str:
-                """'Verdonk, Kate' → 'K Verdonk', 'Kate Verdonk' → 'K Verdonk'."""
-                if not display_name:
-                    return ""
-                parts = [p.strip() for p in display_name.split(",")]
-                if len(parts) == 2 and parts[1]:
-                    return f"{parts[1][0]} {parts[0]}"
-                words = display_name.split()
-                if len(words) >= 2:
-                    return f"{words[0][0]} {words[-1]}"
-                return display_name
-
             # Player IDs already in DB batting data for this game.
-            # Used below to fill in DNB rows that predate the did_not_bat migration.
             db_batting_pids: set = {
                 uuid.UUID(r["player_id"]) for r in batting_flat if r["player_id"]
             }
 
-            _DISMISSAL_SHORT = {
-                "Caught": "c", "Bowled": "b", "LBW": "lbw", "Stumped": "st",
-                "Run Out": "run out", "Hit Wicket": "hit wicket",
-                "Retired Hurt": "retired hurt",
-            }
             _DNB = {"absent", "did not bat", "dnb"}
 
-            # Normalize player name for deduplication: lowercase, remove punctuation, sort words.
-            # Handles "Baker, Daniel" vs "Daniel Baker" → both become "baker daniel".
+            # Normalize name for dedup: lowercase, strip punctuation, sort words.
+            # "Baker, Daniel" and "Daniel Baker" both → "baker daniel".
             def _norm_name(n: str) -> str:
                 words = _re.sub(r"[^a-z\s]", "", (n or "").lower()).split()
                 return " ".join(sorted(words))
 
-            # Fingerprint set of our DB batting players for dedup (catches players whose
-            # GR participantId doesn't match their DB Player.id, e.g. PlayHQ-namespace IDs).
             our_batting_fingerprints: set[str] = {
                 _norm_name(r["player_name"]) for r in batting_flat if r.get("player_name")
             }
 
-            # Org name first word — used to identify which GR team is ours vs opp.
+            # Org name first word — identifies which GR team is ours vs opposition.
             org_obj = await db.get(Organisation, season.organisation_id) if season else None
             org_word = (org_obj.name or "").lower().split()[0] if org_obj and org_obj.name else ""
 
-            # Build participantId → name map from team rosters in GR data.
-            # Simultaneously track opp roster pids for DNB injection below.
+            # GR confirmed fields (via /scorecard/gr-debug):
+            #   teams[]: players[], nonPlayingMembers[], id, displayName, name, owningOrganisation
+            #   batting rows: participantId, playerShortName, batOrder, batInstance,
+            #                 ballsFaced, foursScored, sixesScored, runsScored, battingMinutes,
+            #                 strikeRate, dismissalTypeId, dismissalType, dismissalText,
+            #                 isOnStrike, isOnNonStrike, highlight
+
+            # Build pid→shortName map from both playing and non-playing members.
+            # Track opp roster pids (players + non-playing = DNB candidates).
             pid_to_name: dict[str, str] = {}
             opp_roster_pids: set[str] = set()
             for _team in (gr_data.get("teams") or []):
                 _team_name = (_team.get("displayName") or _team.get("name") or "").lower()
                 _is_our_team = bool(org_word and org_word in _team_name)
-                _roster = (_team.get("players") or _team.get("squad") or
-                           _team.get("participants") or _team.get("members") or [])
-                for _pl in _roster:
-                    _pid = _pl.get("id") or _pl.get("participantId")
-                    _name = (_pl.get("displayName") or
-                             " ".join(filter(None, [_pl.get("firstName"), _pl.get("lastName")])) or
-                             _pl.get("name") or _pl.get("shortName") or "")
+                _all_members = (_team.get("players") or []) + (_team.get("nonPlayingMembers") or [])
+                for _pl in _all_members:
+                    _pid = _pl.get("participantId") or _pl.get("id")
+                    _name = (_pl.get("playerShortName") or _pl.get("displayName") or
+                             _pl.get("name") or "")
                     if _pid and _name:
                         pid_to_name[_pid] = _name
                     if not _is_our_team and _pid:
                         opp_roster_pids.add(_pid)
 
-            # Accumulate our own DNB players missing from DB (games synced before
-            # the did_not_bat migration), keyed pid → (inn_num, bat_order)
+            # GR dismissalText is already formatted: "c S Aplin b W Dagg", "b W Dagg", etc.
+            # Capture dismissalText for our own batters to enrich their DB dismissal strings.
+            our_dismissal_text: dict[uuid.UUID, str] = {}
+
+            # Accumulate our own DNB players missing from DB (pre-migration games).
             our_missing_dnb: dict[uuid.UUID, tuple[int, int | None]] = {}
 
-            # Track all opp pids that appeared in any batting row (incl. DNB) and
-            # the innings number(s) where the opp actually batted (excl. DNB).
+            # Track opp pids seen in innings (incl. DNB) and which inn nums opp batted in.
             opp_all_batting_pids: set[str] = set()
             opp_batting_inn_nums: set[int] = set()
 
@@ -498,63 +485,35 @@ async def get_scorecard(
                         pid = uuid.UUID(pid_str)
                     except ValueError:
                         continue
+
                     if pid in known_ids:
-                        # Our player — check if they're a DNB absent from DB data
+                        # Our player: capture dismissalText for enrichment, handle DNB gap.
+                        dt_text = row.get("dismissalText")
+                        if dt_text:
+                            our_dismissal_text[pid] = dt_text
                         if pid not in db_batting_pids:
-                            dt_id = row.get("dismissalTypeId") or 0
-                            if dt_id != 0:
-                                dt_long = (row.get("dismissalType") or "").lower()
-                                if dt_long in _DNB:
-                                    our_missing_dnb[pid] = (inn_num, row.get("batOrder"))
-                        continue  # all other processing done via DB data
+                            dt_id_o = row.get("dismissalTypeId") or 0
+                            dt_long_o = (row.get("dismissalType") or "").lower()
+                            if dt_id_o != 0 and dt_long_o in _DNB:
+                                our_missing_dnb[pid] = (inn_num, row.get("batOrder"))
+                        continue
+
                     dt_id = row.get("dismissalTypeId") or 0
                     dt_long = row.get("dismissalType") or ""
                     is_dnb = dt_long.lower() in _DNB
-                    # Skip rows with no dismissal info that aren't explicitly marked DNB.
-                    # Note: GR sometimes uses dismissalTypeId=0 for DNB players too,
-                    # so check the dismissalType string before skipping.
                     if dt_id == 0 and not is_dnb:
                         continue
-                    # Try to get player name from GR batting row fields (sync.py
-                    # doesn't need them since it looks up by UUID, but they may exist).
-                    name = (row.get("participantName") or
-                            row.get("displayName") or
-                            row.get("name") or
-                            pid_to_name.get(pid_str, "Unknown"))
-                    # Skip players already in our DB batting data — catches UUID-namespace
-                    # mismatches where the same person has different IDs in PlayHQ vs GR.
+
+                    # playerShortName is on each batting row (confirmed by gr-debug).
+                    name = row.get("playerShortName") or pid_to_name.get(pid_str, "Unknown")
                     if _norm_name(name) in our_batting_fingerprints:
                         continue
-                    # Build enriched dismissal string with fielder/bowler names where known.
-                    dismissal_str = None
-                    if not is_dnb:
-                        fl_id_str = (row.get("fielderParticipantId") or
-                                     row.get("catcherParticipantId") or
-                                     row.get("dismissalFielderId"))
-                        bw_id_str = (row.get("bowlerParticipantId") or
-                                     row.get("dismissalBowlerId"))
-                        fl_name = bw_name = ""
-                        if fl_id_str:
-                            try:
-                                fl_name = _short_name(known_id_to_name.get(uuid.UUID(fl_id_str))) or ""
-                            except ValueError:
-                                pass
-                        if bw_id_str:
-                            try:
-                                bw_name = _short_name(known_id_to_name.get(uuid.UUID(bw_id_str))) or ""
-                            except ValueError:
-                                pass
-                        base = _DISMISSAL_SHORT.get(dt_long, dt_long.lower())
-                        if dt_long in ("Caught", "Stumped") and fl_name and bw_name:
-                            dismissal_str = f"{base} {fl_name} b {bw_name}"
-                        elif dt_long == "Caught" and bw_name:
-                            dismissal_str = f"c b {bw_name}"
-                        elif dt_long in ("Bowled", "LBW") and bw_name:
-                            dismissal_str = f"{base} {bw_name}"
-                        elif dt_long == "Run Out" and fl_name:
-                            dismissal_str = f"run out ({fl_name})"
-                        else:
-                            dismissal_str = base
+
+                    # dismissalText is pre-formatted: "c S Aplin b W Dagg", "b W Dagg", etc.
+                    dismissal_str = None if is_dnb else (
+                        row.get("dismissalText") or dt_long.lower() or None
+                    )
+
                     opp_all_batting_pids.add(pid_str)
                     if not is_dnb:
                         opp_batting_inn_nums.add(inn_num)
@@ -603,11 +562,17 @@ async def get_scorecard(
                         "no_balls": row.get("noBalls"),
                         "economy": econ,
                     })
-                    # Accumulate opp bowling extras (wides + no-balls they conceded)
                     opp_extras[inn_num] = opp_extras.get(inn_num, 0) + (row.get("wideBalls") or 0) + (row.get("noBalls") or 0)
 
-            # Inject DNB rows for opp roster members who didn't appear in any batting row.
-            # GR sometimes omits DNB players from the innings batting array entirely.
+            # Enrich our batting dismissal strings with GR's pre-formatted dismissalText.
+            for r in batting_flat:
+                if not r.get("did_not_bat") and r.get("player_id"):
+                    dt = our_dismissal_text.get(uuid.UUID(r["player_id"]))
+                    if dt:
+                        r["dismissal_type"] = dt
+
+            # Inject DNB rows for opp roster/non-playing members absent from innings batting.
+            # GR includes nonPlayingMembers in teams[] — covers Oscar Brown / Sachin Dhadli style cases.
             if opp_roster_pids and opp_batting_inn_nums:
                 opp_dnb_inn = min(opp_batting_inn_nums)
                 for dnb_pid_str in opp_roster_pids:
@@ -631,8 +596,7 @@ async def get_scorecard(
                         "batting_position": None, "did_not_bat": True,
                     })
 
-            # Append our own DNB players who were absent from DB data (pre-migration games).
-            # Fetch names in one query rather than one-per-player.
+            # Append our own DNB players missing from DB (pre-migration games).
             if our_missing_dnb:
                 dnb_player_res = await db.execute(
                     select(Player).where(Player.id.in_(our_missing_dnb.keys()))
