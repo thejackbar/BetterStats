@@ -121,6 +121,23 @@ async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
     ]
 
 
+@router.get("/{org_id}/grades")
+async def get_org_grades(org_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        text("""
+            SELECT DISTINCT COALESCE(g.display_name_override, g.name) AS display_name
+            FROM grades g
+            JOIN seasons s ON s.id = g.season_id
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            ORDER BY
+                (regexp_replace(COALESCE(g.display_name_override, g.name), '[^0-9].*', ''))::int NULLS LAST,
+                COALESCE(g.display_name_override, g.name)
+        """),
+        {"org_id": org_id},
+    )
+    return [{"name": row.display_name} for row in result]
+
+
 @router.get("/{org_id}/seasons/{season_id}/grades")
 async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(

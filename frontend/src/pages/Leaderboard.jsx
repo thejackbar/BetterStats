@@ -255,7 +255,10 @@ export default function Leaderboard() {
 
   if (inactive) return <ClubInactive />
 
-  const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading: clubLoading } = useClubData(orgId)
+  const { org, seasons, selectedSeason, setSelectedSeason, loading: clubLoading } = useClubData(orgId)
+
+  const [orgGrades, setOrgGrades] = useState([])
+  const [selectedGradeName, setSelectedGradeName] = useState(null)
 
   const [mainTab, setMainTab] = useState('batting')
   const [battingSort, setBattingSort] = useState('total_runs')
@@ -271,6 +274,11 @@ export default function Leaderboard() {
   const [fieldingRows, setFieldingRows] = useState([])
   const [loading, setLoading] = useState(true)
 
+  useEffect(() => {
+    if (!orgId) return
+    api.getOrgGrades(orgId).then(setOrgGrades).catch(() => setOrgGrades([]))
+  }, [orgId])
+
   const effectiveMinRuns = battingSort === 'average' ? minRuns : 0
   const effectiveMinOvers = bowlingSort === 'economy' ? minOvers : 0
   const effectiveMinWickets = bowlingSort === 'average' ? minWickets : 0
@@ -279,15 +287,15 @@ export default function Leaderboard() {
     if (!orgId) return
     setLoading(true)
     Promise.allSettled([
-      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns }),
-      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets }),
-      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, sortBy: fieldingSort, limit: 30 }),
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets }),
+      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30 }),
     ]).then(([b, bw, f]) => {
       if (b.status === 'fulfilled') setBattingRows(b.value)
       if (bw.status === 'fulfilled') setBowlingRows(bw.value)
       if (f.status === 'fulfilled') setFieldingRows(f.value)
     }).finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGrade, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets])
+  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets])
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
@@ -303,16 +311,31 @@ export default function Leaderboard() {
           meta={[<span key="s">All categories. All grades.</span>]}
         />
 
-        {/* Season filter */}
-        <div className="mb-5">
+        {/* Season + grade filters */}
+        <div className="mb-5 flex flex-wrap gap-3 items-center">
           <SeasonSelector
             seasons={seasons}
-            grades={grades}
+            grades={[]}
             selectedSeason={selectedSeason}
             setSelectedSeason={setSelectedSeason}
-            selectedGrade={selectedGrade}
-            setSelectedGrade={setSelectedGrade}
+            selectedGrade={null}
+            setSelectedGrade={() => {}}
           />
+          {orgGrades.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Grade</label>
+              <select
+                value={selectedGradeName || ''}
+                onChange={e => setSelectedGradeName(e.target.value || null)}
+                className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
+              >
+                <option value="">All grades</option>
+                {orgGrades.map(g => (
+                  <option key={g.name} value={g.name}>{g.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Main tab: batting / bowling / fielding */}
