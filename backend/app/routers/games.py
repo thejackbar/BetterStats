@@ -497,21 +497,22 @@ async def get_scorecard(
             opp_batting_inn_nums: set[int] = set()
             # Track our pids seen batting in GR innings (to avoid re-adding as DNB).
             our_batting_pids_seen_in_gr: set[uuid.UUID] = set()
-            # Innings-level extras from GR (byes/leg-byes not on bowling rows).
-            gr_inn_byes: dict[int, int] = {}
+            # Authoritative innings totals from GR innings objects.
+            # Fields confirmed: runsScored, numberOfWicketsFallen, totalExtras,
+            #                   byesRuns, legByesRuns, wideBalls, noBalls, penalties
+            gr_inn_totals: dict[int, dict] = {}
 
             for inn in (gr_data.get("innings") or []):
                 inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
 
-                # Read innings-level extras breakdown (byes, leg-byes, penalties).
-                # GR may not put these on individual bowling rows.
-                _ext = inn.get("extras") or {}
-                if isinstance(_ext, dict):
-                    _b = (_ext.get("byesScored") or _ext.get("byes") or 0)
-                    _lb = (_ext.get("legByesScored") or _ext.get("legByes") or 0)
-                    _pen = (_ext.get("penalties") or _ext.get("penaltyRuns") or 0)
-                    if _b + _lb + _pen:
-                        gr_inn_byes[inn_num] = gr_inn_byes.get(inn_num, 0) + _b + _lb + _pen
+                # Capture authoritative innings totals directly from GR.
+                # totalExtras covers byes/leg-byes/penalties not on bowling rows.
+                gr_inn_totals[inn_num] = {
+                    "runs": inn.get("runsScored"),
+                    "wickets": inn.get("numberOfWicketsFallen"),
+                    "extras": inn.get("totalExtras"),
+                    "batting_team_id": inn.get("battingTeamId"),
+                }
 
                 for row in (inn.get("batting") or []):
                     pid_str = row.get("participantId")
@@ -729,12 +730,17 @@ async def get_scorecard(
                     innings_totals[inn_num_t]["batting_team"] = our_display_name or game.home_team or ""
                 else:
                     innings_totals[inn_num_t]["batting_team"] = opp_display_name or game.away_team or ""
-                # Add opp extras (wides/no-balls) to the innings where opposition bowled
-                if inn_num_t in opp_extras and inn_num_t in our_batting_inns:
-                    innings_totals[inn_num_t]["extras"] = innings_totals[inn_num_t].get("extras", 0) + opp_extras[inn_num_t]
-                # Add innings-level byes/leg-byes from GR (not tracked per bowling row)
-                if inn_num_t in gr_inn_byes:
-                    innings_totals[inn_num_t]["extras"] = innings_totals[inn_num_t].get("extras", 0) + gr_inn_byes[inn_num_t]
+                # Use GR innings-level totalExtras as authoritative source.
+                # This covers byes, leg-byes, penalties and avoids the per-bowler
+                # field-name uncertainty. Applies to both our and opp innings.
+                if inn_num_t in gr_inn_totals:
+                    _gr = gr_inn_totals[inn_num_t]
+                    if _gr.get("extras") is not None:
+                        innings_totals[inn_num_t]["extras"] = _gr["extras"]
+                    # For opp innings, GR wicket count is more reliable than counting
+                    # dismissal strings (which can vary based on dismissal text parsing).
+                    if inn_num_t not in our_batting_inns and _gr.get("wickets") is not None:
+                        innings_totals[inn_num_t]["wickets"] = _gr["wickets"]
 
     except Exception as e:
         import traceback
