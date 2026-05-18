@@ -1,4 +1,4 @@
-/* 3D honour badge cards — adapted from Uiverse.io by Smit-Prajapati */
+/* 3D honour badge cards */
 
 .hb-parent {
   perspective: 800px;
@@ -10,67 +10,54 @@
 .hb-card {
   width: 160px;
   height: 160px;
-  border-radius: 24px;
-  background: var(--hb-gradient);
-  transition: all 0.5s ease-in-out;
+  border-radius: 18px;
+  background: var(--pb-surface, #10141d);
+  border: 1.5px solid var(--hb-border);
+  transition: transform 0.45s ease, box-shadow 0.45s ease, border-color 0.45s ease;
   transform-style: preserve-3d;
-  box-shadow: var(--hb-shadow-a) 20px 30px 15px -20px, var(--hb-shadow-b) 0px 15px 15px -3px;
+  box-shadow: 0 4px 16px var(--hb-shadow-b);
   position: relative;
   overflow: hidden;
 }
 
-.hb-glass {
-  transform-style: preserve-3d;
+/* Subtle inner gradient wash */
+.hb-card::before {
+  content: '';
   position: absolute;
-  inset: 5px;
-  border-radius: 26px;
-  border-top-right-radius: 100%;
-  background: linear-gradient(0deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.75) 100%);
-  transform: translate3d(0, 0, 16px);
-  border-left: 1px solid white;
-  border-bottom: 1px solid white;
-  transition: all 0.5s ease-in-out;
+  inset: 0;
+  border-radius: 18px;
+  background: var(--hb-wash);
   pointer-events: none;
 }
 
-.hb-logo {
+/* Icon circle — top-right */
+.hb-icon {
   position: absolute;
-  right: 0;
-  top: 0;
-  transform-style: preserve-3d;
-}
-
-.hb-circle {
-  display: block;
-  position: absolute;
-  aspect-ratio: 1;
+  top: 11px;
+  right: 11px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  top: 0;
-  right: 0;
-  box-shadow: rgba(100,100,111,0.12) -6px 6px 12px 0;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  background: var(--hb-circle-bg);
-  transition: all 0.5s ease-in-out;
-}
-
-.hb-circle1 { width: 86px;  transform: translate3d(0,0,12px); top: 5px; right: 5px; }
-.hb-circle2 { width: 68px;  transform: translate3d(0,0,24px); top: 6px;  right: 6px;  backdrop-filter: blur(1px); -webkit-backdrop-filter: blur(1px); transition-delay: 0.4s; }
-.hb-circle3 { width: 52px;  transform: translate3d(0,0,36px); top: 11px; right: 11px; transition-delay: 0.8s; }
-.hb-circle4 { width: 36px;  transform: translate3d(0,0,48px); top: 16px; right: 16px; transition-delay: 1.2s; }
-.hb-circle5 {
-  width: 22px;
-  transform: translate3d(0,0,60px);
-  top: 20px; right: 20px;
+  background: var(--hb-icon-bg);
   display: grid;
   place-content: center;
-  transition-delay: 1.6s;
+  transform: translate3d(0, 0, 10px);
+  transition: transform 0.45s ease;
+  z-index: 1;
 }
 
+/* Content */
 .hb-content {
-  padding: 52px 36px 0 14px;
-  transform: translate3d(0, 0, 17px);
-  position: relative;
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 48px;   /* clear the icon */
+  bottom: 34px;  /* clear the footer */
+  transform: translate3d(0, 0, 8px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .hb-category {
@@ -78,17 +65,19 @@
   font-size: 7.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  margin-bottom: 2px;
-  color: var(--hb-text-dim);
+  color: var(--pb-faintest, #3a3f50);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hb-title {
-  color: var(--hb-text);
+  color: var(--hb-accent-text);
   font-weight: 800;
-  font-size: 11.5px;
+  font-size: 13px;
   line-height: 1.25;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -96,95 +85,87 @@
 .hb-sub {
   font-family: ui-monospace, monospace;
   font-size: 9px;
-  color: var(--hb-text-dim);
-  margin-top: 2px;
+  color: var(--pb-dim, #8a90a2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.hb-detail {
-  font-family: ui-monospace, monospace;
-  font-size: 9px;
-  color: var(--hb-accent);
-  margin-left: 3px;
-}
-
+/* Footer */
 .hb-bottom {
-  padding: 4px 8px;
-  transform-style: preserve-3d;
   position: absolute;
-  bottom: 10px;
-  left: 10px;
-  right: 10px;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  transform: translate3d(0, 0, 17px);
+  border-top: 1px solid var(--hb-border);
+  transform: translate3d(0, 0, 8px);
 }
 
 .hb-season {
   font-family: ui-monospace, monospace;
   font-size: 8px;
   letter-spacing: 0.06em;
-  color: var(--hb-text-dim);
+  color: var(--pb-faint, #5b6072);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100px;
+  max-width: 96px;
 }
 
 .hb-count {
   font-family: ui-monospace, monospace;
-  font-size: 9px;
-  color: var(--hb-text-dim);
+  font-size: 8.5px;
   font-weight: 700;
+  color: var(--hb-accent-text);
+  flex-shrink: 0;
 }
 
+/* Admin buttons */
 .hb-admin-btns {
   display: flex;
   gap: 3px;
   opacity: 0;
   transition: opacity 0.15s;
+  flex-shrink: 0;
 }
 
-.hb-parent:hover .hb-admin-btns {
-  opacity: 1;
-}
+.hb-parent:hover .hb-admin-btns { opacity: 1; }
 
 .hb-edit-btn {
   font-size: 8px;
-  padding: 1px 4px;
+  padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(255,255,255,0.5);
-  color: var(--hb-text);
-  border: none;
+  background: var(--pb-surface2, #161b27);
+  color: var(--pb-dim, #8a90a2);
+  border: 1px solid var(--pb-hairline, #1d2331);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: color 0.15s;
 }
-
-.hb-edit-btn:hover { background: rgba(255,255,255,0.8); }
+.hb-edit-btn:hover { color: var(--pb-text, #e6e8ef); }
 
 .hb-del-btn {
   font-size: 8px;
-  padding: 1px 4px;
+  padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(220,50,50,0.2);
-  color: #c00;
-  border: none;
+  background: rgba(239,91,91,0.1);
+  color: var(--pb-red, #ef5b5b);
+  border: 1px solid rgba(239,91,91,0.2);
   cursor: pointer;
-  transition: background 0.15s;
 }
+.hb-del-btn:hover { background: rgba(239,91,91,0.2); }
 
-.hb-del-btn:hover { background: rgba(220,50,50,0.4); }
-
-/* Hover 3D tilt */
+/* Hover lift */
 .hb-parent:hover .hb-card {
-  transform: rotate3d(1, 1, 0, 22deg);
-  box-shadow: var(--hb-shadow-a-h) 20px 30px 15px -20px, var(--hb-shadow-b-h) 0px 15px 20px 0;
+  transform: rotate3d(1, 1, 0, 12deg) translateY(-2px);
+  box-shadow: 0 12px 32px var(--hb-shadow-b), 0 0 0 1px var(--hb-border-hover);
+  border-color: var(--hb-border-hover);
 }
 
-.hb-parent:hover .hb-card .hb-circle2 { transform: translate3d(0,0,36px); }
-.hb-parent:hover .hb-card .hb-circle3 { transform: translate3d(0,0,48px); }
-.hb-parent:hover .hb-card .hb-circle4 { transform: translate3d(0,0,60px); }
-.hb-parent:hover .hb-card .hb-circle5 { transform: translate3d(0,0,72px); }
+.hb-parent:hover .hb-icon {
+  transform: translate3d(0, 0, 20px);
+}

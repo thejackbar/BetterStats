@@ -1141,48 +1141,36 @@ function AchievementsSection({ playerId, orgId, playerName }) {
 
   const BADGE_THEMES = {
     honour: {
-      '--hb-gradient':    'linear-gradient(135deg, #ffd700 0%, #ff8c00 100%)',
-      '--hb-circle-bg':   'rgba(255, 210, 0, 0.22)',
-      '--hb-text':        '#7c3d00',
-      '--hb-text-dim':    'rgba(120, 60, 0, 0.65)',
-      '--hb-accent':      '#c86000',
-      '--hb-shadow-a':    'rgba(140, 80, 0, 0)',
-      '--hb-shadow-b':    'rgba(140, 80, 0, 0.22)',
-      '--hb-shadow-a-h':  'rgba(140, 80, 0, 0.28)',
-      '--hb-shadow-b-h':  'rgba(140, 80, 0, 0.12)',
+      '--hb-accent-text':   '#f5b542',
+      '--hb-border':        'rgba(245, 181, 66, 0.3)',
+      '--hb-border-hover':  'rgba(245, 181, 66, 0.7)',
+      '--hb-icon-bg':       'rgba(245, 181, 66, 0.15)',
+      '--hb-wash':          'linear-gradient(135deg, rgba(245,181,66,0.06) 0%, transparent 60%)',
+      '--hb-shadow-b':      'rgba(245, 181, 66, 0.12)',
     },
     role: {
-      '--hb-gradient':    'linear-gradient(135deg, #70bfff 0%, #1a60f0 100%)',
-      '--hb-circle-bg':   'rgba(100, 170, 255, 0.22)',
-      '--hb-text':        '#002880',
-      '--hb-text-dim':    'rgba(0, 40, 128, 0.65)',
-      '--hb-accent':      '#1a5ef0',
-      '--hb-shadow-a':    'rgba(0, 30, 140, 0)',
-      '--hb-shadow-b':    'rgba(0, 30, 140, 0.22)',
-      '--hb-shadow-a-h':  'rgba(0, 30, 140, 0.28)',
-      '--hb-shadow-b-h':  'rgba(0, 30, 140, 0.12)',
+      '--hb-accent-text':   '#60a5fa',
+      '--hb-border':        'rgba(96, 165, 250, 0.3)',
+      '--hb-border-hover':  'rgba(96, 165, 250, 0.7)',
+      '--hb-icon-bg':       'rgba(96, 165, 250, 0.15)',
+      '--hb-wash':          'linear-gradient(135deg, rgba(96,165,250,0.06) 0%, transparent 60%)',
+      '--hb-shadow-b':      'rgba(96, 165, 250, 0.12)',
     },
     award: {
-      '--hb-gradient':    'linear-gradient(135deg, #00ffd6 0%, #08e260 100%)',
-      '--hb-circle-bg':   'rgba(0, 249, 203, 0.22)',
-      '--hb-text':        '#00613a',
-      '--hb-text-dim':    'rgba(0, 100, 60, 0.65)',
-      '--hb-accent':      '#00a060',
-      '--hb-shadow-a':    'rgba(5, 71, 17, 0)',
-      '--hb-shadow-b':    'rgba(5, 71, 17, 0.22)',
-      '--hb-shadow-a-h':  'rgba(5, 71, 17, 0.28)',
-      '--hb-shadow-b-h':  'rgba(5, 71, 17, 0.12)',
+      '--hb-accent-text':   '#16c784',
+      '--hb-border':        'rgba(22, 199, 132, 0.3)',
+      '--hb-border-hover':  'rgba(22, 199, 132, 0.7)',
+      '--hb-icon-bg':       'rgba(22, 199, 132, 0.15)',
+      '--hb-wash':          'linear-gradient(135deg, rgba(22,199,132,0.06) 0%, transparent 60%)',
+      '--hb-shadow-b':      'rgba(22, 199, 132, 0.12)',
     },
     milestone: {
-      '--hb-gradient':    'linear-gradient(135deg, #c084fc 0%, #7c3aed 100%)',
-      '--hb-circle-bg':   'rgba(192, 132, 252, 0.22)',
-      '--hb-text':        '#3b0764',
-      '--hb-text-dim':    'rgba(60, 10, 100, 0.65)',
-      '--hb-accent':      '#7c3aed',
-      '--hb-shadow-a':    'rgba(60, 10, 100, 0)',
-      '--hb-shadow-b':    'rgba(60, 10, 100, 0.22)',
-      '--hb-shadow-a-h':  'rgba(60, 10, 100, 0.28)',
-      '--hb-shadow-b-h':  'rgba(60, 10, 100, 0.12)',
+      '--hb-accent-text':   '#a78bfa',
+      '--hb-border':        'rgba(167, 139, 250, 0.3)',
+      '--hb-border-hover':  'rgba(167, 139, 250, 0.7)',
+      '--hb-icon-bg':       'rgba(167, 139, 250, 0.15)',
+      '--hb-wash':          'linear-gradient(135deg, rgba(167,139,250,0.06) 0%, transparent 60%)',
+      '--hb-shadow-b':      'rgba(167, 139, 250, 0.12)',
     },
   }
 
@@ -1195,29 +1183,22 @@ function AchievementsSection({ playerId, orgId, playerName }) {
     return (
       <div className="hb-parent" style={BADGE_THEMES[theme]}>
         <div className="hb-card">
-          <div className="hb-logo">
-            <span className="hb-circle hb-circle1" />
-            <span className="hb-circle hb-circle2" />
-            <span className="hb-circle hb-circle3" />
-            <span className="hb-circle hb-circle4" />
-            <span className="hb-circle hb-circle5">
-              <img src={iconSrc} alt="" style={{ width: 12, height: 12, objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
-            </span>
+          <div className="hb-icon">
+            <img src={iconSrc} alt="" style={{ width: 14, height: 14, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.85 }} />
           </div>
-          <div className="hb-glass" />
           <div className="hb-content">
             <span className="hb-category">{a.category}</span>
-            <span className="hb-title" style={{ display: 'block' }}>{label}</span>
+            <span className="hb-title">{label}</span>
             {(sub || detail) && (
               <span className="hb-sub">
                 {sub && <span>{sub}</span>}
-                {detail && <span className="hb-detail">{detail}</span>}
+                {detail && <span style={{ color: 'var(--hb-accent-text)', marginLeft: 3 }}>{detail}</span>}
               </span>
             )}
           </div>
           <div className="hb-bottom">
             <span className="hb-season">{season}</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
               {count != null && count > 1 && <span className="hb-count">{count}×</span>}
               {canEdit && (
                 <div className="hb-admin-btns">
