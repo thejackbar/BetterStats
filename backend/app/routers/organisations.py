@@ -285,6 +285,19 @@ async def get_org_results(
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
         WHERE s.organisation_id = :org_id
+        AND (
+            g.result IS NOT NULL
+            OR EXISTS (
+                SELECT 1 FROM batting_innings bi
+                JOIN players p ON p.id = bi.player_id
+                WHERE bi.game_id = g.id AND p.organisation_id = :org_id
+            )
+            OR EXISTS (
+                SELECT 1 FROM bowling_spells bs
+                JOIN players p ON p.id = bs.player_id
+                WHERE bs.game_id = g.id AND p.organisation_id = :org_id
+            )
+        )
     """
     params: dict = {"org_id": org_id}
     if season_id:

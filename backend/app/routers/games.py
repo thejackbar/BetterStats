@@ -398,6 +398,21 @@ async def get_scorecard(
             }
             _DNB = {"absent", "did not bat", "dnb"}
 
+            # Build participantId → name map from team rosters in GR data.
+            # GR batting/bowling rows only carry participantId; names live in
+            # the teams[].players[] (or similar) array at the top level.
+            pid_to_name: dict[str, str] = {}
+            for _team in (gr_data.get("teams") or []):
+                _roster = (_team.get("players") or _team.get("squad") or
+                           _team.get("participants") or _team.get("members") or [])
+                for _pl in _roster:
+                    _pid = _pl.get("id") or _pl.get("participantId")
+                    _name = (_pl.get("displayName") or
+                             " ".join(filter(None, [_pl.get("firstName"), _pl.get("lastName")])) or
+                             _pl.get("name") or _pl.get("shortName") or "")
+                    if _pid and _name:
+                        pid_to_name[_pid] = _name
+
             for inn in (gr_data.get("innings") or []):
                 inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
 
@@ -416,9 +431,7 @@ async def get_scorecard(
                         continue
                     dt_long = row.get("dismissalType") or ""
                     is_dnb = dt_long.lower() in _DNB
-                    name = (row.get("displayName") or
-                            " ".join(filter(None, [row.get("firstName"), row.get("lastName")])) or
-                            "Unknown")
+                    name = pid_to_name.get(pid_str, "Unknown")
                     opp_batting.append({
                         "innings_number": inn_num,
                         "player_id": None,
@@ -443,9 +456,7 @@ async def get_scorecard(
                         continue
                     if pid in known_ids:
                         continue
-                    name = (row.get("displayName") or
-                            " ".join(filter(None, [row.get("firstName"), row.get("lastName")])) or
-                            "Unknown")
+                    name = pid_to_name.get(pid_str, "Unknown")
                     econ = None
                     try:
                         econ_raw = row.get("economy")
@@ -483,6 +494,16 @@ async def get_scorecard(
             summary_teams = (gr_data.get("matchSummary") or {}).get("teams") or []
             home_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "") or game.home_team or ""
             away_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "") or game.away_team or ""
+
+            # Determine if our org is home or away by matching org name against team names.
+            # We can't use home_name == game.home_team (always True) — we need to know
+            # if WE are home or away in this specific game.
+            org_obj = await db.get(Organisation, season.organisation_id) if season else None
+            org_word = (org_obj.name or "").lower().split()[0] if org_obj and org_obj.name else ""
+            we_are_home = bool(org_word and game.home_team and org_word in game.home_team.lower())
+            our_display_name = home_name if we_are_home else away_name
+            opp_display_name = away_name if we_are_home else home_name
+
             our_batting_inns = {r["innings_number"] for r in batting_flat if not r["did_not_bat"]}
             for inn_num_t in set(list(innings_totals.keys()) + [r["innings_number"] for r in opp_batting]):
                 if inn_num_t not in innings_totals:
@@ -492,15 +513,9 @@ async def get_scorecard(
                     innings_totals[inn_num_t]["runs"] = opp_inn_totals[inn_num_t]["runs"]
                     innings_totals[inn_num_t]["wickets"] = opp_inn_totals[inn_num_t]["wickets"]
                 if inn_num_t in our_batting_inns:
-                    # We batted — figure out if we're home or away using team names
-                    if home_name and game.home_team and home_name.lower().strip() == game.home_team.lower().strip():
-                        innings_totals[inn_num_t]["batting_team"] = home_name
-                    elif away_name:
-                        innings_totals[inn_num_t]["batting_team"] = away_name
+                    innings_totals[inn_num_t]["batting_team"] = our_display_name or game.home_team or ""
                 else:
-                    # Opposition batted
-                    opp_name = away_name if (home_name and game.home_team and home_name.lower().strip() == game.home_team.lower().strip()) else home_name
-                    innings_totals[inn_num_t]["batting_team"] = opp_name or ""
+                    innings_totals[inn_num_t]["batting_team"] = opp_display_name or game.away_team or ""
                 # Add opp extras to the innings where opposition bowled (= innings where we batted)
                 if inn_num_t in opp_extras and inn_num_t in our_batting_inns:
                     innings_totals[inn_num_t]["extras"] = innings_totals[inn_num_t].get("extras", 0) + opp_extras[inn_num_t]

@@ -46,8 +46,9 @@ function MatchHeader({ game, innings }) {
   // Build per-innings data with accurate totals, overs, RR
   const inningsData = innings.map(inn => {
     const t = (game.innings_totals || {})[inn.num] || {}
-    // Use backend totals if available, fall back to summing batting rows
-    const runs = t.runs ?? inn.batting.reduce((s, r) => s + (r.runs ?? 0), 0)
+    // Use backend totals if available, fall back to summing batting rows. Add extras to total.
+    const batsRuns = t.runs ?? inn.batting.reduce((s, r) => s + (r.runs ?? 0), 0)
+    const runs = batsRuns != null ? batsRuns + (t.extras ?? 0) : null
     const wickets = t.runs != null ? t.wickets : inn.batting.filter(r => !r.not_out && r.dismissal_type).length
     const balls = sumOversBalls(inn.bowling)
     const oversStr = ballsToOversStr(balls)
@@ -173,13 +174,14 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
   const dnb = batting.filter(r => r.did_not_bat)
   if (!batted.length && !dnb.length) return null
 
-  // Use backend total if available, otherwise sum batting rows
-  const total = inningsTotal?.runs ?? batted.reduce((s, r) => s + (r.runs ?? 0), 0)
+  // Use backend total if available, otherwise sum batting rows. Always add extras to total.
+  const extras = inningsTotal?.extras ?? null
+  const batsRuns = inningsTotal?.runs ?? batted.reduce((s, r) => s + (r.runs ?? 0), 0)
+  const total = batsRuns != null ? batsRuns + (extras ?? 0) : null
   const wickets = inningsTotal?.runs != null
     ? inningsTotal.wickets
     : batted.filter(r => !r.not_out && r.dismissal_type).length
   const score = fmtScore(total, wickets)
-  const extras = inningsTotal?.extras ?? null
 
   return (
     <div className="pb-card overflow-hidden">
