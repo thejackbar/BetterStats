@@ -37,6 +37,18 @@ function fmtDismissal(text) {
   })
 }
 
+// True iff two team-name strings refer to the same club.
+// Splits on whitespace/hyphens, drops tokens shorter than 4 chars (e.g. "XI",
+// "CC", "6th"), then checks for any exact-word overlap.
+// Using String.includes() would give false positives: "ross" ⊂ "applecross".
+function teamsMatch(a, b) {
+  if (!a || !b) return false
+  const sig = s => s.toLowerCase().split(/[\s\-]+/).filter(w => w.length >= 4)
+  const aWords = sig(a)
+  const bSet = new Set(sig(b))
+  return aWords.some(w => bSet.has(w))
+}
+
 function MatchHeader({ game, innings }) {
   const dateStr = game.played_at
     ? new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()
@@ -64,9 +76,7 @@ function MatchHeader({ game, innings }) {
   // Determine which innings is home vs away
   let homeInn = inn1Data, awayInn = inn2Data
   if (inn1Data?.battingTeam && homeTeam) {
-    const inn1IsHome = inn1Data.battingTeam.toLowerCase().includes(homeTeam.toLowerCase().split(' ')[0])
-      || homeTeam.toLowerCase().includes(inn1Data.battingTeam.toLowerCase().split(' ')[0])
-    if (!inn1IsHome && inn2Data) {
+    if (!teamsMatch(inn1Data.battingTeam, homeTeam) && inn2Data) {
       homeInn = inn2Data
       awayInn = inn1Data
     }
@@ -74,11 +84,7 @@ function MatchHeader({ game, innings }) {
 
   // Win/loss background tints
   const winner = (game.winning_team || '').toLowerCase().trim()
-  const homeWon = !!winner && !!(homeTeam) && (
-    winner === homeTeam.toLowerCase().trim() ||
-    winner.includes(homeTeam.toLowerCase().split(' ')[0]) ||
-    homeTeam.toLowerCase().includes(winner.split(' ')[0])
-  )
+  const homeWon = !!winner && !!(homeTeam) && teamsMatch(game.winning_team || '', homeTeam)
   const awayTeam = game.away_team || ''
   const awayWon = !!winner && !homeWon
   const winBg = 'rgba(22,199,132,0.07)'
