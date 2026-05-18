@@ -391,6 +391,12 @@ async def get_scorecard(
             else:
                 known_ids = set()
 
+            # Player IDs already in DB batting data for this game.
+            # Used below to fill in DNB rows that predate the did_not_bat migration.
+            db_batting_pids: set = {
+                uuid.UUID(r["player_id"]) for r in batting_flat if r["player_id"]
+            }
+
             _DISMISSAL_SHORT = {
                 "Caught": "c", "Bowled": "b", "LBW": "lbw", "Stumped": "st",
                 "Run Out": "run out", "Hit Wicket": "hit wicket",
@@ -400,7 +406,7 @@ async def get_scorecard(
 
             # Build participantId → name map from team rosters in GR data.
             # GR batting/bowling rows only carry participantId; names live in
-            # the teams[].players[] (or similar) array at the top level.
+            # teams[].players[] (or similar) at the top level.
             pid_to_name: dict[str, str] = {}
             for _team in (gr_data.get("teams") or []):
                 _roster = (_team.get("players") or _team.get("squad") or
@@ -412,6 +418,10 @@ async def get_scorecard(
                              _pl.get("name") or _pl.get("shortName") or "")
                     if _pid and _name:
                         pid_to_name[_pid] = _name
+
+            # Accumulate our own DNB players missing from DB (games synced before
+            # the did_not_bat migration), keyed pid → (inn_num, bat_order)
+            our_missing_dnb: dict[uuid.UUID, tuple[int, int | None]] = {}
 
             for inn in (gr_data.get("innings") or []):
                 inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
@@ -425,7 +435,14 @@ async def get_scorecard(
                     except ValueError:
                         continue
                     if pid in known_ids:
-                        continue  # already covered by DB data
+                        # Our player — check if they're a DNB absent from DB data
+                        if pid not in db_batting_pids:
+                            dt_id = row.get("dismissalTypeId") or 0
+                            if dt_id != 0:
+                                dt_long = (row.get("dismissalType") or "").lower()
+                                if dt_long in _DNB:
+                                    our_missing_dnb[pid] = (inn_num, row.get("batOrder"))
+                        continue  # all other processing done via DB data
                     dt_id = row.get("dismissalTypeId") or 0
                     if dt_id == 0:
                         continue
@@ -477,6 +494,24 @@ async def get_scorecard(
                     })
                     # Accumulate opp bowling extras (wides + no-balls they conceded)
                     opp_extras[inn_num] = opp_extras.get(inn_num, 0) + (row.get("wideBalls") or 0) + (row.get("noBalls") or 0)
+
+            # Append our own DNB players who were absent from DB data (pre-migration games).
+            # Fetch names in one query rather than one-per-player.
+            if our_missing_dnb:
+                dnb_player_res = await db.execute(
+                    select(Player).where(Player.id.in_(our_missing_dnb.keys()))
+                )
+                dnb_player_map = {p.id: p for p in dnb_player_res.scalars().all()}
+                for dnb_pid, (dnb_inn, dnb_order) in our_missing_dnb.items():
+                    dnb_player = dnb_player_map.get(dnb_pid)
+                    batting_flat.append({
+                        "innings_number": dnb_inn,
+                        "player_id": str(dnb_pid),
+                        "player_name": dnb_player.display_name if dnb_player else None,
+                        "runs": None, "balls": None, "fours": None, "sixes": None,
+                        "strike_rate": None, "dismissal_type": None, "not_out": False,
+                        "batting_position": dnb_order, "did_not_bat": True,
+                    })
 
             # Compute opp batting totals per innings (runs+wickets) so the frontend
             # can display the correct score in the opp batting card header.
