@@ -1198,15 +1198,13 @@ function AchievementsSection({ playerId, orgId, playerName }) {
           </div>
           <div className="hb-bottom">
             <span className="hb-season">{season}</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              {count != null && count > 1 && <span className="hb-count">{count}×</span>}
-              {canEdit && (
-                <div className="hb-admin-btns">
-                  {onEdit && <button className="hb-edit-btn" onClick={onEdit}>Edit</button>}
-                  {onDelete && <button className="hb-del-btn" onClick={onDelete}>✕</button>}
-                </div>
-              )}
-            </div>
+            {count != null && count > 1 && <span className="hb-count">{count}×</span>}
+            {canEdit && (
+              <div className="hb-admin-btns">
+                {onEdit && <button className="hb-edit-btn" onClick={onEdit}>Edit</button>}
+                {onDelete && <button className="hb-del-btn" onClick={onDelete}>✕</button>}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1309,7 +1307,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               const seasons_str = shorts.length >= 3
                 ? `${shorts[shorts.length - 1]} – ${shorts[0]}`
                 : shorts.join(', ')
-              const synth = { ...g.instances[0], subcategory: g.subcategory, achievement: g.achievement }
+              const synth = { ...g.instances[0], subcategory: g.subcategory, achievement: g.achievement, detail: null }
               return (
                 <HonourBadge key={i} a={synth} theme="role"
                   count={g.instances.length}

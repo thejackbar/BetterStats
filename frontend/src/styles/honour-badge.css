@@ -14,7 +14,7 @@
   background: var(--pb-surface, #10141d);
   border: 1.5px solid var(--hb-border);
   transition: transform 0.45s ease, box-shadow 0.45s ease, border-color 0.45s ease;
-  transform-style: preserve-3d;
+  /* No transform-style: preserve-3d — it prevents overflow: hidden from clipping */
   box-shadow: 0 4px 16px var(--hb-shadow-b);
   position: relative;
   overflow: hidden;
@@ -41,8 +41,6 @@
   background: var(--hb-icon-bg);
   display: grid;
   place-content: center;
-  transform: translate3d(0, 0, 10px);
-  transition: transform 0.45s ease;
   z-index: 1;
 }
 
@@ -51,9 +49,8 @@
   position: absolute;
   top: 12px;
   left: 12px;
-  right: 48px;   /* clear the icon */
-  bottom: 34px;  /* clear the footer */
-  transform: translate3d(0, 0, 8px);
+  right: 48px;  /* clear the icon */
+  bottom: 32px; /* clear the footer */
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -99,12 +96,12 @@
   left: 0;
   right: 0;
   height: 30px;
-  padding: 0 12px;
+  padding: 0 10px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   border-top: 1px solid var(--hb-border);
-  transform: translate3d(0, 0, 8px);
+  overflow: hidden;
 }
 
 .hb-season {
@@ -115,7 +112,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 96px;
+  flex: 1;
+  min-width: 0;
 }
 
 .hb-count {
@@ -169,8 +167,4 @@
   transform: rotate3d(1, 1, 0, 12deg) translateY(-2px);
   box-shadow: 0 12px 32px var(--hb-shadow-b), 0 0 0 1px var(--hb-border-hover);
   border-color: var(--hb-border-hover);
-}
-
-.hb-parent:hover .hb-icon {
-  transform: translate3d(0, 0, 20px);
 }
