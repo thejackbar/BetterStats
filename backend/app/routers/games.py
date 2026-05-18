@@ -406,16 +406,12 @@ async def get_scorecard(
         import re as _re
         gr_data = await get_match_scorecard(str(game.id))
         if gr_data:
-            # Our players: UUID → display_name (for dismissal enrichment on our batting)
             if season:
                 pid_res = await db.execute(
-                    select(Player.id, Player.display_name)
-                    .where(Player.organisation_id == season.organisation_id)
+                    select(Player.id).where(Player.organisation_id == season.organisation_id)
                 )
-                known_id_to_name: dict[uuid.UUID, str] = {r[0]: r[1] for r in pid_res}
-                known_ids: set = set(known_id_to_name.keys())
+                known_ids: set = {r[0] for r in pid_res}
             else:
-                known_id_to_name = {}
                 known_ids = set()
 
             # Player IDs already in DB batting data for this game.
@@ -463,10 +459,6 @@ async def get_scorecard(
                     if not _is_our_team and _pid:
                         opp_roster_pids.add(_pid)
 
-            # GR dismissalText is already formatted: "c S Aplin b W Dagg", "b W Dagg", etc.
-            # Capture dismissalText for our own batters to enrich their DB dismissal strings.
-            our_dismissal_text: dict[uuid.UUID, str] = {}
-
             # Accumulate our own DNB players missing from DB (pre-migration games).
             our_missing_dnb: dict[uuid.UUID, tuple[int, int | None]] = {}
 
@@ -487,10 +479,6 @@ async def get_scorecard(
                         continue
 
                     if pid in known_ids:
-                        # Our player: capture dismissalText for enrichment, handle DNB gap.
-                        dt_text = row.get("dismissalText")
-                        if dt_text:
-                            our_dismissal_text[pid] = dt_text
                         if pid not in db_batting_pids:
                             dt_id_o = row.get("dismissalTypeId") or 0
                             dt_long_o = (row.get("dismissalType") or "").lower()
@@ -563,13 +551,6 @@ async def get_scorecard(
                         "economy": econ,
                     })
                     opp_extras[inn_num] = opp_extras.get(inn_num, 0) + (row.get("wideBalls") or 0) + (row.get("noBalls") or 0)
-
-            # Enrich our batting dismissal strings with GR's pre-formatted dismissalText.
-            for r in batting_flat:
-                if not r.get("did_not_bat") and r.get("player_id"):
-                    dt = our_dismissal_text.get(uuid.UUID(r["player_id"]))
-                    if dt:
-                        r["dismissal_type"] = dt
 
             # Inject DNB rows for opp roster/non-playing members absent from innings batting.
             # GR includes nonPlayingMembers in teams[] — covers Oscar Brown / Sachin Dhadli style cases.
@@ -651,7 +632,8 @@ async def get_scorecard(
                     innings_totals[inn_num_t]["extras"] = innings_totals[inn_num_t].get("extras", 0) + opp_extras[inn_num_t]
 
     except Exception as e:
-        logger.warning(f"get_scorecard: GR live-fetch failed for {game_id}: {e}")
+        import traceback
+        logger.error(f"get_scorecard: GR live-fetch failed for {game_id}: {e}\n{traceback.format_exc()}")
 
     return {
         "id": str(game.id),
