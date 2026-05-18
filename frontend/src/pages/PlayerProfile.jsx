@@ -1304,7 +1304,11 @@ function AchievementsSection({ playerId, orgId, playerName }) {
           <Label className="block mb-3">ROLES</Label>
           <div className="flex flex-wrap gap-4">
             {rolesList.map((g, i) => {
-              const seasons_str = g.instances.map(inst => formatSeasonShort(inst.season, seasons)).filter(Boolean).join(', ')
+              // instances sorted most-recent-first; show range for 3+, list for 1–2
+              const shorts = g.instances.map(inst => formatSeasonShort(inst.season, seasons)).filter(Boolean)
+              const seasons_str = shorts.length >= 3
+                ? `${shorts[shorts.length - 1]} – ${shorts[0]}`
+                : shorts.join(', ')
               const synth = { ...g.instances[0], subcategory: g.subcategory, achievement: g.achievement }
               return (
                 <HonourBadge key={i} a={synth} theme="role"
