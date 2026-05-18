@@ -12,6 +12,7 @@ import {
   AnimatedNum, Sparkline, Label, Card, Btn,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
+import '../styles/honour-badge.css'
 import {
   BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -1138,31 +1139,98 @@ function AchievementsSection({ playerId, orgId, playerName }) {
     return s
   }
 
-  const AchievementCard = ({ a, accent = false }) => (
-    <div className="relative group rounded border pb-hairline p-4 bg-pb-surface hover:bg-pb-surface2 transition-colors"
-         style={accent ? { borderColor: 'color-mix(in srgb, var(--pb-amber) 40%, transparent)', background: 'color-mix(in srgb, var(--pb-amber) 5%, transparent)' } : {}}>
-      <div className="flex items-start gap-3">
-        <ThiingIcon src={CATEGORY_ICON_SRC[a.category] || thiings.trophy} alt="" className="w-7 h-7 shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest uppercase mb-0.5">{a.category}</div>
-          <div className="text-pb-text text-[14px] font-semibold leading-tight">{resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)}</div>
-          {(a.subcategory || a.detail) && (
-            <div className="font-mono text-[11px] text-pb-dim mt-0.5">
-              {a.subcategory && <span>{a.subcategory}</span>}
-              {a.detail && <span className="ml-1" style={{ color: 'var(--pb-accent)' }}>{a.detail}</span>}
+  const BADGE_THEMES = {
+    honour: {
+      '--hb-gradient':    'linear-gradient(135deg, #ffd700 0%, #ff8c00 100%)',
+      '--hb-circle-bg':   'rgba(255, 210, 0, 0.22)',
+      '--hb-text':        '#7c3d00',
+      '--hb-text-dim':    'rgba(120, 60, 0, 0.65)',
+      '--hb-accent':      '#c86000',
+      '--hb-shadow-a':    'rgba(140, 80, 0, 0)',
+      '--hb-shadow-b':    'rgba(140, 80, 0, 0.22)',
+      '--hb-shadow-a-h':  'rgba(140, 80, 0, 0.28)',
+      '--hb-shadow-b-h':  'rgba(140, 80, 0, 0.12)',
+    },
+    role: {
+      '--hb-gradient':    'linear-gradient(135deg, #70bfff 0%, #1a60f0 100%)',
+      '--hb-circle-bg':   'rgba(100, 170, 255, 0.22)',
+      '--hb-text':        '#002880',
+      '--hb-text-dim':    'rgba(0, 40, 128, 0.65)',
+      '--hb-accent':      '#1a5ef0',
+      '--hb-shadow-a':    'rgba(0, 30, 140, 0)',
+      '--hb-shadow-b':    'rgba(0, 30, 140, 0.22)',
+      '--hb-shadow-a-h':  'rgba(0, 30, 140, 0.28)',
+      '--hb-shadow-b-h':  'rgba(0, 30, 140, 0.12)',
+    },
+    award: {
+      '--hb-gradient':    'linear-gradient(135deg, #00ffd6 0%, #08e260 100%)',
+      '--hb-circle-bg':   'rgba(0, 249, 203, 0.22)',
+      '--hb-text':        '#00613a',
+      '--hb-text-dim':    'rgba(0, 100, 60, 0.65)',
+      '--hb-accent':      '#00a060',
+      '--hb-shadow-a':    'rgba(5, 71, 17, 0)',
+      '--hb-shadow-b':    'rgba(5, 71, 17, 0.22)',
+      '--hb-shadow-a-h':  'rgba(5, 71, 17, 0.28)',
+      '--hb-shadow-b-h':  'rgba(5, 71, 17, 0.12)',
+    },
+    milestone: {
+      '--hb-gradient':    'linear-gradient(135deg, #c084fc 0%, #7c3aed 100%)',
+      '--hb-circle-bg':   'rgba(192, 132, 252, 0.22)',
+      '--hb-text':        '#3b0764',
+      '--hb-text-dim':    'rgba(60, 10, 100, 0.65)',
+      '--hb-accent':      '#7c3aed',
+      '--hb-shadow-a':    'rgba(60, 10, 100, 0)',
+      '--hb-shadow-b':    'rgba(60, 10, 100, 0.22)',
+      '--hb-shadow-a-h':  'rgba(60, 10, 100, 0.28)',
+      '--hb-shadow-b-h':  'rgba(60, 10, 100, 0.12)',
+    },
+  }
+
+  const HonourBadge = ({ a, theme = 'award', count = null, seasonsStr = null, onEdit, onDelete }) => {
+    const iconSrc = CATEGORY_ICON_SRC[a.category] || thiings.trophy
+    const label = resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)
+    const sub = a.subcategory
+    const detail = a.detail
+    const season = seasonsStr || seasonRange(a)
+    return (
+      <div className="hb-parent" style={BADGE_THEMES[theme]}>
+        <div className="hb-card">
+          <div className="hb-logo">
+            <span className="hb-circle hb-circle1" />
+            <span className="hb-circle hb-circle2" />
+            <span className="hb-circle hb-circle3" />
+            <span className="hb-circle hb-circle4" />
+            <span className="hb-circle hb-circle5">
+              <img src={iconSrc} alt="" style={{ width: 18, height: 18, objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
+            </span>
+          </div>
+          <div className="hb-glass" />
+          <div className="hb-content">
+            <span className="hb-category">{a.category}</span>
+            <span className="hb-title" style={{ display: 'block' }}>{label}</span>
+            {(sub || detail) && (
+              <span className="hb-sub">
+                {sub && <span>{sub}</span>}
+                {detail && <span className="hb-detail">{detail}</span>}
+              </span>
+            )}
+          </div>
+          <div className="hb-bottom">
+            <span className="hb-season">{season}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {count != null && count > 1 && <span className="hb-count">{count}×</span>}
+              {canEdit && (
+                <div className="hb-admin-btns">
+                  {onEdit && <button className="hb-edit-btn" onClick={onEdit}>Edit</button>}
+                  {onDelete && <button className="hb-del-btn" onClick={onDelete}>✕</button>}
+                </div>
+              )}
             </div>
-          )}
-          <div className="font-mono text-[10px] text-pb-faint tracking-wide2 mt-1">{seasonRange(a)}</div>
+          </div>
         </div>
       </div>
-      {canEdit && (
-        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={() => openEdit(a)} className="text-[10px] text-pb-faint hover:text-pb-text px-1.5 py-0.5 rounded hover:bg-pb-surface2">Edit</button>
-          <button onClick={() => handleDelete(a.id)} className="text-[10px] text-pb-red hover:text-pb-red px-1.5 py-0.5 rounded hover:bg-pb-surface2">✕</button>
-        </div>
-      )}
-    </div>
-  )
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -1241,36 +1309,28 @@ function AchievementsSection({ playerId, orgId, playerName }) {
       {honours.length > 0 && (
         <div>
           <Label className="block mb-3">HONOURS</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {honours.map(a => <AchievementCard key={a.id} a={a} accent />)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {honours.map(a => (
+              <HonourBadge key={a.id} a={a} theme="honour"
+                onEdit={() => openEdit(a)}
+                onDelete={() => handleDelete(a.id)} />
+            ))}
           </div>
         </div>
       )}
       {rolesList.length > 0 && (
         <div>
           <Label className="block mb-3">ROLES</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {rolesList.map((g, i) => {
               const seasons_str = g.instances.map(inst => formatSeasonShort(inst.season, seasons)).filter(Boolean).join(', ')
+              const synth = { ...g.instances[0], subcategory: g.subcategory, achievement: g.achievement }
               return (
-                <div key={i} className="relative group rounded border pb-hairline p-4 bg-pb-surface hover:bg-pb-surface2 transition-colors">
-                  <div className="flex items-start gap-3">
-                    <ThiingIcon src={CATEGORY_ICON_SRC['Office Bearer'] || thiings.necktie} alt="" className="w-7 h-7 shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest uppercase mb-0.5">Office Bearer</div>
-                      <div className="text-pb-text text-[14px] font-semibold leading-tight">{g.achievement}</div>
-                      {g.subcategory && <div className="font-mono text-[11px] text-pb-dim mt-0.5">{g.subcategory}</div>}
-                      {seasons_str && <div className="font-mono text-[10px] text-pb-faint tracking-wide2 mt-1">{seasons_str}</div>}
-                    </div>
-                    <span className="font-mono text-[10px] text-pb-faintest shrink-0">{g.instances.length}×</span>
-                  </div>
-                  {canEdit && (
-                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => openEdit(g.instances[0])} className="text-[10px] text-pb-faint hover:text-pb-text px-1.5 py-0.5 rounded hover:bg-pb-surface2">Edit</button>
-                      <button onClick={() => handleDelete(g.instances[0].id)} className="text-[10px] text-pb-red px-1.5 py-0.5 rounded hover:bg-pb-surface2">✕</button>
-                    </div>
-                  )}
-                </div>
+                <HonourBadge key={i} a={synth} theme="role"
+                  count={g.instances.length}
+                  seasonsStr={seasons_str || undefined}
+                  onEdit={() => openEdit(g.instances[0])}
+                  onDelete={() => handleDelete(g.instances[0].id)} />
               )
             })}
           </div>
@@ -1279,16 +1339,24 @@ function AchievementsSection({ playerId, orgId, playerName }) {
       {awards.length > 0 && (
         <div>
           <Label className="block mb-3">AWARDS</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {awards.map(a => <AchievementCard key={a.id} a={a} />)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {awards.map(a => (
+              <HonourBadge key={a.id} a={a} theme="award"
+                onEdit={() => openEdit(a)}
+                onDelete={() => handleDelete(a.id)} />
+            ))}
           </div>
         </div>
       )}
       {milestones.length > 0 && (
         <div>
           <Label className="block mb-3">MILESTONES</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {milestones.map(a => <AchievementCard key={a.id} a={a} />)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {milestones.map(a => (
+              <HonourBadge key={a.id} a={a} theme="milestone"
+                onEdit={() => openEdit(a)}
+                onDelete={() => handleDelete(a.id)} />
+            ))}
           </div>
         </div>
       )}
