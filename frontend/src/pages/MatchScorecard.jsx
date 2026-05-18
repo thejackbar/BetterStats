@@ -241,6 +241,21 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
                 <td className="py-2 pr-4 font-mono text-[12px] text-right w-8 max-md:hidden" style={{ color: 'var(--pb-faint)' }}>{row.sixes ?? '—'}</td>
               </tr>
             ))}
+            {dnb.map((row, i) => (
+              <tr key={`dnb-${i}`} className="pb-hairline-t hover:bg-pb-surface2">
+                <td className="py-2 pl-5 pr-3 whitespace-nowrap">
+                  {row.player_id
+                    ? <Link to={`/players/${row.player_id}`} className="text-pb-text font-semibold hover:text-pb-accent transition-colors">{fmtName(row.player_name) || '—'}</Link>
+                    : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
+                  }
+                </td>
+                <td className="py-2 pr-5 font-mono text-[12px] italic max-sm:hidden" style={{ color: 'var(--pb-faintest)' }}>did not bat</td>
+                <td className="py-2 px-3 font-mono text-[12px] text-pb-faintest text-right">—</td>
+                <td className="py-2 px-2 font-mono text-[12px] text-pb-faintest text-right">—</td>
+                <td className="py-2 px-2 font-mono text-[12px] text-pb-faintest text-right max-md:hidden">—</td>
+                <td className="py-2 pr-4 font-mono text-[12px] text-pb-faintest text-right max-md:hidden">—</td>
+              </tr>
+            ))}
           </tbody>
           <tfoot>
             {extras != null && extras > 0 && (
@@ -255,21 +270,6 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
               <td className="py-2 px-3 font-mono font-bold text-pb-text text-right pb-num">{score ?? '—'}</td>
               <td colSpan={3} />
             </tr>
-            {dnb.length > 0 && (
-              <tr className="pb-hairline-t">
-                <td colSpan={6} className="px-5 py-2 font-mono text-[10px] text-pb-faintest italic">
-                  DNB: {dnb.map((r, i) => (
-                    <span key={i}>
-                      {i > 0 && ', '}
-                      {r.player_id
-                        ? <Link to={`/players/${r.player_id}`} className="hover:text-pb-accent transition-colors">{fmtName(r.player_name) || '—'}</Link>
-                        : (fmtName(r.player_name) || '—')
-                      }
-                    </span>
-                  ))}
-                </td>
-              </tr>
-            )}
           </tfoot>
         </table>
       </div>
