@@ -638,22 +638,45 @@ async def get_scorecard(
                     (r["innings_number"] for r in batting_flat if not r.get("did_not_bat")),
                     default=1,
                 )
+                _unresolved_roster_pids: list[str] = []
                 for ros_pid_str in our_team_roster_pids:
                     try:
                         ros_pid = uuid.UUID(ros_pid_str)
                     except ValueError:
                         continue
-                    if ros_pid not in known_ids:
-                        continue  # UUID-mismatched; can't map to DB player reliably
                     if ros_pid in db_batting_pids:
-                        continue  # already has a batting row
+                        continue
                     if ros_pid in our_batting_pids_seen_in_gr:
-                        continue  # appeared in GR innings (batted or already flagged)
+                        continue
                     if ros_pid in our_missing_dnb:
-                        continue  # already captured from innings batting array
+                        continue
                     if not pid_to_name.get(ros_pid_str):
                         continue
-                    our_missing_dnb[ros_pid] = (_our_inn, None)
+                    if ros_pid in known_ids:
+                        our_missing_dnb[ros_pid] = (_our_inn, None)
+                    else:
+                        # UUID mismatch (PlayHQ ID in DB vs GR UUID) — resolve by name
+                        _unresolved_roster_pids.append(ros_pid_str)
+
+                # Name-based lookup for UUID-mismatched roster members.
+                if _unresolved_roster_pids and season:
+                    _all_res = await db.execute(
+                        select(Player).where(Player.organisation_id == season.organisation_id)
+                    )
+                    _nk_to_player: dict[tuple, Player] = {}
+                    for _pl in _all_res.scalars().all():
+                        _nk_to_player[_name_key(_pl.display_name)] = _pl
+                    for _ros_str in _unresolved_roster_pids:
+                        _ros_name = pid_to_name.get(_ros_str, "")
+                        if not _ros_name:
+                            continue
+                        _nk = _name_key(_ros_name)
+                        if _nk in our_batting_fingerprints:
+                            continue  # they batted, not a DNB
+                        _matched = _nk_to_player.get(_nk)
+                        if not _matched or _matched.id in db_batting_pids or _matched.id in our_missing_dnb:
+                            continue
+                        our_missing_dnb[_matched.id] = (_our_inn, None)
 
             # Inject DNB rows for opp roster/non-playing members absent from innings batting.
             # GR includes nonPlayingMembers in teams[] — covers Oscar Brown / Sachin Dhadli style cases.
