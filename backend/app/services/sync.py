@@ -861,6 +861,41 @@ async def sync_grassroots_game_level_data(
                         ))
                         fow_count += 1
 
+                    # Classify the innings: club batting or opposition? Prefer
+                    # the authoritative batting-team id when the payload carries
+                    # one, else fall back to a roster-majority vote (the club
+                    # innings is the card whose batters are mostly club players).
+                    inn_team_id = None
+                    for _tk in ("battingTeamId", "teamId"):
+                        _tv = inn.get(_tk)
+                        if _tv:
+                            inn_team_id = str(_tv).lower()
+                            break
+                    if inn_team_id is None:
+                        for _tk in ("battingTeam", "team"):
+                            _to = inn.get(_tk)
+                            if isinstance(_to, dict) and _to.get("id"):
+                                inn_team_id = str(_to["id"]).lower()
+                                break
+                    if inn_team_id is not None and our_team and our_team.get("id"):
+                        is_club_innings = inn_team_id == str(our_team["id"]).lower()
+                    else:
+                        club_n = total_n = 0
+                        for _br in batting_rows:
+                            _bp = _br.get("participantId")
+                            if not _bp:
+                                continue
+                            total_n += 1
+                            try:
+                                _bc = uuid.UUID(_bp)
+                            except ValueError:
+                                continue
+                            if _bc not in known_player_ids:
+                                _bc = merged_away.get(_bc)
+                            if _bc in known_player_ids:
+                                club_n += 1
+                        is_club_innings = total_n > 0 and club_n * 2 > total_n
+
                     for p in _derive_partnerships_grassroots(batting_rows, fow_rows):
                         b1_id = b2_id = None
                         for src_key, dst in (("batter1_id", "b1"), ("batter2_id", "b2")):
@@ -886,6 +921,7 @@ async def sync_grassroots_game_level_data(
                             runs=p.get("runs") or 0,
                             batter1_runs=p.get("batter1_runs"),
                             batter2_runs=p.get("batter2_runs"),
+                            is_club_innings=is_club_innings,
                         ))
                         part_count += 1
 
