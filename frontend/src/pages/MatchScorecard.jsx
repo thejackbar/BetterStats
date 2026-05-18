@@ -463,12 +463,20 @@ export default function MatchScorecard() {
   const inningsNums = [...new Set([
     ...(game.batting || []).map(r => r.innings_number || 1),
     ...(game.bowling || []).map(r => r.innings_number || 1),
+    ...(game.opp_batting || []).map(r => r.innings_number || 1),
+    ...(game.opp_bowling || []).map(r => r.innings_number || 1),
   ])].sort()
 
   const innings = inningsNums.map(num => ({
     num,
-    batting: (game.batting || []).filter(r => (r.innings_number || 1) === num),
-    bowling: (game.bowling || []).filter(r => (r.innings_number || 1) === num),
+    batting: [
+      ...(game.batting || []).filter(r => (r.innings_number || 1) === num),
+      ...(game.opp_batting || []).filter(r => (r.innings_number || 1) === num),
+    ],
+    bowling: [
+      ...(game.bowling || []).filter(r => (r.innings_number || 1) === num),
+      ...(game.opp_bowling || []).filter(r => (r.innings_number || 1) === num),
+    ],
   }))
 
   const inn1 = innings[0] || { num: 1, batting: [], bowling: [] }

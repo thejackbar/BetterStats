@@ -372,6 +372,142 @@ async def get_scorecard(
     fow = await get_game_fall_of_wickets(db, game.id)
     partnerships = await get_game_partnerships(db, game.id)
 
+    # Live-fetch opposition data from GR API (not stored in DB).
+    # game.id IS the GR match UUID, so we can call directly.
+    opp_batting: list[dict] = []
+    opp_bowling: list[dict] = []
+    opp_extras: dict[int, int] = {}
+
+    try:
+        from app.services.grassroots_scores_client import get_match_scorecard
+        gr_data = await get_match_scorecard(str(game.id))
+        if gr_data:
+            # Build set of our org's player IDs to identify opposition rows
+            if season:
+                pid_res = await db.execute(
+                    select(Player.id).where(Player.organisation_id == season.organisation_id)
+                )
+                known_ids: set = {r[0] for r in pid_res}
+            else:
+                known_ids = set()
+
+            _DISMISSAL_SHORT = {
+                "Caught": "c", "Bowled": "b", "LBW": "lbw", "Stumped": "st",
+                "Run Out": "run out", "Hit Wicket": "hit wicket",
+                "Retired Hurt": "retired hurt",
+            }
+            _DNB = {"absent", "did not bat", "dnb"}
+
+            for inn in (gr_data.get("innings") or []):
+                inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+
+                for row in (inn.get("batting") or []):
+                    pid_str = row.get("participantId")
+                    if not pid_str:
+                        continue
+                    try:
+                        pid = uuid.UUID(pid_str)
+                    except ValueError:
+                        continue
+                    if pid in known_ids:
+                        continue  # already covered by DB data
+                    dt_id = row.get("dismissalTypeId") or 0
+                    if dt_id == 0:
+                        continue
+                    dt_long = row.get("dismissalType") or ""
+                    is_dnb = dt_long.lower() in _DNB
+                    name = (row.get("displayName") or
+                            " ".join(filter(None, [row.get("firstName"), row.get("lastName")])) or
+                            "Unknown")
+                    opp_batting.append({
+                        "innings_number": inn_num,
+                        "player_id": None,
+                        "player_name": name,
+                        "runs": None if is_dnb else (row.get("runsScored") or 0),
+                        "balls": None if is_dnb else (row.get("ballsFaced") or 0),
+                        "fours": None if is_dnb else (row.get("foursScored") or 0),
+                        "sixes": None if is_dnb else (row.get("sixesScored") or 0),
+                        "dismissal_type": None if is_dnb else _DISMISSAL_SHORT.get(dt_long, dt_long.lower()),
+                        "not_out": dt_id == 1,
+                        "did_not_bat": is_dnb,
+                        "batting_position": row.get("batOrder"),
+                    })
+
+                for row in (inn.get("bowling") or []):
+                    pid_str = row.get("participantId")
+                    if not pid_str:
+                        continue
+                    try:
+                        pid = uuid.UUID(pid_str)
+                    except ValueError:
+                        continue
+                    if pid in known_ids:
+                        continue
+                    name = (row.get("displayName") or
+                            " ".join(filter(None, [row.get("firstName"), row.get("lastName")])) or
+                            "Unknown")
+                    econ = None
+                    try:
+                        econ_raw = row.get("economy")
+                        econ = float(econ_raw) if econ_raw is not None else None
+                    except (TypeError, ValueError):
+                        pass
+                    opp_bowling.append({
+                        "innings_number": inn_num,
+                        "player_id": None,
+                        "player_name": name,
+                        "overs": row.get("oversBowled"),
+                        "maidens": row.get("maidensBowled"),
+                        "runs": row.get("runsConceded"),
+                        "wickets": row.get("wicketsTaken"),
+                        "wides": row.get("wideBalls"),
+                        "no_balls": row.get("noBalls"),
+                        "economy": econ,
+                    })
+                    # Accumulate opp bowling extras (wides + no-balls they conceded)
+                    opp_extras[inn_num] = opp_extras.get(inn_num, 0) + (row.get("wideBalls") or 0) + (row.get("noBalls") or 0)
+
+            # Compute opp batting totals per innings (runs+wickets) so the frontend
+            # can display the correct score in the opp batting card header.
+            opp_inn_totals: dict[int, dict] = {}
+            for r in opp_batting:
+                n = r["innings_number"]
+                if n not in opp_inn_totals:
+                    opp_inn_totals[n] = {"runs": 0, "wickets": 0}
+                if not r["did_not_bat"] and r["runs"] is not None:
+                    opp_inn_totals[n]["runs"] += r["runs"]
+                if not r["did_not_bat"] and not r.get("not_out") and r.get("dismissal_type"):
+                    opp_inn_totals[n]["wickets"] += 1
+
+            # Populate batting_team in innings_totals from GR summary teams
+            summary_teams = (gr_data.get("matchSummary") or {}).get("teams") or []
+            home_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "") or game.home_team or ""
+            away_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "") or game.away_team or ""
+            our_batting_inns = {r["innings_number"] for r in batting_flat if not r["did_not_bat"]}
+            for inn_num_t in set(list(innings_totals.keys()) + [r["innings_number"] for r in opp_batting]):
+                if inn_num_t not in innings_totals:
+                    innings_totals[inn_num_t] = {"runs": 0, "wickets": 0, "extras": 0}
+                # For opp batting innings, overwrite runs/wickets with actual totals
+                if inn_num_t not in our_batting_inns and inn_num_t in opp_inn_totals:
+                    innings_totals[inn_num_t]["runs"] = opp_inn_totals[inn_num_t]["runs"]
+                    innings_totals[inn_num_t]["wickets"] = opp_inn_totals[inn_num_t]["wickets"]
+                if inn_num_t in our_batting_inns:
+                    # We batted — figure out if we're home or away using team names
+                    if home_name and game.home_team and home_name.lower().strip() == game.home_team.lower().strip():
+                        innings_totals[inn_num_t]["batting_team"] = home_name
+                    elif away_name:
+                        innings_totals[inn_num_t]["batting_team"] = away_name
+                else:
+                    # Opposition batted
+                    opp_name = away_name if (home_name and game.home_team and home_name.lower().strip() == game.home_team.lower().strip()) else home_name
+                    innings_totals[inn_num_t]["batting_team"] = opp_name or ""
+                # Add opp extras to the innings where opposition bowled (= innings where we batted)
+                if inn_num_t in opp_extras and inn_num_t in our_batting_inns:
+                    innings_totals[inn_num_t]["extras"] = innings_totals[inn_num_t].get("extras", 0) + opp_extras[inn_num_t]
+
+    except Exception as e:
+        logger.warning(f"get_scorecard: GR live-fetch failed for {game_id}: {e}")
+
     return {
         "id": str(game.id),
         "home_team": game.home_team,
@@ -384,6 +520,8 @@ async def get_scorecard(
         "innings_totals": innings_totals,
         "batting": batting_flat,
         "bowling": bowling_flat,
+        "opp_batting": opp_batting,
+        "opp_bowling": opp_bowling,
         "fielding": fielding_flat,
         "fall_of_wickets": fow,
         "partnerships": partnerships,
