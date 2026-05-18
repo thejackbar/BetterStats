@@ -27,7 +27,7 @@ function PlayerAutocomplete({ players, value, onChange }) {
   }, [])
 
   const filtered = query.trim().length >= 1
-    ? players.filter(p => p.name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 10)
+    ? players.filter(p => (p.display_name || p.name).toLowerCase().includes(query.trim().toLowerCase())).slice(0, 10)
     : []
 
   return (
@@ -45,10 +45,10 @@ function PlayerAutocomplete({ players, value, onChange }) {
           {filtered.map(p => (
             <button
               key={p.id}
-              onMouseDown={() => { setQuery(p.name); onChange({ name: p.name, id: p.id }); setOpen(false) }}
+              onMouseDown={() => { const dn = p.display_name || p.name; setQuery(dn); onChange({ name: dn, id: p.id }); setOpen(false) }}
               className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
             >
-              {p.name}
+              {p.display_name || p.name}
             </button>
           ))}
         </div>
@@ -381,7 +381,7 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
   }, [])
 
   const filtered = query.trim().length >= 1
-    ? players.filter(p => p.name.toLowerCase().includes(query.trim().toLowerCase()) && !selectedPlayers.find(s => s.id === p.id)).slice(0, 10)
+    ? players.filter(p => (p.display_name || p.name).toLowerCase().includes(query.trim().toLowerCase()) && !selectedPlayers.find(s => s.id === p.id)).slice(0, 10)
     : []
 
   const addPlayer = (p) => { setSelectedPlayers(prev => [...prev, p]); setQuery(''); setOpen(false) }
@@ -393,7 +393,7 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
     setSaving(true); setError(null)
     try {
       for (const p of selectedPlayers) {
-        await api.createAchievement({ ...form, org_id: orgId, player_id: p.id, player_name: p.name })
+        await api.createAchievement({ ...form, org_id: orgId, player_id: p.id, player_name: p.display_name || p.name })
       }
       onSave()
     } catch (e) {
@@ -428,7 +428,7 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
               {filtered.map(p => (
                 <button key={p.id} onMouseDown={() => addPlayer(p)}
                   className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text">
-                  {p.name}
+                  {p.display_name || p.name}
                 </button>
               ))}
             </div>
@@ -438,7 +438,7 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
           <div className="flex flex-wrap gap-2 mt-2">
             {selectedPlayers.map(p => (
               <span key={p.id} className="flex items-center gap-1 bg-pb-surface2 border pb-hairline text-pb-text text-xs px-2.5 py-1 rounded-full">
-                {p.name}
+                {p.display_name || p.name}
                 <button onClick={() => removePlayer(p.id)} className="text-pb-faint hover:text-pb-text ml-0.5">×</button>
               </span>
             ))}
