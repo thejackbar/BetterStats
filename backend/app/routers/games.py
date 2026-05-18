@@ -273,11 +273,19 @@ async def debug_gr_scorecard(game_id: str):
             sample["first_batting_row_keys"] = list(batting[0].keys())
             sample["first_batting_row"] = batting[0]
             break
+    # Expose all innings-level keys (minus batting/bowling/fielding arrays)
+    sample["innings_objects"] = [
+        {k: v for k, v in inn.items() if k not in ("batting", "bowling", "fielding", "fallOfWickets")}
+        for inn in innings
+    ]
     teams = data.get("teams") or []
     sample["teams_keys"] = [list(t.keys()) for t in teams]
     sample["teams_count"] = len(teams)
     sample["innings_count"] = len(innings)
     sample["top_level_keys"] = list(data.keys())
+    match_summary = data.get("matchSummary") or {}
+    sample["match_summary_keys"] = list(match_summary.keys())
+    sample["match_summary_teams"] = match_summary.get("teams") or []
     return sample
 
 
