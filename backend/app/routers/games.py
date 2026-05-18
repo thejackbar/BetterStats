@@ -380,6 +380,7 @@ async def get_scorecard(
 
     try:
         from app.services.grassroots_scores_client import get_match_scorecard
+        import re as _re
         gr_data = await get_match_scorecard(str(game.id))
         if gr_data:
             # Build set of our org's player IDs to identify opposition rows
@@ -404,11 +405,29 @@ async def get_scorecard(
             }
             _DNB = {"absent", "did not bat", "dnb"}
 
+            # Normalize player name for deduplication: lowercase, remove punctuation, sort words.
+            # Handles "Baker, Daniel" vs "Daniel Baker" → both become "baker daniel".
+            def _norm_name(n: str) -> str:
+                words = _re.sub(r"[^a-z\s]", "", (n or "").lower()).split()
+                return " ".join(sorted(words))
+
+            # Fingerprint set of our DB batting players for dedup (catches players whose
+            # GR participantId doesn't match their DB Player.id, e.g. PlayHQ-namespace IDs).
+            our_batting_fingerprints: set[str] = {
+                _norm_name(r["player_name"]) for r in batting_flat if r.get("player_name")
+            }
+
+            # Org name first word — used to identify which GR team is ours vs opp.
+            org_obj = await db.get(Organisation, season.organisation_id) if season else None
+            org_word = (org_obj.name or "").lower().split()[0] if org_obj and org_obj.name else ""
+
             # Build participantId → name map from team rosters in GR data.
-            # GR batting/bowling rows only carry participantId; names live in
-            # teams[].players[] (or similar) at the top level.
+            # Simultaneously track opp roster pids for DNB injection below.
             pid_to_name: dict[str, str] = {}
+            opp_roster_pids: set[str] = set()
             for _team in (gr_data.get("teams") or []):
+                _team_name = (_team.get("displayName") or _team.get("name") or "").lower()
+                _is_our_team = bool(org_word and org_word in _team_name)
                 _roster = (_team.get("players") or _team.get("squad") or
                            _team.get("participants") or _team.get("members") or [])
                 for _pl in _roster:
@@ -418,10 +437,17 @@ async def get_scorecard(
                              _pl.get("name") or _pl.get("shortName") or "")
                     if _pid and _name:
                         pid_to_name[_pid] = _name
+                    if not _is_our_team and _pid:
+                        opp_roster_pids.add(_pid)
 
             # Accumulate our own DNB players missing from DB (games synced before
             # the did_not_bat migration), keyed pid → (inn_num, bat_order)
             our_missing_dnb: dict[uuid.UUID, tuple[int, int | None]] = {}
+
+            # Track all opp pids that appeared in any batting row (incl. DNB) and
+            # the innings number(s) where the opp actually batted (excl. DNB).
+            opp_all_batting_pids: set[str] = set()
+            opp_batting_inn_nums: set[int] = set()
 
             for inn in (gr_data.get("innings") or []):
                 inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
@@ -449,6 +475,13 @@ async def get_scorecard(
                     dt_long = row.get("dismissalType") or ""
                     is_dnb = dt_long.lower() in _DNB
                     name = pid_to_name.get(pid_str, "Unknown")
+                    # Skip players already in our DB batting data — catches UUID-namespace
+                    # mismatches where the same person has different IDs in PlayHQ vs GR.
+                    if _norm_name(name) in our_batting_fingerprints:
+                        continue
+                    opp_all_batting_pids.add(pid_str)
+                    if not is_dnb:
+                        opp_batting_inn_nums.add(inn_num)
                     opp_batting.append({
                         "innings_number": inn_num,
                         "player_id": None,
@@ -474,6 +507,8 @@ async def get_scorecard(
                     if pid in known_ids:
                         continue
                     name = pid_to_name.get(pid_str, "Unknown")
+                    if _norm_name(name) in our_batting_fingerprints:
+                        continue
                     econ = None
                     try:
                         econ_raw = row.get("economy")
@@ -494,6 +529,31 @@ async def get_scorecard(
                     })
                     # Accumulate opp bowling extras (wides + no-balls they conceded)
                     opp_extras[inn_num] = opp_extras.get(inn_num, 0) + (row.get("wideBalls") or 0) + (row.get("noBalls") or 0)
+
+            # Inject DNB rows for opp roster members who didn't appear in any batting row.
+            # GR sometimes omits DNB players from the innings batting array entirely.
+            if opp_roster_pids and opp_batting_inn_nums:
+                opp_dnb_inn = min(opp_batting_inn_nums)
+                for dnb_pid_str in opp_roster_pids:
+                    if dnb_pid_str in opp_all_batting_pids:
+                        continue
+                    try:
+                        dnb_pid = uuid.UUID(dnb_pid_str)
+                    except ValueError:
+                        continue
+                    if dnb_pid in known_ids:
+                        continue
+                    dnb_name = pid_to_name.get(dnb_pid_str, "")
+                    if not dnb_name:
+                        continue
+                    opp_batting.append({
+                        "innings_number": opp_dnb_inn,
+                        "player_id": None,
+                        "player_name": dnb_name,
+                        "runs": None, "balls": None, "fours": None, "sixes": None,
+                        "dismissal_type": None, "not_out": False,
+                        "batting_position": None, "did_not_bat": True,
+                    })
 
             # Append our own DNB players who were absent from DB data (pre-migration games).
             # Fetch names in one query rather than one-per-player.
@@ -530,11 +590,6 @@ async def get_scorecard(
             home_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "") or game.home_team or ""
             away_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "") or game.away_team or ""
 
-            # Determine if our org is home or away by matching org name against team names.
-            # We can't use home_name == game.home_team (always True) — we need to know
-            # if WE are home or away in this specific game.
-            org_obj = await db.get(Organisation, season.organisation_id) if season else None
-            org_word = (org_obj.name or "").lower().split()[0] if org_obj and org_obj.name else ""
             we_are_home = bool(org_word and game.home_team and org_word in game.home_team.lower())
             our_display_name = home_name if we_are_home else away_name
             opp_display_name = away_name if we_are_home else home_name
