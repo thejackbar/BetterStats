@@ -31,7 +31,7 @@ async def _enrich_player(db: AsyncSession, p: Player) -> dict:
     game_innings = len(innings_res.scalars().all())
     return {
         "id": str(p.id),
-        "name": p.name,
+        "name": p.display_name,
         "playhq_id": p.playhq_id,
         "claimed": p.claimed,
         "seasons_count": len(season_stats),

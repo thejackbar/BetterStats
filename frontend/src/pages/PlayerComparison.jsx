@@ -13,7 +13,7 @@ function PlayerSearch({ players, selected, onSelect, label, side, fmt = n => n }
 
   const filtered = useMemo(() => {
     if (!query.trim()) return players.slice(0, 20)
-    return players.filter(p => nameMatchesSearch(p.name, query)).slice(0, 20)
+    return players.filter(p => nameMatchesSearch(p.display_name || p.name, query)).slice(0, 20)
   }, [players, query])
 
   return (
@@ -21,7 +21,7 @@ function PlayerSearch({ players, selected, onSelect, label, side, fmt = n => n }
       <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">{label}</p>
       {selected ? (
         <div className="flex items-center gap-2 bg-pb-surface border pb-hairline rounded px-3 py-2.5">
-          <span className="text-pb-text font-semibold flex-1 text-sm">{fmt(selected.name)}</span>
+          <span className="text-pb-text font-semibold flex-1 text-sm">{fmt(selected.display_name || selected.name)}</span>
           <button
             onClick={() => { onSelect(null); setQuery('') }}
             className="text-pb-faint hover:text-pb-text text-lg leading-none"
@@ -53,7 +53,7 @@ function PlayerSearch({ players, selected, onSelect, label, side, fmt = n => n }
                   onMouseDown={() => { onSelect(p); setQuery(''); setOpen(false) }}
                   className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text transition-colors"
                 >
-                  {fmt(p.name)}
+                  {fmt(p.display_name || p.name)}
                 </button>
               ))}
             </div>
@@ -240,14 +240,14 @@ export default function PlayerComparison() {
             <div className="grid grid-cols-[1fr_auto_1fr] gap-0 mb-0">
               <Link to={`/players/${player1.id}`} className="pb-card rounded-b-none border-b-0 p-4 text-left hover:bg-pb-surface2 transition-colors">
                 <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-0.5">PLAYER 1</p>
-                <p className="font-semibold text-pb-text text-base">{fmt(player1.name)}</p>
+                <p className="font-semibold text-pb-text text-base">{fmt(player1.display_name || player1.name)}</p>
               </Link>
               <div className="flex items-center justify-center px-4 bg-pb-surface border-t border-b pb-hairline-t pb-hairline-b">
                 <span className="font-mono text-[11px] tracking-wide3 text-pb-faintest font-bold">VS</span>
               </div>
               <Link to={`/players/${player2.id}`} className="pb-card rounded-b-none border-b-0 p-4 text-right hover:bg-pb-surface2 transition-colors">
                 <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-0.5">PLAYER 2</p>
-                <p className="font-semibold text-pb-text text-base">{fmt(player2.name)}</p>
+                <p className="font-semibold text-pb-text text-base">{fmt(player2.display_name || player2.name)}</p>
               </Link>
             </div>
 

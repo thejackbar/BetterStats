@@ -13,7 +13,7 @@ async def get_career_batting(session: AsyncSession, player_id: str, season_id: O
         text(f"""
             SELECT
                 p.id AS player_id,
-                p.name,
+                COALESCE(p.display_name_override, p.name) AS name,
                 p.organisation_id,
                 COALESCE(SUM(pss.batting_innings), 0) AS innings,
                 COALESCE(SUM(pss.runs), 0) AS total_runs,
@@ -46,7 +46,7 @@ async def get_career_bowling(session: AsyncSession, player_id: str, season_id: O
         text(f"""
             SELECT
                 p.id AS player_id,
-                p.name,
+                COALESCE(p.display_name_override, p.name) AS name,
                 p.organisation_id,
                 COALESCE(SUM(pss.matches), 0) AS games,
                 COALESCE(SUM(pss.wickets), 0) AS total_wickets,
@@ -79,7 +79,7 @@ async def get_career_fielding(session: AsyncSession, player_id: str, season_id: 
         text(f"""
             SELECT
                 p.id AS player_id,
-                p.name,
+                COALESCE(p.display_name_override, p.name) AS name,
                 p.organisation_id,
                 COALESCE(SUM(pss.matches), 0) AS games,
                 COALESCE(SUM(pss.catches), 0) AS total_catches,
@@ -457,7 +457,7 @@ async def get_game_fall_of_wickets(session: AsyncSession, game_id: str) -> list[
                 fow.innings_number,
                 fow.score_at_fall,
                 fow.overs_at_fall,
-                p.name AS player_name,
+                COALESCE(p.display_name_override, p.name) AS player_name,
                 fow.player_id::text
             FROM fall_of_wickets fow
             LEFT JOIN players p ON p.id = fow.player_id
@@ -493,7 +493,7 @@ async def get_upcoming_milestones_for_org(
             )
             SELECT
                 p.id AS player_id,
-                p.name,
+                COALESCE(p.display_name_override, p.name) AS name,
                 COALESCE(SUM(pss.runs), 0) AS career_runs,
                 COALESCE(SUM(pss.wickets), 0) AS career_wickets,
                 COALESCE(SUM(pss.matches), 0) AS career_matches,
@@ -502,7 +502,7 @@ async def get_upcoming_milestones_for_org(
             LEFT JOIN player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND p.id IN (SELECT player_id FROM active_players)
-            GROUP BY p.id, p.name
+            GROUP BY p.id, p.name, p.display_name_override
             HAVING COALESCE(SUM(pss.runs), 0) > 0 OR COALESCE(SUM(pss.wickets), 0) > 0
         """),
         {"org_id": org_id}
@@ -639,7 +639,7 @@ async def get_recently_achieved_milestones_for_org(
             prior_totals AS (
                 SELECT
                     p.id AS player_id,
-                    p.name,
+                    COALESCE(p.display_name_override, p.name) AS name,
                     COALESCE(SUM(pss.runs), 0) AS prior_runs,
                     COALESCE(SUM(pss.wickets), 0) AS prior_wickets,
                     COALESCE(SUM(pss.matches), 0) AS prior_matches,
@@ -649,7 +649,7 @@ async def get_recently_achieved_milestones_for_org(
                     AND pss.season_id NOT IN ({sid_list})
                 WHERE p.organisation_id = :org_id
                   AND p.id IN (SELECT player_id FROM active_players)
-                GROUP BY p.id, p.name
+                GROUP BY p.id, p.name, p.display_name_override
             )
             SELECT
                 pt.player_id,
@@ -1013,8 +1013,8 @@ async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dic
                 pt.batter2_runs,
                 pt.batter1_id::text,
                 pt.batter2_id::text,
-                p1.name AS batter1_name,
-                p2.name AS batter2_name
+                COALESCE(p1.display_name_override, p1.name) AS batter1_name,
+                COALESCE(p2.display_name_override, p2.name) AS batter2_name
             FROM partnerships pt
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id

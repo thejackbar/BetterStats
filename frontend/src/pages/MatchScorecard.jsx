@@ -377,7 +377,7 @@ function FallOfWicketsSection({ fow = [], fmtName = n => n }) {
   )
 }
 
-function PartnershipsSection({ partnerships = [] }) {
+function PartnershipsSection({ partnerships = [], fmtName = n => n }) {
   if (!partnerships.length) return null
   const byInnings = partnerships.reduce((acc, p) => {
     const k = p.innings_number; if (!acc[k]) acc[k] = []; acc[k].push(p); return acc
@@ -410,7 +410,7 @@ function PartnershipsSection({ partnerships = [] }) {
                         {(p.batter1_name || p.batter1_id) && (
                           <span>
                             {p.batter1_name
-                              ? <Link to={`/players/${p.batter1_id}`} className="hover:text-pb-accent transition-colors">{p.batter1_name}</Link>
+                              ? <Link to={`/players/${p.batter1_id}`} className="hover:text-pb-accent transition-colors">{fmtName(p.batter1_name)}</Link>
                               : <span className="text-pb-faintest italic">Unknown</span>}
                             {p.batter1_runs != null && <span className="text-pb-faint ml-1">({p.batter1_runs})</span>}
                           </span>
@@ -418,7 +418,7 @@ function PartnershipsSection({ partnerships = [] }) {
                         {(p.batter2_name || p.batter2_id) && (
                           <span>
                             {p.batter2_name
-                              ? <Link to={`/players/${p.batter2_id}`} className="hover:text-pb-accent transition-colors">{p.batter2_name}</Link>
+                              ? <Link to={`/players/${p.batter2_id}`} className="hover:text-pb-accent transition-colors">{fmtName(p.batter2_name)}</Link>
                               : <span className="text-pb-faintest italic">Unknown</span>}
                             {p.batter2_runs != null && <span className="text-pb-faint ml-1">({p.batter2_runs})</span>}
                           </span>
@@ -552,7 +552,7 @@ export default function MatchScorecard() {
         )}
 
         <FallOfWicketsSection fow={game.fall_of_wickets ?? []} fmtName={fmtName} />
-        <PartnershipsSection partnerships={game.partnerships ?? []} />
+        <PartnershipsSection partnerships={game.partnerships ?? []} fmtName={fmtName} />
       </main>
     </div>
   )
