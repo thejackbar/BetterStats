@@ -12,10 +12,10 @@
  * Deployment:
  *   wrangler deploy
  * Route (Cloudflare dashboard → Workers → Routes):
- *   betterstats.bltbox.com/*
+ *   betterstats.cricket/*
  */
 
-const SITE = 'https://betterstats.bltbox.com'
+const SITE = 'https://betterstats.cricket'
 
 // Crawler User-Agent patterns — extend as needed
 const CRAWLER_RE = /facebookexternalhit|Facebot|Twitterbot|WhatsApp|LinkedInBot|TelegramBot|Discordbot|Applebot|Slackbot-LinkExpanding|Pinterest|Embedly|redditbot|Googlebot|bingbot/i
