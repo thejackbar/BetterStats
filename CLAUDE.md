@@ -12,8 +12,16 @@ docker compose -f /srv/docker/docker-compose.yaml up -d --force-recreate betters
 
 - `--no-cache` on the build step is required to avoid stale Docker layer cache
 - Only rebuild the two betterstats services, not the whole stack
-- nginx-proxy-manager routes `betterstats.bltbox.com` → `betterstats-frontend` container on `docker-shared-net`
+- nginx-proxy-manager routes `betterstats.cricket` → `betterstats-frontend` container on `docker-shared-net` (apex is the canonical domain; `www.betterstats.cricket` should 301-redirect to it)
 - The backend container name is `betterstats-backend` — this is the correct hostname in `nginx.conf`
+
+## Public Domain
+
+The canonical public domain is **`https://betterstats.cricket`** (no `www`). The old `betterstats.bltbox.com` domain is retired.
+
+- Hardcoded references live in `frontend/src/hooks/usePageMeta.js` (`BASE_URL`) and `frontend/index.html` (`og:url`) — keep both on the apex domain.
+- `CORS_ORIGINS` should be `https://betterstats.cricket` in the server `.env`, but note CORS is dormant in practice: the frontend calls the API via a same-origin relative `/api` path, so cross-origin checks never fire. Updating it is hygiene, not a functional requirement.
+- Any new build/config that references the public URL must point to `betterstats.cricket`.
 
 ## Version Numbers
 

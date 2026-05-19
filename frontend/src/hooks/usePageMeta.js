@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-const BASE_URL = 'https://betterstats.bltbox.com'
+const BASE_URL = 'https://betterstats.cricket'
 
 function setMeta(property, content) {
   if (!content) return null
