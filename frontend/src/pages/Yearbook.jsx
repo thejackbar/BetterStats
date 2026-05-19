@@ -140,7 +140,7 @@ function StatCallout({ value, label, sub, accent = false, className = '' }) {
 
 // ─── Overview tab ────────────────────────────────────────────────────────────
 
-function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, customSections, galleryImages }) {
+function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, customSections, galleryImages, pulledAwards }) {
   const [overview, setOverview] = useState(null)
   const [superlatives, setSuperlatives] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -245,112 +245,152 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
       )}
 
       {/* By the Numbers */}
-      {superlatives && (
-        <div>
-          <p className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase mb-4">By The Numbers</p>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {overview?.total_runs > 0 && (
-              <SupCard label="Total Runs" value={fmtRuns(overview.total_runs)} />
+      {superlatives && (() => {
+        const lifeMemberships = (pulledAwards || []).filter(a => a.category === 'Life Membership')
+        const hullettMedal = (pulledAwards || []).find(a =>
+          (a.achievement || '').toLowerCase().includes('hullett') ||
+          (a.achievement || '').toLowerCase().includes('mark hullett')
+        )
+        return (
+          <div className="space-y-8">
+            <p className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase">By The Numbers</p>
+
+            {/* Match Stats */}
+            {(overview?.total_games > 0 || superlatives.highest_team_innings?.team_runs > 0) && (
+              <StatGroup title="Match Stats">
+                {overview?.total_games > 0 && (
+                  <SupCard label="Games Played" value={overview.total_games} />
+                )}
+                {overview?.total_players > 0 && (
+                  <SupCard label="Players Used" value={overview.total_players} />
+                )}
+                {superlatives.highest_team_innings?.team_runs > 0 && (
+                  <SupCard
+                    label="Highest Team Innings"
+                    value={fmtRuns(superlatives.highest_team_innings.team_runs)}
+                    sub={superlatives.highest_team_innings.home_team}
+                  />
+                )}
+              </StatGroup>
             )}
-            {overview?.total_wickets > 0 && (
-              <SupCard label="Total Wickets" value={overview.total_wickets} />
+
+            {/* Batting Stats */}
+            {(overview?.total_runs > 0 || superlatives?.most_runs?.player_id) && (
+              <StatGroup title="Batting">
+                {overview?.total_runs > 0 && (
+                  <SupCard label="Total Runs" value={fmtRuns(overview.total_runs)} />
+                )}
+                {superlatives?.most_runs?.player_id && (
+                  <SupCard
+                    label="Most Runs"
+                    value={fmtRuns(superlatives.most_runs.runs)}
+                    name={superlatives.most_runs.name}
+                    playerId={superlatives.most_runs.player_id}
+                    clubSlug={clubSlug}
+                  />
+                )}
+                {superlatives.highest_score?.player_id && (
+                  <SupCard
+                    label="Highest Score"
+                    value={`${superlatives.highest_score.runs}${superlatives.highest_score.not_out ? '*' : ''}`}
+                    name={superlatives.highest_score.name}
+                    playerId={superlatives.highest_score.player_id}
+                    clubSlug={clubSlug}
+                    sub={superlatives.highest_score.away_team ? `vs ${superlatives.highest_score.away_team}` : null}
+                  />
+                )}
+                {superlatives.best_partnership?.batter1_id && (
+                  <SupCard
+                    label={`${ORDINALS[(superlatives.best_partnership.wicket_number || 1) - 1]} Wkt Partnership`}
+                    value={superlatives.best_partnership.runs}
+                    name={`${superlatives.best_partnership.batter1_name} & ${superlatives.best_partnership.batter2_name}`}
+                  />
+                )}
+                {overview?.total_hundreds > 0 && (
+                  <SupCard label="Centuries" value={overview.total_hundreds} />
+                )}
+                {overview?.total_fifties > 0 && (
+                  <SupCard label="Half Centuries" value={overview.total_fifties} />
+                )}
+                {superlatives?.most_ducks?.player_id && superlatives.most_ducks.ducks > 0 && (
+                  <SupCard
+                    label="Most Ducks"
+                    value={superlatives.most_ducks.ducks}
+                    name={superlatives.most_ducks.name}
+                    playerId={superlatives.most_ducks.player_id}
+                    clubSlug={clubSlug}
+                    muted
+                  />
+                )}
+              </StatGroup>
             )}
-            {superlatives?.most_runs?.player_id && (
-              <SupCard
-                label="Most Runs"
-                value={fmtRuns(superlatives.most_runs.runs)}
-                name={superlatives.most_runs.name}
-                playerId={superlatives.most_runs.player_id}
-                clubSlug={clubSlug}
-              />
+
+            {/* Bowling Stats */}
+            {(overview?.total_wickets > 0 || superlatives?.most_wickets?.player_id) && (
+              <StatGroup title="Bowling">
+                {overview?.total_wickets > 0 && (
+                  <SupCard label="Total Wickets" value={overview.total_wickets} />
+                )}
+                {superlatives?.most_wickets?.player_id && (
+                  <SupCard
+                    label="Most Wickets"
+                    value={superlatives.most_wickets.wickets}
+                    name={superlatives.most_wickets.name}
+                    playerId={superlatives.most_wickets.player_id}
+                    clubSlug={clubSlug}
+                  />
+                )}
+                {superlatives.best_bowling?.player_id && (
+                  <SupCard
+                    label="Best Bowling"
+                    value={`${superlatives.best_bowling.wickets}/${superlatives.best_bowling.runs_conceded}`}
+                    name={superlatives.best_bowling.name}
+                    playerId={superlatives.best_bowling.player_id}
+                    clubSlug={clubSlug}
+                  />
+                )}
+              </StatGroup>
             )}
-            {superlatives?.most_wickets?.player_id && (
-              <SupCard
-                label="Most Wickets"
-                value={superlatives.most_wickets.wickets}
-                name={superlatives.most_wickets.name}
-                playerId={superlatives.most_wickets.player_id}
-                clubSlug={clubSlug}
-              />
+
+            {/* Mark Hullett Medal */}
+            {hullettMedal && (
+              <StatGroup title={hullettMedal.achievement || 'Mark Hullett Medal'}>
+                <SupCard
+                  label="Medallist"
+                  value={hullettMedal.player_name || '—'}
+                  sub={hullettMedal.detail || null}
+                />
+              </StatGroup>
             )}
-            {superlatives.highest_score?.player_id && (
-              <SupCard
-                label="Highest Score"
-                value={`${superlatives.highest_score.runs}${superlatives.highest_score.not_out ? '*' : ''}`}
-                name={superlatives.highest_score.name}
-                playerId={superlatives.highest_score.player_id}
-                clubSlug={clubSlug}
-                sub={superlatives.highest_score.home_team && superlatives.highest_score.away_team
-                  ? `vs ${superlatives.highest_score.home_team === 'unknown' ? superlatives.highest_score.away_team : superlatives.highest_score.away_team}`
-                  : null}
-              />
-            )}
-            {superlatives.best_bowling?.player_id && (
-              <SupCard
-                label="Best Bowling"
-                value={`${superlatives.best_bowling.wickets}/${superlatives.best_bowling.runs_conceded}`}
-                name={superlatives.best_bowling.name}
-                playerId={superlatives.best_bowling.player_id}
-                clubSlug={clubSlug}
-              />
-            )}
-            {superlatives.best_partnership?.batter1_id && (
-              <SupCard
-                label={`${ORDINALS[(superlatives.best_partnership.wicket_number || 1) - 1]} Wicket Partnership`}
-                value={superlatives.best_partnership.runs}
-                name={`${superlatives.best_partnership.batter1_name} & ${superlatives.best_partnership.batter2_name}`}
-                clubSlug={clubSlug}
-              />
-            )}
-            {superlatives.highest_team_innings?.team_runs > 0 && (
-              <SupCard
-                label="Highest Team Innings"
-                value={fmtRuns(superlatives.highest_team_innings.team_runs)}
-                sub={superlatives.highest_team_innings.home_team}
-              />
-            )}
-            {overview?.total_fifties > 0 && (
-              <SupCard label="Half Centuries" value={overview.total_fifties} />
-            )}
-            {overview?.total_hundreds > 0 && (
-              <SupCard label="Centuries" value={overview.total_hundreds} />
-            )}
-            {overview?.total_players > 0 && (
-              <SupCard label="Players Used" value={overview.total_players} />
-            )}
-            {overview?.total_games > 0 && (
-              <SupCard label="Games Played" value={overview.total_games} />
-            )}
-            {superlatives?.most_ducks?.player_id && superlatives.most_ducks.ducks > 0 && (
-              <SupCard
-                label="Most Ducks"
-                value={superlatives.most_ducks.ducks}
-                name={superlatives.most_ducks.name}
-                playerId={superlatives.most_ducks.player_id}
-                clubSlug={clubSlug}
-                muted
-              />
+
+            {/* Life Memberships */}
+            {lifeMemberships.length > 0 && (
+              <StatGroup title="Life Memberships">
+                {lifeMemberships.map(a => (
+                  <SupCard
+                    key={a.id}
+                    label="Life Member"
+                    value={a.player_name || a.achievement || '—'}
+                    sub={a.detail || null}
+                  />
+                ))}
+              </StatGroup>
             )}
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
 
 function SupCard({ label, value, name, playerId, clubSlug, sub, accent = false, muted = false }) {
   return (
-    <div className="yb-aurora-card">
-      <div className="yb-aurora-inner" />
-      <div
-        className="yb-aurora-blob"
-        style={{ background: `radial-gradient(circle, var(--pb-accent), transparent)` }}
-      />
-      <div className="yb-aurora-content">
+    <div className="yb-futuristic-card">
+      <div className="yb-fc-content">
         <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-2">{label}</div>
         <div
-          className="text-3xl font-bold tabular-nums leading-none mb-1"
-          style={{ color: muted ? 'var(--pb-amber)' : accent ? 'var(--pb-accent)' : 'white' }}
+          className="text-2xl font-bold tabular-nums leading-none mb-1.5"
+          style={{ color: muted ? 'var(--pb-amber)' : 'var(--pb-accent)' }}
         >
           {value}
         </div>
@@ -359,6 +399,17 @@ function SupCard({ label, value, name, playerId, clubSlug, sub, accent = false, 
         )}
         {name && !playerId && <span className="text-[13px] text-white/60">{name}</span>}
         {sub && <div className="text-[12px] text-white/35 mt-0.5">{sub}</div>}
+      </div>
+    </div>
+  )
+}
+
+function StatGroup({ title, children }) {
+  return (
+    <div>
+      <p className="font-mono text-[10px] tracking-wide3 text-white/30 uppercase mb-3">{title}</p>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {children}
       </div>
     </div>
   )
@@ -1506,7 +1557,7 @@ export default function Yearbook() {
       {/* Tab content */}
       <div className="max-w-5xl mx-auto px-4 py-8">
         {activeTab === 'overview' && (
-          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} customSections={customSections} galleryImages={galleryImages} />
+          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} customSections={customSections} galleryImages={galleryImages} pulledAwards={yearbook.pulled_awards || []} />
         )}
         {activeTab === 'results' && (
           <ResultsTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />

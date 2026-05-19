@@ -84,59 +84,47 @@
   }
 }
 
-/* Yearbook aurora superlative cards */
-.yb-aurora-card {
+/* Yearbook futuristic superlative cards */
+.yb-futuristic-card {
   position: relative;
-  border-radius: 16px;
+  padding: 1.2rem 1.25rem;
+  border-radius: 1rem;
+  background: rgba(14, 17, 27, 0.75);
+  backdrop-filter: blur(1rem) saturate(1.4);
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
   transition: transform 0.35s ease, box-shadow 0.35s ease;
 }
 
-.yb-aurora-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.4);
-}
-
-.yb-aurora-inner {
+.yb-futuristic-card::before {
+  content: "";
   position: absolute;
-  inset: 4px;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  z-index: 2;
+  inset: 0;
+  padding: 1.5px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--pb-accent), color-mix(in srgb, var(--pb-accent) 40%, white), var(--pb-accent));
+  background-size: 300% 300%;
+  animation: yb-border-flow 6s linear infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  z-index: 0;
   pointer-events: none;
 }
 
-.yb-aurora-blob {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 110px;
-  height: 110px;
-  border-radius: 50%;
-  filter: blur(22px);
-  z-index: 1;
-  opacity: 0.35;
-  animation: yb-aurora-move 7s infinite ease-in-out;
-  pointer-events: none;
+.yb-futuristic-card:hover {
+  transform: translateY(-3px) scale(1.01);
+  box-shadow: 0 0 1.5rem color-mix(in srgb, var(--pb-accent) 25%, transparent);
 }
 
-.yb-aurora-content {
+.yb-fc-content {
   position: relative;
-  z-index: 3;
-  padding: 20px 20px 18px;
+  z-index: 1;
 }
 
-@keyframes yb-aurora-move {
-  0%   { transform: translate(-60%, -60%) scale(1); }
-  30%  { transform: translate(10%, -40%) scale(1.15); }
-  60%  { transform: translate(20%, 20%) scale(1.05); }
-  80%  { transform: translate(-40%, 10%) scale(1.2); }
-  100% { transform: translate(-60%, -60%) scale(1); }
+@keyframes yb-border-flow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 /* Recharts overrides */
