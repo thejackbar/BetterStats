@@ -363,6 +363,14 @@ async def patch_settings(
 LOGO_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 LOGO_MAX_BYTES = 2 * 1024 * 1024
 
+_IMAGE_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
 
 def _remove_uploaded_logo(logo_url: Optional[str]) -> None:
     """Delete a previously uploaded logo file. No-op for external URLs."""
@@ -388,14 +396,10 @@ async def upload_logo(
     if len(data) > LOGO_MAX_BYTES:
         raise HTTPException(400, "Logo must be 2 MB or smaller")
 
-    org_id = str(club.id)
-    dest_dir = Path("/app/uploads") / "logos" / org_id
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    _remove_uploaded_logo(club.logo_url)
-    filename = f"logo_{uuid.uuid4().hex}{ext}"
-    (dest_dir / filename).write_bytes(data)
-
-    club.logo_url = f"/uploads/logos/{org_id}/{filename}"
+    _remove_uploaded_logo(club.logo_url)  # clean up any legacy on-disk file
+    club.logo_data = data
+    club.logo_mime = _IMAGE_MIME.get(ext, "image/png")
+    club.logo_url = f"/api/images/organisations/{club.id}/logo?v={uuid.uuid4().hex[:8]}"
     await db.commit()
     return {"logo_url": club.logo_url}
 
@@ -407,6 +411,8 @@ async def delete_logo(
     db: AsyncSession = Depends(get_db),
 ):
     _remove_uploaded_logo(club.logo_url)
+    club.logo_data = None
+    club.logo_mime = None
     club.logo_url = None
     await db.commit()
     return {"status": "cleared"}
@@ -449,13 +455,10 @@ async def upload_player_photo(
     if len(data) > PHOTO_MAX_BYTES:
         raise HTTPException(400, "Photo must be 2 MB or smaller")
 
-    dest_dir = Path("/app/uploads") / "players" / player_id
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    _remove_player_photo(player.photo_url)
-    filename = f"photo_{_uuid.uuid4().hex}{ext}"
-    (dest_dir / filename).write_bytes(data)
-
-    player.photo_url = f"/uploads/players/{player_id}/{filename}"
+    _remove_player_photo(player.photo_url)  # clean up any legacy on-disk file
+    player.photo_data = data
+    player.photo_mime = _IMAGE_MIME.get(ext, "image/png")
+    player.photo_url = f"/api/images/players/{player.id}/photo?v={_uuid.uuid4().hex[:8]}"
     await db.commit()
     return {"photo_url": player.photo_url}
 
@@ -472,6 +475,8 @@ async def delete_player_photo(
     if not player or str(player.organisation_id) != str(club.id):
         raise HTTPException(404, "Player not found")
     _remove_player_photo(player.photo_url)
+    player.photo_data = None
+    player.photo_mime = None
     player.photo_url = None
     await db.commit()
     return {"status": "cleared"}
