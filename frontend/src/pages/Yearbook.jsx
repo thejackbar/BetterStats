@@ -369,18 +369,18 @@ function SupCard({ label, value, name, playerId, clubSlug, sub, accent = false, 
   return (
     <div className="yb-futuristic-card">
       <div className="yb-fc-content">
-        <div className="font-mono text-[9px] tracking-wide text-white/40 uppercase leading-tight">{label}</div>
+        <div className="font-mono text-[11px] tracking-wide text-white/40 uppercase leading-tight">{label}</div>
         <div
-          className="text-lg font-bold tabular-nums leading-none"
+          className="text-xl font-bold tabular-nums leading-none"
           style={{ color: muted ? 'var(--pb-amber)' : 'var(--pb-accent)' }}
         >
           {value}
         </div>
         {name && playerId && clubSlug && (
-          <div className="text-[10px] leading-tight"><PlayerLink id={playerId} name={name} slug={clubSlug} /></div>
+          <div className="text-[12px] leading-tight"><PlayerLink id={playerId} name={name} slug={clubSlug} /></div>
         )}
-        {name && !playerId && <span className="text-[10px] text-white/60 leading-tight">{name}</span>}
-        {sub && <div className="text-[9px] text-white/35 leading-tight">{sub}</div>}
+        {name && !playerId && <span className="text-[12px] text-white/60 leading-tight">{name}</span>}
+        {sub && <div className="text-[11px] text-white/35 leading-tight">{sub}</div>}
       </div>
     </div>
   )
