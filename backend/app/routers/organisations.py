@@ -157,20 +157,25 @@ async def get_org_grades(
     season_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
+    params = {"org_id": org_id}
+    season_clause = ""
+    if season_id:
+        season_clause = "AND g.season_id = CAST(:season_id AS UUID)"
+        params["season_id"] = season_id
     result = await db.execute(
-        text("""
+        text(f"""
             SELECT display_name FROM (
                 SELECT DISTINCT COALESCE(g.display_name_override, g.name) AS display_name
                 FROM grades g
                 JOIN seasons s ON s.id = g.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND (:season_id IS NULL OR g.season_id = CAST(:season_id AS UUID))
+                  {season_clause}
             ) sub
             ORDER BY
                 NULLIF(regexp_replace(display_name, '[^0-9].*', ''), '')::int NULLS LAST,
                 display_name
         """),
-        {"org_id": org_id, "season_id": season_id},
+        params,
     )
     return [{"name": row.display_name} for row in result]
 
