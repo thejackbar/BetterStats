@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Boolean, Integer, Numeric, Date, Text, ForeignKey,
-    TIMESTAMP, JSON, UniqueConstraint
+    TIMESTAMP, JSON, UniqueConstraint, LargeBinary
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -53,6 +53,8 @@ class Organisation(Base):
     primary_color = Column(Text, default="#16c784", nullable=True)
     accent_color = Column(Text, default="#243352", nullable=True)
     logo_url = Column(Text, nullable=True)
+    logo_data = Column(LargeBinary, nullable=True)
+    logo_mime = Column(Text, nullable=True)
     hero_image_url = Column(Text, nullable=True)
     theme_mode = Column(Text, default="auto", nullable=True)
     contact_email = Column(Text, nullable=True)
@@ -123,6 +125,8 @@ class Player(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"))
     playhq_id = Column(Text, nullable=True)
     photo_url = Column(Text, nullable=True)
+    photo_data = Column(LargeBinary, nullable=True)
+    photo_mime = Column(Text, nullable=True)
     # claimed / user_id retained as columns but no longer used in business logic
     claimed = Column(Boolean, default=False)
     user_id = Column(UUID(as_uuid=True), nullable=True)
