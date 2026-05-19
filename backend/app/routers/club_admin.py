@@ -967,23 +967,84 @@ async def create_club(
     return {"id": str(org.id), "slug": org.slug, "name": org.name}
 
 
-class ClubActivePatch(BaseModel):
-    is_active: bool
+class ClubUpdate(BaseModel):
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    short_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    primary_color: Optional[str] = None
+    accent_color: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 @router.patch("/super/clubs/{club_id}")
 async def patch_club(
     club_id: str,
-    data: ClubActivePatch,
+    data: ClubUpdate,
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
     org = await db.get(Organisation, uuid.UUID(club_id))
     if not org:
         raise HTTPException(status_code=404, detail="Club not found")
-    org.is_active = data.is_active
+
+    fields = data.model_dump(exclude_unset=True)
+
+    if "slug" in fields:
+        slug = (fields["slug"] or "").lower().strip()
+        if not slug:
+            raise HTTPException(status_code=422, detail="Slug cannot be empty")
+        clash = await db.execute(
+            select(Organisation).where(Organisation.slug == slug, Organisation.id != org.id)
+        )
+        if clash.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Slug already in use")
+        fields["slug"] = slug
+
+    if "name" in fields:
+        name = (fields["name"] or "").strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Name cannot be empty")
+        fields["name"] = name
+
+    for key, value in fields.items():
+        setattr(org, key, value)
+
     await db.commit()
-    return {"id": str(org.id), "is_active": org.is_active}
+    return {
+        "id": str(org.id),
+        "slug": org.slug,
+        "name": org.name,
+        "is_active": org.is_active,
+    }
+
+
+@router.delete("/super/clubs/{club_id}")
+async def delete_club(
+    club_id: str,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    org = await db.get(Organisation, uuid.UUID(club_id))
+    if not org:
+        raise HTTPException(status_code=404, detail="Club not found")
+
+    # These tables key on org_id but have no FK constraint, so the
+    # organisations cascade won't reach them — clean them up explicitly.
+    for table in ("merge_logs", "merge_pair_ignores", "grade_merge_logs", "player_achievements"):
+        await db.execute(
+            _text(f"DELETE FROM {table} WHERE org_id = CAST(:id AS UUID)"),
+            {"id": club_id},
+        )
+
+    # The rest (seasons, grades, games, players, stats, memberships, …) all
+    # FK to organisations ON DELETE CASCADE, so the DB handles them.
+    await db.execute(
+        _text("DELETE FROM organisations WHERE id = CAST(:id AS UUID)"),
+        {"id": club_id},
+    )
+    await db.commit()
+    return {"status": "deleted", "id": club_id}
 
 
 # ---------------------------------------------------------------------------
@@ -1088,6 +1149,118 @@ async def reset_password(
     user.locked_until = None
     await db.commit()
     return {"status": "password_reset"}
+
+
+async def _super_admin_count(db: AsyncSession) -> int:
+    res = await db.execute(
+        select(func.count()).select_from(ClubMembership).where(ClubMembership.role == "super_admin")
+    )
+    return res.scalar() or 0
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    club_id: Optional[str] = None
+
+
+@router.patch("/super/users/{user_id}")
+async def patch_user(
+    user_id: str,
+    data: UserUpdate,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await db.get(User, uuid.UUID(user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    fields = data.model_dump(exclude_unset=True)
+
+    if "username" in fields:
+        username = (fields["username"] or "").lower().strip()
+        if len(username) < 3 or len(username) > 32:
+            raise HTTPException(status_code=422, detail="Username must be 3-32 characters")
+        clash = await db.execute(
+            select(User).where(User.username == username, User.id != user.id)
+        )
+        if clash.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Username already taken")
+        user.username = username
+
+    if "display_name" in fields:
+        user.display_name = (fields["display_name"] or "").strip() or None
+
+    membership_res = await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == user.id)
+    )
+    membership = membership_res.scalar_one_or_none()
+
+    new_role = fields.get("role")
+    if new_role is not None and new_role not in ("super_admin", "club_admin"):
+        raise HTTPException(status_code=422, detail="Role must be super_admin or club_admin")
+
+    # Block removing the last super admin via a role demotion.
+    if (
+        new_role == "club_admin"
+        and membership
+        and membership.role == "super_admin"
+        and await _super_admin_count(db) <= 1
+    ):
+        raise HTTPException(status_code=400, detail="Cannot demote the last super admin")
+
+    if "club_id" in fields:
+        club = await db.get(Organisation, uuid.UUID(fields["club_id"]))
+        if not club:
+            raise HTTPException(status_code=404, detail="Club not found")
+        if membership:
+            membership.club_id = club.id
+        else:
+            membership = ClubMembership(
+                club_id=club.id,
+                user_id=user.id,
+                role=new_role or "club_admin",
+            )
+            db.add(membership)
+
+    if new_role is not None and membership:
+        membership.role = new_role
+
+    await db.commit()
+    return {
+        "id": str(user.id),
+        "username": user.username,
+        "display_name": user.display_name,
+        "role": membership.role if membership else None,
+        "club_id": str(membership.club_id) if membership else None,
+    }
+
+
+@router.delete("/super/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await db.get(User, uuid.UUID(user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+
+    membership_res = await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == user.id)
+    )
+    membership = membership_res.scalar_one_or_none()
+    if membership and membership.role == "super_admin" and await _super_admin_count(db) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the last super admin")
+
+    # club_memberships FK to users ON DELETE CASCADE — removed automatically.
+    await db.delete(user)
+    await db.commit()
+    return {"status": "deleted", "id": user_id}
 
 
 # ---------------------------------------------------------------------------

@@ -229,9 +229,15 @@ export const api = {
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>
     request(`/club-admin/super/clubs/${clubId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superDeleteClub: (clubId) =>
+    request(`/club-admin/super/clubs/${clubId}`, { method: 'DELETE' }),
   superListUsers: () => request('/club-admin/super/users'),
   superCreateUser: (data) =>
     request('/club-admin/super/users', { method: 'POST', body: JSON.stringify(data) }),
+  superUpdateUser: (userId, data) =>
+    request(`/club-admin/super/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superDeleteUser: (userId) =>
+    request(`/club-admin/super/users/${userId}`, { method: 'DELETE' }),
   superResetPassword: (userId, newPassword) =>
     request(`/club-admin/super/users/${userId}/reset-password`, {
       method: 'POST',
