@@ -13,7 +13,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 const barColor = (runs) => {
   if (runs >= 100) return 'var(--pb-chart-milestone, #f5b542)'
   if (runs >= 50) return 'var(--pb-accent, #16c784)'
-  return 'var(--pb-surface2, #243352)'
+  return 'var(--pb-faintest, #3a3f50)'
 }
 
 export default function RunsChart({ innings = [] }) {
