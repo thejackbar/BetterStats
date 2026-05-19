@@ -24,7 +24,12 @@ export const api = {
   listOrgs: () => request('/organisations'),
   getOrg: (orgId) => request(`/organisations/${orgId}`),
   getOrgSeasons: (orgId) => request(`/organisations/${orgId}/seasons`),
-  getOrgGrades: (orgId) => request(`/organisations/${orgId}/grades`),
+  getOrgGrades: (orgId, seasonId) => {
+    const params = new URLSearchParams()
+    if (seasonId) params.set('season_id', seasonId)
+    const qs = params.toString()
+    return request(`/organisations/${orgId}/grades${qs ? `?${qs}` : ''}`)
+  },
   getSeasonGrades: (orgId, seasonId) => request(`/organisations/${orgId}/seasons/${seasonId}/grades`),
   triggerSync: (orgId) => request(`/organisations/${orgId}/sync`, { method: 'POST' }),
   getSyncLogs: (orgId) => request(`/organisations/${orgId}/sync-logs`),
