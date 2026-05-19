@@ -176,6 +176,7 @@ class Game(Base):
     away_team = Column(Text)
     result = Column(Text)
     winning_team = Column(Text)
+    is_final = Column(Boolean, default=False, nullable=False, server_default='false')
     raw_payload = Column(JSON)
 
     grade = relationship("Grade", back_populates="games")

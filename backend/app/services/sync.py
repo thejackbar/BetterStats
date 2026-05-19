@@ -621,6 +621,7 @@ async def sync_grassroots_game_level_data(
     org_id_str_lower = org_id_str.lower()
     seen_match_ids: set[str] = set()
     match_to_season: dict[str, uuid.UUID] = {}
+    match_to_is_final: dict[str, bool] = {}
     for grade_id, season_id, grade_name in grades:
         stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
         try:
@@ -641,6 +642,8 @@ async def sync_grassroots_game_level_data(
                 continue
             seen_match_ids.add(mid)
             match_to_season[mid] = season_id
+            round_name = (m.get("round") or {}).get("name", "")
+            match_to_is_final[mid] = "final" in round_name.lower()
         if run_id:
             await update_sync_run(run_id, stats)
 
@@ -648,6 +651,24 @@ async def sync_grassroots_game_level_data(
     logger.info(f"GR-sync: discovered {len(seen_match_ids)} unique match IDs across {stats['gr_teams_scanned']} grades")
     if run_id:
         await update_sync_run(run_id, stats)
+
+    # Bulk-update is_final on all discovered games (backfills existing rows).
+    if seen_match_ids:
+        finals_ids = [mid for mid, f in match_to_is_final.items() if f]
+        non_finals_ids = [mid for mid, f in match_to_is_final.items() if not f]
+        async with async_session_maker() as upd_session:
+            if finals_ids:
+                await upd_session.execute(
+                    text("UPDATE games SET is_final = TRUE WHERE id = ANY(:ids)"),
+                    {"ids": [uuid.UUID(mid) for mid in finals_ids]},
+                )
+            if non_finals_ids:
+                await upd_session.execute(
+                    text("UPDATE games SET is_final = FALSE WHERE id = ANY(:ids)"),
+                    {"ids": [uuid.UUID(mid) for mid in non_finals_ids]},
+                )
+            await upd_session.commit()
+        logger.info(f"GR-sync: bulk-updated is_final ({len(finals_ids)} finals, {len(non_finals_ids)} non-finals)")
 
     # ── PER-GAME PROCESSING ───────────────────────────────────────────────────
     processed = 0
@@ -753,6 +774,7 @@ async def sync_grassroots_game_level_data(
                     away_team=away_team_name,
                     result=result_text,
                     winning_team=winner_name,
+                    is_final=match_to_is_final.get(match_id_str, False),
                 ))
                 try:
                     await session.flush()

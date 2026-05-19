@@ -120,8 +120,9 @@ async def get_batting_leaderboard(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
     limit: int = 20,
+    finals_only: Optional[bool] = None,
 ) -> list[dict]:
-    return await get_batting_leaderboard_extended(session, org_id, season_id, grade_id, "total_runs", limit)
+    return await get_batting_leaderboard_extended(session, org_id, season_id, grade_id, "total_runs", limit, finals_only=finals_only)
 
 
 async def get_bowling_leaderboard(
@@ -130,8 +131,9 @@ async def get_bowling_leaderboard(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
     limit: int = 20,
+    finals_only: Optional[bool] = None,
 ) -> list[dict]:
-    return await get_bowling_leaderboard_extended(session, org_id, season_id, grade_id, "total_wickets", limit)
+    return await get_bowling_leaderboard_extended(session, org_id, season_id, grade_id, "total_wickets", limit, finals_only=finals_only)
 
 
 async def get_fielding_leaderboard(
@@ -142,11 +144,13 @@ async def get_fielding_leaderboard(
     sort_by: str = "total_dismissals",
     limit: int = 20,
     grade_name: Optional[str] = None,
+    finals_only: Optional[bool] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {"total_catches", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_dismissals"
 
+    finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     params: dict = {"org_id": org_id, "limit": limit}
 
     if grade_id:
@@ -163,7 +167,7 @@ async def get_fielding_leaderboard(
             FROM fielding_stats fs
             JOIN games g ON g.id = fs.game_id
             JOIN players p ON p.id = fs.player_id
-            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id
+            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -189,7 +193,34 @@ async def get_fielding_leaderboard(
             JOIN grades gr ON gr.id = g.grade_id
             JOIN players p ON p.id = fs.player_id
             WHERE {_GRADE_MATCH}{season_clause}
-              AND p.organisation_id = :org_id
+              AND p.organisation_id = :org_id{finals_clause}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
+        """
+        result = await session.execute(text(base), params)
+        return [dict(r) for r in result.mappings()]
+
+    if finals_only:
+        # When finals_only=True with no grade filter, switch to per-game query
+        season_clause = " AND s.id = :season_id" if season_id else ""
+        if season_id:
+            params["season_id"] = season_id
+        base = f"""
+            SELECT
+                p.id AS player_id,
+                COALESCE(p.display_name_override, p.name) AS name,
+                COUNT(DISTINCT fs.game_id) AS games,
+                COALESCE(SUM(fs.catches), 0) AS total_catches,
+                COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
+                COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
+                COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
+            FROM fielding_stats fs
+            JOIN games g ON g.id = fs.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            JOIN players p ON p.id = fs.player_id
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND g.is_final = TRUE{season_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
