@@ -87,11 +87,15 @@
 /* Yearbook futuristic superlative cards */
 .yb-futuristic-card {
   position: relative;
-  padding: 1.2rem 1.25rem;
+  padding: 1rem;
   border-radius: 1rem;
   background: rgba(14, 17, 27, 0.75);
   backdrop-filter: blur(1rem) saturate(1.4);
   overflow: hidden;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: transform 0.35s ease, box-shadow 0.35s ease;
 }
 
@@ -119,6 +123,13 @@
 .yb-fc-content {
   position: relative;
   z-index: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.25rem;
 }
 
 @keyframes yb-border-flow {
