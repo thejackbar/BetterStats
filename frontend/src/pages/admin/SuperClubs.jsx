@@ -1,18 +1,89 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
+const EMPTY_FORM = { org_id: '', name: '', slug: '', short_name: '', contact_email: '' }
+
 export default function SuperClubs() {
   const [clubs, setClubs] = useState([])
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ name: '', slug: '', short_name: '', contact_email: '' })
+  const [form, setForm] = useState(EMPTY_FORM)
   const [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // Club search (same source as the public onboarding flow)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [showResults, setShowResults] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const debounceRef = useRef(null)
+  const searchWrapRef = useRef(null)
+
   const load = () => api.superListClubs().then(setClubs).catch(() => {})
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (searchWrapRef.current && !searchWrapRef.current.contains(e.target)) {
+        setShowResults(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (form.org_id) return
+    if (!query || query.trim().length < 2) {
+      setResults([])
+      setShowResults(false)
+      return
+    }
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const data = await api.searchOrgs(query.trim())
+        setResults(Array.isArray(data) ? data : [])
+        setShowResults(true)
+      } catch {
+        setResults([])
+      } finally {
+        setSearching(false)
+      }
+    }, 350)
+    return () => clearTimeout(debounceRef.current)
+  }, [query, form.org_id])
+
+  const orgName = (org) => org.name || org.shortName || org.organisationName || org.id || ''
+
+  const selectOrg = (org) => {
+    const name = orgName(org)
+    setForm(f => ({
+      ...f,
+      org_id: org.id,
+      name,
+      slug: f.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
+      short_name: f.short_name || org.shortName || '',
+    }))
+    setQuery(name)
+    setShowResults(false)
+    setResults([])
+  }
+
+  const handleQueryChange = (e) => {
+    setForm(f => ({ ...f, org_id: '' }))
+    setQuery(e.target.value)
+  }
+
+  const resetCreate = () => {
+    setForm(EMPTY_FORM)
+    setQuery('')
+    setResults([])
+    setShowResults(false)
+  }
 
   const toggleActive = async (club) => {
     try {
@@ -25,13 +96,17 @@ export default function SuperClubs() {
 
   const createClub = async (e) => {
     e.preventDefault()
+    if (!form.org_id) {
+      setMsg('Select a club from the search results first')
+      return
+    }
     setSaving(true)
     setMsg('')
     try {
       await api.superCreateClub(form)
       setMsg('Club created')
       setShowCreate(false)
-      setForm({ name: '', slug: '', short_name: '', contact_email: '' })
+      resetCreate()
       load()
     } catch (err) {
       setMsg(err.message)
@@ -48,7 +123,7 @@ export default function SuperClubs() {
           <div className="flex items-center gap-3">
             {msg && <span className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>{msg}</span>}
             <button
-              onClick={() => setShowCreate(s => !s)}
+              onClick={() => { setShowCreate(s => !s); resetCreate(); setMsg('') }}
               className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
@@ -60,6 +135,56 @@ export default function SuperClubs() {
         {showCreate && (
           <form onSubmit={createClub} className="pb-card p-4 mb-5 space-y-3">
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Create New Club</p>
+
+            <div ref={searchWrapRef} className="relative">
+              <label className="font-mono text-[10px] text-pb-faint block mb-1">
+                Search Cricket Australia *
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={query}
+                  onChange={handleQueryChange}
+                  onFocus={() => results.length > 0 && setShowResults(true)}
+                  placeholder="e.g. Portland Tigers Cricket Club"
+                  className={INPUT_CLS + ' pr-8'}
+                  autoComplete="off"
+                />
+                {searching && (
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-pb-accent/40 border-t-pb-accent rounded-full animate-spin" />
+                )}
+                {form.org_id && !searching && (
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--pb-accent)' }}>✓</span>
+                )}
+              </div>
+              {showResults && results.length > 0 && (
+                <ul className="absolute z-10 mt-1 w-full bg-pb-surface border pb-hairline rounded shadow-xl max-h-56 overflow-y-auto">
+                  {results.map(org => (
+                    <li key={org.id}>
+                      <button
+                        type="button"
+                        onClick={() => selectOrg(org)}
+                        className="w-full text-left px-3 py-2 text-sm text-pb-text hover:bg-pb-surface2 transition-colors pb-hairline-b last:border-0"
+                      >
+                        <div className="font-medium">{orgName(org)}</div>
+                        {org.shortName && org.shortName !== org.name && (
+                          <div className="text-pb-faint text-xs mt-0.5">{org.shortName}</div>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {showResults && !searching && results.length === 0 && query.trim().length >= 2 && (
+                <div className="absolute z-10 mt-1 w-full bg-pb-surface border pb-hairline rounded px-3 py-2 text-sm text-pb-faint">
+                  No clubs found for "{query}"
+                </div>
+              )}
+              <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                A club must be picked from search so its data syncs correctly.
+              </p>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="font-mono text-[10px] text-pb-faint block mb-1">Club name *</label>
@@ -89,7 +214,7 @@ export default function SuperClubs() {
             </div>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !form.org_id}
               className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
