@@ -6,11 +6,12 @@ from pydantic import BaseModel
 import uuid
 from datetime import date
 
-from app.models.db import Organisation, Season, Grade, get_db
+from app.models.db import Organisation, Season, Grade, User, get_db
 from app.services import playhq_client
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
 from app.services import playhq_partner_client
+from app.routers.auth import get_current_user
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
@@ -50,7 +51,7 @@ class OrganisationOut(BaseModel):
 
 
 @router.get("/search")
-async def search_organisations(q: str = ""):
+async def search_organisations(q: str = "", _: User = Depends(get_current_user)):
     if not q or len(q.strip()) < 2:
         return []
     results = await playhq_client.search_organisations(q.strip())
@@ -62,6 +63,7 @@ async def onboard_organisation(
     data: OnboardRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
 ):
     org_data = await playhq_client.get_organisation(data.org_id)
     if not org_data:

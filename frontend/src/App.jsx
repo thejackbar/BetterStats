@@ -100,7 +100,7 @@ export default function App() {
 
         {/* Public club pages (slug-based) */}
         <Route path="/club-inactive" element={<ClubInactive />} />
-        <Route path="/onboard" element={<Onboard />} />
+        <Route path="/onboard" element={<ProtectedRoute><Onboard /></ProtectedRoute>} />
         <Route path="/:clubSlug/dashboard" element={<Dashboard />} />
         <Route path="/:clubSlug/players" element={<Players />} />
         <Route path="/:clubSlug/compare" element={<PlayerComparison />} />
