@@ -41,6 +41,14 @@ def _parse_route(path: str):
     return None
 
 
+def _abs_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    return f"{SITE}{url}"
+
+
 def _esc(s: str) -> str:
     return (
         str(s)
@@ -96,7 +104,7 @@ async def _player_html(player_id: str, page_url: str, db: AsyncSession) -> str |
         if club_name
         else f"{name}'s career cricket statistics on BetterStats."
     )
-    image = org.logo_url if org else None
+    image = _abs_url(org.logo_url if org else None)
 
     return _html(f"{name} — BetterStats", description, image, page_url)
 
@@ -113,7 +121,7 @@ async def _club_html(slug: str, page_url: str, db: AsyncSession) -> str | None:
         f"{org.name} cricket statistics — batting, bowling and fielding "
         f"leaderboards, records, and player profiles on BetterStats."
     )
-    return _html(f"{org.name} — BetterStats", description, org.logo_url, page_url)
+    return _html(f"{org.name} — BetterStats", description, _abs_url(org.logo_url), page_url)
 
 
 @router.get("", response_class=HTMLResponse)
