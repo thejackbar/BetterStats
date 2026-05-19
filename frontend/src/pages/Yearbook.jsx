@@ -315,6 +315,22 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
             {overview?.total_hundreds > 0 && (
               <SupCard label="Centuries" value={overview.total_hundreds} />
             )}
+            {overview?.total_players > 0 && (
+              <SupCard label="Players Used" value={overview.total_players} />
+            )}
+            {overview?.total_games > 0 && (
+              <SupCard label="Games Played" value={overview.total_games} />
+            )}
+            {superlatives?.most_ducks?.player_id && superlatives.most_ducks.ducks > 0 && (
+              <SupCard
+                label="Most Ducks"
+                value={superlatives.most_ducks.ducks}
+                name={superlatives.most_ducks.name}
+                playerId={superlatives.most_ducks.player_id}
+                clubSlug={clubSlug}
+                muted
+              />
+            )}
           </div>
         </div>
       )}
@@ -324,19 +340,26 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
 
 function SupCard({ label, value, name, playerId, clubSlug, sub, accent = false, muted = false }) {
   return (
-    <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-4">
-      <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-2">{label}</div>
+    <div className="yb-aurora-card">
+      <div className="yb-aurora-inner" />
       <div
-        className="text-3xl font-bold tabular-nums leading-none mb-1"
-        style={{ color: muted ? 'var(--pb-amber)' : accent ? 'var(--pb-accent)' : 'white' }}
-      >
-        {value}
+        className="yb-aurora-blob"
+        style={{ background: `radial-gradient(circle, var(--pb-accent), transparent)` }}
+      />
+      <div className="yb-aurora-content">
+        <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-2">{label}</div>
+        <div
+          className="text-3xl font-bold tabular-nums leading-none mb-1"
+          style={{ color: muted ? 'var(--pb-amber)' : accent ? 'var(--pb-accent)' : 'white' }}
+        >
+          {value}
+        </div>
+        {name && playerId && clubSlug && (
+          <PlayerLink id={playerId} name={name} slug={clubSlug} />
+        )}
+        {name && !playerId && <span className="text-[13px] text-white/60">{name}</span>}
+        {sub && <div className="text-[12px] text-white/35 mt-0.5">{sub}</div>}
       </div>
-      {name && playerId && clubSlug && (
-        <PlayerLink id={playerId} name={name} slug={clubSlug} />
-      )}
-      {name && !playerId && <span className="text-[13px] text-white/60">{name}</span>}
-      {sub && <div className="text-[12px] text-white/35 mt-0.5">{sub}</div>}
     </div>
   )
 }

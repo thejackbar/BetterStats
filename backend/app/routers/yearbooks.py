@@ -257,15 +257,9 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
             if lo <= target_year <= hi:
                 pulled_rows.append(dict(row))
         else:
-            # No season_end: for Office Bearer this is the "Present" sentinel
-            # → ongoing, match any year from the start onward. Other categories
-            # are single-season.
-            if row["category"] == "Office Bearer":
-                if target_year >= s_year:
-                    pulled_rows.append(dict(row))
-            else:
-                if s_year == target_year:
-                    pulled_rows.append(dict(row))
+            # No season_end: single-season record — match exact year only.
+            if s_year == target_year:
+                pulled_rows.append(dict(row))
 
     return {
         **yb,

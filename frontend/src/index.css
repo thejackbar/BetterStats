@@ -84,6 +84,61 @@
   }
 }
 
+/* Yearbook aurora superlative cards */
+.yb-aurora-card {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  transition: transform 0.35s ease, box-shadow 0.35s ease;
+}
+
+.yb-aurora-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.4);
+}
+
+.yb-aurora-inner {
+  position: absolute;
+  inset: 4px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.yb-aurora-blob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  filter: blur(22px);
+  z-index: 1;
+  opacity: 0.35;
+  animation: yb-aurora-move 7s infinite ease-in-out;
+  pointer-events: none;
+}
+
+.yb-aurora-content {
+  position: relative;
+  z-index: 3;
+  padding: 20px 20px 18px;
+}
+
+@keyframes yb-aurora-move {
+  0%   { transform: translate(-60%, -60%) scale(1); }
+  30%  { transform: translate(10%, -40%) scale(1.15); }
+  60%  { transform: translate(20%, 20%) scale(1.05); }
+  80%  { transform: translate(-40%, 10%) scale(1.2); }
+  100% { transform: translate(-60%, -60%) scale(1); }
+}
+
 /* Recharts overrides */
 .recharts-cartesian-grid-horizontal line,
 .recharts-cartesian-grid-vertical line {

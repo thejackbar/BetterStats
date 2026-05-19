@@ -9,10 +9,19 @@ const AWARD_PRESETS = [
   'Most Valuable Player', "Club Person of the Year", "President's Award", 'Custom',
 ]
 
+function Chevron({ open }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
+      <path d="M2.5 5L7 9.5L11.5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
+
 function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
   const inputRef = useRef()
   const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState(null)
+  const [collapsed, setCollapsed] = useState(false)
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0]
@@ -44,39 +53,49 @@ function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
 
   return (
     <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
-      <h2 className="text-[13px] font-semibold text-white/90 mb-1">Hero Image</h2>
-      <p className="text-[11px] text-white/40 mb-4">Shown as the yearbook cover background. Landscape photos work best.</p>
-      {heroPath ? (
-        <div className="mb-3">
-          <img
-            src={`/uploads/${heroPath}`}
-            alt="Hero"
-            className="w-full max-h-48 object-cover rounded-lg border border-white/10"
-          />
-          <div className="flex gap-2 mt-2">
-            <Btn onClick={() => inputRef.current?.click()} disabled={uploading}>
-              {uploading ? 'Uploading…' : 'Replace'}
-            </Btn>
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full flex items-center justify-between mb-1 group"
+      >
+        <h2 className="text-[13px] font-semibold text-white/90">Hero Image</h2>
+        <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!collapsed} /></span>
+      </button>
+      {!collapsed && (
+        <>
+          <p className="text-[11px] text-white/40 mb-4">Shown as the yearbook cover background. Landscape photos work best.</p>
+          {heroPath ? (
+            <div className="mb-3">
+              <img
+                src={`/uploads/${heroPath}`}
+                alt="Hero"
+                className="w-full max-h-48 object-cover rounded-lg border border-white/10"
+              />
+              <div className="flex gap-2 mt-2">
+                <Btn onClick={() => inputRef.current?.click()} disabled={uploading}>
+                  {uploading ? 'Uploading…' : 'Replace'}
+                </Btn>
+                <button
+                  onClick={handleClear}
+                  className="px-3 py-1.5 text-[12px] font-mono text-red-400/60 hover:text-red-400 transition"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ) : (
             <button
-              onClick={handleClear}
-              className="px-3 py-1.5 text-[12px] font-mono text-red-400/60 hover:text-red-400 transition"
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+              className="w-full border-2 border-dashed border-white/15 rounded-lg py-8 text-center hover:border-white/25 transition-colors disabled:opacity-40"
             >
-              Remove
+              <div className="text-white/40 text-[13px]">{uploading ? 'Uploading…' : '+ Upload Hero Image'}</div>
+              <div className="text-white/25 text-[11px] font-mono mt-1">JPG, PNG, WEBP up to 20MB</div>
             </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          onClick={() => inputRef.current?.click()}
-          disabled={uploading}
-          className="w-full border-2 border-dashed border-white/15 rounded-lg py-8 text-center hover:border-white/25 transition-colors disabled:opacity-40"
-        >
-          <div className="text-white/40 text-[13px]">{uploading ? 'Uploading…' : '+ Upload Hero Image'}</div>
-          <div className="text-white/25 text-[11px] font-mono mt-1">JPG, PNG, WEBP up to 20MB</div>
-        </button>
+          )}
+          <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+          {err && <p className="text-[11px] text-red-400/80 mt-2">{err}</p>}
+        </>
       )}
-      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-      {err && <p className="text-[11px] text-red-400/80 mt-2">{err}</p>}
     </div>
   )
 }
@@ -86,6 +105,7 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
   const [uploading, setUploading] = useState(false)
   const [deleting, setDeleting] = useState(null)
   const [err, setErr] = useState(null)
+  const [collapsed, setCollapsed] = useState(false)
 
   const galleryImages = images.filter(i => i.image_type === 'gallery')
 
@@ -123,44 +143,52 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
 
   return (
     <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
-      <div className="flex items-center justify-between mb-3">
-        <div>
+      <div className="flex items-center justify-between mb-1">
+        <button onClick={() => setCollapsed(c => !c)} className="flex items-center gap-2 group flex-1 text-left">
           <h2 className="text-[13px] font-semibold text-white/90">Photo Gallery</h2>
-          <p className="text-[11px] text-white/40 mt-0.5">Team photos, match shots, presentations — shown on the public yearbook.</p>
-        </div>
-        <Btn onClick={() => inputRef.current?.click()} disabled={uploading}>
-          {uploading ? 'Uploading…' : '+ Add Photos'}
-        </Btn>
+          <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!collapsed} /></span>
+        </button>
+        {!collapsed && (
+          <Btn onClick={() => inputRef.current?.click()} disabled={uploading}>
+            {uploading ? 'Uploading…' : '+ Add Photos'}
+          </Btn>
+        )}
       </div>
-      {galleryImages.length > 0 ? (
-        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-2">
-          {galleryImages.map(img => (
-            <div key={img.id} className="relative group aspect-square">
-              <img
-                src={`/uploads/${img.file_path}`}
-                alt=""
-                className="w-full h-full object-cover rounded-lg border border-white/8"
-              />
-              <button
-                onClick={() => handleDelete(img)}
-                disabled={deleting === img.id}
-                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white/70 hover:text-red-400 flex items-center justify-center text-[13px] opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-40"
-              >
-                {deleting === img.id ? '…' : '×'}
-              </button>
+      {!collapsed && (
+        <>
+          <p className="text-[11px] text-white/40 mt-0.5 mb-3">Team photos, match shots, presentations — shown on the public yearbook.</p>
+          {galleryImages.length > 0 ? (
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-2">
+              {galleryImages.map(img => (
+                <div key={img.id} className="relative group aspect-square">
+                  <img
+                    src={`/uploads/${img.file_path}`}
+                    alt=""
+                    className="w-full h-full object-cover rounded-lg border border-white/8"
+                  />
+                  <button
+                    onClick={() => handleDelete(img)}
+                    disabled={deleting === img.id}
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white/70 hover:text-red-400 flex items-center justify-center text-[13px] opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-40"
+                  >
+                    {deleting === img.id ? '…' : '×'}
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ) : (
-        <p className="text-[12px] text-white/25 italic mb-2">No photos yet.</p>
+          ) : (
+            <p className="text-[12px] text-white/25 italic mb-2">No photos yet.</p>
+          )}
+          <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFile} />
+          {err && <p className="text-[11px] text-red-400/80 mt-1">{err}</p>}
+        </>
       )}
-      <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFile} />
-      {err && <p className="text-[11px] text-red-400/80 mt-1">{err}</p>}
     </div>
   )
 }
 
 function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, players, onRefresh }) {
+  const [collapsed, setCollapsed] = useState(false)
   const [adding, setAdding] = useState(false)
   const [awardName, setAwardName] = useState('')
   const [customName, setCustomName] = useState('')
@@ -210,22 +238,25 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, players, onRef
 
   return (
     <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
-      <div className="flex items-center justify-between mb-4">
-        <div>
+      <div className="flex items-center justify-between mb-1">
+        <button onClick={() => setCollapsed(c => !c)} className="flex items-center gap-2 group flex-1 text-left">
           <h2 className="text-[13px] font-semibold text-white/90">Club Awards</h2>
-          <p className="text-[11px] text-white/40 mt-0.5">
-            {totalCount === 0 ? 'Season award winners — shown on the Awards tab.' : `${totalCount} award${totalCount !== 1 ? 's' : ''} for this season`}
-            {pulled.length > 0 && (
-              <span className="ml-1 text-white/30">
-                · {pulled.length} from <Link to="/admin/awards" className="text-pb-accent/70 hover:text-pb-accent underline-offset-2 hover:underline">Awards admin</Link>
-              </span>
-            )}
-          </p>
-        </div>
-        {!adding && <Btn onClick={() => { setAdding(true); setErr(null) }}>+ Add Award</Btn>}
+          <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!collapsed} /></span>
+        </button>
+        {!collapsed && !adding && <Btn onClick={() => { setAdding(true); setErr(null) }}>+ Add Award</Btn>}
       </div>
+      {!collapsed && (
+        <p className="text-[11px] text-white/40 mt-0.5 mb-4">
+          {totalCount === 0 ? 'Season award winners — shown on the Awards tab.' : `${totalCount} award${totalCount !== 1 ? 's' : ''} for this season`}
+          {pulled.length > 0 && (
+            <span className="ml-1 text-white/30">
+              · {pulled.length} from <Link to="/admin/awards" className="text-pb-accent/70 hover:text-pb-accent underline-offset-2 hover:underline">Awards admin</Link>
+            </span>
+          )}
+        </p>
+      )}
 
-      {pulled.length > 0 && (
+      {!collapsed && pulled.length > 0 && (
         <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
           {pulled.map(a => (
             <div key={`pulled-${a.id}`} className="flex items-start gap-4 px-4 py-3 bg-white/[0.015]">
@@ -256,7 +287,7 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, players, onRef
         </div>
       )}
 
-      {awards.length > 0 && (
+      {!collapsed && awards.length > 0 && (
         <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
           {awards.map(a => (
             <div key={a.id} className="flex items-start gap-4 px-4 py-3">
@@ -277,7 +308,7 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, players, onRef
         </div>
       )}
 
-      {adding && (
+      {!collapsed && adding && (
         <div className="rounded-lg border border-white/10 bg-white/3 p-4 space-y-3">
           {/* Award name presets */}
           <div>
@@ -353,6 +384,7 @@ const SECTION_PRESETS = [
 ]
 
 function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
+  const [collapsed, setCollapsed] = useState(false)
   const [adding, setAdding] = useState(false)
   const [newType, setNewType] = useState('')
   const [newTitle, setNewTitle] = useState('')
@@ -449,24 +481,28 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
 
   return (
     <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
-      <div className="flex items-center justify-between mb-4">
-        <div>
+      <div className="flex items-center justify-between mb-1">
+        <button onClick={() => setCollapsed(c => !c)} className="flex items-center gap-2 group flex-1 text-left">
           <h2 className="text-[13px] font-semibold text-white/90">Editorial Sections</h2>
-          <p className="text-[11px] text-white/40 mt-0.5">
-            Optional club reports shown on the public yearbook — toggle each one on/off.
-          </p>
-        </div>
-        {!adding && (
+          <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!collapsed} /></span>
+        </button>
+        {!collapsed && !adding && (
           <Btn onClick={() => setAdding(true)}>+ Add Section</Btn>
         )}
       </div>
 
+      {!collapsed && (
+        <p className="text-[11px] text-white/40 mt-0.5 mb-4">
+          Optional club reports shown on the public yearbook — toggle each one on/off.
+        </p>
+      )}
+
       {/* Existing sections */}
-      {sections.length === 0 && !adding && (
+      {!collapsed && sections.length === 0 && !adding && (
         <p className="text-[12px] text-white/25 italic mb-3">No sections yet. Add a President's Report, Sponsor's Message, or any custom section.</p>
       )}
 
-      <div className="space-y-4">
+      {!collapsed && <div className="space-y-4">
         {sections.map(s => {
           const ed = getEditor(s)
           return (
@@ -521,10 +557,10 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
             </div>
           )
         })}
-      </div>
+      </div>}
 
       {/* Add section form */}
-      {adding && (
+      {!collapsed && adding && (
         <div className="mt-4 rounded-lg border border-white/10 bg-white/3 p-4 space-y-3">
           <p className="text-[12px] font-semibold text-white/70">Choose section type</p>
           <div className="flex flex-wrap gap-2">
@@ -579,6 +615,7 @@ const PRESET_POSITIONS = [
 ]
 
 function HonourBoardSection({ orgId, seasonId, entries, players, onRefresh }) {
+  const [collapsed, setCollapsed] = useState(false)
   const [adding, setAdding] = useState(false)
   const [deleting, setDeleting] = useState(null)
   const [position, setPosition] = useState('')
@@ -649,20 +686,23 @@ function HonourBoardSection({ orgId, seasonId, entries, players, onRefresh }) {
 
   return (
     <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
-      <div className="flex items-center justify-between mb-4">
-        <div>
+      <div className="flex items-center justify-between mb-1">
+        <button onClick={() => setCollapsed(c => !c)} className="flex items-center gap-2 group flex-1 text-left">
           <h2 className="text-[13px] font-semibold text-white/90">Honour Board</h2>
-          <p className="text-[11px] text-white/40 mt-0.5">
-            {entries.length === 0 ? 'No entries yet — add club positions and holders.' : `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} across ${Object.keys(byPos).length} position${Object.keys(byPos).length !== 1 ? 's' : ''}`}
-          </p>
-        </div>
-        {!adding && (
+          <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!collapsed} /></span>
+        </button>
+        {!collapsed && !adding && (
           <Btn onClick={() => { setAdding(true); setErr(null) }}>+ Add Entry</Btn>
         )}
       </div>
+      {!collapsed && (
+        <p className="text-[11px] text-white/40 mt-0.5 mb-4">
+          {entries.length === 0 ? 'No entries yet — add club positions and holders.' : `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} across ${Object.keys(byPos).length} position${Object.keys(byPos).length !== 1 ? 's' : ''}`}
+        </p>
+      )}
 
       {/* Current entries */}
-      {Object.keys(byPos).length > 0 && (
+      {!collapsed && Object.keys(byPos).length > 0 && (
         <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
           {Object.entries(byPos).map(([pos, holders]) => (
             <div key={pos} className="flex items-start gap-4 px-4 py-3">
@@ -690,7 +730,7 @@ function HonourBoardSection({ orgId, seasonId, entries, players, onRefresh }) {
       )}
 
       {/* Add entry form */}
-      {adding && (
+      {!collapsed && adding && (
         <div className="rounded-lg border border-white/10 bg-white/3 p-4 space-y-3">
           {/* Position title */}
           <div>
@@ -809,6 +849,7 @@ export default function AdminYearbookDetail() {
 
   const [narrativeText, setNarrativeText] = useState('')
   const [narrativeDirty, setNarrativeDirty] = useState(false)
+  const [narrativeCollapsed, setNarrativeCollapsed] = useState(false)
 
   useEffect(() => {
     api.adminGetSettings().then(setOrg).catch(() => {})
@@ -966,37 +1007,42 @@ export default function AdminYearbookDetail() {
 
       {/* Narrative Section */}
       <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 mb-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
+        <div className="flex items-center justify-between mb-1">
+          <button onClick={() => setNarrativeCollapsed(c => !c)} className="flex items-center gap-2 group flex-1 text-left">
             <h2 className="text-[13px] font-semibold text-white/90">Season Narrative</h2>
-            <p className="text-[11px] text-white/40 mt-0.5">
+            <span className="text-white/30 group-hover:text-white/60 transition"><Chevron open={!narrativeCollapsed} /></span>
+          </button>
+          {!narrativeCollapsed && (
+            <Btn onClick={generateNarrative} disabled={generating} className="shrink-0">
+              {generating ? 'Generating…' : hasAiDraft ? 'Regenerate' : 'Generate AI Draft'}
+            </Btn>
+          )}
+        </div>
+        {!narrativeCollapsed && (
+          <>
+            <p className="text-[11px] text-white/40 mt-0.5 mb-3">
               {hasSaved ? 'Saved — shown publicly when yearbook is published.'
                 : hasAiDraft ? 'AI draft ready — edit and save to publish.'
                 : 'Generate an AI draft then edit before saving.'}
             </p>
-          </div>
-          <Btn onClick={generateNarrative} disabled={generating} className="shrink-0">
-            {generating ? 'Generating…' : hasAiDraft ? 'Regenerate' : 'Generate AI Draft'}
-          </Btn>
-        </div>
-
-        <textarea
-          value={narrativeText}
-          onChange={e => { setNarrativeText(e.target.value); setNarrativeDirty(true) }}
-          rows={10}
-          placeholder="Click 'Generate AI Draft' to auto-generate a season narrative, or type your own…"
-          className="w-full rounded-lg bg-white/5 border border-white/10 text-white/80 text-sm px-4 py-3 resize-y font-sans leading-relaxed focus:outline-none focus:border-white/25 placeholder:text-white/20"
-        />
-
-        <div className="flex items-center justify-between mt-3">
-          <span className="text-[11px] text-white/25 font-mono">
-            {narrativeText.length} chars
-            {narrativeDirty && <span className="ml-2 text-amber-400/60">· unsaved changes</span>}
-          </span>
-          <Btn onClick={saveNarrative} disabled={saving || !narrativeText.trim()}>
-            {saving ? 'Saving…' : 'Save Narrative'}
-          </Btn>
-        </div>
+            <textarea
+              value={narrativeText}
+              onChange={e => { setNarrativeText(e.target.value); setNarrativeDirty(true) }}
+              rows={10}
+              placeholder="Click 'Generate AI Draft' to auto-generate a season narrative, or type your own…"
+              className="w-full rounded-lg bg-white/5 border border-white/10 text-white/80 text-sm px-4 py-3 resize-y font-sans leading-relaxed focus:outline-none focus:border-white/25 placeholder:text-white/20"
+            />
+            <div className="flex items-center justify-between mt-3">
+              <span className="text-[11px] text-white/25 font-mono">
+                {narrativeText.length} chars
+                {narrativeDirty && <span className="ml-2 text-amber-400/60">· unsaved changes</span>}
+              </span>
+              <Btn onClick={saveNarrative} disabled={saving || !narrativeText.trim()}>
+                {saving ? 'Saving…' : 'Save Narrative'}
+              </Btn>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Hero Image */}
