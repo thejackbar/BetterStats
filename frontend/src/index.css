@@ -87,7 +87,7 @@
 /* Yearbook futuristic superlative cards */
 .yb-futuristic-card {
   position: relative;
-  padding: 0.4rem 0.5rem;
+  padding: 0.55rem 0.6rem;
   border-radius: 0.6rem;
   background: rgba(14, 17, 27, 0.75);
   backdrop-filter: blur(1rem) saturate(1.4);
