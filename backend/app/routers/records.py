@@ -180,7 +180,8 @@ async def get_records(
         pairs_game_join = (
             " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id"
             if season_id else
-            (" JOIN games g ON g.id = pt.game_id" if grade_id else "")
+            (" JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
+             if (grade_id or finals_only) else "")
         )
 
     # Inline WHERE additions for player_season_stats aggregate queries
