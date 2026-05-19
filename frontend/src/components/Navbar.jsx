@@ -6,7 +6,7 @@ import { useClub } from "../hooks/useClub";
 import { useTheme } from "../contexts/ThemeContext";
 import betterStatsLogo from "../assets/betterstatslogo_white.png";
 
-export const SITE_VERSION = "v6.0.9.6";
+export const SITE_VERSION = "v6.0.9.7";
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();

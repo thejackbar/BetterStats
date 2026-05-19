@@ -262,10 +262,10 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
                 pulled_rows.append(dict(row))
 
     featured = await db.execute(
-        text("SELECT achievement_id FROM yearbook_featured_achievements WHERE yearbook_id = :yid ORDER BY sort_order, id"),
+        text("SELECT achievement_id::text FROM yearbook_featured_achievements WHERE yearbook_id = :yid::uuid ORDER BY sort_order, id"),
         {"yid": str(yb["id"])},
     )
-    featured_ids = [str(r["achievement_id"]) for r in featured.mappings().all()]
+    featured_ids = [r["achievement_id"] for r in featured.mappings().all()]
 
     return {
         **yb,
@@ -1474,7 +1474,7 @@ async def add_featured_achievement(
     await db.execute(
         text("""
             INSERT INTO yearbook_featured_achievements (yearbook_id, achievement_id, sort_order)
-            VALUES (:yid, :aid, :order)
+            VALUES (:yid::uuid, :aid::uuid, :order)
             ON CONFLICT (yearbook_id, achievement_id) DO NOTHING
         """),
         {"yid": str(yb["id"]), "aid": body.achievement_id, "order": body.sort_order},
@@ -1492,7 +1492,7 @@ async def remove_featured_achievement(
 ):
     yb = await _ensure_stub(db, org_id, season_id)
     await db.execute(
-        text("DELETE FROM yearbook_featured_achievements WHERE yearbook_id = :yid AND achievement_id = :aid"),
+        text("DELETE FROM yearbook_featured_achievements WHERE yearbook_id = :yid::uuid AND achievement_id = :aid::uuid"),
         {"yid": str(yb["id"]), "aid": achievement_id},
     )
     await db.commit()
