@@ -932,7 +932,7 @@ function AllroundersTab({ orgId, seasonId, gradeId, clubSlug }) {
   )
 }
 
-// ─── Awards tab (Honour Board + Club Awards from achievements) ────────────────
+// ─── Awards tab ───────────────────────────────────────────────────────────────
 
 function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs }) {
   const [milestones, setMilestones] = useState(null)
@@ -948,14 +948,6 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
   const pulledAwards = yearbookData?.pulled_awards || []
   const featuredIds = new Set(yearbookData?.featured_achievement_ids || [])
   const featuredAwards = pulledAwards.filter(a => featuredIds.has(String(a.id)))
-  const honourBoard = yearbookData?.honour_board || []
-
-  const hbByPos = honourBoard.reduce((acc, h) => {
-    if (!acc[h.position_title]) acc[h.position_title] = []
-    acc[h.position_title].push(h)
-    return acc
-  }, {})
-
   const featuredByCategory = featuredAwards.reduce((acc, a) => {
     const cat = a.category || 'Other'
     if (!acc[cat]) acc[cat] = []
@@ -1016,29 +1008,6 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
         </SectionCard>
       ))}
 
-      {honourBoard.length > 0 && (
-        <SectionCard title="Honour Board">
-          <div className="divide-y divide-white/5">
-            {Object.entries(hbByPos).map(([pos, holders]) => (
-              <div key={pos} className="flex items-start gap-4 px-5 py-3">
-                <span className="font-mono text-[11px] text-white/40 uppercase tracking-wide w-40 shrink-0">{pos}</span>
-                <span className="text-[13px] text-white/80">
-                  {holders.map((h, i) => (
-                    <span key={h.id}>
-                      {i > 0 && <span className="text-white/30 mx-1">&amp;</span>}
-                      {h.player_id
-                        ? <PlayerLink id={h.player_id} name={h.player_name || h.name_override} slug={clubSlug} />
-                        : <span>{h.name_override}</span>
-                      }
-                    </span>
-                  ))}
-                </span>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
-
       {loading ? <PbSpinner /> : milestones?.length > 0 && (
         <SectionCard title="Career Milestones This Season">
           <div className="divide-y divide-white/5">
@@ -1061,12 +1030,12 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
         </SectionCard>
       )}
 
-      {honourBoard.length === 0 && !loading && milestones?.length === 0 &&
-       clubAwards.length === 0 && pulledAwards.length === 0 && (
+      {!loading && milestones?.length === 0 &&
+       clubAwards.length === 0 && featuredAwards.length === 0 && (
         <div className="rounded-xl border border-white/8 border-dashed px-6 py-8 text-center">
-          <p className="font-mono text-[11px] text-white/30 uppercase tracking-wide3">Awards & Honour Board</p>
+          <p className="font-mono text-[11px] text-white/30 uppercase tracking-wide3">Awards</p>
           <p className="text-white/25 text-sm mt-2">
-            Club admins can add honour board positions and award winners from the Yearbook admin panel.
+            Club admins can add award winners from the Yearbook admin panel.
           </p>
         </div>
       )}
