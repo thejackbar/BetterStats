@@ -308,7 +308,48 @@ class SettingsPatch(BaseModel):
     primary_color: Optional[str] = None
     accent_color: Optional[str] = None
     theme_mode: Optional[str] = None
+    theme_config: Optional[dict] = None
     player_name_format: Optional[str] = None
+
+
+# Keys allowed inside theme_config and the sub-keys allowed in light/dark palettes.
+_THEME_COLOR_KEYS = {
+    "accent", "positive", "negative",
+    "chart_runs", "chart_wickets", "chart_milestone",
+}
+_THEME_PALETTE_KEYS = {
+    "bg", "surface", "surface2", "hairline", "hairline2",
+    "text", "dim", "faint", "faintest",
+}
+_HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+
+
+def _valid_hex(value) -> bool:
+    return isinstance(value, str) and bool(_HEX_RE.match(value.strip()))
+
+
+def _sanitize_theme_config(raw: dict) -> dict:
+    """Keep only recognised keys with valid hex colour values."""
+    clean: dict = {}
+    for key in _THEME_COLOR_KEYS:
+        val = raw.get(key)
+        if _valid_hex(val):
+            clean[key] = val.strip()
+    series = raw.get("chart_series")
+    if isinstance(series, list):
+        clean_series = [c.strip() for c in series if _valid_hex(c)]
+        if clean_series:
+            clean["chart_series"] = clean_series[:12]
+    for theme in ("light", "dark"):
+        palette = raw.get(theme)
+        if isinstance(palette, dict):
+            clean_palette = {
+                k: v.strip() for k, v in palette.items()
+                if k in _THEME_PALETTE_KEYS and _valid_hex(v)
+            }
+            if clean_palette:
+                clean[theme] = clean_palette
+    return clean
 
 
 @router.get("/settings")
@@ -325,6 +366,7 @@ async def get_settings(
         "primary_color": club.primary_color,
         "accent_color": club.accent_color,
         "theme_mode": club.theme_mode,
+        "theme_config": club.theme_config or {},
         "logo_url": club.logo_url,
         "hero_image_url": club.hero_image_url,
         "is_active": club.is_active,
@@ -350,6 +392,13 @@ async def patch_settings(
         club.accent_color = data.accent_color.strip()
     if data.theme_mode is not None and data.theme_mode in ("light", "dark", "auto"):
         club.theme_mode = data.theme_mode
+    if data.theme_config is not None:
+        clean = _sanitize_theme_config(data.theme_config)
+        club.theme_config = clean or None
+        # Keep the legacy accent_color column in sync for consumers that
+        # still read it directly (share cards, public club payloads).
+        if clean.get("accent"):
+            club.accent_color = clean["accent"]
     if data.player_name_format is not None and data.player_name_format in ("last_first", "first_last", "first_initial_last", "last_first_initial"):
         club.player_name_format = data.player_name_format
     await db.commit()

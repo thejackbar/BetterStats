@@ -11,7 +11,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 }
 
 const barColor = (runs) => {
-  if (runs >= 100) return '#f59e0b'
+  if (runs >= 100) return 'var(--pb-chart-milestone, #f5b542)'
   if (runs >= 50) return 'var(--pb-accent, #16c784)'
   return 'var(--pb-surface2, #243352)'
 }

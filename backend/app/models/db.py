@@ -2,7 +2,7 @@ from sqlalchemy import (
     Column, Boolean, Integer, Numeric, Date, Text, ForeignKey,
     TIMESTAMP, JSON, UniqueConstraint, LargeBinary
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import func
@@ -57,6 +57,7 @@ class Organisation(Base):
     logo_mime = Column(Text, nullable=True)
     hero_image_url = Column(Text, nullable=True)
     theme_mode = Column(Text, default="auto", nullable=True)
+    theme_config = Column(JSONB, nullable=True)
     contact_email = Column(Text, nullable=True)
     player_name_format = Column(Text, default="last_first", nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

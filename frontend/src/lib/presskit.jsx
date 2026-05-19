@@ -158,7 +158,7 @@ export function Btn({ children, primary = false, onClick, className = "", icon, 
 // ── Result pill ────────────────────────────────────────────────────────
 export function ResultPill({ result }) {
   const map = {
-    WIN:  { color: "#4ade80",           bg: "rgba(34,197,94,0.15)" },
+    WIN:  { color: "var(--pb-positive)", bg: "rgba(34,197,94,0.15)" },
     LOSS: { color: "var(--pb-red)",     bg: "rgba(239,91,91,0.10)" },
     DRAW: { color: "var(--pb-faint)",   bg: "rgba(138,144,162,0.10)" },
     TIE:  { color: "var(--pb-amber)",   bg: "rgba(245,181,66,0.10)" },
