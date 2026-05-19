@@ -262,6 +262,13 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
                 pulled_rows.append(dict(row))
 
     return {
+    featured = await db.execute(
+        text("SELECT achievement_id FROM yearbook_featured_achievements WHERE yearbook_id = :yid ORDER BY sort_order, id"),
+        {"yid": str(yb["id"])},
+    )
+    featured_ids = [str(r["achievement_id"]) for r in featured.mappings().all()]
+
+    return {
         **yb,
         "id": str(yb["id"]),
         "season": dict(season_row) if season_row else None,
@@ -270,6 +277,7 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
         "images": [dict(r) for r in images.mappings().all()],
         "awards": [dict(r) for r in awards.mappings().all()],
         "pulled_awards": pulled_rows,
+        "featured_achievement_ids": featured_ids,
     }
 
 
@@ -1447,6 +1455,49 @@ async def delete_award(
     )
     await db.commit()
     return {"status": "deleted"}
+
+
+# ─── Admin: featured achievements (pinned to overview) ───────────────────────
+
+class FeaturedAchievementBody(BaseModel):
+    achievement_id: str
+    sort_order: int = 0
+
+
+@router.post("/{org_id}/{season_id}/featured-achievements")
+async def add_featured_achievement(
+    org_id: str,
+    season_id: str,
+    body: FeaturedAchievementBody,
+    db: AsyncSession = Depends(get_db),
+):
+    yb = await _ensure_stub(db, org_id, season_id)
+    await db.execute(
+        text("""
+            INSERT INTO yearbook_featured_achievements (yearbook_id, achievement_id, sort_order)
+            VALUES (:yid, :aid, :order)
+            ON CONFLICT (yearbook_id, achievement_id) DO NOTHING
+        """),
+        {"yid": str(yb["id"]), "aid": body.achievement_id, "order": body.sort_order},
+    )
+    await db.commit()
+    return {"status": "added"}
+
+
+@router.delete("/{org_id}/{season_id}/featured-achievements/{achievement_id}")
+async def remove_featured_achievement(
+    org_id: str,
+    season_id: str,
+    achievement_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    yb = await _ensure_stub(db, org_id, season_id)
+    await db.execute(
+        text("DELETE FROM yearbook_featured_achievements WHERE yearbook_id = :yid AND achievement_id = :aid"),
+        {"yid": str(yb["id"]), "aid": achievement_id},
+    )
+    await db.commit()
+    return {"status": "removed"}
 
 
 # ─── Admin: trigger stub generation ──────────────────────────────────────────

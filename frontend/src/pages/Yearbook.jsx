@@ -140,7 +140,7 @@ function StatCallout({ value, label, sub, accent = false, className = '' }) {
 
 // ─── Overview tab ────────────────────────────────────────────────────────────
 
-function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, galleryImages, pulledAwards }) {
+function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, galleryImages, pulledAwards, featuredIds }) {
   const [overview, setOverview] = useState(null)
   const [superlatives, setSuperlatives] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -236,14 +236,8 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, ga
 
       {/* By the Numbers */}
       {(() => {
-        const lifeMemberships = (pulledAwards || []).filter(a =>
-          a.category?.toLowerCase() === 'life membership' ||
-          a.subcategory?.toLowerCase() === 'life membership'
-        )
-        const hullettMedal = (pulledAwards || []).find(a =>
-          (a.achievement || '').toLowerCase().includes('hullett') ||
-          (a.subcategory === 'WABCC' && (a.achievement || '').toLowerCase().includes('medal'))
-        )
+        const featuredSet = new Set(featuredIds || [])
+        const featuredAwards = (pulledAwards || []).filter(a => featuredSet.has(String(a.id)))
         return (
           <div className="space-y-8">
             <p className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase">By The Numbers</p>
@@ -367,26 +361,15 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, ga
 
             </>}
 
-            {/* Mark Hullett Medal */}
-            {hullettMedal && (
-              <StatGroup title={hullettMedal.achievement || 'Mark Hullett Medal'}>
-                <SupCard
-                  label="Medallist"
-                  value={hullettMedal.player_name || '—'}
-                  sub={hullettMedal.detail || null}
-                />
-              </StatGroup>
-            )}
-
-            {/* Life Memberships */}
-            {lifeMemberships.length > 0 && (
-              <StatGroup title="Life Memberships">
-                {lifeMemberships.map(a => (
+            {/* Featured / pinned awards from Awards admin */}
+            {featuredAwards.length > 0 && (
+              <StatGroup title="Season Honours">
+                {featuredAwards.map(a => (
                   <SupCard
                     key={a.id}
-                    label="Life Member"
-                    value={a.player_name || a.achievement || '—'}
-                    sub={a.detail || null}
+                    label={a.achievement || a.category || ''}
+                    value={a.player_name || '—'}
+                    sub={a.detail || (a.subcategory || null)}
                   />
                 ))}
               </StatGroup>
@@ -1290,18 +1273,10 @@ function GradesTab({ orgId, seasonId, clubSlug }) {
 // ─── Main Yearbook page ───────────────────────────────────────────────────────
 
 function ReportsTab({ customSections }) {
-  if (!customSections?.length) {
-    return (
-      <div className="py-16 text-center">
-        <p className="text-white/30 text-sm font-mono italic">No reports have been published for this season.</p>
-      </div>
-    )
-  }
   return (
     <div className="space-y-8">
-      {customSections.map(s => (
+      {(customSections || []).map(s => (
         <div key={s.id} className="rounded-xl border border-white/8 bg-white/3 px-6 py-5">
-          <p className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-4">{s.title}</p>
           <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed whitespace-pre-wrap">
             {s.content_markdown}
           </div>
@@ -1481,12 +1456,9 @@ export default function Yearbook() {
   const orgId = club.id
   const seasonId = season?.id
 
-  const reportsLabel = customSections.length === 1
-    ? customSections[0].title
-    : customSections.length > 1 ? 'Reports' : 'Reports'
   const TABS = [
     ...BASE_TABS,
-    ...(customSections.length > 0 ? [{ id: 'reports', label: reportsLabel }] : []),
+    ...customSections.map(s => ({ id: `section-${s.id}`, label: s.title })),
   ]
 
   return (
@@ -1581,7 +1553,7 @@ export default function Yearbook() {
                 ))}
               </div>
             </div>
-            {grades.length > 1 && !['overview', 'grades', 'reports'].includes(activeTab) && (
+            {grades.length > 1 && !['overview', 'grades'].includes(activeTab) && !activeTab.startsWith('section-') && (
               <div className="shrink-0">
                 <select
                   value={gradeId || ''}
@@ -1602,11 +1574,11 @@ export default function Yearbook() {
       {/* Tab content */}
       <div className="max-w-5xl mx-auto px-4 py-8">
         {activeTab === 'overview' && (
-          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} galleryImages={galleryImages} pulledAwards={yearbook.pulled_awards || []} />
+          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} galleryImages={galleryImages} pulledAwards={yearbook.pulled_awards || []} featuredIds={yearbook.featured_achievement_ids || []} />
         )}
-        {activeTab === 'reports' && (
-          <ReportsTab customSections={customSections} />
-        )}
+        {customSections.map(s => activeTab === `section-${s.id}` && (
+          <ReportsTab key={s.id} customSections={[s]} />
+        ))}
         {activeTab === 'results' && (
           <ResultsTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />
         )}

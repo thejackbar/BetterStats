@@ -187,7 +187,7 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
   )
 }
 
-function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, players, onRefresh }) {
+function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, players, onRefresh }) {
   const [collapsed, setCollapsed] = useState(false)
   const [adding, setAdding] = useState(false)
   const [awardName, setAwardName] = useState('')
@@ -199,7 +199,23 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, players, onRef
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(null)
+  const [toggling, setToggling] = useState(null)
   const [err, setErr] = useState(null)
+
+  const featuredSet = new Set(featuredIds || [])
+
+  const handleToggleFeatured = async (a) => {
+    setToggling(a.id)
+    try {
+      if (featuredSet.has(String(a.id))) {
+        await api.removeFeaturedAchievement(orgId, seasonId, a.id)
+      } else {
+        await api.addFeaturedAchievement(orgId, seasonId, a.id)
+      }
+      onRefresh()
+    } catch (ex) { setErr(ex.message) }
+    finally { setToggling(null) }
+  }
 
   const filteredPlayers = players.filter(p =>
     !playerSearch || (p.display_name || p.name || '').toLowerCase().includes(playerSearch.toLowerCase())
@@ -257,34 +273,50 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, players, onRef
       )}
 
       {!collapsed && pulled.length > 0 && (
-        <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
-          {pulled.map(a => (
-            <div key={`pulled-${a.id}`} className="flex items-start gap-4 px-4 py-3 bg-white/[0.015]">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-mono text-[10px] text-white/40 uppercase tracking-wide">
-                    {a.achievement}
-                  </span>
-                  {a.subcategory && (
-                    <span className="font-mono text-[10px] text-white/25">· {a.subcategory}</span>
-                  )}
-                  <span className="font-mono text-[9px] text-pb-accent/60 border border-pb-accent/25 rounded px-1.5 py-px tracking-wide">
-                    {a.category?.toUpperCase()}
-                  </span>
+        <>
+          <p className="text-[10px] font-mono text-white/25 uppercase tracking-wide mb-1.5">
+            ★ Pin awards to feature them in the yearbook overview
+          </p>
+          <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
+            {pulled.map(a => {
+              const isFeatured = featuredSet.has(String(a.id))
+              return (
+                <div key={`pulled-${a.id}`} className={`flex items-start gap-3 px-4 py-3 ${isFeatured ? 'bg-pb-accent/5' : 'bg-white/[0.015]'}`}>
+                  <button
+                    onClick={() => handleToggleFeatured(a)}
+                    disabled={toggling === a.id}
+                    title={isFeatured ? 'Remove from overview' : 'Feature in overview'}
+                    className={`shrink-0 mt-0.5 text-[14px] transition disabled:opacity-40 ${isFeatured ? 'text-pb-accent' : 'text-white/20 hover:text-white/50'}`}
+                  >
+                    {toggling === a.id ? '…' : '★'}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-[10px] text-white/40 uppercase tracking-wide">
+                        {a.achievement}
+                      </span>
+                      {a.subcategory && (
+                        <span className="font-mono text-[10px] text-white/25">· {a.subcategory}</span>
+                      )}
+                      <span className="font-mono text-[9px] text-pb-accent/60 border border-pb-accent/25 rounded px-1.5 py-px tracking-wide">
+                        {a.category?.toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="text-[13px] text-white/80 mt-0.5">{a.player_name || '—'}</div>
+                    {a.detail && <div className="text-[11px] text-white/35 mt-0.5 italic">{a.detail}</div>}
+                  </div>
+                  <Link
+                    to="/admin/awards"
+                    className="shrink-0 text-white/25 hover:text-white/60 transition text-[11px] font-mono pt-0.5"
+                    title="Manage in Awards admin"
+                  >
+                    Edit →
+                  </Link>
                 </div>
-                <div className="text-[13px] text-white/80 mt-0.5">{a.player_name || '—'}</div>
-                {a.detail && <div className="text-[11px] text-white/35 mt-0.5 italic">{a.detail}</div>}
-              </div>
-              <Link
-                to="/admin/awards"
-                className="shrink-0 text-white/25 hover:text-white/60 transition text-[11px] font-mono pt-0.5"
-                title="Manage in Awards admin"
-              >
-                Edit →
-              </Link>
-            </div>
-          ))}
-        </div>
+              )
+            })}
+          </div>
+        </>
       )}
 
       {!collapsed && awards.length > 0 && (
@@ -1067,6 +1099,7 @@ export default function AdminYearbookDetail() {
         seasonId={seasonId}
         awards={yearbook.awards || []}
         pulledAwards={yearbook.pulled_awards || []}
+        featuredIds={yearbook.featured_achievement_ids || []}
         players={players}
         onRefresh={load}
       />
