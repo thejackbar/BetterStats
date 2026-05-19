@@ -130,7 +130,16 @@ async def _paginate_stats(url: str, season_id: str, extra_params: dict = None) -
                 params.update(extra_params)
             r = await client.get(url, params=params, timeout=DEFAULT_TIMEOUT)
             r.raise_for_status()
-            data = r.json()
+            # A season with no stats returns 204 / an empty body — that's a
+            # valid "nothing here", not an error. Calling .json() on it raises
+            # "Expecting value: line 1 column 1 (char 0)".
+            if r.status_code == 204 or not r.content:
+                break
+            try:
+                data = r.json()
+            except ValueError:
+                logger.warning(f"_paginate_stats: non-JSON body from {url} (status {r.status_code})")
+                break
             items = data.get("data", data.get("participants", data if isinstance(data, list) else []))
             if not items:
                 break
