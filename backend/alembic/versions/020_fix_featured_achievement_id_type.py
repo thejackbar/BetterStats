@@ -1,20 +1,21 @@
-"""Add yearbook_featured_achievements for pinning pulled awards to overview
+"""Fix achievement_id column type from UUID to INTEGER in yearbook_featured_achievements
 
-Revision ID: 019
-Revises: 018
+Revision ID: 020
+Revises: 019
 Create Date: 2026-05-19
 """
 from alembic import op
 
-revision = '019'
-down_revision = '018'
+revision = '020'
+down_revision = '019'
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
+    op.execute("DROP TABLE IF EXISTS yearbook_featured_achievements")
     op.execute("""
-        CREATE TABLE IF NOT EXISTS yearbook_featured_achievements (
+        CREATE TABLE yearbook_featured_achievements (
             id SERIAL PRIMARY KEY,
             yearbook_id UUID NOT NULL REFERENCES yearbooks(id) ON DELETE CASCADE,
             achievement_id INTEGER NOT NULL,
@@ -23,10 +24,10 @@ def upgrade() -> None:
         )
     """)
     op.execute("""
-        CREATE INDEX IF NOT EXISTS ix_yb_featured_yearbook
+        CREATE INDEX ix_yb_featured_yearbook
         ON yearbook_featured_achievements (yearbook_id)
     """)
 
 
 def downgrade() -> None:
-    op.drop_table('yearbook_featured_achievements')
+    op.execute("DROP TABLE IF EXISTS yearbook_featured_achievements")

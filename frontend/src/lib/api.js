@@ -366,9 +366,9 @@ export const api = {
   deleteYearbookAward: (orgId, seasonId, awardId) =>
     request(`/yearbooks/${orgId}/${seasonId}/awards/${awardId}`, { method: 'DELETE' }),
   addFeaturedAchievement: (orgId, seasonId, achievementId) =>
-    request(`/yearbooks/${orgId}/${seasonId}/featured-achievements`, { method: 'POST', body: JSON.stringify({ achievement_id: String(achievementId) }) }),
+    request(`/yearbooks/${orgId}/${seasonId}/featured-achievements`, { method: 'POST', body: JSON.stringify({ achievement_id: parseInt(achievementId, 10) }) }),
   removeFeaturedAchievement: (orgId, seasonId, achievementId) =>
-    request(`/yearbooks/${orgId}/${seasonId}/featured-achievements/${String(achievementId)}`, { method: 'DELETE' }),
+    request(`/yearbooks/${orgId}/${seasonId}/featured-achievements/${parseInt(achievementId, 10)}`, { method: 'DELETE' }),
 
   // Award Definitions
   listAwardDefinitions: (orgId) =>
