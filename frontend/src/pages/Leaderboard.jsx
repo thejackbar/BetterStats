@@ -276,8 +276,13 @@ export default function Leaderboard() {
 
   useEffect(() => {
     if (!orgId) return
-    api.getOrgGrades(orgId).then(setOrgGrades).catch(() => setOrgGrades([]))
-  }, [orgId])
+    api.getOrgGrades(orgId, selectedSeason)
+      .then(grades => {
+        setOrgGrades(grades)
+        setSelectedGradeName(prev => (prev && grades.some(g => g.name === prev) ? prev : null))
+      })
+      .catch(() => setOrgGrades([]))
+  }, [orgId, selectedSeason])
 
   const effectiveMinRuns = battingSort === 'average' ? minRuns : 0
   const effectiveMinOvers = bowlingSort === 'economy' ? minOvers : 0

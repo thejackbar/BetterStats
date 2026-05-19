@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 import re as _re
@@ -152,7 +152,11 @@ async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{org_id}/grades")
-async def get_org_grades(org_id: str, db: AsyncSession = Depends(get_db)):
+async def get_org_grades(
+    org_id: str,
+    season_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         text("""
             SELECT display_name FROM (
@@ -160,12 +164,13 @@ async def get_org_grades(org_id: str, db: AsyncSession = Depends(get_db)):
                 FROM grades g
                 JOIN seasons s ON s.id = g.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND (:season_id IS NULL OR g.season_id = CAST(:season_id AS UUID))
             ) sub
             ORDER BY
                 NULLIF(regexp_replace(display_name, '[^0-9].*', ''), '')::int NULLS LAST,
                 display_name
         """),
-        {"org_id": org_id},
+        {"org_id": org_id, "season_id": season_id},
     )
     return [{"name": row.display_name} for row in result]
 
