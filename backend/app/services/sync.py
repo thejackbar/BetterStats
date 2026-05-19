@@ -137,9 +137,15 @@ async def sync_organisation(
         logger.info(f"Found {len(seasons)} seasons")
 
         for season_data in seasons:
-            season_id = _parse_uuid(season_data.get("id", ""))
-            if not season_id:
+            raw_season_id = (season_data.get("id") or "").strip()
+            if not _parse_uuid(raw_season_id):
                 continue
+            # Cricket Australia's season GUID ("Summer 2025/26") is shared
+            # across every club, so it can't be the Season primary key — a
+            # second club's sync would collide on the first club's row and
+            # overwrite its stats. Derive a per-club season id instead, and
+            # keep the raw CA GUID in grassroots_id for the stats API calls.
+            season_id = uuid.uuid5(org_id, raw_season_id)
 
             start_date_str = season_data.get("startDate", "")
             year = int(start_date_str[:4]) if start_date_str else None
@@ -149,10 +155,13 @@ async def sync_organisation(
                 season = Season(
                     id=season_id,
                     organisation_id=org_id,
+                    grassroots_id=raw_season_id,
                     name=season_data.get("name", ""),
                     year=year,
                 )
                 session.add(season)
+            else:
+                season.grassroots_id = raw_season_id
             season.synced_at = datetime.now(timezone.utc)
             await session.commit()
             stats["seasons"] += 1
@@ -162,7 +171,7 @@ async def sync_organisation(
             # org-level /grades endpoint is empty for clubs whose grades are
             # owned by their association rather than the club itself. Each
             # team, however, carries its grade id — so derive grades here.
-            teams_data = await playhq_client.get_teams(org_id_str, str(season_id))
+            teams_data = await playhq_client.get_teams(org_id_str, raw_season_id)
             for t in teams_data:
                 grade_objs = list(t.get("grades") or [])
                 if t.get("grade"):
@@ -180,9 +189,9 @@ async def sync_organisation(
             await session.commit()
 
             # Fetch season-aggregate stats from grassroots API
-            batting_list = await playhq_client.get_batting_stats(org_id_str, str(season_id))
-            bowling_list = await playhq_client.get_bowling_stats(org_id_str, str(season_id))
-            fielding_list = await playhq_client.get_fielding_stats(org_id_str, str(season_id))
+            batting_list = await playhq_client.get_batting_stats(org_id_str, raw_season_id)
+            bowling_list = await playhq_client.get_bowling_stats(org_id_str, raw_season_id)
+            fielding_list = await playhq_client.get_fielding_stats(org_id_str, raw_season_id)
 
             # Merge all participant data keyed by player UUID
             player_data: dict[uuid.UUID, dict] = {}

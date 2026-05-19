@@ -45,7 +45,10 @@ async def get_records_grades(
         return []
 
     db_seasons_res = await db.execute(select(Season).where(Season.organisation_id == uuid.UUID(org_id)))
-    db_seasons_list = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
+    db_seasons_list = [
+        {"id": str(s.id), "name": s.name, "grassroots_id": s.grassroots_id}
+        for s in db_seasons_res.scalars().all()
+    ]
 
     try:
         data = await playhq_partner_client._get(
@@ -71,13 +74,15 @@ async def get_records_grades(
                         api_grades.append({**g, "_season_id": s["id"]})
 
     if not api_grades:
-        # Grassroots API fallback — uses the same org UUID and season UUIDs that power player stats
+        # Grassroots API fallback — needs the raw CA season GUID, not our
+        # per-club season id.
+        gr_seasons = [s for s in db_seasons_list if s.get("grassroots_id")]
         grassroots_results = await asyncio.gather(
-            *[playhq_client.get_grades(org_id, str(s["id"])) for s in db_seasons_list],
+            *[playhq_client.get_grades(org_id, s["grassroots_id"]) for s in gr_seasons],
             return_exceptions=True,
         )
         seen_ids2: set[str] = set()
-        for s, res in zip(db_seasons_list, grassroots_results):
+        for s, res in zip(gr_seasons, grassroots_results):
             if isinstance(res, list):
                 for g in res:
                     gid = g.get("id")
