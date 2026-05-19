@@ -30,7 +30,6 @@ import AdminMerge from './pages/admin/AdminMerge'
 import AdminGrades from './pages/admin/AdminGrades'
 import AdminSync from './pages/admin/AdminSync'
 import AdminPartnershipRecords from './pages/admin/AdminPartnershipRecords'
-import AdminPhqMatch from './pages/admin/AdminPhqMatch'
 
 // Public club pages (slug-based)
 import Dashboard from './pages/Dashboard'
@@ -86,7 +85,6 @@ export default function App() {
         <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
         <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
         <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
-        <Route path="/admin/phq-match" element={<ProtectedRoute><AdminPhqMatch /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
         <Route path="/admin/yearbook" element={<ProtectedRoute><AdminYearbook /></ProtectedRoute>} />
         <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute><AdminYearbookDetail /></ProtectedRoute>} />

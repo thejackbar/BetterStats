@@ -224,7 +224,6 @@ export default function AdminPlayers() {
         <p className="font-mono text-[10px] text-pb-faint mb-4">
           <span style={{ color: 'var(--pb-accent)' }}>Display name</span> adds a suffix without affecting sync.{' '}
           <span style={{ color: 'var(--pb-accent)' }}>PHQ ID</span> links a player to their PlayHQ UUID for precise game-level matching.
-          Use Admin → PHQ ID Match to auto-detect IDs.
         </p>
 
         <div className="pb-card overflow-hidden">
