@@ -3,6 +3,19 @@ from sqlalchemy import text
 from typing import Optional
 import uuid
 
+# Merge-aware grade match fragment (gr must already be joined).
+# Matches grades that are the selected canonical OR are aliases merged into it.
+_GRADE_MATCH = (
+    "(COALESCE(gr.display_name_override, gr.name) = :grade_name"
+    " OR EXISTS (SELECT 1 FROM grade_merge_logs gml"
+    " WHERE gml.org_id = CAST(:org_id AS UUID)"
+    " AND gml.alias_name = gr.name AND gml.undone_at IS NULL"
+    " AND (gml.canonical_name = :grade_name"
+    " OR EXISTS (SELECT 1 FROM grades gr2 JOIN seasons s2 ON s2.id = gr2.season_id"
+    " WHERE gr2.name = gml.canonical_name AND s2.organisation_id = CAST(:org_id AS UUID)"
+    " AND gr2.display_name_override = :grade_name))))"
+)
+
 
 async def get_career_batting(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
     season_clause = " AND pss.season_id = :sid" if season_id else ""
@@ -175,7 +188,7 @@ async def get_fielding_leaderboard(
             JOIN games g ON g.id = fs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN players p ON p.id = fs.player_id
-            WHERE COALESCE(gr.display_name_override, gr.name) = :grade_name{season_clause}
+            WHERE {_GRADE_MATCH}{season_clause}
               AND p.organisation_id = :org_id
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
@@ -910,7 +923,7 @@ async def get_batting_leaderboard_extended(
                 FROM batting_innings bi
                 JOIN games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
-                WHERE COALESCE(gr.display_name_override, gr.name) = :grade_name{season_clause}
+                WHERE {_GRADE_MATCH}{season_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
             )
@@ -1053,7 +1066,7 @@ async def get_bowling_leaderboard_extended(
                 FROM bowling_spells bs
                 JOIN games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
-                WHERE COALESCE(gr.display_name_override, gr.name) = :grade_name{season_clause}
+                WHERE {_GRADE_MATCH}{season_clause}
                 ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
             )
             SELECT
@@ -1073,7 +1086,7 @@ async def get_bowling_leaderboard_extended(
             JOIN grades gr ON gr.id = g.grade_id
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE COALESCE(gr.display_name_override, gr.name) = :grade_name{season_clause}
+            WHERE {_GRADE_MATCH}{season_clause}
               AND p.organisation_id = :org_id
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """

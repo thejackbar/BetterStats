@@ -152,10 +152,22 @@ async def get_records(
     # Partnership queries now always JOIN grades gr for grade_name; season filter via WHERE
     partnership_season_clause = " AND gr.season_id = :season_id" if season_id else ""
 
+    # Merge-aware grade match: also include grades that were merged (aliased) into the selected grade.
+    _grade_match = (
+        "(COALESCE(gr.display_name_override, gr.name) = :grade_name"
+        " OR EXISTS (SELECT 1 FROM grade_merge_logs gml"
+        " WHERE gml.org_id = CAST(:org_id AS UUID)"
+        " AND gml.alias_name = gr.name AND gml.undone_at IS NULL"
+        " AND (gml.canonical_name = :grade_name"
+        " OR EXISTS (SELECT 1 FROM grades gr2 JOIN seasons s2 ON s2.id = gr2.season_id"
+        " WHERE gr2.name = gml.canonical_name AND s2.organisation_id = CAST(:org_id AS UUID)"
+        " AND gr2.display_name_override = :grade_name))))"
+    )
+
     # Grade filter clause — prefer grade_name (cross-season) over grade_id (season-specific)
     if grade_name:
-        game_grade_clause  = " AND COALESCE(gr.display_name_override, gr.name) = :grade_name"
-        pairs_grade_clause = " AND COALESCE(gr.display_name_override, gr.name) = :grade_name"
+        game_grade_clause  = f" AND {_grade_match}"
+        pairs_grade_clause = f" AND {_grade_match}"
         pairs_game_join = (
             " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id"
             if season_id else
@@ -182,8 +194,7 @@ async def get_records(
         " JOIN seasons s ON s.id = gr.season_id"
     )
     _bat_where = (
-        "WHERE p.organisation_id = :org_id"
-        " AND COALESCE(gr.display_name_override, gr.name) = :grade_name"
+        f"WHERE p.organisation_id = :org_id AND {_grade_match}"
         f" {_gw_season}"
         " AND NOT COALESCE(bi.did_not_bat, FALSE)"
         " AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')"
@@ -195,8 +206,7 @@ async def get_records(
         " JOIN seasons s ON s.id = gr.season_id"
     )
     _bowl_where = (
-        "WHERE p.organisation_id = :org_id"
-        " AND COALESCE(gr.display_name_override, gr.name) = :grade_name"
+        f"WHERE p.organisation_id = :org_id AND {_grade_match}"
         f" {_gw_season}"
     )
 

@@ -171,6 +171,12 @@ async def get_org_grades(
                 JOIN seasons s ON s.id = g.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
                   {season_clause}
+                  AND NOT EXISTS (
+                      SELECT 1 FROM grade_merge_logs gml
+                      WHERE gml.org_id = CAST(:org_id AS UUID)
+                        AND gml.alias_name = g.name
+                        AND gml.undone_at IS NULL
+                  )
             ) sub
             ORDER BY
                 NULLIF(regexp_replace(display_name, '[^0-9].*', ''), '')::int NULLS LAST,
