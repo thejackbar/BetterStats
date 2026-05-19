@@ -21,8 +21,8 @@ manually-entered content is lost. Players and all other manual data (manual
 partnership records, merge history, award definitions) are untouched. Every
 club must run a full sync afterwards to rebuild.
 
-Revision ID: 015
-Revises: 014
+Revision ID: 016
+Revises: 015
 Create Date: 2026-05-19
 """
 import uuid
@@ -30,8 +30,8 @@ import uuid
 import sqlalchemy as sa
 from alembic import op
 
-revision = '015'
-down_revision = '014'
+revision = '016'
+down_revision = '015'
 branch_labels = None
 depends_on = None
 
