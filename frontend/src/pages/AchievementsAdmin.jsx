@@ -472,7 +472,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
   const orgId = embeddedOrgId || params.orgId
   const [achievements, setAchievements] = useState(null)
   const [players, setPlayers] = useState([])
-  const [seasons, setSeasons] = useState([])
+  const [seasons, setSeasons] = useState(null)
   const [awardDefs, setAwardDefs] = useState([])
   const [loading, setLoading] = useState(true)
   const [filterSeason, setFilterSeason] = useState('')
@@ -505,7 +505,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
 
   const handleSaved = () => { setShowAdd(false); setShowBulk(false); setEditItem(null); load() }
 
-  if (loading && !achievements) return <PbSpinner message="Loading achievements…" />
+  if ((loading && !achievements) || seasons === null) return <PbSpinner message="Loading achievements…" />
 
   const seasonMap = Object.fromEntries(seasons.map(s => [s.id, s.name]))
   const seasonDisplay = (s) => s === 'All Time' ? 'All Time' : (seasonMap[s] || s.replace(/_/g, '/'))
