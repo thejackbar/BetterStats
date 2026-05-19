@@ -13,6 +13,10 @@ export default function SuperClubs() {
   const [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const [editId, setEditId] = useState(null)
+  const [editForm, setEditForm] = useState({ name: '', slug: '', short_name: '', contact_email: '' })
+  const [confirmDelete, setConfirmDelete] = useState(null)
+
   // Club search (same source as the public onboarding flow)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
@@ -107,6 +111,48 @@ export default function SuperClubs() {
       setMsg('Club created')
       setShowCreate(false)
       resetCreate()
+      load()
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const startEdit = (club) => {
+    setConfirmDelete(null)
+    setEditId(club.id)
+    setEditForm({
+      name: club.name || '',
+      slug: club.slug || '',
+      short_name: club.short_name || '',
+      contact_email: club.contact_email || '',
+    })
+  }
+
+  const saveEdit = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    setMsg('')
+    try {
+      await api.superPatchClub(editId, editForm)
+      setMsg('Club updated')
+      setEditId(null)
+      load()
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteClub = async (club) => {
+    setSaving(true)
+    setMsg('')
+    try {
+      await api.superDeleteClub(club.id)
+      setMsg(`Deleted ${club.name}`)
+      setConfirmDelete(null)
       load()
     } catch (err) {
       setMsg(err.message)
@@ -224,34 +270,112 @@ export default function SuperClubs() {
         )}
 
         <div className="pb-card overflow-hidden">
-          <div className="grid grid-cols-[1fr_auto_auto] font-mono text-[10px] tracking-wide3 text-pb-faint px-5 py-2.5 bg-pb-surface2/40">
+          <div className="grid grid-cols-[1fr_auto_auto_auto] font-mono text-[10px] tracking-wide3 text-pb-faint px-5 py-2.5 bg-pb-surface2/40">
             <span>CLUB</span>
             <span className="mr-8">STATUS</span>
-            <span>CREATED</span>
+            <span className="mr-8">CREATED</span>
+            <span>ACTIONS</span>
           </div>
           {clubs.length === 0 && (
             <div className="px-5 py-6 text-center font-mono text-[11px] text-pb-faint">No clubs yet</div>
           )}
           {clubs.map((club, i) => (
-            <div key={club.id} className={`grid grid-cols-[1fr_auto_auto] items-center px-5 py-3 ${i > 0 ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-              <div>
-                <span className="text-pb-text text-sm">{club.name}</span>
-                <span className="font-mono text-[10px] text-pb-faintest ml-2">/{club.slug}</span>
+            <div key={club.id} className={i > 0 ? 'pb-hairline-t' : ''}>
+              <div className="grid grid-cols-[1fr_auto_auto_auto] items-center px-5 py-3 hover:bg-pb-surface2">
+                <div>
+                  <span className="text-pb-text text-sm">{club.name}</span>
+                  <span className="font-mono text-[10px] text-pb-faintest ml-2">/{club.slug}</span>
+                </div>
+                <button
+                  onClick={() => toggleActive(club)}
+                  className={`font-mono text-[10px] px-2 py-1 rounded mr-8 border transition-colors ${
+                    club.is_active
+                      ? 'border-pb-accent/30 text-pb-accent bg-pb-accent/10'
+                      : 'border-pb-hairline text-pb-faint bg-pb-surface2'
+                  }`}
+                  style={club.is_active ? { color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' } : {}}
+                >
+                  {club.is_active ? 'Active' : 'Inactive'}
+                </button>
+                <span className="font-mono text-[10px] text-pb-faintest mr-8">
+                  {club.created_at ? new Date(club.created_at).toLocaleDateString('en-AU') : '—'}
+                </span>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => (editId === club.id ? setEditId(null) : startEdit(club))}
+                    className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
+                  >
+                    {editId === club.id ? 'Close' : 'Edit'}
+                  </button>
+                  <button
+                    onClick={() => { setConfirmDelete(club.id); setEditId(null) }}
+                    className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
-              <button
-                onClick={() => toggleActive(club)}
-                className={`font-mono text-[10px] px-2 py-1 rounded mr-8 border transition-colors ${
-                  club.is_active
-                    ? 'border-pb-accent/30 text-pb-accent bg-pb-accent/10'
-                    : 'border-pb-hairline text-pb-faint bg-pb-surface2'
-                }`}
-                style={club.is_active ? { color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' } : {}}
-              >
-                {club.is_active ? 'Active' : 'Inactive'}
-              </button>
-              <span className="font-mono text-[10px] text-pb-faintest">
-                {club.created_at ? new Date(club.created_at).toLocaleDateString('en-AU') : '—'}
-              </span>
+
+              {editId === club.id && (
+                <form onSubmit={saveEdit} className="px-5 py-4 bg-pb-surface2/40 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Club name</label>
+                      <input type="text" value={editForm.name}
+                        onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                        className={INPUT_CLS} />
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Slug</label>
+                      <input type="text" value={editForm.slug}
+                        onChange={e => setEditForm(f => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') }))}
+                        className={INPUT_CLS + ' font-mono'} />
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Short name</label>
+                      <input type="text" value={editForm.short_name}
+                        onChange={e => setEditForm(f => ({ ...f, short_name: e.target.value }))}
+                        className={INPUT_CLS} />
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Contact email</label>
+                      <input type="email" value={editForm.contact_email}
+                        onChange={e => setEditForm(f => ({ ...f, contact_email: e.target.value }))}
+                        className={INPUT_CLS} />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="submit" disabled={saving}
+                      className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"
+                      style={{ background: 'var(--pb-accent)' }}>
+                      {saving ? 'Saving…' : 'SAVE CHANGES'}
+                    </button>
+                    <button type="button" onClick={() => setEditId(null)}
+                      className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {confirmDelete === club.id && (
+                <div className="px-5 py-4 bg-pb-red/5 border-t border-pb-red/30 space-y-2">
+                  <p className="font-mono text-[11px] text-pb-red">
+                    Delete <strong>{club.name}</strong>? This permanently removes every season,
+                    grade, game, player and user for this club. This cannot be undone.
+                  </p>
+                  <div className="flex gap-2">
+                    <button onClick={() => deleteClub(club)} disabled={saving}
+                      className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-white bg-pb-red">
+                      {saving ? 'Deleting…' : 'DELETE PERMANENTLY'}
+                    </button>
+                    <button onClick={() => setConfirmDelete(null)}
+                      className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
