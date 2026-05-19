@@ -1,0 +1,62 @@
+{
+  "template": "T1_HeroList",
+  "palette": "crimson",
+  "team": {
+    "name": "APPLECROSS",
+    "short": "AC",
+    "monogram": "AC",
+    "logo": "../assets/team-logo.webp"
+  },
+  "opponent": {
+    "name": "NOTTINGHAMSHIRE",
+    "short": "NCC",
+    "monogram": "NCC",
+    "logo": "../assets/opponent-logo.png"
+  },
+  "match": {
+    "competition": "PREMIER T20",
+    "round": "ROUND 7",
+    "venue": "Heathcote Reserve",
+    "date": "SAT 30 MAY",
+    "time": "2:30 PM",
+    "season": "2025–26"
+  },
+  "players": [
+    { "first": "Marcus",  "last": "HOLT",       "role": "BAT",  "roleLong": "Top-Order Batter",  "captain": true,        "headshot": "../assets/player-cutout.png" },
+    { "first": "Devansh", "last": "RAO",        "role": "BAT",  "roleLong": "Top-Order Batter",  "viceCaptain": true },
+    { "first": "Tomas",   "last": "VEGA",       "role": "WK",   "roleLong": "Wicket-Keeper",     "keeper": true },
+    { "first": "Eli",     "last": "HARTMAN",    "role": "AR",   "roleLong": "All-Rounder" },
+    { "first": "Jared",   "last": "NGATA",      "role": "AR",   "roleLong": "All-Rounder" },
+    { "first": "Reuben",  "last": "COLE",       "role": "BAT",  "roleLong": "Middle Order" },
+    { "first": "Sam",     "last": "WHITFIELD",  "role": "BOWL", "roleLong": "Right-Arm Pace" },
+    { "first": "Owen",    "last": "STRATTON",   "role": "BOWL", "roleLong": "Off-Spin" },
+    { "first": "Kade",    "last": "LINWOOD",    "role": "BOWL", "roleLong": "Left-Arm Pace" },
+    { "first": "Ari",     "last": "BEKELE",     "role": "AR",   "roleLong": "All-Rounder" },
+    { "first": "Felix",   "last": "MARO",       "role": "BOWL", "roleLong": "Leg-Spin" },
+    { "first": "Joaquin", "last": "PERALTA",    "role": "BAT",  "roleLong": "Middle Order" },
+    { "first": "Lior",    "last": "ASHKENAZI",  "role": "BOWL", "roleLong": "Right-Arm Pace" }
+  ],
+  "toss": {
+    "winner": "TEAM",
+    "decision": "BAT"
+  },
+  "motm": {
+    "player": { "first": "Marcus", "last": "HOLT", "role": "BAT", "roleLong": "Top-Order Batter", "headshot": "../assets/player-cutout.png" },
+    "stats": [
+      { "label": "Runs",        "value": "87"    },
+      { "label": "Balls",       "value": "54"    },
+      { "label": "Fours",       "value": "9"     },
+      { "label": "Sixes",       "value": "4"     },
+      { "label": "Strike Rate", "value": "161.1" },
+      { "label": "Not Out",     "value": "★"     }
+    ],
+    "summary": "Anchored the chase with a match-winning 87* off 54, his fourth fifty of the season."
+  },
+  "result": {
+    "winner": "TEAM",
+    "margin": "by 28 runs",
+    "teamScore": "182/6 (20)",
+    "oppScore": "154/9 (20)",
+    "motmLast": "HOLT"
+  }
+}

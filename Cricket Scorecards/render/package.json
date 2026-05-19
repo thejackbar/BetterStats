@@ -1,0 +1,17 @@
+{
+  "name": "cricket-lineup-render",
+  "version": "1.0.0",
+  "description": "Server-side renderer for cricket lineup post templates",
+  "main": "render.js",
+  "scripts": {
+    "render": "node render.js",
+    "example": "node render.js example-input.json example-output.jpg",
+    "all": "node render-all.js"
+  },
+  "dependencies": {
+    "puppeteer": "^22.10.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
