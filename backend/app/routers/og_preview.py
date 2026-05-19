@@ -100,13 +100,14 @@ async def _player_html(player_id: str, page_url: str, db: AsyncSession) -> str |
     name = player.display_name
     club_name = org.name if org else ""
     description = (
-        f"{name}'s career batting, bowling and fielding records at {club_name} on BetterStats."
+        f"Explore {name}'s full career batting, bowling and fielding records at {club_name} — "
+        f"innings by innings, season by season, on BetterStats."
         if club_name
-        else f"{name}'s career cricket statistics on BetterStats."
+        else f"Explore {name}'s complete career cricket statistics — innings, wickets and more on BetterStats."
     )
     image = _abs_url(org.logo_url if org else None)
 
-    return _html(f"{name} — BetterStats", description, image, page_url)
+    return _html(f"{name} — Cricket Career Stats | BetterStats", description, image, page_url)
 
 
 async def _club_html(slug: str, page_url: str, db: AsyncSession) -> str | None:
@@ -118,10 +119,10 @@ async def _club_html(slug: str, page_url: str, db: AsyncSession) -> str | None:
         return None
 
     description = (
-        f"{org.name} cricket statistics — batting, bowling and fielding "
-        f"leaderboards, records, and player profiles on BetterStats."
+        f"Batting averages, bowling figures, fielding stats, season records and player profiles "
+        f"for {org.name} — all in one place on BetterStats."
     )
-    return _html(f"{org.name} — BetterStats", description, _abs_url(org.logo_url), page_url)
+    return _html(f"{org.name} Cricket Club Stats & Records | BetterStats", description, _abs_url(org.logo_url), page_url)
 
 
 @router.get("", response_class=HTMLResponse)
