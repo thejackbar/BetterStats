@@ -84,6 +84,10 @@ class Season(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"))
+    # Per-club derived id (uuid5 of org id + grassroots_id). The raw Cricket
+    # Australia season GUID lives in grassroots_id — it is shared across clubs
+    # so it cannot be the primary key.
+    grassroots_id = Column(Text, nullable=True)
     name = Column(Text, nullable=False)
     year = Column(Integer)
     synced_at = Column(TIMESTAMP(timezone=True))
