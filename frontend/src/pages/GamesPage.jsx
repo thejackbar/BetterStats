@@ -99,6 +99,7 @@ export default function GamesPage() {
     seasons, grades,
     selectedSeason, setSelectedSeason,
     selectedGrade, setSelectedGrade,
+    finalsOnly, setFinalsOnly,
     loading: clubLoading,
   } = useClubData(orgId)
 
@@ -115,11 +116,11 @@ export default function GamesPage() {
   useEffect(() => {
     if (!orgId) return
     setLoading(true)
-    api.getOrgResults(orgId, { seasonId: selectedSeason, gradeId: selectedGrade })
+    api.getOrgResults(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, finalsOnly })
       .then(setGames)
       .catch(() => setGames([]))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGrade])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly])
 
   // Group by grade_name, preserving played_at DESC order within each group
   const byGrade = useMemo(() => {
@@ -163,6 +164,8 @@ export default function GamesPage() {
             setSelectedSeason={setSelectedSeason}
             selectedGrade={selectedGrade}
             setSelectedGrade={setSelectedGrade}
+            finalsOnly={finalsOnly}
+            setFinalsOnly={setFinalsOnly}
           />
         </div>
 

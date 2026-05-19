@@ -339,6 +339,7 @@ async def get_org_results(
     org_id: str,
     season_id: str | None = None,
     grade_id: str | None = None,
+    finals_only: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
     """Return all synced game results for the org from the DB, grouped-friendly flat list."""
@@ -368,6 +369,8 @@ async def get_org_results(
     if grade_id:
         query += " AND gr.id = :grade_id"
         params["grade_id"] = grade_id
+    if finals_only:
+        query += " AND g.is_final = TRUE"
     query += " ORDER BY g.played_at DESC"
     rows = await db.execute(text(query), params)
     return [

@@ -7,6 +7,7 @@ export function useClubData(orgId) {
   const [grades, setGrades] = useState([])
   const [selectedSeason, setSelectedSeason] = useState(null)
   const [selectedGrade, setSelectedGrade] = useState(null)
+  const [finalsOnly, setFinalsOnly] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -36,6 +37,7 @@ export function useClubData(orgId) {
     org, seasons, grades,
     selectedSeason, setSelectedSeason,
     selectedGrade, setSelectedGrade,
+    finalsOnly, setFinalsOnly,
     loading, error,
   }
 }

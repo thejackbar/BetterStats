@@ -896,6 +896,7 @@ async def get_batting_leaderboard_extended(
     limit: int = 20,
     min_runs: int = 0,
     grade_name: Optional[str] = None,
+    finals_only: Optional[bool] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_runs", "average", "strike_rate", "total_sixes",
@@ -904,18 +905,19 @@ async def get_batting_leaderboard_extended(
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_runs"
 
+    finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     params: dict = {"org_id": org_id, "limit": limit}
 
     if grade_id:
         params["grade_id"] = grade_id
-        base = """
+        base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
                 FROM batting_innings bi
                 JOIN games g ON g.id = bi.game_id
                 WHERE g.grade_id = :grade_id
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
-                  AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                  AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){finals_clause}
             )
             SELECT
                 p.id AS player_id,
@@ -955,6 +957,49 @@ async def get_batting_leaderboard_extended(
                 JOIN games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 WHERE {_GRADE_MATCH}{season_clause}
+                  AND NOT COALESCE(bi.did_not_bat, FALSE)
+                  AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){finals_clause}
+            )
+            SELECT
+                p.id AS player_id,
+                COALESCE(p.display_name_override, p.name) AS name,
+                COUNT(*) AS innings,
+                COALESCE(SUM(q.runs), 0) AS total_runs,
+                MAX(q.runs) AS high_score,
+                ROUND(SUM(q.runs)::numeric / NULLIF(COUNT(*) - SUM(q.not_out::int), 0), 2) AS average,
+                ROUND(SUM(q.runs)::numeric / NULLIF(SUM(q.balls), 0) * 100, 2) AS strike_rate,
+                SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) AS fifties,
+                SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) AS hundreds,
+                SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) AS ducks,
+                COUNT(DISTINCT q.game_id) AS games,
+                COALESCE(SUM(q.fours), 0) AS total_fours,
+                COALESCE(SUM(q.sixes), 0) AS total_sixes
+            FROM qualifying q
+            JOIN players p ON p.id = q.player_id
+            WHERE p.organisation_id = :org_id
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+        """
+        if min_runs > 0:
+            base += " HAVING SUM(q.runs) >= :min_runs"
+            params["min_runs"] = min_runs
+        base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
+        result = await session.execute(text(base), params)
+        return [dict(r) for r in result.mappings()]
+
+    if finals_only:
+        # When finals_only=True with no grade filter, switch to per-game query
+        season_clause = " AND s.id = :season_id" if season_id else ""
+        if season_id:
+            params["season_id"] = season_id
+        base = f"""
+            WITH qualifying AS (
+                SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
+                FROM batting_innings bi
+                JOIN games g ON g.id = bi.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND g.is_final = TRUE{season_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
             )
@@ -1027,6 +1072,7 @@ async def get_bowling_leaderboard_extended(
     min_overs: int = 0,
     min_wickets: int = 0,
     grade_name: Optional[str] = None,
+    finals_only: Optional[bool] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_wickets", "average", "economy", "best_figures_wickets",
@@ -1035,12 +1081,13 @@ async def get_bowling_leaderboard_extended(
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_wickets"
 
+    finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     params: dict = {"org_id": org_id, "limit": limit}
     sort_dir = "ASC" if sort_by in ("economy", "average") else "DESC"
 
     if grade_id:
         params["grade_id"] = grade_id
-        base = """
+        base = f"""
             WITH best_spell AS (
                 SELECT DISTINCT ON (bs.player_id)
                     bs.player_id,
@@ -1048,7 +1095,7 @@ async def get_bowling_leaderboard_extended(
                     bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
                 FROM bowling_spells bs
                 JOIN games g ON g.id = bs.game_id
-                WHERE g.grade_id = :grade_id
+                WHERE g.grade_id = :grade_id{finals_clause}
                 ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
             )
             SELECT
@@ -1067,7 +1114,7 @@ async def get_bowling_leaderboard_extended(
             JOIN games g ON g.id = bs.game_id
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id
+            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """
         having_clauses = []
@@ -1097,7 +1144,7 @@ async def get_bowling_leaderboard_extended(
                 FROM bowling_spells bs
                 JOIN games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
-                WHERE {_GRADE_MATCH}{season_clause}
+                WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
                 ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
             )
             SELECT
@@ -1117,7 +1164,62 @@ async def get_bowling_leaderboard_extended(
             JOIN grades gr ON gr.id = g.grade_id
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE {_GRADE_MATCH}{season_clause}
+            WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
+              AND p.organisation_id = :org_id
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
+        """
+        having_clauses = []
+        if min_overs > 0:
+            having_clauses.append("COALESCE(SUM(bs.overs), 0) >= :min_overs")
+            params["min_overs"] = min_overs
+        if min_wickets > 0:
+            having_clauses.append("COALESCE(SUM(bs.wickets), 0) >= :min_wickets")
+            params["min_wickets"] = min_wickets
+        if having_clauses:
+            base += " HAVING " + " AND ".join(having_clauses)
+        base += f" ORDER BY {sort_by} {sort_dir} NULLS LAST LIMIT :limit"
+        result = await session.execute(text(base), params)
+        return [dict(r) for r in result.mappings()]
+
+    if finals_only:
+        # When finals_only=True with no grade filter, switch to per-game query
+        season_clause = " AND s.id = :season_id" if season_id else ""
+        if season_id:
+            params["season_id"] = season_id
+        base = f"""
+            WITH best_spell AS (
+                SELECT DISTINCT ON (bs.player_id)
+                    bs.player_id,
+                    bs.wickets AS best_figures_wickets,
+                    bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
+                FROM bowling_spells bs
+                JOIN games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND g.is_final = TRUE{season_clause}
+                ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
+            )
+            SELECT
+                p.id AS player_id,
+                COALESCE(p.display_name_override, p.name) AS name,
+                COUNT(DISTINCT bs.game_id) AS games,
+                COALESCE(SUM(bs.wickets), 0) AS total_wickets,
+                ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
+                ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy,
+                bsf.best_figures_wickets,
+                bsf.best_bowling_figures,
+                COALESCE(SUM(bs.maidens), 0) AS total_maidens,
+                COALESCE(SUM(bs.overs), 0) AS total_overs,
+                COALESCE(SUM(CASE WHEN bs.wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors
+            FROM bowling_spells bs
+            JOIN games g ON g.id = bs.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            JOIN players p ON p.id = bs.player_id
+            LEFT JOIN best_spell bsf ON bsf.player_id = p.id
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND g.is_final = TRUE{season_clause}
               AND p.organisation_id = :org_id
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """

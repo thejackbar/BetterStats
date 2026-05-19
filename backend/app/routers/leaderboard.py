@@ -25,9 +25,10 @@ async def batting_leaderboard(
     sort_by: str = Query("total_runs"),
     limit: int = Query(20, le=5000),
     min_runs: int = Query(0),
+    finals_only: Optional[bool] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await get_batting_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_runs, grade_name)
+    rows = await get_batting_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_runs, grade_name, finals_only=finals_only)
     return _stringify(rows)
 
 
@@ -41,9 +42,10 @@ async def bowling_leaderboard(
     limit: int = Query(20, le=5000),
     min_overs: int = Query(0),
     min_wickets: int = Query(0),
+    finals_only: Optional[bool] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await get_bowling_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_overs, min_wickets, grade_name)
+    rows = await get_bowling_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_overs, min_wickets, grade_name, finals_only=finals_only)
     return _stringify(rows)
 
 
@@ -55,7 +57,8 @@ async def fielding_leaderboard(
     grade_name: Optional[str] = Query(None),
     sort_by: str = Query("total_dismissals"),
     limit: int = Query(20, le=50),
+    finals_only: Optional[bool] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit, grade_name)
+    rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit, grade_name, finals_only=finals_only)
     return _stringify(rows)

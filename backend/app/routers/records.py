@@ -115,6 +115,7 @@ async def get_records(
     season_id: str | None = Query(None),
     grade_id: str | None = Query(None),
     grade_name: str | None = Query(None),
+    finals_only: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     # If grade_id supplied, resolve grade name (for manual record filtering) and season if missing
@@ -187,6 +188,7 @@ async def get_records(
 
     # When grade_name active: game-level join/where templates for batting and bowling
     _gw_season = "AND s.id = :season_id" if season_id else ""
+    finals_clause = "AND g.is_final = TRUE" if finals_only else ""
     _bat_join = (
         "JOIN batting_innings bi ON bi.player_id = p.id"
         " JOIN games g ON g.id = bi.game_id"
@@ -196,6 +198,7 @@ async def get_records(
     _bat_where = (
         f"WHERE p.organisation_id = :org_id AND {_grade_match}"
         f" {_gw_season}"
+        f" {finals_clause}"
         " AND NOT COALESCE(bi.did_not_bat, FALSE)"
         " AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')"
     )
@@ -208,15 +211,59 @@ async def get_records(
     _bowl_where = (
         f"WHERE p.organisation_id = :org_id AND {_grade_match}"
         f" {_gw_season}"
+        f" {finals_clause}"
     )
 
     async def q(sql: str, params: dict | None = None) -> list[dict]:
         rows = await db.execute(text(sql), params or p)
         return [dict(r) for r in rows.mappings().all()]
 
+    # Whether to use per-game queries (required for grade_name or finals_only)
+    use_game_level = bool(grade_name or finals_only)
+    # Grade filter fragment for use-game-level queries that don't use _grade_match
+    _match_grade_filter = f"AND {_grade_match}" if grade_name else ""
+
+    # For the no-grade-name + finals_only path: same joins as grade_name but without grade filter
+    if finals_only and not grade_name:
+        _bat_join_ng = (
+            "JOIN batting_innings bi ON bi.player_id = p.id"
+            " JOIN games g ON g.id = bi.game_id"
+            " JOIN grades gr ON gr.id = g.grade_id"
+            " JOIN seasons s ON s.id = gr.season_id"
+        )
+        _bat_where_ng = (
+            f"WHERE p.organisation_id = :org_id"
+            f" {_gw_season}"
+            " AND g.is_final = TRUE"
+            " AND NOT COALESCE(bi.did_not_bat, FALSE)"
+            " AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')"
+        )
+        _bowl_join_ng = (
+            "JOIN bowling_spells bs ON bs.player_id = p.id"
+            " JOIN games g ON g.id = bs.game_id"
+            " JOIN grades gr ON gr.id = g.grade_id"
+            " JOIN seasons s ON s.id = gr.season_id"
+        )
+        _bowl_where_ng = (
+            f"WHERE p.organisation_id = :org_id"
+            f" {_gw_season}"
+            " AND g.is_final = TRUE"
+        )
+    else:
+        _bat_join_ng = _bat_join
+        _bat_where_ng = _bat_where
+        _bowl_join_ng = _bowl_join
+        _bowl_where_ng = _bowl_where
+
+    # For queries that need the right join/where based on context
+    _eff_bat_join = _bat_join if grade_name else _bat_join_ng
+    _eff_bat_where = _bat_where if grade_name else _bat_where_ng
+    _eff_bowl_join = _bowl_join if grade_name else _bowl_join_ng
+    _eff_bowl_where = _bowl_where if grade_name else _bowl_where_ng
+
     # ── Batting ────────────────────────────────────────────────────────────────────────
 
-    if grade_name:
+    if use_game_level:
         top_career_runs = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COALESCE(SUM(bi.runs), 0) AS runs,
@@ -226,8 +273,8 @@ async def get_records(
                    MAX(bi.runs) AS high_score,
                    ROUND(SUM(bi.runs)::numeric /
                        NULLIF(COUNT(*) - COUNT(*) FILTER (WHERE bi.not_out), 0), 2) AS average
-            FROM players p {_bat_join}
-            {_bat_where}
+            FROM players p {_eff_bat_join}
+            {_eff_bat_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(bi.runs) > 0
             ORDER BY runs DESC LIMIT :limit
@@ -251,14 +298,14 @@ async def get_records(
             ORDER BY runs DESC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         top_high_scores = await q(f"""
             WITH best AS (
                 SELECT DISTINCT ON (p.id)
                     p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                     bi.runs, bi.not_out, s.name AS season_name
-                FROM players p {_bat_join}
-                {_bat_where}
+                FROM players p {_eff_bat_join}
+                {_eff_bat_where}
                   AND bi.runs IS NOT NULL AND bi.runs > 0
                 ORDER BY p.id, bi.runs DESC
             )
@@ -279,7 +326,7 @@ async def get_records(
             ORDER BY pss.high_score DESC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         top_batting_avg = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    ROUND(SUM(bi.runs)::numeric /
@@ -287,8 +334,8 @@ async def get_records(
                    COALESCE(SUM(bi.runs), 0) AS runs,
                    COUNT(*) AS innings,
                    COUNT(DISTINCT bi.game_id) AS matches
-            FROM players p {_bat_join}
-            {_bat_where}
+            FROM players p {_eff_bat_join}
+            {_eff_bat_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING (COUNT(*) - COUNT(*) FILTER (WHERE bi.not_out)) >= 10
             ORDER BY average DESC LIMIT :limit
@@ -310,14 +357,14 @@ async def get_records(
             ORDER BY average DESC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         most_fifties = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) AS fifties,
                    COALESCE(SUM(bi.runs), 0) AS runs,
                    COUNT(DISTINCT bi.game_id) AS matches
-            FROM players p {_bat_join}
-            {_bat_where}
+            FROM players p {_eff_bat_join}
+            {_eff_bat_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) > 0
             ORDER BY fifties DESC LIMIT :limit
@@ -337,14 +384,14 @@ async def get_records(
             ORDER BY fifties DESC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         most_hundreds = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(*) FILTER (WHERE bi.runs >= 100) AS hundreds,
                    COALESCE(SUM(bi.runs), 0) AS runs,
                    COUNT(DISTINCT bi.game_id) AS matches
-            FROM players p {_bat_join}
-            {_bat_where}
+            FROM players p {_eff_bat_join}
+            {_eff_bat_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING COUNT(*) FILTER (WHERE bi.runs >= 100) > 0
             ORDER BY hundreds DESC LIMIT :limit
@@ -364,13 +411,13 @@ async def get_records(
             ORDER BY hundreds DESC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         most_ducks = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(*) FILTER (WHERE bi.runs = 0 AND NOT COALESCE(bi.not_out, FALSE)) AS ducks,
                    COUNT(*) AS innings
-            FROM players p {_bat_join}
-            {_bat_where}
+            FROM players p {_eff_bat_join}
+            {_eff_bat_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING COUNT(*) FILTER (WHERE bi.runs = 0 AND NOT COALESCE(bi.not_out, FALSE)) > 0
             ORDER BY ducks DESC LIMIT :limit
@@ -389,14 +436,14 @@ async def get_records(
             ORDER BY ducks DESC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         most_runs_season = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    SUM(bi.runs) AS runs,
                    COUNT(*) AS innings,
                    s.name AS season_name, s.year AS season_year
-            FROM players p {_bat_join}
-            {_bat_where}
+            FROM players p {_eff_bat_join}
+            {_eff_bat_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), s.id, s.name, s.year
             HAVING SUM(bi.runs) > 0
             ORDER BY runs DESC LIMIT :limit
@@ -416,7 +463,7 @@ async def get_records(
 
     # ── Bowling ────────────────────────────────────────────────────────────────────────
 
-    if grade_name:
+    if use_game_level:
         top_career_wickets = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COALESCE(SUM(bs.wickets), 0) AS wickets,
@@ -426,8 +473,8 @@ async def get_records(
                        NULLIF(SUM(bs.wickets), 0), 2) AS average,
                    ROUND(SUM(bs.runs)::numeric /
                        NULLIF(SUM(bs.overs), 0), 2) AS economy
-            FROM players p {_bowl_join}
-            {_bowl_where}
+            FROM players p {_eff_bowl_join}
+            {_eff_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(bs.wickets) > 0
             ORDER BY wickets DESC LIMIT :limit
@@ -451,14 +498,14 @@ async def get_records(
             ORDER BY wickets DESC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         best_innings_figures = await q(f"""
             WITH best AS (
                 SELECT DISTINCT ON (p.id)
                     p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                     bs.wickets, bs.runs, s.name AS season_name
-                FROM players p {_bowl_join}
-                {_bowl_where}
+                FROM players p {_eff_bowl_join}
+                {_eff_bowl_where}
                   AND bs.wickets > 0
                 ORDER BY p.id, bs.wickets DESC, bs.runs ASC
             )
@@ -483,15 +530,15 @@ async def get_records(
             LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         top_bowling_avg = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    ROUND(SUM(bs.runs)::numeric /
                        NULLIF(SUM(bs.wickets), 0), 2) AS average,
                    COALESCE(SUM(bs.wickets), 0) AS wickets,
                    COUNT(DISTINCT bs.game_id) AS matches
-            FROM players p {_bowl_join}
-            {_bowl_where}
+            FROM players p {_eff_bowl_join}
+            {_eff_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(bs.wickets) >= 20
             ORDER BY average ASC LIMIT :limit
@@ -512,15 +559,15 @@ async def get_records(
             ORDER BY average ASC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         top_economy = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    ROUND(SUM(bs.runs)::numeric /
                        NULLIF(SUM(bs.overs), 0), 2) AS economy,
                    COALESCE(SUM(bs.wickets), 0) AS wickets,
                    ROUND(SUM(bs.overs), 1) AS overs
-            FROM players p {_bowl_join}
-            {_bowl_where}
+            FROM players p {_eff_bowl_join}
+            {_eff_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(bs.overs) >= 50
             ORDER BY economy ASC LIMIT :limit
@@ -541,13 +588,13 @@ async def get_records(
             ORDER BY economy ASC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         most_five_fors = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(*) FILTER (WHERE bs.wickets >= 5) AS five_fors,
                    COALESCE(SUM(bs.wickets), 0) AS wickets
-            FROM players p {_bowl_join}
-            {_bowl_where}
+            FROM players p {_eff_bowl_join}
+            {_eff_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING COUNT(*) FILTER (WHERE bs.wickets >= 5) > 0
             ORDER BY five_fors DESC LIMIT :limit
@@ -566,14 +613,14 @@ async def get_records(
             ORDER BY five_fors DESC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         most_wickets_season = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    SUM(bs.wickets)::int AS wickets,
                    COUNT(DISTINCT bs.game_id) AS innings,
                    s.name AS season_name, s.year AS season_year
-            FROM players p {_bowl_join}
-            {_bowl_where}
+            FROM players p {_eff_bowl_join}
+            {_eff_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), s.id, s.name, s.year
             HAVING SUM(bs.wickets) > 0
             ORDER BY wickets DESC LIMIT :limit
@@ -593,7 +640,7 @@ async def get_records(
 
     # ── Partnerships ──────────────────────────────────────────────────────────────────────
 
-    top_partnerships = await q("""
+    top_partnerships = await q(f"""
         SELECT
             p1.id::text AS batter1_id,
             COALESCE(p1.display_name_override, p1.name) AS batter1_name,
@@ -628,12 +675,12 @@ async def get_records(
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
         WHERE pt.is_club_innings IS NOT FALSE
           AND p1.organisation_id = :org_id AND p2.organisation_id = :org_id
-          """ + partnership_season_clause + game_grade_clause + """
+          {partnership_season_clause} {game_grade_clause} {finals_clause}
           AND pt.runs IS NOT NULL AND pt.runs > 0
         ORDER BY pt.runs DESC LIMIT :limit
     """)
 
-    partnerships_by_wicket_rows = await q("""
+    partnerships_by_wicket_rows = await q(f"""
         SELECT
             p1.id::text AS batter1_id,
             COALESCE(p1.display_name_override, p1.name) AS batter1_name,
@@ -669,7 +716,7 @@ async def get_records(
         LEFT JOIN players p2 ON p2.id = pt.batter2_id
         WHERE pt.is_club_innings IS NOT FALSE
           AND p1.organisation_id = :org_id AND p2.organisation_id = :org_id
-          """ + partnership_season_clause + game_grade_clause + """
+          {partnership_season_clause} {game_grade_clause} {finals_clause}
           AND pt.runs IS NOT NULL AND pt.runs > 0 AND pt.wicket_number BETWEEN 1 AND 10
     """)
     by_wicket: dict[int, list] = {}
@@ -681,7 +728,7 @@ async def get_records(
             del d["rn"]
             by_wicket[wk].append(d)
 
-    partnerships_by_grade_rows = await q("""
+    partnerships_by_grade_rows = await q(f"""
         WITH ranked AS (
             SELECT
                 COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
@@ -721,7 +768,7 @@ async def get_records(
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE pt.is_club_innings IS NOT FALSE
               AND p1.organisation_id = :org_id AND p2.organisation_id = :org_id
-              """ + partnership_season_clause + game_grade_clause + """
+              {partnership_season_clause} {game_grade_clause} {finals_clause}
               AND pt.runs IS NOT NULL AND pt.runs > 0 AND pt.wicket_number BETWEEN 1 AND 10
         )
         SELECT * FROM ranked WHERE rn = 1
@@ -765,7 +812,7 @@ async def get_records(
                 "is_manual": True,
             })
 
-    top_pairs = await q("""
+    top_pairs = await q(f"""
         SELECT
             LEAST(p1.id::text, p2.id::text)    AS pair_key,
             p1.id::text AS batter1_id,
@@ -778,10 +825,10 @@ async def get_records(
         FROM partnerships pt
         JOIN players p1 ON p1.id = pt.batter1_id
         JOIN players p2 ON p2.id = pt.batter2_id
-        """ + pairs_game_join + """
+        {pairs_game_join}
         WHERE pt.is_club_innings IS NOT FALSE
           AND p1.organisation_id = :org_id AND p2.organisation_id = :org_id
-          """ + pairs_grade_clause + """
+          {pairs_grade_clause} {finals_clause}
         GROUP BY LEAST(p1.id::text, p2.id::text),
                  p1.id, COALESCE(p1.display_name_override, p1.name),
                  p2.id, COALESCE(p2.display_name_override, p2.name)
@@ -791,7 +838,7 @@ async def get_records(
 
     # ── Team / fielding ───────────────────────────────────────────────────────────────────────
 
-    if grade_name:
+    if use_game_level:
         most_matches = await q(f"""
             WITH appearances AS (
                 SELECT bi.player_id, bi.game_id, gr.season_id
@@ -800,8 +847,9 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND {_grade_match}
+                  {_match_grade_filter}
                   {_gw_season}
+                  {finals_clause}
                 UNION
                 SELECT bs.player_id, bs.game_id, gr.season_id
                 FROM bowling_spells bs
@@ -809,8 +857,9 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND {_grade_match}
+                  {_match_grade_filter}
                   {_gw_season}
+                  {finals_clause}
             )
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(DISTINCT ap.game_id) AS matches,
@@ -836,7 +885,7 @@ async def get_records(
             ORDER BY matches DESC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         most_seasons = await q(f"""
             WITH appearances AS (
                 SELECT bi.player_id, gr.season_id
@@ -845,8 +894,9 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND {_grade_match}
+                  {_match_grade_filter}
                   {_gw_season}
+                  {finals_clause}
                 UNION
                 SELECT bs.player_id, gr.season_id
                 FROM bowling_spells bs
@@ -854,8 +904,9 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND {_grade_match}
+                  {_match_grade_filter}
                   {_gw_season}
+                  {finals_clause}
             )
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(DISTINCT ap.season_id) AS seasons,
@@ -881,7 +932,7 @@ async def get_records(
             ORDER BY seasons DESC LIMIT :limit
         """)
 
-    if grade_name:
+    if use_game_level:
         top_allrounders = await q(f"""
             WITH bat AS (
                 SELECT bi.player_id,
@@ -894,8 +945,9 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND {_grade_match}
+                  {_match_grade_filter}
                   {_gw_season}
+                  {finals_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')
                 GROUP BY bi.player_id
@@ -910,8 +962,9 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND {_grade_match}
+                  {_match_grade_filter}
                   {_gw_season}
+                  {finals_clause}
                 GROUP BY bs.player_id
             )
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,

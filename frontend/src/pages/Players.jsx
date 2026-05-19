@@ -14,7 +14,7 @@ export default function Players() {
   const { club, orgId, inactive } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
-  const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading: clubLoading } = useClubData(orgId)
+  const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, finalsOnly, setFinalsOnly, loading: clubLoading } = useClubData(orgId)
 
   if (inactive) return <ClubInactive />
 
@@ -35,21 +35,21 @@ export default function Players() {
 
   useEffect(() => {
     if (!orgId) return
-    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000 })
+    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })
         setBattingStats(map)
       })
       .catch(() => {})
-    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000 })
+    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })
         setBowlingStats(map)
       })
       .catch(() => {})
-  }, [orgId, selectedSeason, selectedGrade])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return players
@@ -105,6 +105,8 @@ export default function Players() {
             setSelectedSeason={setSelectedSeason}
             selectedGrade={selectedGrade}
             setSelectedGrade={setSelectedGrade}
+            finalsOnly={finalsOnly}
+            setFinalsOnly={setFinalsOnly}
           />
         </div>
 

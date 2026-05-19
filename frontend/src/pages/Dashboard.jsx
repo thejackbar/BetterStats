@@ -99,7 +99,7 @@ export default function Dashboard() {
 
   if (inactive) return <ClubInactive />
 
-  const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, loading, error } = useClubData(orgId)
+  const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, finalsOnly, setFinalsOnly, loading, error } = useClubData(orgId)
   const { games, loading: gamesLoading } = useRecentGames(orgId, { seasonId: selectedSeason, gradeId: selectedGrade })
 
   const [topBatters, setTopBatters] = useState([])
@@ -117,8 +117,8 @@ export default function Dashboard() {
     if (!orgId) return
     setStatsLoading(true)
     Promise.allSettled([
-      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5 }),
-      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5 }),
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly }),
       api.getOrgSummary(orgId, { seasonId: selectedSeason, gradeId: selectedGrade }),
     ])
       .then(([b, bw, s]) => {
@@ -127,7 +127,7 @@ export default function Dashboard() {
         if (s.status === 'fulfilled') setSummary(s.value)
       })
       .finally(() => setStatsLoading(false))
-  }, [orgId, selectedSeason, selectedGrade])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly])
 
   useEffect(() => {
     if (!orgId) return
@@ -188,6 +188,8 @@ export default function Dashboard() {
             setSelectedSeason={setSelectedSeason}
             selectedGrade={selectedGrade}
             setSelectedGrade={setSelectedGrade}
+            finalsOnly={finalsOnly}
+            setFinalsOnly={setFinalsOnly}
           />
         </div>
 

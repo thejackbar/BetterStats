@@ -66,6 +66,7 @@ async def list_games(
     season_id: Optional[str] = Query(None),
     grade_id: Optional[str] = Query(None),
     limit: int = Query(20, le=100),
+    finals_only: Optional[bool] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     org = await db.get(Organisation, uuid.UUID(org_id))
@@ -84,6 +85,8 @@ async def list_games(
             grade_obj = await db.get(Grade, uuid.UUID(grade_id))
             if grade_obj:
                 recent = [g for g in recent if (g.get("grade") or {}).get("name", "").strip().lower() == grade_obj.name.strip().lower()]
+        if finals_only:
+            recent = [g for g in recent if "final" in (g.get("round") or {}).get("name", "").lower()]
         recent.sort(key=lambda x: x["played_at"], reverse=True)
         return recent[:limit]
 
@@ -98,6 +101,8 @@ async def list_games(
         query = query.where(Season.id == uuid.UUID(season_id))
     if grade_id:
         query = query.where(Grade.id == uuid.UUID(grade_id))
+    if finals_only:
+        query = query.where(Game.is_final == True)
     query = query.order_by(Game.played_at.desc()).limit(limit)
     result = await db.execute(query)
     return [
