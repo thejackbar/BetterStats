@@ -44,6 +44,7 @@ class OrganisationOut(BaseModel):
     logo_url: str | None = None
     hero_image_url: str | None = None
     theme_mode: str | None = None
+    theme_config: dict | None = None
     player_name_format: str | None = None
 
     class Config:

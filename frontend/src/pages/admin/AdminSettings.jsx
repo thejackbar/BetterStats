@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
-import { BRAND, COLOR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss } from '../../lib/theme'
+import { BRAND, COLOR_FIELDS, HONOUR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss } from '../../lib/theme'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
@@ -220,6 +220,20 @@ export default function AdminSettings() {
               ))}
             </div>
 
+            {/* Honour category colours */}
+            <div className="mt-6">
+              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-1">Honour categories</label>
+              <p className="font-mono text-[10px] text-pb-faintest mb-3">Colour-codes achievement badges and the pills under a player's name.</p>
+              <div className="grid sm:grid-cols-2 gap-x-4 gap-y-4">
+                {HONOUR_FIELDS.map(f => (
+                  <ColorField key={f.key} label={f.label} hint={f.hint}
+                    value={theme[f.key]} fallback={BRAND[f.key]}
+                    onChange={v => setColor(f.key, v)}
+                    onReset={() => setColor(f.key, BRAND[f.key])} />
+                ))}
+              </div>
+            </div>
+
             {/* Chart series palette */}
             <div className="mt-5">
               <div className="flex items-center justify-between mb-1.5">
@@ -246,14 +260,14 @@ export default function AdminSettings() {
                     onClick={() => setTheme(t => ({ ...t, [mode]: { ...BRAND[mode] } }))}
                     className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-accent transition">Reset</button>
                 </div>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   {PALETTE_FIELDS.map(f => (
-                    <div key={f.key} className="flex flex-col items-center gap-1">
+                    <div key={f.key} className="flex flex-col gap-1">
                       <input type="color"
                         value={HEX_RE.test(theme[mode][f.key]) ? theme[mode][f.key] : BRAND[mode][f.key]}
                         onChange={e => setPalette(mode, f.key, e.target.value)}
                         className="w-full h-9 rounded border pb-hairline bg-pb-surface2 cursor-pointer" />
-                      <span className="font-mono text-[8px] text-pb-faintest text-center leading-tight">{f.label}</span>
+                      <span className="font-mono text-[9px] text-pb-faintest leading-tight">{f.label}</span>
                     </div>
                   ))}
                 </div>

@@ -27,6 +27,12 @@
   --pb-chart-6: #06b6d4;
   --pb-chart-7: #84cc16;
   --pb-chart-8: #f97316;
+
+  /* Honour / achievement category colours */
+  --pb-cat-honour:    #f5b542;
+  --pb-cat-role:      #60a5fa;
+  --pb-cat-award:     #16c784;
+  --pb-cat-milestone: #a78bfa;
 }
 
 /* Dark theme (default) */
