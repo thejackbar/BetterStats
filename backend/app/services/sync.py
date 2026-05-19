@@ -157,6 +157,28 @@ async def sync_organisation(
             await session.commit()
             stats["seasons"] += 1
 
+            # Seed Grade rows from this season's teams. The game-level sync
+            # discovers matches by iterating grades from the DB, but the
+            # org-level /grades endpoint is empty for clubs whose grades are
+            # owned by their association rather than the club itself. Each
+            # team, however, carries its grade id — so derive grades here.
+            teams_data = await playhq_client.get_teams(org_id_str, str(season_id))
+            for t in teams_data:
+                grade_objs = list(t.get("grades") or [])
+                if t.get("grade"):
+                    grade_objs.append(t["grade"])
+                for gd in grade_objs:
+                    grade_id = _parse_uuid((gd or {}).get("id", ""))
+                    if not grade_id:
+                        continue
+                    if not await session.get(Grade, grade_id):
+                        session.add(Grade(
+                            id=grade_id,
+                            season_id=season_id,
+                            name=gd.get("name", "Unknown Grade"),
+                        ))
+            await session.commit()
+
             # Fetch season-aggregate stats from grassroots API
             batting_list = await playhq_client.get_batting_stats(org_id_str, str(season_id))
             bowling_list = await playhq_client.get_bowling_stats(org_id_str, str(season_id))
