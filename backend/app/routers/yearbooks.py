@@ -214,8 +214,8 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
     # exact-string season matches AND date-spanning ranges (season → season_end).
     all_ach = await db.execute(
         text("""
-            SELECT a.id, a.category, a.subcategory, a.achievement, a.detail,
-                   a.season, a.season_end, a.player_id,
+            SELECT a.id::text, a.category, a.subcategory, a.achievement, a.detail,
+                   a.season, a.season_end, a.player_id::text,
                    COALESCE(p.display_name_override, p.name, a.player_name) AS player_name
             FROM player_achievements a
             LEFT JOIN players p ON p.id = a.player_id

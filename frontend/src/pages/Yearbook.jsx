@@ -956,7 +956,7 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
     return acc
   }, {})
 
-  const pulledByCategory = pulledAwards.reduce((acc, a) => {
+  const featuredByCategory = featuredAwards.reduce((acc, a) => {
     const cat = a.category || 'Other'
     if (!acc[cat]) acc[cat] = []
     acc[cat].push(a)
@@ -967,35 +967,12 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
     'Hall of Fame', 'Life Membership', 'Office Bearer', 'Milestone',
   ]
   const orderedCategories = [
-    ...CATEGORY_ORDER.filter(c => pulledByCategory[c]),
-    ...Object.keys(pulledByCategory).filter(c => !CATEGORY_ORDER.includes(c)),
+    ...CATEGORY_ORDER.filter(c => featuredByCategory[c]),
+    ...Object.keys(featuredByCategory).filter(c => !CATEGORY_ORDER.includes(c)),
   ]
 
   return (
     <div className="space-y-6">
-      {/* Season Honours — explicitly pinned awards */}
-      {featuredAwards.length > 0 && (
-        <SectionCard title="Season Honours">
-          <div className="grid sm:grid-cols-2 gap-px bg-white/5">
-            {featuredAwards.map(a => (
-              <div key={`featured-${a.id}`} className="bg-white/2 px-5 py-4">
-                <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">
-                  {resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)}
-                  {a.subcategory && <span className="text-white/30 normal-case ml-1.5">· {a.subcategory}</span>}
-                </div>
-                <div className="text-[15px] font-semibold text-white/90">
-                  {a.player_id
-                    ? <PlayerLink id={a.player_id} name={a.player_name} slug={clubSlug} />
-                    : <span>{a.player_name || '—'}</span>
-                  }
-                </div>
-                {a.detail && <div className="text-[12px] text-white/40 mt-1 italic">{a.detail}</div>}
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
-
       {/* Club Awards (added directly to the yearbook) */}
       {clubAwards.length > 0 && (
         <SectionCard title="Club Awards">
@@ -1016,11 +993,11 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
         </SectionCard>
       )}
 
-      {/* Pulled from /admin/awards, grouped by category */}
+      {/* Toggled-on awards from /admin/awards, grouped by category */}
       {orderedCategories.map(cat => (
         <SectionCard key={cat} title={cat === 'Club Award' ? 'Club Awards' : (cat.endsWith('s') ? cat : `${cat}s`)}>
           <div className="grid sm:grid-cols-2 gap-px bg-white/5">
-            {pulledByCategory[cat].map(a => (
+            {featuredByCategory[cat].map(a => (
               <div key={`pulled-${a.id}`} className="bg-white/2 px-5 py-4">
                 <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">
                   {resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)}
