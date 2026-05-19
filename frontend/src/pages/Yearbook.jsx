@@ -1481,9 +1481,12 @@ export default function Yearbook() {
   const orgId = club.id
   const seasonId = season?.id
 
+  const reportsLabel = customSections.length === 1
+    ? customSections[0].title
+    : customSections.length > 1 ? 'Reports' : 'Reports'
   const TABS = [
     ...BASE_TABS,
-    ...(customSections.length > 0 ? [{ id: 'reports', label: 'Reports' }] : []),
+    ...(customSections.length > 0 ? [{ id: 'reports', label: reportsLabel }] : []),
   ]
 
   return (
@@ -1578,7 +1581,7 @@ export default function Yearbook() {
                 ))}
               </div>
             </div>
-            {grades.length > 1 && !['overview', 'grades'].includes(activeTab) && (
+            {grades.length > 1 && !['overview', 'grades', 'reports'].includes(activeTab) && (
               <div className="shrink-0">
                 <select
                   value={gradeId || ''}
