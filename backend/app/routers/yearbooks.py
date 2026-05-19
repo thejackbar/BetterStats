@@ -261,7 +261,6 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
             if s_year == target_year:
                 pulled_rows.append(dict(row))
 
-    return {
     featured = await db.execute(
         text("SELECT achievement_id FROM yearbook_featured_achievements WHERE yearbook_id = :yid ORDER BY sort_order, id"),
         {"yid": str(yb["id"])},
