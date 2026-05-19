@@ -1346,8 +1346,6 @@ export default function PlayerProfile() {
   const [byPosition, setByPosition] = useState([])
   const [bowlingByGrade, setBowlingByGrade] = useState([])
   const [tab, setTab] = useState('batting')
-  const [syncRequested, setSyncRequested] = useState(false)
-  const [syncRequestLoading, setSyncRequestLoading] = useState(false)
 
   useClubTheme(org)
   const fmtName = useNameFormat(org)
@@ -1474,21 +1472,22 @@ export default function PlayerProfile() {
               </div>
             )}
           </div>
-          <div className="flex gap-2 flex-wrap">
-            {orgSlug && (
-              <Link to={`/${orgSlug}/compare?playerA=${playerId}`}>
-                <Btn>Compare</Btn>
-              </Link>
+          <div className="flex flex-col items-end gap-3">
+            {player.photo_url && (
+              <img
+                src={player.photo_url}
+                alt={fmtName(player.display_name)}
+                className="w-24 h-24 rounded-full object-cover border border-pb-hairline2"
+              />
             )}
-            <Link to={`/players/${playerId}/share`}><Btn>Share card</Btn></Link>
-            <Btn primary onClick={async () => {
-              if (syncRequested || syncRequestLoading) return
-              setSyncRequestLoading(true)
-              try { await api.requestPlayerSync(playerId) } catch {}
-              setSyncRequested(true); setSyncRequestLoading(false)
-            }}>
-              {syncRequestLoading ? 'Requesting…' : syncRequested ? '✓ Requested' : 'Sync player'}
-            </Btn>
+            <div className="flex gap-2 flex-wrap justify-end">
+              {orgSlug && (
+                <Link to={`/${orgSlug}/compare?playerA=${playerId}`}>
+                  <Btn>Compare</Btn>
+                </Link>
+              )}
+              <Link to={`/players/${playerId}/share`}><Btn primary>Share card</Btn></Link>
+            </div>
           </div>
         </div>
 
