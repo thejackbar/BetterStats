@@ -298,11 +298,8 @@ app.include_router(achievements.router)
 app.include_router(award_definitions.router)
 app.include_router(statlab.router)
 app.include_router(yearbooks.router)
-<<<<<<< HEAD
 app.include_router(images.router)
-=======
 app.include_router(og_preview.router)
->>>>>>> c3eb196 (Add nginx crawler detection and backend OG preview endpoint)
 
 # Serve uploaded files (hero images, gallery photos)
 _upload_dir = Path("/app/uploads")
