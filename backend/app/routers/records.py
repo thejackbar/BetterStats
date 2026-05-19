@@ -800,7 +800,7 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  AND {_grade_match}
                   {_gw_season}
                 UNION
                 SELECT bs.player_id, bs.game_id, gr.season_id
@@ -809,7 +809,7 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  AND {_grade_match}
                   {_gw_season}
             )
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
@@ -845,7 +845,7 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  AND {_grade_match}
                   {_gw_season}
                 UNION
                 SELECT bs.player_id, gr.season_id
@@ -854,7 +854,7 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  AND {_grade_match}
                   {_gw_season}
             )
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
@@ -894,7 +894,7 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  AND {_grade_match}
                   {_gw_season}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')
@@ -910,7 +910,7 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND COALESCE(gr.display_name_override, gr.name) = :grade_name
+                  AND {_grade_match}
                   {_gw_season}
                 GROUP BY bs.player_id
             )
