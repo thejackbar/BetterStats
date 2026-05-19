@@ -571,7 +571,7 @@ function ScoreDistributionChart({ innings }) {
         />
         <Bar dataKey="count" radius={[3, 3, 0, 0]}>
           {data.map((entry, i) => (
-            <Cell key={i} fill={entry.label === '100+' ? 'var(--pb-chart-milestone, #f5b542)' : entry.highlight ? 'var(--pb-positive, #16c784)' : 'var(--pb-surface2)'} />
+            <Cell key={i} fill={entry.label === '100+' ? 'var(--pb-chart-milestone, #f5b542)' : entry.highlight ? 'var(--pb-positive, #16c784)' : 'var(--pb-faintest, #3a3f50)'} />
           ))}
         </Bar>
       </BarChart>
