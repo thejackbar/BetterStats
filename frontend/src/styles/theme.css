@@ -1,6 +1,37 @@
-/* BetterStats — Press Box theme */
+/* BetterStats — Press Box theme
+ *
+ * Surface/text tokens are theme-aware: they live under [data-theme="dark"]
+ * and [data-theme="light"] so the whole app can flip with one attribute.
+ * Brand / accent / chart tokens are theme-independent and live in :root.
+ * A club's saved palette is injected at runtime as <style id="club-theme">
+ * by useClubTheme() — see frontend/src/lib/theme.js.
+ */
 
 :root {
+  /* Brand + semantic colours (shared across light and dark) */
+  --pb-accent:          #16c784;
+  --pb-positive:        #16c784;
+  --pb-negative:        #ef5b5b;
+  --pb-red:             #ef5b5b;
+
+  /* Chart series */
+  --pb-chart-runs:      #16c784;
+  --pb-chart-wickets:   #3b82f6;
+  --pb-chart-milestone: #f5b542;
+  --pb-amber:           #f5b542;
+  --pb-chart-1: #16c784;
+  --pb-chart-2: #3b82f6;
+  --pb-chart-3: #f5b542;
+  --pb-chart-4: #a855f7;
+  --pb-chart-5: #ef5b5b;
+  --pb-chart-6: #06b6d4;
+  --pb-chart-7: #84cc16;
+  --pb-chart-8: #f97316;
+}
+
+/* Dark theme (default) */
+:root,
+[data-theme="dark"] {
   --pb-bg:        #0a0d14;
   --pb-surface:   #10141d;
   --pb-surface2:  #161b27;
@@ -11,10 +42,20 @@
   --pb-dim:      #8a90a2;
   --pb-faint:    #5b6072;
   --pb-faintest: #3a3f50;
+}
 
-  --pb-accent: #16c784;
-  --pb-red:    #ef5b5b;
-  --pb-amber:  #f5b542;
+/* Light theme */
+[data-theme="light"] {
+  --pb-bg:        #f5f6f8;
+  --pb-surface:   #ffffff;
+  --pb-surface2:  #eef0f3;
+  --pb-hairline:  #e1e4ea;
+  --pb-hairline2: #d0d4dd;
+
+  --pb-text:     #1b1e27;
+  --pb-dim:      #5b6072;
+  --pb-faint:    #8a90a2;
+  --pb-faintest: #b6bac6;
 }
 
 .pb-num { font-variant-numeric: tabular-nums; }

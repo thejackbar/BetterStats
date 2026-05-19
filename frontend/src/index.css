@@ -4,12 +4,12 @@
 
 @layer base {
   html {
-    @apply bg-navy-950 text-white antialiased;
+    @apply bg-pb-bg text-pb-text antialiased;
     scroll-behavior: smooth;
   }
 
   body {
-    @apply bg-navy-950;
+    @apply bg-pb-bg;
   }
 
   /* Scrollbar */
@@ -18,10 +18,11 @@
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-navy-900;
+    background: var(--pb-surface);
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-navy-600 rounded-full;
+    background: var(--pb-hairline2);
+    border-radius: 9999px;
   }
 }
 
@@ -31,11 +32,11 @@
   }
 
   .card {
-    @apply bg-navy-800 border border-navy-700 rounded-xl;
+    @apply bg-pb-surface border border-pb-hairline rounded-xl;
   }
 
   .section-label {
-    @apply text-xs font-semibold uppercase tracking-widest text-slate-500;
+    @apply text-xs font-semibold uppercase tracking-widest text-pb-faint;
   }
 
   .display-heading {
@@ -47,15 +48,15 @@
   }
 
   .table-header {
-    @apply text-2xs font-semibold uppercase tracking-widest text-slate-500 px-3 py-2;
+    @apply text-2xs font-semibold uppercase tracking-widest text-pb-faint px-3 py-2;
   }
 
   .table-cell {
-    @apply px-3 py-2.5 text-sm text-slate-200;
+    @apply px-3 py-2.5 text-sm text-pb-text;
   }
 
   .table-row {
-    @apply border-b border-navy-700 hover:bg-navy-700/40 transition-colors;
+    @apply border-b border-pb-hairline hover:bg-pb-surface2/60 transition-colors;
   }
 
   .btn-primary {
@@ -63,7 +64,7 @@
   }
 
   .btn-ghost {
-    @apply text-slate-400 hover:text-white hover:bg-navy-700 px-3 py-1.5 rounded-lg transition-colors text-sm;
+    @apply text-pb-dim hover:text-pb-text hover:bg-pb-surface2 px-3 py-1.5 rounded-lg transition-colors text-sm;
   }
 
   .badge {
@@ -86,10 +87,10 @@
 /* Recharts overrides */
 .recharts-cartesian-grid-horizontal line,
 .recharts-cartesian-grid-vertical line {
-  stroke: #1a2540;
+  stroke: var(--pb-hairline);
 }
 .recharts-tooltip-wrapper .recharts-default-tooltip {
-  background: #131c2e !important;
-  border: 1px solid #243352 !important;
+  background: var(--pb-surface) !important;
+  border: 1px solid var(--pb-hairline2) !important;
   border-radius: 8px !important;
 }

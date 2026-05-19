@@ -33,6 +33,11 @@ export default {
           accent:    "var(--pb-accent)",
           red:       "var(--pb-red)",
           amber:     "var(--pb-amber)",
+          positive:  "var(--pb-positive)",
+          negative:  "var(--pb-negative)",
+          milestone: "var(--pb-chart-milestone)",
+          runs:      "var(--pb-chart-runs)",
+          wickets:   "var(--pb-chart-wickets)",
         },
       },
       fontFamily: {

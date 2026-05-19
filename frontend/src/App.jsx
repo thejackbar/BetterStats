@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
+import { ThemeProvider } from './contexts/ThemeContext'
 import ProtectedRoute from './components/ProtectedRoute'
 
 // Marketing
@@ -59,7 +60,8 @@ import Navbar from './components/Navbar'
 export default function App() {
   return (
     <AuthProvider>
-      <div className="min-h-screen bg-navy-950">
+      <ThemeProvider>
+      <div className="min-h-screen bg-pb-bg">
         <Navbar />
       <Routes>
         {/* Marketing site */}
@@ -115,6 +117,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </div>
+      </ThemeProvider>
     </AuthProvider>
   )
 }

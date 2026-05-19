@@ -1,29 +1,36 @@
 import { useEffect } from 'react'
+import { buildThemeCss } from '../lib/theme'
+import { useTheme } from '../contexts/ThemeContext'
 
 /**
- * Injects a <style> tag overriding the site's accent colour with the club's
- * primary_color setting. Cleans up on unmount so non-club pages stay green.
+ * Applies a club's white-label theme:
+ *  - injects a <style id="club-theme"> tag with the club's full colour
+ *    palette (accent, indicators, chart series, light + dark surfaces)
+ *  - feeds the club's admin-default theme mode into ThemeContext
+ *
+ * Cleans up on unmount so non-club pages fall back to BetterStats defaults.
  */
 export function useClubTheme(club) {
+  const { setClubDefault } = useTheme()
+
   useEffect(() => {
-    const colour = club?.accent_color
-    if (!colour) return
+    if (!club) return
 
-    const existing = document.getElementById('club-theme')
-    if (existing) existing.remove()
-
-    const style = document.createElement('style')
-    style.id = 'club-theme'
-    style.textContent = `
-      :root { --pb-accent: ${colour}; }
-      .text-accent { color: ${colour} !important; }
-      .bg-accent, .btn-primary { background-color: ${colour} !important; }
-      .border-accent { border-color: ${colour} !important; }
-      .hover\\:text-accent:hover { color: ${colour} !important; }
-      .accent-bar { background-color: ${colour} !important; }
-    `
-    document.head.appendChild(style)
+    const css = buildThemeCss(club.theme_config)
+    let style = document.getElementById('club-theme')
+    if (!style) {
+      style = document.createElement('style')
+      style.id = 'club-theme'
+      document.head.appendChild(style)
+    }
+    style.textContent = css
 
     return () => { document.getElementById('club-theme')?.remove() }
-  }, [club?.accent_color])
+  }, [club?.theme_config, club?.accent_color])
+
+  useEffect(() => {
+    if (!club) return
+    const mode = club.theme_mode
+    setClubDefault(mode === 'light' || mode === 'dark' ? mode : 'auto')
+  }, [club?.theme_mode, setClubDefault])
 }

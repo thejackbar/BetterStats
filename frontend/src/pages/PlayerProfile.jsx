@@ -153,12 +153,12 @@ function rankCls(i, topIdx, botIdx, defaultCls = 'text-pb-dim') {
 }
 
 // ── Charts ──────────────────────────────────────────────────────────────────
-const PIE_COLORS = ['#16c784', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#06b6d4', '#84cc16', '#f97316']
+const PIE_COLORS = ['var(--pb-chart-1)', 'var(--pb-chart-2)', 'var(--pb-chart-3)', 'var(--pb-chart-4)', 'var(--pb-chart-5)', 'var(--pb-chart-6)', 'var(--pb-chart-7)', 'var(--pb-chart-8)']
 
 const CHART_TOOLTIP_STYLE = {
-  contentStyle: { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, fontSize: 12 },
-  labelStyle: { color: '#94a3b8' },
-  itemStyle: { color: '#fff' },
+  contentStyle: { background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline2)', borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: 'var(--pb-dim)' },
+  itemStyle: { color: 'var(--pb-text)' },
 }
 
 function DismissalDonut({ dismissals }) {
@@ -197,14 +197,14 @@ function SeasonChart({ data }) {
   return (
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-        <XAxis dataKey="season_name" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
-        <YAxis yAxisId="left" tick={{ fill: '#64748b', fontSize: 11 }} />
-        <YAxis yAxisId="right" orientation="right" tick={{ fill: '#64748b', fontSize: 11 }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
+        <XAxis dataKey="season_name" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis yAxisId="left" tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
+        <YAxis yAxisId="right" orientation="right" tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
         <Tooltip {...CHART_TOOLTIP_STYLE} />
-        <Legend wrapperStyle={{ color: '#94a3b8', fontSize: 12 }} />
-        <Bar yAxisId="left" dataKey="total_runs" name="Runs" fill="#16c784" radius={[3,3,0,0]} />
-        <Bar yAxisId="right" dataKey="total_wickets" name="Wickets" fill="#3b82f6" radius={[3,3,0,0]} />
+        <Legend wrapperStyle={{ color: 'var(--pb-dim)', fontSize: 12 }} />
+        <Bar yAxisId="left" dataKey="total_runs" name="Runs" fill="var(--pb-chart-runs, #16c784)" radius={[3,3,0,0]} />
+        <Bar yAxisId="right" dataKey="total_wickets" name="Wickets" fill="var(--pb-chart-wickets, #3b82f6)" radius={[3,3,0,0]} />
       </BarChart>
     </ResponsiveContainer>
   )
@@ -220,12 +220,12 @@ function CumulativeRunsChart({ seasonStats }) {
   return (
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-        <XAxis dataKey="season" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
-        <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
+        <XAxis dataKey="season" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
         <Tooltip {...CHART_TOOLTIP_STYLE} formatter={(v, name) => [v.toLocaleString(), name === 'total' ? 'Career total' : 'Season runs']} />
-        <Bar dataKey="season_runs" name="season_runs" fill="#16c78440" radius={[2,2,0,0]} />
-        <Line type="monotone" dataKey="total" name="total" stroke="#16c784" strokeWidth={2} dot={false} />
+        <Bar dataKey="season_runs" name="season_runs" fill="var(--pb-chart-runs, #16c784)" fillOpacity={0.25} radius={[2,2,0,0]} />
+        <Line type="monotone" dataKey="total" name="total" stroke="var(--pb-accent, #16c784)" strokeWidth={2} dot={false} />
       </BarChart>
     </ResponsiveContainer>
   )
@@ -244,13 +244,13 @@ function AveragesChart({ seasonStats }) {
   return (
     <ResponsiveContainer width="100%" height={220}>
       <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-        <XAxis dataKey="season" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
-        <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
+        <XAxis dataKey="season" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
         <Tooltip {...CHART_TOOLTIP_STYLE} />
-        <Legend wrapperStyle={{ color: '#94a3b8', fontSize: 12 }} />
-        <Line type="monotone" dataKey="bat_avg" name="Batting Avg" stroke="#16c784" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-        <Line type="monotone" dataKey="bowl_avg" name="Bowling Avg" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+        <Legend wrapperStyle={{ color: 'var(--pb-dim)', fontSize: 12 }} />
+        <Line type="monotone" dataKey="bat_avg" name="Batting Avg" stroke="var(--pb-accent, #16c784)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+        <Line type="monotone" dataKey="bowl_avg" name="Bowling Avg" stroke="var(--pb-chart-wickets, #3b82f6)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
       </LineChart>
     </ResponsiveContainer>
   )
@@ -262,11 +262,11 @@ function RunsByGradeChart({ byGrade }) {
   return (
     <ResponsiveContainer width="100%" height={Math.max(180, sorted.length * 36)}>
       <BarChart data={sorted} layout="vertical" margin={{ top: 5, right: 60, left: 8, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
-        <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} />
-        <YAxis type="category" dataKey="grade_name" width={130} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" horizontal={false} />
+        <XAxis type="number" tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
+        <YAxis type="category" dataKey="grade_name" width={130} tick={{ fill: 'var(--pb-dim)', fontSize: 11 }} />
         <Tooltip {...CHART_TOOLTIP_STYLE} formatter={(v, _, props) => [`${v} runs (${props.payload.innings} inn, avg ${props.payload.average ?? '—'})`, '']} />
-        <Bar dataKey="runs" fill="#16c784" radius={[0,3,3,0]} label={{ position: 'right', fill: '#64748b', fontSize: 11 }} />
+        <Bar dataKey="runs" fill="var(--pb-chart-runs, #16c784)" radius={[0,3,3,0]} label={{ position: 'right', fill: 'var(--pb-faint)', fontSize: 11 }} />
       </BarChart>
     </ResponsiveContainer>
   )
@@ -278,11 +278,11 @@ function WicketsByGradeChart({ bowlingByGrade }) {
   return (
     <ResponsiveContainer width="100%" height={Math.max(180, sorted.length * 36)}>
       <BarChart data={sorted} layout="vertical" margin={{ top: 5, right: 60, left: 8, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
-        <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} />
-        <YAxis type="category" dataKey="grade_name" width={130} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" horizontal={false} />
+        <XAxis type="number" tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
+        <YAxis type="category" dataKey="grade_name" width={130} tick={{ fill: 'var(--pb-dim)', fontSize: 11 }} />
         <Tooltip {...CHART_TOOLTIP_STYLE} formatter={(v, _, props) => [`${v} wkts (avg ${props.payload.average ?? '—'}, econ ${props.payload.economy ?? '—'})`, '']} />
-        <Bar dataKey="wickets" fill="#3b82f6" radius={[0,3,3,0]} label={{ position: 'right', fill: '#64748b', fontSize: 11 }} />
+        <Bar dataKey="wickets" fill="var(--pb-chart-wickets, #3b82f6)" radius={[0,3,3,0]} label={{ position: 'right', fill: 'var(--pb-faint)', fontSize: 11 }} />
       </BarChart>
     </ResponsiveContainer>
   )
@@ -548,7 +548,7 @@ function ScoreDistributionChart({ innings }) {
         />
         <Bar dataKey="count" radius={[3, 3, 0, 0]}>
           {data.map((entry, i) => (
-            <Cell key={i} fill={entry.label === '100+' ? 'var(--pb-amber)' : entry.highlight ? 'var(--pb-accent)' : 'var(--pb-surface2)'} />
+            <Cell key={i} fill={entry.label === '100+' ? 'var(--pb-chart-milestone, #f5b542)' : entry.highlight ? 'var(--pb-positive, #16c784)' : 'var(--pb-surface2)'} />
           ))}
         </Bar>
       </BarChart>
@@ -583,7 +583,7 @@ function CareerBowlingProgressionChart({ spells }) {
         />
         <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'monospace' }} />
         <Line type="monotone" dataKey="avg" name="Average" stroke="var(--pb-accent)" dot={false} strokeWidth={2} connectNulls />
-        <Line type="monotone" dataKey="econ" name="Economy" stroke="var(--pb-amber)" dot={false} strokeWidth={2} connectNulls />
+        <Line type="monotone" dataKey="econ" name="Economy" stroke="var(--pb-chart-milestone, #f5b542)" dot={false} strokeWidth={2} connectNulls />
       </LineChart>
     </ResponsiveContainer>
   )
@@ -623,7 +623,7 @@ function InningsHistoryTable({ innings }) {
                 <td className="py-2.5 font-mono text-[11px] text-pb-faint">{row.grade_name || '—'}</td>
                 <td className="py-2.5 font-mono text-[11px] text-pb-faint text-right">{row.innings_number ?? '—'}</td>
                 <td className="py-2.5 text-right">
-                  <span className="font-mono font-bold text-sm" style={{ color: (row.runs ?? 0) >= 100 ? 'var(--pb-amber)' : (row.runs ?? 0) >= 50 ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
+                  <span className="font-mono font-bold text-sm" style={{ color: (row.runs ?? 0) >= 100 ? 'var(--pb-chart-milestone, #f5b542)' : (row.runs ?? 0) >= 50 ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
                     {row.runs ?? '—'}
                   </span>
                   {row.not_out && <span className="font-mono text-[10px] ml-0.5" style={{ color: 'var(--pb-accent)' }}>*</span>}
@@ -673,7 +673,7 @@ function SpellHistoryTable({ spells }) {
                 <td className="py-2.5 font-mono text-[11px] text-pb-faint text-right">{row.maidens ?? '—'}</td>
                 <td className="py-2.5 font-mono text-sm text-pb-dim text-right">{row.runs ?? '—'}</td>
                 <td className="py-2.5 text-right">
-                  <span className="font-mono font-bold text-sm" style={{ color: (row.wickets ?? 0) >= 5 ? 'var(--pb-amber)' : (row.wickets ?? 0) >= 3 ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
+                  <span className="font-mono font-bold text-sm" style={{ color: (row.wickets ?? 0) >= 5 ? 'var(--pb-chart-milestone, #f5b542)' : (row.wickets ?? 0) >= 3 ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
                     {row.wickets ?? '—'}
                   </span>
                 </td>
@@ -885,11 +885,11 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
             <Card title="WICKETS BY SEASON">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={[...seasonStats].reverse()} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="season_name" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
+                  <XAxis dataKey="season_name" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
                   <Tooltip {...CHART_TOOLTIP_STYLE} />
-                  <Bar dataKey="total_wickets" name="Wickets" fill="#3b82f6" radius={[3,3,0,0]} />
+                  <Bar dataKey="total_wickets" name="Wickets" fill="var(--pb-chart-wickets, #3b82f6)" radius={[3,3,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
@@ -916,13 +916,13 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                   }))}
                   margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="season" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
+                  <XAxis dataKey="season" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
                   <Tooltip {...CHART_TOOLTIP_STYLE} />
-                  <Legend wrapperStyle={{ color: '#94a3b8', fontSize: 12 }} />
-                  <Line type="monotone" dataKey="bowl_avg" name="Bowling Avg" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                  <Line type="monotone" dataKey="economy" name="Economy" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  <Legend wrapperStyle={{ color: 'var(--pb-dim)', fontSize: 12 }} />
+                  <Line type="monotone" dataKey="bowl_avg" name="Bowling Avg" stroke="var(--pb-chart-wickets, #3b82f6)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  <Line type="monotone" dataKey="economy" name="Economy" stroke="var(--pb-chart-milestone, #f5b542)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             </Card>
@@ -1569,7 +1569,7 @@ export default function PlayerProfile() {
                   </div>
                   <div className="pb-card p-3 flex flex-col gap-1">
                     <Label>100s</Label>
-                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1" style={{ color: batting.hundreds > 0 ? 'var(--pb-amber)' : undefined }}>
+                    <span className="font-mono text-2xl font-bold pb-num leading-none mt-1" style={{ color: batting.hundreds > 0 ? 'var(--pb-chart-milestone, #f5b542)' : undefined }}>
                       {batting.hundreds ?? '—'}
                     </span>
                   </div>

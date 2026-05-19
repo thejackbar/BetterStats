@@ -363,7 +363,7 @@ export default function ShareCard() {
         <div className="overflow-x-auto pb-4">
           <div
             className="magic-glow-wrapper"
-            style={{ '--magic-gradient': `linear-gradient(to left, ${org?.primary_color || '#16c784'} 0%, ${org?.accent_color || '#0d2a4e'} 100%)` }}
+            style={{ '--magic-gradient': `linear-gradient(to left, ${org?.accent_color || '#16c784'} 0%, ${org?.theme_config?.dark?.surface2 || '#0d2a4e'} 100%)` }}
           >
             <ShareCardVisual
               player={player}

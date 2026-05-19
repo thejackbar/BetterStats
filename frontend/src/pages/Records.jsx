@@ -99,7 +99,7 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
           headers={['Player', 'Score', 'Season']}
           rows={(data.top_high_scores || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
-            <span className="font-bold" style={{ color: r.runs >= 100 ? 'var(--pb-amber)' : 'var(--pb-accent)' }}>{r.runs}{r.not_out ? '*' : ''}</span>,
+            <span className="font-bold" style={{ color: r.runs >= 100 ? 'var(--pb-chart-milestone, #f5b542)' : 'var(--pb-accent)' }}>{r.runs}{r.not_out ? '*' : ''}</span>,
             <span className="text-pb-faintest text-[11px]">{r.season_name}{isNew(r.season_name) && <NewBadge />}</span>,
           ])}
         />
@@ -119,7 +119,7 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
           headers={['Player', '100s', 'M', 'Runs']}
           rows={(data.most_hundreds || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
-            <span className="font-bold" style={{ color: 'var(--pb-amber)' }}>{r.hundreds}</span>,
+            <span className="font-bold" style={{ color: 'var(--pb-chart-milestone, #f5b542)' }}>{r.hundreds}</span>,
             r.matches ?? '—', r.runs ?? '—',
           ])}
         />
@@ -213,7 +213,7 @@ function BowlingTab({ data, latestSeason, fmt = n => n }) {
             headers={['Player', '5W', 'Wkts']}
             rows={(data.most_five_fors || []).map((r, i) => [
               <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
-              <span className="font-bold" style={{ color: 'var(--pb-amber)' }}>{r.five_fors}</span>,
+              <span className="font-bold" style={{ color: 'var(--pb-chart-milestone, #f5b542)' }}>{r.five_fors}</span>,
               r.wickets ?? '—',
             ])}
           />
