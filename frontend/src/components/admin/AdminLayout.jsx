@@ -3,20 +3,34 @@ import { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import betterStatsLogo from '../../assets/betterstatslogo_white.png'
 
-const NAV_LINKS = [
-  { to: '/admin', label: 'Dashboard', exact: true },
-  { to: '/admin/players', label: 'Players' },
-  { to: '/admin/games', label: 'Matches' },
-  { to: '/admin/seasons', label: 'Seasons' },
-  { to: '/admin/yearbook', label: 'Yearbooks' },
-  { to: '/admin/awards', label: 'Awards' },
-  { to: '/admin/award-definitions', label: 'Award Types' },
-  { to: '/admin/merge', label: 'Merge Players' },
-  { to: '/admin/grades', label: 'Merge Grades' },
-  { to: '/admin/sync', label: 'Data Sync' },
-  { to: '/admin/partnerships', label: 'Partnership Rec.' },
-  { to: '/admin/phq-match', label: 'PHQ ID Match' },
-  { to: '/admin/settings', label: 'Settings' },
+const NAV_SECTIONS = [
+  { items: [{ to: '/admin', label: 'Dashboard', exact: true }] },
+  {
+    heading: 'Cricket Data',
+    items: [
+      { to: '/admin/players', label: 'Players' },
+      { to: '/admin/games', label: 'Matches' },
+      { to: '/admin/seasons', label: 'Seasons' },
+    ],
+  },
+  {
+    heading: 'Content',
+    items: [
+      { to: '/admin/yearbook', label: 'Yearbooks' },
+      { to: '/admin/awards', label: 'Awards' },
+      { to: '/admin/award-definitions', label: 'Award Types' },
+    ],
+  },
+  {
+    heading: 'Tools',
+    items: [
+      { to: '/admin/sync', label: 'Data Sync' },
+      { to: '/admin/merge', label: 'Merge Players' },
+      { to: '/admin/grades', label: 'Merge Grades' },
+      { to: '/admin/partnerships', label: 'Partnership Rec.' },
+    ],
+  },
+  { items: [{ to: '/admin/settings', label: 'Settings' }] },
 ]
 
 const SUPER_LINKS = [
@@ -93,20 +107,29 @@ export default function AdminLayout({ children }) {
           w-full md:w-48 shrink-0 border-r pb-hairline-r pt-4 pb-8 px-2
         `}>
           <nav className="space-y-0.5">
-            {NAV_LINKS.map(link => (
-              <Link
-                key={link.to}
-                to={link.to}
-                onClick={() => setMobileOpen(false)}
-                className={`block px-3 py-2 rounded text-sm transition-colors font-mono text-[11px] tracking-wide2 ${
-                  isActive(link.to, link.exact)
-                    ? 'bg-pb-surface2 text-pb-text'
-                    : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
-                }`}
-                style={isActive(link.to, link.exact) ? { color: 'var(--pb-accent)' } : {}}
-              >
-                {link.label.toUpperCase()}
-              </Link>
+            {NAV_SECTIONS.map((section, i) => (
+              <div key={section.heading || `section-${i}`} className={i > 0 ? 'pt-3' : ''}>
+                {section.heading && (
+                  <div className="pb-1 px-3 font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase">
+                    {section.heading}
+                  </div>
+                )}
+                {section.items.map(link => (
+                  <Link
+                    key={link.to}
+                    to={link.to}
+                    onClick={() => setMobileOpen(false)}
+                    className={`block px-3 py-2 rounded text-sm transition-colors font-mono text-[11px] tracking-wide2 ${
+                      isActive(link.to, link.exact)
+                        ? 'bg-pb-surface2 text-pb-text'
+                        : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
+                    }`}
+                    style={isActive(link.to, link.exact) ? { color: 'var(--pb-accent)' } : {}}
+                  >
+                    {link.label.toUpperCase()}
+                  </Link>
+                ))}
+              </div>
             ))}
 
             {user?.role === 'super_admin' && (
