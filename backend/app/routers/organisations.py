@@ -6,11 +6,12 @@ from pydantic import BaseModel
 import uuid
 from datetime import date
 
-from app.models.db import Organisation, Season, Grade, get_db
+from app.models.db import Organisation, Season, Grade, User, ClubMembership, get_db
 from app.services import playhq_client
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
 from app.services import playhq_partner_client
+from app.routers.auth import get_current_user
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
@@ -50,7 +51,7 @@ class OrganisationOut(BaseModel):
 
 
 @router.get("/search")
-async def search_organisations(q: str = ""):
+async def search_organisations(q: str = "", _: User = Depends(get_current_user)):
     if not q or len(q.strip()) < 2:
         return []
     results = await playhq_client.search_organisations(q.strip())
@@ -62,7 +63,28 @@ async def onboard_organisation(
     data: OnboardRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    # Determine the caller's single club membership / role.
+    membership_res = await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )
+    membership = membership_res.scalar_one_or_none()
+    is_super = membership is not None and membership.role == "super_admin"
+
+    # A club admin gets one onboard. Once their linked club has data, they're
+    # locked out — only a super admin can onboard further clubs.
+    if not is_super and membership is not None:
+        already = await db.execute(
+            text("SELECT 1 FROM seasons WHERE organisation_id = :cid LIMIT 1"),
+            {"cid": str(membership.club_id)},
+        )
+        if already.scalar():
+            raise HTTPException(
+                status_code=403,
+                detail="Your account is already linked to a club. Contact a super admin to onboard another.",
+            )
+
     org_data = await playhq_client.get_organisation(data.org_id)
     if not org_data:
         raise HTTPException(status_code=404, detail="Organisation not found")
@@ -74,6 +96,14 @@ async def onboard_organisation(
     org = await upsert_organisation(db, org_data)
     run_id = await start_sync_run(org.id, "org_full")
     background_tasks.add_task(_sync_safe, data.org_id, run_id, "org_full")
+
+    # The onboarded club becomes the club admin's linked club.
+    if not is_super:
+        if membership is not None:
+            membership.club_id = org.id
+        else:
+            db.add(ClubMembership(club_id=org.id, user_id=current_user.id, role="club_admin"))
+        await db.commit()
 
     return {
         "status": "sync_started",

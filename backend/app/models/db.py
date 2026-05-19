@@ -69,7 +69,11 @@ class Organisation(Base):
 
 class ClubMembership(Base):
     __tablename__ = "club_memberships"
-    __table_args__ = (UniqueConstraint("club_id", "user_id", name="uq_club_membership"),)
+    __table_args__ = (
+        UniqueConstraint("club_id", "user_id", name="uq_club_membership"),
+        # An admin account is linked to exactly one club.
+        UniqueConstraint("user_id", name="uq_membership_one_per_user"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     club_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
