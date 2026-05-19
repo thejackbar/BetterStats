@@ -28,10 +28,13 @@ async def search_organisations(query: str) -> list:
         r.raise_for_status()
         data = r.json()
         orgs = data.get("data", data.get("organisations", data if isinstance(data, list) else []))
-        # Normalise: expose playHQId as id so the frontend can use org.id consistently
+        # Expose the Grassroots organisation GUID as `id` — that is the key
+        # every sync endpoint resolves against. `playHQId` is a separate
+        # namespace; the fixturesladders/scores APIs don't recognise it, so
+        # binding a club to it yields an empty (0-season) sync.
         for org in orgs:
-            if "id" not in org and "playHQId" in org:
-                org["id"] = org["playHQId"]
+            if not org.get("id"):
+                org["id"] = org.get("organisationGuid") or org.get("playHQId")
         return orgs
 
 
