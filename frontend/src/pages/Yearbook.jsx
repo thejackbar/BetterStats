@@ -140,7 +140,7 @@ function StatCallout({ value, label, sub, accent = false, className = '' }) {
 
 // ─── Overview tab ────────────────────────────────────────────────────────────
 
-function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, galleryImages, pulledAwards, featuredIds }) {
+function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, galleryImages }) {
   const [overview, setOverview] = useState(null)
   const [superlatives, setSuperlatives] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -236,8 +236,6 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, ga
 
       {/* By the Numbers */}
       {(() => {
-        const featuredSet = new Set(featuredIds || [])
-        const featuredAwards = (pulledAwards || []).filter(a => featuredSet.has(String(a.id)))
         return (
           <div className="space-y-8">
             <p className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase">By The Numbers</p>
@@ -360,20 +358,6 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, ga
             )}
 
             </>}
-
-            {/* Featured / pinned awards from Awards admin */}
-            {featuredAwards.length > 0 && (
-              <StatGroup title="Season Honours">
-                {featuredAwards.map(a => (
-                  <SupCard
-                    key={a.id}
-                    label={a.achievement || a.category || ''}
-                    value={a.player_name || '—'}
-                    sub={a.detail || (a.subcategory || null)}
-                  />
-                ))}
-              </StatGroup>
-            )}
           </div>
         )
       })()}
@@ -962,6 +946,8 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
 
   const clubAwards = yearbookData?.awards || []
   const pulledAwards = yearbookData?.pulled_awards || []
+  const featuredIds = new Set(yearbookData?.featured_achievement_ids || [])
+  const featuredAwards = pulledAwards.filter(a => featuredIds.has(String(a.id)))
   const honourBoard = yearbookData?.honour_board || []
 
   const hbByPos = honourBoard.reduce((acc, h) => {
@@ -987,6 +973,29 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
 
   return (
     <div className="space-y-6">
+      {/* Season Honours — explicitly pinned awards */}
+      {featuredAwards.length > 0 && (
+        <SectionCard title="Season Honours">
+          <div className="grid sm:grid-cols-2 gap-px bg-white/5">
+            {featuredAwards.map(a => (
+              <div key={`featured-${a.id}`} className="bg-white/2 px-5 py-4">
+                <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">
+                  {resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)}
+                  {a.subcategory && <span className="text-white/30 normal-case ml-1.5">· {a.subcategory}</span>}
+                </div>
+                <div className="text-[15px] font-semibold text-white/90">
+                  {a.player_id
+                    ? <PlayerLink id={a.player_id} name={a.player_name} slug={clubSlug} />
+                    : <span>{a.player_name || '—'}</span>
+                  }
+                </div>
+                {a.detail && <div className="text-[12px] text-white/40 mt-1 italic">{a.detail}</div>}
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
       {/* Club Awards (added directly to the yearbook) */}
       {clubAwards.length > 0 && (
         <SectionCard title="Club Awards">
@@ -1574,7 +1583,7 @@ export default function Yearbook() {
       {/* Tab content */}
       <div className="max-w-5xl mx-auto px-4 py-8">
         {activeTab === 'overview' && (
-          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} galleryImages={galleryImages} pulledAwards={yearbook.pulled_awards || []} featuredIds={yearbook.featured_achievement_ids || []} />
+          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} galleryImages={galleryImages} />
         )}
         {customSections.map(s => activeTab === `section-${s.id}` && (
           <ReportsTab key={s.id} customSections={[s]} />
