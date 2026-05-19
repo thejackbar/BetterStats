@@ -247,7 +247,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
         <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Season {form.category === 'Office Bearer' ? 'Start' : ''}</label>
         <select className={INPUT_CLS} value={form.season} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
           <option value="">— All Time —</option>
-          {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {seasons.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
         </select>
       </div>
       {form.category === 'Office Bearer' && (
@@ -255,7 +255,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Season End</label>
           <select className={INPUT_CLS} value={form.season_end || ''} onChange={e => setForm(f => ({ ...f, season_end: e.target.value }))}>
             <option value="">— Present —</option>
-            {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {seasons.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
           </select>
         </div>
       )}
@@ -507,8 +507,12 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
 
   if ((loading && !achievements) || seasons === null) return <PbSpinner message="Loading achievements…" />
 
-  const seasonMap = Object.fromEntries(seasons.map(s => [s.id, s.name]))
-  const seasonDisplay = (s) => s === 'All Time' ? 'All Time' : (seasonMap[s] || s.replace(/_/g, '/'))
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const seasonDisplay = (s) => {
+    if (!s || s === 'All Time') return 'All Time'
+    if (UUID_RE.test(s)) return 'Unknown Season'
+    return s.replace(/_/g, '/')
+  }
 
   const allSeasons = [...new Set((achievements || []).map(a => a.season).filter(Boolean))].sort((a, b) => b.localeCompare(a))
 

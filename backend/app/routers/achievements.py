@@ -101,8 +101,29 @@ async def list_achievements(
         base_filter += " AND season = :season"
         params["season"] = season
 
+    # Resolve UUID season values → season names via a global seasons JOIN.
+    # Achievements added through the UI stored the season's DB UUID; if the org
+    # was ever recreated the UUID is now orphaned.  COALESCE falls back to the
+    # raw value (string seasons like "2025_26" stay unchanged).
     rows = await db.execute(
-        text(f"SELECT * FROM player_achievements WHERE {base_filter} ORDER BY season DESC NULLS LAST, category, id"),
+        text(f"""
+            SELECT pa.id, pa.org_id, pa.player_id, pa.player_name,
+                   COALESCE(s.name, pa.season) AS season,
+                   COALESCE(se.name, pa.season_end) AS season_end,
+                   pa.category, pa.subcategory,
+                   pa.achievement, pa.detail, pa.created_at
+            FROM player_achievements pa
+            LEFT JOIN seasons s ON s.id = CASE
+                WHEN pa.season ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
+                THEN pa.season::uuid
+                ELSE NULL END
+            LEFT JOIN seasons se ON se.id = CASE
+                WHEN pa.season_end ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
+                THEN pa.season_end::uuid
+                ELSE NULL END
+            WHERE {base_filter}
+            ORDER BY pa.season DESC NULLS LAST, pa.category, pa.id
+        """),
         params,
     )
     return [dict(r) for r in rows.mappings().all()]
