@@ -140,7 +140,7 @@ function StatCallout({ value, label, sub, accent = false, className = '' }) {
 
 // ─── Overview tab ────────────────────────────────────────────────────────────
 
-function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, customSections, galleryImages, pulledAwards }) {
+function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, galleryImages, pulledAwards }) {
   const [overview, setOverview] = useState(null)
   const [superlatives, setSuperlatives] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -219,16 +219,6 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
         </div>
       )}
 
-      {/* Custom editorial sections (Presidents Report, etc.) */}
-      {customSections?.length > 0 && customSections.map(s => (
-        <div key={s.id} className="rounded-xl border border-white/8 bg-white/3 px-6 py-5">
-          <p className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-3">{s.title}</p>
-          <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed whitespace-pre-wrap">
-            {s.content_markdown}
-          </div>
-        </div>
-      ))}
-
       {/* Photo gallery */}
       {galleryImages?.length > 0 && (
         <SectionCard title="Photo Gallery">
@@ -245,15 +235,19 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
       )}
 
       {/* By the Numbers */}
-      {superlatives && (() => {
-        const lifeMemberships = (pulledAwards || []).filter(a => a.category === 'Life Membership')
+      {(() => {
+        const lifeMemberships = (pulledAwards || []).filter(a =>
+          a.category?.toLowerCase() === 'life membership' ||
+          a.subcategory?.toLowerCase() === 'life membership'
+        )
         const hullettMedal = (pulledAwards || []).find(a =>
           (a.achievement || '').toLowerCase().includes('hullett') ||
-          (a.achievement || '').toLowerCase().includes('mark hullett')
+          (a.subcategory === 'WABCC' && (a.achievement || '').toLowerCase().includes('medal'))
         )
         return (
           <div className="space-y-8">
             <p className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase">By The Numbers</p>
+            {superlatives && <>
 
             {/* Match Stats */}
             {(overview?.total_games > 0 || superlatives.highest_team_innings?.team_runs > 0) && (
@@ -342,15 +336,36 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, cu
                 )}
                 {superlatives.best_bowling?.player_id && (
                   <SupCard
-                    label="Best Bowling"
+                    label="Best Figures"
                     value={`${superlatives.best_bowling.wickets}/${superlatives.best_bowling.runs_conceded}`}
                     name={superlatives.best_bowling.name}
                     playerId={superlatives.best_bowling.player_id}
                     clubSlug={clubSlug}
                   />
                 )}
+                {superlatives?.best_bowling_average?.player_id && (
+                  <SupCard
+                    label="Best Average"
+                    value={fmt(superlatives.best_bowling_average.average)}
+                    name={superlatives.best_bowling_average.name}
+                    playerId={superlatives.best_bowling_average.player_id}
+                    clubSlug={clubSlug}
+                    sub={`${superlatives.best_bowling_average.wickets} wkts`}
+                  />
+                )}
+                {superlatives?.most_fifers?.player_id && (
+                  <SupCard
+                    label="Most 5-Wicket Hauls"
+                    value={superlatives.most_fifers.fifers}
+                    name={superlatives.most_fifers.name}
+                    playerId={superlatives.most_fifers.player_id}
+                    clubSlug={clubSlug}
+                  />
+                )}
               </StatGroup>
             )}
+
+            </>}
 
             {/* Mark Hullett Medal */}
             {hullettMedal && (
@@ -1274,7 +1289,29 @@ function GradesTab({ orgId, seasonId, clubSlug }) {
 
 // ─── Main Yearbook page ───────────────────────────────────────────────────────
 
-const TABS = [
+function ReportsTab({ customSections }) {
+  if (!customSections?.length) {
+    return (
+      <div className="py-16 text-center">
+        <p className="text-white/30 text-sm font-mono italic">No reports have been published for this season.</p>
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-8">
+      {customSections.map(s => (
+        <div key={s.id} className="rounded-xl border border-white/8 bg-white/3 px-6 py-5">
+          <p className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-4">{s.title}</p>
+          <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed whitespace-pre-wrap">
+            {s.content_markdown}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const BASE_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'results', label: 'Results' },
   { id: 'batting', label: 'Batting' },
@@ -1444,6 +1481,11 @@ export default function Yearbook() {
   const orgId = club.id
   const seasonId = season?.id
 
+  const TABS = [
+    ...BASE_TABS,
+    ...(customSections.length > 0 ? [{ id: 'reports', label: 'Reports' }] : []),
+  ]
+
   return (
     <div className="min-h-screen" style={{ background: 'var(--pb-bg)' }}>
       {/* Hero */}
@@ -1557,7 +1599,10 @@ export default function Yearbook() {
       {/* Tab content */}
       <div className="max-w-5xl mx-auto px-4 py-8">
         {activeTab === 'overview' && (
-          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} customSections={customSections} galleryImages={galleryImages} pulledAwards={yearbook.pulled_awards || []} />
+          <OverviewTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} season={season} clubSlug={clubSlug} narrative={narrative} galleryImages={galleryImages} pulledAwards={yearbook.pulled_awards || []} />
+        )}
+        {activeTab === 'reports' && (
+          <ReportsTab customSections={customSections} />
         )}
         {activeTab === 'results' && (
           <ResultsTab orgId={orgId} seasonId={seasonId} gradeId={gradeId} clubSlug={clubSlug} />

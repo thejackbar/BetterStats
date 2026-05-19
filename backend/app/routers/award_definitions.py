@@ -56,7 +56,7 @@ def _assoc_office_milestone_rows():
         r.append(('Association Award', 'WASTCA', a))
     for a in ['Batting Award', 'Bowling Award', 'Fielding Award', 'Most Improved',
               'Best New Player', 'Best Team Player', "Coach's Award", "Captain's Award",
-              'Volunteer Award', 'Les Buchanan Medal']:
+              'Volunteer Award', 'Les Buchanan Medal', 'Mark Hullett Medal']:
         r.append(('Association Award', 'WABCC', a))
     for a in [
         'PSWL Metro: Champion Player', 'PSWL Metro: Batting Average',

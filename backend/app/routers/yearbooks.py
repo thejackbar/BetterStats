@@ -688,6 +688,46 @@ async def get_superlatives(
     )
     most_wickets = dict(mw_ind.mappings().first() or {})
 
+    # Most 5-wicket hauls (fifers)
+    mf = await db.execute(
+        text(f"""
+            SELECT p.id AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COUNT(*) AS fifers
+            FROM bowling_spells bs
+            JOIN players p ON p.id = bs.player_id
+            JOIN games gm ON gm.id = bs.game_id
+            JOIN grades g ON g.id = gm.grade_id
+            JOIN seasons s ON s.id = g.season_id
+            WHERE g.season_id = :s AND s.organisation_id = :o
+              AND p.organisation_id = :o
+              AND bs.wickets >= 5
+              {grade_filter_bs}
+            GROUP BY p.id, p.name, p.display_name_override
+            ORDER BY COUNT(*) DESC NULLS LAST
+            LIMIT 1
+        """),
+        params,
+    )
+    most_fifers = dict(mf.mappings().first() or {})
+
+    # Best bowling average (min 10 wickets)
+    ba = await db.execute(
+        text(f"""
+            SELECT p.id AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   SUM(pss.wickets) AS wickets,
+                   ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average
+            FROM player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            WHERE pss.season_id = :s AND p.organisation_id = :o
+            GROUP BY p.id, p.name, p.display_name_override
+            HAVING SUM(pss.wickets) >= 10
+            ORDER BY SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0) ASC NULLS LAST
+            LIMIT 1
+        """),
+        params,
+    )
+    best_bowling_average = dict(ba.mappings().first() or {})
+
     return {
         "highest_score": highest_score,
         "best_bowling": best_bowling,
@@ -696,6 +736,8 @@ async def get_superlatives(
         "most_ducks": most_ducks,
         "most_runs": most_runs,
         "most_wickets": most_wickets,
+        "most_fifers": most_fifers,
+        "best_bowling_average": best_bowling_average,
     }
 
 
