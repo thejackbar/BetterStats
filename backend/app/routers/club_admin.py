@@ -19,6 +19,7 @@ from sqlalchemy import text as _text
 import asyncio
 import logging as _logging
 from app.routers.auth import get_current_user, get_current_club, require_super_admin, _hash_password
+from app.services import playhq_client
 
 # Keep strong references to background tasks so they aren't GC'd before completing
 _background_tasks: set = set()
@@ -896,6 +897,7 @@ async def rename_partnership_grade(
 # ---------------------------------------------------------------------------
 
 class ClubCreate(BaseModel):
+    org_id: str
     name: str
     slug: str
     short_name: Optional[str] = None
@@ -931,13 +933,27 @@ async def create_club(
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    # The org id IS the sync key — it must be the real Cricket Australia club
+    # GUID (picked from search), otherwise sync resolves to nothing.
+    try:
+        org_uuid = uuid.UUID((data.org_id or "").strip())
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Pick a club from the search results")
+
+    org_data = await playhq_client.get_organisation(str(org_uuid))
+    if not org_data:
+        raise HTTPException(status_code=404, detail="Club not found in the Cricket Australia data source")
+
+    if await db.get(Organisation, org_uuid):
+        raise HTTPException(status_code=409, detail="This club has already been added")
+
     slug = data.slug.lower().strip()
     existing = await db.execute(select(Organisation).where(Organisation.slug == slug))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Slug already in use")
 
     org = Organisation(
-        id=uuid.uuid4(),
+        id=org_uuid,
         name=data.name.strip(),
         slug=slug,
         short_name=data.short_name,
