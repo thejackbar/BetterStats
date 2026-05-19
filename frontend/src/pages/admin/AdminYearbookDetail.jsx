@@ -275,20 +275,30 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
       {!collapsed && pulled.length > 0 && (
         <>
           <p className="text-[10px] font-mono text-white/25 uppercase tracking-wide mb-1.5">
-            ★ Pin awards to feature them in the yearbook overview
+            Toggle awards to display them in the yearbook overview
           </p>
+          {err && <p className="text-[11px] text-red-400/80 mb-2">{err}</p>}
           <div className="mb-4 divide-y divide-white/5 rounded-lg border border-white/8 overflow-hidden">
             {pulled.map(a => {
               const isFeatured = featuredSet.has(String(a.id))
+              const isToggling = toggling === a.id
               return (
-                <div key={`pulled-${a.id}`} className={`flex items-start gap-3 px-4 py-3 ${isFeatured ? 'bg-pb-accent/5' : 'bg-white/[0.015]'}`}>
+                <div key={`pulled-${a.id}`} className={`flex items-center gap-3 px-4 py-3 transition-colors ${isFeatured ? 'bg-pb-accent/5' : 'bg-white/[0.015]'}`}>
+                  {/* Toggle switch */}
                   <button
                     onClick={() => handleToggleFeatured(a)}
-                    disabled={toggling === a.id}
-                    title={isFeatured ? 'Remove from overview' : 'Feature in overview'}
-                    className={`shrink-0 mt-0.5 text-[14px] transition disabled:opacity-40 ${isFeatured ? 'text-pb-accent' : 'text-white/20 hover:text-white/50'}`}
+                    disabled={isToggling}
+                    title={isFeatured ? 'Hide from overview' : 'Show in overview'}
+                    className="shrink-0 disabled:opacity-40"
+                    aria-label={isFeatured ? 'Hide from overview' : 'Show in overview'}
                   >
-                    {toggling === a.id ? '…' : '★'}
+                    <span className={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors duration-200 ${
+                      isFeatured ? 'bg-pb-accent border-pb-accent' : 'bg-white/10 border-white/15'
+                    }`}>
+                      <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200 ${
+                        isToggling ? 'opacity-50' : ''
+                      } ${isFeatured ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                    </span>
                   </button>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -307,7 +317,7 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
                   </div>
                   <Link
                     to="/admin/awards"
-                    className="shrink-0 text-white/25 hover:text-white/60 transition text-[11px] font-mono pt-0.5"
+                    className="shrink-0 text-white/25 hover:text-white/60 transition text-[11px] font-mono"
                     title="Manage in Awards admin"
                   >
                     Edit →
