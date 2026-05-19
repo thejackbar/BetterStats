@@ -155,7 +155,7 @@ export default function Dashboard() {
   }
 
   const currentSeason = seasons?.find(s => s.id === selectedSeason)
-  const seasonLabel = currentSeason?.name || (seasons?.[0]?.name) || 'All Seasons'
+  const seasonLabel = selectedSeason ? (currentSeason?.name || 'All Seasons') : 'All Seasons'
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
