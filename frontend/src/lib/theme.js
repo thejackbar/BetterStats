@@ -18,6 +18,11 @@ export const BRAND = {
   chart_wickets: '#3b82f6',
   chart_milestone: '#f5b542',
   chart_series: ['#16c784', '#3b82f6', '#f5b542', '#a855f7', '#ef5b5b', '#06b6d4', '#84cc16', '#f97316'],
+  // Honour / achievement category colours (badges + header pills)
+  cat_honour: '#f5b542',
+  cat_role: '#60a5fa',
+  cat_award: '#16c784',
+  cat_milestone: '#a78bfa',
   dark: {
     bg: '#0a0d14', surface: '#10141d', surface2: '#161b27',
     hairline: '#1d2331', hairline2: '#262d3d',
@@ -30,7 +35,7 @@ export const BRAND = {
   },
 }
 
-/** Flat list of scalar colour keys, used by the admin form. */
+/** Brand + chart colour fields shown in the admin form. */
 export const COLOR_FIELDS = [
   { key: 'accent', label: 'Accent', hint: 'Primary brand colour — buttons, links, highlights' },
   { key: 'positive', label: 'Top indicator', hint: 'Good / leading values' },
@@ -40,16 +45,19 @@ export const COLOR_FIELDS = [
   { key: 'chart_milestone', label: 'Chart — milestone', hint: 'Centuries & high-score highlights' },
 ]
 
+/** Honour / achievement category colours — drive badges and header pills. */
+export const HONOUR_FIELDS = [
+  { key: 'cat_honour', label: 'Honours', hint: 'Hall of Fame, life membership, premierships' },
+  { key: 'cat_role', label: 'Club roles', hint: 'Office bearers — president, committee' },
+  { key: 'cat_award', label: 'Awards', hint: 'Club & association awards' },
+  { key: 'cat_milestone', label: 'Milestones', hint: 'Games played & cap milestones' },
+]
+
+/** Surface + text colours that differ per theme. Kept deliberately small. */
 export const PALETTE_FIELDS = [
   { key: 'bg', label: 'Background' },
-  { key: 'surface', label: 'Surface' },
-  { key: 'surface2', label: 'Surface (raised)' },
-  { key: 'hairline', label: 'Border' },
-  { key: 'hairline2', label: 'Border (strong)' },
+  { key: 'surface', label: 'Cards & panels' },
   { key: 'text', label: 'Text' },
-  { key: 'dim', label: 'Text (dim)' },
-  { key: 'faint', label: 'Text (faint)' },
-  { key: 'faintest', label: 'Text (faintest)' },
 ]
 
 /** Merge a club's stored theme_config over the brand defaults. */
@@ -65,6 +73,10 @@ export function resolveTheme(config) {
     chart_series: (Array.isArray(c.chart_series) && c.chart_series.length)
       ? c.chart_series
       : BRAND.chart_series,
+    cat_honour: c.cat_honour || BRAND.cat_honour,
+    cat_role: c.cat_role || BRAND.cat_role,
+    cat_award: c.cat_award || BRAND.cat_award,
+    cat_milestone: c.cat_milestone || BRAND.cat_milestone,
     dark: { ...BRAND.dark, ...(c.dark || {}) },
     light: { ...BRAND.light, ...(c.light || {}) },
   }
@@ -82,6 +94,10 @@ export function buildThemeCss(config) {
     `--pb-chart-wickets:${t.chart_wickets}`,
     `--pb-chart-milestone:${t.chart_milestone}`,
     `--pb-amber:${t.chart_milestone}`,
+    `--pb-cat-honour:${t.cat_honour}`,
+    `--pb-cat-role:${t.cat_role}`,
+    `--pb-cat-award:${t.cat_award}`,
+    `--pb-cat-milestone:${t.cat_milestone}`,
     ...t.chart_series.map((c, i) => `--pb-chart-${i + 1}:${c}`),
   ].join(';')
 

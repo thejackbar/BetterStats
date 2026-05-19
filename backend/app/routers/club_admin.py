@@ -316,6 +316,7 @@ class SettingsPatch(BaseModel):
 _THEME_COLOR_KEYS = {
     "accent", "positive", "negative",
     "chart_runs", "chart_wickets", "chart_milestone",
+    "cat_honour", "cat_role", "cat_award", "cat_milestone",
 }
 _THEME_PALETTE_KEYS = {
     "bg", "surface", "surface2", "hairline", "hairline2",

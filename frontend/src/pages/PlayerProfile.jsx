@@ -98,6 +98,29 @@ function headerPriority(a) {
   return 99
 }
 
+// Classifies an achievement into a colour category. Keys match the
+// --pb-cat-* theme variables and the HonourBadge `theme` prop.
+function achievementType(a) {
+  if (['Hall of Fame', 'Life Membership', 'Premiership'].includes(a.category) ||
+      (a.category === 'Milestone' && a.subcategory === 'Cap Number')) return 'honour'
+  if (a.category === 'Office Bearer') return 'role'
+  if (a.category === 'Milestone') return 'milestone'
+  return 'award'
+}
+
+// White-labelled badge styling — derives every shade from one --pb-cat-* var.
+function badgeVars(type) {
+  const c = `var(--pb-cat-${['honour', 'role', 'award', 'milestone'].includes(type) ? type : 'award'})`
+  return {
+    '--hb-accent-text':  c,
+    '--hb-border':       `color-mix(in srgb, ${c} 30%, transparent)`,
+    '--hb-border-hover': `color-mix(in srgb, ${c} 70%, transparent)`,
+    '--hb-icon-bg':      `color-mix(in srgb, ${c} 15%, transparent)`,
+    '--hb-wash':         `linear-gradient(135deg, color-mix(in srgb, ${c} 6%, transparent) 0%, transparent 60%)`,
+    '--hb-shadow-b':     `color-mix(in srgb, ${c} 12%, transparent)`,
+  }
+}
+
 function useSortable(rows, defaultKey, defaultDir = 'desc') {
   const [sortKey, setSortKey] = useState(defaultKey)
   const [sortDir, setSortDir] = useState(defaultDir)
@@ -1139,41 +1162,6 @@ function AchievementsSection({ playerId, orgId, playerName }) {
     return s
   }
 
-  const BADGE_THEMES = {
-    honour: {
-      '--hb-accent-text':   '#f5b542',
-      '--hb-border':        'rgba(245, 181, 66, 0.3)',
-      '--hb-border-hover':  'rgba(245, 181, 66, 0.7)',
-      '--hb-icon-bg':       'rgba(245, 181, 66, 0.15)',
-      '--hb-wash':          'linear-gradient(135deg, rgba(245,181,66,0.06) 0%, transparent 60%)',
-      '--hb-shadow-b':      'rgba(245, 181, 66, 0.12)',
-    },
-    role: {
-      '--hb-accent-text':   '#60a5fa',
-      '--hb-border':        'rgba(96, 165, 250, 0.3)',
-      '--hb-border-hover':  'rgba(96, 165, 250, 0.7)',
-      '--hb-icon-bg':       'rgba(96, 165, 250, 0.15)',
-      '--hb-wash':          'linear-gradient(135deg, rgba(96,165,250,0.06) 0%, transparent 60%)',
-      '--hb-shadow-b':      'rgba(96, 165, 250, 0.12)',
-    },
-    award: {
-      '--hb-accent-text':   '#16c784',
-      '--hb-border':        'rgba(22, 199, 132, 0.3)',
-      '--hb-border-hover':  'rgba(22, 199, 132, 0.7)',
-      '--hb-icon-bg':       'rgba(22, 199, 132, 0.15)',
-      '--hb-wash':          'linear-gradient(135deg, rgba(22,199,132,0.06) 0%, transparent 60%)',
-      '--hb-shadow-b':      'rgba(22, 199, 132, 0.12)',
-    },
-    milestone: {
-      '--hb-accent-text':   '#a78bfa',
-      '--hb-border':        'rgba(167, 139, 250, 0.3)',
-      '--hb-border-hover':  'rgba(167, 139, 250, 0.7)',
-      '--hb-icon-bg':       'rgba(167, 139, 250, 0.15)',
-      '--hb-wash':          'linear-gradient(135deg, rgba(167,139,250,0.06) 0%, transparent 60%)',
-      '--hb-shadow-b':      'rgba(167, 139, 250, 0.12)',
-    },
-  }
-
   const HonourBadge = ({ a, theme = 'award', seasonsStr = null, onEdit, onDelete }) => {
     const iconSrc = CATEGORY_ICON_SRC[a.category] || thiings.trophy
     const label = resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)
@@ -1181,7 +1169,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
     const detail = a.detail
     const season = seasonsStr || seasonRange(a)
     return (
-      <div className="hb-parent" style={BADGE_THEMES[theme]}>
+      <div className="hb-parent" style={badgeVars(theme)}>
         <div className="hb-card">
           <div className="hb-icon">
             <img src={iconSrc} alt="" style={{ width: 14, height: 14, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.85 }} />
@@ -1476,11 +1464,19 @@ export default function PlayerProfile() {
             {/* Header achievement badges */}
             {headerAchievements.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-3">
-                {headerAchievements.map(a => (
-                  <span key={a.id} className="font-mono text-[10px] tracking-wide2 px-2.5 py-1 rounded-sm border text-[11px]" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)', color: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' }}>
-                    {formatAchievementBadge(a, seasons, awardDefs)}
-                  </span>
-                ))}
+                {headerAchievements.map(a => {
+                  const c = `var(--pb-cat-${achievementType(a)})`
+                  return (
+                    <span key={a.id} className="font-mono text-[10px] tracking-wide2 px-2.5 py-1 rounded-sm border text-[11px]"
+                      style={{
+                        borderColor: `color-mix(in srgb, ${c} 40%, transparent)`,
+                        color: c,
+                        background: `color-mix(in srgb, ${c} 10%, transparent)`,
+                      }}>
+                      {formatAchievementBadge(a, seasons, awardDefs)}
+                    </span>
+                  )
+                })}
               </div>
             )}
           </div>
