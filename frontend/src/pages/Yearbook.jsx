@@ -369,18 +369,18 @@ function SupCard({ label, value, name, playerId, clubSlug, sub, accent = false, 
   return (
     <div className="yb-futuristic-card">
       <div className="yb-fc-content">
-        <div className="font-mono text-[9px] tracking-wide3 text-white/40 uppercase leading-tight">{label}</div>
+        <div className="font-mono text-[7px] tracking-wide text-white/40 uppercase leading-tight">{label}</div>
         <div
-          className="text-2xl font-bold tabular-nums leading-none"
+          className="text-base font-bold tabular-nums leading-none"
           style={{ color: muted ? 'var(--pb-amber)' : 'var(--pb-accent)' }}
         >
           {value}
         </div>
         {name && playerId && clubSlug && (
-          <div className="text-[11px] leading-tight"><PlayerLink id={playerId} name={name} slug={clubSlug} /></div>
+          <div className="text-[8px] leading-tight"><PlayerLink id={playerId} name={name} slug={clubSlug} /></div>
         )}
-        {name && !playerId && <span className="text-[11px] text-white/60 leading-tight">{name}</span>}
-        {sub && <div className="text-[10px] text-white/35 leading-tight">{sub}</div>}
+        {name && !playerId && <span className="text-[8px] text-white/60 leading-tight">{name}</span>}
+        {sub && <div className="text-[7px] text-white/35 leading-tight">{sub}</div>}
       </div>
     </div>
   )
@@ -390,7 +390,7 @@ function StatGroup({ title, children }) {
   return (
     <div>
       <p className="font-mono text-[10px] tracking-wide3 text-white/30 uppercase mb-3">{title}</p>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 gap-2">
         {children}
       </div>
     </div>
