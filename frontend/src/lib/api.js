@@ -390,6 +390,34 @@ export const api = {
     return request(`/statlab/query?${params}`)
   },
 
+  // Sponsors (public)
+  getClubSponsors: (slug) => request(`/clubs/${slug}/sponsors`),
+
+  // Sponsors (admin)
+  adminListSponsors: () => request('/club-admin/sponsors'),
+  adminCreateSponsor: (data) =>
+    request('/club-admin/sponsors', { method: 'POST', body: JSON.stringify(data) }),
+  adminPatchSponsor: (id, data) =>
+    request(`/club-admin/sponsors/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adminUploadSponsorLogo: (id, file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/club-admin/sponsors/${id}/logo`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  adminDeleteSponsorLogo: (id) =>
+    request(`/club-admin/sponsors/${id}/logo`, { method: 'DELETE' }),
+  adminDeleteSponsor: (id) =>
+    request(`/club-admin/sponsors/${id}`, { method: 'DELETE' }),
+  adminReorderSponsors: (items) =>
+    request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+
   // Records
   getRecords: (orgId, { seasonId, gradeId, gradeName } = {}) => {
     const params = new URLSearchParams()

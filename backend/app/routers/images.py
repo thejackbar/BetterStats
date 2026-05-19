@@ -9,7 +9,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, Player, get_db
+from app.models.db import Organisation, Player, Sponsor, get_db
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -45,5 +45,17 @@ async def get_player_photo(player_id: str, db: AsyncSession = Depends(get_db)):
     return Response(
         content=player.photo_data,
         media_type=player.photo_mime or "image/png",
+        headers=_CACHE_HEADERS,
+    )
+
+
+@router.get("/sponsors/{sponsor_id}/logo")
+async def get_sponsor_logo(sponsor_id: str, db: AsyncSession = Depends(get_db)):
+    sponsor = await db.get(Sponsor, _parse_uuid(sponsor_id))
+    if not sponsor or not sponsor.logo_data:
+        raise HTTPException(404, "No logo")
+    return Response(
+        content=sponsor.logo_data,
+        media_type=sponsor.logo_mime or "image/png",
         headers=_CACHE_HEADERS,
     )

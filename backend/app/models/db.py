@@ -68,6 +68,20 @@ class Organisation(Base):
     memberships = relationship("ClubMembership", back_populates="club")
 
 
+class Sponsor(Base):
+    __tablename__ = "org_sponsors"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    website_url = Column(Text, nullable=True)
+    logo_url = Column(Text, nullable=True)
+    logo_data = Column(LargeBinary, nullable=True)
+    logo_mime = Column(Text, nullable=True)
+    display_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class ClubMembership(Base):
     __tablename__ = "club_memberships"
     __table_args__ = (

@@ -56,6 +56,8 @@ import PlayHQScorecard from './pages/PlayHQScorecard'
 import ClubInactive from './pages/ClubInactive'
 import Onboard from './pages/Onboard'
 import Navbar from './components/Navbar'
+import SponsorFooter from './components/SponsorFooter'
+import AdminSponsors from './pages/admin/AdminSponsors'
 
 export default function App() {
   return (
@@ -88,6 +90,7 @@ export default function App() {
         <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
         <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+        <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
         <Route path="/admin/yearbook" element={<ProtectedRoute><AdminYearbook /></ProtectedRoute>} />
         <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute><AdminYearbookDetail /></ProtectedRoute>} />
         <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
@@ -116,6 +119,7 @@ export default function App() {
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <SponsorFooter />
       </div>
       </ThemeProvider>
     </AuthProvider>

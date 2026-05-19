@@ -19,6 +19,7 @@ const NAV_SECTIONS = [
       { to: '/admin/yearbook', label: 'Yearbooks' },
       { to: '/admin/awards', label: 'Awards' },
       { to: '/admin/award-definitions', label: 'Award Types' },
+      { to: '/admin/sponsors', label: 'Sponsors' },
     ],
   },
   {

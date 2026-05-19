@@ -225,6 +225,24 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_award_defs_org ON org_award_definitions(org_id)"
         ))
+        # Sponsors table
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS org_sponsors (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                website_url TEXT,
+                logo_url TEXT,
+                logo_data BYTEA,
+                logo_mime TEXT,
+                display_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_org_sponsors_org "
+            "ON org_sponsors(organisation_id, display_order)"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

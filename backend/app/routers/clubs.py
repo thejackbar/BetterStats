@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models.db import Organisation, get_db
+from app.models.db import Organisation, Season, Sponsor, get_db
+from app.routers.organisations import _season_sort_key
 
 router = APIRouter(prefix="/clubs", tags=["clubs"])
 
@@ -32,4 +33,44 @@ async def get_club_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
         "theme_config": org.theme_config or {},
         "contact_email": org.contact_email,
         "player_name_format": org.player_name_format or "last_first",
+    }
+
+
+@router.get("/{slug}/sponsors")
+async def get_club_sponsors(slug: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Organisation).where(Organisation.slug == slug.lower()))
+    org = result.scalar_one_or_none()
+    if not org or not org.is_active:
+        raise HTTPException(status_code=404, detail="Club not found")
+
+    sponsors_result = await db.execute(
+        select(Sponsor)
+        .where(Sponsor.organisation_id == org.id)
+        .order_by(Sponsor.display_order, Sponsor.created_at)
+    )
+    sponsors = sponsors_result.scalars().all()
+
+    # Determine the current (most recent) season name
+    seasons_result = await db.execute(
+        select(Season).where(Season.organisation_id == org.id)
+    )
+    all_seasons = seasons_result.scalars().all()
+    current_season = None
+    if all_seasons:
+        sorted_seasons = sorted(all_seasons, key=_season_sort_key)
+        current_season = sorted_seasons[0].name if sorted_seasons else None
+
+    return {
+        "club_name": org.short_name or org.name,
+        "current_season": current_season,
+        "sponsors": [
+            {
+                "id": str(s.id),
+                "name": s.name,
+                "website_url": s.website_url,
+                "logo_url": s.logo_url,
+            }
+            for s in sponsors
+            if s.logo_url  # only show sponsors that have a logo
+        ],
     }
