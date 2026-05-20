@@ -711,7 +711,7 @@ const ANALYSIS_SUBTABS = [
   { key: 'team',     label: 'TEAM' },
 ]
 
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, battingInnings = [], bowlingSpells = [], teamBreakdown = [], seasonLabel = null }) {
+function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null }) {
   const [subTab, setSubTab] = useState('batting')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -1001,77 +1001,104 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
         </div>
       )}
 
-      {subTab === 'team' && (
-        <div className="space-y-6">
-          {teamBreakdown.length > 0 ? (
-            <Card
-              title={`MATCHES BY GRADE${seasonLabel ? ` · ${seasonLabel.toUpperCase()}` : ''}`}
-              pad="p-0"
-            >
-              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pt-4">
-                Every grade this player has appeared in (batting, bowling, or fielding), with result record.
-                {!seasonLabel && ' Use the season filter above to view a single season.'}
-              </p>
-              <div className="overflow-x-auto pb-scroll mt-3">
-                <table className="w-full min-w-[560px] text-[13px]">
-                  <thead>
-                    <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
-                      <th className="py-3 pl-5 pb-2">GRADE</th>
-                      <th className="py-3 text-right pb-2">MATCHES</th>
-                      <th className="py-3 text-right pb-2">SEASONS</th>
-                      <th className="py-3 text-right pb-2">W</th>
-                      <th className="py-3 text-right pb-2">L</th>
-                      <th className="py-3 text-right pb-2">D</th>
-                      <th className="py-3 pr-5 text-right pb-2">WIN %</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {teamBreakdown.map((r, i) => (
-                      <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-                        <td className="py-2.5 pl-5 text-pb-text">{r.grade_name}</td>
-                        <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{r.matches}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.seasons}</td>
-                        <td className="py-2.5 font-mono text-pb-text text-right">{r.won}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.lost}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.drawn}</td>
-                        <td className="py-2.5 pr-5 font-mono text-pb-text text-right">
-                          {r.win_pct != null ? `${r.win_pct.toFixed(1)}%` : '—'}
-                        </td>
+      {subTab === 'team' && (() => {
+        const rows = teamBreakdown.rows || []
+        const unattributed = teamBreakdown.unattributed || 0
+        return (
+          <div className="space-y-6">
+            {rows.length > 0 ? (
+              <Card
+                title={`MATCHES BY GRADE${seasonLabel ? ` · ${seasonLabel.toUpperCase()}` : ''}`}
+                pad="p-0"
+              >
+                <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pt-4">
+                  Every grade this player has appeared in (batting, bowling, or fielding), with result record.
+                  {!seasonLabel && ' Use the season filter above to view a single season.'}
+                </p>
+                <div className="overflow-x-auto pb-scroll mt-3">
+                  <table className="w-full min-w-[560px] text-[13px]">
+                    <thead>
+                      <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                        <th className="py-3 pl-5 pb-2">GRADE</th>
+                        <th className="py-3 text-right pb-2">MATCHES</th>
+                        <th className="py-3 text-right pb-2">SEASONS</th>
+                        <th className="py-3 text-right pb-2">W</th>
+                        <th className="py-3 text-right pb-2">L</th>
+                        <th className="py-3 text-right pb-2">D</th>
+                        <th className="py-3 pr-5 text-right pb-2">WIN %</th>
                       </tr>
-                    ))}
-                    {teamBreakdown.length > 1 && (() => {
-                      const totals = teamBreakdown.reduce((acc, r) => {
-                        acc.matches += r.matches || 0
-                        acc.won += r.won || 0
-                        acc.lost += r.lost || 0
-                        acc.drawn += r.drawn || 0
-                        return acc
-                      }, { matches: 0, won: 0, lost: 0, drawn: 0 })
-                      const decided = totals.won + totals.lost + totals.drawn
-                      const winPct = decided > 0 ? (totals.won / decided * 100) : null
-                      return (
-                        <tr className="pb-hairline-t bg-pb-surface2">
-                          <td className="py-2.5 pl-5 font-mono text-[11px] tracking-wide2 text-pb-faint">TOTAL</td>
-                          <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{totals.matches}</td>
-                          <td className="py-2.5 text-right text-pb-faintest">—</td>
-                          <td className="py-2.5 font-mono text-pb-text text-right">{totals.won}</td>
-                          <td className="py-2.5 font-mono text-pb-dim text-right">{totals.lost}</td>
-                          <td className="py-2.5 font-mono text-pb-dim text-right">{totals.drawn}</td>
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => (
+                        <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                          <td className="py-2.5 pl-5 text-pb-text">{r.grade_name}</td>
+                          <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}
+                              title={r.attributed_unknown > 0 ? `${r.scorecard_matches} with scorecard + ${r.attributed_unknown} from CA aggregate (no scorecard yet)` : null}>
+                            {r.matches}
+                            {r.attributed_unknown > 0 && <span className="text-pb-faint font-normal"> *</span>}
+                          </td>
+                          <td className="py-2.5 font-mono text-pb-dim text-right">{r.seasons}</td>
+                          <td className="py-2.5 font-mono text-pb-text text-right">{r.won}</td>
+                          <td className="py-2.5 font-mono text-pb-dim text-right">{r.lost}</td>
+                          <td className="py-2.5 font-mono text-pb-dim text-right">{r.drawn}</td>
                           <td className="py-2.5 pr-5 font-mono text-pb-text text-right">
-                            {winPct != null ? `${winPct.toFixed(1)}%` : '—'}
+                            {r.win_pct != null ? `${r.win_pct.toFixed(1)}%` : '—'}
                           </td>
                         </tr>
-                      )
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          ) : (
-            <p className="text-pb-faint text-sm py-4">No grade appearances recorded{seasonLabel ? ` for ${seasonLabel}` : ''}.</p>
-          )}
-        </div>
-      )}
+                      ))}
+                      {unattributed > 0 && (
+                        <tr className="pb-hairline-t hover:bg-pb-surface2"
+                            title="Games CA's season aggregate counts but where we have no scorecard AND the player played in multiple grades that season, so we can't safely attribute them.">
+                          <td className="py-2.5 pl-5 text-pb-faint italic">No scorecard data</td>
+                          <td className="py-2.5 font-mono text-right pb-num text-pb-dim">{unattributed}</td>
+                          <td className="py-2.5 text-right text-pb-faintest">—</td>
+                          <td className="py-2.5 text-right text-pb-faintest">—</td>
+                          <td className="py-2.5 text-right text-pb-faintest">—</td>
+                          <td className="py-2.5 text-right text-pb-faintest">—</td>
+                          <td className="py-2.5 pr-5 text-right text-pb-faintest">—</td>
+                        </tr>
+                      )}
+                      {(rows.length > 1 || unattributed > 0) && (() => {
+                        const totals = rows.reduce((acc, r) => {
+                          acc.matches += r.matches || 0
+                          acc.won += r.won || 0
+                          acc.lost += r.lost || 0
+                          acc.drawn += r.drawn || 0
+                          return acc
+                        }, { matches: 0, won: 0, lost: 0, drawn: 0 })
+                        totals.matches += unattributed
+                        const decided = totals.won + totals.lost + totals.drawn
+                        const winPct = decided > 0 ? (totals.won / decided * 100) : null
+                        return (
+                          <tr className="pb-hairline-t bg-pb-surface2">
+                            <td className="py-2.5 pl-5 font-mono text-[11px] tracking-wide2 text-pb-faint">TOTAL</td>
+                            <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{totals.matches}</td>
+                            <td className="py-2.5 text-right text-pb-faintest">—</td>
+                            <td className="py-2.5 font-mono text-pb-text text-right">{totals.won}</td>
+                            <td className="py-2.5 font-mono text-pb-dim text-right">{totals.lost}</td>
+                            <td className="py-2.5 font-mono text-pb-dim text-right">{totals.drawn}</td>
+                            <td className="py-2.5 pr-5 font-mono text-pb-text text-right">
+                              {winPct != null ? `${winPct.toFixed(1)}%` : '—'}
+                            </td>
+                          </tr>
+                        )
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+                {(rows.some(r => r.attributed_unknown > 0) || unattributed > 0) && (
+                  <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pb-4 pt-2">
+                    * = matches counted by CA&apos;s season aggregate but with no scorecard captured yet; attributed to a grade only when the player played in a single grade that season.
+                    {unattributed > 0 && ` ${unattributed.toLocaleString()} ${unattributed === 1 ? 'match' : 'matches'} couldn't be attributed (mixed-grade season).`}
+                  </p>
+                )}
+              </Card>
+            ) : (
+              <p className="text-pb-faint text-sm py-4">No grade appearances recorded{seasonLabel ? ` for ${seasonLabel}` : ''}.</p>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -1418,7 +1445,7 @@ export default function PlayerProfile() {
   const [byGrade, setByGrade] = useState([])
   const [byPosition, setByPosition] = useState([])
   const [bowlingByGrade, setBowlingByGrade] = useState([])
-  const [teamBreakdown, setTeamBreakdown] = useState([])
+  const [teamBreakdown, setTeamBreakdown] = useState({ rows: [], unattributed: 0, total_aggregate_matches: 0 })
   const [tab, setTab] = useState('batting')
 
   useClubTheme(org)
@@ -1485,8 +1512,8 @@ export default function PlayerProfile() {
   useEffect(() => {
     if (!playerId || !data?.player) return
     api.getPlayerTeamBreakdown(playerId, { seasonId })
-      .then(setTeamBreakdown)
-      .catch(() => setTeamBreakdown([]))
+      .then(res => setTeamBreakdown(res && res.rows ? res : { rows: [], unattributed: 0, total_aggregate_matches: 0 }))
+      .catch(() => setTeamBreakdown({ rows: [], unattributed: 0, total_aggregate_matches: 0 }))
   }, [playerId, data?.player, seasonId])
 
   if (loading) return <PbSpinner message="Loading player data…" />

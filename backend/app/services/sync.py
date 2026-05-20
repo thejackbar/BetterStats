@@ -10,7 +10,8 @@ from sqlalchemy.sql import func
 from app.models.db import (
     Organisation, Season, Grade, Game, Player,
     BattingInnings, BowlingSpell, FieldingStat, FallOfWicket, Partnership,
-    PlayerSeasonStats, Milestone, PhqIdSuggestion, SyncRun, async_session_maker
+    PlayerSeasonStats, PlayerSeasonGradeStats, Milestone, PhqIdSuggestion,
+    SyncRun, async_session_maker
 )
 from app.services import playhq_client
 
@@ -341,6 +342,88 @@ async def sync_organisation(
             logger.info(f"Season {season_data.get('name')}: {len(player_data)} players synced")
             if run_id:
                 await update_sync_run(run_id, stats)
+
+            # Per-grade aggregate sync — same CA endpoints + `gradeId` param.
+            # Lets us attribute per-grade match counts exactly instead of
+            # heuristically (the org-level stats above collapse grades).
+            try:
+                grades_for_season = await session.execute(
+                    select(Grade.id).where(Grade.season_id == season_id)
+                )
+                grade_ids_this_season = [g[0] for g in grades_for_season.all()]
+                if grade_ids_this_season:
+                    await session.execute(
+                        delete(PlayerSeasonGradeStats).where(
+                            PlayerSeasonGradeStats.season_id == season_id
+                        )
+                    )
+                    grade_rows_written = 0
+                    for grade_uuid in grade_ids_this_season:
+                        grade_id_str = str(grade_uuid)
+                        try:
+                            gbat = await playhq_client.get_batting_stats(org_id_str, raw_season_id, grade_id_str)
+                            gbowl = await playhq_client.get_bowling_stats(org_id_str, raw_season_id, grade_id_str)
+                            gfield = await playhq_client.get_fielding_stats(org_id_str, raw_season_id, grade_id_str)
+                        except Exception as e:
+                            logger.warning(f"GR per-grade aggregate failed for grade={grade_id_str} season={raw_season_id}: {e}")
+                            continue
+
+                        per_grade: dict[uuid.UUID, dict] = {}
+                        for p in gbat:
+                            pid = _parse_uuid(p.get("id"))
+                            if not pid:
+                                continue
+                            per_grade.setdefault(pid, {})["batting"] = p.get("statistics", {})
+                        for p in gbowl:
+                            pid = _parse_uuid(p.get("id"))
+                            if not pid:
+                                continue
+                            per_grade.setdefault(pid, {})["bowling"] = p.get("statistics", {})
+                        for p in gfield:
+                            pid = _parse_uuid(p.get("id"))
+                            if not pid:
+                                continue
+                            per_grade.setdefault(pid, {})["fielding"] = p.get("statistics", {})
+
+                        seen_pids: set[uuid.UUID] = set()
+                        for pid, pdata in per_grade.items():
+                            effective_pid = merged_away.get(str(pid), pid)
+                            if effective_pid in seen_pids:
+                                continue
+                            seen_pids.add(effective_pid)
+                            if not await session.get(Player, effective_pid):
+                                continue
+                            b = pdata.get("batting", {})
+                            bw = pdata.get("bowling", {})
+                            f = pdata.get("fielding", {})
+                            session.add(PlayerSeasonGradeStats(
+                                player_id=effective_pid,
+                                season_id=season_id,
+                                grade_id=grade_uuid,
+                                matches=b.get("matches") or bw.get("matches") or f.get("matches") or 0,
+                                batting_innings=b.get("battingInnings") or 0,
+                                runs=b.get("battingAggregate") or 0,
+                                not_outs=b.get("battingNotOuts") or 0,
+                                high_score=b.get("battingHighScore"),
+                                bowling_innings=bw.get("bowlingInnings") or 0,
+                                wickets=bw.get("bowlingWickets") or 0,
+                                runs_conceded=bw.get("bowlingRuns") or 0,
+                                catches=(f.get("fieldingTotalCatches")
+                                         or ((f.get("fieldingCatches") or 0) + (f.get("fieldingWicketKeeperCatches") or 0))),
+                                run_outs=f.get("fieldingRunOuts") or 0,
+                                stumpings=f.get("fieldingStumpings") or 0,
+                                synced_at=datetime.now(timezone.utc),
+                            ))
+                            grade_rows_written += 1
+                    await session.commit()
+                    stats["grade_stats"] = stats.get("grade_stats", 0) + grade_rows_written
+                    logger.info(f"Season {season_data.get('name')}: {grade_rows_written} per-grade aggregate rows across {len(grade_ids_this_season)} grades")
+                    if run_id:
+                        await update_sync_run(run_id, stats)
+            except Exception as e:
+                import traceback as _tbg
+                logger.error(f"Per-grade aggregate sync failed for season {raw_season_id}: {e}\n{_tbg.format_exc()}")
+                await session.rollback()
 
         # Recompute milestones for all players in this org
         all_pids_res = await session.execute(

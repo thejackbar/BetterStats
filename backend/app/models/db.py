@@ -291,6 +291,30 @@ class Milestone(Base):
     game = relationship("Game")
 
 
+class PlayerSeasonGradeStats(Base):
+    __tablename__ = "player_season_grade_stats"
+    __table_args__ = (
+        UniqueConstraint("player_id", "season_id", "grade_id", name="uq_player_season_grade"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="CASCADE"), nullable=False)
+    grade_id  = Column(UUID(as_uuid=True), ForeignKey("grades.id",  ondelete="CASCADE"), nullable=False)
+    matches          = Column(Integer, default=0)
+    batting_innings  = Column(Integer, default=0)
+    runs             = Column(Integer, default=0)
+    not_outs         = Column(Integer, default=0)
+    high_score       = Column(Integer)
+    bowling_innings  = Column(Integer, default=0)
+    wickets          = Column(Integer, default=0)
+    runs_conceded    = Column(Integer, default=0)
+    catches          = Column(Integer, default=0)
+    run_outs         = Column(Integer, default=0)
+    stumpings        = Column(Integer, default=0)
+    synced_at        = Column(TIMESTAMP(timezone=True))
+
+
 class PlayerSeasonStats(Base):
     __tablename__ = "player_season_stats"
     __table_args__ = (UniqueConstraint("player_id", "season_id", name="uq_player_season"),)

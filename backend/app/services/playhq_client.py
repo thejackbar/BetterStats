@@ -119,13 +119,15 @@ async def get_teams(org_id: str, season_id: str) -> list:
             return []
 
 
-async def _paginate_stats(url: str, season_id: str, extra_params: dict = None) -> list:
+async def _paginate_stats(url: str, season_id: str, extra_params: dict = None, grade_id: Optional[str] = None) -> list:
     results = []
     offset = 1
     limit = 100
     async with httpx.AsyncClient() as client:
         while True:
             params = _base_params({"seasonId": season_id, "offset": offset, "limit": limit})
+            if grade_id:
+                params["gradeId"] = grade_id
             if extra_params:
                 params.update(extra_params)
             r = await client.get(url, params=params, timeout=DEFAULT_TIMEOUT)
@@ -150,26 +152,29 @@ async def _paginate_stats(url: str, season_id: str, extra_params: dict = None) -
     return results
 
 
-async def get_batting_stats(org_id: str, season_id: str) -> list:
+async def get_batting_stats(org_id: str, season_id: str, grade_id: Optional[str] = None) -> list:
     return await _paginate_stats(
         f"{BASE_URL}/participants/organisations/{org_id}/batting-statistics",
         season_id,
         {"sort": "BattingAggregate:desc"},
+        grade_id=grade_id,
     )
 
 
-async def get_bowling_stats(org_id: str, season_id: str) -> list:
+async def get_bowling_stats(org_id: str, season_id: str, grade_id: Optional[str] = None) -> list:
     return await _paginate_stats(
         f"{BASE_URL}/participants/organisations/{org_id}/bowling-statistics",
         season_id,
         {"sort": "BowlingWickets:desc"},
+        grade_id=grade_id,
     )
 
 
-async def get_fielding_stats(org_id: str, season_id: str) -> list:
+async def get_fielding_stats(org_id: str, season_id: str, grade_id: Optional[str] = None) -> list:
     return await _paginate_stats(
         f"{BASE_URL}/participants/organisations/{org_id}/fielding-statistics",
         season_id,
+        grade_id=grade_id,
     )
 
 

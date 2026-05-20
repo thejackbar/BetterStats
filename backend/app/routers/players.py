@@ -220,7 +220,7 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     # Team tab does so canonical/merged grade names line up.
     breakdown = await get_player_team_breakdown(db, player_id, str(player.organisation_id))
     GRADE_MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300]
-    for row in breakdown:
+    for row in breakdown.get("rows", []):
         matches_in_grade = int(row.get("matches") or 0)
         grade_name = row.get("grade_name")
         if not grade_name or matches_in_grade <= 0:
