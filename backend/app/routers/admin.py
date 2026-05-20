@@ -39,6 +39,9 @@ async def _enrich_player(db: AsyncSession, p: Player) -> dict:
         "total_wickets": sum((s.wickets or 0) for s in season_stats),
         "total_matches": sum((s.matches or 0) for s in season_stats),
         "game_level_innings": game_innings,
+        # Private — used by get_merge_candidates to filter same-name players
+        # whose playing eras don't overlap. Stripped before returning to client.
+        "_season_ids": {s.season_id for s in season_stats if s.season_id},
     }
 
 
@@ -83,10 +86,19 @@ async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), 
                 pair_key = tuple(sorted([enriched[i]["id"], enriched[j]["id"]]))
                 if pair_key in ignored:
                     continue
+                # Same name + disjoint playing eras = different people. Two
+                # "Lewis, Steven" rows (one 2005/06-only, one 2012/13-onwards)
+                # were being auto-merged repeatedly until this guard landed.
+                a_seasons = enriched[i].get("_season_ids") or set()
+                b_seasons = enriched[j].get("_season_ids") or set()
+                if a_seasons and b_seasons and not (a_seasons & b_seasons):
+                    continue
+                a = {k: v for k, v in enriched[i].items() if not k.startswith("_")}
+                b = {k: v for k, v in enriched[j].items() if not k.startswith("_")}
                 candidate_pairs.append({
                     "normalised_name": key,
-                    "player_a": enriched[i],
-                    "player_b": enriched[j],
+                    "player_a": a,
+                    "player_b": b,
                 })
 
     return candidate_pairs

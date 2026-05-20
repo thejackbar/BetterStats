@@ -70,6 +70,21 @@ Cricket Australia hosts club cricket data across **two separate backends**, both
 
 ## Sync Architecture
 
+### Admin UI button names (Sync Actions card)
+
+The three buttons on `/admin/sync` map to backend endpoints as follows. When
+the user says one of the UI names, this is what they mean:
+
+| UI button             | Backend route                                  | What it does                                                        |
+|-----------------------|------------------------------------------------|---------------------------------------------------------------------|
+| **Sync Now**          | `POST /organisations/{id}/sync`                | Pull latest games & stats. Safe to run anytime — the weekly job.    |
+| **Fix Missing Totals**| backfill aggregates endpoint (`/club-admin/...`) | Recomputes `player_season_stats` from existing per-game rows. No CA fetch. Use when a player shows 0 matches/runs despite having scorecards. |
+| **Full Rebuild**      | `POST /club-admin/hard-refresh`                | Wipes per-game tables and re-pulls everything from CA. Slow (hour+). Use after sync-logic changes. |
+
+(Renamed Apr–May 2026; old labels were "Sync" / "Backfill Aggregates" /
+"Hard Refresh". Internal endpoint names and the `kind` field on `sync_runs`
+are unchanged.)
+
 - **Full sync** (`POST /organisations/{id}/sync`) / **Hard refresh** (`POST /club-admin/hard-refresh`): scheduled weekly + on-demand. Two passes:
   1. **Grassroots aggregate** (`playhq_client.get_*_stats`) — season totals for all 52 seasons. Source of `player_season_stats`.
   2. **Grassroots scores** (`grassroots_scores_client` + `sync_grassroots_game_level_data`) — game-level scorecards confirmed back to at least 1975. Iterates grades from DB (all seasons, all grades), calls `/scores/grades/{grade_id}/matches` for each to get match IDs, fetches `/scores/matches/{id}?includeScorecard` for each. Skips PHQ-namespace IDs that 204. Per-game session pattern to avoid async session deadlock. Uses `session.get(Grade, ...)` to avoid stale-cache FK violations. No longer depends on fixturesladders for discovery, so pre-2000 seasons are fully covered.
