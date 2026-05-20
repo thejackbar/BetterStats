@@ -4,9 +4,10 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useClub } from "../hooks/useClub";
 import { useTheme } from "../contexts/ThemeContext";
+import NavbarPlayerSearch from "./NavbarPlayerSearch";
 import betterStatsLogo from "../assets/betterstatslogo_white.png";
 
-export const SITE_VERSION = "v6.2.3.2";
+export const SITE_VERSION = "v6.2.4";
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
@@ -126,6 +127,8 @@ export default function Navbar() {
               </NavLink>
             ))}
           </nav>
+
+          <NavbarPlayerSearch orgId={club?.id} club={club} />
 
           <ThemeToggle />
 
