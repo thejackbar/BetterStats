@@ -711,7 +711,7 @@ const ANALYSIS_SUBTABS = [
   { key: 'team',     label: 'TEAM' },
 ]
 
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, battingInnings = [], bowlingSpells = [], teamBreakdown = [], seasonLabel = null }) {
+function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, battingInnings = [], bowlingSpells = [], teamBreakdown = [], seasonLabel = null, careerMatches = null }) {
   const [subTab, setSubTab] = useState('batting')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -1001,77 +1001,98 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
         </div>
       )}
 
-      {subTab === 'team' && (
-        <div className="space-y-6">
-          {teamBreakdown.length > 0 ? (
-            <Card
-              title={`MATCHES BY GRADE${seasonLabel ? ` · ${seasonLabel.toUpperCase()}` : ''}`}
-              pad="p-0"
-            >
-              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pt-4">
-                Every grade this player has appeared in (batting, bowling, or fielding), with result record.
-                {!seasonLabel && ' Use the season filter above to view a single season.'}
-              </p>
-              <div className="overflow-x-auto pb-scroll mt-3">
-                <table className="w-full min-w-[560px] text-[13px]">
-                  <thead>
-                    <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
-                      <th className="py-3 pl-5 pb-2">GRADE</th>
-                      <th className="py-3 text-right pb-2">MATCHES</th>
-                      <th className="py-3 text-right pb-2">SEASONS</th>
-                      <th className="py-3 text-right pb-2">W</th>
-                      <th className="py-3 text-right pb-2">L</th>
-                      <th className="py-3 text-right pb-2">D</th>
-                      <th className="py-3 pr-5 text-right pb-2">WIN %</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {teamBreakdown.map((r, i) => (
-                      <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-                        <td className="py-2.5 pl-5 text-pb-text">{r.grade_name}</td>
-                        <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{r.matches}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.seasons}</td>
-                        <td className="py-2.5 font-mono text-pb-text text-right">{r.won}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.lost}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.drawn}</td>
-                        <td className="py-2.5 pr-5 font-mono text-pb-text text-right">
-                          {r.win_pct != null ? `${r.win_pct.toFixed(1)}%` : '—'}
-                        </td>
+      {subTab === 'team' && (() => {
+        const gradeMatchSum = teamBreakdown.reduce((acc, r) => acc + (r.matches || 0), 0)
+        const gap = careerMatches != null ? Math.max(0, careerMatches - gradeMatchSum) : 0
+        return (
+          <div className="space-y-6">
+            {teamBreakdown.length > 0 ? (
+              <Card
+                title={`MATCHES BY GRADE${seasonLabel ? ` · ${seasonLabel.toUpperCase()}` : ''}`}
+                pad="p-0"
+              >
+                <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pt-4">
+                  Every grade this player has appeared in (batting, bowling, or fielding), with result record.
+                  {!seasonLabel && ' Use the season filter above to view a single season.'}
+                </p>
+                <div className="overflow-x-auto pb-scroll mt-3">
+                  <table className="w-full min-w-[560px] text-[13px]">
+                    <thead>
+                      <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                        <th className="py-3 pl-5 pb-2">GRADE</th>
+                        <th className="py-3 text-right pb-2">MATCHES</th>
+                        <th className="py-3 text-right pb-2">SEASONS</th>
+                        <th className="py-3 text-right pb-2">W</th>
+                        <th className="py-3 text-right pb-2">L</th>
+                        <th className="py-3 text-right pb-2">D</th>
+                        <th className="py-3 pr-5 text-right pb-2">WIN %</th>
                       </tr>
-                    ))}
-                    {teamBreakdown.length > 1 && (() => {
-                      const totals = teamBreakdown.reduce((acc, r) => {
-                        acc.matches += r.matches || 0
-                        acc.won += r.won || 0
-                        acc.lost += r.lost || 0
-                        acc.drawn += r.drawn || 0
-                        return acc
-                      }, { matches: 0, won: 0, lost: 0, drawn: 0 })
-                      const decided = totals.won + totals.lost + totals.drawn
-                      const winPct = decided > 0 ? (totals.won / decided * 100) : null
-                      return (
-                        <tr className="pb-hairline-t bg-pb-surface2">
-                          <td className="py-2.5 pl-5 font-mono text-[11px] tracking-wide2 text-pb-faint">TOTAL</td>
-                          <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{totals.matches}</td>
-                          <td className="py-2.5 text-right text-pb-faintest">—</td>
-                          <td className="py-2.5 font-mono text-pb-text text-right">{totals.won}</td>
-                          <td className="py-2.5 font-mono text-pb-dim text-right">{totals.lost}</td>
-                          <td className="py-2.5 font-mono text-pb-dim text-right">{totals.drawn}</td>
+                    </thead>
+                    <tbody>
+                      {teamBreakdown.map((r, i) => (
+                        <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                          <td className="py-2.5 pl-5 text-pb-text">{r.grade_name}</td>
+                          <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{r.matches}</td>
+                          <td className="py-2.5 font-mono text-pb-dim text-right">{r.seasons}</td>
+                          <td className="py-2.5 font-mono text-pb-text text-right">{r.won}</td>
+                          <td className="py-2.5 font-mono text-pb-dim text-right">{r.lost}</td>
+                          <td className="py-2.5 font-mono text-pb-dim text-right">{r.drawn}</td>
                           <td className="py-2.5 pr-5 font-mono text-pb-text text-right">
-                            {winPct != null ? `${winPct.toFixed(1)}%` : '—'}
+                            {r.win_pct != null ? `${r.win_pct.toFixed(1)}%` : '—'}
                           </td>
                         </tr>
-                      )
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          ) : (
-            <p className="text-pb-faint text-sm py-4">No grade appearances recorded{seasonLabel ? ` for ${seasonLabel}` : ''}.</p>
-          )}
-        </div>
-      )}
+                      ))}
+                      {gap > 0 && (
+                        <tr className="pb-hairline-t hover:bg-pb-surface2" title="Games CA's season aggregate counts but where we don't have a scorecard, so they can't be attributed to a grade.">
+                          <td className="py-2.5 pl-5 text-pb-faint italic">No scorecard data</td>
+                          <td className="py-2.5 font-mono text-right pb-num text-pb-dim">{gap}</td>
+                          <td className="py-2.5 text-right text-pb-faintest">—</td>
+                          <td className="py-2.5 text-right text-pb-faintest">—</td>
+                          <td className="py-2.5 text-right text-pb-faintest">—</td>
+                          <td className="py-2.5 text-right text-pb-faintest">—</td>
+                          <td className="py-2.5 pr-5 text-right text-pb-faintest">—</td>
+                        </tr>
+                      )}
+                      {(teamBreakdown.length > 1 || gap > 0) && (() => {
+                        const totals = teamBreakdown.reduce((acc, r) => {
+                          acc.matches += r.matches || 0
+                          acc.won += r.won || 0
+                          acc.lost += r.lost || 0
+                          acc.drawn += r.drawn || 0
+                          return acc
+                        }, { matches: 0, won: 0, lost: 0, drawn: 0 })
+                        totals.matches += gap
+                        const decided = totals.won + totals.lost + totals.drawn
+                        const winPct = decided > 0 ? (totals.won / decided * 100) : null
+                        return (
+                          <tr className="pb-hairline-t bg-pb-surface2">
+                            <td className="py-2.5 pl-5 font-mono text-[11px] tracking-wide2 text-pb-faint">TOTAL</td>
+                            <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{totals.matches}</td>
+                            <td className="py-2.5 text-right text-pb-faintest">—</td>
+                            <td className="py-2.5 font-mono text-pb-text text-right">{totals.won}</td>
+                            <td className="py-2.5 font-mono text-pb-dim text-right">{totals.lost}</td>
+                            <td className="py-2.5 font-mono text-pb-dim text-right">{totals.drawn}</td>
+                            <td className="py-2.5 pr-5 font-mono text-pb-text text-right">
+                              {winPct != null ? `${winPct.toFixed(1)}%` : '—'}
+                            </td>
+                          </tr>
+                        )
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+                {gap > 0 && (
+                  <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pb-4 pt-2">
+                    {gap.toLocaleString()} {gap === 1 ? 'match is' : 'matches are'} counted by the season aggregate but have no per-game scorecard, so we can't attribute {gap === 1 ? 'it' : 'them'} to a grade.
+                  </p>
+                )}
+              </Card>
+            ) : (
+              <p className="text-pb-faint text-sm py-4">No grade appearances recorded{seasonLabel ? ` for ${seasonLabel}` : ''}.</p>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -1703,7 +1724,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} careerMatches={batting?.games ?? bowling?.games ?? null} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
       </main>
