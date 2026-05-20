@@ -482,6 +482,9 @@ async def get_player_team_breakdown(
                 UNION
                 SELECT fs.player_id, fs.game_id FROM fielding_stats fs
                 WHERE fs.player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT ga.player_id, ga.game_id FROM game_appearances ga
+                WHERE ga.player_id = CAST(:pid AS UUID)
             )
             SELECT
                 COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
@@ -546,6 +549,8 @@ async def get_player_team_breakdown(
                 SELECT bs.game_id FROM bowling_spells bs WHERE bs.player_id = CAST(:pid AS UUID)
                 UNION
                 SELECT fs.game_id FROM fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
             )
             SELECT
                 gr.season_id AS season_id,
