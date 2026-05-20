@@ -861,6 +861,16 @@ async def get_records(
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
+                UNION
+                SELECT fs.player_id, fs.game_id, gr.season_id
+                FROM fielding_stats fs
+                JOIN games g ON g.id = fs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  {_match_grade_filter}
+                  {_gw_season}
+                  {finals_clause}
             )
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(DISTINCT ap.game_id) AS matches,
@@ -902,6 +912,16 @@ async def get_records(
                 SELECT bs.player_id, gr.season_id
                 FROM bowling_spells bs
                 JOIN games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  {_match_grade_filter}
+                  {_gw_season}
+                  {finals_clause}
+                UNION
+                SELECT fs.player_id, gr.season_id
+                FROM fielding_stats fs
+                JOIN games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)

@@ -444,6 +444,85 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str, org_id: Op
     return [dict(r) for r in result.mappings()]
 
 
+async def get_player_team_breakdown(
+    session: AsyncSession,
+    player_id: str,
+    org_id: Optional[str] = None,
+    season_id: Optional[str] = None,
+) -> list[dict]:
+    """Per-grade match breakdown for a single player.
+
+    Unions batting/bowling/fielding appearances so games where the player only
+    fielded still count. Result rows are grouped by the canonical (merge-aware)
+    grade name and include matches, seasons, won/lost/drawn counts, and win_pct.
+    """
+    season_clause = ""
+    params: dict = {"pid": player_id, "org_id": org_id}
+    if season_id:
+        season_clause = " AND gr.season_id = CAST(:sid AS UUID)"
+        params["sid"] = season_id
+
+    result = await session.execute(
+        text(f"""
+            WITH appearances AS (
+                SELECT bi.player_id, bi.game_id FROM batting_innings bi
+                WHERE bi.player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT bs.player_id, bs.game_id FROM bowling_spells bs
+                WHERE bs.player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT fs.player_id, fs.game_id FROM fielding_stats fs
+                WHERE fs.player_id = CAST(:pid AS UUID)
+            )
+            SELECT
+                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                COUNT(DISTINCT ap.game_id) AS matches,
+                COUNT(DISTINCT gr.season_id) AS seasons,
+                COUNT(*) FILTER (WHERE g.result = 'WIN')  AS won,
+                COUNT(*) FILTER (WHERE g.result = 'LOSS') AS lost,
+                COUNT(*) FILTER (WHERE g.result IN ('DRAW', 'TIE')) AS drawn
+            FROM appearances ap
+            JOIN games g  ON g.id = ap.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            LEFT JOIN LATERAL (
+                SELECT canonical_name FROM grade_merge_logs gml
+                WHERE gml.org_id = CAST(:org_id AS UUID)
+                  AND gml.alias_name = gr.name
+                  AND gml.undone_at IS NULL
+                LIMIT 1
+            ) am ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT gr2.display_name_override FROM grades gr2
+                JOIN seasons s2 ON s2.id = gr2.season_id
+                WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                  AND gr2.display_name_override IS NOT NULL
+                LIMIT 1
+            ) gdn ON TRUE
+            WHERE TRUE {season_clause}
+            GROUP BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
+            ORDER BY matches DESC, grade_name
+        """),
+        params,
+    )
+    rows = []
+    for r in result.mappings():
+        d = dict(r)
+        matches = int(d.get("matches") or 0)
+        won = int(d.get("won") or 0)
+        lost = int(d.get("lost") or 0)
+        drawn = int(d.get("drawn") or 0)
+        decided = won + lost + drawn
+        d["win_pct"] = round(won / decided * 100, 1) if decided > 0 else None
+        d["matches"] = matches
+        d["seasons"] = int(d.get("seasons") or 0)
+        d["won"] = won
+        d["lost"] = lost
+        d["drawn"] = drawn
+        rows.append(d)
+    return rows
+
+
 async def get_season_by_season(session: AsyncSession, player_id: str) -> list[dict]:
     result = await session.execute(
         text("""

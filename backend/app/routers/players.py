@@ -11,7 +11,7 @@ from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
     get_player_batting_innings, get_player_bowling_spells,
     get_dismissal_breakdown, get_batting_by_position, get_batting_by_grade,
-    get_bowling_by_grade,
+    get_bowling_by_grade, get_player_team_breakdown,
     get_season_by_season, get_player_milestones, get_player_partnerships,
     get_player_activity, get_upcoming_milestones_for_org,
     get_player_rankings,
@@ -117,6 +117,20 @@ async def get_player_bowling_by_grade(player_id: str, db: AsyncSession = Depends
     return await get_bowling_by_grade(db, player_id, str(player.organisation_id))
 
 
+@router.get("/{player_id}/team-breakdown")
+async def get_player_team_breakdown_endpoint(
+    player_id: str,
+    season_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await get_player_team_breakdown(
+        db, player_id, str(player.organisation_id), season_id
+    )
+
+
 @router.get("/{player_id}/rankings")
 async def get_player_rankings_endpoint(
     player_id: str,
@@ -201,6 +215,34 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
         if total_matches < m:
             upcoming.append({"type": "matches", "current": total_matches, "target": m, "needed": m - total_matches})
             break
+
+    # Per-grade match milestones — uses the same merge-aware breakdown the
+    # Team tab does so canonical/merged grade names line up.
+    breakdown = await get_player_team_breakdown(db, player_id, str(player.organisation_id))
+    GRADE_MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300]
+    for row in breakdown:
+        matches_in_grade = int(row.get("matches") or 0)
+        grade_name = row.get("grade_name")
+        if not grade_name or matches_in_grade <= 0:
+            continue
+        next_target = next((m for m in GRADE_MATCH_MILESTONES if matches_in_grade < m), None)
+        if next_target is None:
+            continue
+        needed = next_target - matches_in_grade
+        # Only surface when within a meaningful window — otherwise the list
+        # explodes for players who've sampled lots of grades briefly.
+        if needed > 15:
+            continue
+        upcoming.append({
+            "type": "matches",
+            "current": matches_in_grade,
+            "target": next_target,
+            "needed": needed,
+            "label": f"MATCHES — {grade_name}",
+            "grade_name": grade_name,
+        })
+
+    upcoming.sort(key=lambda m: m.get("needed", 9999))
     return upcoming
 
 

@@ -708,9 +708,10 @@ function SpellHistoryTable({ spells }) {
 const ANALYSIS_SUBTABS = [
   { key: 'batting',  label: 'BATTING' },
   { key: 'bowling',  label: 'BOWLING' },
+  { key: 'team',     label: 'TEAM' },
 ]
 
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, battingInnings = [], bowlingSpells = [] }) {
+function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, battingInnings = [], bowlingSpells = [], teamBreakdown = [], seasonLabel = null }) {
   const [subTab, setSubTab] = useState('batting')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -999,6 +1000,78 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           )}
         </div>
       )}
+
+      {subTab === 'team' && (
+        <div className="space-y-6">
+          {teamBreakdown.length > 0 ? (
+            <Card
+              title={`MATCHES BY GRADE${seasonLabel ? ` · ${seasonLabel.toUpperCase()}` : ''}`}
+              pad="p-0"
+            >
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pt-4">
+                Every grade this player has appeared in (batting, bowling, or fielding), with result record.
+                {!seasonLabel && ' Use the season filter above to view a single season.'}
+              </p>
+              <div className="overflow-x-auto pb-scroll mt-3">
+                <table className="w-full min-w-[560px] text-[13px]">
+                  <thead>
+                    <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                      <th className="py-3 pl-5 pb-2">GRADE</th>
+                      <th className="py-3 text-right pb-2">MATCHES</th>
+                      <th className="py-3 text-right pb-2">SEASONS</th>
+                      <th className="py-3 text-right pb-2">W</th>
+                      <th className="py-3 text-right pb-2">L</th>
+                      <th className="py-3 text-right pb-2">D</th>
+                      <th className="py-3 pr-5 text-right pb-2">WIN %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teamBreakdown.map((r, i) => (
+                      <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                        <td className="py-2.5 pl-5 text-pb-text">{r.grade_name}</td>
+                        <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{r.matches}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.seasons}</td>
+                        <td className="py-2.5 font-mono text-pb-text text-right">{r.won}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.lost}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.drawn}</td>
+                        <td className="py-2.5 pr-5 font-mono text-pb-text text-right">
+                          {r.win_pct != null ? `${r.win_pct.toFixed(1)}%` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                    {teamBreakdown.length > 1 && (() => {
+                      const totals = teamBreakdown.reduce((acc, r) => {
+                        acc.matches += r.matches || 0
+                        acc.won += r.won || 0
+                        acc.lost += r.lost || 0
+                        acc.drawn += r.drawn || 0
+                        return acc
+                      }, { matches: 0, won: 0, lost: 0, drawn: 0 })
+                      const decided = totals.won + totals.lost + totals.drawn
+                      const winPct = decided > 0 ? (totals.won / decided * 100) : null
+                      return (
+                        <tr className="pb-hairline-t bg-pb-surface2">
+                          <td className="py-2.5 pl-5 font-mono text-[11px] tracking-wide2 text-pb-faint">TOTAL</td>
+                          <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{totals.matches}</td>
+                          <td className="py-2.5 text-right text-pb-faintest">—</td>
+                          <td className="py-2.5 font-mono text-pb-text text-right">{totals.won}</td>
+                          <td className="py-2.5 font-mono text-pb-dim text-right">{totals.lost}</td>
+                          <td className="py-2.5 font-mono text-pb-dim text-right">{totals.drawn}</td>
+                          <td className="py-2.5 pr-5 font-mono text-pb-text text-right">
+                            {winPct != null ? `${winPct.toFixed(1)}%` : '—'}
+                          </td>
+                        </tr>
+                      )
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ) : (
+            <p className="text-pb-faint text-sm py-4">No grade appearances recorded{seasonLabel ? ` for ${seasonLabel}` : ''}.</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -1015,7 +1088,7 @@ function MilestonesTab({ playerId, upcomingMilestones, milestones }) {
               const pct = Math.min(100, Math.round((m.current / m.target) * 100))
               return (
                 <div key={i} className="pb-card-2 p-4 rounded border border-pb-hairline">
-                  <Label>{m.type?.toUpperCase() || 'MILESTONE'}</Label>
+                  <Label>{m.label || m.type?.toUpperCase() || 'MILESTONE'}</Label>
                   <div className="flex items-baseline justify-between mt-2 mb-2">
                     <span className="font-mono text-[26px] font-bold pb-num leading-none" style={{ color: 'var(--pb-accent)' }}>
                       <AnimatedNum value={m.current} />
@@ -1345,6 +1418,7 @@ export default function PlayerProfile() {
   const [byGrade, setByGrade] = useState([])
   const [byPosition, setByPosition] = useState([])
   const [bowlingByGrade, setBowlingByGrade] = useState([])
+  const [teamBreakdown, setTeamBreakdown] = useState([])
   const [tab, setTab] = useState('batting')
 
   useClubTheme(org)
@@ -1407,6 +1481,13 @@ export default function PlayerProfile() {
       if (bg.status === 'fulfilled') setBowlingByGrade(bg.value)
     })
   }, [playerId, data?.player])
+
+  useEffect(() => {
+    if (!playerId || !data?.player) return
+    api.getPlayerTeamBreakdown(playerId, { seasonId })
+      .then(setTeamBreakdown)
+      .catch(() => setTeamBreakdown([]))
+  }, [playerId, data?.player, seasonId])
 
   if (loading) return <PbSpinner message="Loading player data…" />
   if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-pb-red">Error: {error}</div>
@@ -1622,7 +1703,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} battingInnings={battingInnings} bowlingSpells={bowlingSpells} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
       </main>
