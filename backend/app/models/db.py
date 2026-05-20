@@ -150,6 +150,9 @@ class Player(Base):
     photo_url = Column(Text, nullable=True)
     photo_data = Column(LargeBinary, nullable=True)
     photo_mime = Column(Text, nullable=True)
+    gender = Column(Text, nullable=True)
+    is_player = Column(Boolean, default=True, nullable=True)
+    player_role = Column(Text, nullable=True)
     # claimed / user_id retained as columns but no longer used in business logic
     claimed = Column(Boolean, default=False)
     user_id = Column(UUID(as_uuid=True), nullable=True)
