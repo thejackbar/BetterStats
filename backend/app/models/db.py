@@ -158,6 +158,7 @@ class Player(Base):
     batting_innings = relationship("BattingInnings", back_populates="player")
     bowling_spells = relationship("BowlingSpell", back_populates="player")
     fielding_stats = relationship("FieldingStat", back_populates="player")
+    appearances = relationship("GameAppearance", back_populates="player")
     milestones = relationship("Milestone", back_populates="player")
     season_stats = relationship("PlayerSeasonStats", back_populates="player")
 
@@ -183,6 +184,7 @@ class Game(Base):
     batting_innings = relationship("BattingInnings", back_populates="game")
     bowling_spells = relationship("BowlingSpell", back_populates="game")
     fielding_stats = relationship("FieldingStat", back_populates="game")
+    appearances = relationship("GameAppearance", back_populates="game")
     fall_of_wickets = relationship("FallOfWicket", back_populates="game")
     partnerships = relationship("Partnership", back_populates="game")
 
@@ -239,6 +241,19 @@ class FieldingStat(Base):
 
     game = relationship("Game", back_populates="fielding_stats")
     player = relationship("Player", back_populates="fielding_stats")
+
+
+class GameAppearance(Base):
+    __tablename__ = "game_appearances"
+
+    game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"), primary_key=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), primary_key=True)
+    team_name = Column(Text, nullable=True)
+    is_captain = Column(Boolean, default=False, nullable=False, server_default='false')
+    is_wicket_keeper = Column(Boolean, default=False, nullable=False, server_default='false')
+
+    game = relationship("Game", back_populates="appearances")
+    player = relationship("Player", back_populates="appearances")
 
 
 class FallOfWicket(Base):

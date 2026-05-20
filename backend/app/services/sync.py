@@ -9,7 +9,7 @@ from sqlalchemy.sql import func
 
 from app.models.db import (
     Organisation, Season, Grade, Game, Player,
-    BattingInnings, BowlingSpell, FieldingStat, FallOfWicket, Partnership,
+    BattingInnings, BowlingSpell, FieldingStat, FallOfWicket, Partnership, GameAppearance,
     PlayerSeasonStats, PlayerSeasonGradeStats, Milestone, PhqIdSuggestion,
     SyncRun, async_session_maker
 )
@@ -151,12 +151,22 @@ async def _backfill_missing_season_stats(org_id_str: str) -> int:
                     JOIN seasons s ON s.id = gr.season_id
                     WHERE s.organisation_id = :org_id
                 ),
+                appearances AS (
+                    SELECT ga.player_id, gr.season_id, ga.game_id
+                    FROM game_appearances ga
+                    JOIN games g   ON g.id = ga.game_id
+                    JOIN grades gr ON gr.id = g.grade_id
+                    JOIN seasons s ON s.id = gr.season_id
+                    WHERE s.organisation_id = :org_id
+                ),
                 pairs AS (
                     SELECT player_id, season_id FROM bat_innings
                     UNION
                     SELECT player_id, season_id FROM bowl_spells
                     UNION
                     SELECT player_id, season_id FROM field_stats
+                    UNION
+                    SELECT player_id, season_id FROM appearances
                 ),
                 missing AS (
                     SELECT p.player_id, p.season_id
@@ -218,6 +228,8 @@ async def _backfill_missing_season_stats(org_id_str: str) -> int:
                         SELECT player_id, season_id, game_id FROM bowl_spells
                         UNION
                         SELECT player_id, season_id, game_id FROM field_stats
+                        UNION
+                        SELECT player_id, season_id, game_id FROM appearances
                     ) all_games
                     GROUP BY player_id, season_id
                 )
@@ -834,7 +846,7 @@ async def sync_grassroots_game_level_data(
         "gr_teams_scanned": 0, "gr_matches_seen": 0,
         "gr_games_new": 0, "gr_games_skipped_done": 0, "gr_games_skipped_no_data": 0,
         "gr_batting": 0, "gr_bowling": 0, "gr_fielding": 0,
-        "gr_partnerships": 0, "gr_fow": 0,
+        "gr_partnerships": 0, "gr_fow": 0, "gr_appearances": 0,
     }
     org_uuid = _parse_uuid(org_id_str)
     if not org_uuid:
@@ -962,9 +974,11 @@ async def sync_grassroots_game_level_data(
         # Open a fresh per-game session.
         try:
             async with async_session_maker() as session:
-                # Skip if game already has batting rows
+                # Skip if game already processed (Game row exists). Pre-v6.2.5 we
+                # checked batting_innings only, which re-processed forfeits/abandons
+                # every sync — now those save with appearances but no stats rows.
                 existing = await session.execute(
-                    text("SELECT 1 FROM batting_innings WHERE game_id=:gid LIMIT 1"),
+                    text("SELECT 1 FROM games WHERE id=:gid LIMIT 1"),
                     {"gid": match_id_str},
                 )
                 if existing.scalar():
@@ -1056,7 +1070,41 @@ async def sync_grassroots_game_level_data(
                     logger.warning(f"GR-sync: game flush failed for {match_id_str}: {e}")
                     continue  # session auto-rollback on context exit
 
-                bat_count = bowl_count = field_count = part_count = fow_count = 0
+                bat_count = bowl_count = field_count = part_count = fow_count = appear_count = 0
+
+                # Roster: insert one GameAppearance per club player listed in the
+                # team-sheet. Covers selected players who didn't bat/bowl/take a
+                # dismissal (forfeits, washouts, late-order batters who didn't
+                # get a hit, fielders with no chances). Matches play.cricket's
+                # match-count which is based on selection, not stat lines.
+                if our_team:
+                    seen_appear_pids: set[uuid.UUID] = set()
+                    our_team_name = our_team.get("displayName") or our_team.get("name") or ""
+                    for roster_p in (our_team.get("players") or []):
+                        rpid_str = roster_p.get("participantId")
+                        if not rpid_str:
+                            continue
+                        try:
+                            rpid = uuid.UUID(rpid_str)
+                        except ValueError:
+                            continue
+                        if rpid not in known_player_ids:
+                            rpid = merged_away.get(rpid)
+                            if rpid is None or rpid not in known_player_ids:
+                                continue
+                        if rpid in seen_appear_pids:
+                            continue  # multi-team appearance (shouldn't happen for one team)
+                        seen_appear_pids.add(rpid)
+                        roles = roster_p.get("roles") or []
+                        is_captain = any((r or "").lower() == "captain" for r in roles)
+                        is_wk = any("wicket" in (r or "").lower() for r in roles)
+                        session.add(GameAppearance(
+                            game_id=match_uuid, player_id=rpid,
+                            team_name=our_team_name,
+                            is_captain=is_captain, is_wicket_keeper=is_wk,
+                        ))
+                        appear_count += 1
+
                 for inn in (scorecard.get("innings") or []):
                     # CA's GR API returns `inningsNumber: 1` for BOTH innings
                     # (data bug their end). `inningsOrder` is the field that
@@ -1252,7 +1300,7 @@ async def sync_grassroots_game_level_data(
                         ))
                         part_count += 1
 
-                if bat_count == 0 and bowl_count == 0:
+                if bat_count == 0 and bowl_count == 0 and appear_count == 0:
                     stats["gr_games_skipped_no_data"] += 1
                     continue  # session auto-rollback
 
@@ -1263,6 +1311,7 @@ async def sync_grassroots_game_level_data(
                 stats["gr_fielding"] += field_count
                 stats["gr_partnerships"] += part_count
                 stats["gr_fow"] += fow_count
+                stats["gr_appearances"] += appear_count
         except Exception as e:
             logger.error(f"GR-sync: per-game exception for {match_id_str}: {e}")
             # session has already auto-closed; just move on
