@@ -139,9 +139,9 @@ export default function AdminSync() {
   }
 
   const handleHardRefresh = async () => {
-    if (!orgId || hardRefreshing || syncing) return
+    if (!orgId || hardRefreshing || syncing || backfilling) return
     const ok = window.confirm(
-      'Hard refresh re-pulls every historical game for this club and tops up any missing player data. ' +
+      'Full Rebuild wipes every stored game for this club and re-pulls all history from Cricket Australia. ' +
       'This may take an hour or longer for clubs with a lot of history. Continue?'
     )
     if (!ok) return
@@ -151,13 +151,13 @@ export default function AdminSync() {
       const res = await api.adminHardRefreshOrg()
       if (res.status === 'already_running') {
         setHardRefreshing(false)
-        alert('A hard refresh is already running for this club. Wait for it to complete.')
+        alert('A full rebuild is already running for this club. Wait for it to complete.')
         return
       }
       setPolling(true)
     } catch (e) {
       setHardRefreshing(false)
-      alert(`Failed to start hard refresh: ${e.message}`)
+      alert(`Failed to start full rebuild: ${e.message}`)
     }
   }
 
@@ -168,12 +168,14 @@ export default function AdminSync() {
 
         {/* Trigger card */}
         <div className="pb-card p-5 mb-8">
-          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">Full Sync</p>
-          <div className="flex flex-wrap gap-3">
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">Sync Actions</p>
+
+          {/* Update with latest data */}
+          <div className="flex items-start gap-4 py-3">
             <button
               onClick={handleSync}
-              disabled={syncing || hardRefreshing || !orgId}
-              className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-pb-bg"
+              disabled={syncing || hardRefreshing || backfilling || !orgId}
+              className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
               {syncing ? (
@@ -183,39 +185,69 @@ export default function AdminSync() {
                 </>
               ) : 'SYNC NOW'}
             </button>
+            <div className="flex-1">
+              <p className="text-pb-text text-sm font-medium mb-0.5">Pull latest games &amp; stats</p>
+              <p className="text-pb-faint text-xs leading-relaxed">
+                Adds new games and updates existing players from Cricket Australia. Safe to run anytime —
+                this is the normal weekly sync.
+              </p>
+            </div>
+          </div>
+
+          {/* Fix missing totals */}
+          <div className="flex items-start gap-4 py-3 pb-hairline-t">
+            <button
+              onClick={handleBackfillAggregates}
+              disabled={backfilling || syncing || hardRefreshing || !orgId}
+              className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-text"
+              style={{ borderColor: 'var(--pb-hairline)', background: 'transparent' }}
+            >
+              {backfilling ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-pb-text/30 border-t-pb-text rounded-full animate-spin" />
+                  FIXING…
+                </>
+              ) : 'FIX MISSING TOTALS'}
+            </button>
+            <div className="flex-1">
+              <p className="text-pb-text text-sm font-medium mb-0.5">Repair players showing 0 matches</p>
+              <p className="text-pb-faint text-xs leading-relaxed">
+                Recomputes career totals from scorecards already in BetterStats. Use when a player&apos;s
+                headline reads 0 despite having visible innings. No data pulled from Cricket Australia —
+                runs in seconds.
+              </p>
+            </div>
+          </div>
+
+          {/* Full rebuild */}
+          <div className="flex items-start gap-4 py-3 pb-hairline-t">
             <button
               onClick={handleHardRefresh}
-              disabled={hardRefreshing || syncing || !orgId}
-              className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-pb-amber"
+              disabled={hardRefreshing || syncing || backfilling || !orgId}
+              className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-amber"
               style={{ borderColor: 'var(--pb-amber)', background: 'transparent' }}
-              title="Re-pulls every historical game and tops up any missing player data. Takes longer than a normal sync."
             >
               {hardRefreshing ? (
                 <>
                   <span className="w-3 h-3 border-2 border-pb-amber/30 border-t-pb-amber rounded-full animate-spin" />
-                  HARD REFRESHING…
+                  REBUILDING…
                 </>
-              ) : 'HARD REFRESH'}
+              ) : 'FULL REBUILD'}
             </button>
-            <button
-              onClick={handleBackfillAggregates}
-              disabled={backfilling || syncing || hardRefreshing || !orgId}
-              className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-pb-faint"
-              style={{ borderColor: 'var(--pb-hairline)', background: 'transparent' }}
-              title="Synthesise missing player_season_stats rows from per-game scorecard data. Fixes players with scorecards but a 0-matches headline. Fast — no upstream API calls."
-            >
-              {backfilling ? (
-                <>
-                  <span className="w-3 h-3 border-2 border-pb-faint/30 border-t-pb-faint rounded-full animate-spin" />
-                  BACKFILLING…
-                </>
-              ) : 'BACKFILL AGGREGATES'}
-            </button>
+            <div className="flex-1">
+              <p className="text-pb-text text-sm font-medium mb-0.5">Wipe and re-pull everything</p>
+              <p className="text-pb-faint text-xs leading-relaxed">
+                Deletes every stored game and re-pulls all history from Cricket Australia. Use after a
+                sync-logic change or if data looks broadly wrong. Slow — an hour or more for a club with
+                a lot of history.
+              </p>
+            </div>
           </div>
+
           {(syncing || hardRefreshing) && (
-            <p className="font-mono text-[10px] text-pb-faint mt-3">
+            <p className="font-mono text-[10px] text-pb-faint mt-3 pt-3 pb-hairline-t">
               Running in background — this page will update automatically.
-              A hard refresh can take an hour or longer.
+              A full rebuild can take an hour or longer.
             </p>
           )}
           {settings && (
