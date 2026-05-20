@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cricket Template Renderer</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Archivo+Black&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+
+  <style>
+    /* No chrome — just the artboard.
+       The body matches the slide size so puppeteer's element screenshot is
+       pixel-exact. No scrollbars, no margins. */
+    html, body { margin: 0; padding: 0; background: #000; width: 1080px; height: 1080px; overflow: hidden; }
+    #render-target { width: 1080px; height: 1080px; }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="render-target"></div>
+
+  <script type="text/babel" src="data.jsx"></script>
+  <script type="text/babel" src="fx.jsx"></script>
+  <script type="text/babel" src="templates-a.jsx"></script>
+  <script type="text/babel" src="templates-b.jsx"></script>
+  <script type="text/babel" src="templates-c.jsx"></script>
+  <script type="text/babel" src="companions.jsx"></script>
+
+  <script type="text/babel">
+    // Reads config injected by Puppeteer (or by URL query if you prefer).
+    //
+    //   window.__RENDER_CONFIG = {
+    //     template: "T1_HeroList" | "C1_CaptainAnnounce" | ...,
+    //     palette:  "crimson" | "midnight" | "forest" | "cobalt" | "rust" | "graphite",
+    //     team:     { name, short, monogram, logo },
+    //     opponent: { name, short, monogram, logo },
+    //     match:    { competition, round, venue, date, time, season },
+    //     players:  Player[],
+    //     // companion-specific (only the one matching your template is needed):
+    //     toss?:    { winner: "TEAM"|"OPPONENT", decision: "BAT"|"BOWL" },
+    //     motm?:    { player, stats: [{label,value}], summary },
+    //     result?:  { winner: "TEAM"|"OPPONENT"|"TIE", margin, teamScore, oppScore, motmLast },
+    //   };
+
+    function renderFromConfig() {
+      const cfg = window.__RENDER_CONFIG || {
+        template: "T1_HeroList",
+        palette: "crimson",
+        team: { name: window.SAMPLE_TEAM.name, short: "AC", monogram: "AC", logo: "assets/team-logo.webp" },
+        opponent: { name: window.SAMPLE_OPPONENT.name, short: "NCC", monogram: "NCC", logo: "assets/opponent-logo.png" },
+        match: window.SAMPLE_MATCH,
+        players: window.SAMPLE_PLAYERS,
+        toss: window.SAMPLE_TOSS,
+        motm: window.SAMPLE_MOTM,
+        result: window.SAMPLE_RESULT,
+      };
+
+      const palette = window.PALETTES[cfg.palette] || window.PALETTES.midnight;
+      const common = {
+        team: cfg.team, opponent: cfg.opponent, match: cfg.match,
+        players: cfg.players, palette,
+      };
+
+      const Comp = window[cfg.template];
+      if (!Comp) {
+        document.body.innerHTML = `<pre style="color:red;padding:30px;font:14px monospace">Unknown template: ${cfg.template}</pre>`;
+        window.__renderReady = true;
+        return;
+      }
+
+      let element;
+      if (cfg.template === "C1_CaptainAnnounce") {
+        element = <Comp player={featuredOf(cfg.players)} {...common} />;
+      } else if (cfg.template === "C2_TossWon") {
+        element = <Comp toss={cfg.toss} {...common} />;
+      } else if (cfg.template === "C3_ManOfMatch") {
+        element = <Comp motm={cfg.motm} {...common} />;
+      } else if (cfg.template === "C4_FinalScore") {
+        element = <Comp result={cfg.result} {...common} />;
+      } else {
+        element = <Comp {...common} />;
+      }
+
+      ReactDOM.createRoot(document.getElementById("render-target")).render(element);
+
+      // Tell Puppeteer when fonts + images are loaded.
+      Promise.all([
+        document.fonts.ready,
+        ...Array.from(document.images).map((img) =>
+          img.complete ? Promise.resolve() : new Promise((res) => { img.onload = img.onerror = res; })
+        ),
+      ]).then(() => {
+        // Two RAFs to let final layout flush
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          window.__renderReady = true;
+        }));
+      });
+    }
+
+    // Babel scripts run async; wait for all globals to be defined.
+    function waitForGlobals() {
+      if (window.T1_HeroList && window.C1_CaptainAnnounce && window.PALETTES && window.SAMPLE_TEAM) {
+        renderFromConfig();
+      } else {
+        setTimeout(waitForGlobals, 50);
+      }
+    }
+    waitForGlobals();
+  </script>
+</body>
+</html>
