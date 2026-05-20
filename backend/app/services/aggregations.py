@@ -449,20 +449,29 @@ async def get_player_team_breakdown(
     player_id: str,
     org_id: Optional[str] = None,
     season_id: Optional[str] = None,
-) -> list[dict]:
+) -> dict:
     """Per-grade match breakdown for a single player.
 
-    Unions batting/bowling/fielding appearances so games where the player only
-    fielded still count. Result rows are grouped by the canonical (merge-aware)
-    grade name and include matches, seasons, won/lost/drawn counts, and win_pct.
+    Returns ``{rows, unattributed, total_aggregate_matches}``. Each row is a
+    canonical (merge-aware) grade with matches, seasons, won/lost/drawn,
+    win_pct, and a ``scorecard_matches`` count for the per-game source.
+
+    ``player_season_stats.matches`` is the CA aggregate count and is the source
+    of truth for "how many games did this player play". Per-game scorecard
+    coverage can be incomplete, so we attribute any per-season gap to a grade
+    when only one grade has per-game appearances that season (the unambiguous
+    case). Truly ambiguous seasons accumulate into ``unattributed``.
     """
-    season_clause = ""
+    season_clause_gr = ""
+    season_clause_pss = ""
     params: dict = {"pid": player_id, "org_id": org_id}
     if season_id:
-        season_clause = " AND gr.season_id = CAST(:sid AS UUID)"
+        season_clause_gr = " AND gr.season_id = CAST(:sid AS UUID)"
+        season_clause_pss = " AND pss.season_id = CAST(:sid AS UUID)"
         params["sid"] = season_id
 
-    result = await session.execute(
+    # Per-grade summary: roll up appearances to the canonical grade name.
+    summary = await session.execute(
         text(f"""
             WITH appearances AS (
                 SELECT bi.player_id, bi.game_id FROM batting_innings bi
@@ -499,28 +508,207 @@ async def get_player_team_breakdown(
                   AND gr2.display_name_override IS NOT NULL
                 LIMIT 1
             ) gdn ON TRUE
-            WHERE TRUE {season_clause}
+            WHERE TRUE {season_clause_gr}
             GROUP BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
             ORDER BY matches DESC, grade_name
         """),
         params,
     )
-    rows = []
-    for r in result.mappings():
+    rows: list[dict] = []
+    rows_by_name: dict[str, dict] = {}
+    for r in summary.mappings():
         d = dict(r)
         matches = int(d.get("matches") or 0)
         won = int(d.get("won") or 0)
         lost = int(d.get("lost") or 0)
         drawn = int(d.get("drawn") or 0)
-        decided = won + lost + drawn
-        d["win_pct"] = round(won / decided * 100, 1) if decided > 0 else None
-        d["matches"] = matches
-        d["seasons"] = int(d.get("seasons") or 0)
-        d["won"] = won
-        d["lost"] = lost
-        d["drawn"] = drawn
-        rows.append(d)
-    return rows
+        row = {
+            "grade_name": d.get("grade_name"),
+            "scorecard_matches": matches,
+            "matches": matches,
+            "seasons": int(d.get("seasons") or 0),
+            "won": won,
+            "lost": lost,
+            "drawn": drawn,
+            "win_pct": None,
+            "attributed_unknown": 0,
+        }
+        rows.append(row)
+        rows_by_name[row["grade_name"]] = row
+
+    # Per-(season, grade) per-game counts — needed for the heuristic fallback
+    # used when player_season_grade_stats hasn't been populated yet.
+    per_season_grade = await session.execute(
+        text(f"""
+            WITH appearances AS (
+                SELECT bi.game_id FROM batting_innings bi WHERE bi.player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT bs.game_id FROM bowling_spells bs WHERE bs.player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT fs.game_id FROM fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
+            )
+            SELECT
+                gr.season_id AS season_id,
+                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                COUNT(DISTINCT ap.game_id) AS games
+            FROM appearances ap
+            JOIN games g  ON g.id = ap.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            LEFT JOIN LATERAL (
+                SELECT canonical_name FROM grade_merge_logs gml
+                WHERE gml.org_id = CAST(:org_id AS UUID)
+                  AND gml.alias_name = gr.name
+                  AND gml.undone_at IS NULL
+                LIMIT 1
+            ) am ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT gr2.display_name_override FROM grades gr2
+                JOIN seasons s2 ON s2.id = gr2.season_id
+                WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                  AND gr2.display_name_override IS NOT NULL
+                LIMIT 1
+            ) gdn ON TRUE
+            WHERE TRUE {season_clause_gr}
+            GROUP BY gr.season_id, COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
+        """),
+        params,
+    )
+    season_grade_games: dict = {}  # season_id -> {grade_name: count}
+    for r in per_season_grade.mappings():
+        sid = str(r["season_id"])
+        season_grade_games.setdefault(sid, {})[r["grade_name"]] = int(r["games"] or 0)
+
+    # Per-season CA aggregate match counts (kept as a sanity reference and
+    # for the heuristic fallback below).
+    season_totals = await session.execute(
+        text(f"""
+            SELECT pss.season_id, COALESCE(pss.matches, 0) AS matches
+            FROM player_season_stats pss
+            WHERE pss.player_id = CAST(:pid AS UUID)
+              {season_clause_pss}
+        """),
+        params,
+    )
+    season_aggregate = {str(r["season_id"]): int(r["matches"] or 0) for r in season_totals.mappings()}
+
+    # Exact per-(season,grade) aggregate from CA (when synced). Source of truth.
+    per_grade_agg = await session.execute(
+        text(f"""
+            SELECT
+                psgs.season_id,
+                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                COALESCE(psgs.matches, 0) AS matches
+            FROM player_season_grade_stats psgs
+            JOIN grades gr ON gr.id = psgs.grade_id
+            LEFT JOIN LATERAL (
+                SELECT canonical_name FROM grade_merge_logs gml
+                WHERE gml.org_id = CAST(:org_id AS UUID)
+                  AND gml.alias_name = gr.name
+                  AND gml.undone_at IS NULL
+                LIMIT 1
+            ) am ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT gr2.display_name_override FROM grades gr2
+                JOIN seasons s2 ON s2.id = gr2.season_id
+                WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                  AND gr2.display_name_override IS NOT NULL
+                LIMIT 1
+            ) gdn ON TRUE
+            WHERE psgs.player_id = CAST(:pid AS UUID)
+              {(" AND psgs.season_id = CAST(:sid AS UUID)") if season_id else ""}
+        """),
+        params,
+    )
+    # Roll up per-(season, canonical-grade-name): sum because merged grades
+    # could resolve to the same canonical name within a season.
+    exact_per_season_grade: dict = {}  # season_id -> {grade_name: matches}
+    exact_per_grade: dict = {}         # grade_name -> total matches
+    for r in per_grade_agg.mappings():
+        sid = str(r["season_id"])
+        gn = r["grade_name"]
+        m = int(r["matches"] or 0)
+        exact_per_season_grade.setdefault(sid, {})[gn] = exact_per_season_grade.get(sid, {}).get(gn, 0) + m
+        exact_per_grade[gn] = exact_per_grade.get(gn, 0) + m
+
+    # Track which seasons have exact per-grade data so we don't double-count
+    # them with the legacy heuristic.
+    seasons_with_exact = set(exact_per_season_grade.keys())
+
+    unattributed = 0
+
+    # 1) Apply exact per-grade matches where available.
+    for grade_name, agg_matches in exact_per_grade.items():
+        row = rows_by_name.get(grade_name)
+        if row is None:
+            row = {
+                "grade_name": grade_name,
+                "scorecard_matches": 0,
+                "matches": 0,
+                "seasons": 0,
+                "won": 0,
+                "lost": 0,
+                "drawn": 0,
+                "win_pct": None,
+                "attributed_unknown": 0,
+            }
+            rows.append(row)
+            rows_by_name[grade_name] = row
+        extra = max(0, agg_matches - (row.get("scorecard_matches") or 0))
+        if extra > 0:
+            row["matches"] = (row.get("scorecard_matches") or 0) + extra
+            row["attributed_unknown"] = extra
+        # Update seasons count if exact data covers seasons the per-game data missed
+        seasons_seen = {sid for sid, gn_map in exact_per_season_grade.items() if grade_name in gn_map}
+        row["seasons"] = max(row.get("seasons") or 0, len(seasons_seen))
+
+    # 2) Heuristic fallback for seasons WITHOUT per-grade aggregate yet.
+    grade_attributed_fallback: dict = {}
+    for sid, agg in season_aggregate.items():
+        if sid in seasons_with_exact:
+            continue
+        per_game = sum(season_grade_games.get(sid, {}).values())
+        gap = agg - per_game
+        if gap <= 0:
+            continue
+        grades_with_data = list(season_grade_games.get(sid, {}).keys())
+        if len(grades_with_data) == 1:
+            grade_attributed_fallback[grades_with_data[0]] = grade_attributed_fallback.get(grades_with_data[0], 0) + gap
+        else:
+            unattributed += gap
+
+    for grade_name, extra in grade_attributed_fallback.items():
+        row = rows_by_name.get(grade_name)
+        if row is None:
+            row = {
+                "grade_name": grade_name,
+                "scorecard_matches": 0,
+                "matches": extra,
+                "attributed_unknown": extra,
+                "seasons": 0,
+                "won": 0,
+                "lost": 0,
+                "drawn": 0,
+                "win_pct": None,
+            }
+            rows.append(row)
+            rows_by_name[grade_name] = row
+        else:
+            row["matches"] = (row.get("matches") or 0) + extra
+            row["attributed_unknown"] = (row.get("attributed_unknown") or 0) + extra
+
+    rows.sort(key=lambda r: (-(r.get("matches") or 0), r.get("grade_name") or ""))
+    for row in rows:
+        decided = row["won"] + row["lost"] + row["drawn"]
+        row["win_pct"] = round(row["won"] / decided * 100, 1) if decided > 0 else None
+
+    total_aggregate = sum(season_aggregate.values())
+    return {
+        "rows": rows,
+        "unattributed": unattributed,
+        "total_aggregate_matches": total_aggregate,
+    }
 
 
 async def get_season_by_season(session: AsyncSession, player_id: str) -> list[dict]:

@@ -711,7 +711,7 @@ const ANALYSIS_SUBTABS = [
   { key: 'team',     label: 'TEAM' },
 ]
 
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, battingInnings = [], bowlingSpells = [], teamBreakdown = [], seasonLabel = null, careerMatches = null }) {
+function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null }) {
   const [subTab, setSubTab] = useState('batting')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -1002,11 +1002,11 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
       )}
 
       {subTab === 'team' && (() => {
-        const gradeMatchSum = teamBreakdown.reduce((acc, r) => acc + (r.matches || 0), 0)
-        const gap = careerMatches != null ? Math.max(0, careerMatches - gradeMatchSum) : 0
+        const rows = teamBreakdown.rows || []
+        const unattributed = teamBreakdown.unattributed || 0
         return (
           <div className="space-y-6">
-            {teamBreakdown.length > 0 ? (
+            {rows.length > 0 ? (
               <Card
                 title={`MATCHES BY GRADE${seasonLabel ? ` · ${seasonLabel.toUpperCase()}` : ''}`}
                 pad="p-0"
@@ -1029,10 +1029,14 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                       </tr>
                     </thead>
                     <tbody>
-                      {teamBreakdown.map((r, i) => (
+                      {rows.map((r, i) => (
                         <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                           <td className="py-2.5 pl-5 text-pb-text">{r.grade_name}</td>
-                          <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{r.matches}</td>
+                          <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}
+                              title={r.attributed_unknown > 0 ? `${r.scorecard_matches} with scorecard + ${r.attributed_unknown} from CA aggregate (no scorecard yet)` : null}>
+                            {r.matches}
+                            {r.attributed_unknown > 0 && <span className="text-pb-faint font-normal"> *</span>}
+                          </td>
                           <td className="py-2.5 font-mono text-pb-dim text-right">{r.seasons}</td>
                           <td className="py-2.5 font-mono text-pb-text text-right">{r.won}</td>
                           <td className="py-2.5 font-mono text-pb-dim text-right">{r.lost}</td>
@@ -1042,10 +1046,11 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                           </td>
                         </tr>
                       ))}
-                      {gap > 0 && (
-                        <tr className="pb-hairline-t hover:bg-pb-surface2" title="Games CA's season aggregate counts but where we don't have a scorecard, so they can't be attributed to a grade.">
+                      {unattributed > 0 && (
+                        <tr className="pb-hairline-t hover:bg-pb-surface2"
+                            title="Games CA's season aggregate counts but where we have no scorecard AND the player played in multiple grades that season, so we can't safely attribute them.">
                           <td className="py-2.5 pl-5 text-pb-faint italic">No scorecard data</td>
-                          <td className="py-2.5 font-mono text-right pb-num text-pb-dim">{gap}</td>
+                          <td className="py-2.5 font-mono text-right pb-num text-pb-dim">{unattributed}</td>
                           <td className="py-2.5 text-right text-pb-faintest">—</td>
                           <td className="py-2.5 text-right text-pb-faintest">—</td>
                           <td className="py-2.5 text-right text-pb-faintest">—</td>
@@ -1053,15 +1058,15 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                           <td className="py-2.5 pr-5 text-right text-pb-faintest">—</td>
                         </tr>
                       )}
-                      {(teamBreakdown.length > 1 || gap > 0) && (() => {
-                        const totals = teamBreakdown.reduce((acc, r) => {
+                      {(rows.length > 1 || unattributed > 0) && (() => {
+                        const totals = rows.reduce((acc, r) => {
                           acc.matches += r.matches || 0
                           acc.won += r.won || 0
                           acc.lost += r.lost || 0
                           acc.drawn += r.drawn || 0
                           return acc
                         }, { matches: 0, won: 0, lost: 0, drawn: 0 })
-                        totals.matches += gap
+                        totals.matches += unattributed
                         const decided = totals.won + totals.lost + totals.drawn
                         const winPct = decided > 0 ? (totals.won / decided * 100) : null
                         return (
@@ -1081,9 +1086,10 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                     </tbody>
                   </table>
                 </div>
-                {gap > 0 && (
+                {(rows.some(r => r.attributed_unknown > 0) || unattributed > 0) && (
                   <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pb-4 pt-2">
-                    {gap.toLocaleString()} {gap === 1 ? 'match is' : 'matches are'} counted by the season aggregate but have no per-game scorecard, so we can't attribute {gap === 1 ? 'it' : 'them'} to a grade.
+                    * = matches counted by CA&apos;s season aggregate but with no scorecard captured yet; attributed to a grade only when the player played in a single grade that season.
+                    {unattributed > 0 && ` ${unattributed.toLocaleString()} ${unattributed === 1 ? 'match' : 'matches'} couldn't be attributed (mixed-grade season).`}
                   </p>
                 )}
               </Card>
@@ -1439,7 +1445,7 @@ export default function PlayerProfile() {
   const [byGrade, setByGrade] = useState([])
   const [byPosition, setByPosition] = useState([])
   const [bowlingByGrade, setBowlingByGrade] = useState([])
-  const [teamBreakdown, setTeamBreakdown] = useState([])
+  const [teamBreakdown, setTeamBreakdown] = useState({ rows: [], unattributed: 0, total_aggregate_matches: 0 })
   const [tab, setTab] = useState('batting')
 
   useClubTheme(org)
@@ -1506,8 +1512,8 @@ export default function PlayerProfile() {
   useEffect(() => {
     if (!playerId || !data?.player) return
     api.getPlayerTeamBreakdown(playerId, { seasonId })
-      .then(setTeamBreakdown)
-      .catch(() => setTeamBreakdown([]))
+      .then(res => setTeamBreakdown(res && res.rows ? res : { rows: [], unattributed: 0, total_aggregate_matches: 0 }))
+      .catch(() => setTeamBreakdown({ rows: [], unattributed: 0, total_aggregate_matches: 0 }))
   }, [playerId, data?.player, seasonId])
 
   if (loading) return <PbSpinner message="Loading player data…" />
@@ -1724,7 +1730,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} careerMatches={batting?.games ?? bowling?.games ?? null} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
       </main>

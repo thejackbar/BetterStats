@@ -89,6 +89,31 @@ async def lifespan(app: FastAPI):
             "ON grade_merge_logs(org_id, alias_name) WHERE undone_at IS NULL"
         ))
         await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS player_season_grade_stats (
+                id SERIAL PRIMARY KEY,
+                player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                grade_id  UUID NOT NULL REFERENCES grades(id)  ON DELETE CASCADE,
+                matches          INTEGER DEFAULT 0,
+                batting_innings  INTEGER DEFAULT 0,
+                runs             INTEGER DEFAULT 0,
+                not_outs         INTEGER DEFAULT 0,
+                high_score       INTEGER,
+                bowling_innings  INTEGER DEFAULT 0,
+                wickets          INTEGER DEFAULT 0,
+                runs_conceded    INTEGER DEFAULT 0,
+                catches          INTEGER DEFAULT 0,
+                run_outs         INTEGER DEFAULT 0,
+                stumpings        INTEGER DEFAULT 0,
+                synced_at        TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (player_id, season_id, grade_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_psgs_player_season "
+            "ON player_season_grade_stats(player_id, season_id)"
+        ))
+        await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS player_achievements (
                 id SERIAL PRIMARY KEY,
                 org_id UUID NOT NULL,
