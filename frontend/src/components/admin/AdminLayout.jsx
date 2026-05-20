@@ -20,6 +20,7 @@ const NAV_SECTIONS = [
       { to: '/admin/awards', label: 'Awards' },
       { to: '/admin/award-definitions', label: 'Award Types' },
       { to: '/admin/sponsors', label: 'Sponsors' },
+      { to: '/admin/social-post', label: 'Social Posts' },
     ],
   },
   {

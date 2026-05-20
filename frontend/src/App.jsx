@@ -58,6 +58,7 @@ import Onboard from './pages/Onboard'
 import Navbar from './components/Navbar'
 import SponsorFooter from './components/SponsorFooter'
 import AdminSponsors from './pages/admin/AdminSponsors'
+import AdminSocialPost from './pages/admin/AdminSocialPost'
 
 export default function App() {
   return (
@@ -91,6 +92,7 @@ export default function App() {
         <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
         <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
+        <Route path="/admin/social-post" element={<ProtectedRoute><AdminSocialPost /></ProtectedRoute>} />
         <Route path="/admin/yearbook" element={<ProtectedRoute><AdminYearbook /></ProtectedRoute>} />
         <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute><AdminYearbookDetail /></ProtectedRoute>} />
         <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />

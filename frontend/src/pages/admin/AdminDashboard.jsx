@@ -21,6 +21,7 @@ export default function AdminDashboard() {
     { to: '/admin/merge', label: 'Merge Players', desc: 'Fix duplicate player entries' },
     { to: '/admin/sync', label: 'Data Sync', desc: 'Trigger sync & view sync log' },
     { to: '/admin/games', label: 'View Matches', desc: 'Browse match results' },
+    { to: '/admin/social-post', label: 'Social Posts', desc: 'Design & export match day graphics' },
     { to: '/admin/settings', label: 'Club Settings', desc: 'Name, colours, contact' },
   ]
 
