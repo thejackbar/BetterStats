@@ -58,6 +58,12 @@ export const api = {
   getPlayerByPosition: (playerId) => request(`/players/${playerId}/by-position`),
   getPlayerByGrade: (playerId) => request(`/players/${playerId}/by-grade`),
   getPlayerBowlingByGrade: (playerId) => request(`/players/${playerId}/bowling-by-grade`),
+  getPlayerTeamBreakdown: (playerId, { seasonId } = {}) => {
+    const params = new URLSearchParams()
+    if (seasonId) params.set('season_id', seasonId)
+    const qs = params.toString()
+    return request(`/players/${playerId}/team-breakdown${qs ? `?${qs}` : ''}`)
+  },
   getPlayerSeasons: (playerId) => request(`/players/${playerId}/seasons`),
   getPlayerMilestones: (playerId) => request(`/players/${playerId}/milestones`),
   getPlayerPartnerships: (playerId) => request(`/players/${playerId}/partnerships`),
