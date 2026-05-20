@@ -55,6 +55,9 @@ async def list_players(
             "display_name_override": p.display_name_override,
             "playhq_id": p.playhq_id,
             "photo_url": p.photo_url,
+            "gender": p.gender,
+            "is_player": p.is_player,
+            "player_role": p.player_role,
         }
         for p in players
     ]
@@ -63,6 +66,9 @@ async def list_players(
 class PlayerPatch(BaseModel):
     display_name_override: Optional[str] = None
     playhq_id: Optional[str] = None
+    gender: Optional[str] = None
+    is_player: Optional[bool] = None
+    player_role: Optional[str] = None
 
 
 @router.patch("/players/{player_id}")
@@ -93,12 +99,21 @@ async def patch_player(
             if conflict.scalar_one_or_none():
                 raise HTTPException(status_code=409, detail="Another player already has this PlayHQ ID")
         player.playhq_id = new_phq
+    if data.gender is not None:
+        player.gender = data.gender.strip() or None
+    if data.is_player is not None:
+        player.is_player = data.is_player
+    if data.player_role is not None:
+        player.player_role = data.player_role.strip() or None
     await db.commit()
     return {
         "id": str(player.id),
         "display_name": player.display_name,
         "display_name_override": player.display_name_override,
         "playhq_id": player.playhq_id,
+        "gender": player.gender,
+        "is_player": player.is_player,
+        "player_role": player.player_role,
     }
 
 

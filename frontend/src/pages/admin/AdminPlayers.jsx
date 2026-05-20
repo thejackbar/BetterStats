@@ -1,20 +1,278 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { nameMatchesSearch, formatPlayerName } from '../../lib/nameFormat'
 
+// ---------------------------------------------------------------------------
+// EditPlayerModal
+// ---------------------------------------------------------------------------
+
+function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
+  const [form, setForm] = useState({
+    display_name_override: player.display_name_override || '',
+    gender: player.gender || '',
+    is_player: player.is_player !== false, // default true
+    player_role: player.player_role || '',
+    playhq_id: player.playhq_id || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [msgError, setMsgError] = useState(false)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [photoUrl, setPhotoUrl] = useState(player.photo_url || null)
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const setSuccess = (text) => {
+    setMsgError(false)
+    setMsg(text)
+    setTimeout(() => setMsg(''), 2500)
+  }
+
+  const setError = (text) => {
+    setMsgError(true)
+    setMsg(text)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setMsg('')
+    try {
+      const payload = {
+        display_name_override: form.display_name_override,
+        gender: form.gender,
+        is_player: form.is_player,
+        player_role: form.player_role,
+        playhq_id: form.playhq_id,
+      }
+      const updated = await api.adminPatchPlayer(player.id, payload)
+      onSaved({ ...player, ...updated, photo_url: photoUrl })
+      setSuccess('Saved')
+    } catch (err) {
+      setError(err.message || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handlePhotoUpload = async (file) => {
+    if (!file) return
+    setUploadingPhoto(true)
+    setMsg('')
+    try {
+      const result = await api.adminUploadPlayerPhoto(player.id, file)
+      setPhotoUrl(result.photo_url)
+      onSaved({ ...player, photo_url: result.photo_url })
+      setSuccess('Photo saved')
+    } catch (err) {
+      setError(err.message || 'Upload failed')
+    } finally {
+      setUploadingPhoto(false)
+    }
+  }
+
+  const handlePhotoDelete = async () => {
+    setUploadingPhoto(true)
+    setMsg('')
+    try {
+      await api.adminDeletePlayerPhoto(player.id)
+      setPhotoUrl(null)
+      onSaved({ ...player, photo_url: null })
+      setSuccess('Photo removed')
+    } catch (err) {
+      setError(err.message || 'Delete failed')
+    } finally {
+      setUploadingPhoto(false)
+    }
+  }
+
+  const displayedName = player.display_name_override || formatPlayerName(player.name, nameFormat)
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60"
+      style={{ backdropFilter: 'blur(2px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="bg-pb-surface pb-card max-w-md w-full mx-4 mt-16 mb-8 overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b pb-hairline-b">
+          <div>
+            <p className="text-pb-text text-sm font-semibold">{displayedName}</p>
+            <p className="font-mono text-[10px] text-pb-faintest mt-0.5">{player.id}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-pb-faint hover:text-pb-text transition-colors font-mono text-[11px] px-2 py-1"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 space-y-4">
+
+          {/* Display Name */}
+          <div>
+            <label className="font-mono text-[10px] text-pb-faintest block mb-1">Display Name</label>
+            <input
+              type="text"
+              value={form.display_name_override}
+              onChange={e => setForm(f => ({ ...f, display_name_override: e.target.value }))}
+              placeholder="Blank to use synced name"
+              className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+            />
+          </div>
+
+          {/* Gender + Is Player row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Gender</label>
+              <select
+                value={form.gender}
+                onChange={e => setForm(f => ({ ...f, gender: e.target.value }))}
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+              >
+                <option value="">—</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+              </select>
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Type</label>
+              <label className="flex items-center gap-2 cursor-pointer mt-1.5">
+                <input
+                  type="checkbox"
+                  checked={form.is_player}
+                  onChange={e => setForm(f => ({ ...f, is_player: e.target.checked }))}
+                  className="accent-pb-accent"
+                />
+                <span className="font-mono text-[10px] text-pb-text">
+                  {form.is_player ? 'Player' : 'Non-Player (coach/scorer/official)'}
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* Role */}
+          <div>
+            <label className="font-mono text-[10px] text-pb-faintest block mb-1">Role</label>
+            <select
+              value={form.player_role}
+              onChange={e => setForm(f => ({ ...f, player_role: e.target.value }))}
+              className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+            >
+              <option value="">—</option>
+              <option value="Batter">Batter</option>
+              <option value="Bowler">Bowler</option>
+              <option value="Wicketkeeper">Wicketkeeper</option>
+              <option value="All Rounder">All Rounder</option>
+            </select>
+          </div>
+
+          {/* PlayHQ ID */}
+          <div>
+            <label className="font-mono text-[10px] text-pb-faintest block mb-1">PlayHQ ID</label>
+            <input
+              type="text"
+              value={form.playhq_id}
+              onChange={e => setForm(f => ({ ...f, playhq_id: e.target.value }))}
+              placeholder="e.g. a1b2c3d4-e5f6-..."
+              className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none"
+              style={{ '--tw-border-opacity': 1 }}
+            />
+          </div>
+
+          {/* Photo */}
+          <div>
+            <label className="font-mono text-[10px] text-pb-faintest block mb-2">Photo</label>
+            <div className="flex items-center gap-3">
+              {photoUrl && (
+                <img
+                  src={photoUrl}
+                  alt="Player"
+                  className="w-12 h-12 rounded object-cover border pb-hairline"
+                />
+              )}
+              <div className="flex items-center gap-2">
+                <label
+                  className={`font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text cursor-pointer transition-colors ${uploadingPhoto ? 'opacity-50 pointer-events-none' : ''}`}
+                >
+                  {uploadingPhoto ? '…' : (photoUrl ? 'Replace' : 'Upload photo')}
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.webp,.gif"
+                    className="hidden"
+                    onChange={e => handlePhotoUpload(e.target.files?.[0])}
+                  />
+                </label>
+                {photoUrl && (
+                  <button
+                    onClick={handlePhotoDelete}
+                    disabled={uploadingPhoto}
+                    className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faintest hover:text-pb-red transition-colors disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-5 py-3 border-t pb-hairline-t">
+          <div>
+            {msg && (
+              <span
+                className="font-mono text-[10px] tracking-wide"
+                style={{ color: msgError ? 'var(--pb-red)' : 'var(--pb-accent)' }}
+              >
+                {msg.toUpperCase()}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
+            >
+              CLOSE
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
+              style={{ background: 'var(--pb-accent)' }}
+            >
+              {saving ? 'SAVING…' : 'SAVE'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// AdminPlayers
+// ---------------------------------------------------------------------------
+
 export default function AdminPlayers() {
   const [players, setPlayers] = useState([])
   const [filter, setFilter] = useState('')
-  const [editing, setEditing] = useState(null) // { id, field, value }
-  const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [nameFormat, setNameFormat] = useState('last_first')
   const [showCreate, setShowCreate] = useState(false)
   const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', playhq_id: '', display_name_override: '' })
   const [creating, setCreating] = useState(false)
   const [createMsg, setCreateMsg] = useState('')
-  const [uploadingPhotoFor, setUploadingPhotoFor] = useState(null) // player id
+  const [editingPlayer, setEditingPlayer] = useState(null) // player object or null
 
   useEffect(() => {
     api.adminListPlayers().then(setPlayers).catch(() => {})
@@ -33,45 +291,14 @@ export default function AdminPlayers() {
     )
   })
 
-  const startEdit = (p, field) => setEditing({
-    id: p.id,
-    field,
-    value: field === 'display_name' ? (p.display_name_override || '') : (p.playhq_id || ''),
-  })
+  const handleModalSaved = useCallback((updated) => {
+    setPlayers(ps => ps.map(p => p.id === updated.id ? { ...p, ...updated } : p))
+    // If modal is still open, keep it open — user closed it themselves
+  }, [])
 
-  const saveEdit = async () => {
-    if (!editing) return
-    setSaving(true)
-    try {
-      const payload = editing.field === 'display_name'
-        ? { display_name_override: editing.value }
-        : { playhq_id: editing.value }
-      const updated = await api.adminPatchPlayer(editing.id, payload)
-      setPlayers(ps => ps.map(p => p.id === editing.id ? { ...p, ...updated } : p))
-      setEditing(null)
-      setMsg('Saved')
-      setTimeout(() => setMsg(''), 2000)
-    } catch (err) {
-      setMsg(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const clearField = async (playerId, field) => {
-    setSaving(true)
-    try {
-      const payload = field === 'display_name' ? { display_name_override: '' } : { playhq_id: '' }
-      const updated = await api.adminPatchPlayer(playerId, payload)
-      setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, ...updated } : p))
-      setMsg('Cleared')
-      setTimeout(() => setMsg(''), 2000)
-    } catch (err) {
-      setMsg(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
+  const handleModalClose = useCallback(() => {
+    setEditingPlayer(null)
+  }, [])
 
   const submitCreate = async (e) => {
     e.preventDefault()
@@ -97,37 +324,17 @@ export default function AdminPlayers() {
     }
   }
 
-  const handlePhotoUpload = async (playerId, file) => {
-    if (!file) return
-    setUploadingPhotoFor(playerId)
-    try {
-      const result = await api.adminUploadPlayerPhoto(playerId, file)
-      setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, photo_url: result.photo_url } : p))
-      setMsg('Photo saved')
-      setTimeout(() => setMsg(''), 2500)
-    } catch (err) {
-      setMsg(err.message)
-    } finally {
-      setUploadingPhotoFor(null)
-    }
-  }
-
-  const handlePhotoDelete = async (playerId) => {
-    setUploadingPhotoFor(playerId)
-    try {
-      await api.adminDeletePlayerPhoto(playerId)
-      setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, photo_url: null } : p))
-      setMsg('Photo removed')
-      setTimeout(() => setMsg(''), 2500)
-    } catch (err) {
-      setMsg(err.message)
-    } finally {
-      setUploadingPhotoFor(null)
-    }
-  }
-
   return (
     <AdminLayout>
+      {editingPlayer && (
+        <EditPlayerModal
+          player={editingPlayer}
+          onClose={handleModalClose}
+          onSaved={handleModalSaved}
+          nameFormat={nameFormat}
+        />
+      )}
+
       <div className="max-w-4xl">
         <div className="flex items-center justify-between mb-5">
           <h1 className="font-display font-bold text-2xl text-pb-text">Players</h1>
@@ -222,8 +429,7 @@ export default function AdminPlayers() {
         </div>
 
         <p className="font-mono text-[10px] text-pb-faint mb-4">
-          <span style={{ color: 'var(--pb-accent)' }}>Display name</span> adds a suffix without affecting sync.{' '}
-          <span style={{ color: 'var(--pb-accent)' }}>PHQ ID</span> links a player to their PlayHQ UUID for precise game-level matching.
+          Click <span style={{ color: 'var(--pb-accent)' }}>Edit</span> on any player to update their display name, gender, role, PlayHQ ID, or photo.
         </p>
 
         <div className="pb-card overflow-hidden">
@@ -231,133 +437,48 @@ export default function AdminPlayers() {
             <div className="px-5 py-8 text-center text-pb-faint font-mono text-[11px]">No players found</div>
           )}
           {filtered.map((p, i) => (
-            <div key={p.id} className={`px-5 py-3.5 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-              {editing?.id === p.id && editing.field === 'display_name' ? (
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-mono text-[10px] text-pb-faint mb-1">Display name override</p>
-                    <input
-                      autoFocus
-                      type="text"
-                      value={editing.value}
-                      onChange={e => setEditing(ed => ({ ...ed, value: e.target.value }))}
-                      placeholder="Blank to clear"
-                      className="w-full bg-pb-surface2 border rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none"
-                      style={{ borderColor: 'var(--pb-accent)' }}
-                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(null) }}
-                    />
-                  </div>
-                  <button
-                    onClick={saveEdit}
-                    disabled={saving}
-                    className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
-                    style={{ background: 'var(--pb-accent)' }}
-                  >
-                    SAVE
-                  </button>
-                  <button onClick={() => setEditing(null)} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
-                    CANCEL
-                  </button>
-                </div>
-              ) : editing?.id === p.id && editing.field === 'playhq_id' ? (
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-mono text-[10px] text-pb-faint mb-1">PlayHQ ID (UUID)</p>
-                    <input
-                      autoFocus
-                      type="text"
-                      value={editing.value}
-                      onChange={e => setEditing(ed => ({ ...ed, value: e.target.value }))}
-                      placeholder="e.g. a1b2c3d4-e5f6-..."
-                      className="w-full bg-pb-surface2 border rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none"
-                      style={{ borderColor: 'var(--pb-amber)' }}
-                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(null) }}
-                    />
-                  </div>
-                  <button
-                    onClick={saveEdit}
-                    disabled={saving}
-                    className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
-                    style={{ background: 'var(--pb-accent)' }}
-                  >
-                    SAVE
-                  </button>
-                  <button onClick={() => setEditing(null)} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
-                    CANCEL
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-pb-text text-sm font-medium">
-                      {p.display_name_override || fmt(p.name)}
-                      {p.display_name_override && (
-                        <span className="ml-2 font-mono text-[10px] text-pb-faint">(raw: {p.name})</span>
-                      )}
-                    </p>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
-                      <span className="font-mono text-[10px] text-pb-faintest">{p.id}</span>
-                      {p.playhq_id ? (
-                        <span className="font-mono text-[10px] text-pb-amber/70">PHQ: {p.playhq_id}</span>
-                      ) : (
-                        <span className="font-mono text-[10px] text-pb-faintest italic">no PHQ ID</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                    <button
-                      onClick={() => startEdit(p, 'display_name')}
-                      className="font-mono text-[10px] text-pb-faint hover:text-pb-text px-2 py-1 transition-colors"
-                    >
-                      Name
-                    </button>
+            <div key={p.id} className={`px-5 py-3.5 flex items-start justify-between gap-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
+              <div className="min-w-0 flex items-center gap-3">
+                {p.photo_url && (
+                  <img
+                    src={p.photo_url}
+                    alt=""
+                    className="w-8 h-8 rounded-full object-cover shrink-0 border pb-hairline"
+                  />
+                )}
+                <div>
+                  <p className="text-pb-text text-sm font-medium">
+                    {p.display_name_override || fmt(p.name)}
                     {p.display_name_override && (
-                      <button
-                        onClick={() => clearField(p.id, 'display_name')}
-                        className="font-mono text-[10px] text-pb-faintest hover:text-pb-red px-2 py-1 transition-colors"
-                      >
-                        ✕ name
-                      </button>
+                      <span className="ml-2 font-mono text-[10px] text-pb-faint">(raw: {p.name})</span>
                     )}
-                    <button
-                      onClick={() => startEdit(p, 'playhq_id')}
-                      className={`font-mono text-[10px] px-2 py-1 transition-colors ${p.playhq_id ? 'text-pb-amber/70 hover:text-pb-amber' : 'text-pb-faint hover:text-pb-amber'}`}
-                    >
-                      {p.playhq_id ? 'Edit PHQ' : 'Set PHQ'}
-                    </button>
-                    {p.playhq_id && (
-                      <button
-                        onClick={() => clearField(p.id, 'playhq_id')}
-                        className="font-mono text-[10px] text-pb-faintest hover:text-pb-red px-2 py-1 transition-colors"
-                      >
-                        ✕ PHQ
-                      </button>
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
+                    <span className="font-mono text-[10px] text-pb-faintest">{p.id}</span>
+                    {p.playhq_id ? (
+                      <span className="font-mono text-[10px] text-pb-amber/70">PHQ: {p.playhq_id}</span>
+                    ) : (
+                      <span className="font-mono text-[10px] text-pb-faintest italic">no PHQ ID</span>
                     )}
-                    <label
-                      className={`font-mono text-[10px] px-2 py-1 transition-colors cursor-pointer ${p.photo_url ? 'text-pb-accent/70 hover:text-pb-accent' : 'text-pb-faint hover:text-pb-accent'} ${uploadingPhotoFor === p.id ? 'opacity-50 pointer-events-none' : ''}`}
-                      title={p.photo_url ? 'Replace photo' : 'Upload photo'}
-                    >
-                      {uploadingPhotoFor === p.id ? '…' : (p.photo_url ? 'Photo ✓' : 'Photo')}
-                      <input
-                        type="file"
-                        accept=".jpg,.jpeg,.png,.webp,.gif"
-                        className="hidden"
-                        onChange={e => handlePhotoUpload(p.id, e.target.files?.[0])}
-                      />
-                    </label>
-                    {p.photo_url && (
-                      <button
-                        onClick={() => handlePhotoDelete(p.id)}
-                        disabled={uploadingPhotoFor === p.id}
-                        className="font-mono text-[10px] text-pb-faintest hover:text-pb-red px-2 py-1 transition-colors disabled:opacity-50"
-                      >
-                        ✕ photo
-                      </button>
+                    {p.gender && (
+                      <span className="font-mono text-[10px] text-pb-faint">{p.gender}</span>
+                    )}
+                    {p.player_role && (
+                      <span className="font-mono text-[10px] text-pb-faint">{p.player_role}</span>
+                    )}
+                    {p.is_player === false && (
+                      <span className="font-mono text-[10px] text-pb-faintest italic">non-player</span>
                     )}
                   </div>
                 </div>
-              )}
+              </div>
+
+              <button
+                onClick={() => setEditingPlayer(p)}
+                className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors shrink-0"
+              >
+                Edit
+              </button>
             </div>
           ))}
         </div>
