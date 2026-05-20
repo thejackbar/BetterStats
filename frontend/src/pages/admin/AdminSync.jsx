@@ -39,6 +39,7 @@ export default function AdminSync() {
   const [syncRequests, setSyncRequests] = useState([])
   const [actionLoading, setActionLoading] = useState(null)
   const [hardRefreshing, setHardRefreshing] = useState(false)
+  const [backfilling, setBackfilling] = useState(false)
   const [syncWarnings, setSyncWarnings] = useState({})
 
   const orgId = settings?.id
@@ -124,6 +125,19 @@ export default function AdminSync() {
     }
   }
 
+  const handleBackfillAggregates = async () => {
+    if (!orgId || backfilling || syncing || hardRefreshing) return
+    setBackfilling(true)
+    try {
+      const res = await api.adminBackfillAggregates()
+      alert(`Backfill complete — inserted ${res.inserted ?? 0} aggregate rows.`)
+    } catch (e) {
+      alert(`Backfill failed: ${e.message}`)
+    } finally {
+      setBackfilling(false)
+    }
+  }
+
   const handleHardRefresh = async () => {
     if (!orgId || hardRefreshing || syncing) return
     const ok = window.confirm(
@@ -182,6 +196,20 @@ export default function AdminSync() {
                   HARD REFRESHING…
                 </>
               ) : 'HARD REFRESH'}
+            </button>
+            <button
+              onClick={handleBackfillAggregates}
+              disabled={backfilling || syncing || hardRefreshing || !orgId}
+              className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-pb-faint"
+              style={{ borderColor: 'var(--pb-hairline)', background: 'transparent' }}
+              title="Synthesise missing player_season_stats rows from per-game scorecard data. Fixes players with scorecards but a 0-matches headline. Fast — no upstream API calls."
+            >
+              {backfilling ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-pb-faint/30 border-t-pb-faint rounded-full animate-spin" />
+                  BACKFILLING…
+                </>
+              ) : 'BACKFILL AGGREGATES'}
             </button>
           </div>
           {(syncing || hardRefreshing) && (
