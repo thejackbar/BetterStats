@@ -1650,6 +1650,23 @@ async def hard_refresh_org(
     return {"status": "started", "run_id": str(run_id), "org_id": org_id_str}
 
 
+@router.post("/backfill-aggregates")
+async def backfill_aggregates(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    """Synthesise missing player_season_stats rows from per-game scorecard data.
+
+    For (player, season) pairs that have batting / bowling / fielding rows
+    but no aggregate row — typically low-volume players omitted by CA's
+    Grassroots aggregate API for older seasons — insert a computed
+    aggregate so career numbers add up. Lighter than a full hard-refresh.
+    """
+    from app.services.sync import _backfill_missing_season_stats
+    inserted = await _backfill_missing_season_stats(str(club.id))
+    return {"inserted": inserted, "org_id": str(club.id)}
+
+
 @router.delete("/sync-runs")
 async def clear_sync_runs(
     current_user: User = Depends(get_current_user),

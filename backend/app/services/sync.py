@@ -99,6 +99,183 @@ async def finish_sync_run(run_id: uuid.UUID, stats: dict, error: str = "") -> No
         await session.commit()
 
 
+async def _backfill_missing_season_stats(org_id_str: str) -> int:
+    """Insert player_season_stats rows for (player, season) pairs that appear in
+    per-game tables but have no aggregate row.
+
+    CA's Grassroots aggregate API can omit low-volume players for older
+    seasons. The career-stats queries SUM from player_season_stats, so without
+    a row the player reads 0 matches/runs/wickets despite real scorecards.
+    Compute a synthetic aggregate from batting_innings + bowling_spells +
+    fielding_stats so the headline numbers line up with what we know happened.
+
+    DNB/Absent batting rows are excluded everywhere (matches the v3.0.2.2
+    rule that those aren't real innings). Returns the number of rows inserted.
+    """
+    org_uuid = _parse_uuid(org_id_str)
+    if not org_uuid:
+        return 0
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            text(
+                """
+                WITH bat_innings AS (
+                    SELECT bi.player_id, gr.season_id, bi.game_id,
+                           bi.runs, bi.balls, bi.fours, bi.sixes,
+                           COALESCE(bi.not_out, FALSE) AS not_out
+                    FROM batting_innings bi
+                    JOIN games g    ON g.id = bi.game_id
+                    JOIN grades gr  ON gr.id = g.grade_id
+                    JOIN seasons s  ON s.id = gr.season_id
+                    WHERE s.organisation_id = :org_id
+                      AND COALESCE(LOWER(bi.dismissal_type), '')
+                          NOT IN ('absent', 'did not bat', 'dnb')
+                ),
+                bowl_spells AS (
+                    SELECT bs.player_id, gr.season_id, bs.game_id, bs.innings_number,
+                           bs.runs, bs.wickets, bs.maidens,
+                           bs.wides, bs.no_balls, bs.overs
+                    FROM bowling_spells bs
+                    JOIN games g   ON g.id = bs.game_id
+                    JOIN grades gr ON gr.id = g.grade_id
+                    JOIN seasons s ON s.id = gr.season_id
+                    WHERE s.organisation_id = :org_id
+                ),
+                field_stats AS (
+                    SELECT fs.player_id, gr.season_id, fs.game_id,
+                           fs.catches, fs.run_outs, fs.stumpings
+                    FROM fielding_stats fs
+                    JOIN games g   ON g.id = fs.game_id
+                    JOIN grades gr ON gr.id = g.grade_id
+                    JOIN seasons s ON s.id = gr.season_id
+                    WHERE s.organisation_id = :org_id
+                ),
+                pairs AS (
+                    SELECT player_id, season_id FROM bat_innings
+                    UNION
+                    SELECT player_id, season_id FROM bowl_spells
+                    UNION
+                    SELECT player_id, season_id FROM field_stats
+                ),
+                missing AS (
+                    SELECT p.player_id, p.season_id
+                    FROM pairs p
+                    LEFT JOIN player_season_stats pss
+                      ON pss.player_id = p.player_id AND pss.season_id = p.season_id
+                    WHERE pss.id IS NULL
+                ),
+                bat_agg AS (
+                    SELECT
+                        player_id, season_id,
+                        COUNT(*)                                              AS innings,
+                        COALESCE(SUM(runs), 0)                                AS runs,
+                        SUM(CASE WHEN not_out THEN 1 ELSE 0 END)              AS not_outs,
+                        COALESCE(SUM(balls), 0)                               AS balls_faced,
+                        SUM(CASE WHEN runs >= 50 AND runs < 100 THEN 1 ELSE 0 END) AS fifties,
+                        SUM(CASE WHEN runs >= 100 THEN 1 ELSE 0 END)          AS hundreds,
+                        SUM(CASE WHEN runs = 0 AND NOT not_out THEN 1 ELSE 0 END) AS ducks,
+                        MAX(runs)                                             AS high_score,
+                        COALESCE(SUM(fours), 0)                               AS fours,
+                        COALESCE(SUM(sixes), 0)                               AS sixes,
+                        COUNT(DISTINCT game_id)                               AS bat_games
+                    FROM bat_innings
+                    GROUP BY player_id, season_id
+                ),
+                bowl_agg AS (
+                    SELECT
+                        player_id, season_id,
+                        COUNT(DISTINCT (game_id, innings_number))             AS bowling_innings,
+                        COALESCE(SUM(wickets), 0)                             AS wickets,
+                        COALESCE(SUM(runs), 0)                                AS runs_conceded,
+                        COALESCE(SUM(maidens), 0)                             AS maidens,
+                        COALESCE(SUM(wides), 0)                               AS wides,
+                        COALESCE(SUM(no_balls), 0)                            AS no_balls,
+                        COALESCE(SUM(
+                            FLOOR(COALESCE(overs, 0))::int * 6
+                            + ROUND((COALESCE(overs, 0) - FLOOR(COALESCE(overs, 0))) * 10)::int
+                        ), 0)                                                 AS total_balls,
+                        SUM(CASE WHEN wickets >= 5 THEN 1 ELSE 0 END)         AS five_fors,
+                        MAX(wickets)                                          AS best_wkts,
+                        COUNT(DISTINCT game_id)                               AS bowl_games
+                    FROM bowl_spells
+                    GROUP BY player_id, season_id
+                ),
+                field_agg AS (
+                    SELECT
+                        player_id, season_id,
+                        COALESCE(SUM(catches), 0)                             AS catches,
+                        COALESCE(SUM(run_outs), 0)                            AS run_outs,
+                        COALESCE(SUM(stumpings), 0)                           AS stumpings,
+                        COUNT(DISTINCT game_id)                               AS field_games
+                    FROM field_stats
+                    GROUP BY player_id, season_id
+                ),
+                games_count AS (
+                    SELECT player_id, season_id, COUNT(DISTINCT game_id) AS matches FROM (
+                        SELECT player_id, season_id, game_id FROM bat_innings
+                        UNION
+                        SELECT player_id, season_id, game_id FROM bowl_spells
+                        UNION
+                        SELECT player_id, season_id, game_id FROM field_stats
+                    ) all_games
+                    GROUP BY player_id, season_id
+                )
+                INSERT INTO player_season_stats (
+                    player_id, season_id, matches,
+                    batting_innings, runs, not_outs, balls_faced,
+                    fifties, hundreds, ducks, high_score, fours, sixes,
+                    bowling_innings, wickets, overs, bowling_balls,
+                    runs_conceded, maidens, best_bowling_wickets,
+                    five_wicket_innings, wides, no_balls,
+                    catches, run_outs, stumpings
+                )
+                SELECT
+                    m.player_id, m.season_id,
+                    COALESCE(gc.matches, 0),
+                    COALESCE(ba.innings, 0),
+                    COALESCE(ba.runs, 0),
+                    COALESCE(ba.not_outs, 0),
+                    COALESCE(ba.balls_faced, 0),
+                    COALESCE(ba.fifties, 0),
+                    COALESCE(ba.hundreds, 0),
+                    COALESCE(ba.ducks, 0),
+                    ba.high_score,
+                    COALESCE(ba.fours, 0),
+                    COALESCE(ba.sixes, 0),
+                    COALESCE(bo.bowling_innings, 0),
+                    COALESCE(bo.wickets, 0),
+                    CASE WHEN bo.total_balls IS NULL OR bo.total_balls = 0 THEN 0
+                         ELSE (bo.total_balls / 6)::numeric + ((bo.total_balls % 6)::numeric / 10)
+                    END,
+                    COALESCE(bo.total_balls, 0),
+                    COALESCE(bo.runs_conceded, 0),
+                    COALESCE(bo.maidens, 0),
+                    bo.best_wkts,
+                    COALESCE(bo.five_fors, 0),
+                    COALESCE(bo.wides, 0),
+                    COALESCE(bo.no_balls, 0),
+                    COALESCE(fa.catches, 0),
+                    COALESCE(fa.run_outs, 0),
+                    COALESCE(fa.stumpings, 0)
+                FROM missing m
+                LEFT JOIN bat_agg     ba ON ba.player_id = m.player_id AND ba.season_id = m.season_id
+                LEFT JOIN bowl_agg    bo ON bo.player_id = m.player_id AND bo.season_id = m.season_id
+                LEFT JOIN field_agg   fa ON fa.player_id = m.player_id AND fa.season_id = m.season_id
+                LEFT JOIN games_count gc ON gc.player_id = m.player_id AND gc.season_id = m.season_id
+                ON CONFLICT (player_id, season_id) DO NOTHING
+                RETURNING 1
+                """
+            ),
+            {"org_id": str(org_uuid)},
+        )
+        inserted = len(result.fetchall())
+        await session.commit()
+        if inserted:
+            logger.info(f"Backfilled {inserted} player_season_stats rows from per-game data for org {org_id_str}")
+        return inserted
+
+
 async def sync_organisation(
     org_id_str: str,
     run_id: Optional[uuid.UUID] = None,
@@ -445,6 +622,20 @@ async def sync_organisation(
         except Exception as e:
             import traceback as _tb2
             logger.error(f"Grassroots game-level sync failed for {org_id_str}: {e}\n{_tb2.format_exc()}")
+
+        # CA's aggregate API sometimes omits low-volume players for old seasons,
+        # leaving them with scorecard rows but no player_season_stats row. Every
+        # career number on the player page sums from player_season_stats, so
+        # those players show "0 matches" despite having real innings. Synthesise
+        # the missing aggregate from the per-game tables we already have.
+        try:
+            backfilled = await _backfill_missing_season_stats(org_id_str)
+            stats["aggregate_backfill"] = backfilled
+            if run_id:
+                await update_sync_run(run_id, stats)
+        except Exception as e:
+            import traceback as _tb3
+            logger.error(f"Aggregate backfill failed for {org_id_str}: {e}\n{_tb3.format_exc()}")
 
         logger.info(f"Sync complete: {stats}")
         if run_id and owns_run:
