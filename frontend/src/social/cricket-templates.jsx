@@ -1,0 +1,1210 @@
+// Cricket social media templates — ES module port of the Cricket Scorecards 2 design system.
+// All templates render at exactly 1080×1080px using inline styles.
+// Font stack: Anton, Bebas Neue, Archivo Black, Inter, JetBrains Mono (loaded in index.html)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARED VISUAL PRIMITIVES
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function GrainSVG({ opacity = 0.35, id = 'grain' }) {
+  return (
+    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', mixBlendMode: 'overlay', opacity }}>
+      <filter id={id}>
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" />
+        <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0" />
+      </filter>
+      <rect width="100%" height="100%" filter={`url(#${id})`} />
+    </svg>
+  )
+}
+
+export function Halftone({ color = '#fff', size = 14, opacity = 0.12, angle = 0, style = {} }) {
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, pointerEvents: 'none', opacity,
+      backgroundImage: `radial-gradient(${color} 1.2px, transparent 1.6px)`,
+      backgroundSize: `${size}px ${size}px`,
+      transform: `rotate(${angle}deg) scale(1.4)`,
+      transformOrigin: 'center',
+      ...style,
+    }} />
+  )
+}
+
+export function Stripes({ color = '#fff', angle = -45, gap = 14, opacity = 0.06, style = {} }) {
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, pointerEvents: 'none', opacity,
+      backgroundImage: `repeating-linear-gradient(${angle}deg, ${color} 0 1px, transparent 1px ${gap}px)`,
+      ...style,
+    }} />
+  )
+}
+
+export function ClubLogo({ monogram = 'NG', color = '#fff', bg = 'transparent', size = 120, shape = 'shield', src = null }) {
+  if (src) {
+    return <img src={src} alt={monogram + ' logo'} style={{ width: size, height: size, objectFit: 'contain', display: 'block' }} />
+  }
+  const stroke = Math.max(2, size * 0.04)
+  const fontSize = size * 0.42
+  if (shape === 'circle') {
+    return (
+      <div style={{
+        width: size, height: size, borderRadius: '50%',
+        background: bg, border: `${stroke}px solid ${color}`,
+        display: 'grid', placeItems: 'center', color,
+        fontFamily: "'Anton', sans-serif", fontSize, letterSpacing: 1,
+      }}>{monogram}</div>
+    )
+  }
+  return (
+    <svg width={size} height={size * 1.08} viewBox="0 0 100 108" style={{ display: 'block' }}>
+      <path d="M5 8 L50 0 L95 8 L92 60 Q88 88 50 104 Q12 88 8 60 Z"
+        fill={bg === 'transparent' ? 'none' : bg}
+        stroke={color} strokeWidth="3" />
+      <text x="50" y="62" textAnchor="middle"
+        fontFamily="'Anton', sans-serif" fontSize="38" fill={color} letterSpacing="1">{monogram}</text>
+    </svg>
+  )
+}
+
+export function RoleChip({ kind, accent = '#ffc233', ink = '#0b1530' }) {
+  if (!kind) return null
+  const labels = { C: 'C', VC: 'VC', WK: 'WK' }
+  const label = labels[kind]
+  if (!label) return null
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      minWidth: 32, height: 24, padding: '0 8px',
+      background: accent, color: ink,
+      fontFamily: "'Anton', sans-serif", fontSize: 16, fontWeight: 400,
+      letterSpacing: 1, lineHeight: 1, borderRadius: 2,
+      verticalAlign: 'middle',
+    }}>{label}</span>
+  )
+}
+
+export function PlayerSilhouette({ team, role, ink = '#fff', style = {} }) {
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%', display: 'grid', placeItems: 'center', ...style }}>
+      <div style={{
+        fontFamily: "'Anton', sans-serif",
+        fontSize: 'min(60%, 280px)',
+        lineHeight: 0.85,
+        color: ink,
+        opacity: 0.18,
+        letterSpacing: -2,
+        userSelect: 'none',
+      }}>{team.monogram}</div>
+    </div>
+  )
+}
+
+export function VsBlock({ accent = '#ffc233', ink = '#fff', size = 18 }) {
+  return (
+    <div style={{ fontFamily: "'Anton', sans-serif", fontSize: size, color: ink, letterSpacing: 2, opacity: 0.85 }}>VS</div>
+  )
+}
+
+export function PlayerImage({ player, team, palette, fit = 'contain', size = 200, style = {} }) {
+  if (player && player.headshot) {
+    return (
+      <img src={player.headshot} alt={(player.first || '') + ' ' + (player.last || '')}
+        style={{ width: '100%', height: '100%', objectFit: fit, objectPosition: 'bottom', ...style }} />
+    )
+  }
+  if (team && team.logo) {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', ...style }}>
+        <img src={team.logo} alt={team.short || 'club'}
+          style={{ width: '65%', height: '65%', objectFit: 'contain', opacity: 0.92 }} />
+      </div>
+    )
+  }
+  return (
+    <div style={{
+      width: '100%', height: '100%', display: 'grid', placeItems: 'center',
+      fontFamily: "'Anton', sans-serif", fontSize: size * 0.5, color: palette && palette.accent || '#fff',
+      opacity: 0.85, letterSpacing: -2, lineHeight: 1, ...style,
+    }}>{team && team.monogram || '?'}</div>
+  )
+}
+
+export function featuredOf(players) {
+  if (!players || !players.length) return null
+  return players.find(p => p.captain) || players[0]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ROLE STYLING (templates B)
+// ─────────────────────────────────────────────────────────────────────────────
+const ROLE_LABEL = { BAT: 'BAT', BOWL: 'BOWL', AR: 'AR', WK: 'WK' }
+const ROLE_COLOR_BG = (palette, role) => {
+  switch (role) {
+    case 'BAT': return palette.accent
+    case 'BOWL': return palette.ink + '1a'
+    case 'AR': return palette.secondary
+    case 'WK': return palette.ink + '33'
+    default: return palette.ink + '1a'
+  }
+}
+const ROLE_COLOR_INK = (palette, role) => {
+  switch (role) {
+    case 'BAT': return palette.primary
+    case 'BOWL': return palette.ink
+    case 'AR': return palette.accent
+    case 'WK': return palette.ink
+    default: return palette.ink
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BUILT-IN PALETTES
+// ─────────────────────────────────────────────────────────────────────────────
+export const PALETTES = {
+  midnight: { name: 'Midnight', primary: '#0b1530', secondary: '#1a2647', accent: '#ffc233', ink: '#ffffff' },
+  crimson:  { name: 'Crimson',  primary: '#2a0a0e', secondary: '#5a0f1a', accent: '#ff3344', ink: '#fff4e6' },
+  forest:   { name: 'Forest',   primary: '#0c2418', secondary: '#163828', accent: '#c4ff4d', ink: '#f4fbe8' },
+  cobalt:   { name: 'Cobalt',   primary: '#0b1f4a', secondary: '#17336b', accent: '#00c2ff', ink: '#ffffff' },
+  rust:     { name: 'Rust',     primary: '#1e0f08', secondary: '#3a1a0a', accent: '#ff7a1a', ink: '#fff1e3' },
+  graphite: { name: 'Graphite', primary: '#101113', secondary: '#1d1f23', accent: '#e8ff00', ink: '#ffffff' },
+}
+
+export function orgToPalette(org) {
+  const accent = org?.primary_color || '#16c784'
+  const primary = org?.accent_color || '#243352'
+  const r = parseInt(primary.slice(1, 3), 16)
+  const g = parseInt(primary.slice(3, 5), 16)
+  const b = parseInt(primary.slice(5, 7), 16)
+  const lighter = (x, a) => Math.min(255, x + a).toString(16).padStart(2, '0')
+  const secondary = `#${lighter(r, 20)}${lighter(g, 20)}${lighter(b, 20)}`
+  return { name: 'Club', primary, secondary, accent, ink: '#ffffff' }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 1 — Hero cutout + bold name list
+// ─────────────────────────────────────────────────────────────────────────────
+export function T1_HeroList({ team, opponent, match, players, palette }) {
+  const P = players.slice(0, 13)
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: `linear-gradient(135deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
+      color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <div style={{
+        position: 'absolute', left: 0, top: 0, bottom: 0, width: 56,
+        background: palette.secondary,
+        borderRight: `1px solid ${palette.ink}1a`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <div style={{
+          transform: 'rotate(-90deg)',
+          whiteSpace: 'nowrap',
+          fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 8,
+          color: palette.ink, opacity: 0.7,
+        }}>{(team.fullName || team.name).toUpperCase()}</div>
+      </div>
+      <div style={{
+        position: 'absolute', left: 70, top: 80,
+        fontFamily: "'Anton', sans-serif", fontSize: 160, lineHeight: 0.88,
+        color: palette.ink, opacity: 0.06, letterSpacing: -2, userSelect: 'none',
+        maxWidth: 540,
+      }}>{(team.fullName || team.name + ' CRICKET CLUB').toUpperCase()}</div>
+      <Halftone color={palette.ink} opacity={0.08} size={12} />
+      <Stripes color={palette.ink} opacity={0.04} gap={20} angle={-30} />
+      <div style={{
+        position: 'absolute', left: 56, top: 0, width: 564, height: 1080,
+        display: 'grid', placeItems: 'end center', overflow: 'hidden',
+      }}>
+        <div style={{
+          position: 'absolute', left: -100, bottom: -100, width: 700, height: 700,
+          background: `radial-gradient(circle at 40% 40%, ${palette.accent}33 0%, transparent 60%)`,
+        }} />
+        {(() => {
+          const featured = featuredOf(players)
+          const hasHead = !!(featured && featured.headshot)
+          const src = hasHead ? featured.headshot : team.logo
+          return (
+            <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
+              style={{
+                position: 'relative',
+                height: hasHead ? 980 : 460,
+                width: 'auto', marginBottom: hasHead ? -20 : 200,
+                objectFit: 'contain', objectPosition: 'bottom',
+                filter: `drop-shadow(0 30px 60px ${palette.primary}cc)`,
+              }} />
+          )
+        })()}
+      </div>
+      <div style={{
+        position: 'absolute', left: 80, top: 40, zIndex: 5,
+        fontFamily: "'Anton', sans-serif", letterSpacing: 3,
+        color: palette.ink, lineHeight: 1.1, maxWidth: 240,
+      }}>
+        <div style={{ background: palette.accent, color: palette.primary, padding: '4px 10px', display: 'inline-block', fontSize: 16 }}>MATCH DAY</div>
+        <div style={{ marginTop: 10, fontSize: 16 }}>{match.venue.toUpperCase()}</div>
+        <div style={{ opacity: 0.65, marginTop: 2, fontSize: 14, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5 }}>{match.date} · {match.time}</div>
+      </div>
+      <div style={{ position: 'absolute', right: 40, top: 56, width: 480 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start' }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{
+              fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 2,
+              color: palette.ink, opacity: 0.85, lineHeight: 1,
+            }}>{match.competition}</div>
+            <div style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5,
+              color: palette.accent, marginTop: 6,
+            }}>{match.season}</div>
+          </div>
+        </div>
+        <div style={{
+          fontFamily: "'Anton', sans-serif", fontSize: 180, lineHeight: 0.85,
+          letterSpacing: -2, marginTop: 28, color: palette.ink,
+        }}>SQUAD</div>
+        <div style={{ width: 60, height: 4, background: palette.accent, marginTop: 10, marginBottom: 24 }} />
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+          gap: 16, marginBottom: 26, flexWrap: 'wrap',
+        }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, letterSpacing: 1.5, lineHeight: 1 }}>{team.name}</div>
+          </div>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.accent} size={52} shape="shield" />
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, opacity: 0.7 }}>V</div>
+          <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={52} shape="shield" />
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, letterSpacing: 1.5, lineHeight: 1 }}>{opponent.name}</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'right' }}>
+          {P.map((p, i) => {
+            const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
+            return (
+              <div key={i} style={{
+                fontFamily: "'Anton', sans-serif", fontSize: 40, lineHeight: 1.05,
+                letterSpacing: 0.5, color: palette.ink,
+                display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10,
+              }}>
+                <span style={{ fontWeight: 300, opacity: 0.72, fontSize: 30 }}>{p.first.toUpperCase()}</span>
+                <span style={{ color: palette.ink }}>{p.last}</span>
+                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <div style={{
+        position: 'absolute', right: 40, bottom: 36,
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6,
+      }}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: palette.ink, opacity: 0.5, letterSpacing: 1.5 }}>PRESENTED BY</div>
+        <div style={{ padding: '10px 18px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 14, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS.CRICKET</div>
+      </div>
+      <GrainSVG opacity={0.35} id="g1" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 2 — Trading card grid (4×3)
+// ─────────────────────────────────────────────────────────────────────────────
+export function T2_CardGrid({ team, opponent, match, players, palette }) {
+  const P = players.slice(0, 12)
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <Halftone color={palette.ink} opacity={0.05} size={10} />
+      <Stripes color={palette.accent} opacity={0.04} gap={30} angle={45} />
+      <div style={{
+        position: 'absolute', left: -50, bottom: -60,
+        fontFamily: "'Anton', sans-serif", fontSize: 320, lineHeight: 0.8,
+        color: palette.ink, opacity: 0.04, letterSpacing: -6,
+        transform: 'rotate(-8deg)', userSelect: 'none', whiteSpace: 'nowrap',
+      }}>LINEUP</div>
+      <svg style={{ position: 'absolute', left: -180, top: -180, width: 560, height: 560, opacity: 0.08 }}>
+        <circle cx="280" cy="280" r="260" fill="none" stroke={palette.ink} strokeWidth="2" />
+        <circle cx="280" cy="280" r="200" fill="none" stroke={palette.ink} strokeWidth="2" />
+        <circle cx="280" cy="280" r="140" fill="none" stroke={palette.ink} strokeWidth="2" />
+      </svg>
+      <svg style={{ position: 'absolute', right: -160, bottom: -160, width: 480, height: 480, opacity: 0.06 }}>
+        <circle cx="240" cy="240" r="220" fill="none" stroke={palette.accent} strokeWidth="3" />
+        <circle cx="240" cy="240" r="160" fill="none" stroke={palette.accent} strokeWidth="3" />
+      </svg>
+      <div style={{ position: 'absolute', left: -40, bottom: 80, width: 240, height: 4, background: palette.accent, transform: 'rotate(-30deg)', opacity: 0.7 }} />
+      <div style={{
+        position: 'absolute', top: -20, right: -40, width: 380, height: 180,
+        background: palette.accent, opacity: 0.9,
+        clipPath: 'polygon(0% 30%, 100% 0%, 100% 70%, 18% 100%)',
+      }} />
+      <div style={{ position: 'absolute', top: 30, right: 60, width: 4, height: 80, background: palette.primary }} />
+      <svg style={{ position: 'absolute', left: 40, top: 16, width: 220, height: 60, opacity: 0.55 }}>
+        {Array.from({ length: 36 }).map((_, i) => (
+          <circle key={i} cx={(i % 12) * 18 + 6} cy={Math.floor(i / 12) * 18 + 6} r={2.4} fill={palette.accent} />
+        ))}
+      </svg>
+      <div style={{ position: 'absolute', left: 260, top: 36, width: 220, height: 3, background: palette.accent, opacity: 0.7 }} />
+      <div style={{ position: 'absolute', left: 482, top: 30, width: 14, height: 14, background: palette.accent, borderRadius: '50%' }} />
+      <div style={{ position: 'absolute', left: 40, top: 90, display: 'flex', gap: 6, alignItems: 'center' }}>
+        {[20, 32, 14, 28, 22, 36, 18, 26].map((h, i) => (
+          <div key={i} style={{ width: 5, height: h, background: palette.accent, opacity: 0.6 }} />
+        ))}
+      </div>
+      <div style={{ position: 'relative', padding: '44px 56px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 2 }}>
+        <div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 96, lineHeight: 0.85, color: palette.ink, letterSpacing: -1 }}>LINEUP</div>
+          <div style={{ width: 84, height: 4, background: palette.accent, margin: '10px 0 14px' }} />
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, letterSpacing: 2, color: palette.ink, opacity: 0.95 }}>
+            {team.name} <span style={{ opacity: 0.5 }}>×</span> {opponent.name}
+          </div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, letterSpacing: 1.8, color: palette.accent, marginTop: 10, fontWeight: 500 }}>
+            {match.round} · {match.date} · {match.time}
+          </div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 4 }}>
+            {match.venue.toUpperCase()}
+          </div>
+        </div>
+        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={100} shape="shield" />
+      </div>
+      <div style={{
+        position: 'absolute', left: 56, right: 56, top: 380, bottom: 100,
+        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: 'repeat(3, 1fr)',
+        gap: 14,
+      }}>
+        {P.map((p, i) => {
+          const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
+          return (
+            <div key={i} style={{
+              position: 'relative', overflow: 'hidden',
+              background: `linear-gradient(180deg, ${palette.secondary} 0%, ${palette.primary} 100%)`,
+              border: `2px solid ${palette.accent}`,
+              display: 'flex', flexDirection: 'column',
+            }}>
+              <div style={{ flex: 1, display: 'grid', placeItems: 'center', position: 'relative', overflow: 'hidden' }}>
+                <Halftone color={palette.ink} opacity={0.08} size={6} />
+                {p.headshot ? (
+                  <img src={p.headshot} alt={p.first + ' ' + p.last}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} />
+                ) : team.logo ? (
+                  <img src={team.logo} alt={team.short}
+                    style={{ width: '68%', height: '68%', objectFit: 'contain', opacity: 0.92 }} />
+                ) : (
+                  <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 96, color: palette.accent, opacity: 0.85, letterSpacing: -2, lineHeight: 1 }}>{team.monogram}</div>
+                )}
+                {chip && <div style={{ position: 'absolute', top: 8, right: 8 }}><RoleChip kind={chip} accent={palette.accent} ink={palette.primary} /></div>}
+                <div style={{ position: 'absolute', top: 8, left: 8, fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: palette.ink, opacity: 0.4, letterSpacing: 1.5 }}>#{String(i + 1).padStart(2, '0')}</div>
+              </div>
+              <div style={{
+                background: palette.accent, color: palette.primary,
+                padding: '10px 10px', textAlign: 'center',
+                fontFamily: "'Anton', sans-serif", fontSize: 26, letterSpacing: 1,
+                lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>{p.last}</div>
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ position: 'absolute', left: 56, right: 56, bottom: 32, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+        <div style={{ padding: '10px 18px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 14, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS.CRICKET</div>
+      </div>
+      <GrainSVG opacity={0.4} id="g2" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 3 — Side image + numbered XI
+// ─────────────────────────────────────────────────────────────────────────────
+export function T3_SideNumbered({ team, opponent, match, players, palette }) {
+  const P = players.slice(0, 11)
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <svg width="1080" height="1080" style={{ position: 'absolute', inset: 0 }}>
+        <defs>
+          <linearGradient id="bgwv" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor={palette.primary} />
+            <stop offset="1" stopColor={palette.secondary} />
+          </linearGradient>
+        </defs>
+        <rect width="1080" height="1080" fill="url(#bgwv)" />
+        <path d="M 900 0 C 1050 200 950 400 1080 600 L 1080 0 Z" fill={palette.ink} opacity="0.04" />
+        <path d="M 1000 1080 C 850 900 1100 700 980 500 L 1080 500 L 1080 1080 Z" fill={palette.accent} opacity="0.06" />
+      </svg>
+      <div style={{
+        position: 'absolute', left: 0, top: 0, width: 380, height: 1080,
+        background: `linear-gradient(180deg, ${palette.secondary} 0%, ${palette.primary} 100%)`,
+        overflow: 'hidden',
+      }}>
+        <Halftone color={palette.ink} opacity={0.1} size={8} />
+        <div style={{ position: 'absolute', left: -120, bottom: -120, width: 600, height: 600, background: `radial-gradient(circle at center, ${palette.accent}33 0%, transparent 60%)` }} />
+        {(() => {
+          const featured = featuredOf(players)
+          const hasHead = !!(featured && featured.headshot)
+          const src = hasHead ? featured.headshot : team.logo
+          return (
+            <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
+              style={{
+                position: 'absolute', inset: 0,
+                width: '100%', height: '100%',
+                objectFit: hasHead ? 'cover' : 'contain',
+                objectPosition: hasHead ? 'top center' : 'center',
+                padding: hasHead ? 0 : 80,
+              }} />
+          )
+        })()}
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 240, background: `linear-gradient(180deg, transparent 0%, ${palette.primary}ee 100%)` }} />
+        {(() => {
+          const featured = featuredOf(players)
+          if (!featured) return null
+          const chip = featured.captain ? 'C' : featured.viceCaptain ? 'VC' : featured.keeper ? 'WK' : null
+          return (
+            <div style={{ position: 'absolute', left: 16, right: 16, bottom: 22, zIndex: 2 }}>
+              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 20, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{featured.first.toUpperCase()}</div>
+              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 44, letterSpacing: 0.5, color: palette.ink, lineHeight: 1, marginTop: 2, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span>{featured.last}</span>
+                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+              </div>
+            </div>
+          )
+        })()}
+      </div>
+      <div style={{
+        position: 'absolute', left: 360, top: 540,
+        transform: 'rotate(-90deg)', transformOrigin: 'left top',
+        fontFamily: "'Anton', sans-serif", fontSize: 80, letterSpacing: 4,
+        color: 'transparent', WebkitTextStroke: `2px ${palette.accent}`,
+        whiteSpace: 'nowrap', lineHeight: 0.8,
+      }}>STARTING XI</div>
+      <div style={{ position: 'absolute', left: 460, top: 60, right: 40, bottom: 40, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28, marginBottom: 28 }}>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={110} shape="circle" />
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, letterSpacing: 3, color: palette.accent }}>VS</div>
+          <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={110} shape="circle" />
+        </div>
+        <div style={{ textAlign: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.8, color: palette.ink, opacity: 0.7, marginBottom: 4 }}>
+          {match.competition} · {match.round} · {match.date}
+        </div>
+        <div style={{ textAlign: 'center', fontFamily: "'Anton', sans-serif", fontSize: 16, letterSpacing: 2, color: palette.accent, marginBottom: 22, lineHeight: 1 }}>
+          {match.venue.toUpperCase()}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+          {P.map((p, i) => {
+            const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${palette.ink}1c` }}>
+                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 42, color: palette.accent, lineHeight: 1, width: 50, textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: 10, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                  <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, color: palette.ink, opacity: 0.65, fontWeight: 300, letterSpacing: 0.5 }}>{p.first.toUpperCase()}</span>
+                  <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 38, letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>{p.last}</span>
+                </div>
+                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+              </div>
+            )
+          })}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 12, paddingTop: 10, borderTop: `2px solid ${palette.accent}` }}>
+          <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.7 }}>BETTERSTATS.CRICKET</div>
+        </div>
+      </div>
+      <GrainSVG opacity={0.3} id="g3" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 4 — Batting order with role-coded rows
+// ─────────────────────────────────────────────────────────────────────────────
+export function T4_BattingOrder({ team, opponent, match, players, palette }) {
+  const P = players.slice(0, 13)
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <Stripes color={palette.ink} opacity={0.04} gap={40} angle={0} />
+      <Halftone color={palette.ink} opacity={0.04} size={11} />
+      <div style={{ position: 'relative', padding: '32px 56px 18px', borderBottom: `3px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: palette.accent, marginBottom: 4 }}>// PROBABLE XI</div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 68, lineHeight: 0.85, color: palette.ink, letterSpacing: -1 }}>BATTING ORDER</div>
+        </div>
+        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
+      </div>
+      <div style={{ padding: '16px 56px', background: palette.secondary, borderBottom: `1px solid ${palette.ink}22`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={44} shape="shield" />
+            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, letterSpacing: 1, color: palette.accent }}>v</div>
+            <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={44} shape="shield" />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.78 }}>
+            <span>{match.competition} · {match.round}</span>
+            <span style={{ opacity: 0.7 }}>{match.venue.toUpperCase()}</span>
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, letterSpacing: 1, lineHeight: 1, color: palette.accent }}>{match.date}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 4 }}>{match.time}</div>
+        </div>
+      </div>
+      <div style={{ padding: '16px 56px 0', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {P.map((p, i) => {
+          const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
+          const isRole = p.role || 'BAT'
+          return (
+            <div key={i} style={{
+              display: 'grid', gridTemplateColumns: '60px 1fr auto', alignItems: 'center', gap: 14,
+              padding: '8px 16px',
+              background: i % 2 === 0 ? `${palette.ink}08` : 'transparent',
+              borderLeft: `3px solid ${i === 10 ? palette.accent : 'transparent'}`,
+            }}>
+              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 40, color: palette.accent, lineHeight: 1, textAlign: 'center' }}>{i + 1}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, color: palette.ink, opacity: 0.62, fontWeight: 300, letterSpacing: 0.5 }}>{p.first.toUpperCase()}</span>
+                <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>{p.last}</span>
+                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+              </div>
+              <div style={{ width: 64, textAlign: 'center', padding: '5px 0', background: 'transparent', border: `1.5px solid ${palette.ink}55`, color: palette.ink, fontFamily: "'Anton', sans-serif", fontSize: 14, letterSpacing: 1.5, lineHeight: 1, borderRadius: 2 }}>
+                {ROLE_LABEL[isRole]}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ position: 'absolute', left: 56, right: 56, bottom: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTop: `1px solid ${palette.ink}22` }}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.5 }}>{(team.fullName || team.name).toUpperCase()} · {match.season}</div>
+        <div style={{ padding: '6px 14px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.7 }}>BETTERSTATS.CRICKET</div>
+      </div>
+      <GrainSVG opacity={0.25} id="g4" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 5 — Brutalist typographic
+// ─────────────────────────────────────────────────────────────────────────────
+export function T5_Brutalist({ team, opponent, match, players, palette }) {
+  const P = players.slice(0, 11)
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <Stripes color={palette.ink} opacity={0.06} gap={6} angle={0} />
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 320, textAlign: 'center', fontFamily: "'Anton', sans-serif", fontSize: 520, lineHeight: 0.8, color: palette.ink, opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>XI</div>
+      <Halftone color={palette.ink} opacity={0.08} size={14} angle={-20} />
+      <div style={{ position: 'absolute', left: -100, top: 360, width: 1300, height: 100, background: palette.accent, opacity: 0.08, transform: 'rotate(-3deg)' }} />
+      <div style={{ position: 'absolute', left: -120, top: 700, width: 1300, height: 60, background: palette.accent, opacity: 0.1, transform: 'rotate(2deg)' }} />
+      <svg style={{ position: 'absolute', right: -180, top: 220, width: 520, height: 520, opacity: 0.08 }}>
+        <circle cx="260" cy="260" r="240" fill="none" stroke={palette.accent} strokeWidth="3" />
+        <circle cx="260" cy="260" r="180" fill="none" stroke={palette.accent} strokeWidth="3" />
+      </svg>
+      <div style={{ background: palette.accent, color: palette.primary, padding: '24px 44px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 52, letterSpacing: 2, lineHeight: 1 }}>{team.name} XI</div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, letterSpacing: 1.5, lineHeight: 1 }}>VS {opponent.name}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, marginTop: 6 }}>{match.round} · {match.date}</div>
+        </div>
+      </div>
+      <div style={{ padding: '32px 44px 0', display: 'flex', flexDirection: 'column', gap: 0 }}>
+        {P.map((p, i) => {
+          const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
+          return (
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: '56px 1fr 70px 60px', alignItems: 'center', gap: 14, borderBottom: `1px solid ${palette.ink}1a`, padding: '4px 0' }}>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.accent, opacity: 0.9 }}>{String(i + 1).padStart(2, '0')}</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, lineHeight: 0.95, overflow: 'hidden' }}>
+                <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, color: palette.ink, opacity: 0.5, letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{p.first.toUpperCase()}</span>
+                <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 64, color: palette.ink, letterSpacing: -1, whiteSpace: 'nowrap', lineHeight: 0.95 }}>{p.last}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+              </div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.5, textAlign: 'right' }}>{p.role}</div>
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: palette.secondary, padding: '22px 44px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', borderTop: `3px solid ${palette.accent}`, zIndex: 2 }}>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, letterSpacing: 2, color: palette.ink, lineHeight: 1, textAlign: 'left' }}>STARTING XI</div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 2, color: palette.accent, lineHeight: 1 }}>{match.venue.toUpperCase()}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.ink, opacity: 0.85, marginTop: 6 }}>{match.competition} · {match.time}</div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ padding: '8px 14px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 13, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+        </div>
+      </div>
+      <GrainSVG opacity={0.32} id="g5" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 6 — Diagonal poster
+// ─────────────────────────────────────────────────────────────────────────────
+export function T6_Diagonal({ team, opponent, match, players, palette }) {
+  const P = players.slice(0, 11)
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <Halftone color={palette.ink} opacity={0.07} size={10} />
+      <div style={{
+        position: 'absolute', left: -200, top: 0, width: 1500, height: 220,
+        background: palette.accent, transform: 'rotate(-8deg)', transformOrigin: 'top left', top: -40, padding: '100px 0px 0px',
+      }}>
+        <div style={{ padding: '70px 240px 0', color: palette.primary, fontFamily: "'Anton', sans-serif", fontSize: 100, lineHeight: 0.9, letterSpacing: -1, transform: 'rotate(0deg)', display: 'flex', alignItems: 'center', gap: 28 }}>
+          1ST XI
+          <span style={{ fontSize: 22, letterSpacing: 3, opacity: 0.85 }}>· {match.date.toUpperCase()} ·</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <ClubLogo src={team.logo} monogram={team.monogram} color={palette.primary} size={70} shape="shield" />
+            <span style={{ fontFamily: "'Anton', sans-serif", fontSize: 56, letterSpacing: 1, lineHeight: 1 }}>v</span>
+            <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.primary} size={70} shape="shield" />
+          </span>
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 56, top: 220, right: 56, height: 420, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
+        <div style={{ flexShrink: 0, maxWidth: 320, paddingBottom: 24 }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: palette.accent, marginBottom: 14 }}>// 1ST XI</div>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={260} shape="shield" />
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 26, letterSpacing: 1, color: palette.ink, opacity: 0.85, marginTop: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
+        </div>
+        <div style={{ flex: 1, height: 500, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'visible' }}>
+          {(() => {
+            const featured = featuredOf(players)
+            const hasHead = !!(featured && featured.headshot)
+            const src = hasHead ? featured.headshot : team.logo
+            return (
+              <img src={src} alt={featured?.last || team.short}
+                style={{
+                  height: hasHead ? 520 : 280,
+                  width: 'auto', objectFit: 'contain', objectPosition: 'bottom',
+                  filter: `drop-shadow(0 20px 40px ${palette.primary}cc)`,
+                }} />
+            )
+          })()}
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: 620, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {P.map((p, i) => {
+          const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0', borderBottom: `1px solid ${palette.ink}1a` }}>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.accent, width: 26 }}>{String(i + 1).padStart(2, '0')}</div>
+              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 26, letterSpacing: 0.5, color: palette.ink, lineHeight: 1.1, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <span style={{ opacity: 0.55, fontWeight: 300 }}>{p.first.toUpperCase()}</span>{' '}
+                <span>{p.last}</span>
+              </div>
+              {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ position: 'absolute', left: -200, bottom: -40, width: 1500, height: 130, background: palette.secondary, transform: 'rotate(-4deg)', transformOrigin: 'bottom left', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', padding: '0 240px' }}>
+        <div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: 1.5, color: palette.accent, opacity: 0.85 }}>VENUE</div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 1.5, color: palette.ink, marginTop: 2 }}>{match.venue.toUpperCase()}</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: 1.5, color: palette.accent, opacity: 0.85 }}>{match.competition} · {match.round}</div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 24, letterSpacing: 1.5, color: palette.ink, marginTop: 2 }}>{match.date.toUpperCase()} · {match.time}</div>
+        </div>
+        <div style={{ justifySelf: 'end', padding: '6px 14px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 12, letterSpacing: 2, color: palette.ink, opacity: 0.85 }}>BETTERSTATS</div>
+      </div>
+      <GrainSVG opacity={0.35} id="g6" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 7 — Milestone spotlight
+// ─────────────────────────────────────────────────────────────────────────────
+export function T7_CaptainSpotlight({ team, opponent, match, players, palette, milestone }) {
+  const player = milestone?.player || featuredOf(players)
+  const value = milestone?.value || '1ST'
+  const unit = milestone?.unit || 'XI'
+  const reason = milestone?.reason || 'NAMED IN THE STARTING XI'
+  const detail = milestone?.detail || `${player?.roleLong || ''}`
+  const rest = players.slice(0, 13).filter(p => p !== player)
+  const hasHead = !!(player && player.headshot)
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: `linear-gradient(135deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
+      color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <Halftone color={palette.ink} opacity={0.06} size={11} />
+      <Stripes color={palette.accent} opacity={0.04} gap={26} angle={-22} />
+      <div style={{ position: 'absolute', right: -40, top: -50, fontFamily: "'Anton', sans-serif", fontSize: 720, lineHeight: 0.8, color: palette.accent, opacity: 0.08, letterSpacing: -16, userSelect: 'none' }}>{value}</div>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '28px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 4 }}>
+        <div><div style={{ display: 'inline-block', padding: '5px 12px', background: palette.accent, color: palette.primary, fontFamily: "'Anton', sans-serif", fontSize: 16, letterSpacing: 3 }}>★ MILESTONE</div></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={60} shape="shield" />
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 18, opacity: 0.7 }}>VS</div>
+          <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={60} shape="shield" />
+        </div>
+      </div>
+      <div style={{ position: 'absolute', right: 0, top: 60, width: 540, height: 660, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
+        {hasHead ? (
+          <img src={player.headshot} alt={player.last} style={{ height: 720, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+        ) : (
+          <img src={team.logo} alt={team.short} style={{ width: 380, height: 380, objectFit: 'contain', marginBottom: 40 }} />
+        )}
+      </div>
+      <div style={{ position: 'absolute', left: 40, top: 96, width: 540, zIndex: 3 }}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 3, color: palette.accent, marginBottom: 10 }}>// {reason}</div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 320, lineHeight: 0.82, color: palette.ink, letterSpacing: -8 }}>{value}</div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 80, letterSpacing: 2, color: palette.accent, lineHeight: 1, marginTop: -8 }}>{unit}</div>
+        <div style={{ marginTop: 22, paddingTop: 16, borderTop: `2px solid ${palette.accent}` }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 32, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 76, letterSpacing: -1, color: palette.ink, lineHeight: 0.9, marginTop: 2 }}>{player?.last || ''}</div>
+          {detail && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.2, color: palette.ink, opacity: 0.7, marginTop: 10, lineHeight: 1.4 }}>{detail}</div>}
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 270, background: palette.primary, borderTop: `3px solid ${palette.accent}`, padding: '18px 40px', zIndex: 3 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent }}>// JOINED BY THE XI</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.6 }}>{match.venue.toUpperCase()} · {match.date} · {match.time}</div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, columnGap: 24 }}>
+          {rest.slice(0, 12).map((p, i) => {
+            const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontFamily: "'Anton', sans-serif", lineHeight: 1.1, color: palette.ink, borderBottom: `1px solid ${palette.ink}1c`, paddingBottom: 5, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                <span style={{ color: palette.accent, fontSize: 13, opacity: 0.85, width: 22 }}>{String(i + 1).padStart(2, '0')}</span>
+                <span style={{ fontSize: 16, opacity: 0.6, fontWeight: 300 }}>{p.first[0]}.</span>
+                <span style={{ fontSize: 22, overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{p.last}</span>
+                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <GrainSVG opacity={0.32} id="g7" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 8 — Asymmetric mosaic
+// ─────────────────────────────────────────────────────────────────────────────
+export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx = 0 }) {
+  const playersXI = players.slice(0, 11)
+  const featuredP = playersXI[featuredIdx] || playersXI.find(p => p.captain) || playersXI[0]
+  const rest = playersXI.filter(p => p !== featuredP)
+  const P = [featuredP, ...rest]
+  const ROLE_BG = { BAT: palette.accent, BOWL: palette.ink, AR: palette.secondary, WK: palette.primary }
+  const ROLE_INK = { BAT: palette.primary, BOWL: palette.primary, AR: palette.ink, WK: palette.ink }
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <Halftone color={palette.ink} opacity={0.05} size={9} />
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 220, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', left: -40, top: -40, fontFamily: "'Anton', sans-serif", fontSize: 280, lineHeight: 0.8, color: palette.ink, opacity: 0.07, letterSpacing: -6, userSelect: 'none' }}>THE XI</div>
+      </div>
+      <div style={{ position: 'relative', padding: '36px 36px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 2 }}>
+        <div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent, marginBottom: 6 }}>// STARTING XI · {match.competition}</div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 60, lineHeight: 0.9, color: palette.ink, letterSpacing: -1 }}>
+            {team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}
+          </div>
+        </div>
+        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={76} shape="shield" />
+      </div>
+      <div style={{ margin: '0 36px', padding: '14px 18px', background: palette.secondary, borderLeft: `3px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, position: 'relative', zIndex: 2 }}>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 1, color: palette.ink }}>{match.round}</div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 1, color: palette.accent }}>{match.date}</div>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.85 }}>{match.time}</div>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.85 }}>{match.venue.toUpperCase()}</div>
+      </div>
+      <div style={{ position: 'absolute', left: 28, right: 28, top: 280, bottom: 80, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gridTemplateRows: 'repeat(4, 1fr)', gap: 10 }}>
+        {P.map((p, i) => {
+          const isFeatured = i === 0
+          const role = p.role || 'BAT'
+          const bg = ROLE_BG[role] || palette.accent
+          const ink = ROLE_INK[role] || palette.primary
+          const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
+          return (
+            <div key={i} style={{
+              gridColumn: isFeatured ? 'span 2' : 'span 1',
+              gridRow: isFeatured ? 'span 2' : 'span 1',
+              background: bg, color: ink,
+              position: 'relative', overflow: 'hidden',
+              display: 'flex', flexDirection: 'column',
+              border: `1.5px solid ${palette.ink}1a`,
+            }}>
+              <div style={{ flex: 1, position: 'relative', display: 'grid', placeItems: 'center', background: `linear-gradient(180deg, ${bg} 0%, ${palette.primary}aa 100%)`, overflow: 'hidden' }}>
+                {p.headshot ? (
+                  <img src={p.headshot} alt={p.last} style={{ height: '120%', width: 'auto', maxWidth: '100%', objectFit: 'contain', objectPosition: 'bottom' }} />
+                ) : (
+                  <img src={team.logo} alt={team.short} style={{ width: isFeatured ? 200 : 80, height: isFeatured ? 200 : 80, objectFit: 'contain', opacity: 0.85 }} />
+                )}
+                <div style={{ position: 'absolute', top: 6, left: 6, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: 1.5, color: ink, opacity: 0.7 }}>#{String(i + 1).padStart(2, '0')}</div>
+                {chip && <div style={{ position: 'absolute', top: 6, right: 6 }}><RoleChip kind={chip} accent={palette.accent} ink={palette.primary} /></div>}
+              </div>
+              <div style={{ padding: isFeatured ? '10px 12px' : '5px 8px', background: ink, color: bg, fontFamily: "'Anton', sans-serif", fontSize: isFeatured ? 32 : 14, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.last}</div>
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ position: 'absolute', left: 36, right: 36, bottom: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          {[['BAT', palette.accent], ['BOWL', palette.ink], ['AR', palette.secondary]].map(([lbl, clr]) => (
+            <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.7 }}>
+              <span style={{ width: 14, height: 14, background: clr, border: lbl === 'AR' ? `1px solid ${palette.ink}55` : 'none', display: 'inline-block' }} /> {lbl}
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+      </div>
+      <GrainSVG opacity={0.28} id="g8" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 9 — Festival flyer
+// ─────────────────────────────────────────────────────────────────────────────
+export function T9_Flyer({ team, opponent, match, players, palette }) {
+  const P = players.slice(0, 11)
+  const tier1 = P.slice(0, 2)
+  const tier2 = P.slice(2, 5)
+  const tier3 = P.slice(5, 11)
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <Halftone color={palette.ink} opacity={0.08} size={10} />
+      <Stripes color={palette.accent} opacity={0.06} gap={20} angle={0} />
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 130, textAlign: 'center', fontFamily: "'Anton', sans-serif", fontSize: 520, lineHeight: 0.8, color: palette.accent, opacity: 0.07, letterSpacing: -10, userSelect: 'none' }}>XI</div>
+      {[['left', 'top'], ['right', 'top'], ['left', 'bottom'], ['right', 'bottom']].map(([h, v], i) => (
+        <div key={i} style={{
+          position: 'absolute',
+          [h]: 32, [v]: v === 'bottom' ? 160 : 32,
+          width: 40, height: 40,
+          borderTop: v === 'top' ? `3px solid ${palette.accent}` : undefined,
+          borderBottom: v === 'bottom' ? `3px solid ${palette.accent}` : undefined,
+          borderLeft: h === 'left' ? `3px solid ${palette.accent}` : undefined,
+          borderRight: h === 'right' ? `3px solid ${palette.accent}` : undefined,
+        }} />
+      ))}
+      <div style={{ textAlign: 'center', padding: '44px 40px 12px', position: 'relative', zIndex: 2 }}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 4, color: palette.accent, marginBottom: 14 }}>★ {match.competition} · {match.season} · PRESENTS ★</div>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 20 }}>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={68} shape="shield" />
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 70, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{team.name}</div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, letterSpacing: 3, color: palette.accent, padding: '0 8px' }}>vs</div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 46, letterSpacing: 1, color: palette.ink, lineHeight: 1, opacity: 0.85 }}>{opponent.name}</div>
+          <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={48} shape="shield" />
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, margin: '8px 0 16px', fontFamily: "'Anton', sans-serif", fontSize: 18, letterSpacing: 6, color: palette.accent }}>
+        <span style={{ flex: '0 1 180px', height: 2, background: palette.accent, opacity: 0.5 }} />
+        <span>★ ★ ★ THE LINEUP ★ ★ ★</span>
+        <span style={{ flex: '0 1 180px', height: 2, background: palette.accent, opacity: 0.5 }} />
+      </div>
+      <div style={{ textAlign: 'center', padding: '0 40px', lineHeight: 0.88, fontFamily: "'Anton', sans-serif", color: palette.ink, letterSpacing: -1 }}>
+        <div style={{ fontSize: 108, marginBottom: 6 }}>
+          {tier1.map((p, i) => (
+            <span key={i}>
+              <span>{p.last}</span>
+              {i < tier1.length - 1 && <span style={{ color: palette.accent, margin: '0 18px' }}>·</span>}
+            </span>
+          ))}
+        </div>
+        <div style={{ fontSize: 68, marginTop: 16, opacity: 0.95 }}>
+          {tier2.map((p, i) => (
+            <span key={i}>
+              <span>{p.last}</span>
+              {i < tier2.length - 1 && <span style={{ color: palette.accent, margin: '0 16px' }}>·</span>}
+            </span>
+          ))}
+        </div>
+        <div style={{ fontSize: 40, marginTop: 18, opacity: 0.88, letterSpacing: 0 }}>
+          <div>
+            {tier3.slice(0, 3).map((p, i) => (
+              <span key={i}>
+                <span>{p.last}</span>
+                {i < 2 && <span style={{ color: palette.accent, margin: '0 14px', opacity: 0.7 }}>·</span>}
+              </span>
+            ))}
+          </div>
+          <div style={{ marginTop: 6 }}>
+            {tier3.slice(3).map((p, i, arr) => (
+              <span key={i}>
+                <span>{p.last}</span>
+                {i < arr.length - 1 && <span style={{ color: palette.accent, margin: '0 14px', opacity: 0.7 }}>·</span>}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: palette.accent, color: palette.primary, padding: '22px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 40, letterSpacing: 1, lineHeight: 1 }}>{match.date}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, marginTop: 4 }}>GATES {match.time}</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 32, letterSpacing: 2, lineHeight: 1 }}>{match.venue.toUpperCase()}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, marginTop: 4 }}>{match.round}</div>
+        </div>
+        <div style={{ padding: '10px 16px', border: `2px solid ${palette.primary}`, fontFamily: "'Anton', sans-serif", fontSize: 14, letterSpacing: 2 }}>BETTERSTATS</div>
+      </div>
+      <GrainSVG opacity={0.4} id="g9" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPANION 1 — Generic announcement
+// ─────────────────────────────────────────────────────────────────────────────
+export function C1_CaptainAnnounce({ announcement, team, opponent, match, palette, player: legacyPlayer }) {
+  const a = announcement || { kind: 'ANNOUNCEMENT', headline: 'NAMED', subheadline: '', player: legacyPlayer }
+  const player = a.player || legacyPlayer
+  const hasHead = !!(player && player.headshot)
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: `linear-gradient(160deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
+      color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <Halftone color={palette.ink} opacity={0.07} size={11} />
+      <Stripes color={palette.accent} opacity={0.04} gap={28} angle={-22} />
+      <div style={{ position: 'absolute', left: -40, top: -30, fontFamily: "'Anton', sans-serif", fontSize: 360, lineHeight: 0.82, color: palette.accent, opacity: 0.09, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{(a.kind || 'ANNOUNCEMENT')}</div>
+      <div style={{ position: 'absolute', left: 60, top: 90, right: 60, bottom: 200, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
+        {hasHead ? (
+          <img src={player.headshot} alt={player.last} style={{ height: 820, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+        ) : (
+          <img src={team.logo} alt={team.short} style={{ width: 460, height: 460, objectFit: 'contain', marginBottom: 60 }} />
+        )}
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '36px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 3 }}>
+        <div><div style={{ display: 'inline-block', padding: '7px 14px', background: palette.accent, color: palette.primary, fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 3 }}>{(a.kind || 'ANNOUNCEMENT').toUpperCase()}</div></div>
+        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={92} shape="shield" />
+      </div>
+      <div style={{ position: 'absolute', left: 40, bottom: 130, right: 40, zIndex: 3 }}>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 56, letterSpacing: 3, color: palette.accent, marginBottom: 8, lineHeight: 1 }}>{(a.headline || '').toUpperCase()}</div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 64, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 200, letterSpacing: -3, color: palette.ink, lineHeight: 0.84, marginTop: -6 }}>{player?.last || '—'}</div>
+        {a.subheadline && <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, letterSpacing: 2, color: palette.accent, marginTop: 10 }}>{a.subheadline.toUpperCase()}</div>}
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 2, color: palette.ink }}>{(team.fullName || team.name).toUpperCase()}</div>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.65 }}>{match.competition} · {match.season}</div>
+        <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+      </div>
+      <GrainSVG opacity={0.32} id="ca1" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPANION 2 — Toss
+// ─────────────────────────────────────────────────────────────────────────────
+export function C2_TossWon({ toss, team, opponent, match, palette }) {
+  const winnerIsOpponent = toss?.winner === 'OPPONENT'
+  const decision = (toss?.decision || 'BAT').toUpperCase()
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <Halftone color={palette.ink} opacity={0.07} size={10} />
+      <Stripes color={palette.accent} opacity={0.04} gap={24} angle={-20} />
+      <div style={{ position: 'absolute', right: -100, top: -100, width: 660, height: 660, borderRadius: '50%', background: `radial-gradient(circle at 35% 30%, ${palette.accent} 0%, ${palette.accent}dd 50%, ${palette.accent}88 100%)`, boxShadow: `inset 0 0 0 14px ${palette.primary}, inset 0 0 0 20px ${palette.accent}` }} />
+      <div style={{ position: 'absolute', right: 90, top: 130, fontFamily: "'Anton', sans-serif", fontSize: 280, letterSpacing: -4, color: palette.primary, lineHeight: 0.85, transform: 'rotate(-6deg)' }}>TOSS</div>
+      <div style={{ position: 'absolute', left: -50, bottom: 180, fontFamily: "'Anton', sans-serif", fontSize: 460, lineHeight: 0.8, color: palette.ink, opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>{decision}</div>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '32px 40px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 14, zIndex: 3 }}>
+        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={72} shape="shield" />
+        <div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent }}>// {match.competition} · {match.round}</div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, letterSpacing: 1.5, marginTop: 2, color: palette.ink }}>{team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}</div>
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 40, top: 320, right: 40 }}>
+        <div style={{ display: 'inline-block', padding: '6px 14px', background: palette.accent, color: palette.primary, fontFamily: "'Anton', sans-serif", fontSize: 20, letterSpacing: 3, marginBottom: 12 }}>
+          {winnerIsOpponent ? `${opponent.name} WON THE TOSS` : `${team.name} WON THE TOSS`}
+        </div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 88, letterSpacing: 2, color: palette.ink, opacity: 0.55, lineHeight: 1, marginTop: 16 }}>{winnerIsOpponent ? "THEY'RE" : "WE'RE"}</div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 280, letterSpacing: -6, color: palette.ink, lineHeight: 0.85, marginTop: -4 }}>{decision}</div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 72, letterSpacing: 3, color: palette.accent, lineHeight: 1, marginTop: -8 }}>FIRST</div>
+      </div>
+      <div style={{ position: 'absolute', left: 40, right: 40, bottom: 100, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={64} shape="shield" />
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, color: palette.accent }}>VS</div>
+          <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={64} shape="shield" />
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 30, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{match.date}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.75, marginTop: 4 }}>{match.time} · {match.venue.toUpperCase()}</div>
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 16, letterSpacing: 2, color: palette.ink, opacity: 0.85 }}>{(team.fullName || team.name).toUpperCase()}</div>
+        <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+      </div>
+      <GrainSVG opacity={0.3} id="ca2" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPANION 3 — Man of the Match
+// ─────────────────────────────────────────────────────────────────────────────
+export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
+  const player = motm?.player
+  const stats = motm?.stats || []
+  const hasHead = !!(player && player.headshot)
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <div style={{ position: 'absolute', left: -100, top: -100, width: 700, height: 1400, background: palette.secondary, transform: 'rotate(8deg)', transformOrigin: 'top left' }} />
+      <Halftone color={palette.ink} opacity={0.06} size={11} />
+      <Stripes color={palette.accent} opacity={0.04} gap={28} angle={-22} />
+      <div style={{ position: 'absolute', right: 60, top: 90, fontFamily: "'Anton', sans-serif", fontSize: 320, lineHeight: 0.8, color: palette.accent, opacity: 0.18, letterSpacing: -8, userSelect: 'none' }}>★</div>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '32px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 3 }}>
+        <div>
+          <div style={{ display: 'inline-block', padding: '6px 14px', background: palette.accent, color: palette.primary, fontFamily: "'Anton', sans-serif", fontSize: 18, letterSpacing: 3 }}>★ MAN OF THE MATCH</div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 32, letterSpacing: 1.5, marginTop: 14, color: palette.ink }}>{team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 6 }}>{match.competition} · {match.round} · {match.date}</div>
+        </div>
+        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
+      </div>
+      <div style={{ position: 'absolute', left: 0, top: 220, width: 520, height: 700, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
+        {hasHead ? (
+          <img src={player.headshot} alt={player?.last} style={{ height: 760, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+        ) : (
+          <img src={team.logo} alt={team.short} style={{ width: 400, height: 400, objectFit: 'contain', marginBottom: 80 }} />
+        )}
+      </div>
+      <div style={{ position: 'absolute', right: 36, top: 230, width: 520, zIndex: 3 }}>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 44, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 124, letterSpacing: -1, color: palette.ink, lineHeight: 0.88, marginTop: -2 }}>{player?.last || ''}</div>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: palette.accent, marginTop: 8 }}>{(player?.roleLong || player?.role || '').toUpperCase()}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 22 }}>
+          {stats.map((s, i) => (
+            <div key={i} style={{ padding: '14px 18px', background: i === 0 ? palette.accent : `${palette.ink}0c`, border: `1.5px solid ${palette.accent}`, color: i === 0 ? palette.primary : palette.ink }}>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, opacity: 0.75 }}>{s.label.toUpperCase()}</div>
+              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 76, lineHeight: 0.9, letterSpacing: -1, marginTop: 4 }}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+        {motm?.summary && (
+          <div style={{ marginTop: 16, fontFamily: "'Inter', sans-serif", fontSize: 15, lineHeight: 1.4, color: palette.ink, opacity: 0.78, fontStyle: 'italic', borderLeft: `3px solid ${palette.accent}`, paddingLeft: 14 }}>
+            "{motm.summary}"
+          </div>
+        )}
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 18, letterSpacing: 2, color: palette.ink }}>{match.venue.toUpperCase()}</div>
+        <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+      </div>
+      <GrainSVG opacity={0.3} id="ca3" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPANION 4 — Final score with top performers
+// ─────────────────────────────────────────────────────────────────────────────
+export function C4_FinalScore({ result, team, opponent, match, palette }) {
+  const winnerSide = result?.winner === 'OPPONENT' ? 'opponent' : (result?.winner === 'TIE' ? 'tie' : 'team')
+  const tb = result?.topBatters || {}
+  const tw = result?.topBowlers || {}
+  const teamBatters = tb.team || []
+  const teamBowlers = tw.team || []
+  const oppBatters = tb.opponent || []
+  const oppBowlers = tw.opponent || []
+  const Perf = ({ p, accent }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: `1px solid ${palette.ink}1a`, padding: '5px 0', fontFamily: "'Anton', sans-serif", color: palette.ink, lineHeight: 1.05, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+      <span style={{ fontSize: 18, letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8 }}>{p.last}</span>
+      <span style={{ fontSize: 16, color: accent || palette.accent, letterSpacing: 1 }}>{p.line}</span>
+    </div>
+  )
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      <Halftone color={palette.ink} opacity={0.06} size={10} />
+      <Stripes color={palette.accent} opacity={0.03} gap={28} angle={0} />
+      <div style={{ position: 'absolute', inset: 0, paddingBottom: 64, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '40px 48px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `3px solid ${palette.accent}` }}>
+          <div>
+            <div style={{ display: 'inline-block', padding: '8px 16px', background: palette.accent, color: palette.primary, fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 3 }}>FULL TIME</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 10 }}>{match.competition} · {match.round} · {match.date}</div>
+          </div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 56, letterSpacing: 2, color: palette.ink }}>RESULT</div>
+        </div>
+        <div style={{ padding: '36px 48px 24px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 24, alignItems: 'center' }}>
+          <div style={{ textAlign: 'center', padding: '22px 18px', background: winnerSide === 'team' ? `${palette.accent}22` : 'transparent', border: `2px solid ${winnerSide === 'team' ? palette.accent : palette.ink + '22'}`, position: 'relative' }}>
+            {winnerSide === 'team' && <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)', padding: '4px 12px', background: palette.accent, color: palette.primary, fontFamily: "'Anton', sans-serif", fontSize: 16, letterSpacing: 2 }}>WINNER</div>}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 18 }}>
+              <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={96} shape="shield" />
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{team.name}</div>
+                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 64, letterSpacing: -0.5, lineHeight: 1, color: palette.ink, marginTop: 6 }}>{result?.teamScore || '—'}</div>
+              </div>
+            </div>
+          </div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 52, letterSpacing: 2, color: palette.accent }}>VS</div>
+          <div style={{ textAlign: 'center', padding: '22px 18px', background: winnerSide === 'opponent' ? `${palette.accent}22` : 'transparent', border: `2px solid ${winnerSide === 'opponent' ? palette.accent : palette.ink + '22'}`, position: 'relative' }}>
+            {winnerSide === 'opponent' && <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)', padding: '4px 12px', background: palette.accent, color: palette.primary, fontFamily: "'Anton', sans-serif", fontSize: 16, letterSpacing: 2 }}>WINNER</div>}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 18 }}>
+              <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={96} shape="shield" />
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{opponent.name}</div>
+                <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 64, letterSpacing: -0.5, lineHeight: 1, color: palette.ink, marginTop: 6 }}>{result?.oppScore || '—'}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style={{ margin: '0 48px 20px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, minHeight: 0 }}>
+          <div style={{ padding: '20px 22px', background: `${palette.ink}08`, borderLeft: `3px solid ${palette.accent}`, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 2, lineHeight: 1, color: palette.accent, marginBottom: 14 }}>{team.short} · TOP PERFORMERS</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginBottom: 6 }}>BATTING</div>
+            {teamBatters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginTop: 14, marginBottom: 6 }}>BOWLING</div>
+            {teamBowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
+          </div>
+          <div style={{ padding: '20px 22px', background: `${palette.ink}08`, borderLeft: `3px solid ${palette.ink}55`, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 2, lineHeight: 1, color: palette.ink, opacity: 0.85, marginBottom: 14 }}>{opponent.short} · TOP PERFORMERS</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginBottom: 6 }}>BATTING</div>
+            {oppBatters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginTop: 14, marginBottom: 6 }}>BOWLING</div>
+            {oppBowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
+          </div>
+        </div>
+        <div style={{ margin: '0 48px 20px', padding: '26px 28px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}`, textAlign: 'center' }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: palette.accent, marginBottom: 10 }}>// MATCH RESULT</div>
+          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 60, letterSpacing: -0.5, lineHeight: 1.05, color: palette.ink }}>
+            {result?.winner === 'TIE' ? 'MATCH TIED' : `${winnerSide === 'team' ? team.name : opponent.name} WIN ${result?.margin || ''}`.trim()}
+          </div>
+          {result?.motmLast && (
+            <div style={{ display: 'inline-block', marginTop: 12, padding: '6px 14px', background: `${palette.ink}10`, border: `1px solid ${palette.accent}`, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.85 }}>★ MOTM · {result.motmLast}</div>
+          )}
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 48px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 18, letterSpacing: 2, color: palette.ink }}>{match.venue.toUpperCase()}</div>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.65 }}>{match.season} SEASON</div>
+        <div style={{ padding: '6px 12px', border: `1.5px solid ${palette.ink}55`, fontFamily: "'Anton', sans-serif", fontSize: 11, letterSpacing: 2, color: palette.ink, opacity: 0.8 }}>BETTERSTATS</div>
+      </div>
+      <GrainSVG opacity={0.3} id="ca4" />
+    </div>
+  )
+}
