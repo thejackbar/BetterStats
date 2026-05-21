@@ -648,21 +648,49 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
             pid_uuids = [uuid.UUID(p) for p in all_pids]
             res = await db.execute(select(Player).where(Player.id.in_(pid_uuids)))
             for p in res.scalars().all():
-                raw_name = p.display_name or p.name or ""
-                parts = raw_name.strip().split()
-                # GR stores names as "LastName FirstName" (last_first)
-                if len(parts) >= 2:
-                    first = " ".join(parts[1:])
-                    last = parts[0].upper()
+                raw_name = (p.display_name or p.name or "").strip()
+                if ", " in raw_name:
+                    # "Surname, Firstname" → last="SURNAME", first="Firstname"
+                    last_part, first_part = raw_name.split(", ", 1)
+                    first = first_part.strip()
+                    last = last_part.strip().upper()
                 else:
-                    first = ""
-                    last = parts[0].upper() if parts else ""
+                    parts = raw_name.split()
+                    if len(parts) >= 2:
+                        first = " ".join(parts[1:])
+                        last = parts[0].upper()
+                    else:
+                        first = ""
+                        last = parts[0].upper() if parts else ""
+                # Strip any trailing punctuation from last name
+                last = last.rstrip(".,;:")
                 name_map[str(p.id).lower()] = (first, last)
         except Exception:
             pass  # name lookup best-effort; empty names still render
 
+    # Build roster name map from team player lists (covers opposition players not in our DB)
+    roster_name_map: dict[str, tuple[str, str]] = {}
+    for team_r in teams_raw:
+        for rp in (team_r.get("players") or []):
+            pid = rp.get("participantId") or ""
+            if not pid:
+                continue
+            dn = rp.get("displayName") or rp.get("name") or ""
+            if dn:
+                dn = dn.strip()
+                if ", " in dn:
+                    lp, fp = dn.split(", ", 1)
+                    roster_name_map[pid.lower()] = (fp.strip(), lp.strip().upper().rstrip(".,;:"))
+                else:
+                    pts = dn.split()
+                    if len(pts) >= 2:
+                        roster_name_map[pid.lower()] = (" ".join(pts[1:]), pts[0].upper().rstrip(".,;:"))
+                    else:
+                        roster_name_map[pid.lower()] = ("", dn.upper().rstrip(".,;:"))
+
     def get_name(pid: str) -> tuple[str, str]:
-        return name_map.get(str(pid).lower(), ("", pid[-4:].upper() if pid else "?"))
+        key = str(pid).lower()
+        return name_map.get(key) or roster_name_map.get(key) or ("", "")
 
     def parse_batting(batting_rows: list) -> list:
         rows = sorted(batting_rows, key=lambda b: b.get("batOrder") or 99)
@@ -752,10 +780,13 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
         name = (team_raw.get("displayName") or team_raw.get("name") or "TEAM").upper()
         short = "".join(w[0] for w in name.split()[:3])
         total, wickets, overs, rr = team_totals(inn, batting)
+        logo_url = (team_raw.get("logoUrl") or team_raw.get("logo") or
+                    team_raw.get("imageUrl") or team_raw.get("image") or None)
         return {
             "name": name,
             "short": short,
             "color": default_color,
+            "logo": logo_url,
             "monogram": short,
             "total": total,
             "wickets": wickets,
@@ -773,8 +804,13 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
     venue = (match_summary.get("venue") or {}).get("name") or ""
     date_raw = match_summary.get("dateTimeUTC") or match_summary.get("startDateTime") or ""
     date_str = date_raw[:10] if date_raw else ""
-    grade_name = ((raw.get("grade") or match_summary.get("grade") or {}).get("name") or "").upper()
-    round_name = match_summary.get("round") or raw.get("round") or ""
+    grade_obj = raw.get("grade") or match_summary.get("grade") or {}
+    grade_name = (grade_obj.get("name") or "").upper()
+    round_raw = match_summary.get("round") or raw.get("round") or ""
+    if isinstance(round_raw, dict):
+        round_name = round_raw.get("name") or round_raw.get("shortName") or ""
+    else:
+        round_name = str(round_raw)
 
     meta = {
         "competition": grade_name,
