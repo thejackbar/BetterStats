@@ -256,6 +256,25 @@ export default function AdminSocialPost() {
 
   // Scorecard match data (for SC1/SC2/SC3)
   const [scorecardMatch, setScorecardMatch] = useState(DEFAULT_SCORECARD)
+  const [scUrlInput, setScUrlInput] = useState('')
+  const [scUrlStatus, setScUrlStatus] = useState(null) // null | 'loading' | 'ok' | string(error)
+
+  const handleScUrlImport = async () => {
+    const urlOrId = scUrlInput.trim()
+    const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+    const match = urlOrId.match(uuidRe)
+    if (!match) { setScUrlStatus('Paste a play.cricket.com.au match URL or a match UUID'); return }
+    const matchId = match[0]
+    setScUrlStatus('loading')
+    try {
+      const data = await api.getSocialScorecard(matchId)
+      setScorecardMatch(data)
+      setScUrlStatus('ok')
+    } catch (e) {
+      setScUrlStatus(e?.message || 'Failed to load scorecard')
+    }
+  }
+
   const patchScMeta = patch => setScorecardMatch(m => ({ ...m, meta: { ...m.meta, ...patch } }))
   const patchScTeam = (side, patch) => setScorecardMatch(m => ({ ...m, [side]: { ...m[side], ...patch } }))
   const patchScExtras = (side, patch) => setScorecardMatch(m => ({ ...m, [side]: { ...m[side], extras: { ...m[side].extras, ...patch } } }))
@@ -384,7 +403,6 @@ export default function AdminSocialPost() {
   }
   if (isScorecard) {
     extraProps.match = scorecardMatch
-    extraProps.dark = isDarkPalette
   }
 
   // Build players array for template
@@ -983,6 +1001,34 @@ export default function AdminSocialPost() {
             {isScorecard && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Scorecard Data</h2>
+
+                {/* PlayCricket URL import */}
+                <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
+                  <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from PlayCricket</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={scUrlInput}
+                      onChange={e => { setScUrlInput(e.target.value); setScUrlStatus(null) }}
+                      placeholder="https://play.cricket.com.au/match/37af9ea5-..."
+                      className="flex-1 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono"
+                      onKeyDown={e => e.key === 'Enter' && handleScUrlImport()}
+                    />
+                    <button
+                      onClick={handleScUrlImport}
+                      disabled={scUrlStatus === 'loading'}
+                      className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+                      style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}
+                    >
+                      {scUrlStatus === 'loading' ? 'Loading…' : 'Import'}
+                    </button>
+                  </div>
+                  {scUrlStatus && scUrlStatus !== 'loading' && (
+                    <p className={`font-mono text-[9px] mt-1.5 ${scUrlStatus === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
+                      {scUrlStatus === 'ok' ? '✓ Scorecard loaded — review and adjust below' : `✗ ${scUrlStatus}`}
+                    </p>
+                  )}
+                </div>
 
                 {/* Meta */}
                 <div className="grid grid-cols-2 gap-2 mb-3">
