@@ -1294,10 +1294,10 @@ export function SC1_Broadcast({ match, palette = {} }) {
           return (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 1.1fr 46px 40px 34px 34px 54px', gap: 8, padding: '5px 2px', alignItems: 'baseline', borderBottom: i < team.batting.length - 1 ? `1px solid ${rule}` : 'none', opacity: dnb ? 0.4 : 1 }}>
               <div style={{ fontFamily: SC_MONO, fontSize: 12, color: dim }}>{p.num}</div>
-              <div style={{ fontFamily: SC_FONT, fontSize: 22, letterSpacing: 0.5, lineHeight: 1, display: 'flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                <span style={{ color: dim, fontSize: 15, fontWeight: 300 }}>{p.first}</span>
+              <div style={{ fontFamily: SC_FONT, fontSize: 22, letterSpacing: 0.5, lineHeight: 1.3, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                {p.first && <span style={{ color: dim, fontSize: 15, fontWeight: 300 }}>{p.first} </span>}
                 <span>{p.last}</span>
-                {p.role && <span style={{ fontFamily: SC_MONO, fontSize: 10, color: accent, letterSpacing: 1, marginLeft: 2 }}>({p.role})</span>}
+                {p.role && <span style={{ fontFamily: SC_MONO, fontSize: 10, color: accent, letterSpacing: 1, marginLeft: 4 }}>({p.role})</span>}
               </div>
               <div style={{ fontFamily: SC_BODY, fontSize: 13, color: dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : p.out)}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_FONT, fontSize: 24, lineHeight: 1, color: dnb ? dim : ink }}>{dnb ? '—' : (p.notOut ? `${p.r}*` : p.r)}</div>
@@ -1320,8 +1320,8 @@ export function SC1_Broadcast({ match, palette = {} }) {
         </div>
         {(team.bowling || []).map((p, i) => (
           <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 46px 40px 46px 40px 54px', gap: 8, padding: '5px 2px', alignItems: 'baseline', borderBottom: i < team.bowling.length - 1 ? `1px solid ${rule}` : 'none' }}>
-            <div style={{ fontFamily: SC_FONT, fontSize: 20, letterSpacing: 0.5, display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{ color: dim, fontSize: 14, fontWeight: 300 }}>{p.first}</span><span>{p.last}</span>
+            <div style={{ fontFamily: SC_FONT, fontSize: 20, letterSpacing: 0.5, lineHeight: 1.3, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+              {p.first && <span style={{ color: dim, fontSize: 14, fontWeight: 300 }}>{p.first} </span>}<span>{p.last}</span>
             </div>
             <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 13 }}>{p.o}</div>
             <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 13, color: dim }}>{p.m}</div>
@@ -1403,9 +1403,9 @@ export function SC2_Brutalist({ match, palette = {} }) {
           const dnb = p.didNotBat
           return (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1.1fr 44px 38px 32px 32px 50px', gap: 8, padding: '5px 0', alignItems: 'baseline', borderBottom: i < team.batting.length - 1 ? `1px solid ${rule}` : 'none', background: i % 2 === 0 ? stripe : 'transparent', opacity: dnb ? 0.35 : 1 }}>
-              <div style={{ fontFamily: SC_FONT, fontSize: 20, letterSpacing: 0.5, lineHeight: 1, display: 'flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                <span style={{ color: dim, fontSize: 13, fontWeight: 300 }}>{p.first}</span><span>{p.last}</span>
-                {p.role && <span style={{ fontFamily: SC_MONO, fontSize: 9, color: accent, letterSpacing: 1 }}>({p.role})</span>}
+              <div style={{ fontFamily: SC_FONT, fontSize: 20, letterSpacing: 0.5, lineHeight: 1.3, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                {p.first && <span style={{ color: dim, fontSize: 13, fontWeight: 300 }}>{p.first} </span>}<span>{p.last}</span>
+                {p.role && <span style={{ fontFamily: SC_MONO, fontSize: 9, color: accent, letterSpacing: 1 }}> ({p.role})</span>}
               </div>
               <div style={{ fontFamily: SC_BODY, fontSize: 12, color: dim, fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : p.out)}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_FONT, fontSize: 22, lineHeight: 1, color: dnb ? dim : ink, letterSpacing: -0.5 }}>{dnb ? '—' : (p.notOut ? `${p.r}*` : p.r)}</div>
@@ -1428,8 +1428,8 @@ export function SC2_Brutalist({ match, palette = {} }) {
         </div>
         {(team.bowling || []).map((p, i) => (
           <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 42px 38px 42px 38px 56px', gap: 8, padding: '5px 0', alignItems: 'baseline', borderBottom: i < team.bowling.length - 1 ? `1px solid ${rule}` : 'none', background: i % 2 === 0 ? stripe : 'transparent' }}>
-            <div style={{ fontFamily: SC_FONT, fontSize: 19, letterSpacing: 0.5, display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{ color: dim, fontSize: 12, fontWeight: 300 }}>{p.first}</span><span>{p.last}</span>
+            <div style={{ fontFamily: SC_FONT, fontSize: 19, letterSpacing: 0.5, lineHeight: 1.3, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+              {p.first && <span style={{ color: dim, fontSize: 12, fontWeight: 300 }}>{p.first} </span>}<span>{p.last}</span>
             </div>
             <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 12 }}>{p.o}</div>
             <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 12, color: dim }}>{p.m}</div>
@@ -1512,9 +1512,9 @@ export function SC3_Dashboard({ match, palette = {} }) {
           const dnb = p.didNotBat
           return (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1.1fr 42px 38px 32px 32px 50px', gap: 10, padding: '5px 0', alignItems: 'baseline', borderBottom: i < team.batting.length - 1 ? `1px solid ${rule}` : 'none', opacity: dnb ? 0.4 : 1 }}>
-              <div style={{ fontFamily: SC_BODY, fontSize: 14, fontWeight: 600, color: ink, lineHeight: 1.1, display: 'flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                <span style={{ color: dim, fontSize: 12, fontWeight: 400 }}>{p.first}</span><span>{p.last}</span>
-                {p.role && <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: 1, padding: '1px 5px', borderRadius: 4, background: `${accent}22`, color: accent }}>{p.role}</span>}
+              <div style={{ fontFamily: SC_BODY, fontSize: 14, fontWeight: 600, color: ink, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                {p.first && <span style={{ color: dim, fontSize: 12, fontWeight: 400 }}>{p.first} </span>}<span>{p.last}</span>
+                {p.role && <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: 1, padding: '1px 5px', borderRadius: 4, background: `${accent}22`, color: accent }}> {p.role}</span>}
               </div>
               <div style={{ fontFamily: SC_BODY, fontSize: 11.5, color: dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : p.out)}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_BODY, fontSize: 16, fontWeight: 700, color: dnb ? dim : ink, lineHeight: 1 }}>{dnb ? '—' : (p.notOut ? `${p.r}*` : p.r)}</div>
@@ -1538,8 +1538,8 @@ export function SC3_Dashboard({ match, palette = {} }) {
         </div>
         {(team.bowling || []).map((p, i) => (
           <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 42px 38px 42px 38px 50px', gap: 10, padding: '5px 0', alignItems: 'baseline', borderBottom: i < team.bowling.length - 1 ? `1px solid ${rule}` : 'none' }}>
-            <div style={{ fontFamily: SC_BODY, fontSize: 14, fontWeight: 600, color: ink, display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{ color: dim, fontSize: 12, fontWeight: 400 }}>{p.first}</span><span>{p.last}</span>
+            <div style={{ fontFamily: SC_BODY, fontSize: 14, fontWeight: 600, color: ink, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+              {p.first && <span style={{ color: dim, fontSize: 12, fontWeight: 400 }}>{p.first} </span>}<span>{p.last}</span>
             </div>
             <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 11, color: dim }}>{p.o}</div>
             <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 11, color: dim }}>{p.m}</div>
