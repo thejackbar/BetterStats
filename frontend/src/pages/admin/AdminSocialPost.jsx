@@ -5,6 +5,7 @@ import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
   T5_Brutalist, T6_Diagonal, T7_CaptainSpotlight, T8_Mosaic, T9_Flyer,
   C1_CaptainAnnounce, C2_TossWon, C3_ManOfMatch, C4_FinalScore,
+  SC1_Broadcast, SC2_Brutalist, SC3_Dashboard,
   PALETTES, orgToPalette,
 } from '../../social/cricket-templates'
 
@@ -25,7 +26,32 @@ const TEMPLATES = [
   { id: 'C2', name: 'Toss',            category: 'Companion', component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
   { id: 'C3', name: 'Player Spotlight',category: 'Companion', component: C3_ManOfMatch,      desc: 'Man of match / player stats',     maxPlayers: 1 },
   { id: 'C4', name: 'Match Result',    category: 'Companion', component: C4_FinalScore,      desc: 'Full time result + top performers', maxPlayers: 0 },
+  { id: 'SC1', name: 'Broadcast',      category: 'Scorecard', component: SC1_Broadcast,      desc: 'TV-style full scorecard, dark/light', maxPlayers: 0, isScorecard: true },
+  { id: 'SC2', name: 'Brutalist',      category: 'Scorecard', component: SC2_Brutalist,      desc: 'Bold type, heavy rules', maxPlayers: 0, isScorecard: true },
+  { id: 'SC3', name: 'Dashboard',      category: 'Scorecard', component: SC3_Dashboard,      desc: 'Soft cards, app-style', maxPlayers: 0, isScorecard: true },
 ]
+
+const DEFAULT_BATTING_ROW = (num) => ({ num, first: '', last: `PLAYER ${num}`, r: 0, b: 0, fours: 0, sixes: 0, sr: 0, out: 'not out', notOut: false, didNotBat: false, role: null })
+const DEFAULT_BOWLING_ROW = (i) => ({ first: '', last: `BOWLER ${i + 1}`, o: 0, m: 0, r: 0, w: 0, econ: 0 })
+const DEFAULT_TEAM = (name, short, color) => ({
+  name, short, color, monogram: short,
+  total: '0', overs: '0.0', wickets: 0, runRate: '0.00',
+  batting: Array.from({ length: 11 }, (_, i) => DEFAULT_BATTING_ROW(i + 1)),
+  bowling: Array.from({ length: 6 }, (_, i) => DEFAULT_BOWLING_ROW(i)),
+  extras: { total: 0, b: 0, lb: 0, nb: 0, wd: 0 },
+})
+const DEFAULT_SCORECARD = {
+  meta: {
+    competition: 'COMPETITION', round: 'ROUND 1', format: 'T20', overs: 20,
+    venue: 'HOME GROUND', date: 'SAT 1 JAN',
+    toss: 'HOME WON THE TOSS · ELECTED TO BAT',
+    result: 'HOME WON BY 6 WICKETS',
+    series: 'SEASON 2025/26',
+    motm: { first: 'Player', last: 'NAME', team: 'HOME', line: '87 (54) · 2/22' },
+  },
+  home: DEFAULT_TEAM('HOME TEAM', 'HOM', '#1a4eb8'),
+  away: DEFAULT_TEAM('AWAY TEAM', 'AWY', '#cc1f2c'),
+}
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
@@ -44,8 +70,10 @@ function deriveShort(name) {
   return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 3)
 }
 
-function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = 'BAT' } = {}, nameFormat = 'last_first') {
-  const { first, last } = splitName(p.display_name || p.name, nameFormat)
+function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = 'BAT' } = {}, nameFormat = 'last_first', swap = false) {
+  const raw = splitName(p.display_name || p.name, nameFormat)
+  const first = swap ? raw.last : raw.first
+  const last  = swap ? raw.first.toUpperCase() : raw.last
   return {
     first,
     last,
@@ -223,6 +251,31 @@ export default function AdminSocialPost() {
   // Hero image
   const [heroImage, setHeroImage] = useState({ blobUrl: null, playerIdx: 0 })
 
+  // Name display swap
+  const [swapNames, setSwapNames] = useState(false)
+
+  // Scorecard match data (for SC1/SC2/SC3)
+  const [scorecardMatch, setScorecardMatch] = useState(DEFAULT_SCORECARD)
+  const patchScMeta = patch => setScorecardMatch(m => ({ ...m, meta: { ...m.meta, ...patch } }))
+  const patchScTeam = (side, patch) => setScorecardMatch(m => ({ ...m, [side]: { ...m[side], ...patch } }))
+  const patchScExtras = (side, patch) => setScorecardMatch(m => ({ ...m, [side]: { ...m[side], extras: { ...m[side].extras, ...patch } } }))
+  const updateBatRow = (side, idx, patch) => setScorecardMatch(m => {
+    const batting = [...m[side].batting]
+    batting[idx] = { ...batting[idx], ...patch }
+    if (patch.r !== undefined || patch.b !== undefined) {
+      const row = { ...batting[idx], ...patch }
+      batting[idx] = { ...row, sr: row.b > 0 ? +((row.r / row.b) * 100).toFixed(2) : 0 }
+    }
+    return { ...m, [side]: { ...m[side], batting } }
+  })
+  const updateBowlRow = (side, idx, patch) => setScorecardMatch(m => {
+    const bowling = [...m[side].bowling]
+    bowling[idx] = { ...bowling[idx], ...patch }
+    const row = bowling[idx]
+    bowling[idx] = { ...row, econ: row.o > 0 ? +((row.r / row.o)).toFixed(2) : 0 }
+    return { ...m, [side]: { ...m[side], bowling } }
+  })
+
   // Template-specific extras
   const [milestone, setMilestone] = useState({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
   const [announcement, setAnnouncement] = useState({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: 'FOR THE 2025-26 SEASON', playerIdx: 0 })
@@ -273,7 +326,18 @@ export default function AdminSocialPost() {
 
   // Current template definition
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
+  const isScorecard = !!(tmpl.isScorecard)
   const TemplateComponent = tmpl.component
+
+  // Detect if palette is dark (for scorecard dark mode)
+  const hexToLuminance = (hex) => {
+    const r = parseInt(hex.slice(1, 3), 16) / 255
+    const g = parseInt(hex.slice(3, 5), 16) / 255
+    const b = parseInt(hex.slice(5, 7), 16) / 255
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const palettePrimary = activePalette?.primary || '#0a0a0a'
+  const isDarkPalette = palettePrimary.startsWith('#') ? hexToLuminance(palettePrimary) < 0.4 : true
 
   // Build template-specific extra props
   const extraProps = {}
@@ -284,7 +348,7 @@ export default function AdminSocialPost() {
       unit: milestone.unit || 'GAMES',
       reason: milestone.reason || 'MILESTONE',
       detail: milestone.detail,
-      player: milestonePlayer ? playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat) : undefined,
+      player: milestonePlayer ? playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat, swapNames) : undefined,
     }
   }
   if (templateId === 'C1') {
@@ -293,7 +357,7 @@ export default function AdminSocialPost() {
       kind: announcement.kind,
       headline: announcement.headline,
       subheadline: announcement.subheadline,
-      player: annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat) : undefined,
+      player: annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames) : undefined,
     }
   }
   if (templateId === 'C2') {
@@ -302,7 +366,7 @@ export default function AdminSocialPost() {
   if (templateId === 'C3') {
     const motmPlayer = selectedPlayers[motm.playerIdx]
     extraProps.motm = {
-      player: motmPlayer ? playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat) : undefined,
+      player: motmPlayer ? playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat, swapNames) : undefined,
       stats: motm.stats.filter(s => s.label && s.value),
       summary: motm.summary,
     }
@@ -318,10 +382,14 @@ export default function AdminSocialPost() {
       topBowlers: result.topBowlers,
     }
   }
+  if (isScorecard) {
+    extraProps.match = scorecardMatch
+    extraProps.dark = isDarkPalette
+  }
 
   // Build players array for template
   const templatePlayers = selectedPlayers.map((sp, i) => {
-    const base = playerToTemplatePlayer(sp.player, sp, nameFormat)
+    const base = playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames)
     if (heroImage.blobUrl && i === heroImage.playerIdx) base.headshot = heroImage.blobUrl
     return base
   })
@@ -469,7 +537,7 @@ export default function AdminSocialPost() {
             {/* Template picker */}
             <section className="pb-card p-4">
               <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Template</h2>
-              {['Lineup', 'Companion'].map(cat => (
+              {['Lineup', 'Companion', 'Scorecard'].map(cat => (
                 <div key={cat} className="mb-3">
                   <p className="font-mono text-[9px] tracking-wide3 text-pb-faintest uppercase mb-2">{cat}</p>
                   <div className="grid grid-cols-3 gap-2">
@@ -640,10 +708,20 @@ export default function AdminSocialPost() {
             {/* Players */}
             {tmpl.maxPlayers > 0 && (
               <section className="pb-card p-4">
-                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
-                  Players
-                  <span className="ml-2 text-pb-faintest">{selectedPlayers.length}/{tmpl.maxPlayers}</span>
-                </h2>
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
+                    Players
+                    <span className="ml-2 text-pb-faintest">{selectedPlayers.length}/{tmpl.maxPlayers}</span>
+                  </h2>
+                  <button
+                    onClick={() => setSwapNames(s => !s)}
+                    title="Toggle which word is treated as the surname"
+                    className={`font-mono text-[9px] tracking-wide2 px-2 py-1 rounded border pb-hairline transition-colors ${swapNames ? 'text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}
+                    style={swapNames ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
+                  >
+                    ↕ SWAP NAMES
+                  </button>
+                </div>
                 <p className="text-[11px] text-pb-faint mb-3">Select up to {tmpl.maxPlayers} players. Assign C / VC / WK as needed.</p>
 
                 {selectedPlayers.length > 0 && (
@@ -901,6 +979,135 @@ export default function AdminSocialPost() {
               </section>
             )}
 
+            {/* Scorecard data form */}
+            {isScorecard && (
+              <section className="pb-card p-4">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Scorecard Data</h2>
+
+                {/* Meta */}
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <Field label="Result"><TextInput value={scorecardMatch.meta.result} onChange={v => patchScMeta({ result: v })} placeholder="HOME WON BY 6 WICKETS" /></Field>
+                  <Field label="Competition"><TextInput value={scorecardMatch.meta.competition} onChange={v => patchScMeta({ competition: v })} placeholder="PREMIER GRADE" /></Field>
+                  <Field label="Round"><TextInput value={scorecardMatch.meta.round} onChange={v => patchScMeta({ round: v })} placeholder="ROUND 7" /></Field>
+                  <Field label="Format"><TextInput value={scorecardMatch.meta.format} onChange={v => patchScMeta({ format: v })} placeholder="T20" /></Field>
+                  <Field label="Overs"><TextInput value={String(scorecardMatch.meta.overs)} onChange={v => patchScMeta({ overs: Number(v) || 20 })} placeholder="20" /></Field>
+                  <Field label="Date"><TextInput value={scorecardMatch.meta.date} onChange={v => patchScMeta({ date: v })} placeholder="SAT 1 JAN" /></Field>
+                  <div className="col-span-2">
+                    <Field label="Venue"><TextInput value={scorecardMatch.meta.venue} onChange={v => patchScMeta({ venue: v })} placeholder="Home Ground" /></Field>
+                  </div>
+                  <div className="col-span-2">
+                    <Field label="Toss"><TextInput value={scorecardMatch.meta.toss} onChange={v => patchScMeta({ toss: v })} placeholder="HOME WON THE TOSS · ELECTED TO BAT" /></Field>
+                  </div>
+                  <div className="col-span-2">
+                    <Field label="Series"><TextInput value={scorecardMatch.meta.series} onChange={v => patchScMeta({ series: v })} placeholder="SEASON 2025/26" /></Field>
+                  </div>
+                  <Field label="MOTM First Name"><TextInput value={scorecardMatch.meta.motm.first} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, first: v } })} placeholder="Player" /></Field>
+                  <Field label="MOTM Last Name"><TextInput value={scorecardMatch.meta.motm.last} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, last: v } })} placeholder="NAME" /></Field>
+                  <div className="col-span-2">
+                    <Field label="MOTM Line"><TextInput value={scorecardMatch.meta.motm.line} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, line: v } })} placeholder="87 (54) · 2/22" /></Field>
+                  </div>
+                </div>
+
+                {/* Team panels */}
+                {['home', 'away'].map(side => {
+                  const t = scorecardMatch[side]
+                  return (
+                    <details key={side} className="mb-3 border pb-hairline rounded">
+                      <summary className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase px-3 py-2 cursor-pointer hover:bg-pb-surface2">
+                        {side === 'home' ? '1st Innings' : '2nd Innings'} — {t.name || side.toUpperCase()}
+                      </summary>
+                      <div className="px-3 pb-3 pt-2 flex flex-col gap-2">
+                        <div className="grid grid-cols-3 gap-2">
+                          <Field label="Team Name"><TextInput value={t.name} onChange={v => patchScTeam(side, { name: v, monogram: v.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) })} placeholder="HOME TEAM" /></Field>
+                          <Field label="Short (3)"><TextInput value={t.short} onChange={v => patchScTeam(side, { short: v.toUpperCase().slice(0, 4), monogram: v.toUpperCase().slice(0, 3) })} placeholder="HOM" /></Field>
+                          <Field label="Colour">
+                            <input type="color" value={t.color} onChange={e => patchScTeam(side, { color: e.target.value })} className="w-full h-[34px] rounded cursor-pointer border-0 bg-transparent p-0" />
+                          </Field>
+                          <Field label="Total"><TextInput value={t.total} onChange={v => patchScTeam(side, { total: v })} placeholder="182" /></Field>
+                          <Field label="Wickets"><TextInput value={String(t.wickets)} onChange={v => patchScTeam(side, { wickets: Number(v) || 0 })} placeholder="7" /></Field>
+                          <Field label="Overs"><TextInput value={t.overs} onChange={v => patchScTeam(side, { overs: v })} placeholder="20.0" /></Field>
+                          <Field label="Run Rate"><TextInput value={t.runRate} onChange={v => patchScTeam(side, { runRate: v })} placeholder="9.10" /></Field>
+                          <div className="col-span-2">
+                            <Field label="Extras (b·lb·nb·wd)">
+                              <div className="grid grid-cols-4 gap-1">
+                                {['b','lb','nb','wd'].map(k => (
+                                  <input key={k} type="number" min="0" value={t.extras[k]} onChange={e => {
+                                    const next = { ...t.extras, [k]: +e.target.value }
+                                    next.total = next.b + next.lb + next.nb + next.wd
+                                    patchScExtras(side, next)
+                                  }} placeholder={k} className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center" />
+                                ))}
+                              </div>
+                            </Field>
+                          </div>
+                        </div>
+
+                        {/* Batting rows */}
+                        <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-1">Batting</p>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="grid gap-1 font-mono text-[8px] text-pb-faintest px-1" style={{ gridTemplateColumns: '18px 1fr 1fr 32px 32px 24px 24px auto' }}>
+                            <span>#</span><span>First</span><span>Last</span><span>Runs</span><span>Balls</span><span>4s</span><span>6s</span><span>Out</span>
+                          </div>
+                          {t.batting.map((p, i) => (
+                            <div key={i} className="grid gap-1 items-center" style={{ gridTemplateColumns: '18px 1fr 1fr 32px 32px 24px 24px auto' }}>
+                              <span className="font-mono text-[9px] text-pb-faintest text-center">{p.num}</span>
+                              <input value={p.first} onChange={e => updateBatRow(side, i, { first: e.target.value })} placeholder="First" className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-0.5 text-xs text-pb-text" />
+                              <input value={p.last} onChange={e => updateBatRow(side, i, { last: e.target.value })} placeholder="LAST" className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-0.5 text-xs text-pb-text font-mono uppercase" />
+                              <input type="number" min="0" value={p.r} onChange={e => updateBatRow(side, i, { r: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" disabled={p.didNotBat} />
+                              <input type="number" min="0" value={p.b} onChange={e => updateBatRow(side, i, { b: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" disabled={p.didNotBat} />
+                              <input type="number" min="0" value={p.fours} onChange={e => updateBatRow(side, i, { fours: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" disabled={p.didNotBat} />
+                              <input type="number" min="0" value={p.sixes} onChange={e => updateBatRow(side, i, { sixes: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" disabled={p.didNotBat} />
+                              <div className="flex gap-1">
+                                <button onClick={() => updateBatRow(side, i, { notOut: !p.notOut, didNotBat: false })} className={`font-mono text-[8px] px-1 py-0.5 rounded border pb-hairline ${p.notOut ? 'text-pb-text' : 'text-pb-faintest'}`} style={p.notOut ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}>NO</button>
+                                <button onClick={() => updateBatRow(side, i, { didNotBat: !p.didNotBat, notOut: false })} className={`font-mono text-[8px] px-1 py-0.5 rounded border pb-hairline ${p.didNotBat ? 'text-pb-text' : 'text-pb-faintest'}`} style={p.didNotBat ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}>DNB</button>
+                              </div>
+                            </div>
+                          ))}
+                          {t.batting.length < 11 && (
+                            <button onClick={() => patchScTeam(side, { batting: [...t.batting, DEFAULT_BATTING_ROW(t.batting.length + 1)] })} className="text-xs text-pb-faint hover:text-pb-accent font-mono text-left">+ Add batter</button>
+                          )}
+                        </div>
+
+                        {/* Dismissal text for each batter (collapsed) */}
+                        <details className="mt-1">
+                          <summary className="font-mono text-[9px] text-pb-faintest cursor-pointer">Dismissal text (optional)</summary>
+                          <div className="flex flex-col gap-1 mt-1">
+                            {t.batting.filter(p => !p.didNotBat && !p.notOut).map((p, i) => (
+                              <div key={i} className="flex items-center gap-2">
+                                <span className="font-mono text-[9px] text-pb-faintest w-16 truncate">{p.last}</span>
+                                <input value={p.out || ''} onChange={e => updateBatRow(side, t.batting.indexOf(p), { out: e.target.value })} placeholder="c Smith b Jones" className="flex-1 bg-pb-surface2 border pb-hairline rounded px-2 py-0.5 text-xs text-pb-text" />
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+
+                        {/* Bowling rows */}
+                        <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-2">Bowling</p>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="grid gap-1 font-mono text-[8px] text-pb-faintest px-1" style={{ gridTemplateColumns: '1fr 1fr 32px 28px 32px 28px' }}>
+                            <span>First</span><span>Last</span><span>Ovrs</span><span>M</span><span>Runs</span><span>Wkts</span>
+                          </div>
+                          {t.bowling.map((p, i) => (
+                            <div key={i} className="grid gap-1 items-center" style={{ gridTemplateColumns: '1fr 1fr 32px 28px 32px 28px' }}>
+                              <input value={p.first} onChange={e => updateBowlRow(side, i, { first: e.target.value })} placeholder="First" className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-0.5 text-xs text-pb-text" />
+                              <input value={p.last} onChange={e => updateBowlRow(side, i, { last: e.target.value })} placeholder="LAST" className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-0.5 text-xs text-pb-text font-mono uppercase" />
+                              <input type="number" min="0" step="0.1" value={p.o} onChange={e => updateBowlRow(side, i, { o: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" />
+                              <input type="number" min="0" value={p.m} onChange={e => updateBowlRow(side, i, { m: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" />
+                              <input type="number" min="0" value={p.r} onChange={e => updateBowlRow(side, i, { r: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" />
+                              <input type="number" min="0" value={p.w} onChange={e => updateBowlRow(side, i, { w: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" />
+                            </div>
+                          ))}
+                          {t.bowling.length < 8 && (
+                            <button onClick={() => patchScTeam(side, { bowling: [...t.bowling, DEFAULT_BOWLING_ROW(t.bowling.length)] })} className="text-xs text-pb-faint hover:text-pb-accent font-mono text-left">+ Add bowler</button>
+                          )}
+                        </div>
+                      </div>
+                    </details>
+                  )
+                })}
+              </section>
+            )}
+
           </div>{/* end left panel */}
 
           {/* ── RIGHT PANEL: preview ─────────────────────────── */}
@@ -921,26 +1128,36 @@ export default function AdminSocialPost() {
                 </div>
               </div>
 
-              {/* Scaled preview — show at 50% scale */}
-              <div style={{ width: 540, height: 540, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 8, background: '#0a0a0a' }}>
-                <div style={{ transform: 'scale(0.5)', transformOrigin: 'top left', width: 1080, height: 1080, pointerEvents: 'none' }}>
-                  <TemplateComponent
-                    team={team}
-                    opponent={oppData}
-                    match={matchData}
-                    players={templatePlayers}
-                    palette={activePalette}
-                    {...extraProps}
-                  />
-                </div>
-              </div>
-
-              <p className="text-pb-faintest text-[10px] font-mono mt-2">1080 × 1080 px · shown at 50%</p>
+              {/* Scaled preview */}
+              {(() => {
+                const W = isScorecard ? 1920 : 1080
+                const H = isScorecard ? 1080 : 1080
+                const previewW = 620
+                const scale = previewW / W
+                const previewH = Math.round(H * scale)
+                return (
+                  <>
+                    <div style={{ width: previewW, height: previewH, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 8, background: '#0a0a0a' }}>
+                      <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none' }}>
+                        <TemplateComponent
+                          team={team}
+                          opponent={oppData}
+                          match={matchData}
+                          players={templatePlayers}
+                          palette={activePalette}
+                          {...extraProps}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-pb-faintest text-[10px] font-mono mt-2">{W} × {H} px · shown at {Math.round(scale * 100)}%</p>
+                  </>
+                )
+              })()}
             </div>
 
             {/* Hidden full-size render for export */}
             <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
-              <div ref={renderRef}>
+              <div ref={renderRef} style={{ width: isScorecard ? 1920 : 1080, height: 1080 }}>
                 <TemplateComponent
                   team={team}
                   opponent={oppData}
