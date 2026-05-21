@@ -313,6 +313,40 @@ export default function AdminSocialPost() {
 
   const patchScMeta = patch => setScorecardMatch(m => ({ ...m, meta: { ...m.meta, ...patch } }))
   const patchScTeam = (side, patch) => setScorecardMatch(m => ({ ...m, [side]: { ...m[side], ...patch } }))
+
+  // Per-side scorecard team search — same CA API as the opponent search
+  const [scTeamSearch, setScTeamSearch] = useState({ home: '', away: '' })
+  const [scTeamResults, setScTeamResults] = useState({ home: [], away: [] })
+  const [scTeamSearching, setScTeamSearching] = useState({ home: false, away: false })
+  const scTeamSearchTimeout = useRef({ home: null, away: null })
+
+  const handleScTeamSearch = useCallback(async (side, q) => {
+    setScTeamSearch(s => ({ ...s, [side]: q }))
+    clearTimeout(scTeamSearchTimeout.current[side])
+    if (!q.trim()) { setScTeamResults(r => ({ ...r, [side]: [] })); return }
+    scTeamSearchTimeout.current[side] = setTimeout(async () => {
+      setScTeamSearching(s => ({ ...s, [side]: true }))
+      try {
+        const results = await api.searchOrgs(q)
+        setScTeamResults(r => ({ ...r, [side]: results || [] }))
+      } catch { setScTeamResults(r => ({ ...r, [side]: [] })) }
+      finally { setScTeamSearching(s => ({ ...s, [side]: false })) }
+    }, 350)
+  }, [])
+
+  const selectScTeam = useCallback(async (side, org) => {
+    let logoUrl = org.logoURL || org.logo_url || null
+    try {
+      const bsOrgs = await api.listOrgs()
+      const matched = bsOrgs.find(o => o.name?.toLowerCase() === org.name?.toLowerCase() || o.id === org.id)
+      if (matched?.id) logoUrl = `${BASE_URL}/images/organisations/${matched.id}/logo`
+    } catch { /* fall back to CA logo */ }
+    const name = (org.name || org.shortName || '').toUpperCase()
+    const short = (org.shortName || deriveShort(name || 'OPP')).toUpperCase().slice(0, 4)
+    patchScTeam(side, { name, short, monogram: short.slice(0, 3), logo: logoUrl })
+    setScTeamSearch(s => ({ ...s, [side]: '' }))
+    setScTeamResults(r => ({ ...r, [side]: [] }))
+  }, [])
   const patchScExtras = (side, patch) => setScorecardMatch(m => ({ ...m, [side]: { ...m[side], extras: { ...m[side].extras, ...patch } } }))
   const updateBatRow = (side, idx, patch) => setScorecardMatch(m => {
     const batting = [...m[side].batting]
@@ -1158,6 +1192,38 @@ export default function AdminSocialPost() {
                         {side === 'home' ? '1st Innings' : '2nd Innings'} — {t.name || side.toUpperCase()}
                       </summary>
                       <div className="px-3 pb-3 pt-2 flex flex-col gap-2">
+                        {/* Club search */}
+                        <div className="relative">
+                          <label className="block font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase mb-1">Search Club (CA)</label>
+                          <div className="relative">
+                            <input
+                              value={scTeamSearch[side]}
+                              onChange={e => handleScTeamSearch(side, e.target.value)}
+                              placeholder="Type club name…"
+                              className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-1.5 text-xs text-pb-text placeholder:text-pb-faintest"
+                            />
+                            {scTeamSearching[side] && (
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[9px] text-pb-faintest animate-pulse">SEARCHING…</span>
+                            )}
+                          </div>
+                          {scTeamResults[side].length > 0 && (
+                            <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-pb-surface border pb-hairline rounded shadow-lg max-h-48 overflow-y-auto">
+                              {scTeamResults[side].map((org, i) => (
+                                <button
+                                  key={org.id || i}
+                                  onClick={() => selectScTeam(side, org)}
+                                  className="w-full text-left px-3 py-1.5 hover:bg-pb-surface2 flex items-center gap-2 border-b pb-hairline last:border-0"
+                                >
+                                  {(org.logoURL || org.logo_url) && (
+                                    <img src={org.logoURL || org.logo_url} alt="" className="w-6 h-6 rounded object-contain bg-pb-surface2 shrink-0" />
+                                  )}
+                                  <span className="text-xs text-pb-text flex-1 truncate">{org.name}</span>
+                                  {org.shortName && <span className="font-mono text-[9px] text-pb-faintest">{org.shortName}</span>}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                         <div className="grid grid-cols-4 gap-2">
                           <div className="col-span-2">
                             <Field label="Team Name"><TextInput value={t.name} onChange={v => patchScTeam(side, { name: v, monogram: v.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) })} placeholder="HOME TEAM" /></Field>
