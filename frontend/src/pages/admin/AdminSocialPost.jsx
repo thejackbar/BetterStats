@@ -215,6 +215,10 @@ export default function AdminSocialPost() {
   const [paletteKey, setPaletteKey] = useState('club')
   const [customBg, setCustomBg] = useState('#243352')
   const [customAccent, setCustomAccent] = useState('#16c784')
+  const [savedPalettes, setSavedPalettes] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bs_social_palettes') || '[]') } catch { return [] }
+  })
+  const [savePaletteName, setSavePaletteName] = useState('')
 
   // Hero image
   const [heroImage, setHeroImage] = useState({ blobUrl: null, playerIdx: 0 })
@@ -262,7 +266,7 @@ export default function AdminSocialPost() {
     ? orgToPalette(settings)
     : paletteKey === 'custom'
       ? { name: 'Custom', primary: customBg, secondary: customBg + 'cc', accent: customAccent, ink: '#ffffff' }
-      : PALETTES[paletteKey]
+      : (savedPalettes.find(p => p.key === paletteKey) || PALETTES[paletteKey])
 
   // Name format from club settings (last_first = "Smith John", first_last = "John Smith")
   const nameFormat = settings?.player_name_format || 'last_first'
@@ -509,18 +513,64 @@ export default function AdminSocialPost() {
                   Custom
                 </button>
               </div>
+              {/* Saved custom palettes */}
+              {savedPalettes.length > 0 && (
+                <div className="flex gap-2 flex-wrap items-center mt-2 pt-2 border-t pb-hairline">
+                  <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Saved</span>
+                  {savedPalettes.map(p => (
+                    <div key={p.key} className="flex items-center gap-1">
+                      <PaletteSwatch pal={p} selected={paletteKey === p.key} onClick={() => setPaletteKey(p.key)} />
+                      <button
+                        onClick={() => {
+                          const next = savedPalettes.filter(x => x.key !== p.key)
+                          setSavedPalettes(next)
+                          localStorage.setItem('bs_social_palettes', JSON.stringify(next))
+                          if (paletteKey === p.key) setPaletteKey('club')
+                        }}
+                        className="text-pb-faintest hover:text-red-400 text-[10px] leading-none"
+                        title="Delete palette"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {paletteKey === 'custom' && (
-                <div className="flex gap-4 items-center mt-2">
-                  <label className="flex items-center gap-2 text-xs text-pb-faint font-mono">
-                    <input type="color" value={customBg} onChange={e => setCustomBg(e.target.value)}
-                      className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
-                    Background
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-pb-faint font-mono">
-                    <input type="color" value={customAccent} onChange={e => setCustomAccent(e.target.value)}
-                      className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
-                    Accent
-                  </label>
+                <div className="mt-2 flex flex-col gap-2">
+                  <div className="flex gap-4 items-center">
+                    <label className="flex items-center gap-2 text-xs text-pb-faint font-mono">
+                      <input type="color" value={customBg} onChange={e => setCustomBg(e.target.value)}
+                        className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                      Background
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-pb-faint font-mono">
+                      <input type="color" value={customAccent} onChange={e => setCustomAccent(e.target.value)}
+                        className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                      Accent
+                    </label>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      value={savePaletteName}
+                      onChange={e => setSavePaletteName(e.target.value)}
+                      placeholder="Palette name..."
+                      className="flex-1 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-xs text-pb-text placeholder:text-pb-faintest font-mono"
+                    />
+                    <button
+                      onClick={() => {
+                        const name = savePaletteName.trim() || `Custom ${savedPalettes.length + 1}`
+                        const key = `saved_${Date.now()}`
+                        const pal = { key, name, primary: customBg, secondary: customBg + 'cc', accent: customAccent, ink: '#ffffff' }
+                        const next = [...savedPalettes, pal]
+                        setSavedPalettes(next)
+                        localStorage.setItem('bs_social_palettes', JSON.stringify(next))
+                        setSavePaletteName('')
+                        setPaletteKey(key)
+                      }}
+                      className="px-3 py-1 rounded text-xs font-mono text-pb-text border pb-hairline hover:bg-pb-surface2 transition-colors whitespace-nowrap"
+                    >
+                      Save palette
+                    </button>
+                  </div>
                 </div>
               )}
             </section>

@@ -388,7 +388,7 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
                 <Halftone color={palette.ink} opacity={0.08} size={6} />
                 {p.headshot ? (
                   <img src={p.headshot} alt={p.first + ' ' + p.last}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} />
+                    style={{ width: '84%', height: '84%', objectFit: 'contain', objectPosition: 'center bottom' }} />
                 ) : team.logo ? (
                   <img src={team.logo} alt={team.short}
                     style={{ width: '68%', height: '68%', objectFit: 'contain', opacity: 0.92 }} />
@@ -658,10 +658,10 @@ export function T6_Diagonal({ team, opponent, match, players, palette }) {
     }}>
       <Halftone color={palette.ink} opacity={0.07} size={10} />
       <div style={{
-        position: 'absolute', left: -200, top: 0, width: 1500, height: 220,
-        background: palette.accent, transform: 'rotate(-8deg)', transformOrigin: 'top left', top: -40, padding: '100px 0px 0px',
+        position: 'absolute', left: -200, width: 1500, height: 220,
+        background: palette.accent, transform: 'rotate(-8deg)', transformOrigin: 'top left', top: 40, padding: '60px 0px 0px',
       }}>
-        <div style={{ padding: '70px 240px 0', color: palette.primary, fontFamily: "'Anton', sans-serif", fontSize: 100, lineHeight: 0.9, letterSpacing: -1, transform: 'rotate(0deg)', display: 'flex', alignItems: 'center', gap: 28 }}>
+        <div style={{ padding: '30px 240px 0', color: palette.primary, fontFamily: "'Anton', sans-serif", fontSize: 100, lineHeight: 0.9, letterSpacing: -1, transform: 'rotate(0deg)', display: 'flex', alignItems: 'center', gap: 28 }}>
           1ST XI
           <span style={{ fontSize: 22, letterSpacing: 3, opacity: 0.85 }}>· {match.date.toUpperCase()} ·</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -671,7 +671,7 @@ export function T6_Diagonal({ team, opponent, match, players, palette }) {
           </span>
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, top: 220, right: 56, height: 420, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
+      <div style={{ position: 'absolute', left: 56, top: 270, right: 56, height: 370, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
         <div style={{ flexShrink: 0, maxWidth: 320, paddingBottom: 24 }}>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: palette.accent, marginBottom: 14 }}>// 1ST XI</div>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={260} shape="shield" />
@@ -845,7 +845,7 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
             }}>
               <div style={{ flex: 1, position: 'relative', display: 'grid', placeItems: 'center', background: `linear-gradient(180deg, ${bg} 0%, ${palette.primary}aa 100%)`, overflow: 'hidden' }}>
                 {p.headshot ? (
-                  <img src={p.headshot} alt={p.last} style={{ height: '120%', width: 'auto', maxWidth: '100%', objectFit: 'contain', objectPosition: 'bottom' }} />
+                  <img src={p.headshot} alt={p.last} style={{ height: '85%', width: '85%', objectFit: 'contain', objectPosition: 'center bottom' }} />
                 ) : (
                   <img src={team.logo} alt={team.short} style={{ width: isFeatured ? 200 : 80, height: isFeatured ? 200 : 80, objectFit: 'contain', opacity: 0.85 }} />
                 )}
