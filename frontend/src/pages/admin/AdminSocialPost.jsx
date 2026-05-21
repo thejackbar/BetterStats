@@ -29,18 +29,23 @@ const TEMPLATES = [
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
-function splitName(displayName) {
+function splitName(displayName, nameFormat = 'last_first') {
   const parts = (displayName || '').trim().split(/\s+/)
   if (parts.length === 1) return { first: '', last: parts[0].toUpperCase() }
-  return { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1].toUpperCase() }
+  if (nameFormat === 'first_last') {
+    // "Shaylyn Wijesinghe" → first="Shaylyn", last="WIJESINGHE"
+    return { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1].toUpperCase() }
+  }
+  // default: last_first → "Wijesinghe Shaylyn" → first="Shaylyn", last="WIJESINGHE"
+  return { first: parts.slice(1).join(' '), last: parts[0].toUpperCase() }
 }
 
 function deriveShort(name) {
   return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 3)
 }
 
-function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = 'BAT' } = {}) {
-  const { first, last } = splitName(p.display_name || p.name)
+function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = 'BAT' } = {}, nameFormat = 'last_first') {
+  const { first, last } = splitName(p.display_name || p.name, nameFormat)
   return {
     first,
     last,
@@ -210,6 +215,10 @@ export default function AdminSocialPost() {
   const [paletteKey, setPaletteKey] = useState('club')
   const [customBg, setCustomBg] = useState('#243352')
   const [customAccent, setCustomAccent] = useState('#16c784')
+  const [savedPalettes, setSavedPalettes] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bs_social_palettes') || '[]') } catch { return [] }
+  })
+  const [savePaletteName, setSavePaletteName] = useState('')
 
   // Hero image
   const [heroImage, setHeroImage] = useState({ blobUrl: null, playerIdx: 0 })
@@ -257,7 +266,10 @@ export default function AdminSocialPost() {
     ? orgToPalette(settings)
     : paletteKey === 'custom'
       ? { name: 'Custom', primary: customBg, secondary: customBg + 'cc', accent: customAccent, ink: '#ffffff' }
-      : PALETTES[paletteKey]
+      : (savedPalettes.find(p => p.key === paletteKey) || PALETTES[paletteKey])
+
+  // Name format from club settings (last_first = "Smith John", first_last = "John Smith")
+  const nameFormat = settings?.player_name_format || 'last_first'
 
   // Current template definition
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
@@ -272,7 +284,7 @@ export default function AdminSocialPost() {
       unit: milestone.unit || 'GAMES',
       reason: milestone.reason || 'MILESTONE',
       detail: milestone.detail,
-      player: milestonePlayer ? playerToTemplatePlayer(milestonePlayer.player, milestonePlayer) : undefined,
+      player: milestonePlayer ? playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat) : undefined,
     }
   }
   if (templateId === 'C1') {
@@ -281,7 +293,7 @@ export default function AdminSocialPost() {
       kind: announcement.kind,
       headline: announcement.headline,
       subheadline: announcement.subheadline,
-      player: annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer) : undefined,
+      player: annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat) : undefined,
     }
   }
   if (templateId === 'C2') {
@@ -290,7 +302,7 @@ export default function AdminSocialPost() {
   if (templateId === 'C3') {
     const motmPlayer = selectedPlayers[motm.playerIdx]
     extraProps.motm = {
-      player: motmPlayer ? playerToTemplatePlayer(motmPlayer.player, motmPlayer) : undefined,
+      player: motmPlayer ? playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat) : undefined,
       stats: motm.stats.filter(s => s.label && s.value),
       summary: motm.summary,
     }
@@ -309,7 +321,7 @@ export default function AdminSocialPost() {
 
   // Build players array for template
   const templatePlayers = selectedPlayers.map((sp, i) => {
-    const base = playerToTemplatePlayer(sp.player, sp)
+    const base = playerToTemplatePlayer(sp.player, sp, nameFormat)
     if (heroImage.blobUrl && i === heroImage.playerIdx) base.headshot = heroImage.blobUrl
     return base
   })
@@ -363,13 +375,14 @@ export default function AdminSocialPost() {
   }, [])
 
   const selectOpponent = useCallback(async (org) => {
-    let logoUrl = null
-    // Check if this is a BetterStats org (has our logo)
+    // Start with the PlayHQ Cloudinary logo (returned by search endpoint)
+    let logoUrl = org.logoURL || org.logo_url || null
+    // If this org is also a BetterStats club, prefer our stored logo
     try {
       const bsOrgs = await api.listOrgs()
       const matched = bsOrgs.find(o => o.name?.toLowerCase() === org.name?.toLowerCase() || o.id === org.id)
       if (matched?.id) logoUrl = `${BASE_URL}/images/organisations/${matched.id}/logo`
-    } catch { /* ignore */ }
+    } catch { /* ignore — fall back to Cloudinary URL */ }
     patchOpp({
       name: org.name || org.shortName || '',
       short: org.shortName || deriveShort(org.name || 'OPP'),
@@ -500,18 +513,64 @@ export default function AdminSocialPost() {
                   Custom
                 </button>
               </div>
+              {/* Saved custom palettes */}
+              {savedPalettes.length > 0 && (
+                <div className="flex gap-2 flex-wrap items-center mt-2 pt-2 border-t pb-hairline">
+                  <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Saved</span>
+                  {savedPalettes.map(p => (
+                    <div key={p.key} className="flex items-center gap-1">
+                      <PaletteSwatch pal={p} selected={paletteKey === p.key} onClick={() => setPaletteKey(p.key)} />
+                      <button
+                        onClick={() => {
+                          const next = savedPalettes.filter(x => x.key !== p.key)
+                          setSavedPalettes(next)
+                          localStorage.setItem('bs_social_palettes', JSON.stringify(next))
+                          if (paletteKey === p.key) setPaletteKey('club')
+                        }}
+                        className="text-pb-faintest hover:text-red-400 text-[10px] leading-none"
+                        title="Delete palette"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {paletteKey === 'custom' && (
-                <div className="flex gap-4 items-center mt-2">
-                  <label className="flex items-center gap-2 text-xs text-pb-faint font-mono">
-                    <input type="color" value={customBg} onChange={e => setCustomBg(e.target.value)}
-                      className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
-                    Background
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-pb-faint font-mono">
-                    <input type="color" value={customAccent} onChange={e => setCustomAccent(e.target.value)}
-                      className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
-                    Accent
-                  </label>
+                <div className="mt-2 flex flex-col gap-2">
+                  <div className="flex gap-4 items-center">
+                    <label className="flex items-center gap-2 text-xs text-pb-faint font-mono">
+                      <input type="color" value={customBg} onChange={e => setCustomBg(e.target.value)}
+                        className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                      Background
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-pb-faint font-mono">
+                      <input type="color" value={customAccent} onChange={e => setCustomAccent(e.target.value)}
+                        className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                      Accent
+                    </label>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      value={savePaletteName}
+                      onChange={e => setSavePaletteName(e.target.value)}
+                      placeholder="Palette name..."
+                      className="flex-1 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-xs text-pb-text placeholder:text-pb-faintest font-mono"
+                    />
+                    <button
+                      onClick={() => {
+                        const name = savePaletteName.trim() || `Custom ${savedPalettes.length + 1}`
+                        const key = `saved_${Date.now()}`
+                        const pal = { key, name, primary: customBg, secondary: customBg + 'cc', accent: customAccent, ink: '#ffffff' }
+                        const next = [...savedPalettes, pal]
+                        setSavedPalettes(next)
+                        localStorage.setItem('bs_social_palettes', JSON.stringify(next))
+                        setSavePaletteName('')
+                        setPaletteKey(key)
+                      }}
+                      className="px-3 py-1 rounded text-xs font-mono text-pb-text border pb-hairline hover:bg-pb-surface2 transition-colors whitespace-nowrap"
+                    >
+                      Save palette
+                    </button>
+                  </div>
                 </div>
               )}
             </section>
@@ -554,8 +613,12 @@ export default function AdminSocialPost() {
                         onClick={() => selectOpponent(org)}
                         className="w-full text-left px-3 py-2 hover:bg-pb-surface2 flex items-center gap-2 border-b pb-hairline last:border-0"
                       >
+                        {(org.logoURL || org.logo_url) && (
+                          <img src={org.logoURL || org.logo_url} alt="" className="w-7 h-7 rounded object-contain bg-pb-surface2 shrink-0" />
+                        )}
                         <span className="text-sm text-pb-text flex-1 truncate">{org.name}</span>
                         {org.shortName && <span className="font-mono text-[9px] text-pb-faintest">{org.shortName}</span>}
+                        {org.suburb && <span className="font-mono text-[9px] text-pb-faintest hidden sm:block">{org.suburb}</span>}
                       </button>
                     ))}
                   </div>
