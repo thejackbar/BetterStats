@@ -371,13 +371,14 @@ export default function AdminSocialPost() {
   }, [])
 
   const selectOpponent = useCallback(async (org) => {
-    let logoUrl = null
-    // Check if this is a BetterStats org (has our logo)
+    // Start with the PlayHQ Cloudinary logo (returned by search endpoint)
+    let logoUrl = org.logoURL || org.logo_url || null
+    // If this org is also a BetterStats club, prefer our stored logo
     try {
       const bsOrgs = await api.listOrgs()
       const matched = bsOrgs.find(o => o.name?.toLowerCase() === org.name?.toLowerCase() || o.id === org.id)
       if (matched?.id) logoUrl = `${BASE_URL}/images/organisations/${matched.id}/logo`
-    } catch { /* ignore */ }
+    } catch { /* ignore — fall back to Cloudinary URL */ }
     patchOpp({
       name: org.name || org.shortName || '',
       short: org.shortName || deriveShort(org.name || 'OPP'),
@@ -562,8 +563,12 @@ export default function AdminSocialPost() {
                         onClick={() => selectOpponent(org)}
                         className="w-full text-left px-3 py-2 hover:bg-pb-surface2 flex items-center gap-2 border-b pb-hairline last:border-0"
                       >
+                        {(org.logoURL || org.logo_url) && (
+                          <img src={org.logoURL || org.logo_url} alt="" className="w-7 h-7 rounded object-contain bg-pb-surface2 shrink-0" />
+                        )}
                         <span className="text-sm text-pb-text flex-1 truncate">{org.name}</span>
                         {org.shortName && <span className="font-mono text-[9px] text-pb-faintest">{org.shortName}</span>}
+                        {org.suburb && <span className="font-mono text-[9px] text-pb-faintest hidden sm:block">{org.suburb}</span>}
                       </button>
                     ))}
                   </div>
