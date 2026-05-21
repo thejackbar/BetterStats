@@ -10,7 +10,7 @@ from app.services.grassroots_scores_client import get_match_scorecard
 
 from app.models.db import (
     Player, PlayerSeasonStats, BattingInnings, BowlingSpell,
-    FieldingStat, FallOfWicket, Partnership, Milestone, User, get_db,
+    FieldingStat, FallOfWicket, Partnership, Milestone, User, Organisation, get_db,
 )
 from app.routers.auth import get_current_user
 
@@ -590,6 +590,27 @@ def _overs_str(overs_raw) -> str:
         return str(overs_raw)
 
 
+async def _org_logo_for_team(team_name: str, db: AsyncSession) -> str | None:
+    """Try to find a matching org in the DB and return its logo URL."""
+    from sqlalchemy import or_, func
+    words = [w for w in re.split(r"\W+", team_name.upper()) if len(w) > 3]
+    if not words:
+        return None
+    conditions = [func.upper(Organisation.name).contains(w) for w in words[:3]]
+    res = await db.execute(
+        select(Organisation)
+        .where(or_(*conditions))
+        .where(or_(Organisation.logo_url.isnot(None), Organisation.logo_data.isnot(None)))
+        .limit(1)
+    )
+    org = res.scalars().first()
+    if not org:
+        return None
+    if org.logo_url:
+        return org.logo_url
+    return f"/api/images/organisations/{org.id}/logo"
+
+
 def _team_id_from_inn(inn: dict) -> str | None:
     for k in ("battingTeamId", "teamId"):
         v = inn.get(k)
@@ -804,6 +825,12 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
 
     home = build_team(home_team_raw, bat_inn=home_inn, bowl_inn=away_inn, default_color="#1a4eb8")
     away = build_team(away_team_raw, bat_inn=away_inn, bowl_inn=home_inn, default_color="#cc1f2c")
+
+    # Fallback logo lookup: if GR didn't provide a logo, match against orgs in our DB
+    if not home.get("logo"):
+        home["logo"] = await _org_logo_for_team(home["name"], db)
+    if not away.get("logo"):
+        away["logo"] = await _org_logo_for_team(away["name"], db)
 
     result_text = (match_summary.get("result") or match_summary.get("statusText") or "RESULT").upper()
     venue = (match_summary.get("venue") or {}).get("name") or ""

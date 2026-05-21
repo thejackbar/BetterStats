@@ -1274,17 +1274,17 @@ export function SC1_Broadcast({ match, palette = {} }) {
     const batCount = (team.batting || []).length
     const bowlCount = (team.bowling || []).length
     const totalRows = Math.max(1, batCount + bowlCount)
-    const rowH = Math.max(22, Math.min(36, Math.floor(590 / totalRows)))
-    const sc = rowH / 36
-    const rp = Math.max(2, Math.round(5 * sc))
-    const bnf = Math.max(14, Math.round(22 * sc))
-    const bff = Math.max(10, Math.round(15 * sc))
-    const brf = Math.max(14, Math.round(24 * sc))
-    const bsf = Math.max(9, Math.round(13 * sc))
-    const wnf = Math.max(13, Math.round(20 * sc))
-    const wff = Math.max(9, Math.round(14 * sc))
-    const wwf = Math.max(14, Math.round(22 * sc))
-    const wsf = Math.max(9, Math.round(13 * sc))
+    // lineHeight 1.5 is required for Anton (ascender exceeds em-square).
+    // Derive bnf so that bnf*1.5 + 2*rp == available px / row.
+    const rp = 3
+    const bnf = Math.max(12, Math.min(22, Math.floor((590 / totalRows - 2 * rp) / 1.5)))
+    const bff = Math.max(9,  Math.round(bnf * 0.68))
+    const brf = Math.max(12, Math.round(bnf * 1.09))
+    const bsf = Math.max(9,  Math.round(bnf * 0.59))
+    const wnf = bnf
+    const wff = bff
+    const wwf = Math.max(12, Math.round(bnf * 1.0))
+    const wsf = bsf
     return (
     <div style={{ background: panel, border: `1px solid ${rule}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 18, padding: '14px 22px', background: `linear-gradient(90deg, ${accentC}, ${accentC}aa 60%, transparent)`, color: headerInk, borderBottom: `1px solid ${rule}` }}>
@@ -1308,7 +1308,7 @@ export function SC1_Broadcast({ match, palette = {} }) {
           return (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 1.1fr 46px 40px 34px 34px 54px', gap: 8, padding: `${rp}px 2px`, alignItems: 'center', borderBottom: i < team.batting.length - 1 ? `1px solid ${rule}` : 'none', opacity: dnb ? 0.4 : 1 }}>
               <div style={{ fontFamily: SC_MONO, fontSize: bsf, color: dim }}>{p.num}</div>
-              <div style={{ fontFamily: SC_FONT, fontSize: bnf, letterSpacing: 0.5, lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+              <div style={{ fontFamily: SC_FONT, fontSize: bnf, letterSpacing: 0.5, lineHeight: 1.5, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
                 {p.first && <span style={{ color: dim, fontSize: bff, fontWeight: 300 }}>{p.first} </span>}
                 <span>{p.last}</span>
                 {p.role && <span style={{ fontFamily: SC_MONO, fontSize: 10, color: accent, letterSpacing: 1, marginLeft: 4 }}>({p.role})</span>}
@@ -1334,7 +1334,7 @@ export function SC1_Broadcast({ match, palette = {} }) {
         </div>
         {(team.bowling || []).map((p, i) => (
           <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 46px 40px 46px 40px 54px', gap: 8, padding: `${rp}px 2px`, alignItems: 'center', borderBottom: i < team.bowling.length - 1 ? `1px solid ${rule}` : 'none' }}>
-            <div style={{ fontFamily: SC_FONT, fontSize: wnf, letterSpacing: 0.5, lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+            <div style={{ fontFamily: SC_FONT, fontSize: wnf, letterSpacing: 0.5, lineHeight: 1.5, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
               {p.first && <span style={{ color: dim, fontSize: wff, fontWeight: 300 }}>{p.first} </span>}<span>{p.last}</span>
             </div>
             <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: wsf }}>{p.o}</div>
@@ -1400,17 +1400,15 @@ export function SC2_Brutalist({ match, palette = {} }) {
     const batCount = (team.batting || []).length
     const bowlCount = (team.bowling || []).length
     const totalRows = Math.max(1, batCount + bowlCount)
-    const rowH = Math.max(22, Math.min(36, Math.floor(520 / totalRows)))
-    const sc = rowH / 36
-    const rp = Math.max(2, Math.round(5 * sc))
-    const bnf = Math.max(13, Math.round(20 * sc))
-    const bff = Math.max(9, Math.round(13 * sc))
-    const brf = Math.max(13, Math.round(22 * sc))
-    const bsf = Math.max(9, Math.round(12 * sc))
-    const wnf = Math.max(12, Math.round(19 * sc))
-    const wff = Math.max(8, Math.round(12 * sc))
-    const wwf = Math.max(12, Math.round(20 * sc))
-    const wsf = Math.max(9, Math.round(12 * sc))
+    const rp = 3
+    const bnf = Math.max(12, Math.min(20, Math.floor((520 / totalRows - 2 * rp) / 1.5)))
+    const bff = Math.max(9,  Math.round(bnf * 0.65))
+    const brf = Math.max(12, Math.round(bnf * 1.1))
+    const bsf = Math.max(9,  Math.round(bnf * 0.60))
+    const wnf = bnf
+    const wff = bff
+    const wwf = Math.max(12, Math.round(bnf * 1.0))
+    const wsf = bsf
     return (
     <div style={{ borderLeft: `2px solid ${ruleStrong}`, borderRight: `2px solid ${ruleStrong}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ background: ink, color: bg, padding: '16px 22px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 18, borderBottom: `2px solid ${ruleStrong}` }}>
@@ -1432,7 +1430,7 @@ export function SC2_Brutalist({ match, palette = {} }) {
           const dnb = p.didNotBat
           return (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1.1fr 44px 38px 32px 32px 50px', gap: 8, padding: `${rp}px 0`, alignItems: 'center', borderBottom: i < team.batting.length - 1 ? `1px solid ${rule}` : 'none', background: i % 2 === 0 ? stripe : 'transparent', opacity: dnb ? 0.35 : 1 }}>
-              <div style={{ fontFamily: SC_FONT, fontSize: bnf, letterSpacing: 0.5, lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+              <div style={{ fontFamily: SC_FONT, fontSize: bnf, letterSpacing: 0.5, lineHeight: 1.5, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
                 {p.first && <span style={{ color: dim, fontSize: bff, fontWeight: 300 }}>{p.first} </span>}<span>{p.last}</span>
                 {p.role && <span style={{ fontFamily: SC_MONO, fontSize: 9, color: accent, letterSpacing: 1 }}> ({p.role})</span>}
               </div>
@@ -1457,7 +1455,7 @@ export function SC2_Brutalist({ match, palette = {} }) {
         </div>
         {(team.bowling || []).map((p, i) => (
           <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 42px 38px 42px 38px 56px', gap: 8, padding: `${rp}px 0`, alignItems: 'center', borderBottom: i < team.bowling.length - 1 ? `1px solid ${rule}` : 'none', background: i % 2 === 0 ? stripe : 'transparent' }}>
-            <div style={{ fontFamily: SC_FONT, fontSize: wnf, letterSpacing: 0.5, lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+            <div style={{ fontFamily: SC_FONT, fontSize: wnf, letterSpacing: 0.5, lineHeight: 1.5, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
               {p.first && <span style={{ color: dim, fontSize: wff, fontWeight: 300 }}>{p.first} </span>}<span>{p.last}</span>
             </div>
             <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: wsf }}>{p.o}</div>

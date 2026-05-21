@@ -260,6 +260,22 @@ export default function AdminSocialPost() {
   const [scUrlInput, setScUrlInput] = useState('')
   const [scUrlStatus, setScUrlStatus] = useState(null) // null | 'loading' | 'ok' | string(error)
 
+  const [removingBg, setRemovingBg] = useState(null) // 'hero' | 'sponsor-0' | 'sponsor-1' | null
+
+  const handleRemoveBg = useCallback(async (key, srcUrl, onSuccess) => {
+    setRemovingBg(key)
+    try {
+      const { removeBackground } = await import('@imgly/background-removal')
+      const blob = await removeBackground(srcUrl, { debug: false })
+      const newUrl = URL.createObjectURL(blob)
+      onSuccess(newUrl)
+    } catch (e) {
+      console.error('Background removal failed:', e)
+    } finally {
+      setRemovingBg(null)
+    }
+  }, [])
+
   const [sponsorFiles, setSponsorFiles] = useState([null, null])
   const handleSponsorFile = (idx, file) => {
     if (!file) return
@@ -859,6 +875,16 @@ export default function AdminSocialPost() {
                           </Field>
                         )}
                         <button
+                          disabled={removingBg === 'hero'}
+                          onClick={() => handleRemoveBg('hero', heroImage.blobUrl, newUrl => {
+                            URL.revokeObjectURL(heroImage.blobUrl)
+                            setHeroImage(h => ({ ...h, blobUrl: newUrl }))
+                          })}
+                          className="text-xs font-mono text-pb-faint hover:text-pb-text disabled:opacity-40 text-left"
+                        >
+                          {removingBg === 'hero' ? '⏳ Removing background…' : '✂ Remove background'}
+                        </button>
+                        <button
                           onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null, playerIdx: 0 }) }}
                           className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left"
                         >
@@ -1095,7 +1121,28 @@ export default function AdminSocialPost() {
                             <span>{sponsorFiles[i] ? '✓ Loaded' : `Sponsor ${i + 1}`}</span>
                             <input type="file" accept="image/*" className="hidden" onChange={e => handleSponsorFile(i, e.target.files?.[0])} />
                           </label>
-                          {sponsorFiles[i] && <img src={sponsorFiles[i]} alt="" className="h-8 object-contain rounded border pb-hairline" />}
+                          {sponsorFiles[i] && (
+                            <div className="flex items-center gap-2">
+                              <img src={sponsorFiles[i]} alt="" className="h-8 object-contain rounded border pb-hairline flex-1 min-w-0" />
+                              <button
+                                disabled={removingBg === `sponsor-${i}`}
+                                onClick={() => handleRemoveBg(`sponsor-${i}`, sponsorFiles[i], newUrl => {
+                                  setSponsorFiles(prev => { const next = [...prev]; next[i] = newUrl; return next })
+                                  setScorecardMatch(m => ({
+                                    ...m,
+                                    meta: {
+                                      ...m.meta,
+                                      sponsors: m.meta.sponsors.map((s, j) => j === i ? { ...s, url: newUrl } : s),
+                                    },
+                                  }))
+                                })}
+                                className="shrink-0 text-[10px] font-mono text-pb-faint hover:text-pb-text disabled:opacity-40 whitespace-nowrap"
+                                title="Remove background"
+                              >
+                                {removingBg === `sponsor-${i}` ? '⏳' : '✂ BG'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
