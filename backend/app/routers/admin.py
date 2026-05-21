@@ -747,21 +747,24 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
         return result
 
     def parse_extras(inn: dict) -> dict:
-        ex = inn.get("extras") or {}
-        total = ex.get("total") or ex.get("totalExtras") or 0
+        # GR top-level fields confirmed from games router (523-538)
         return {
-            "total": total,
-            "b": ex.get("byes") or 0,
-            "lb": ex.get("legByes") or 0,
-            "nb": ex.get("noBalls") or 0,
-            "wd": ex.get("wides") or ex.get("wideBalls") or 0,
+            "total": inn.get("totalExtras") or 0,
+            "b": inn.get("byesRuns") or 0,
+            "lb": inn.get("legByesRuns") or 0,
+            "nb": inn.get("noBalls") or 0,
+            "wd": inn.get("wideBalls") or 0,
         }
 
     def team_totals(inn: dict, batting: list):
-        bat_runs = sum(b["r"] for b in batting if not b["didNotBat"])
-        extras_total = (inn.get("extras") or {}).get("total") or 0
-        total_runs = bat_runs + extras_total
-        total_wkts = sum(1 for b in batting if not b["notOut"] and not b["didNotBat"])
+        # GR authoritative fields (confirmed from games router)
+        total_runs = inn.get("runsScored") or (
+            sum(b["r"] for b in batting if not b["didNotBat"])
+            + ((inn.get("extras") or {}).get("total") or inn.get("totalExtras") or 0)
+        )
+        total_wkts = inn.get("numberOfWicketsFallen") or sum(
+            1 for b in batting if not b["notOut"] and not b["didNotBat"]
+        )
         overs_raw = inn.get("totalOvers") or inn.get("overs")
         overs = _overs_str(overs_raw) if overs_raw else "0"
         try:
@@ -774,12 +777,14 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
         rr = round(total_runs / o_real, 2) if o_real > 0 else 0
         return str(total_runs), total_wkts, overs, str(rr)
 
-    def build_team(team_raw: dict, inn: dict, default_color: str) -> dict:
-        batting = parse_batting(inn.get("batting") or [])
-        bowling = parse_bowling(inn.get("bowling") or [])
+    def build_team(team_raw: dict, bat_inn: dict, bowl_inn: dict, default_color: str) -> dict:
+        # bat_inn  = innings where THIS team batted  → use for batting rows + extras + totals
+        # bowl_inn = innings where OPPONENT batted   → use for bowling rows (team bowled in opp innings)
+        batting = parse_batting(bat_inn.get("batting") or [])
+        bowling = parse_bowling(bowl_inn.get("bowling") or [])
         name = (team_raw.get("displayName") or team_raw.get("name") or "TEAM").upper()
         short = "".join(w[0] for w in name.split()[:3])
-        total, wickets, overs, rr = team_totals(inn, batting)
+        total, wickets, overs, rr = team_totals(bat_inn, batting)
         logo_url = (team_raw.get("logoUrl") or team_raw.get("logo") or
                     team_raw.get("imageUrl") or team_raw.get("image") or None)
         return {
@@ -794,11 +799,11 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
             "runRate": rr,
             "batting": batting,
             "bowling": bowling,
-            "extras": parse_extras(inn),
+            "extras": parse_extras(bat_inn),
         }
 
-    home = build_team(home_team_raw, home_inn, "#1a4eb8")
-    away = build_team(away_team_raw, away_inn, "#cc1f2c")
+    home = build_team(home_team_raw, bat_inn=home_inn, bowl_inn=away_inn, default_color="#1a4eb8")
+    away = build_team(away_team_raw, bat_inn=away_inn, bowl_inn=home_inn, default_color="#cc1f2c")
 
     result_text = (match_summary.get("result") or match_summary.get("statusText") or "RESULT").upper()
     venue = (match_summary.get("venue") or {}).get("name") or ""
