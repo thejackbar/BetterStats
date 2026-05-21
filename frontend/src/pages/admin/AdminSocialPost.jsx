@@ -48,9 +48,10 @@ const DEFAULT_SCORECARD = {
     result: 'HOME WON BY 6 WICKETS',
     series: 'SEASON 2025/26',
     motm: { first: 'Player', last: 'NAME', team: 'HOME', line: '87 (54) · 2/22' },
+    sponsors: [{ url: null, name: '' }, { url: null, name: '' }],
   },
-  home: DEFAULT_TEAM('HOME TEAM', 'HOM', '#1a4eb8'),
-  away: DEFAULT_TEAM('AWAY TEAM', 'AWY', '#cc1f2c'),
+  home: { ...DEFAULT_TEAM('HOME TEAM', 'HOM', '#1a4eb8'), headerInk: '#0a0a0a' },
+  away: { ...DEFAULT_TEAM('AWAY TEAM', 'AWY', '#cc1f2c'), headerInk: '#0a0a0a' },
 }
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api'
@@ -259,6 +260,20 @@ export default function AdminSocialPost() {
   const [scUrlInput, setScUrlInput] = useState('')
   const [scUrlStatus, setScUrlStatus] = useState(null) // null | 'loading' | 'ok' | string(error)
 
+  const [sponsorFiles, setSponsorFiles] = useState([null, null])
+  const handleSponsorFile = (idx, file) => {
+    if (!file) return
+    const url = URL.createObjectURL(file)
+    setSponsorFiles(prev => { const next = [...prev]; next[idx] = url; return next })
+    setScorecardMatch(m => ({
+      ...m,
+      meta: {
+        ...m.meta,
+        sponsors: m.meta.sponsors.map((s, i) => i === idx ? { url, name: file.name.replace(/\.[^.]+$/, '') } : s),
+      },
+    }))
+  }
+
   const handleScUrlImport = async () => {
     const urlOrId = scUrlInput.trim()
     const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
@@ -268,7 +283,12 @@ export default function AdminSocialPost() {
     setScUrlStatus('loading')
     try {
       const data = await api.getSocialScorecard(matchId)
-      setScorecardMatch(data)
+      setScorecardMatch(prev => ({
+        ...data,
+        meta: { ...data.meta, sponsors: prev.meta.sponsors },
+        home: { ...data.home, headerInk: prev.home?.headerInk || '#0a0a0a' },
+        away: { ...data.away, headerInk: prev.away?.headerInk || '#0a0a0a' },
+      }))
       setScUrlStatus('ok')
     } catch (e) {
       setScUrlStatus(e?.message || 'Failed to load scorecard')
@@ -494,13 +514,27 @@ export default function AdminSocialPost() {
     try {
       await document.fonts.ready
       const html2canvas = (await import('html2canvas')).default
-      const canvas = await html2canvas(renderRef.current, {
+      const el = renderRef.current
+      const wrapper = el.parentElement
+      const W = tmpl.isScorecard ? 1920 : 1080
+      const H = 1080
+      // Temporarily position in viewport (opacity ~0) so html2canvas captures the full element
+      const prevStyle = wrapper.getAttribute('style') || ''
+      wrapper.setAttribute('style', 'position:fixed;left:0;top:0;z-index:-1;opacity:0.001;pointer-events:none;overflow:hidden')
+      await new Promise(r => requestAnimationFrame(r))
+      await new Promise(r => requestAnimationFrame(r))
+      const canvas = await html2canvas(el, {
         scale: 1,
         useCORS: true,
         allowTaint: false,
         backgroundColor: null,
         logging: false,
+        width: W,
+        height: H,
+        windowWidth: W,
+        windowHeight: H,
       })
+      wrapper.setAttribute('style', prevStyle)
       canvas.toBlob(blob => {
         if (!blob) { setExportError('Could not generate image'); return }
         const url = URL.createObjectURL(blob)
@@ -1052,6 +1086,20 @@ export default function AdminSocialPost() {
                   <div className="col-span-2">
                     <Field label="MOTM Line"><TextInput value={scorecardMatch.meta.motm.line} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, line: v } })} placeholder="87 (54) · 2/22" /></Field>
                   </div>
+                  <div className="col-span-2">
+                    <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mb-1">Sponsor Logos</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[0, 1].map(i => (
+                        <div key={i} className="flex flex-col gap-1">
+                          <label className="flex items-center gap-2 px-2 py-1.5 rounded border pb-hairline cursor-pointer hover:bg-pb-surface2 text-xs font-mono text-pb-faint">
+                            <span>{sponsorFiles[i] ? '✓ Loaded' : `Sponsor ${i + 1}`}</span>
+                            <input type="file" accept="image/*" className="hidden" onChange={e => handleSponsorFile(i, e.target.files?.[0])} />
+                          </label>
+                          {sponsorFiles[i] && <img src={sponsorFiles[i]} alt="" className="h-8 object-contain rounded border pb-hairline" />}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Team panels */}
@@ -1063,17 +1111,22 @@ export default function AdminSocialPost() {
                         {side === 'home' ? '1st Innings' : '2nd Innings'} — {t.name || side.toUpperCase()}
                       </summary>
                       <div className="px-3 pb-3 pt-2 flex flex-col gap-2">
-                        <div className="grid grid-cols-3 gap-2">
-                          <Field label="Team Name"><TextInput value={t.name} onChange={v => patchScTeam(side, { name: v, monogram: v.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) })} placeholder="HOME TEAM" /></Field>
+                        <div className="grid grid-cols-4 gap-2">
+                          <div className="col-span-2">
+                            <Field label="Team Name"><TextInput value={t.name} onChange={v => patchScTeam(side, { name: v, monogram: v.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) })} placeholder="HOME TEAM" /></Field>
+                          </div>
                           <Field label="Short (3)"><TextInput value={t.short} onChange={v => patchScTeam(side, { short: v.toUpperCase().slice(0, 4), monogram: v.toUpperCase().slice(0, 3) })} placeholder="HOM" /></Field>
-                          <Field label="Colour">
+                          <Field label="Team Colour">
                             <input type="color" value={t.color} onChange={e => patchScTeam(side, { color: e.target.value })} className="w-full h-[34px] rounded cursor-pointer border-0 bg-transparent p-0" />
+                          </Field>
+                          <Field label="Header Text">
+                            <input type="color" value={t.headerInk || '#0a0a0a'} onChange={e => patchScTeam(side, { headerInk: e.target.value })} className="w-full h-[34px] rounded cursor-pointer border-0 bg-transparent p-0" />
                           </Field>
                           <Field label="Total"><TextInput value={t.total} onChange={v => patchScTeam(side, { total: v })} placeholder="182" /></Field>
                           <Field label="Wickets"><TextInput value={String(t.wickets)} onChange={v => patchScTeam(side, { wickets: Number(v) || 0 })} placeholder="7" /></Field>
                           <Field label="Overs"><TextInput value={t.overs} onChange={v => patchScTeam(side, { overs: v })} placeholder="20.0" /></Field>
                           <Field label="Run Rate"><TextInput value={t.runRate} onChange={v => patchScTeam(side, { runRate: v })} placeholder="9.10" /></Field>
-                          <div className="col-span-2">
+                          <div className="col-span-4">
                             <Field label="Extras (b·lb·nb·wd)">
                               <div className="grid grid-cols-4 gap-1">
                                 {['b','lb','nb','wd'].map(k => (

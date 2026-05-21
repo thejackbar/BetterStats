@@ -1234,7 +1234,8 @@ function _toRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`
 }
 
-function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {} }) {
+function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = [] }) {
+  const slots = [0, 1]
   return (
     <div style={{
       position: 'absolute', left: 32, right: 32, bottom: 16, height: 56,
@@ -1243,8 +1244,12 @@ function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {} }) {
     }}>
       <div style={{ fontFamily: SC_BODY, fontSize: 10, letterSpacing: 2.5, color: dim, fontWeight: 600 }}>PRESENTED BY</div>
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 40, fontFamily: SC_FONT, fontSize: 18, letterSpacing: 3, color: dimmer }}>
-        <div style={{ padding: '6px 18px', border: `1px dashed ${dimmer}`, borderRadius: 6 }}>SPONSOR LOGO</div>
-        <div style={{ padding: '6px 18px', border: `1px dashed ${dimmer}`, borderRadius: 6 }}>SPONSOR LOGO</div>
+        {slots.map(i => {
+          const s = sponsors?.[i]
+          return s?.url
+            ? <img key={i} src={s.url} alt={s.name || `Sponsor ${i+1}`} style={{ maxHeight: 36, maxWidth: 180, objectFit: 'contain', borderRadius: 4 }} />
+            : <div key={i} style={{ padding: '6px 18px', border: `1px dashed ${dimmer}`, borderRadius: 6 }}>SPONSOR LOGO</div>
+        })}
       </div>
       <div style={{ fontFamily: SC_MONO, fontSize: 10, letterSpacing: 1.5, color: dimmer }}>BETTERSTATS.CRICKET</div>
     </div>
@@ -1264,68 +1269,70 @@ export function SC1_Broadcast({ match, palette = {} }) {
   const rule   = _toRgba(ink, 0.10)
   const accent = palette.accent    || '#ffc233'
 
-  const TeamPanel = ({ team, accentC, side }) => (
+  const TeamPanel = ({ team, accentC, side }) => {
+    const headerInk = team.headerInk || '#0a0a0a'
+    return (
     <div style={{ background: panel, border: `1px solid ${rule}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 18, padding: '14px 22px', background: `linear-gradient(90deg, ${accentC}, ${accentC}aa 60%, transparent)`, color: '#0a0a0a', borderBottom: `1px solid ${rule}` }}>
-        <ClubLogo monogram={team.short} color='#0a0a0a' size={52} shape='shield' />
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 18, padding: '14px 22px', background: `linear-gradient(90deg, ${accentC}, ${accentC}aa 60%, transparent)`, color: headerInk, borderBottom: `1px solid ${rule}` }}>
+        <ClubLogo monogram={team.short} color={headerInk} src={team.logo || null} size={56} shape='shield' />
         <div>
-          <div style={{ fontFamily: SC_FONT, fontSize: 34, letterSpacing: 1.5, lineHeight: 1 }}>{team.name}</div>
-          <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 2, marginTop: 4, opacity: 0.7 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS · CHASE'} · RR {team.runRate}</div>
+          <div style={{ fontFamily: SC_FONT, fontSize: 42, letterSpacing: 1.5, lineHeight: 1 }}>{team.name}</div>
+          <div style={{ fontFamily: SC_MONO, fontSize: 12, letterSpacing: 2, marginTop: 4, opacity: 0.75 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS · CHASE'} · RR {team.runRate}</div>
         </div>
         <div style={{ textAlign: 'right', lineHeight: 0.9 }}>
-          <div style={{ fontFamily: SC_FONT, fontSize: 56, letterSpacing: -1 }}>{team.total}{team.wickets < 10 ? `/${team.wickets}` : ''}</div>
-          <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 2, marginTop: 2 }}>{team.overs} OV</div>
+          <div style={{ fontFamily: SC_FONT, fontSize: 68, letterSpacing: -1 }}>{team.total}{team.wickets < 10 ? `/${team.wickets}` : ''}</div>
+          <div style={{ fontFamily: SC_MONO, fontSize: 12, letterSpacing: 2, marginTop: 2 }}>{team.overs} OV</div>
         </div>
       </div>
-      <div style={{ padding: '10px 18px 4px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '26px 1fr 1.1fr 42px 38px 32px 32px 50px', gap: 8, fontFamily: SC_MONO, fontSize: 10, letterSpacing: 1.5, color: dim, padding: '0 2px 6px', borderBottom: `1px solid ${rule}` }}>
+      <div style={{ padding: '8px 18px 4px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 1.1fr 46px 40px 34px 34px 54px', gap: 8, fontFamily: SC_MONO, fontSize: 11, letterSpacing: 1.5, color: dim, padding: '0 2px 6px', borderBottom: `1px solid ${rule}` }}>
           <div>#</div><div>BATTER</div><div>HOW OUT</div>
           <div style={{ textAlign: 'right' }}>R</div><div style={{ textAlign: 'right' }}>B</div><div style={{ textAlign: 'right' }}>4s</div><div style={{ textAlign: 'right' }}>6s</div><div style={{ textAlign: 'right' }}>SR</div>
         </div>
         {(team.batting || []).map((p, i) => {
           const dnb = p.didNotBat
           return (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '26px 1fr 1.1fr 42px 38px 32px 32px 50px', gap: 8, padding: '5px 2px', alignItems: 'baseline', borderBottom: i < team.batting.length - 1 ? `1px solid ${rule}` : 'none', opacity: dnb ? 0.4 : 1 }}>
-              <div style={{ fontFamily: SC_MONO, fontSize: 11, color: dim }}>{p.num}</div>
-              <div style={{ fontFamily: SC_FONT, fontSize: 18, letterSpacing: 0.5, lineHeight: 1, display: 'flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                <span style={{ color: dim, fontSize: 13, fontWeight: 300 }}>{p.first}</span>
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 1.1fr 46px 40px 34px 34px 54px', gap: 8, padding: '5px 2px', alignItems: 'baseline', borderBottom: i < team.batting.length - 1 ? `1px solid ${rule}` : 'none', opacity: dnb ? 0.4 : 1 }}>
+              <div style={{ fontFamily: SC_MONO, fontSize: 12, color: dim }}>{p.num}</div>
+              <div style={{ fontFamily: SC_FONT, fontSize: 22, letterSpacing: 0.5, lineHeight: 1, display: 'flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                <span style={{ color: dim, fontSize: 15, fontWeight: 300 }}>{p.first}</span>
                 <span>{p.last}</span>
-                {p.role && <span style={{ fontFamily: SC_MONO, fontSize: 9, color: accent, letterSpacing: 1, marginLeft: 2 }}>({p.role})</span>}
+                {p.role && <span style={{ fontFamily: SC_MONO, fontSize: 10, color: accent, letterSpacing: 1, marginLeft: 2 }}>({p.role})</span>}
               </div>
-              <div style={{ fontFamily: SC_BODY, fontSize: 12, color: dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : p.out)}</div>
-              <div style={{ textAlign: 'right', fontFamily: SC_FONT, fontSize: 20, lineHeight: 1, color: dnb ? dim : ink }}>{dnb ? '—' : (p.notOut ? `${p.r}*` : p.r)}</div>
-              <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 12, color: dim }}>{dnb ? '—' : p.b}</div>
-              <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 12, color: dim }}>{dnb ? '—' : p.fours}</div>
-              <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 12, color: dim }}>{dnb ? '—' : p.sixes}</div>
-              <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 12, color: dnb ? dim : accent }}>{dnb ? '—' : (p.sr || 0).toFixed(2)}</div>
+              <div style={{ fontFamily: SC_BODY, fontSize: 13, color: dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : p.out)}</div>
+              <div style={{ textAlign: 'right', fontFamily: SC_FONT, fontSize: 24, lineHeight: 1, color: dnb ? dim : ink }}>{dnb ? '—' : (p.notOut ? `${p.r}*` : p.r)}</div>
+              <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 13, color: dim }}>{dnb ? '—' : p.b}</div>
+              <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 13, color: dim }}>{dnb ? '—' : p.fours}</div>
+              <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 13, color: dim }}>{dnb ? '—' : p.sixes}</div>
+              <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 13, color: dnb ? dim : accent }}>{dnb ? '—' : (p.sr || 0).toFixed(2)}</div>
             </div>
           )
         })}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px', padding: '8px 2px', borderTop: `1px solid ${rule}`, fontFamily: SC_MONO, fontSize: 12, color: dim, letterSpacing: 1 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px', padding: '7px 2px', borderTop: `1px solid ${rule}`, fontFamily: SC_MONO, fontSize: 12, color: dim, letterSpacing: 1 }}>
           <div>EXTRAS · b {team.extras?.b ?? 0} · lb {team.extras?.lb ?? 0} · nb {team.extras?.nb ?? 0} · wd {team.extras?.wd ?? 0}</div>
           <div style={{ textAlign: 'right', color: ink }}>{team.extras?.total ?? 0}</div>
         </div>
       </div>
       <div style={{ padding: '6px 18px 14px', background: panel2, marginTop: 'auto' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 42px 38px 42px 38px 50px', gap: 8, fontFamily: SC_MONO, fontSize: 10, letterSpacing: 2, color: dim, padding: '8px 2px 4px', borderBottom: `1px solid ${rule}` }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 46px 40px 46px 40px 54px', gap: 8, fontFamily: SC_MONO, fontSize: 11, letterSpacing: 2, color: dim, padding: '7px 2px 4px', borderBottom: `1px solid ${rule}` }}>
           <div style={{ color: accent }}>{side === 'home' ? `${m.away?.short ?? 'AWAY'} BOWLING` : `${m.home?.short ?? 'HOME'} BOWLING`}</div>
           <div style={{ textAlign: 'right' }}>O</div><div style={{ textAlign: 'right' }}>M</div><div style={{ textAlign: 'right' }}>R</div><div style={{ textAlign: 'right' }}>W</div><div style={{ textAlign: 'right' }}>ECON</div>
         </div>
         {(team.bowling || []).map((p, i) => (
-          <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 42px 38px 42px 38px 50px', gap: 8, padding: '5px 2px', alignItems: 'baseline', borderBottom: i < team.bowling.length - 1 ? `1px solid ${rule}` : 'none' }}>
-            <div style={{ fontFamily: SC_FONT, fontSize: 17, letterSpacing: 0.5, display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{ color: dim, fontSize: 12, fontWeight: 300 }}>{p.first}</span><span>{p.last}</span>
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 46px 40px 46px 40px 54px', gap: 8, padding: '5px 2px', alignItems: 'baseline', borderBottom: i < team.bowling.length - 1 ? `1px solid ${rule}` : 'none' }}>
+            <div style={{ fontFamily: SC_FONT, fontSize: 20, letterSpacing: 0.5, display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ color: dim, fontSize: 14, fontWeight: 300 }}>{p.first}</span><span>{p.last}</span>
             </div>
-            <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 12 }}>{p.o}</div>
-            <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 12, color: dim }}>{p.m}</div>
-            <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 12 }}>{p.r}</div>
-            <div style={{ textAlign: 'right', fontFamily: SC_FONT, fontSize: 18, color: p.w > 0 ? accent : ink }}>{p.w}</div>
-            <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 12, color: dim }}>{(p.econ || 0).toFixed(2)}</div>
+            <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 13 }}>{p.o}</div>
+            <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 13, color: dim }}>{p.m}</div>
+            <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 13 }}>{p.r}</div>
+            <div style={{ textAlign: 'right', fontFamily: SC_FONT, fontSize: 22, color: p.w > 0 ? accent : ink }}>{p.w}</div>
+            <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: 13, color: dim }}>{(p.econ || 0).toFixed(2)}</div>
           </div>
         ))}
       </div>
     </div>
-  )
+  )}
 
   return (
     <div style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
@@ -1352,11 +1359,11 @@ export function SC1_Broadcast({ match, palette = {} }) {
           </div>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, padding: '0 24px', height: 808 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, padding: '0 24px', height: 800 }}>
         <TeamPanel team={m.home || {}} accentC={m.home?.color || '#1a4eb8'} side='home' />
         <TeamPanel team={m.away || {}} accentC={m.away?.color || '#cc1f2c'} side='away' />
       </div>
-      <ScSponsorFooter bg={panel} ink={ink} dim={dim} dimmer={dimmer} rule={rule} />
+      <ScSponsorFooter bg={panel} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
       <GrainSVG opacity={dark ? 0.22 : 0.16} id='sc1g' />
     </div>
   )
