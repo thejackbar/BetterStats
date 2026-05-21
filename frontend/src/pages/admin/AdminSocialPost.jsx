@@ -29,18 +29,23 @@ const TEMPLATES = [
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
-function splitName(displayName) {
+function splitName(displayName, nameFormat = 'last_first') {
   const parts = (displayName || '').trim().split(/\s+/)
   if (parts.length === 1) return { first: '', last: parts[0].toUpperCase() }
-  return { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1].toUpperCase() }
+  if (nameFormat === 'first_last') {
+    // "Shaylyn Wijesinghe" → first="Shaylyn", last="WIJESINGHE"
+    return { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1].toUpperCase() }
+  }
+  // default: last_first → "Wijesinghe Shaylyn" → first="Shaylyn", last="WIJESINGHE"
+  return { first: parts.slice(1).join(' '), last: parts[0].toUpperCase() }
 }
 
 function deriveShort(name) {
   return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 3)
 }
 
-function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = 'BAT' } = {}) {
-  const { first, last } = splitName(p.display_name || p.name)
+function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = 'BAT' } = {}, nameFormat = 'last_first') {
+  const { first, last } = splitName(p.display_name || p.name, nameFormat)
   return {
     first,
     last,
@@ -259,6 +264,9 @@ export default function AdminSocialPost() {
       ? { name: 'Custom', primary: customBg, secondary: customBg + 'cc', accent: customAccent, ink: '#ffffff' }
       : PALETTES[paletteKey]
 
+  // Name format from club settings (last_first = "Smith John", first_last = "John Smith")
+  const nameFormat = settings?.player_name_format || 'last_first'
+
   // Current template definition
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
   const TemplateComponent = tmpl.component
@@ -272,7 +280,7 @@ export default function AdminSocialPost() {
       unit: milestone.unit || 'GAMES',
       reason: milestone.reason || 'MILESTONE',
       detail: milestone.detail,
-      player: milestonePlayer ? playerToTemplatePlayer(milestonePlayer.player, milestonePlayer) : undefined,
+      player: milestonePlayer ? playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat) : undefined,
     }
   }
   if (templateId === 'C1') {
@@ -281,7 +289,7 @@ export default function AdminSocialPost() {
       kind: announcement.kind,
       headline: announcement.headline,
       subheadline: announcement.subheadline,
-      player: annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer) : undefined,
+      player: annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat) : undefined,
     }
   }
   if (templateId === 'C2') {
@@ -290,7 +298,7 @@ export default function AdminSocialPost() {
   if (templateId === 'C3') {
     const motmPlayer = selectedPlayers[motm.playerIdx]
     extraProps.motm = {
-      player: motmPlayer ? playerToTemplatePlayer(motmPlayer.player, motmPlayer) : undefined,
+      player: motmPlayer ? playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat) : undefined,
       stats: motm.stats.filter(s => s.label && s.value),
       summary: motm.summary,
     }
@@ -309,7 +317,7 @@ export default function AdminSocialPost() {
 
   // Build players array for template
   const templatePlayers = selectedPlayers.map((sp, i) => {
-    const base = playerToTemplatePlayer(sp.player, sp)
+    const base = playerToTemplatePlayer(sp.player, sp, nameFormat)
     if (heroImage.blobUrl && i === heroImage.playerIdx) base.headshot = heroImage.blobUrl
     return base
   })
