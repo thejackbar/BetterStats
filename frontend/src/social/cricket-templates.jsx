@@ -1211,12 +1211,28 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCORECARD TEMPLATES — 1920×1080 full match scorecards
-// Props: { match, dark }  where match = { meta, home, away }
+// Props: { match, palette }  where match = { meta, home, away }
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SC_FONT = "'Anton', sans-serif"
 const SC_MONO = "'JetBrains Mono', monospace"
 const SC_BODY = "'Inter', sans-serif"
+
+function _scIsDark(hex) {
+  if (!hex || !hex.startsWith('#')) return true
+  const r = parseInt(hex.slice(1, 3), 16) / 255
+  const g = parseInt(hex.slice(3, 5), 16) / 255
+  const b = parseInt(hex.slice(5, 7), 16) / 255
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.4
+}
+
+function _toRgba(hex, alpha) {
+  if (!hex || !hex.startsWith('#')) return `rgba(255,255,255,${alpha})`
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r},${g},${b},${alpha})`
+}
 
 function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {} }) {
   return (
@@ -1236,16 +1252,17 @@ function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {} }) {
 }
 
 // ─── SC1: Broadcast ───────────────────────────────────────────────────────────
-export function SC1_Broadcast({ match, dark = true }) {
+export function SC1_Broadcast({ match, palette = {} }) {
   const m = match
-  const bg     = dark ? '#0a1224' : '#f4f3ee'
-  const panel  = dark ? '#101c38' : '#ffffff'
-  const panel2 = dark ? '#0d1730' : '#ebe9e0'
-  const ink    = dark ? '#f4f3ee' : '#0a1224'
-  const dim    = dark ? 'rgba(244,243,238,0.55)' : 'rgba(10,18,36,0.55)'
-  const dimmer = dark ? 'rgba(244,243,238,0.35)' : 'rgba(10,18,36,0.35)'
-  const rule   = dark ? 'rgba(244,243,238,0.10)' : 'rgba(10,18,36,0.10)'
-  const accent = '#ffc233'
+  const dark   = _scIsDark(palette.primary)
+  const bg     = palette.primary   || (dark ? '#0a1224' : '#f4f3ee')
+  const panel  = palette.secondary || (dark ? '#101c38' : '#ffffff')
+  const panel2 = bg
+  const ink    = palette.ink       || (dark ? '#f4f3ee' : '#0a1224')
+  const dim    = _toRgba(ink, 0.55)
+  const dimmer = _toRgba(ink, 0.35)
+  const rule   = _toRgba(ink, 0.10)
+  const accent = palette.accent    || '#ffc233'
 
   const TeamPanel = ({ team, accentC, side }) => (
     <div style={{ background: panel, border: `1px solid ${rule}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -1346,16 +1363,17 @@ export function SC1_Broadcast({ match, dark = true }) {
 }
 
 // ─── SC2: Brutalist ───────────────────────────────────────────────────────────
-export function SC2_Brutalist({ match, dark = false }) {
+export function SC2_Brutalist({ match, palette = {} }) {
   const m = match
-  const bg       = dark ? '#0a0a0c' : '#f0ece2'
-  const ink      = dark ? '#f0ece2' : '#0a0a0c'
-  const dim      = dark ? 'rgba(240,236,226,0.55)' : 'rgba(10,10,12,0.55)'
-  const dimmer   = dark ? 'rgba(240,236,226,0.32)' : 'rgba(10,10,12,0.32)'
-  const rule     = dark ? 'rgba(240,236,226,0.18)' : 'rgba(10,10,12,0.18)'
-  const ruleStrong = dark ? 'rgba(240,236,226,0.7)' : 'rgba(10,10,12,0.85)'
-  const accent   = dark ? '#ffc233' : '#cc1f2c'
-  const stripe   = dark ? 'rgba(240,236,226,0.04)' : 'rgba(10,10,12,0.04)'
+  const dark     = _scIsDark(palette.primary)
+  const bg       = palette.primary   || (dark ? '#0a0a0c' : '#f0ece2')
+  const ink      = palette.ink       || (dark ? '#f0ece2' : '#0a0a0c')
+  const dim      = _toRgba(ink, 0.55)
+  const dimmer   = _toRgba(ink, 0.32)
+  const rule     = _toRgba(ink, 0.18)
+  const ruleStrong = _toRgba(ink, dark ? 0.7 : 0.85)
+  const accent   = palette.accent    || (dark ? '#ffc233' : '#cc1f2c')
+  const stripe   = _toRgba(ink, 0.04)
 
   const TeamCol = ({ team, side }) => (
     <div style={{ borderLeft: `2px solid ${ruleStrong}`, borderRight: `2px solid ${ruleStrong}`, display: 'flex', flexDirection: 'column' }}>
@@ -1433,33 +1451,34 @@ export function SC2_Brutalist({ match, dark = false }) {
           <span style={{ fontWeight: 700, letterSpacing: 1.5, fontFamily: SC_MONO }}>FORMAT</span><span>{m.meta?.format} · {m.meta?.overs} overs/side</span>
           <span style={{ fontWeight: 700, letterSpacing: 1.5, fontFamily: SC_MONO }}>SERIES</span><span>{m.meta?.series}</span>
         </div>
-        <div style={{ padding: '10px 16px', background: dark ? '#0a0a0c' : '#f0ece2', color: accent, border: `2px solid ${dark ? '#0a0a0c' : '#0a0a0c'}` }}>
+        <div style={{ padding: '10px 16px', background: bg, color: accent, border: `2px solid ${ruleStrong}` }}>
           <div style={{ fontFamily: SC_MONO, fontSize: 10, letterSpacing: 2, fontWeight: 700, color: ink }}>★ PLAYER OF THE MATCH</div>
           <div style={{ fontFamily: SC_FONT, fontSize: 28, color: ink, letterSpacing: 1, lineHeight: 1, marginTop: 4 }}>{(m.meta?.motm?.first || '').toUpperCase()} {m.meta?.motm?.last}</div>
           <div style={{ fontFamily: SC_MONO, fontSize: 11, color: ink, opacity: 0.7, marginTop: 4 }}>{m.meta?.motm?.line}</div>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: 830 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: 760 }}>
         <TeamCol team={m.home || {}} side='home' />
         <TeamCol team={m.away || {}} side='away' />
       </div>
-      <ScSponsorFooter bg={ink} ink={bg} dim={dark ? 'rgba(10,10,12,0.55)' : 'rgba(240,236,226,0.65)'} dimmer={dark ? 'rgba(10,10,12,0.35)' : 'rgba(240,236,226,0.45)'} rule={ruleStrong} style={{ borderRadius: 0, borderTop: `3px solid ${accent}` }} />
+      <ScSponsorFooter bg={ink} ink={bg} dim={_toRgba(bg, 0.55)} dimmer={_toRgba(bg, 0.35)} rule={ruleStrong} style={{ borderRadius: 0, borderTop: `3px solid ${accent}` }} />
       <GrainSVG opacity={dark ? 0.28 : 0.18} id='sc2g' />
     </div>
   )
 }
 
 // ─── SC3: Dashboard ───────────────────────────────────────────────────────────
-export function SC3_Dashboard({ match, dark = false }) {
+export function SC3_Dashboard({ match, palette = {} }) {
   const m = match
-  const bg     = dark ? '#0e1116' : '#f3f4f6'
-  const card   = dark ? '#171b22' : '#ffffff'
-  const ink    = dark ? '#e5e7eb' : '#111827'
-  const dim    = dark ? 'rgba(229,231,235,0.55)' : 'rgba(17,24,39,0.55)'
-  const dimmer = dark ? 'rgba(229,231,235,0.35)' : 'rgba(17,24,39,0.4)'
-  const rule   = dark ? 'rgba(229,231,235,0.08)' : 'rgba(17,24,39,0.08)'
-  const accent = '#2563eb'
-  const win    = '#10b981'
+  const dark   = _scIsDark(palette.primary)
+  const bg     = palette.primary   || (dark ? '#0e1116' : '#f3f4f6')
+  const card   = palette.secondary || (dark ? '#171b22' : '#ffffff')
+  const ink    = palette.ink       || (dark ? '#e5e7eb' : '#111827')
+  const dim    = _toRgba(ink, 0.55)
+  const dimmer = _toRgba(ink, 0.40)
+  const rule   = _toRgba(ink, 0.08)
+  const accent = palette.accent    || '#2563eb'
+  const win    = palette.accent    || '#10b981'
 
   const Card = ({ children, style }) => (
     <div style={{ background: card, borderRadius: 16, border: `1px solid ${rule}`, boxShadow: dark ? '0 1px 0 rgba(255,255,255,0.04)' : '0 1px 2px rgba(17,24,39,0.06)', padding: 18, ...style }}>{children}</div>

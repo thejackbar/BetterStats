@@ -6,6 +6,8 @@ import uuid
 import re
 import json
 
+from app.services.grassroots_scores_client import get_match_scorecard
+
 from app.models.db import (
     Player, PlayerSeasonStats, BattingInnings, BowlingSpell,
     FieldingStat, FallOfWicket, Partnership, Milestone, User, get_db,
@@ -564,3 +566,227 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
     await db.commit()
 
     return {"status": "undone", "restored_player_id": str(remove_id)}
+
+
+# ─── Social: fetch Grassroots scorecard for social image builder ──────────────
+
+_DNB_TYPES = {"did not bat", "dnb", "absent", "absent hurt"}
+_NOT_OUT_ID = 1  # dismissalTypeId == 1 means "not out" in GR API
+
+
+def _overs_str(overs_raw) -> str:
+    """Convert oversBowled string/float or balls int to 'X.Y' display string."""
+    if overs_raw is None:
+        return "0"
+    if isinstance(overs_raw, str) and "." in overs_raw:
+        return overs_raw
+    try:
+        balls = int(float(str(overs_raw)) * 6) if "." not in str(overs_raw) else None
+        if balls is not None:
+            return f"{balls // 6}.{balls % 6}"
+        # already X.Y format
+        return str(overs_raw)
+    except (TypeError, ValueError):
+        return str(overs_raw)
+
+
+def _team_id_from_inn(inn: dict) -> str | None:
+    for k in ("battingTeamId", "teamId"):
+        v = inn.get(k)
+        if v:
+            return str(v).lower()
+    for k in ("battingTeam", "team"):
+        obj = inn.get(k)
+        if isinstance(obj, dict) and obj.get("id"):
+            return str(obj["id"]).lower()
+    return None
+
+
+@router.get("/social/scorecard/{match_id}")
+async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+    """Fetch a Grassroots scorecard and return it in the social template format."""
+    raw = await get_match_scorecard(match_id)
+    if raw is None:
+        raise HTTPException(404, "Scorecard not found — match may be PlayHQ-only or not yet completed")
+
+    match_summary = raw.get("matchSummary") or {}
+    teams_raw = raw.get("teams") or []
+    innings_list = raw.get("innings") or []
+
+    # Identify home team from matchSummary.teams[].isHome
+    summary_teams = match_summary.get("teams") or []
+    home_id = next((str(t.get("id", "")).lower() for t in summary_teams if t.get("isHome")), None)
+
+    def find_team(tid):
+        if tid:
+            t = next((t for t in teams_raw if str(t.get("id", "")).lower() == tid), None)
+            if t:
+                return t
+        return teams_raw[0] if teams_raw else {}
+
+    home_team_raw = find_team(home_id)
+    away_id = next((str(t.get("id", "")).lower() for t in teams_raw if str(t.get("id", "")).lower() != home_id), None)
+    away_team_raw = find_team(away_id)
+
+    # Map innings to teams: home team batting = innings where battingTeamId == home_id
+    home_inn = next((i for i in innings_list if _team_id_from_inn(i) == home_id), innings_list[0] if innings_list else {})
+    away_inn = next((i for i in innings_list if _team_id_from_inn(i) != home_id), innings_list[1] if len(innings_list) > 1 else {})
+
+    # Collect all participantIds to look up names from DB
+    all_pids: set[str] = set()
+    for inn in [home_inn, away_inn]:
+        for row in (inn.get("batting") or []):
+            if row.get("participantId"):
+                all_pids.add(row["participantId"])
+        for row in (inn.get("bowling") or []):
+            if row.get("participantId"):
+                all_pids.add(row["participantId"])
+
+    name_map: dict[str, tuple[str, str]] = {}  # participantId -> (first, last)
+    if all_pids:
+        try:
+            pid_uuids = [uuid.UUID(p) for p in all_pids]
+            res = await db.execute(select(Player).where(Player.id.in_(pid_uuids)))
+            for p in res.scalars().all():
+                raw_name = p.display_name or p.name or ""
+                parts = raw_name.strip().split()
+                # GR stores names as "LastName FirstName" (last_first)
+                if len(parts) >= 2:
+                    first = " ".join(parts[1:])
+                    last = parts[0].upper()
+                else:
+                    first = ""
+                    last = parts[0].upper() if parts else ""
+                name_map[str(p.id).lower()] = (first, last)
+        except Exception:
+            pass  # name lookup best-effort; empty names still render
+
+    def get_name(pid: str) -> tuple[str, str]:
+        return name_map.get(str(pid).lower(), ("", pid[-4:].upper() if pid else "?"))
+
+    def parse_batting(batting_rows: list) -> list:
+        rows = sorted(batting_rows, key=lambda b: b.get("batOrder") or 99)
+        result = []
+        for i, b in enumerate(rows):
+            dt = (b.get("dismissalType") or "").lower()
+            dt_id = b.get("dismissalTypeId") or 0
+            dnb = dt in _DNB_TYPES
+            not_out = (dt_id == _NOT_OUT_ID or dt == "not out") and not dnb
+            pid = b.get("participantId") or ""
+            first, last = get_name(pid)
+            runs = b.get("runsScored") or 0
+            balls = b.get("ballsFaced") or 0
+            result.append({
+                "num": i + 1,
+                "first": first,
+                "last": last,
+                "r": runs,
+                "b": balls,
+                "fours": b.get("foursScored") or 0,
+                "sixes": b.get("sixesScored") or 0,
+                "sr": round(runs / balls * 100, 2) if balls > 0 else 0,
+                "out": dt if not dnb and not not_out else ("not out" if not_out else "did not bat"),
+                "notOut": not_out,
+                "didNotBat": dnb,
+                "role": None,
+            })
+        return result
+
+    def parse_bowling(bowling_rows: list) -> list:
+        result = []
+        for bw in bowling_rows:
+            pid = bw.get("participantId") or ""
+            first, last = get_name(pid)
+            overs_raw = bw.get("oversBowled")
+            overs = _overs_str(overs_raw)
+            runs = bw.get("runsConceded") or 0
+            try:
+                o_float = float(str(overs_raw or 0).replace(",", "."))
+                whole = int(o_float)
+                part = round((o_float - whole) * 10)
+                o_float_real = whole + part / 6
+            except (TypeError, ValueError):
+                o_float_real = 0
+            result.append({
+                "first": first,
+                "last": last,
+                "o": overs,
+                "m": bw.get("maidensBowled") or 0,
+                "r": runs,
+                "w": bw.get("wicketsTaken") or 0,
+                "econ": round(runs / o_float_real, 2) if o_float_real > 0 else 0,
+            })
+        return result
+
+    def parse_extras(inn: dict) -> dict:
+        ex = inn.get("extras") or {}
+        total = ex.get("total") or ex.get("totalExtras") or 0
+        return {
+            "total": total,
+            "b": ex.get("byes") or 0,
+            "lb": ex.get("legByes") or 0,
+            "nb": ex.get("noBalls") or 0,
+            "wd": ex.get("wides") or ex.get("wideBalls") or 0,
+        }
+
+    def team_totals(inn: dict, batting: list):
+        bat_runs = sum(b["r"] for b in batting if not b["didNotBat"])
+        extras_total = (inn.get("extras") or {}).get("total") or 0
+        total_runs = bat_runs + extras_total
+        total_wkts = sum(1 for b in batting if not b["notOut"] and not b["didNotBat"])
+        overs_raw = inn.get("totalOvers") or inn.get("overs")
+        overs = _overs_str(overs_raw) if overs_raw else "0"
+        try:
+            o_float = float(str(overs_raw or 0))
+            whole = int(o_float)
+            part = round((o_float - whole) * 10)
+            o_real = whole + part / 6
+        except (TypeError, ValueError):
+            o_real = 0
+        rr = round(total_runs / o_real, 2) if o_real > 0 else 0
+        return str(total_runs), total_wkts, overs, str(rr)
+
+    def build_team(team_raw: dict, inn: dict, default_color: str) -> dict:
+        batting = parse_batting(inn.get("batting") or [])
+        bowling = parse_bowling(inn.get("bowling") or [])
+        name = (team_raw.get("displayName") or team_raw.get("name") or "TEAM").upper()
+        short = "".join(w[0] for w in name.split()[:3])
+        total, wickets, overs, rr = team_totals(inn, batting)
+        return {
+            "name": name,
+            "short": short,
+            "color": default_color,
+            "monogram": short,
+            "total": total,
+            "wickets": wickets,
+            "overs": overs,
+            "runRate": rr,
+            "batting": batting,
+            "bowling": bowling,
+            "extras": parse_extras(inn),
+        }
+
+    home = build_team(home_team_raw, home_inn, "#1a4eb8")
+    away = build_team(away_team_raw, away_inn, "#cc1f2c")
+
+    result_text = (match_summary.get("result") or match_summary.get("statusText") or "RESULT").upper()
+    venue = (match_summary.get("venue") or {}).get("name") or ""
+    date_raw = match_summary.get("dateTimeUTC") or match_summary.get("startDateTime") or ""
+    date_str = date_raw[:10] if date_raw else ""
+    grade_name = ((raw.get("grade") or match_summary.get("grade") or {}).get("name") or "").upper()
+    round_name = match_summary.get("round") or raw.get("round") or ""
+
+    meta = {
+        "competition": grade_name,
+        "round": f"ROUND {round_name}".strip() if round_name else "ROUND",
+        "format": "T20",
+        "overs": 20,
+        "venue": venue,
+        "date": date_str,
+        "toss": "",
+        "result": result_text,
+        "series": "",
+        "motm": {"first": "", "last": "", "team": "", "line": ""},
+    }
+
+    return {"meta": meta, "home": home, "away": away}

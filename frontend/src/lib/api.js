@@ -19,6 +19,7 @@ export const api = {
 
   // Organisations (UUID-based, used internally once slug is resolved)
   searchOrgs: (q) => request(`/organisations/search?q=${encodeURIComponent(q)}`),
+  getSocialScorecard: (matchId) => request(`/admin/social/scorecard/${matchId}`),
   onboard: (orgId, orgName = '') =>
     request('/organisations/onboard', { method: 'POST', body: JSON.stringify({ org_id: orgId, org_name: orgName }) }),
   listOrgs: () => request('/organisations'),
