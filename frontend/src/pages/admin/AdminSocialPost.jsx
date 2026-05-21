@@ -82,7 +82,7 @@ function SelectedPlayerRow({ sp, idx, onUpdate, onRemove, onMoveUp, onMoveDown, 
         <button onClick={onMoveDown} disabled={isLast} className="text-pb-faintest hover:text-pb-text disabled:opacity-20 text-xs leading-none">▼</button>
       </div>
       <span className="font-mono text-[10px] text-pb-faintest w-4 shrink-0">{idx + 1}</span>
-      <span className="text-sm text-pb-text flex-1 truncate">{player._name}</span>
+      <span className="text-sm text-pb-text flex-1 truncate">{player.display_name || player.name}</span>
       <select
         value={role}
         onChange={e => onUpdate({ role: e.target.value })}
@@ -197,6 +197,10 @@ export default function AdminSocialPost() {
   // Opponent state
   const [opponent, setOpponent] = useState({ name: '', short: '', monogram: '', logo: null })
   const patchOpp = patch => setOpponent(o => ({ ...o, ...patch }))
+  const [oppSearch, setOppSearch] = useState('')
+  const [oppResults, setOppResults] = useState([])
+  const [oppSearching, setOppSearching] = useState(false)
+  const oppSearchTimeout = useRef(null)
 
   // Player selection
   const [selectedPlayers, setSelectedPlayers] = useState([])
@@ -204,6 +208,11 @@ export default function AdminSocialPost() {
 
   // Palette
   const [paletteKey, setPaletteKey] = useState('club')
+  const [customBg, setCustomBg] = useState('#243352')
+  const [customAccent, setCustomAccent] = useState('#16c784')
+
+  // Hero image
+  const [heroImage, setHeroImage] = useState({ blobUrl: null, playerIdx: 0 })
 
   // Template-specific extras
   const [milestone, setMilestone] = useState({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
@@ -244,7 +253,11 @@ export default function AdminSocialPost() {
   }
 
   // Derive palette
-  const activePalette = paletteKey === 'club' ? orgToPalette(settings) : PALETTES[paletteKey]
+  const activePalette = paletteKey === 'club'
+    ? orgToPalette(settings)
+    : paletteKey === 'custom'
+      ? { name: 'Custom', primary: customBg, secondary: customBg + 'cc', accent: customAccent, ink: '#ffffff' }
+      : PALETTES[paletteKey]
 
   // Current template definition
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
@@ -295,7 +308,11 @@ export default function AdminSocialPost() {
   }
 
   // Build players array for template
-  const templatePlayers = selectedPlayers.map(sp => playerToTemplatePlayer(sp.player, sp))
+  const templatePlayers = selectedPlayers.map((sp, i) => {
+    const base = playerToTemplatePlayer(sp.player, sp)
+    if (heroImage.blobUrl && i === heroImage.playerIdx) base.headshot = heroImage.blobUrl
+    return base
+  })
 
   // Player management
   const addPlayer = useCallback(p => {
@@ -329,6 +346,46 @@ export default function AdminSocialPost() {
       return next
     })
   }, [])
+
+  // Opponent search with debounce
+  const handleOppSearch = useCallback(async (q) => {
+    setOppSearch(q)
+    clearTimeout(oppSearchTimeout.current)
+    if (!q.trim()) { setOppResults([]); return }
+    oppSearchTimeout.current = setTimeout(async () => {
+      setOppSearching(true)
+      try {
+        const results = await api.searchOrgs(q)
+        setOppResults(results || [])
+      } catch { setOppResults([]) }
+      finally { setOppSearching(false) }
+    }, 350)
+  }, [])
+
+  const selectOpponent = useCallback(async (org) => {
+    let logoUrl = null
+    // Check if this is a BetterStats org (has our logo)
+    try {
+      const bsOrgs = await api.listOrgs()
+      const matched = bsOrgs.find(o => o.name?.toLowerCase() === org.name?.toLowerCase() || o.id === org.id)
+      if (matched?.id) logoUrl = `${BASE_URL}/images/organisations/${matched.id}/logo`
+    } catch { /* ignore */ }
+    patchOpp({
+      name: org.name || org.shortName || '',
+      short: org.shortName || deriveShort(org.name || 'OPP'),
+      logo: logoUrl,
+    })
+    setOppSearch('')
+    setOppResults([])
+  }, [])
+
+  // Hero image file selection
+  const handleHeroFile = useCallback((e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (heroImage.blobUrl) URL.revokeObjectURL(heroImage.blobUrl)
+    setHeroImage(h => ({ ...h, blobUrl: URL.createObjectURL(file) }))
+  }, [heroImage.blobUrl])
 
   // Export to PNG via html2canvas
   const handleExport = async () => {
@@ -423,7 +480,7 @@ export default function AdminSocialPost() {
             {/* Colour palette */}
             <section className="pb-card p-4">
               <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Colour Palette</h2>
-              <div className="flex gap-2 flex-wrap items-center">
+              <div className="flex gap-2 flex-wrap items-center mb-2">
                 <button
                   onClick={() => setPaletteKey('club')}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded border text-xs font-mono transition-colors ${paletteKey === 'club' ? 'text-pb-text' : 'text-pb-faint hover:text-pb-text border-transparent'}`}
@@ -435,7 +492,28 @@ export default function AdminSocialPost() {
                 {Object.entries(PALETTES).map(([key, pal]) => (
                   <PaletteSwatch key={key} pal={pal} selected={paletteKey === key} onClick={() => setPaletteKey(key)} />
                 ))}
+                <button
+                  onClick={() => setPaletteKey('custom')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded border text-xs font-mono transition-colors ${paletteKey === 'custom' ? 'text-pb-text' : 'text-pb-faint hover:text-pb-text border-transparent'}`}
+                  style={paletteKey === 'custom' ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
+                >
+                  Custom
+                </button>
               </div>
+              {paletteKey === 'custom' && (
+                <div className="flex gap-4 items-center mt-2">
+                  <label className="flex items-center gap-2 text-xs text-pb-faint font-mono">
+                    <input type="color" value={customBg} onChange={e => setCustomBg(e.target.value)}
+                      className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                    Background
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-pb-faint font-mono">
+                    <input type="color" value={customAccent} onChange={e => setCustomAccent(e.target.value)}
+                      className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                    Accent
+                  </label>
+                </div>
+              )}
             </section>
 
             {/* Match info */}
@@ -454,12 +532,45 @@ export default function AdminSocialPost() {
             {/* Opponent */}
             <section className="pb-card p-4">
               <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Opponent</h2>
+              {/* Club search */}
+              <div className="relative mb-3">
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Search Club</label>
+                <div className="relative">
+                  <input
+                    value={oppSearch}
+                    onChange={e => handleOppSearch(e.target.value)}
+                    placeholder="Type club name to search..."
+                    className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text placeholder:text-pb-faintest"
+                  />
+                  {oppSearching && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[9px] text-pb-faintest animate-pulse">SEARCHING...</span>
+                  )}
+                </div>
+                {oppResults.length > 0 && (
+                  <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-pb-surface border pb-hairline rounded shadow-lg max-h-48 overflow-y-auto">
+                    {oppResults.map((org, i) => (
+                      <button
+                        key={org.id || i}
+                        onClick={() => selectOpponent(org)}
+                        className="w-full text-left px-3 py-2 hover:bg-pb-surface2 flex items-center gap-2 border-b pb-hairline last:border-0"
+                      >
+                        <span className="text-sm text-pb-text flex-1 truncate">{org.name}</span>
+                        {org.shortName && <span className="font-mono text-[9px] text-pb-faintest">{org.shortName}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Club Name"><TextInput value={opponent.name} onChange={v => patchOpp({ name: v })} placeholder="Subiaco CC" /></Field>
                 <Field label="Short Code"><TextInput value={opponent.short} onChange={v => patchOpp({ short: v })} placeholder="SUB" /></Field>
-                <div className="col-span-2">
-                  <Field label="Logo URL (optional)"><TextInput value={opponent.logo || ''} onChange={v => patchOpp({ logo: v || null })} placeholder="https://..." /></Field>
-                </div>
+                {opponent.logo && (
+                  <div className="col-span-2 flex items-center gap-2">
+                    <img src={opponent.logo} alt="" className="w-8 h-8 rounded object-contain bg-pb-surface2" onError={e => e.target.style.display='none'} />
+                    <span className="text-[10px] text-pb-faint font-mono truncate flex-1">{opponent.logo}</span>
+                    <button onClick={() => patchOpp({ logo: null })} className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                  </div>
+                )}
               </div>
             </section>
 
@@ -519,6 +630,51 @@ export default function AdminSocialPost() {
                     </div>
                   </>
                 )}
+              </section>
+            )}
+
+            {/* Hero Image */}
+            {['T1','T3','T6','T7','C1','C3'].includes(templateId) && (
+              <section className="pb-card p-4">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Hero Image</h2>
+                <p className="text-[11px] text-pb-faint mb-3">Upload a player cutout (transparent PNG recommended) to use as the featured image.</p>
+                <div className="flex flex-col gap-3">
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <span
+                      className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint hover:text-pb-text group-hover:bg-pb-surface2 transition-colors"
+                    >
+                      Choose File
+                    </span>
+                    <span className="text-[11px] text-pb-faint truncate">
+                      {heroImage.blobUrl ? 'Image selected' : 'No file chosen'}
+                    </span>
+                    <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" />
+                  </label>
+                  {heroImage.blobUrl && (
+                    <div className="flex items-start gap-3">
+                      <img src={heroImage.blobUrl} alt="Hero preview" className="w-16 h-16 object-contain rounded bg-pb-surface2" />
+                      <div className="flex flex-col gap-2 flex-1">
+                        {selectedPlayers.length > 1 && (
+                          <Field label="Apply to player slot">
+                            <select value={heroImage.playerIdx}
+                              onChange={e => setHeroImage(h => ({ ...h, playerIdx: +e.target.value }))}
+                              className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text">
+                              {selectedPlayers.map((sp, i) => (
+                                <option key={i} value={i}>{sp.player.display_name || sp.player.name}</option>
+                              ))}
+                            </select>
+                          </Field>
+                        )}
+                        <button
+                          onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null, playerIdx: 0 }) }}
+                          className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left"
+                        >
+                          Remove image
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </section>
             )}
 
