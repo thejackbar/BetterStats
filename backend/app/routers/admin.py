@@ -663,6 +663,30 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
             if row.get("participantId"):
                 all_pids.add(row["participantId"])
 
+    # Build merge-redirect map: removed player UUID → kept player UUID (transitive, no cycles)
+    try:
+        merge_res = await db.execute(
+            text("SELECT removed_player_id::text AS r, kept_player_id::text AS k FROM merge_logs WHERE undone_at IS NULL")
+        )
+        raw_merge = {row.r: row.k for row in merge_res.mappings().all()}
+    except Exception:
+        raw_merge = {}
+
+    def _resolve_merge(rid, seen=None):
+        seen = seen or set()
+        if rid in seen or rid not in raw_merge:
+            return rid
+        seen.add(rid)
+        return _resolve_merge(raw_merge[rid], seen)
+
+    merged_away: dict[str, str] = {k: _resolve_merge(k) for k in raw_merge}
+
+    # Include kept-player IDs in the DB query so redirected lookups succeed
+    for removed_id in list(all_pids):
+        kept = merged_away.get(removed_id.lower())
+        if kept:
+            all_pids.add(kept)
+
     name_map: dict[str, tuple[str, str]] = {}  # participantId -> (first, last)
     if all_pids:
         try:
@@ -711,7 +735,12 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
 
     def get_name(pid: str) -> tuple[str, str]:
         key = str(pid).lower()
-        return name_map.get(key) or roster_name_map.get(key) or ("", "")
+        if key in name_map:
+            return name_map[key]
+        kept_id = merged_away.get(key)
+        if kept_id and kept_id.lower() in name_map:
+            return name_map[kept_id.lower()]
+        return roster_name_map.get(key) or ("", "")
 
     def parse_batting(batting_rows: list) -> list:
         rows = sorted(batting_rows, key=lambda b: b.get("batOrder") or 99)
