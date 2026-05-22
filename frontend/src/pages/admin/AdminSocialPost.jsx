@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import AdminLayout from '../../components/admin/AdminLayout'
+import ImageEditorModal from '../../components/ImageEditorModal'
 import { api } from '../../lib/api'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
@@ -270,33 +271,25 @@ export default function AdminSocialPost() {
   const [scUrlInput, setScUrlInput] = useState('')
   const [scUrlStatus, setScUrlStatus] = useState(null)
 
-  const [removingBg, setRemovingBg] = useState(null)
-
-  const handleRemoveBg = useCallback(async (key, srcUrl, onSuccess) => {
-    setRemovingBg(key)
-    try {
-      const { removeBackground } = await import('@imgly/background-removal')
-      const blob = await removeBackground(srcUrl, { debug: false })
-      onSuccess(URL.createObjectURL(blob))
-    } catch (e) {
-      console.error('Background removal failed:', e)
-    } finally {
-      setRemovingBg(null)
-    }
-  }, [])
+  // Editor: { key: 'hero' | `sponsor-${i}`, source: File|string }
+  const [editor, setEditor] = useState(null)
 
   const [sponsorFiles, setSponsorFiles] = useState([null, null])
-  const handleSponsorFile = (idx, file) => {
-    if (!file) return
-    const url = URL.createObjectURL(file)
+  const applySponsorBlob = (idx, blob, name) => {
+    const url = URL.createObjectURL(blob)
     setSponsorFiles(prev => { const next = [...prev]; next[idx] = url; return next })
     setScorecardMatch(m => ({
       ...m,
       meta: {
         ...m.meta,
-        sponsors: m.meta.sponsors.map((s, i) => i === idx ? { url, name: file.name.replace(/\.[^.]+$/, '') } : s),
+        sponsors: m.meta.sponsors.map((s, i) => i === idx ? { url, name: name || s.name || '' } : s),
       },
     }))
+  }
+
+  const handleSponsorFile = (idx, file) => {
+    if (!file) return
+    setEditor({ key: `sponsor-${idx}`, source: file, sponsorIdx: idx, sponsorName: file.name.replace(/\.[^.]+$/, '') })
   }
 
   const [milestone, setMilestone] = useState({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
@@ -451,10 +444,10 @@ export default function AdminSocialPost() {
 
   const handleHeroFile = useCallback((e) => {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
-    if (heroImage.blobUrl) URL.revokeObjectURL(heroImage.blobUrl)
-    setHeroImage(h => ({ ...h, blobUrl: URL.createObjectURL(file) }))
-  }, [heroImage.blobUrl])
+    setEditor({ key: 'hero', source: file })
+  }, [])
 
   // Player management
   const addPlayer = useCallback(p => {
@@ -934,14 +927,10 @@ export default function AdminSocialPost() {
                           </Field>
                         )}
                         <button
-                          disabled={removingBg === 'hero'}
-                          onClick={() => handleRemoveBg('hero', heroImage.blobUrl, newUrl => {
-                            URL.revokeObjectURL(heroImage.blobUrl)
-                            setHeroImage(h => ({ ...h, blobUrl: newUrl }))
-                          })}
-                          className="text-xs font-mono text-pb-faint hover:text-pb-text disabled:opacity-40 text-left"
+                          onClick={() => setEditor({ key: 'hero', source: heroImage.blobUrl })}
+                          className="text-xs font-mono text-pb-faint hover:text-pb-text text-left"
                         >
-                          {removingBg === 'hero' ? '⏳ Removing background…' : '✂ Remove background'}
+                          ✎ Edit (crop / remove background)
                         </button>
                         <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null, playerIdx: 0 }) }}
                           className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left">Remove image</button>
@@ -1181,14 +1170,10 @@ export default function AdminSocialPost() {
                               <div className="flex items-center gap-2">
                                 <img src={currentUrl} alt="" className="h-8 object-contain rounded border pb-hairline flex-1 min-w-0" onError={e => e.target.style.opacity='0.3'} />
                                 <button
-                                  disabled={removingBg === `sponsor-${i}`}
-                                  onClick={() => handleRemoveBg(`sponsor-${i}`, currentUrl, newUrl => {
-                                    setSponsorFiles(prev => { const next = [...prev]; next[i] = newUrl; return next })
-                                    setScorecardMatch(m => ({ ...m, meta: { ...m.meta, sponsors: m.meta.sponsors.map((s, j) => j === i ? { ...s, url: newUrl } : s) } }))
-                                  })}
-                                  className="shrink-0 text-[10px] font-mono text-pb-faint hover:text-pb-text disabled:opacity-40 whitespace-nowrap"
+                                  onClick={() => setEditor({ key: `sponsor-${i}`, source: currentUrl, sponsorIdx: i, sponsorName: scorecardMatch.meta.sponsors[i]?.name || '' })}
+                                  className="shrink-0 text-[10px] font-mono text-pb-faint hover:text-pb-text whitespace-nowrap"
                                 >
-                                  {removingBg === `sponsor-${i}` ? '⏳' : '✂ BG'}
+                                  ✎ Edit
                                 </button>
                                 <button
                                   onClick={() => {
@@ -1404,6 +1389,27 @@ export default function AdminSocialPost() {
           <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} {...extraProps} />
         </div>
       </div>
+
+      <ImageEditorModal
+        open={!!editor}
+        source={editor?.source}
+        title={editor?.key === 'hero' ? 'Edit Hero Image' : 'Edit Sponsor Logo'}
+        aspect={null}
+        outputType="image/png"
+        outputName={editor?.key === 'hero' ? 'hero.png' : 'sponsor.png'}
+        onCancel={() => setEditor(null)}
+        onApply={async (file) => {
+          const e = editor
+          setEditor(null)
+          if (!e) return
+          if (e.key === 'hero') {
+            if (heroImage.blobUrl) URL.revokeObjectURL(heroImage.blobUrl)
+            setHeroImage(h => ({ ...h, blobUrl: URL.createObjectURL(file) }))
+          } else if (typeof e.sponsorIdx === 'number') {
+            applySponsorBlob(e.sponsorIdx, file, e.sponsorName)
+          }
+        }}
+      />
     </AdminLayout>
   )
 }

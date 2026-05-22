@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import ImageEditorModal from '../../components/ImageEditorModal'
 
 export default function AdminSponsors() {
   const [sponsors, setSponsors] = useState([])
@@ -26,6 +27,9 @@ export default function AdminSponsors() {
   // Logo upload state: { [id]: uploading|error|null }
   const [logoState, setLogoState] = useState({})
   const [flash, setFlash] = useState(null)
+
+  // Editor: { sponsorId, source } when open
+  const [editor, setEditor] = useState(null)
 
   useEffect(() => {
     load()
@@ -290,9 +294,22 @@ export default function AdminSponsors() {
                             type="file"
                             accept="image/png,image/jpeg,image/svg+xml,image/webp"
                             className="hidden"
-                            onChange={e => e.target.files[0] && handleLogoUpload(sponsor.id, e.target.files[0])}
+                            onChange={e => {
+                              const f = e.target.files?.[0]
+                              e.target.value = ''
+                              if (f) setEditor({ sponsorId: sponsor.id, source: f })
+                            }}
                           />
                         </label>
+
+                        {sponsor.logo_url && (
+                          <button
+                            onClick={() => setEditor({ sponsorId: sponsor.id, source: sponsor.logo_url })}
+                            className="font-mono text-[10px] text-pb-faint hover:text-pb-text px-2 py-1 rounded border pb-hairline"
+                          >
+                            EDIT
+                          </button>
+                        )}
 
                         {sponsor.logo_url && (
                           <button
@@ -356,6 +373,21 @@ export default function AdminSponsors() {
             After adding, use the LOGO button on the row to upload a logo image. Only sponsors with logos are shown in the footer.
           </p>
         </div>
+
+        <ImageEditorModal
+          open={!!editor}
+          source={editor?.source}
+          title="Edit Sponsor Logo"
+          aspect={null}
+          outputType="image/png"
+          outputName="sponsor-logo.png"
+          onCancel={() => setEditor(null)}
+          onApply={async (file) => {
+            const sponsorId = editor?.sponsorId
+            setEditor(null)
+            if (sponsorId) await handleLogoUpload(sponsorId, file)
+          }}
+        />
       </div>
     </AdminLayout>
   )

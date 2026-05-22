@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import ImageEditorModal from '../../components/ImageEditorModal'
 import { BRAND, COLOR_FIELDS, HONOUR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss } from '../../lib/theme'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
@@ -41,6 +42,7 @@ export default function AdminSettings() {
   const [saving, setSaving] = useState(false)
   const [logoUrl, setLogoUrl] = useState(null)
   const [logoBusy, setLogoBusy] = useState(false)
+  const [logoEditorSource, setLogoEditorSource] = useState(null)
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -83,10 +85,15 @@ export default function AdminSettings() {
   }))
   const resetAll = () => setTheme(resolveTheme(null))
 
-  const handleLogoSelect = async (e) => {
+  const handleLogoSelect = (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    setLogoEditorSource(file)
+  }
+
+  const handleLogoUpload = async (file) => {
+    setLogoEditorSource(null)
     setLogoBusy(true)
     setMsg('')
     try {
@@ -166,11 +173,17 @@ export default function AdminSettings() {
                   : <span className="font-mono text-[9px] text-pb-faintest">No logo</span>}
               </div>
               <div className="flex flex-col gap-2 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button type="button" onClick={() => fileRef.current?.click()} disabled={logoBusy}
                     className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2 transition disabled:opacity-50">
                     {logoBusy ? 'Working…' : (logoUrl ? 'Replace logo' : 'Upload logo')}
                   </button>
+                  {logoUrl && (
+                    <button type="button" onClick={() => setLogoEditorSource(logoUrl)} disabled={logoBusy}
+                      className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2 transition disabled:opacity-50">
+                      Edit (crop / remove background)
+                    </button>
+                  )}
                   {logoUrl && (
                     <button type="button" onClick={handleLogoRemove} disabled={logoBusy}
                       className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-red transition disabled:opacity-50">
@@ -179,12 +192,22 @@ export default function AdminSettings() {
                   )}
                 </div>
                 <p className="font-mono text-[10px] text-pb-faintest">
-                  PNG, JPG, WEBP or GIF · max 2 MB. With a custom logo set, it appears top-left and the BetterStats logo moves to the top-right.
+                  PNG, JPG, WEBP or GIF · max 2 MB. Use Edit to crop or remove the background on the existing logo. With a custom logo set, it appears top-left and the BetterStats logo moves to the top-right.
                 </p>
               </div>
             </div>
             <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif"
               className="hidden" onChange={handleLogoSelect} />
+            <ImageEditorModal
+              open={!!logoEditorSource}
+              source={logoEditorSource}
+              title="Edit Club Logo"
+              aspect={null}
+              outputType="image/png"
+              outputName="club-logo.png"
+              onCancel={() => setLogoEditorSource(null)}
+              onApply={handleLogoUpload}
+            />
           </div>
 
           {/* --- Theme + branding --- */}
