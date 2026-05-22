@@ -193,7 +193,9 @@ def _coerce_value(kind: str, value_str: str):
 
 
 def _build_metric_filters(filters: list[str], allowed: dict[str, str]) -> tuple[list[str], dict]:
-    """Parse 'field:op:value' filters against the per-target metric allowlist."""
+    """Parse 'field:op:value' filters against the per-target metric allowlist.
+    Produces an AND-joined clause set — flat form, used for back-compat and
+    URL-driven simple queries."""
     clauses: list[str] = []
     params: dict = {}
     for i, raw in enumerate(filters or []):
@@ -213,6 +215,68 @@ def _build_metric_filters(filters: list[str], allowed: dict[str, str]) -> tuple[
         clauses.append(f"{allowed[field]} {OPERATOR_MAP[op]} :{key}")
         params[key] = value
     return clauses, params
+
+
+def _build_filter_tree(tree: dict, allowed: dict[str, str], counter: list[int] | None = None) -> tuple[str | None, dict]:
+    """Recursively compile a nested filter tree into a single SQL expression
+    plus bound params. Tree shape:
+      {"type": "group", "op": "AND"|"OR", "clauses": [tree, ...]}
+      {"type": "leaf",  "field": str, "op": str, "value": number}
+    Invalid leaves are silently dropped; an empty group returns (None, {}).
+    """
+    if counter is None:
+        counter = [0]
+    if not isinstance(tree, dict):
+        return None, {}
+    kind = tree.get("type")
+    if kind == "leaf":
+        field = tree.get("field")
+        op = tree.get("op")
+        value_str = tree.get("value")
+        if field not in allowed or op not in OPERATOR_MAP:
+            return None, {}
+        try:
+            value = float(value_str)
+        except (TypeError, ValueError):
+            return None, {}
+        counter[0] += 1
+        key = f"ft_{counter[0]}"
+        return f"{allowed[field]} {OPERATOR_MAP[op]} :{key}", {key: value}
+    if kind == "group":
+        op = str(tree.get("op", "AND")).upper()
+        if op not in ("AND", "OR"):
+            op = "AND"
+        parts: list[str] = []
+        params: dict = {}
+        for child in (tree.get("clauses") or []):
+            s, p = _build_filter_tree(child, allowed, counter)
+            if s:
+                parts.append(s)
+                params.update(p)
+        if not parts:
+            return None, params
+        if len(parts) == 1:
+            return parts[0], params
+        return "(" + (" " + op + " ").join(parts) + ")", params
+    return None, {}
+
+
+def _compile_metric_clause(
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
+    allowed: dict[str, str],
+) -> tuple[str, dict]:
+    """Produce a single WHERE-suffix clause (with no leading WHERE) from either
+    a flat `metric_filters` list or a nested `filter_tree`. The tree wins when
+    both are provided. Empty input returns ("", {}).
+    """
+    if filter_tree:
+        s, p = _build_filter_tree(filter_tree, allowed)
+        return (s or "", p)
+    clauses, params = _build_metric_filters(metric_filters or [], allowed)
+    if not clauses:
+        return "", {}
+    return " AND ".join(clauses), params
 
 
 def _build_filter_block(ctx: dict, spec_dict: dict) -> tuple[list[str], dict, bool]:
@@ -429,16 +493,17 @@ async def query_player_career(
     sort_by: str,
     sort_dir: str,
     limit: int,
-    metric_filters: list[str],
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
     context: dict,
 ) -> list[dict]:
     sort_by, sort_dir, limit = _validated("player_career", sort_by, sort_dir, limit)
     metrics = PLAYER_AGG_METRICS
 
     mc, mp, ic, ip, used_ctx = _build_context_filters(context)
-    metric_clauses, metric_params = _build_metric_filters(metric_filters, metrics)
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, metrics)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **metric_params}
-    where_sql = ("WHERE " + " AND ".join(metric_clauses)) if metric_clauses else ""
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
     needs_live = used_ctx or bool(ic)
 
     if needs_live:
@@ -547,7 +612,8 @@ async def query_player_season(
     sort_by: str,
     sort_dir: str,
     limit: int,
-    metric_filters: list[str],
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
     context: dict,
 ) -> list[dict]:
     """One row per (player, season). Uses pss when no context filters require
@@ -557,9 +623,9 @@ async def query_player_season(
     metrics = PLAYER_AGG_METRICS
 
     mc, mp, ic, ip, used_ctx = _build_context_filters(context)
-    metric_clauses, metric_params = _build_metric_filters(metric_filters, metrics)
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, metrics)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **metric_params}
-    where_sql = ("WHERE " + " AND ".join(metric_clauses)) if metric_clauses else ""
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
     needs_live = used_ctx or bool(ic)
 
     if needs_live:
@@ -679,7 +745,8 @@ async def query_player_grade(
     sort_by: str,
     sort_dir: str,
     limit: int,
-    metric_filters: list[str],
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
     context: dict,
 ) -> list[dict]:
     """One row per (player, canonical grade name). Always uses per-innings
@@ -687,9 +754,9 @@ async def query_player_grade(
     sort_by, sort_dir, limit = _validated("player_grade", sort_by, sort_dir, limit)
 
     mc, mp, ic, ip, _ = _build_context_filters(context)
-    metric_clauses, metric_params = _build_metric_filters(metric_filters, PLAYER_AGG_METRICS)
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, PLAYER_AGG_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **metric_params}
-    where_sql = ("WHERE " + " AND ".join(metric_clauses)) if metric_clauses else ""
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     cte = _player_agg_innings_cte(
         mc, ic,
@@ -758,16 +825,17 @@ async def query_innings_list(
     sort_by: str,
     sort_dir: str,
     limit: int,
-    metric_filters: list[str],
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
     context: dict,
 ) -> list[dict]:
     """One row per batting innings."""
     sort_by, sort_dir, limit = _validated("innings_list", sort_by, sort_dir, limit)
 
     mc, mp, ic, ip, _ = _build_context_filters(context)
-    metric_clauses, metric_params = _build_metric_filters(metric_filters, INNINGS_METRICS)
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, INNINGS_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **metric_params}
-    where_sql = ("WHERE " + " AND ".join(metric_clauses)) if metric_clauses else ""
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
     innings_extra = (" AND " + " AND ".join(ic)) if ic else ""
 
     universe = _game_universe_sql(mc)
@@ -824,15 +892,16 @@ async def query_spell_list(
     sort_by: str,
     sort_dir: str,
     limit: int,
-    metric_filters: list[str],
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
     context: dict,
 ) -> list[dict]:
     sort_by, sort_dir, limit = _validated("spell_list", sort_by, sort_dir, limit)
 
     mc, mp, _ic, _ip, _ = _build_context_filters(context)
-    metric_clauses, metric_params = _build_metric_filters(metric_filters, SPELL_METRICS)
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, SPELL_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **metric_params}
-    where_sql = ("WHERE " + " AND ".join(metric_clauses)) if metric_clauses else ""
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     universe = _game_universe_sql(mc)
     sql = f"""
@@ -883,7 +952,8 @@ async def query_match_list(
     sort_by: str,
     sort_dir: str,
     limit: int,
-    metric_filters: list[str],
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
     context: dict,
 ) -> list[dict]:
     """One row per club match. Team / opposition runs are derived from
@@ -891,9 +961,9 @@ async def query_match_list(
     sort_by, sort_dir, limit = _validated("match_list", sort_by, sort_dir, limit)
 
     mc, mp, _ic, _ip, _ = _build_context_filters(context)
-    metric_clauses, metric_params = _build_metric_filters(metric_filters, MATCH_METRICS)
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, MATCH_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **metric_params}
-    where_sql = ("WHERE " + " AND ".join(metric_clauses)) if metric_clauses else ""
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     universe = _game_universe_sql(mc)
     sql = f"""
@@ -965,15 +1035,16 @@ async def query_partnership_list(
     sort_by: str,
     sort_dir: str,
     limit: int,
-    metric_filters: list[str],
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
     context: dict,
 ) -> list[dict]:
     sort_by, sort_dir, limit = _validated("partnership_list", sort_by, sort_dir, limit)
 
     mc, mp, _ic, _ip, _ = _build_context_filters(context)
-    metric_clauses, metric_params = _build_metric_filters(metric_filters, PARTNERSHIP_METRICS)
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, PARTNERSHIP_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **metric_params}
-    where_sql = ("WHERE " + " AND ".join(metric_clauses)) if metric_clauses else ""
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     universe = _game_universe_sql(mc)
     sql = f"""
@@ -1239,7 +1310,8 @@ async def run_query(
     sort_by: str,
     sort_dir: str,
     limit: int,
-    metric_filters: list[str],
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
     context: dict,
 ) -> list[dict]:
     if target not in TARGET_DISPATCH:
@@ -1252,6 +1324,7 @@ async def run_query(
         sort_dir=sort_dir,
         limit=limit,
         metric_filters=metric_filters,
+        filter_tree=filter_tree,
         context=context,
     )
 
@@ -1265,6 +1338,27 @@ async def run_derived(
     return await fn(session, org_id=org_id, limit=limit, context=context)
 
 
+METRIC_CATEGORIES: list[dict] = [
+    {"key": "participation", "label": "Participation",
+     "fields": ["matches", "seasons_played", "batting_innings", "bowling_innings"]},
+    {"key": "batting", "label": "Batting",
+     "fields": ["runs", "not_outs", "batting_average", "batting_strike_rate", "high_score",
+                "fifties", "hundreds", "ducks", "fours", "sixes", "balls_faced", "balls",
+                "strike_rate", "batting_position"]},
+    {"key": "bowling", "label": "Bowling",
+     "fields": ["wickets", "overs", "maidens", "bowling_average", "bowling_economy",
+                "bowling_strike_rate", "five_wicket_innings", "best_bowling_wickets",
+                "runs_conceded", "wides", "no_balls", "economy"]},
+    {"key": "fielding", "label": "Fielding",
+     "fields": ["catches", "run_outs", "stumpings"]},
+    {"key": "match", "label": "Match",
+     "fields": ["team_runs", "team_wickets", "opp_runs", "opp_wickets", "margin_runs",
+                "innings_number"]},
+    {"key": "partnership", "label": "Partnership",
+     "fields": ["wicket_number", "batter1_runs", "batter2_runs"]},
+]
+
+
 def schema() -> dict:
     """Public schema description for the frontend."""
     return {
@@ -1275,6 +1369,7 @@ def schema() -> dict:
             }
             for t in TARGETS
         },
+        "categories": METRIC_CATEGORIES,
         "context_filters": {
             k: {"value_kind": v["value_kind"]} for k, v in CONTEXT_FILTERS.items()
         },

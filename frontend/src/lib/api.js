@@ -398,17 +398,23 @@ export const api = {
   // StatLab — schema (targets, metrics, context filters, derived queries)
   statlabSchema: () => request('/statlab/schema'),
 
-  // StatLab — main query
+  // StatLab — main query. Pass `filterTree` for nested AND/OR; the legacy
+  // `filters` flat list is preserved for backward compatibility.
   statlabQuery: (orgId, {
     target = 'player_career',
     sortBy = 'runs',
     sortDir = 'desc',
     limit = 100,
     filters = [],
+    filterTree = null,
     context = {},
   } = {}) => {
     const params = new URLSearchParams({ org_id: orgId, target, sort_by: sortBy, sort_dir: sortDir, limit })
-    filters.forEach(f => params.append('filters', f))
+    if (filterTree) {
+      params.set('filter_tree', JSON.stringify(filterTree))
+    } else {
+      filters.forEach(f => params.append('filters', f))
+    }
     Object.entries(context).forEach(([k, v]) => {
       if (v === undefined || v === null || v === '' || v === false) return
       params.set(k, v === true ? 'true' : String(v))

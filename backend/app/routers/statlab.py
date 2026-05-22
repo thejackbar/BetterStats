@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete
 from pydantic import BaseModel, Field
 from typing import Optional, Any
+import json
 import re
 import uuid
 
@@ -83,6 +84,7 @@ async def statlab_query(
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(100, ge=1, le=500),
     filters: list[str] = Query(default=[]),
+    filter_tree: Optional[str] = Query(None, description="URL-encoded JSON filter tree (overrides `filters` when present)"),
     # Context filters as flat query params (easier on the URL than nested JSON)
     season_id: Optional[str] = Query(None),
     grade_id: Optional[str] = Query(None),
@@ -104,6 +106,12 @@ async def statlab_query(
     """Run a StatLab query against one of the registered targets."""
     if target not in svc.TARGET_DISPATCH:
         raise HTTPException(status_code=400, detail=f"Unknown query target: {target}")
+    parsed_tree = None
+    if filter_tree:
+        try:
+            parsed_tree = json.loads(filter_tree)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="filter_tree must be valid JSON")
     ctx = _ctx_from_query(
         season_id, grade_id, grade_name, opposition, date_from, date_to,
         min_year, max_year, finals_only, captain_only, keeper_only, result,
@@ -118,6 +126,7 @@ async def statlab_query(
             sort_dir=sort_dir,
             limit=limit,
             metric_filters=filters,
+            filter_tree=parsed_tree,
             context=ctx,
         )
     except ValueError as e:
