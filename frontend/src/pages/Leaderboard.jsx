@@ -46,9 +46,9 @@ const MAIN_TABS = [
 ]
 
 const SIRS_TABS = [
-  { key: 'centuries',      label: 'CENTURIES',    countKey: 'century_count', threshold: '100+ runs' },
+  { key: 'centuries',       label: 'CENTURIES',    countKey: 'century_count', threshold: '100+ runs' },
   { key: 'bowling-innings', label: '7-FORS',       countKey: 'haul_count',   threshold: '7+ wickets in an innings' },
-  { key: 'bowling-match',  label: '10-WKT MATCH', countKey: 'haul_count',   threshold: '10+ wickets in a match' },
+  { key: 'bowling-match',   label: '10-WKT MATCH', countKey: 'haul_count',   threshold: '10+ wickets in a match' },
 ]
 
 function formatSirsDate(dateStr) {
@@ -65,7 +65,7 @@ function SirsTable({ rows, sirsType, fmt = n => n }) {
 
   const toggle = id => setExpanded(prev => {
     const next = new Set(prev)
-    if (next.has(id)) next.delete(id) else next.add(id)
+    if (next.has(id)) { next.delete(id) } else { next.add(id) }
     return next
   })
 
@@ -470,7 +470,7 @@ export default function Leaderboard() {
           )}
         </div>
 
-        {/* Main tab: batting / bowling / fielding */}
+        {/* Main tab: batting / bowling / fielding / sirs */}
         <div className="flex flex-wrap gap-1 pb-hairline-b mb-4">
           {MAIN_TABS.map(t => (
             <button key={t.key} onClick={() => setMainTab(t.key)}
