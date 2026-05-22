@@ -1,4 +1,5 @@
 import logging
+import re
 import uuid
 from datetime import datetime, timezone, date
 from typing import Optional
@@ -738,59 +739,63 @@ _NON_WICKET_DT = {"absent", "did not bat", "dnb", "retired hurt", "retired not o
 _BOWLER_CREDIT_DT = {"Caught", "Bowled", "LBW", "Stumped", "Hit Wicket"}
 
 
+# Cricket-scorecard bowler marker: literal lowercase "b" (optionally "b:")
+# preceded by whitespace or at the start of the text, followed by whitespace.
+# Lowercase-only on purpose so a fielder's initial like "B Cooper" doesn't
+# false-match the marker — the indicator is always lowercase in convention.
+_BOWLER_MARKER_RE = re.compile(r'(?:^|\s)b:?\s+')
+# Caught/Stumped fielder: between the "c"/"st" prefix and the next " b" marker.
+_CAUGHT_FIELDER_RE = re.compile(r'^c:?\s+(.+?)\sb:?\s+')
+_STUMPED_FIELDER_RE = re.compile(r'^st:?\s+(.+?)\sb:?\s+')
+# Caught-and-bowled: "c & b ..." or "c and b ..." (with optional colon).
+_CB_RE = re.compile(r'^c\s*(?:&|and)\s*b:?\s+')
+# LBW where the text has no separate " b" marker — e.g. "lbw: BowlerName".
+_LBW_DIRECT_RE = re.compile(r'^lbw:?\s+(.+?)\s*$', re.IGNORECASE)
+
+
 def _parse_bowler_and_fielder(dismissal_text: str, dismissal_type: str) -> tuple[str | None, str | None, str]:
     """Parse GR `dismissalText` to extract bowler name, fielder name, and a
     canonical short dismissal method.
 
-    Formats (confirmed via /scorecard/gr-debug):
-      "b W Dagg"               -> bowler="W Dagg", fielder=None,    method="bowled"
-      "c S Aplin b W Dagg"     -> bowler="W Dagg", fielder="S Aplin", method="caught"
-      "c & b W Dagg"           -> bowler="W Dagg", fielder=None,    method="caught and bowled"
-      "c and b W Dagg"         -> same as above
-      "lbw b W Dagg"           -> bowler="W Dagg", fielder=None,    method="lbw"
-      "st †Smith b W Dagg"     -> bowler="W Dagg", fielder="Smith",  method="stumped"
-      "hit wicket b W Dagg"    -> bowler="W Dagg", fielder=None,    method="hit wicket"
-
-    Returns (bowler_name, fielder_name, method) — names trimmed, †/leading
-    punctuation removed. None when the relevant piece can't be parsed.
+    Handles both colon and non-colon variants observed in CA data:
+      "b: J Birbeck"           -> bowler="J Birbeck", fielder=None,     method="bowled"
+      "b J Birbeck"            -> same as above
+      "c: A Dillon b: J Birbeck" -> bowler="J Birbeck", fielder="A Dillon", method="caught"
+      "c & b: J Birbeck"       -> bowler="J Birbeck", fielder=None,     method="caught and bowled"
+      "c and b J Birbeck"      -> same as above
+      "lbw b: J Birbeck"       -> bowler="J Birbeck", fielder=None,     method="lbw"
+      "lbw: J Birbeck"         -> bowler="J Birbeck", fielder=None,     method="lbw"
+      "st †Smith b: J Birbeck" -> bowler="J Birbeck", fielder="Smith",  method="stumped"
+      "hit wicket b J Birbeck" -> bowler="J Birbeck", fielder=None,     method="hit wicket"
     """
     if not dismissal_text:
         return None, None, ""
     text = dismissal_text.strip()
 
-    # Bowler: everything after the final " b " or leading "b " (the bowled prefix).
-    bowler_name = None
-    if " b " in text:
-        bowler_name = text.rsplit(" b ", 1)[1].strip()
-    elif text.startswith("b "):
-        bowler_name = text[2:].strip()
+    # Bowler = everything after the LAST lowercase "b"/"b:" marker.
+    matches = list(_BOWLER_MARKER_RE.finditer(text))
+    bowler_name = text[matches[-1].end():].strip() if matches else None
 
-    # Method + fielder by dismissalType.
     dt = (dismissal_type or "").strip()
     if dt == "Bowled":
         return bowler_name, None, "bowled"
     if dt == "LBW":
+        if not bowler_name:
+            m = _LBW_DIRECT_RE.match(text)
+            if m:
+                bowler_name = m.group(1).strip()
         return bowler_name, None, "lbw"
     if dt == "Hit Wicket":
         return bowler_name, None, "hit wicket"
     if dt == "Stumped":
-        m = None
-        if text.startswith("st "):
-            tail = text[3:]
-            if " b " in tail:
-                m = tail.rsplit(" b ", 1)[0].strip()
-        fielder = m.lstrip("†").strip() if m else None
+        m = _STUMPED_FIELDER_RE.match(text)
+        fielder = m.group(1).strip().lstrip("†").strip() if m else None
         return bowler_name, fielder, "stumped"
     if dt == "Caught":
-        # Caught-and-bowled: no separate fielder, method is its own slice.
-        if text.startswith("c & b ") or text.startswith("c and b "):
+        if _CB_RE.match(text):
             return bowler_name, None, "caught and bowled"
-        m = None
-        if text.startswith("c "):
-            tail = text[2:]
-            if " b " in tail:
-                m = tail.rsplit(" b ", 1)[0].strip()
-        fielder = m.lstrip("†").strip() if m else None
+        m = _CAUGHT_FIELDER_RE.match(text)
+        fielder = m.group(1).strip().lstrip("†").strip() if m else None
         return bowler_name, fielder, "caught"
     return bowler_name, None, ""
 
