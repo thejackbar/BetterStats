@@ -127,12 +127,103 @@ const CONTEXT_KEYS = [
   'dismissal','position_min','position_max',
 ]
 
+// Category groupings for the field picker. Field membership is intersected
+// with each target's allowed metrics on render — categories with no eligible
+// fields hide automatically. Kept in sync with backend METRIC_CATEGORIES.
+const FILTER_CATEGORIES = [
+  { key: 'participation', label: 'Participation',
+    fields: ['matches','seasons_played','batting_innings','bowling_innings'] },
+  { key: 'batting', label: 'Batting',
+    fields: ['runs','not_outs','batting_average','batting_strike_rate','high_score',
+             'fifties','hundreds','ducks','fours','sixes','balls_faced','balls',
+             'strike_rate','batting_position'] },
+  { key: 'bowling', label: 'Bowling',
+    fields: ['wickets','overs','maidens','bowling_average','bowling_economy',
+             'bowling_strike_rate','five_wicket_innings','best_bowling_wickets',
+             'runs_conceded','wides','no_balls','economy'] },
+  { key: 'fielding', label: 'Fielding',
+    fields: ['catches','run_outs','stumpings'] },
+  { key: 'match', label: 'Match',
+    fields: ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs','innings_number'] },
+  { key: 'partnership', label: 'Partnership',
+    fields: ['wicket_number','batter1_runs','batter2_runs'] },
+]
+
+const CATEGORY_LOOKUP = (() => {
+  const m = {}
+  FILTER_CATEGORIES.forEach(c => c.fields.forEach(f => { if (!m[f]) m[f] = c }))
+  return m
+})()
+
+const OPERATOR_SYMBOLS = { gte: '≥', gt: '>', eq: '=', lte: '≤', lt: '<', ne: '≠' }
+
+let _treeIdCounter = 1000
+const newTreeId = () => ++_treeIdCounter
+
+const emptyTree = () => ({ id: newTreeId(), type: 'group', op: 'AND', clauses: [] })
+
+function flatToTree(filters) {
+  return {
+    id: newTreeId(),
+    type: 'group',
+    op: 'AND',
+    clauses: (filters || []).map(f => ({
+      id: newTreeId(),
+      type: 'leaf',
+      field: f.field,
+      op: f.op,
+      value: f.value,
+    })),
+  }
+}
+
+function ensureTreeIds(node) {
+  if (!node || typeof node !== 'object') return node
+  const withId = { ...node, id: node.id ?? newTreeId() }
+  if (withId.type === 'group') {
+    withId.clauses = (withId.clauses || []).map(ensureTreeIds)
+  }
+  return withId
+}
+
+function treeLeafCount(node) {
+  if (!node) return 0
+  if (node.type === 'leaf') return (node.field && node.value !== '' && node.value != null) ? 1 : 0
+  return (node.clauses || []).reduce((n, c) => n + treeLeafCount(c), 0)
+}
+
+function treeFields(node) {
+  const out = new Set()
+  const walk = (n) => {
+    if (!n) return
+    if (n.type === 'leaf' && n.field) out.add(n.field)
+    if (n.type === 'group') (n.clauses || []).forEach(walk)
+  }
+  walk(node)
+  return [...out]
+}
+
+// Strip null/empty leaves so the backend / saved JSON never carries placeholder rows.
+function cleanTree(node) {
+  if (!node) return null
+  if (node.type === 'leaf') {
+    if (!node.field || !node.op || node.value === '' || node.value == null) return null
+    return { type: 'leaf', field: node.field, op: node.op, value: node.value }
+  }
+  if (node.type === 'group') {
+    const cleaned = (node.clauses || []).map(cleanTree).filter(Boolean)
+    if (cleaned.length === 0) return null
+    return { type: 'group', op: node.op || 'AND', clauses: cleaned }
+  }
+  return null
+}
+
 const DEFAULT_QUERY = {
   target: 'player_career',
   sortBy: 'runs',
   sortDir: 'desc',
   limit: 100,
-  filters: [],
+  filterTree: emptyTree(),
   context: {},
 }
 
@@ -144,10 +235,8 @@ function encodeQueryToParams(q) {
   p.set('sort', q.sortBy)
   p.set('dir', q.sortDir)
   if (q.limit !== DEFAULT_QUERY.limit) p.set('limit', q.limit)
-  q.filters.forEach((f, i) => {
-    if (!f.field || !f.op || f.value === '' || f.value === undefined) return
-    p.append('f', `${f.field}:${f.op}:${f.value}`)
-  })
+  const cleaned = cleanTree(q.filterTree)
+  if (cleaned) p.set('ft', JSON.stringify(cleaned))
   Object.entries(q.context || {}).forEach(([k, v]) => {
     if (v === undefined || v === null || v === '' || v === false) return
     p.set(`c_${k}`, v === true ? '1' : String(v))
@@ -160,13 +249,19 @@ function decodeParamsToQuery(params) {
   const sortBy = params.get('sort') || DEFAULT_QUERY.sortBy
   const sortDir = params.get('dir') || DEFAULT_QUERY.sortDir
   const limit = Number(params.get('limit')) || DEFAULT_QUERY.limit
-  const filters = []
-  params.getAll('f').forEach((raw, i) => {
-    const parts = raw.split(':')
-    if (parts.length >= 3) {
-      filters.push({ id: i + 1, field: parts[0], op: parts[1], value: parts.slice(2).join(':') })
-    }
-  })
+  let filterTree = emptyTree()
+  const ftRaw = params.get('ft')
+  if (ftRaw) {
+    try { filterTree = ensureTreeIds(JSON.parse(ftRaw)) } catch { /* ignore */ }
+  } else {
+    // Back-compat: ?f=field:op:value repeated → flat AND tree
+    const flat = []
+    params.getAll('f').forEach(raw => {
+      const parts = raw.split(':')
+      if (parts.length >= 3) flat.push({ field: parts[0], op: parts[1], value: parts.slice(2).join(':') })
+    })
+    if (flat.length) filterTree = flatToTree(flat)
+  }
   const context = {}
   CONTEXT_KEYS.forEach(k => {
     const v = params.get(`c_${k}`)
@@ -177,7 +272,7 @@ function decodeParamsToQuery(params) {
       context[k] = v
     }
   })
-  return { target, sortBy, sortDir, limit, filters, context }
+  return { target, sortBy, sortDir, limit, filterTree, context }
 }
 
 function csvEscape(v) {
@@ -277,35 +372,212 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape }) {
   )
 }
 
-function MetricFiltersPanel({ filters, metrics, onChange }) {
-  const add = () => onChange([...filters, { id: Date.now(), field: metrics[0] || 'runs', op: 'gte', value: '' }])
-  const update = (id, patch) => onChange(filters.map(f => f.id === id ? { ...f, ...patch } : f))
-  const remove = (id) => onChange(filters.filter(f => f.id !== id))
+// ─── Filter Bar (top-of-page boolean filter tree) ─────────────────────────────
+
+function categoriesForTarget(targetMetrics) {
+  const metricSet = new Set(targetMetrics || [])
+  return FILTER_CATEGORIES
+    .map(c => ({ ...c, fields: c.fields.filter(f => metricSet.has(f)) }))
+    .filter(c => c.fields.length > 0)
+}
+
+function FieldPicker({ open, onClose, onPick, categories, anchorRect }) {
+  const [search, setSearch] = useState('')
+  useEffect(() => { if (open) setSearch('') }, [open])
+  if (!open) return null
+  const term = search.trim().toLowerCase()
+  const filtered = categories.map(c => ({
+    ...c,
+    fields: c.fields.filter(f => !term || (METRIC_LABELS[f]?.label || f).toLowerCase().includes(term) || f.toLowerCase().includes(term)),
+  })).filter(c => c.fields.length > 0)
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <Label>Metric filters</Label>
-        <button onClick={add} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">+ ADD</button>
+    <>
+      <div className="fixed inset-0 z-30" onClick={onClose} />
+      <div
+        className="absolute z-40 mt-1 bg-pb-bg pb-card shadow-xl w-[300px] max-h-[420px] overflow-auto pb-scroll"
+        style={{ top: anchorRect?.bottom ? `${anchorRect.bottom + window.scrollY}px` : undefined, left: anchorRect?.left ? `${anchorRect.left + window.scrollX}px` : undefined }}
+      >
+        <div className="sticky top-0 bg-pb-bg pb-hairline-b p-2">
+          <input
+            autoFocus
+            className={inputCls}
+            placeholder="Search metrics…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="py-1">
+          {filtered.length === 0 && <p className="text-pb-faintest text-xs px-3 py-3">No matching metrics for this query type.</p>}
+          {filtered.map(c => (
+            <div key={c.key} className="px-2 py-1.5">
+              <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest px-1 mb-1">{c.label.toUpperCase()}</div>
+              <div className="grid grid-cols-2 gap-1">
+                {c.fields.map(f => (
+                  <button
+                    key={f}
+                    onClick={() => { onPick(f); onClose() }}
+                    className="text-left px-2 py-1.5 rounded hover:bg-pb-surface2 font-mono text-[11px] text-pb-dim hover:text-pb-text transition truncate"
+                  >
+                    {METRIC_LABELS[f]?.label || f}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-      {filters.length === 0
-        ? <p className="text-pb-faintest font-mono text-[10.5px]">No filters.</p>
-        : (
-          <ul className="flex flex-col gap-2">
-            {filters.map(f => (
-              <li key={f.id} className="flex items-center gap-1">
-                <select className={selectCls + ' flex-1 min-w-0'} value={f.field} onChange={e => update(f.id, { field: e.target.value })}>
-                  {metrics.map(m => <option key={m} value={m}>{METRIC_LABELS[m]?.label || m}</option>)}
-                </select>
-                <select className={selectCls + ' w-24'} value={f.op} onChange={e => update(f.id, { op: e.target.value })}>
-                  {OPERATORS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
-                </select>
-                <input className={inputCls + ' w-16'} type="number" value={f.value} placeholder="0" onChange={e => update(f.id, { value: e.target.value })} />
-                <button onClick={() => remove(f.id)} className="text-pb-faint hover:text-pb-red font-mono text-base leading-none px-1">×</button>
-              </li>
-            ))}
-          </ul>
-        )
-      }
+    </>
+  )
+}
+
+function FilterLeaf({ leaf, categories, onChange, onRemove }) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [anchor, setAnchor] = useState(null)
+  const fieldBtnRef = useRef(null)
+  const openPicker = () => {
+    if (fieldBtnRef.current) setAnchor(fieldBtnRef.current.getBoundingClientRect())
+    setPickerOpen(true)
+  }
+  const cat = leaf.field ? CATEGORY_LOOKUP[leaf.field] : null
+  const fieldLabel = leaf.field ? (METRIC_LABELS[leaf.field]?.label || leaf.field) : 'Choose metric'
+  return (
+    <div className="flex items-center gap-1.5 bg-pb-surface border border-pb-hairline rounded-md px-1 py-1 hover:border-pb-hairline2 transition">
+      <button
+        ref={fieldBtnRef}
+        onClick={openPicker}
+        className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-pb-surface2 transition min-w-[140px] text-left"
+      >
+        {cat && <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">{cat.label}</span>}
+        <span className="text-pb-text font-medium text-xs truncate">{fieldLabel}</span>
+        <span className="text-pb-faint text-[10px]">▾</span>
+      </button>
+      <select
+        className={selectCls + ' w-14 text-center'}
+        value={leaf.op}
+        onChange={e => onChange({ ...leaf, op: e.target.value })}
+        title="Operator"
+      >
+        {OPERATORS.map(o => (
+          <option key={o.key} value={o.key}>{OPERATOR_SYMBOLS[o.key] || o.key}</option>
+        ))}
+      </select>
+      <input
+        type="number"
+        className={inputCls + ' w-20'}
+        value={leaf.value}
+        placeholder="0"
+        onChange={e => onChange({ ...leaf, value: e.target.value })}
+      />
+      <button
+        onClick={onRemove}
+        className="text-pb-faint hover:text-pb-red font-mono text-base leading-none px-1.5"
+        title="Remove filter"
+      >×</button>
+      <FieldPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={(field) => onChange({ ...leaf, field })}
+        categories={categories}
+        anchorRect={anchor}
+      />
+    </div>
+  )
+}
+
+function FilterGroup({ node, categories, onChange, onRemove, depth = 0 }) {
+  const isRoot = depth === 0
+  const setOp = (op) => onChange({ ...node, op })
+  const addLeaf = () => {
+    const cl = [...(node.clauses || []), { id: newTreeId(), type: 'leaf', field: '', op: 'gte', value: '' }]
+    onChange({ ...node, clauses: cl })
+  }
+  const addGroup = () => {
+    const cl = [...(node.clauses || []), {
+      id: newTreeId(), type: 'group', op: 'OR', clauses: [
+        { id: newTreeId(), type: 'leaf', field: '', op: 'gte', value: '' },
+      ],
+    }]
+    onChange({ ...node, clauses: cl })
+  }
+  const updateChild = (id, next) => {
+    if (next == null) {
+      onChange({ ...node, clauses: node.clauses.filter(c => c.id !== id) })
+      return
+    }
+    onChange({ ...node, clauses: node.clauses.map(c => c.id === id ? next : c) })
+  }
+  const isEmpty = !node.clauses || node.clauses.length === 0
+  return (
+    <div className={isRoot ? '' : 'border-l-2 border-pb-accent/40 pl-3 ml-1 my-1'}>
+      <div className="flex items-center gap-2 flex-wrap mb-2">
+        <Label>{isRoot ? 'Filters' : 'Group'}</Label>
+        <div className="flex gap-1">
+          {['AND','OR'].map(op => (
+            <button
+              key={op}
+              onClick={() => setOp(op)}
+              className={`px-2 py-0.5 font-mono text-[10px] tracking-wide2 rounded border transition ${node.op === op ? 'text-pb-text bg-pb-surface2 border-pb-hairline2' : 'text-pb-faint border-transparent hover:border-pb-hairline'}`}
+            >
+              {op}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1" />
+        <button onClick={addLeaf} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">+ filter</button>
+        <button onClick={addGroup} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">+ group</button>
+        {!isRoot && (
+          <button onClick={onRemove} className="text-pb-faint hover:text-pb-red font-mono text-base leading-none px-1">×</button>
+        )}
+      </div>
+      {isEmpty && isRoot && (
+        <p className="text-pb-faintest font-mono text-[10.5px] mb-2">No filters yet. Click <span className="text-pb-faint">+ filter</span> to narrow your results.</p>
+      )}
+      <div className="flex flex-wrap gap-1.5 items-center">
+        {(node.clauses || []).map((c, i) => (
+          <div key={c.id} className="flex items-center gap-1.5">
+            {i > 0 && (
+              <span className="font-mono text-[10px] tracking-wide2 text-pb-faint px-1.5 py-0.5 rounded bg-pb-surface2/50">{node.op}</span>
+            )}
+            {c.type === 'leaf' ? (
+              <FilterLeaf
+                leaf={c}
+                categories={categories}
+                onChange={(next) => updateChild(c.id, next)}
+                onRemove={() => updateChild(c.id, null)}
+              />
+            ) : (
+              <FilterGroup
+                node={c}
+                categories={categories}
+                onChange={(next) => updateChild(c.id, next)}
+                onRemove={() => updateChild(c.id, null)}
+                depth={depth + 1}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function FilterBar({ tree, categories, onChange, onClear }) {
+  const count = treeLeafCount(tree)
+  return (
+    <div className="pb-card p-3 mb-5">
+      <FilterGroup
+        node={tree}
+        categories={categories}
+        onChange={onChange}
+        onRemove={() => {}}
+        depth={0}
+      />
+      {count > 0 && (
+        <div className="flex justify-end pt-2 mt-2 pb-hairline-t">
+          <button onClick={onClear} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">Clear all filters</button>
+        </div>
+      )}
     </div>
   )
 }
@@ -431,8 +703,17 @@ export default function StatLab() {
     api.statlabGetReport(reportSlug, orgId).then(r => {
       if (cancelled) return
       setOpenReport(r)
-      const q = { ...DEFAULT_QUERY, ...(r.query_json || {}) }
-      q.filters = (q.filters || []).map((f, i) => ({ id: i + 1, ...f }))
+      const incoming = r.query_json || {}
+      const q = { ...DEFAULT_QUERY, ...incoming }
+      // Migrate legacy reports (flat filters array) and ensure tree node ids
+      if (incoming.filterTree) {
+        q.filterTree = ensureTreeIds(incoming.filterTree)
+      } else if (Array.isArray(incoming.filters) && incoming.filters.length) {
+        q.filterTree = flatToTree(incoming.filters)
+      } else {
+        q.filterTree = emptyTree()
+      }
+      delete q.filters
       q.context = q.context || {}
       setQuery(q)
       setHasQueried(false)
@@ -467,7 +748,7 @@ export default function StatLab() {
     const q = overrideQuery || queryRef.current
     setLoading(true); setError(null); setHasQueried(true); setClientSort({ col: null, dir: null })
     setActiveDerived(overrideDerived)
-    const validFilters = (q.filters || []).filter(x => x.field && x.op && x.value !== '').map(x => `${x.field}:${x.op}:${x.value}`)
+    const cleaned = cleanTree(q.filterTree)
     try {
       let data
       if (overrideDerived) {
@@ -475,7 +756,7 @@ export default function StatLab() {
       } else {
         data = await api.statlabQuery(orgId, {
           target: q.target, sortBy: q.sortBy, sortDir: q.sortDir,
-          limit: q.limit, filters: validFilters, context: q.context,
+          limit: q.limit, filterTree: cleaned, context: q.context,
         })
       }
       setRows(data)
@@ -485,13 +766,12 @@ export default function StatLab() {
   }, [orgId])
 
   const applyPreset = useCallback(async (preset) => {
-    const newFilters = (preset.filters || []).map((f, i) => ({ id: Date.now() + i, ...f }))
     const next = {
       target: preset.target,
       sortBy: preset.sortBy,
       sortDir: preset.sortDir,
       limit: DEFAULT_QUERY.limit,
-      filters: newFilters,
+      filterTree: flatToTree(preset.filters || []),
       context: preset.context || {},
     }
     setQuery(next)
@@ -501,7 +781,7 @@ export default function StatLab() {
   }, [runQuery, clubSlug, navigate, reportSlug])
 
   const applyDerived = useCallback(async (name) => {
-    const next = { ...queryRef.current, target: queryRef.current.target, filters: [] }
+    const next = { ...queryRef.current, filterTree: emptyTree() }
     setQuery(next)
     await runQuery(next, name)
   }, [runQuery])
@@ -539,7 +819,7 @@ export default function StatLab() {
     }
     const set = COLUMN_SETS[query.target] || []
     // Promote filtered fields and the active sort to the front
-    const filteredKeys = query.filters.filter(f => f.value !== '').map(f => f.field)
+    const filteredKeys = treeFields(query.filterTree)
     const order = []
     const seen = new Set()
     ;[...filteredKeys, query.sortBy, ...set].forEach(k => {
@@ -572,13 +852,13 @@ export default function StatLab() {
 
   const saveReport = useCallback(async (payload) => {
     const q = queryRef.current
-    const cleanFilters = (q.filters || []).filter(f => f.field && f.op && f.value !== '').map(({ field, op, value }) => ({ field, op, value }))
+    const cleanedTree = cleanTree(q.filterTree)
     const queryJson = {
       target: q.target,
       sortBy: q.sortBy,
       sortDir: q.sortDir,
       limit: q.limit,
-      filters: cleanFilters,
+      filterTree: cleanedTree,
       context: q.context || {},
       derived: activeDerived || null,
     }
@@ -631,7 +911,7 @@ export default function StatLab() {
         />
 
         {/* Target tabs */}
-        <div className="flex flex-wrap gap-1 pb-hairline-b mb-5 overflow-x-auto">
+        <div className="flex flex-wrap gap-1 pb-hairline-b mb-4 overflow-x-auto">
           {TARGETS.map(t => (
             <button key={t.key} onClick={() => { setQuery(q => ({ ...q, target: t.key })); setRows([]); setHasQueried(false); setActiveDerived(null) }}
               className={`relative px-3.5 py-2.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition ${query.target === t.key && !activeDerived ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'}`}>
@@ -640,6 +920,14 @@ export default function StatLab() {
             </button>
           ))}
         </div>
+
+        {/* Filter bar — categorised picker, nested AND/OR */}
+        <FilterBar
+          tree={query.filterTree}
+          categories={categoriesForTarget(targetMetrics)}
+          onChange={(tree) => setQuery(q => ({ ...q, filterTree: tree }))}
+          onClear={() => setQuery(q => ({ ...q, filterTree: emptyTree() }))}
+        />
 
         <div className="grid grid-cols-1 xl:grid-cols-[340px_1fr] gap-5">
           {/* Left panel: controls */}
@@ -671,14 +959,6 @@ export default function StatLab() {
                 seasons={seasons}
                 grades={grades}
                 targetShape={targetMeta.shape}
-              />
-            </Card>
-
-            <Card title="METRIC FILTERS">
-              <MetricFiltersPanel
-                filters={query.filters}
-                metrics={targetMetrics}
-                onChange={filters => setQuery(q => ({ ...q, filters }))}
               />
             </Card>
 
