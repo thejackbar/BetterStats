@@ -513,4 +513,12 @@ export const api = {
     if (finalsOnly) params.set('finals_only', 'true')
     return request(`/leaderboard/fielding?${params}`)
   },
+  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, limit } = {}) => {
+    const params = new URLSearchParams({ org_id: orgId })
+    if (seasonId) params.set('season_id', seasonId)
+    if (gradeName) params.set('grade_name', gradeName)
+    if (finalsOnly) params.set('finals_only', 'true')
+    if (limit) params.set('limit', limit)
+    return request(`/leaderboard/sirs/${type}?${params}`)
+  },
 }
