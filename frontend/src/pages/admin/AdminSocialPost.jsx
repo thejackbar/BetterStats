@@ -97,7 +97,12 @@ const BASE_URL = import.meta.env.VITE_API_URL || '/api'
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 function splitName(displayName, nameFormat = 'last_first') {
-  const parts = (displayName || '').trim().split(/\s+/)
+  const raw = (displayName || '').trim()
+  if (raw.includes(', ')) {
+    const [lastPart, firstPart] = raw.split(', ', 2)
+    return { first: firstPart.trim(), last: lastPart.trim().toUpperCase() }
+  }
+  const parts = raw.split(/\s+/)
   if (parts.length === 1) return { first: '', last: parts[0].toUpperCase() }
   if (nameFormat === 'first_last') {
     return { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1].toUpperCase() }
