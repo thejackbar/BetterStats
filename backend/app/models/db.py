@@ -437,6 +437,25 @@ class SyncRun(Base):
     error = Column(Text, nullable=True)
 
 
+class SavedReport(Base):
+    __tablename__ = "saved_reports"
+    __table_args__ = (
+        UniqueConstraint("org_id", "slug", name="uq_saved_reports_org_slug"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    slug = Column(Text, nullable=False)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    query_json = Column(JSONB, nullable=False)
+    visibility = Column(Text, nullable=False, server_default="club")
+    view_count = Column(Integer, nullable=False, server_default="0")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class PhqIdSuggestion(Base):
     __tablename__ = "phq_id_suggestions"
 
