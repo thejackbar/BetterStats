@@ -127,8 +127,13 @@ TARGETS: dict[str, dict] = {
 # match/game row of the underlying record. value_kind controls how the value is
 # coerced. operator is fixed because each filter has natural semantics.
 
-# Match-level context filters — applied inside the game_universe CTE (aliases
-# g, gr, s, am, ga are all valid there).
+# Match-level context filters — applied inside the game_universe CTE.
+# References inside SQL strings:
+#   g, gr, s, am  → table/CTE aliases visible in game_universe's WHERE clause.
+#   ga.team_name  → the club's team name for this game (set by a LATERAL
+#                   subquery that returns DISTINCT team_names from our org's
+#                   appearances; produces 1 row per (game, our_team), not per
+#                   appearance row, so downstream joins don't multiply).
 MATCH_CONTEXT_FILTERS: dict[str, dict] = {
     "date_from":    {"sql": "g.played_at >= :ctx_date_from",                          "value_kind": "date"},
     "date_to":      {"sql": "g.played_at <= :ctx_date_to",                            "value_kind": "date"},
@@ -137,11 +142,9 @@ MATCH_CONTEXT_FILTERS: dict[str, dict] = {
     "max_year":     {"sql": "COALESCE(s.year, 9999) <= :ctx_max_year",                "value_kind": "int"},
     "grade_id":     {"sql": "gr.id = CAST(:ctx_grade_id AS UUID)",                    "value_kind": "uuid"},
     "grade_name":   {"sql": "COALESCE(am.canonical_name, gr.name) = :ctx_grade_name", "value_kind": "text"},
-    "opposition":   {"sql": "LOWER(COALESCE(opp_team(g, ga.team_name), '')) LIKE LOWER(:ctx_opposition)", "value_kind": "text_like"},
+    "opposition":   {"sql": "LOWER(COALESCE(CASE WHEN ga.team_name = g.home_team THEN g.away_team WHEN ga.team_name = g.away_team THEN g.home_team ELSE NULL END, '')) LIKE LOWER(:ctx_opposition)", "value_kind": "text_like"},
     "finals_only":  {"sql": "g.is_final = TRUE",                                       "value_kind": "flag"},
-    "captain_only": {"sql": "ga.is_captain = TRUE",                                    "value_kind": "flag"},
-    "keeper_only":  {"sql": "ga.is_wicket_keeper = TRUE",                              "value_kind": "flag"},
-    "result":       {"sql": "match_result(g, ga.team_name) = :ctx_result",             "value_kind": "result"},
+    "result":       {"sql": "(CASE WHEN g.winning_team IS NULL OR g.winning_team = '' THEN 'drawn' WHEN ga.team_name IS NOT NULL AND g.winning_team = ga.team_name THEN 'won' WHEN ga.team_name IS NOT NULL THEN 'lost' ELSE 'drawn' END) = :ctx_result", "value_kind": "result"},
 }
 
 # Per-innings filters — applied to batting_innings (bi) joins only; relevant
@@ -152,8 +155,17 @@ INNINGS_CONTEXT_FILTERS: dict[str, dict] = {
     "position_max": {"sql": "bi.batting_position <= :ctx_position_max",                       "value_kind": "int"},
 }
 
+# Per-player filters — applied at the (game_universe × player) join because
+# captain / keeper status is a property of an individual player's appearance,
+# not of the game itself. These are deliberately NOT in game_universe so the
+# CTE stays at one row per (game, team) and doesn't fan out across appearances.
+PLAYER_CONTEXT_FILTERS: dict[str, dict] = {
+    "captain_only": {"sql": "gap.is_captain = TRUE",        "value_kind": "flag"},
+    "keeper_only":  {"sql": "gap.is_wicket_keeper = TRUE",  "value_kind": "flag"},
+}
+
 # Combined view for schema introspection.
-CONTEXT_FILTERS: dict[str, dict] = {**MATCH_CONTEXT_FILTERS, **INNINGS_CONTEXT_FILTERS}
+CONTEXT_FILTERS: dict[str, dict] = {**MATCH_CONTEXT_FILTERS, **INNINGS_CONTEXT_FILTERS, **PLAYER_CONTEXT_FILTERS}
 
 # Helper SQL functions emitted once at the top of each query that needs them.
 # We define them as inline expressions to avoid creating real DB functions.
@@ -302,11 +314,17 @@ def _build_filter_block(ctx: dict, spec_dict: dict) -> tuple[list[str], dict, bo
     return clauses, params, used
 
 
-def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict, bool]:
-    """Returns (match_clauses, match_params, innings_clauses, innings_params, any_match_used)."""
+def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict, list[str], dict, bool]:
+    """Returns (match_clauses, match_params, innings_clauses, innings_params,
+    player_clauses, player_params, any_match_used).
+    The match block expands inside game_universe; the innings block attaches to
+    batting_innings joins; the player block attaches to (game_universe × player)
+    via a gap LEFT JOIN that callers must provide.
+    """
     mc, mp, mu = _build_filter_block(ctx, MATCH_CONTEXT_FILTERS)
     ic, ip, _iu = _build_filter_block(ctx, INNINGS_CONTEXT_FILTERS)
-    return mc, mp, ic, ip, mu
+    pc, pp, _pu = _build_filter_block(ctx, PLAYER_CONTEXT_FILTERS)
+    return mc, mp, ic, ip, pc, pp, mu
 
 
 # ─── Common SQL fragments ──────────────────────────────────────────────────────
@@ -315,19 +333,26 @@ def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict,
 # queries join their per-innings/per-spell/etc. tables against this universe.
 
 def _game_universe_sql(ctx_clauses: list[str]) -> str:
+    """Build the per-game universe CTE.
+
+    Critical correctness note: `ga.team_name` MUST come from a LATERAL that
+    returns at most one row per distinct team_name. A naive LEFT JOIN of
+    game_appearances against games multiplies rows by the per-game appearance
+    count (typically ~11), and any downstream JOIN to batting_innings /
+    bowling_spells / fielding_stats then over-counts by the same factor.
+    This bit us once already — manifested as inflated streak lengths in
+    derived_consecutive_ducks (4 real ducks reported as 12).
+    """
     ctx_where = (" AND " + " AND ".join(ctx_clauses)) if ctx_clauses else ""
     return f"""
         game_universe AS (
-            SELECT DISTINCT
+            SELECT
                 g.id                                          AS game_id,
                 ga.team_name                                  AS club_team,
                 CASE
                     WHEN ga.team_name = g.home_team THEN g.away_team
                     WHEN ga.team_name = g.away_team THEN g.home_team
-                    ELSE NULLIF(CASE WHEN g.home_team IS NOT NULL AND g.away_team IS NOT NULL
-                                     THEN CASE WHEN ga.team_name IS NULL THEN NULL
-                                               ELSE NULL END
-                                     ELSE NULL END, NULL)
+                    ELSE NULL
                 END                                           AS opposition,
                 CASE
                     WHEN g.winning_team IS NULL OR g.winning_team = '' THEN 'drawn'
@@ -344,15 +369,23 @@ def _game_universe_sql(ctx_clauses: list[str]) -> str:
                 s.name                                        AS season_name,
                 COALESCE(s.year, 0)                           AS season_year,
                 g.is_final                                    AS is_final,
-                ga.is_captain                                 AS is_captain,
-                ga.is_wicket_keeper                           AS is_wicket_keeper,
                 g.home_team                                   AS home_team,
                 g.away_team                                   AS away_team,
                 g.winning_team                                AS winning_team
             FROM games g
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s  ON s.id  = gr.season_id
-            LEFT JOIN game_appearances ga ON ga.game_id = g.id
+            LEFT JOIN LATERAL (
+                -- One row per distinct team our club fielded in this game.
+                -- For a typical game this returns exactly one team_name; if
+                -- the org has both home & away sides in an intra-club fixture
+                -- it returns two — both legitimate perspectives.
+                SELECT DISTINCT ga_inner.team_name
+                FROM game_appearances ga_inner
+                JOIN players p_inner ON p_inner.id = ga_inner.player_id
+                WHERE ga_inner.game_id = g.id
+                  AND p_inner.organisation_id = CAST(:org_id AS UUID)
+            ) ga ON TRUE
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)
@@ -374,22 +407,11 @@ def _game_universe_sql(ctx_clauses: list[str]) -> str:
     """
 
 
-# In context filter SQL, `opp_team(g, ga.team_name)` and `match_result(g, ga.team_name)`
-# are *not* real DB functions — we reference them in the filter spec but rewrite
-# them here to inline CASE expressions before issuing the query. This avoids
-# adding stored functions to the DB.
+# Pseudo-function tokens (`opp_team`, `match_result`) used to live in filter
+# specs and were rewritten to inline CASE expressions before query execution.
+# The current filter SQL embeds the CASE expressions directly, so this hook is
+# a no-op kept for back-compat with any external callers.
 def _inline_helpers(sql: str) -> str:
-    sql = sql.replace(
-        "opp_team(g, ga.team_name)",
-        "(CASE WHEN ga.team_name = g.home_team THEN g.away_team "
-        "WHEN ga.team_name = g.away_team THEN g.home_team ELSE NULL END)",
-    )
-    sql = sql.replace(
-        "match_result(g, ga.team_name)",
-        "(CASE WHEN g.winning_team IS NULL OR g.winning_team = '' THEN 'drawn' "
-        "WHEN ga.team_name IS NOT NULL AND g.winning_team = ga.team_name THEN 'won' "
-        "WHEN ga.team_name IS NOT NULL THEN 'lost' ELSE 'drawn' END)",
-    )
     return sql
 
 
@@ -408,6 +430,7 @@ def _validated(target: str, sort_by: str, sort_dir: str, limit: int) -> tuple[st
 def _player_agg_innings_cte(
     ctx_clauses: list[str],
     innings_clauses: list[str],
+    player_clauses: list[str],
     group_cols: str,
     select_cols: str,
 ) -> str:
@@ -417,6 +440,9 @@ def _player_agg_innings_cte(
     """
     universe = _game_universe_sql(ctx_clauses)
     innings_extra = (" AND " + " AND ".join(innings_clauses)) if innings_clauses else ""
+    player_extra = (" AND " + " AND ".join(player_clauses)) if player_clauses else ""
+    # gap LEFT JOIN exposes this player's per-game appearance row so the
+    # captain_only / keeper_only filters can apply at the right scope.
     return f"""
         WITH {universe},
         bat AS (
@@ -442,7 +468,8 @@ def _player_agg_innings_cte(
             FROM game_universe gu
             JOIN batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            WHERE p.organisation_id = :org_id {innings_extra}
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id {innings_extra} {player_extra}
             GROUP BY {group_cols}
         ),
         bowl AS (
@@ -458,7 +485,8 @@ def _player_agg_innings_cte(
             FROM game_universe gu
             JOIN bowling_spells bs ON bs.game_id = gu.game_id
             JOIN players p ON p.id = bs.player_id
-            WHERE p.organisation_id = :org_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
             GROUP BY {group_cols}
         ),
         field AS (
@@ -470,7 +498,8 @@ def _player_agg_innings_cte(
             FROM game_universe gu
             JOIN fielding_stats fs ON fs.game_id = gu.game_id
             JOIN players p ON p.id = fs.player_id
-            WHERE p.organisation_id = :org_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
             GROUP BY {group_cols}
         ),
         appear AS (
@@ -478,9 +507,9 @@ def _player_agg_innings_cte(
                 {select_cols}
                 COUNT(DISTINCT gu.game_id) AS matches
             FROM game_universe gu
-            JOIN game_appearances ga2 ON ga2.game_id = gu.game_id
-            JOIN players p ON p.id = ga2.player_id
-            WHERE p.organisation_id = :org_id
+            JOIN game_appearances gap ON gap.game_id = gu.game_id
+            JOIN players p ON p.id = gap.player_id
+            WHERE p.organisation_id = :org_id {player_extra}
             GROUP BY {group_cols}
         )
     """
@@ -500,16 +529,16 @@ async def query_player_career(
     sort_by, sort_dir, limit = _validated("player_career", sort_by, sort_dir, limit)
     metrics = PLAYER_AGG_METRICS
 
-    mc, mp, ic, ip, used_ctx = _build_context_filters(context)
+    mc, mp, ic, ip, pc, pp, used_ctx = _build_context_filters(context)
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, metrics)
-    params = {"org_id": org_id, "limit": limit, **mp, **ip, **metric_params}
+    params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
-    needs_live = used_ctx or bool(ic)
+    needs_live = used_ctx or bool(ic) or bool(pc)
 
     if needs_live:
         # Live aggregation over per-innings rows so context filters take effect.
         cte = _player_agg_innings_cte(
-            mc, ic,
+            mc, ic, pc,
             group_cols="p.id, COALESCE(p.display_name_override, p.name)",
             select_cols="p.id AS player_id, COALESCE(p.display_name_override, p.name) AS player_name,",
         )
@@ -622,15 +651,15 @@ async def query_player_season(
     sort_by, sort_dir, limit = _validated("player_season", sort_by, sort_dir, limit)
     metrics = PLAYER_AGG_METRICS
 
-    mc, mp, ic, ip, used_ctx = _build_context_filters(context)
+    mc, mp, ic, ip, pc, pp, used_ctx = _build_context_filters(context)
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, metrics)
-    params = {"org_id": org_id, "limit": limit, **mp, **ip, **metric_params}
+    params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
-    needs_live = used_ctx or bool(ic)
+    needs_live = used_ctx or bool(ic) or bool(pc)
 
     if needs_live:
         cte = _player_agg_innings_cte(
-            mc, ic,
+            mc, ic, pc,
             group_cols="p.id, COALESCE(p.display_name_override, p.name), gu.season_id, gu.season_name, gu.season_year",
             select_cols=("p.id AS player_id, COALESCE(p.display_name_override, p.name) AS player_name, "
                          "gu.season_id, gu.season_name, gu.season_year,"),
@@ -753,13 +782,13 @@ async def query_player_grade(
     aggregation since player_season_stats has no grade dimension."""
     sort_by, sort_dir, limit = _validated("player_grade", sort_by, sort_dir, limit)
 
-    mc, mp, ic, ip, _ = _build_context_filters(context)
+    mc, mp, ic, ip, pc, pp, _ = _build_context_filters(context)
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, PLAYER_AGG_METRICS)
-    params = {"org_id": org_id, "limit": limit, **mp, **ip, **metric_params}
+    params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     cte = _player_agg_innings_cte(
-        mc, ic,
+        mc, ic, pc,
         group_cols="p.id, COALESCE(p.display_name_override, p.name), gu.canonical_grade_name, gu.display_grade_name",
         select_cols=("p.id AS player_id, COALESCE(p.display_name_override, p.name) AS player_name, "
                      "gu.canonical_grade_name AS grade_name, gu.display_grade_name,"),
@@ -832,11 +861,12 @@ async def query_innings_list(
     """One row per batting innings."""
     sort_by, sort_dir, limit = _validated("innings_list", sort_by, sort_dir, limit)
 
-    mc, mp, ic, ip, _ = _build_context_filters(context)
+    mc, mp, ic, ip, pc, pp, _ = _build_context_filters(context)
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, INNINGS_METRICS)
-    params = {"org_id": org_id, "limit": limit, **mp, **ip, **metric_params}
+    params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
     innings_extra = (" AND " + " AND ".join(ic)) if ic else ""
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
 
     universe = _game_universe_sql(mc)
     sql = f"""
@@ -870,10 +900,12 @@ async def query_innings_list(
             FROM game_universe gu
             JOIN batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
               {innings_extra}
+              {player_extra}
         )
         SELECT * FROM rows
         {where_sql}
@@ -898,10 +930,11 @@ async def query_spell_list(
 ) -> list[dict]:
     sort_by, sort_dir, limit = _validated("spell_list", sort_by, sort_dir, limit)
 
-    mc, mp, _ic, _ip, _ = _build_context_filters(context)
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, SPELL_METRICS)
-    params = {"org_id": org_id, "limit": limit, **mp, **metric_params}
+    params = {"org_id": org_id, "limit": limit, **mp, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
 
     universe = _game_universe_sql(mc)
     sql = f"""
@@ -933,7 +966,8 @@ async def query_spell_list(
             FROM game_universe gu
             JOIN bowling_spells bs ON bs.game_id = gu.game_id
             JOIN players p ON p.id = bs.player_id
-            WHERE p.organisation_id = :org_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
         )
         SELECT * FROM rows
         {where_sql}
@@ -960,9 +994,9 @@ async def query_match_list(
     batting_innings sums."""
     sort_by, sort_dir, limit = _validated("match_list", sort_by, sort_dir, limit)
 
-    mc, mp, _ic, _ip, _ = _build_context_filters(context)
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, MATCH_METRICS)
-    params = {"org_id": org_id, "limit": limit, **mp, **metric_params}
+    params = {"org_id": org_id, "limit": limit, **mp, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     universe = _game_universe_sql(mc)
@@ -1041,9 +1075,9 @@ async def query_partnership_list(
 ) -> list[dict]:
     sort_by, sort_dir, limit = _validated("partnership_list", sort_by, sort_dir, limit)
 
-    mc, mp, _ic, _ip, _ = _build_context_filters(context)
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, PARTNERSHIP_METRICS)
-    params = {"org_id": org_id, "limit": limit, **mp, **metric_params}
+    params = {"org_id": org_id, "limit": limit, **mp, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     universe = _game_universe_sql(mc)
@@ -1098,9 +1132,10 @@ async def derived_consecutive_ducks(
     played_at, then innings_number) that were ducks. A duck = runs=0 AND not_out
     is false AND dismissal_type is a real dismissal (excluding absent / DNB).
     """
-    mc, mp, _ic, _ip, _ = _build_context_filters(context)
-    params = {"org_id": org_id, "limit": min(max(1, limit), 200), **mp}
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 200), **mp, **pp}
     universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
     sql = f"""
         WITH {universe},
         seq AS (
@@ -1121,9 +1156,11 @@ async def derived_consecutive_ducks(
             FROM game_universe gu
             JOIN batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+              {player_extra}
         ),
         grp AS (
             SELECT player_id, player_name, rn, is_duck,
@@ -1158,9 +1195,10 @@ async def derived_consecutive_fifties(
     session: AsyncSession, *, org_id: str, limit: int, context: dict,
 ) -> list[dict]:
     """Longest run of consecutive innings scoring 50+."""
-    mc, mp, _ic, _ip, _ = _build_context_filters(context)
-    params = {"org_id": org_id, "limit": min(max(1, limit), 200), **mp}
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 200), **mp, **pp}
     universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
     sql = f"""
         WITH {universe},
         seq AS (
@@ -1174,9 +1212,11 @@ async def derived_consecutive_fifties(
             FROM game_universe gu
             JOIN batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+              {player_extra}
         ),
         grp AS (
             SELECT player_id, player_name, rn, is_fifty,
@@ -1206,9 +1246,13 @@ async def derived_consecutive_fifties(
 async def derived_best_partnership_pair(
     session: AsyncSession, *, org_id: str, limit: int, context: dict,
 ) -> list[dict]:
-    """Best partnership ever for each pair of batters (unordered)."""
-    mc, mp, _ic, _ip, _ = _build_context_filters(context)
-    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp}
+    """Best partnership ever for each pair of batters (unordered).
+
+    captain/keeper filters don't apply at the pair level (a partnership has
+    two batters, only one of whom might be captain); we ignore pc here.
+    """
+    mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
     sql = f"""
         WITH {universe},
