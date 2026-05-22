@@ -141,7 +141,7 @@ def main():
                 print(f"  {r['played_at']}  {(r['grade_name'] or '?'):22s}  → 204/no GR scorecard  id={gid}")
                 continue
 
-            teams = (data.get("matchSummary") or {}).get("teams") or []
+            teams = data.get("teams") or []
             found = False
             for team in teams:
                 for roster_p in (team.get("players") or []):
@@ -217,7 +217,7 @@ def main():
             if not data:
                 print(f"    → no GR scorecard (204)")
                 continue
-            teams = (data.get("matchSummary") or {}).get("teams") or []
+            teams = data.get("teams") or []
             found = False
             for team in teams:
                 for roster_p in (team.get("players") or []):
