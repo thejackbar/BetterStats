@@ -5,6 +5,9 @@ from pydantic import BaseModel
 import uuid
 import re
 import json
+import logging
+
+log = logging.getLogger(__name__)
 
 from app.services.grassroots_scores_client import get_match_scorecard
 
@@ -626,6 +629,16 @@ def _team_id_from_inn(inn: dict) -> str | None:
 @router.get("/social/scorecard/{match_id}")
 async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
     """Fetch a Grassroots scorecard and return it in the social template format."""
+    try:
+        return await _get_social_scorecard_inner(match_id, db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("social scorecard %s failed", match_id)
+        raise HTTPException(500, f"Scorecard parse error: {exc}") from exc
+
+
+async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
     raw = await get_match_scorecard(match_id)
     if raw is None:
         raise HTTPException(404, "Scorecard not found — match may be PlayHQ-only or not yet completed")
@@ -752,16 +765,16 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
             not_out = (dt_id == _NOT_OUT_ID or dt == "not out") and not dnb
             pid = b.get("participantId") or ""
             first, last = get_name(pid)
-            runs = b.get("runsScored") or 0
-            balls = b.get("ballsFaced") or 0
+            runs = int(b.get("runsScored") or 0)
+            balls = int(b.get("ballsFaced") or 0)
             result.append({
                 "num": i + 1,
                 "first": first,
                 "last": last,
                 "r": runs,
                 "b": balls,
-                "fours": b.get("foursScored") or 0,
-                "sixes": b.get("sixesScored") or 0,
+                "fours": int(b.get("foursScored") or 0),
+                "sixes": int(b.get("sixesScored") or 0),
                 "sr": round(runs / balls * 100, 2) if balls > 0 else 0,
                 "out": dt if not dnb and not not_out else ("not out" if not_out else "did not bat"),
                 "notOut": not_out,
@@ -777,7 +790,7 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
             first, last = get_name(pid)
             overs_raw = bw.get("oversBowled")
             overs = _overs_str(overs_raw)
-            runs = bw.get("runsConceded") or 0
+            runs = int(bw.get("runsConceded") or 0)
             try:
                 o_float = float(str(overs_raw or 0).replace(",", "."))
                 whole = int(o_float)
@@ -789,9 +802,9 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
                 "first": first,
                 "last": last,
                 "o": overs,
-                "m": bw.get("maidensBowled") or 0,
+                "m": int(bw.get("maidensBowled") or 0),
                 "r": runs,
-                "w": bw.get("wicketsTaken") or 0,
+                "w": int(bw.get("wicketsTaken") or 0),
                 "econ": round(runs / o_float_real, 2) if o_float_real > 0 else 0,
             })
         return result
@@ -808,11 +821,13 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
 
     def team_totals(inn: dict, batting: list):
         # GR authoritative fields (confirmed from games router)
-        total_runs = inn.get("runsScored") or (
+        rs_raw = inn.get("runsScored")
+        total_runs = int(rs_raw) if rs_raw is not None else (
             sum(b["r"] for b in batting if not b["didNotBat"])
-            + ((inn.get("extras") or {}).get("total") or inn.get("totalExtras") or 0)
+            + int(inn.get("totalExtras") or 0)
         )
-        total_wkts = inn.get("numberOfWicketsFallen") or sum(
+        wkts_raw = inn.get("numberOfWicketsFallen")
+        total_wkts = int(wkts_raw) if wkts_raw is not None else sum(
             1 for b in batting if not b["notOut"] and not b["didNotBat"]
         )
         overs_raw = inn.get("totalOvers") or inn.get("overs")
