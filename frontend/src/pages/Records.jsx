@@ -553,6 +553,7 @@ export default function Records() {
   const [orgGrades, setOrgGrades] = useState([])
   const [selectedGradeName, setSelectedGradeName] = useState(null)
   const [finalsOnly, setFinalsOnly] = useState(false)
+  const [captainOnly, setCaptainOnly] = useState(false)
   const [tab, setTab] = useState('batting')
   const [records, setRecords] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -570,11 +571,11 @@ export default function Records() {
   useEffect(() => {
     if (!orgId) return
     setLoading(true)
-    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly })
+    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly })
       .then(setRecords)
       .catch(() => setRecords(null))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly])
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
@@ -598,6 +599,8 @@ export default function Records() {
             setSelectedGrade={() => {}}
             finalsOnly={finalsOnly}
             setFinalsOnly={setFinalsOnly}
+            captainOnly={captainOnly}
+            setCaptainOnly={setCaptainOnly}
           />
           {orgGrades.length > 0 && (
             <div className="flex items-center gap-2">

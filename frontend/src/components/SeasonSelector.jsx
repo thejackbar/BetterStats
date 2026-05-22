@@ -7,6 +7,8 @@ export default function SeasonSelector({
   setSelectedGrade,
   finalsOnly = false,
   setFinalsOnly = () => {},
+  captainOnly = false,
+  setCaptainOnly = () => {},
 }) {
   return (
     <div className="flex flex-wrap gap-3 items-center">
@@ -50,6 +52,19 @@ export default function SeasonSelector({
           >
             <option value="all">All games</option>
             <option value="finals">Finals only</option>
+          </select>
+        </div>
+      )}
+      {seasons.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Captain</label>
+          <select
+            value={captainOnly ? 'captain' : 'all'}
+            onChange={e => setCaptainOnly(e.target.value === 'captain')}
+            className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
+          >
+            <option value="all">All players</option>
+            <option value="captain">As captain</option>
           </select>
         </div>
       )}

@@ -364,6 +364,7 @@ export default function Leaderboard() {
   const [orgGrades, setOrgGrades] = useState([])
   const [selectedGradeName, setSelectedGradeName] = useState(null)
   const [finalsOnly, setFinalsOnly] = useState(false)
+  const [captainOnly, setCaptainOnly] = useState(false)
 
   const [mainTab, setMainTab] = useState('batting')
   const [battingSort, setBattingSort] = useState('total_runs')
@@ -403,29 +404,29 @@ export default function Leaderboard() {
     if (!orgId) return
     setLoading(true)
     Promise.allSettled([
-      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns, finalsOnly }),
-      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets, finalsOnly }),
-      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30, finalsOnly }),
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns, finalsOnly, captainOnly }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets, finalsOnly, captainOnly }),
+      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30, finalsOnly, captainOnly }),
     ]).then(([b, bw, f]) => {
       if (b.status === 'fulfilled') setBattingRows(b.value)
       if (bw.status === 'fulfilled') setBowlingRows(bw.value)
       if (f.status === 'fulfilled') setFieldingRows(f.value)
     }).finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, finalsOnly])
+  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, finalsOnly, captainOnly])
 
   useEffect(() => {
     if (!orgId || mainTab !== 'sirs') return
     setSirsLoading(true)
     Promise.allSettled([
-      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly }),
-      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly }),
-      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly }),
+      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly }),
+      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly }),
+      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly }),
     ]).then(([sc, sbi, sbm]) => {
       if (sc.status === 'fulfilled') setCenturiesRows(sc.value)
       if (sbi.status === 'fulfilled') setBowlingInningsRows(sbi.value)
       if (sbm.status === 'fulfilled') setBowlingMatchRows(sbm.value)
     }).finally(() => setSirsLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, mainTab])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, mainTab])
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
@@ -452,6 +453,8 @@ export default function Leaderboard() {
             setSelectedGrade={() => {}}
             finalsOnly={finalsOnly}
             setFinalsOnly={setFinalsOnly}
+            captainOnly={captainOnly}
+            setCaptainOnly={setCaptainOnly}
           />
           {orgGrades.length > 0 && (
             <div className="flex items-center gap-2">

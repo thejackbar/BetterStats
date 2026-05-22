@@ -263,6 +263,138 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     return upcoming
 
 
+@router.get("/{player_id}/captain-stats")
+async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(get_db)):
+    pid = uuid.UUID(player_id)
+
+    summary_res = await db.execute(text("""
+        SELECT
+            COUNT(DISTINCT ga.game_id) AS games_captained,
+            SUM(CASE WHEN g.result = 'WIN' THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN g.result = 'LOSS' THEN 1 ELSE 0 END) AS losses,
+            SUM(CASE WHEN g.result IS NULL OR g.result NOT IN ('WIN', 'LOSS') THEN 1 ELSE 0 END) AS draws
+        FROM game_appearances ga
+        JOIN games g ON g.id = ga.game_id
+        WHERE ga.player_id = :pid AND ga.is_captain = TRUE
+    """), {"pid": pid})
+    summary = dict(summary_res.mappings().first() or {})
+
+    bat_cap_res = await db.execute(text("""
+        SELECT
+            COUNT(*) AS innings,
+            COALESCE(SUM(bi.runs), 0) AS runs,
+            MAX(bi.runs) AS high_score,
+            ROUND(SUM(bi.runs)::numeric / NULLIF(COUNT(*) - SUM(bi.not_out::int), 0), 2) AS average,
+            SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END) AS fifties,
+            SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds
+        FROM batting_innings bi
+        JOIN game_appearances ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
+        WHERE bi.player_id = :pid
+          AND NOT COALESCE(bi.did_not_bat, FALSE)
+          AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+    """), {"pid": pid})
+    bat_cap = dict(bat_cap_res.mappings().first() or {})
+
+    bat_not_res = await db.execute(text("""
+        SELECT
+            COUNT(*) AS innings,
+            COALESCE(SUM(bi.runs), 0) AS runs,
+            MAX(bi.runs) AS high_score,
+            ROUND(SUM(bi.runs)::numeric / NULLIF(COUNT(*) - SUM(bi.not_out::int), 0), 2) AS average,
+            SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END) AS fifties,
+            SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds
+        FROM batting_innings bi
+        LEFT JOIN game_appearances ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
+        WHERE bi.player_id = :pid
+          AND NOT COALESCE(bi.did_not_bat, FALSE)
+          AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+          AND ga.game_id IS NULL
+    """), {"pid": pid})
+    bat_not = dict(bat_not_res.mappings().first() or {})
+
+    bowl_cap_res = await db.execute(text("""
+        SELECT
+            COUNT(DISTINCT bs.game_id) AS games,
+            COALESCE(SUM(bs.wickets), 0) AS wickets,
+            ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
+            ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy
+        FROM bowling_spells bs
+        JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
+        WHERE bs.player_id = :pid
+    """), {"pid": pid})
+    bowl_cap = dict(bowl_cap_res.mappings().first() or {})
+
+    bowl_not_res = await db.execute(text("""
+        SELECT
+            COUNT(DISTINCT bs.game_id) AS games,
+            COALESCE(SUM(bs.wickets), 0) AS wickets,
+            ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
+            ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy
+        FROM bowling_spells bs
+        LEFT JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
+        WHERE bs.player_id = :pid
+          AND ga.game_id IS NULL
+    """), {"pid": pid})
+    bowl_not = dict(bowl_not_res.mappings().first() or {})
+
+    by_season_res = await db.execute(text("""
+        WITH captain_games AS (
+            SELECT ga.game_id, g.result, s.name AS season_name, s.year AS season_year
+            FROM game_appearances ga
+            JOIN games g ON g.id = ga.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE ga.player_id = :pid AND ga.is_captain = TRUE
+        ),
+        bat_per_game AS (
+            SELECT bi.game_id, SUM(bi.runs) AS runs, COUNT(*) AS innings,
+                   SUM(bi.not_out::int) AS not_outs
+            FROM batting_innings bi
+            WHERE bi.player_id = :pid
+              AND bi.game_id IN (SELECT game_id FROM captain_games)
+              AND NOT COALESCE(bi.did_not_bat, FALSE)
+              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+            GROUP BY bi.game_id
+        ),
+        bowl_per_game AS (
+            SELECT bs.game_id, SUM(bs.wickets) AS wickets, SUM(bs.runs) AS bowl_runs
+            FROM bowling_spells bs
+            WHERE bs.player_id = :pid
+              AND bs.game_id IN (SELECT game_id FROM captain_games)
+            GROUP BY bs.game_id
+        )
+        SELECT
+            cg.season_name,
+            cg.season_year,
+            COUNT(cg.game_id) AS games_captained,
+            SUM(CASE WHEN cg.result = 'WIN' THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN cg.result = 'LOSS' THEN 1 ELSE 0 END) AS losses,
+            SUM(CASE WHEN cg.result IS NULL OR cg.result NOT IN ('WIN', 'LOSS') THEN 1 ELSE 0 END) AS draws,
+            COALESCE(SUM(bat.runs), 0) AS batting_runs,
+            COALESCE(SUM(bat.innings), 0) AS batting_innings,
+            ROUND(SUM(bat.runs)::numeric / NULLIF(SUM(bat.innings) - SUM(bat.not_outs), 0), 2) AS batting_avg,
+            COALESCE(SUM(bowl.wickets), 0) AS bowling_wickets,
+            ROUND(SUM(bowl.bowl_runs)::numeric / NULLIF(SUM(bowl.wickets), 0), 2) AS bowling_avg
+        FROM captain_games cg
+        LEFT JOIN bat_per_game bat ON bat.game_id = cg.game_id
+        LEFT JOIN bowl_per_game bowl ON bowl.game_id = cg.game_id
+        GROUP BY cg.season_name, cg.season_year
+        ORDER BY cg.season_year DESC NULLS LAST
+    """), {"pid": pid})
+    by_season = [dict(r) for r in by_season_res.mappings()]
+    for row in by_season:
+        row["season_year"] = row.get("season_year")
+
+    return {
+        "summary": summary,
+        "batting_as_captain": bat_cap,
+        "batting_not_captain": bat_not,
+        "bowling_as_captain": bowl_cap,
+        "bowling_not_captain": bowl_not,
+        "by_season": by_season,
+    }
+
+
 class SyncRequestCreate(BaseModel):
     note: Optional[str] = None
 
