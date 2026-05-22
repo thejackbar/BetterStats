@@ -14,12 +14,12 @@ import {
 // TEMPLATE REGISTRY
 // ─────────────────────────────────────────────────────────────────────────────
 const TEMPLATES = [
-  { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13 },
+  { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13, w: 1080, h: 2160 },
   { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: 12 },
   { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: 'Side photo + numbered XI',        maxPlayers: 11 },
   { id: 'T4', name: 'Batting Order',   component: T4_BattingOrder,    desc: 'Tactical batting order',          maxPlayers: 13 },
   { id: 'T5', name: 'Brutalist',       component: T5_Brutalist,       desc: 'Typography-forward XI',           maxPlayers: 11 },
-  { id: 'T6', name: 'Diagonal Poster', component: T6_Diagonal,        desc: 'Diagonal poster, match-day hype', maxPlayers: 11 },
+  { id: 'T6', name: 'Diagonal Poster', component: T6_Diagonal,        desc: 'Diagonal poster, match-day hype', maxPlayers: 11, w: 2160, h: 2160 },
   { id: 'T7', name: 'Milestone',       component: T7_CaptainSpotlight, desc: 'Milestone achievement showcase',  maxPlayers: 13 },
   { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: 11 },
   { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: 11 },
@@ -265,7 +265,8 @@ export default function AdminSocialPost() {
   })
   const [savePaletteName, setSavePaletteName] = useState('')
 
-  const [heroImage, setHeroImage] = useState({ blobUrl: null, playerIdx: 0 })
+  const [heroImage, setHeroImage] = useState({ blobUrl: null })
+  const [heroMode, setHeroMode] = useState('player')
 
   const [scorecardMatch, setScorecardMatch] = useState(DEFAULT_SCORECARD)
   const [scUrlInput, setScUrlInput] = useState('')
@@ -489,8 +490,8 @@ export default function AdminSocialPost() {
       const html2canvas = (await import('html2canvas')).default
       const el = renderRef.current
       const wrapper = el.parentElement
-      const W = tmpl.isScorecard ? 1920 : 1080
-      const H = 1080
+      const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
+      const H = tmpl.h || 1080
       const prevStyle = wrapper.getAttribute('style') || ''
       wrapper.setAttribute('style', 'position:fixed;left:0;top:0;z-index:-1;opacity:0.001;pointer-events:none;overflow:hidden')
       await new Promise(r => requestAnimationFrame(r))
@@ -574,19 +575,30 @@ export default function AdminSocialPost() {
   }
   if (templateId === 'C1') {
     const annPlayer = selectedPlayers[announcement.playerIdx]
+    let annTemplatePlayer = annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames) : undefined
+    if (annTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
+      annTemplatePlayer = { ...annTemplatePlayer, headshot: heroImage.blobUrl }
+    }
     extraProps.announcement = {
       kind: announcement.kind, headline: announcement.headline, subheadline: announcement.subheadline,
-      player: annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames) : undefined,
+      player: annTemplatePlayer,
     }
   }
   if (templateId === 'C2') extraProps.toss = { winner: toss.winner, decision: toss.decision }
   if (templateId === 'C3') {
     const motmPlayer = selectedPlayers[motm.playerIdx]
+    let motmTemplatePlayer = motmPlayer ? playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat, swapNames) : undefined
+    if (motmTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
+      motmTemplatePlayer = { ...motmTemplatePlayer, headshot: heroImage.blobUrl }
+    }
     extraProps.motm = {
-      player: motmPlayer ? playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat, swapNames) : undefined,
+      player: motmTemplatePlayer,
       stats: motm.stats.filter(s => s.label && s.value),
       summary: motm.summary,
     }
+  }
+  if (['T1', 'T3', 'T6', 'T7'].includes(templateId) && heroImage.blobUrl) {
+    extraProps.heroImage = heroImage.blobUrl
   }
   if (templateId === 'C4') {
     extraProps.result = {
@@ -599,7 +611,6 @@ export default function AdminSocialPost() {
 
   const templatePlayers = selectedPlayers.map((sp, i) => {
     const base = playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames)
-    if (heroImage.blobUrl && i === heroImage.playerIdx) base.headshot = heroImage.blobUrl
     return base
   })
 
@@ -625,7 +636,8 @@ export default function AdminSocialPost() {
     setMatch({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
     setOpponent({ name: '', short: '', monogram: '', logo: null })
     setSelectedPlayers([])
-    setHeroImage({ blobUrl: null, playerIdx: 0 })
+    setHeroImage({ blobUrl: null })
+    setHeroMode('player')
     setMilestone({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
     setAnnouncement({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: 'FOR THE 2025-26 SEASON', playerIdx: 0 })
     setToss({ winner: 'TEAM', decision: 'BAT' })
@@ -649,8 +661,8 @@ export default function AdminSocialPost() {
   )
 
   // ─── Preview renderer ────────────────────────────────────────────────────────
-  const W = isScorecard ? 1920 : 1080
-  const H = 1080
+  const W = tmpl.w || (isScorecard ? 1920 : 1080)
+  const H = tmpl.h || 1080
 
   // ─── Controls ────────────────────────────────────────────────────────────────
   const showMatchInfo = activeTab !== 'scorecard'
@@ -906,38 +918,44 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Hero Image</h2>
                 <p className="text-[11px] text-pb-faint mb-3">Transparent PNG recommended for best results.</p>
-                <div className="flex flex-col gap-3">
-                  <label className="flex items-center gap-3 cursor-pointer group">
-                    <span className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint group-hover:bg-pb-surface2 transition-colors">Choose File</span>
-                    <span className="text-[11px] text-pb-faint truncate">{heroImage.blobUrl ? 'Image selected' : 'No file chosen'}</span>
-                    <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" />
-                  </label>
-                  {heroImage.blobUrl && (
-                    <div className="flex items-start gap-3">
-                      <img src={heroImage.blobUrl} alt="Hero preview" className="w-16 h-16 object-contain rounded bg-pb-surface2" />
-                      <div className="flex flex-col gap-2 flex-1">
-                        {selectedPlayers.length > 1 && (
-                          <Field label="Apply to player">
-                            <select value={heroImage.playerIdx} onChange={e => setHeroImage(h => ({ ...h, playerIdx: +e.target.value }))}
-                              className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text">
-                              {selectedPlayers.map((sp, i) => (
-                                <option key={i} value={i}>{sp.player.display_name || sp.player.name}</option>
-                              ))}
-                            </select>
-                          </Field>
-                        )}
-                        <button
-                          onClick={() => setEditor({ key: 'hero', source: heroImage.blobUrl })}
-                          className="text-xs font-mono text-pb-faint hover:text-pb-text text-left"
-                        >
-                          ✎ Edit (crop / remove background)
-                        </button>
-                        <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null, playerIdx: 0 }) }}
-                          className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left">Remove image</button>
+                {['C1', 'C3'].includes(templateId) && (
+                  <div className="flex gap-2 mb-3">
+                    <button
+                      onClick={() => setHeroMode('player')}
+                      className={`flex-1 py-1.5 rounded border text-xs font-mono transition-colors ${heroMode === 'player' ? '' : 'text-pb-faint border-transparent hover:border-pb-hairline'}`}
+                      style={heroMode === 'player' ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
+                    >Player Picture</button>
+                    <button
+                      onClick={() => setHeroMode('hero')}
+                      className={`flex-1 py-1.5 rounded border text-xs font-mono transition-colors ${heroMode === 'hero' ? '' : 'text-pb-faint border-transparent hover:border-pb-hairline'}`}
+                      style={heroMode === 'hero' ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
+                    >Hero Image</button>
+                  </div>
+                )}
+                {(!['C1', 'C3'].includes(templateId) || heroMode === 'hero') && (
+                  <div className="flex flex-col gap-3">
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <span className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint group-hover:bg-pb-surface2 transition-colors">Choose File</span>
+                      <span className="text-[11px] text-pb-faint truncate">{heroImage.blobUrl ? 'Image selected' : 'No file chosen'}</span>
+                      <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" />
+                    </label>
+                    {heroImage.blobUrl && (
+                      <div className="flex items-start gap-3">
+                        <img src={heroImage.blobUrl} alt="Hero preview" className="w-16 h-16 object-contain rounded bg-pb-surface2" />
+                        <div className="flex flex-col gap-2 flex-1">
+                          <button
+                            onClick={() => setEditor({ key: 'hero', source: heroImage.blobUrl })}
+                            className="text-xs font-mono text-pb-faint hover:text-pb-text text-left"
+                          >
+                            ✎ Edit (crop / remove background)
+                          </button>
+                          <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null }) }}
+                            className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left">Remove image</button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
               </section>
             )}
 
@@ -1404,7 +1422,7 @@ export default function AdminSocialPost() {
           if (!e) return
           if (e.key === 'hero') {
             if (heroImage.blobUrl) URL.revokeObjectURL(heroImage.blobUrl)
-            setHeroImage(h => ({ ...h, blobUrl: URL.createObjectURL(file) }))
+            setHeroImage({ blobUrl: URL.createObjectURL(file) })
           } else if (typeof e.sponsorIdx === 'number') {
             applySponsorBlob(e.sponsorIdx, file, e.sponsorName)
           }
