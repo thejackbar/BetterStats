@@ -683,6 +683,8 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
         )
         raw_merge = {row.r: row.k for row in merge_res.mappings().all()}
     except Exception:
+        log.exception("merge_logs lookup failed for scorecard %s", match_id)
+        await db.rollback()
         raw_merge = {}
 
     def _resolve_merge(rid, seen=None):
@@ -702,29 +704,35 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
 
     name_map: dict[str, tuple[str, str]] = {}  # participantId -> (first, last)
     if all_pids:
-        try:
-            pid_uuids = [uuid.UUID(p) for p in all_pids]
-            res = await db.execute(select(Player).where(Player.id.in_(pid_uuids)))
-            for p in res.scalars().all():
-                raw_name = (p.display_name or p.name or "").strip()
-                if ", " in raw_name:
-                    # "Surname, Firstname" → last="SURNAME", first="Firstname"
-                    last_part, first_part = raw_name.split(", ", 1)
-                    first = first_part.strip()
-                    last = last_part.strip().upper()
-                else:
-                    parts = raw_name.split()
-                    if len(parts) >= 2:
-                        first = " ".join(parts[1:])
-                        last = parts[0].upper()
+        pid_uuids = []
+        for p in all_pids:
+            try:
+                pid_uuids.append(uuid.UUID(p))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        if pid_uuids:
+            try:
+                res = await db.execute(select(Player).where(Player.id.in_(pid_uuids)))
+                for p in res.scalars().all():
+                    raw_name = (p.display_name or p.name or "").strip()
+                    if ", " in raw_name:
+                        # "Surname, Firstname" → last="SURNAME", first="Firstname"
+                        last_part, first_part = raw_name.split(", ", 1)
+                        first = first_part.strip()
+                        last = last_part.strip().upper()
                     else:
-                        first = ""
-                        last = parts[0].upper() if parts else ""
-                # Strip any trailing punctuation from last name
-                last = last.rstrip(".,;:")
-                name_map[str(p.id).lower()] = (first, last)
-        except Exception:
-            pass  # name lookup best-effort; empty names still render
+                        parts = raw_name.split()
+                        if len(parts) >= 2:
+                            first = " ".join(parts[1:])
+                            last = parts[0].upper()
+                        else:
+                            first = ""
+                            last = parts[0].upper() if parts else ""
+                    last = last.rstrip(".,;:")
+                    name_map[str(p.id).lower()] = (first, last)
+            except Exception:
+                log.exception("player name lookup failed for scorecard %s", match_id)
+                await db.rollback()
 
     # Build roster name map from team player lists (covers opposition players not in our DB)
     roster_name_map: dict[str, tuple[str, str]] = {}
