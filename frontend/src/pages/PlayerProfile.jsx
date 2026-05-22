@@ -1472,6 +1472,10 @@ export default function PlayerProfile() {
   const [bowlingByBatterPosition, setBowlingByBatterPosition] = useState([])
   const [teamBreakdown, setTeamBreakdown] = useState({ rows: [], unattributed: 0, total_aggregate_matches: 0 })
   const [tab, setTab] = useState('batting')
+  // Track which playerId we last fetched aux data for, so navigating between
+  // player profiles refetches instead of showing the prior player's data.
+  const lastAuxFetchRef = useRef(null)
+  const lastMilestonesFetchRef = useRef(null)
 
   useClubTheme(org)
   const fmtName = useNameFormat(org)
@@ -1512,13 +1516,26 @@ export default function PlayerProfile() {
   }, [data?.player?.organisation_id, playerId])
 
   useEffect(() => {
-    if (!data?.player || milestones.length > 0) return
+    if (!data?.player) return
+    if (lastMilestonesFetchRef.current === playerId) return
+    lastMilestonesFetchRef.current = playerId
+    setMilestones([])
     api.getPlayerMilestones(playerId).then(setMilestones).catch(() => setMilestones([]))
-  }, [playerId, data?.player, milestones.length])
+  }, [playerId, data?.player])
 
   useEffect(() => {
     if (!playerId || !data?.player) return
-    if (partnerships.length > 0 || byGrade.length > 0) return
+    if (lastAuxFetchRef.current === playerId) return
+    lastAuxFetchRef.current = playerId
+    // Reset stale state from previously-viewed player — otherwise navigating
+    // between profiles would show the previous player's dismissal/grade data.
+    setPartnerships([])
+    setDismissals([])
+    setByGrade([])
+    setByPosition([])
+    setBowlingByGrade([])
+    setBowlingDismissals([])
+    setBowlingByBatterPosition([])
     Promise.allSettled([
       api.getPlayerPartnerships(playerId),
       api.getPlayerDismissals(playerId),
