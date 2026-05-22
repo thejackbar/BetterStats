@@ -220,6 +220,7 @@ function TextInput({ value, onChange, placeholder }) {
 export default function AdminSocialPost() {
   const [settings, setSettings] = useState(null)
   const [allPlayers, setAllPlayers] = useState([])
+  const [adminSponsors, setAdminSponsors] = useState([])
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(null)
@@ -312,8 +313,26 @@ export default function AdminSocialPost() {
   useEffect(() => { localStorage.setItem('bs_social_font', fontKey) }, [fontKey])
 
   useEffect(() => {
-    Promise.all([api.adminGetSettings(), api.adminListPlayers()])
-      .then(([s, p]) => { setSettings(s); setAllPlayers(p) })
+    Promise.all([api.adminGetSettings(), api.adminListPlayers(), api.adminListSponsors()])
+      .then(([s, p, sp]) => {
+        setSettings(s)
+        setAllPlayers(p)
+        const sponsors = sp || []
+        setAdminSponsors(sponsors)
+        if (sponsors.length > 0) {
+          setScorecardMatch(m => ({
+            ...m,
+            meta: {
+              ...m.meta,
+              sponsors: [0, 1].map(i => {
+                const s = sponsors[i]
+                if (!s) return m.meta.sponsors[i] || { url: null, name: '' }
+                return { url: `${BASE_URL}/images/sponsors/${s.id}/logo`, name: s.name }
+              }),
+            },
+          }))
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -1124,30 +1143,60 @@ export default function AdminSocialPost() {
                   <div className="col-span-2"><Field label="MOTM Line"><TextInput value={scorecardMatch.meta.motm.line} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, line: v } })} placeholder="87 (54) · 2/22" /></Field></div>
                   <div className="col-span-2">
                     <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mb-1">Sponsor Logos</p>
+                    {adminSponsors.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {adminSponsors.map(sp => {
+                          const logoUrl = `${BASE_URL}/images/sponsors/${sp.id}/logo`
+                          return (
+                            <button key={sp.id} title={sp.name}
+                              onClick={() => {
+                                const slot = scorecardMatch.meta.sponsors[0]?.url ? 1 : 0
+                                setScorecardMatch(m => ({ ...m, meta: { ...m.meta, sponsors: m.meta.sponsors.map((s, i) => i === slot ? { url: logoUrl, name: sp.name } : s) } }))
+                                setSponsorFiles(prev => { const next = [...prev]; next[slot] = logoUrl; return next })
+                              }}
+                              className="flex items-center gap-1.5 px-2 py-1 rounded border pb-hairline hover:bg-pb-surface2 text-[10px] font-mono text-pb-faint"
+                            >
+                              <img src={logoUrl} alt={sp.name} className="h-5 object-contain" onError={e => e.target.style.display='none'} />
+                              {sp.name}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
-                      {[0, 1].map(i => (
-                        <div key={i} className="flex flex-col gap-1">
-                          <label className="flex items-center gap-2 px-2 py-1.5 rounded border pb-hairline cursor-pointer hover:bg-pb-surface2 text-xs font-mono text-pb-faint">
-                            <span>{sponsorFiles[i] ? '✓ Loaded' : `Sponsor ${i + 1}`}</span>
-                            <input type="file" accept="image/*" className="hidden" onChange={e => handleSponsorFile(i, e.target.files?.[0])} />
-                          </label>
-                          {sponsorFiles[i] && (
-                            <div className="flex items-center gap-2">
-                              <img src={sponsorFiles[i]} alt="" className="h-8 object-contain rounded border pb-hairline flex-1 min-w-0" />
-                              <button
-                                disabled={removingBg === `sponsor-${i}`}
-                                onClick={() => handleRemoveBg(`sponsor-${i}`, sponsorFiles[i], newUrl => {
-                                  setSponsorFiles(prev => { const next = [...prev]; next[i] = newUrl; return next })
-                                  setScorecardMatch(m => ({ ...m, meta: { ...m.meta, sponsors: m.meta.sponsors.map((s, j) => j === i ? { ...s, url: newUrl } : s) } }))
-                                })}
-                                className="shrink-0 text-[10px] font-mono text-pb-faint hover:text-pb-text disabled:opacity-40 whitespace-nowrap"
-                              >
-                                {removingBg === `sponsor-${i}` ? '⏳' : '✂ BG'}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                      {[0, 1].map(i => {
+                        const currentUrl = scorecardMatch.meta.sponsors[i]?.url
+                        return (
+                          <div key={i} className="flex flex-col gap-1">
+                            <label className="flex items-center gap-2 px-2 py-1.5 rounded border pb-hairline cursor-pointer hover:bg-pb-surface2 text-xs font-mono text-pb-faint">
+                              <span>{currentUrl ? '✓ Set' : `Upload ${i + 1}`}</span>
+                              <input type="file" accept="image/*" className="hidden" onChange={e => handleSponsorFile(i, e.target.files?.[0])} />
+                            </label>
+                            {currentUrl && (
+                              <div className="flex items-center gap-2">
+                                <img src={currentUrl} alt="" className="h-8 object-contain rounded border pb-hairline flex-1 min-w-0" onError={e => e.target.style.opacity='0.3'} />
+                                <button
+                                  disabled={removingBg === `sponsor-${i}`}
+                                  onClick={() => handleRemoveBg(`sponsor-${i}`, currentUrl, newUrl => {
+                                    setSponsorFiles(prev => { const next = [...prev]; next[i] = newUrl; return next })
+                                    setScorecardMatch(m => ({ ...m, meta: { ...m.meta, sponsors: m.meta.sponsors.map((s, j) => j === i ? { ...s, url: newUrl } : s) } }))
+                                  })}
+                                  className="shrink-0 text-[10px] font-mono text-pb-faint hover:text-pb-text disabled:opacity-40 whitespace-nowrap"
+                                >
+                                  {removingBg === `sponsor-${i}` ? '⏳' : '✂ BG'}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSponsorFiles(prev => { const next = [...prev]; next[i] = null; return next })
+                                    setScorecardMatch(m => ({ ...m, meta: { ...m.meta, sponsors: m.meta.sponsors.map((s, j) => j === i ? { url: null, name: '' } : s) } }))
+                                  }}
+                                  className="shrink-0 text-[10px] text-pb-faintest hover:text-red-400"
+                                >✕</button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 </div>
@@ -1205,12 +1254,12 @@ export default function AdminSocialPost() {
                         </div>
 
                         <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-1">Batting</p>
-                        <div className="flex flex-col gap-0.5">
-                          <div className="grid gap-1 font-mono text-[8px] text-pb-faintest px-1" style={{ gridTemplateColumns: '18px 1fr 1fr 32px 32px 24px 24px auto' }}>
-                            <span>#</span><span>First</span><span>Last</span><span>Runs</span><span>Balls</span><span>4s</span><span>6s</span><span>Out</span>
+                        <div className="flex flex-col gap-1 overflow-x-auto">
+                          <div className="grid gap-1 font-mono text-[8px] text-pb-faintest px-1 min-w-[420px]" style={{ gridTemplateColumns: '14px 1fr 1fr 32px 32px 22px 22px 48px 60px 14px' }}>
+                            <span>#</span><span>First</span><span>Last</span><span>Runs</span><span>Balls</span><span>4s</span><span>6s</span><span>Status</span><span>Dismissal</span><span></span>
                           </div>
                           {t.batting.map((p, i) => (
-                            <div key={i} className="grid gap-1 items-center" style={{ gridTemplateColumns: '18px 1fr 1fr 32px 32px 24px 24px auto' }}>
+                            <div key={i} className="grid gap-1 items-center min-w-[420px]" style={{ gridTemplateColumns: '14px 1fr 1fr 32px 32px 22px 22px 48px 60px 14px' }}>
                               <span className="font-mono text-[9px] text-pb-faintest text-center">{p.num}</span>
                               <input value={p.first} onChange={e => updateBatRow(side, i, { first: e.target.value })} placeholder="First" className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-0.5 text-xs text-pb-text" />
                               <input value={p.last} onChange={e => updateBatRow(side, i, { last: e.target.value })} placeholder="LAST" className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-0.5 text-xs text-pb-text font-mono uppercase" />
@@ -1218,51 +1267,47 @@ export default function AdminSocialPost() {
                               <input type="number" min="0" value={p.b} onChange={e => updateBatRow(side, i, { b: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" disabled={p.didNotBat} />
                               <input type="number" min="0" value={p.fours} onChange={e => updateBatRow(side, i, { fours: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" disabled={p.didNotBat} />
                               <input type="number" min="0" value={p.sixes} onChange={e => updateBatRow(side, i, { sixes: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" disabled={p.didNotBat} />
-                              <div className="flex gap-1">
+                              <div className="flex gap-0.5">
                                 <button onClick={() => updateBatRow(side, i, { notOut: !p.notOut, didNotBat: false })}
-                                  className={`font-mono text-[8px] px-1 py-0.5 rounded border pb-hairline ${p.notOut ? 'text-pb-text' : 'text-pb-faintest'}`}
+                                  className={`font-mono text-[8px] px-1 py-0.5 rounded border pb-hairline ${p.notOut ? '' : 'text-pb-faintest'}`}
                                   style={p.notOut ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}>NO</button>
                                 <button onClick={() => updateBatRow(side, i, { didNotBat: !p.didNotBat, notOut: false })}
-                                  className={`font-mono text-[8px] px-1 py-0.5 rounded border pb-hairline ${p.didNotBat ? 'text-pb-text' : 'text-pb-faintest'}`}
+                                  className={`font-mono text-[8px] px-1 py-0.5 rounded border pb-hairline ${p.didNotBat ? '' : 'text-pb-faintest'}`}
                                   style={p.didNotBat ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}>DNB</button>
                               </div>
+                              <input value={p.didNotBat || p.notOut ? '' : (p.out || '')}
+                                onChange={e => updateBatRow(side, i, { out: e.target.value })}
+                                placeholder={p.didNotBat ? '—' : p.notOut ? '—' : 'c Smith b J…'}
+                                disabled={p.didNotBat || p.notOut}
+                                className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-[10px] text-pb-text disabled:opacity-30" />
+                              <button onClick={() => {
+                                const next = t.batting.filter((_, j) => j !== i).map((r, j) => ({ ...r, num: j + 1 }))
+                                patchScTeam(side, { batting: next })
+                              }} className="text-pb-faintest hover:text-red-400 text-[10px] leading-none text-center">✕</button>
                             </div>
                           ))}
-                          {t.batting.length < 11 && (
-                            <button onClick={() => patchScTeam(side, { batting: [...t.batting, DEFAULT_BATTING_ROW(t.batting.length + 1)] })}
-                              className="text-xs text-pb-faint hover:text-pb-accent font-mono text-left">+ Add batter</button>
-                          )}
+                          <button onClick={() => patchScTeam(side, { batting: [...t.batting, DEFAULT_BATTING_ROW(t.batting.length + 1)] })}
+                            className="text-xs text-pb-faint hover:text-pb-accent font-mono text-left">+ Add batter</button>
                         </div>
 
-                        <details className="mt-1">
-                          <summary className="font-mono text-[9px] text-pb-faintest cursor-pointer">Dismissal text (optional)</summary>
-                          <div className="flex flex-col gap-1 mt-1">
-                            {t.batting.filter(p => !p.didNotBat && !p.notOut).map((p, i) => (
-                              <div key={i} className="flex items-center gap-2">
-                                <span className="font-mono text-[9px] text-pb-faintest w-16 truncate">{p.last}</span>
-                                <input value={p.out || ''} onChange={e => updateBatRow(side, t.batting.indexOf(p), { out: e.target.value })} placeholder="c Smith b Jones"
-                                  className="flex-1 bg-pb-surface2 border pb-hairline rounded px-2 py-0.5 text-xs text-pb-text" />
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-
                         <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-2">Bowling</p>
-                        <div className="flex flex-col gap-0.5">
-                          <div className="grid gap-1 font-mono text-[8px] text-pb-faintest px-1" style={{ gridTemplateColumns: '1fr 1fr 32px 28px 32px 28px' }}>
-                            <span>First</span><span>Last</span><span>Ovrs</span><span>M</span><span>Runs</span><span>Wkts</span>
+                        <div className="flex flex-col gap-0.5 overflow-x-auto">
+                          <div className="grid gap-1 font-mono text-[8px] text-pb-faintest px-1 min-w-[340px]" style={{ gridTemplateColumns: '1fr 1fr 36px 28px 36px 28px 16px' }}>
+                            <span>First</span><span>Last</span><span>Ovrs</span><span>M</span><span>Runs</span><span>Wkts</span><span></span>
                           </div>
                           {t.bowling.map((p, i) => (
-                            <div key={i} className="grid gap-1 items-center" style={{ gridTemplateColumns: '1fr 1fr 32px 28px 32px 28px' }}>
+                            <div key={i} className="grid gap-1 items-center min-w-[340px]" style={{ gridTemplateColumns: '1fr 1fr 36px 28px 36px 28px 16px' }}>
                               <input value={p.first} onChange={e => updateBowlRow(side, i, { first: e.target.value })} placeholder="First" className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-0.5 text-xs text-pb-text" />
                               <input value={p.last} onChange={e => updateBowlRow(side, i, { last: e.target.value })} placeholder="LAST" className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-0.5 text-xs text-pb-text font-mono uppercase" />
                               <input type="number" min="0" step="0.1" value={p.o} onChange={e => updateBowlRow(side, i, { o: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" />
                               <input type="number" min="0" value={p.m} onChange={e => updateBowlRow(side, i, { m: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" />
                               <input type="number" min="0" value={p.r} onChange={e => updateBowlRow(side, i, { r: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" />
                               <input type="number" min="0" value={p.w} onChange={e => updateBowlRow(side, i, { w: +e.target.value })} className="bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-xs text-pb-text font-mono text-center" />
+                              <button onClick={() => patchScTeam(side, { bowling: t.bowling.filter((_, j) => j !== i) })}
+                                className="text-pb-faintest hover:text-red-400 text-[10px] leading-none text-center">✕</button>
                             </div>
                           ))}
-                          {t.bowling.length < 8 && (
+                          {t.bowling.length < 11 && (
                             <button onClick={() => patchScTeam(side, { bowling: [...t.bowling, DEFAULT_BOWLING_ROW(t.bowling.length)] })}
                               className="text-xs text-pb-faint hover:text-pb-accent font-mono text-left">+ Add bowler</button>
                           )}
@@ -1307,43 +1352,41 @@ export default function AdminSocialPost() {
           </div>{/* end left column */}
 
           {/* ─── RIGHT: sticky preview (desktop only) ──────────────────────── */}
-          <div className="hidden xl:block flex-1 min-w-0">
-            <div className="sticky top-[64px] flex flex-col gap-3">
-              <div className="pb-card p-4">
-                <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                  <span className="font-mono text-[10px] text-pb-faint uppercase shrink-0">{tmpl.id}: {tmpl.name}</span>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {exportError && <span className="text-red-400 text-[10px] font-mono truncate max-w-[140px]">{exportError}</span>}
-                    <button onClick={handleExport} disabled={exporting}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono tracking-wide2 transition-colors disabled:opacity-60"
-                      style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-                      {exporting ? 'EXPORTING...' : '↓ DOWNLOAD PNG'}
-                    </button>
-                    <button onClick={handleReset}
-                      className="px-3 py-1.5 rounded text-xs font-mono border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
-                      title="Reset all fields for this tab">
-                      ↺ Reset
-                    </button>
-                  </div>
+          <div className="hidden xl:flex flex-1 min-w-0 sticky top-[64px] self-start flex-col gap-3">
+            <div className="pb-card p-4">
+              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                <span className="font-mono text-[10px] text-pb-faint uppercase shrink-0">{tmpl.id}: {tmpl.name}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {exportError && <span className="text-red-400 text-[10px] font-mono truncate max-w-[140px]">{exportError}</span>}
+                  <button onClick={handleExport} disabled={exporting}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono tracking-wide2 transition-colors disabled:opacity-60"
+                    style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+                    {exporting ? 'EXPORTING...' : '↓ DOWNLOAD PNG'}
+                  </button>
+                  <button onClick={handleReset}
+                    className="px-3 py-1.5 rounded text-xs font-mono border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
+                    title="Reset all fields for this tab">
+                    ↺ Reset
+                  </button>
                 </div>
-                {(() => {
-                  const pw = 560
-                  const scale = pw / W
-                  const ph = Math.round(H * scale)
-                  return (
-                    <>
-                      <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
-                        <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none' }}>
-                          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} {...extraProps} />
-                        </div>
-                      </div>
-                      <p className="text-pb-faintest text-[10px] font-mono mt-2">
-                        {W} × {H} px · shown at {Math.round(scale * 100)}%
-                      </p>
-                    </>
-                  )
-                })()}
               </div>
+              {(() => {
+                const pw = Math.min(700, W)
+                const scale = pw / W
+                const ph = Math.round(H * scale)
+                return (
+                  <>
+                    <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
+                      <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none' }}>
+                        <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} {...extraProps} />
+                      </div>
+                    </div>
+                    <p className="text-pb-faintest text-[10px] font-mono mt-2">
+                      {W} × {H} px · shown at {Math.round(scale * 100)}%
+                    </p>
+                  </>
+                )
+              })()}
             </div>
           </div>
 
