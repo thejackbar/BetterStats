@@ -853,9 +853,29 @@ async def get_records(
     # truth and includes games where we have no scorecard yet. Falls back to
     # the per-game UNION when filtering on finals only (since the aggregate
     # doesn't track finals separately) or when no grade filter is set.
-    use_psgs_path = bool(grade_name) and not finals_only
+    use_psgs_path = bool(grade_name) and not finals_only and not captain_only
 
-    if use_psgs_path:
+    if captain_only:
+        most_matches = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COUNT(DISTINCT ga.game_id) AS matches,
+                   COUNT(DISTINCT gr.season_id) AS seasons
+            FROM game_appearances ga
+            JOIN games g ON g.id = ga.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            JOIN players p ON p.id = ga.player_id
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND ga.is_captain = TRUE
+              AND p.organisation_id = :org_id
+              {_gw_season}
+              {_match_grade_filter}
+              {finals_clause}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING COUNT(DISTINCT ga.game_id) > 0
+            ORDER BY matches DESC LIMIT :limit
+        """)
+    elif use_psgs_path:
         psgs_season_clause = "AND psgs.season_id = :season_id" if season_id else ""
         most_matches = await q(f"""
             SELECT p.id::text AS player_id,
@@ -929,7 +949,27 @@ async def get_records(
             ORDER BY matches DESC LIMIT :limit
         """)
 
-    if use_psgs_path:
+    if captain_only:
+        most_seasons = await q(f"""
+            SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+                   COUNT(DISTINCT gr.season_id) AS seasons,
+                   COUNT(DISTINCT ga.game_id) AS matches
+            FROM game_appearances ga
+            JOIN games g ON g.id = ga.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            JOIN players p ON p.id = ga.player_id
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND ga.is_captain = TRUE
+              AND p.organisation_id = :org_id
+              {_gw_season}
+              {_match_grade_filter}
+              {finals_clause}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            HAVING COUNT(DISTINCT gr.season_id) > 0
+            ORDER BY seasons DESC LIMIT :limit
+        """)
+    elif use_psgs_path:
         psgs_season_clause = "AND psgs.season_id = :season_id" if season_id else ""
         most_seasons = await q(f"""
             SELECT p.id::text AS player_id,
