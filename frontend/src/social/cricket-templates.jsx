@@ -1409,7 +1409,8 @@ export function SC2_Brutalist({ match, palette = {} }) {
     const wsf = bsf
     return (
     <div style={{ borderLeft: `2px solid ${ruleStrong}`, borderRight: `2px solid ${ruleStrong}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ background: ink, color: bg, padding: '16px 22px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 18, borderBottom: `2px solid ${ruleStrong}` }}>
+      <div style={{ background: ink, color: bg, padding: '16px 22px', display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 18, borderBottom: `2px solid ${ruleStrong}` }}>
+        <ClubLogo monogram={team.short} color={bg} src={team.logo || null} size={52} shape='shield' />
         <div>
           <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 3, opacity: 0.65 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS'}</div>
           <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 52, letterSpacing: 1, lineHeight: 0.95, marginTop: 2 }}>{team.name}</div>
@@ -1531,7 +1532,10 @@ export function SC3_Dashboard({ match, palette = {} }) {
     return (
     <Card style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 16, padding: '18px 20px', borderBottom: `1px solid ${rule}` }}>
-        <div style={{ width: 52, height: 52, borderRadius: 12, background: `${accentC}22`, color: accentC, display: 'grid', placeItems: 'center', fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 22, letterSpacing: 1 }}>{team.short}</div>
+        {team.logo
+          ? <img src={team.logo} alt={team.short} style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 8 }} />
+          : <div style={{ width: 52, height: 52, borderRadius: 12, background: `${accentC}22`, color: accentC, display: 'grid', placeItems: 'center', fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 22, letterSpacing: 1 }}>{team.short}</div>
+        }
         <div>
           <div style={{ fontFamily: SC_BODY, fontSize: 12, letterSpacing: 1.5, color: dim, fontWeight: 500 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS'}</div>
           <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 28, letterSpacing: 0.5, lineHeight: 1.1, color: ink }}>{team.name}</div>

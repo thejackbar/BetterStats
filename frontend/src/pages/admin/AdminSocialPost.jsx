@@ -1174,7 +1174,7 @@ export default function AdminSocialPost() {
                             </label>
                             {currentUrl && (
                               <div className="flex items-center gap-2">
-                                <img src={currentUrl} alt="" className="h-8 object-contain rounded border pb-hairline flex-1 min-w-0" onError={e => e.target.opacity='0.3'} />
+                                <img src={currentUrl} alt="" className="h-8 object-contain rounded border pb-hairline flex-1 min-w-0" onError={e => e.target.style.opacity='0.3'} />
                                 <button
                                   disabled={removingBg === `sponsor-${i}`}
                                   onClick={() => handleRemoveBg(`sponsor-${i}`, currentUrl, newUrl => {
