@@ -116,6 +116,7 @@ async def get_records(
     grade_id: str | None = Query(None),
     grade_name: str | None = Query(None),
     finals_only: bool = Query(False),
+    captain_only: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     # If grade_id supplied, resolve grade name (for manual record filtering) and season if missing
@@ -190,12 +191,20 @@ async def get_records(
     # When grade_name active: game-level join/where templates for batting and bowling
     _gw_season = "AND s.id = :season_id" if season_id else ""
     finals_clause = "AND g.is_final = TRUE" if finals_only else ""
+    captain_bat_join = (
+        " JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE"
+        if captain_only else ""
+    )
+    captain_bowl_join = (
+        " JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE"
+        if captain_only else ""
+    )
     _bat_join = (
         "JOIN batting_innings bi ON bi.player_id = p.id"
         " JOIN games g ON g.id = bi.game_id"
         " JOIN grades gr ON gr.id = g.grade_id"
         " JOIN seasons s ON s.id = gr.season_id"
-    )
+    ) + captain_bat_join
     _bat_where = (
         f"WHERE p.organisation_id = :org_id AND {_grade_match}"
         f" {_gw_season}"
@@ -208,7 +217,7 @@ async def get_records(
         " JOIN games g ON g.id = bs.game_id"
         " JOIN grades gr ON gr.id = g.grade_id"
         " JOIN seasons s ON s.id = gr.season_id"
-    )
+    ) + captain_bowl_join
     _bowl_where = (
         f"WHERE p.organisation_id = :org_id AND {_grade_match}"
         f" {_gw_season}"
@@ -220,35 +229,35 @@ async def get_records(
         return [dict(r) for r in rows.mappings().all()]
 
     # Whether to use per-game queries (required for grade_name or finals_only)
-    use_game_level = bool(grade_name or finals_only)
+    use_game_level = bool(grade_name or finals_only or captain_only)
     # Grade filter fragment for use-game-level queries that don't use _grade_match
     _match_grade_filter = f"AND {_grade_match}" if grade_name else ""
 
     # For the no-grade-name + finals_only path: same joins as grade_name but without grade filter
-    if finals_only and not grade_name:
+    if (finals_only or captain_only) and not grade_name:
         _bat_join_ng = (
             "JOIN batting_innings bi ON bi.player_id = p.id"
             " JOIN games g ON g.id = bi.game_id"
             " JOIN grades gr ON gr.id = g.grade_id"
             " JOIN seasons s ON s.id = gr.season_id"
-        )
+        ) + captain_bat_join
         _bat_where_ng = (
             f"WHERE p.organisation_id = :org_id"
             f" {_gw_season}"
-            " AND g.is_final = TRUE"
-            " AND NOT COALESCE(bi.did_not_bat, FALSE)"
-            " AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')"
+            + (" AND g.is_final = TRUE" if finals_only else "")
+            + " AND NOT COALESCE(bi.did_not_bat, FALSE)"
+            + " AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')"
         )
         _bowl_join_ng = (
             "JOIN bowling_spells bs ON bs.player_id = p.id"
             " JOIN games g ON g.id = bs.game_id"
             " JOIN grades gr ON gr.id = g.grade_id"
             " JOIN seasons s ON s.id = gr.season_id"
-        )
+        ) + captain_bowl_join
         _bowl_where_ng = (
             f"WHERE p.organisation_id = :org_id"
             f" {_gw_season}"
-            " AND g.is_final = TRUE"
+            + (" AND g.is_final = TRUE" if finals_only else "")
         )
     else:
         _bat_join_ng = _bat_join

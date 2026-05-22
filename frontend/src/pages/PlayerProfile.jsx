@@ -709,9 +709,155 @@ const ANALYSIS_SUBTABS = [
   { key: 'batting',  label: 'BATTING' },
   { key: 'bowling',  label: 'BOWLING' },
   { key: 'team',     label: 'TEAM' },
+  { key: 'captain',  label: 'CAPTAIN' },
 ]
 
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null }) {
+function CaptainTab({ captainStats }) {
+  if (!captainStats) {
+    return <div className="p-4 text-pb-faint font-mono text-sm">Loading captain stats…</div>
+  }
+
+  const { summary, batting_as_captain, batting_not_captain, bowling_as_captain, bowling_not_captain, by_season } = captainStats
+
+  if (!summary?.games_captained) {
+    return <div className="p-4 text-pb-faint font-mono text-sm">No captain data available.</div>
+  }
+
+  const winPct = summary.games_captained > 0
+    ? Math.round((summary.wins / summary.games_captained) * 100)
+    : 0
+
+  const fmtV = v => v == null ? '—' : v
+
+  return (
+    <div className="space-y-8 p-4">
+      {/* Summary */}
+      <div className="flex gap-6 flex-wrap">
+        <div>
+          <div className="font-mono text-2xl text-pb-text">{summary.games_captained}</div>
+          <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mt-0.5">Games as captain</div>
+        </div>
+        <div>
+          <div className="font-mono text-2xl text-pb-text">{summary.wins}W / {summary.losses}L / {summary.draws}D</div>
+          <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mt-0.5">Win / Loss / Draw  ·  {winPct}% win rate</div>
+        </div>
+      </div>
+
+      {/* Batting comparison */}
+      <div>
+        <div className="font-mono text-[11px] tracking-wide2 text-pb-faint uppercase mb-3">Batting</div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[480px] text-[13px]">
+            <thead>
+              <tr className="border-b pb-hairline-b">
+                <th className="text-left font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 pr-4"></th>
+                <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Inn</th>
+                <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Runs</th>
+                <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Avg</th>
+                <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">HS</th>
+                <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">50s</th>
+                <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">100s</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="py-2.5 pr-4 font-mono text-pb-text font-semibold text-[12px] whitespace-nowrap">As captain</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(batting_as_captain?.innings)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(batting_as_captain?.runs)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(batting_as_captain?.average)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(batting_as_captain?.high_score)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(batting_as_captain?.fifties)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(batting_as_captain?.hundreds)}</td>
+              </tr>
+              <tr className="border-t pb-hairline-t">
+                <td className="py-2.5 pr-4 font-mono text-pb-dim text-[12px] whitespace-nowrap">Not captain</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(batting_not_captain?.innings)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(batting_not_captain?.runs)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(batting_not_captain?.average)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(batting_not_captain?.high_score)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(batting_not_captain?.fifties)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(batting_not_captain?.hundreds)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Bowling comparison */}
+      <div>
+        <div className="font-mono text-[11px] tracking-wide2 text-pb-faint uppercase mb-3">Bowling</div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[380px] text-[13px]">
+            <thead>
+              <tr className="border-b pb-hairline-b">
+                <th className="text-left font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 pr-4"></th>
+                <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Games</th>
+                <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Wkts</th>
+                <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Avg</th>
+                <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Econ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="py-2.5 pr-4 font-mono text-pb-text font-semibold text-[12px] whitespace-nowrap">As captain</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.games)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.wickets)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.average)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.economy)}</td>
+              </tr>
+              <tr className="border-t pb-hairline-t">
+                <td className="py-2.5 pr-4 font-mono text-pb-dim text-[12px] whitespace-nowrap">Not captain</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.games)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.wickets)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.average)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.economy)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Season by season */}
+      {by_season?.length > 0 && (
+        <div>
+          <div className="font-mono text-[11px] tracking-wide2 text-pb-faint uppercase mb-3">By season as captain</div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px] text-[13px]">
+              <thead>
+                <tr className="border-b pb-hairline-b">
+                  <th className="text-left font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 pr-4">Season</th>
+                  <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">G</th>
+                  <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">W/L/D</th>
+                  <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Bat Inn</th>
+                  <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Runs</th>
+                  <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Bat Avg</th>
+                  <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Wkts</th>
+                  <th className="text-right font-mono text-pb-faint text-[11px] tracking-wide2 py-1.5 px-2">Bowl Avg</th>
+                </tr>
+              </thead>
+              <tbody>
+                {by_season.map((row, i) => (
+                  <tr key={i} className={i % 2 === 1 ? 'bg-pb-surface' : ''}>
+                    <td className="py-2 pr-4 font-mono text-pb-text text-[12px]">{row.season_name}</td>
+                    <td className="py-2 px-2 text-right font-mono text-pb-dim">{row.games_captained}</td>
+                    <td className="py-2 px-2 text-right font-mono text-pb-dim">{row.wins}/{row.losses}/{row.draws}</td>
+                    <td className="py-2 px-2 text-right font-mono text-pb-dim">{fmtV(row.batting_innings)}</td>
+                    <td className="py-2 px-2 text-right font-mono text-pb-dim">{fmtV(row.batting_runs)}</td>
+                    <td className="py-2 px-2 text-right font-mono text-pb-dim">{fmtV(row.batting_avg)}</td>
+                    <td className="py-2 px-2 text-right font-mono text-pb-dim">{fmtV(row.bowling_wickets)}</td>
+                    <td className="py-2 px-2 text-right font-mono text-pb-dim">{fmtV(row.bowling_avg)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null, captainStats }) {
   const [subTab, setSubTab] = useState('batting')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -1023,6 +1169,8 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           )}
         </div>
       )}
+
+      {subTab === 'captain' && <CaptainTab captainStats={captainStats} />}
 
       {subTab === 'team' && (() => {
         const rows = teamBreakdown.rows || []
@@ -1471,6 +1619,7 @@ export default function PlayerProfile() {
   const [bowlingDismissals, setBowlingDismissals] = useState([])
   const [bowlingByBatterPosition, setBowlingByBatterPosition] = useState([])
   const [teamBreakdown, setTeamBreakdown] = useState({ rows: [], unattributed: 0, total_aggregate_matches: 0 })
+  const [captainStats, setCaptainStats] = useState(null)
   const [tab, setTab] = useState('batting')
   // Track which playerId we last fetched aux data for, so navigating between
   // player profiles refetches instead of showing the prior player's data.
@@ -1504,6 +1653,7 @@ export default function PlayerProfile() {
     if (!playerId) return
     api.getPlayerSeasons(playerId).then(setSeasonStats).catch(() => setSeasonStats([]))
     api.getPlayerUpcomingMilestones(playerId).then(setUpcomingMilestones).catch(() => setUpcomingMilestones([]))
+    api.getPlayerCaptainStats(playerId).then(setCaptainStats).catch(() => setCaptainStats({}))
   }, [playerId])
 
   useEffect(() => {
@@ -1776,7 +1926,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
       </main>

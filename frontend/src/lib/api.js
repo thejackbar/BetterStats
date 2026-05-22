@@ -471,12 +471,13 @@ export const api = {
     request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
 
   // Records
-  getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly } = {}) => {
+  getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
     if (gradeName) params.set('grade_name', gradeName)
     if (finalsOnly) params.set('finals_only', 'true')
+    if (captainOnly) params.set('captain_only', 'true')
     return request(`/records/${orgId}?${params}`)
   },
   getRecordsGrades: (orgId, seasonId) => {
@@ -486,7 +487,7 @@ export const api = {
   },
 
   // Leaderboard
-  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, finalsOnly } = {}) => {
+  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, finalsOnly, captainOnly } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -495,9 +496,10 @@ export const api = {
     if (limit) params.set('limit', limit)
     if (minRuns != null) params.set('min_runs', minRuns)
     if (finalsOnly) params.set('finals_only', 'true')
+    if (captainOnly) params.set('captain_only', 'true')
     return request(`/leaderboard/batting?${params}`)
   },
-  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, finalsOnly } = {}) => {
+  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, finalsOnly, captainOnly } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -507,9 +509,10 @@ export const api = {
     if (minOvers != null) params.set('min_overs', minOvers)
     if (minWickets != null) params.set('min_wickets', minWickets)
     if (finalsOnly) params.set('finals_only', 'true')
+    if (captainOnly) params.set('captain_only', 'true')
     return request(`/leaderboard/bowling?${params}`)
   },
-  fieldingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, finalsOnly } = {}) => {
+  fieldingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, finalsOnly, captainOnly } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -517,14 +520,17 @@ export const api = {
     if (sortBy) params.set('sort_by', sortBy)
     if (limit) params.set('limit', limit)
     if (finalsOnly) params.set('finals_only', 'true')
+    if (captainOnly) params.set('captain_only', 'true')
     return request(`/leaderboard/fielding?${params}`)
   },
-  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, limit } = {}) => {
+  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, captainOnly, limit } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeName) params.set('grade_name', gradeName)
     if (finalsOnly) params.set('finals_only', 'true')
+    if (captainOnly) params.set('captain_only', 'true')
     if (limit) params.set('limit', limit)
     return request(`/leaderboard/sirs/${type}?${params}`)
   },
+  getPlayerCaptainStats: (playerId) => request(`/players/${playerId}/captain-stats`),
 }
