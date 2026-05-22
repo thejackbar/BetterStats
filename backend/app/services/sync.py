@@ -762,7 +762,9 @@ def _parse_bowler_and_fielder(dismissal_text: str, dismissal_type: str) -> tuple
       "b J Birbeck"            -> same as above
       "c: A Dillon b: J Birbeck" -> bowler="J Birbeck", fielder="A Dillon", method="caught"
       "c & b: J Birbeck"       -> bowler="J Birbeck", fielder=None,     method="caught and bowled"
+      "c&b J Birbeck"          -> same (no spaces)
       "c and b J Birbeck"      -> same as above
+      "c J Birbeck b J Birbeck" -> reclassified to "caught and bowled" (same-name form)
       "lbw b: J Birbeck"       -> bowler="J Birbeck", fielder=None,     method="lbw"
       "lbw: J Birbeck"         -> bowler="J Birbeck", fielder=None,     method="lbw"
       "st †Smith b: J Birbeck" -> bowler="J Birbeck", fielder="Smith",  method="stumped"
@@ -771,12 +773,21 @@ def _parse_bowler_and_fielder(dismissal_text: str, dismissal_type: str) -> tuple
     if not dismissal_text:
         return None, None, ""
     text = dismissal_text.strip()
+    dt = (dismissal_type or "").strip()
+
+    # Caught-and-bowled is detected FIRST because the spaceless form "c&b"
+    # has no whitespace before the "b" marker, so the general bowler-tail
+    # extractor below would fail. Extract the bowler directly from the tail.
+    if dt == "Caught":
+        cb_match = re.match(r'^c\s*(?:&|and)\s*b:?\s*', text)
+        if cb_match:
+            bowler_name = text[cb_match.end():].strip() or None
+            return bowler_name, None, "caught and bowled"
 
     # Bowler = everything after the LAST lowercase "b"/"b:" marker.
     matches = list(_BOWLER_MARKER_RE.finditer(text))
     bowler_name = text[matches[-1].end():].strip() if matches else None
 
-    dt = (dismissal_type or "").strip()
     if dt == "Bowled":
         return bowler_name, None, "bowled"
     if dt == "LBW":
@@ -792,10 +803,12 @@ def _parse_bowler_and_fielder(dismissal_text: str, dismissal_type: str) -> tuple
         fielder = m.group(1).strip().lstrip("†").strip() if m else None
         return bowler_name, fielder, "stumped"
     if dt == "Caught":
-        if _CB_RE.match(text):
-            return bowler_name, None, "caught and bowled"
         m = _CAUGHT_FIELDER_RE.match(text)
         fielder = m.group(1).strip().lstrip("†").strip() if m else None
+        # CA sometimes writes c&b as "c X b X" with the same name in both
+        # slots instead of using the "c & b" shorthand. Reclassify these.
+        if fielder and bowler_name and fielder == bowler_name:
+            return bowler_name, None, "caught and bowled"
         return bowler_name, fielder, "caught"
     return bowler_name, None, ""
 
