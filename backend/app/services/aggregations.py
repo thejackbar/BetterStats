@@ -1790,3 +1790,158 @@ async def get_player_rankings(
         "wickets_rank": row["wickets_rank"],
         "catches_rank": row["catches_rank"],
     }
+
+
+def _sirs_base_clauses(org_id, season_id, grade_name, finals_only, params):
+    """Return (season_clause, finals_clause, grade_clause) strings and mutate params."""
+    season_clause = ""
+    if season_id:
+        params["season_id"] = season_id
+        season_clause = " AND s.id = CAST(:season_id AS UUID)"
+    finals_clause = " AND g.is_final = TRUE" if finals_only else ""
+    grade_clause = ""
+    if grade_name:
+        params["grade_name"] = grade_name
+        grade_clause = f" AND {_GRADE_MATCH}"
+    return season_clause, finals_clause, grade_clause
+
+
+def _sirs_stringify(rows):
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["player_id"] = str(d["player_id"])
+        if d.get("performances") is None:
+            d["performances"] = []
+        out.append(d)
+    return out
+
+
+async def get_sirs_batting(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str] = None,
+    grade_name: Optional[str] = None,
+    finals_only: Optional[bool] = None,
+    limit: int = 200,
+) -> list[dict]:
+    params: dict = {"org_id": org_id, "limit": limit}
+    season_clause, finals_clause, grade_clause = _sirs_base_clauses(org_id, season_id, grade_name, finals_only, params)
+    result = await session.execute(text(f"""
+        SELECT
+            p.id AS player_id,
+            COALESCE(p.display_name_override, p.name) AS name,
+            COUNT(*) AS century_count,
+            json_agg(json_build_object(
+                'runs', bi.runs,
+                'not_out', bi.not_out,
+                'game_id', g.id,
+                'grade', COALESCE(gr.display_name_override, gr.name),
+                'season', s.name,
+                'date', g.played_at
+            ) ORDER BY bi.runs DESC) AS performances
+        FROM batting_innings bi
+        JOIN games g ON g.id = bi.game_id
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        JOIN players p ON p.id = bi.player_id
+        WHERE p.organisation_id = CAST(:org_id AS UUID)
+          AND s.organisation_id = CAST(:org_id AS UUID)
+          AND bi.runs >= 100
+          AND NOT COALESCE(bi.did_not_bat, FALSE)
+          AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){season_clause}{finals_clause}{grade_clause}
+        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+        ORDER BY century_count DESC NULLS LAST
+        LIMIT :limit
+    """), params)
+    return _sirs_stringify(result.mappings())
+
+
+async def get_sirs_bowling_innings(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str] = None,
+    grade_name: Optional[str] = None,
+    finals_only: Optional[bool] = None,
+    limit: int = 200,
+) -> list[dict]:
+    params: dict = {"org_id": org_id, "limit": limit}
+    season_clause, finals_clause, grade_clause = _sirs_base_clauses(org_id, season_id, grade_name, finals_only, params)
+    result = await session.execute(text(f"""
+        SELECT
+            p.id AS player_id,
+            COALESCE(p.display_name_override, p.name) AS name,
+            COUNT(*) AS haul_count,
+            json_agg(json_build_object(
+                'wickets', bs.wickets,
+                'runs', bs.runs,
+                'overs', bs.overs,
+                'game_id', g.id,
+                'grade', COALESCE(gr.display_name_override, gr.name),
+                'season', s.name,
+                'date', g.played_at
+            ) ORDER BY bs.wickets DESC, bs.runs ASC) AS performances
+        FROM bowling_spells bs
+        JOIN games g ON g.id = bs.game_id
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        JOIN players p ON p.id = bs.player_id
+        WHERE p.organisation_id = CAST(:org_id AS UUID)
+          AND s.organisation_id = CAST(:org_id AS UUID)
+          AND bs.wickets >= 7{season_clause}{finals_clause}{grade_clause}
+        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+        ORDER BY haul_count DESC NULLS LAST
+        LIMIT :limit
+    """), params)
+    return _sirs_stringify(result.mappings())
+
+
+async def get_sirs_bowling_match(
+    session: AsyncSession,
+    org_id: str,
+    season_id: Optional[str] = None,
+    grade_name: Optional[str] = None,
+    finals_only: Optional[bool] = None,
+    limit: int = 200,
+) -> list[dict]:
+    params: dict = {"org_id": org_id, "limit": limit}
+    season_clause, finals_clause, grade_clause = _sirs_base_clauses(org_id, season_id, grade_name, finals_only, params)
+    result = await session.execute(text(f"""
+        WITH match_totals AS (
+            SELECT
+                bs.player_id,
+                bs.game_id,
+                SUM(bs.wickets) AS total_wickets,
+                SUM(bs.runs)    AS total_runs
+            FROM bowling_spells bs
+            JOIN games g ON g.id = bs.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            JOIN players p ON p.id = bs.player_id
+            WHERE p.organisation_id = CAST(:org_id AS UUID)
+              AND s.organisation_id = CAST(:org_id AS UUID){season_clause}{finals_clause}{grade_clause}
+            GROUP BY bs.player_id, bs.game_id
+            HAVING SUM(bs.wickets) >= 10
+        )
+        SELECT
+            p.id AS player_id,
+            COALESCE(p.display_name_override, p.name) AS name,
+            COUNT(*) AS haul_count,
+            json_agg(json_build_object(
+                'wickets', mt.total_wickets,
+                'runs', mt.total_runs,
+                'game_id', g.id,
+                'grade', COALESCE(gr.display_name_override, gr.name),
+                'season', s.name,
+                'date', g.played_at
+            ) ORDER BY mt.total_wickets DESC, mt.total_runs ASC) AS performances
+        FROM match_totals mt
+        JOIN players p ON p.id = mt.player_id
+        JOIN games g ON g.id = mt.game_id
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+        ORDER BY haul_count DESC NULLS LAST
+        LIMIT :limit
+    """), params)
+    return _sirs_stringify(result.mappings())

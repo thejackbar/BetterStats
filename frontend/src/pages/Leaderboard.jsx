@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useClubData } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
@@ -42,7 +42,111 @@ const MAIN_TABS = [
   { key: 'batting',  label: 'BATTING' },
   { key: 'bowling',  label: 'BOWLING' },
   { key: 'fielding', label: 'FIELDING' },
+  { key: 'sirs',     label: 'SIRS' },
 ]
+
+const SIRS_TABS = [
+  { key: 'centuries',      label: 'CENTURIES',    countKey: 'century_count', threshold: '100+ runs' },
+  { key: 'bowling-innings', label: '7-FORS',       countKey: 'haul_count',   threshold: '7+ wickets in an innings' },
+  { key: 'bowling-match',  label: '10-WKT MATCH', countKey: 'haul_count',   threshold: '10+ wickets in a match' },
+]
+
+function formatSirsDate(dateStr) {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr + 'T00:00:00')
+  return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: '2-digit' })
+}
+
+function SirsTable({ rows, sirsType, fmt = n => n }) {
+  const [expanded, setExpanded] = useState(new Set())
+  const tab = SIRS_TABS.find(t => t.key === sirsType)
+  const countKey = tab?.countKey || 'century_count'
+  const isBatting = sirsType === 'centuries'
+
+  const toggle = id => setExpanded(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id) else next.add(id)
+    return next
+  })
+
+  return (
+    <Card pad="p-0">
+      <div className="overflow-x-auto pb-scroll">
+        <table className="w-full min-w-[460px] text-[14px]">
+          <thead>
+            <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+              <th className="font-medium py-3 pl-5 w-10">#</th>
+              <th className="font-medium py-3">PLAYER</th>
+              <th className="font-medium py-3 text-right pr-3" style={{ color: 'var(--pb-accent)' }}>
+                {tab?.label || 'COUNT'}
+              </th>
+              <th className="py-3 pr-4 w-8" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p, i) => (
+              <Fragment key={p.player_id}>
+                <tr
+                  className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2 cursor-pointer`}
+                  onClick={() => toggle(p.player_id)}
+                >
+                  <td className="py-3 pl-5 font-mono text-pb-faint">{String(i + 1).padStart(2, '0')}</td>
+                  <td className="py-3">
+                    <Link
+                      to={`/players/${p.player_id}`}
+                      className="text-pb-text font-semibold hover:text-pb-accent"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {fmt(p.name)}
+                    </Link>
+                  </td>
+                  <td className="py-3 pr-3 text-right">
+                    <span className="font-mono text-[15px] font-bold" style={{ color: 'var(--pb-accent)' }}>
+                      {p[countKey] ?? '—'}
+                    </span>
+                  </td>
+                  <td className="py-3 pr-4 text-right font-mono text-pb-faint text-[10px]">
+                    {expanded.has(p.player_id) ? '▲' : '▼'}
+                  </td>
+                </tr>
+                {expanded.has(p.player_id) && (
+                  <tr>
+                    <td colSpan={4} className="pb-4 px-5 bg-pb-surface2/20">
+                      <table className="w-full text-[12px] font-mono">
+                        <thead>
+                          <tr className="text-pb-faint text-[10px] tracking-wide3">
+                            <th className="py-1.5 text-right pr-5 w-16">{isBatting ? 'RUNS' : 'FIGURES'}</th>
+                            <th className="py-1.5 text-left pr-4">GRADE</th>
+                            <th className="py-1.5 text-left pr-4">SEASON</th>
+                            <th className="py-1.5 text-left">DATE</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(p.performances || []).map((perf, j) => (
+                            <tr key={j} className={j ? 'pb-hairline-t' : ''}>
+                              <td className="py-1 pr-5 text-right font-bold" style={{ color: 'var(--pb-accent)' }}>
+                                {isBatting
+                                  ? `${perf.runs}${perf.not_out ? '*' : ''}`
+                                  : `${perf.wickets}/${perf.runs}`}
+                              </td>
+                              <td className="py-1 pr-4 text-pb-dim">{perf.grade || '—'}</td>
+                              <td className="py-1 pr-4 text-pb-dim">{perf.season || '—'}</td>
+                              <td className="py-1 text-pb-dim">{formatSirsDate(perf.date)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  )
+}
 
 function MinFilterInput({ label, value, onChange }) {
   return (
@@ -275,6 +379,12 @@ export default function Leaderboard() {
   const [fieldingRows, setFieldingRows] = useState([])
   const [loading, setLoading] = useState(true)
 
+  const [sirsTab, setSirsTab] = useState('centuries')
+  const [centuriesRows, setCenturiesRows] = useState([])
+  const [bowlingInningsRows, setBowlingInningsRows] = useState([])
+  const [bowlingMatchRows, setBowlingMatchRows] = useState([])
+  const [sirsLoading, setSirsLoading] = useState(false)
+
   useEffect(() => {
     if (!orgId) return
     api.getOrgGrades(orgId, selectedSeason)
@@ -302,6 +412,20 @@ export default function Leaderboard() {
       if (f.status === 'fulfilled') setFieldingRows(f.value)
     }).finally(() => setLoading(false))
   }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, finalsOnly])
+
+  useEffect(() => {
+    if (!orgId || mainTab !== 'sirs') return
+    setSirsLoading(true)
+    Promise.allSettled([
+      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly }),
+      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly }),
+      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly }),
+    ]).then(([sc, sbi, sbm]) => {
+      if (sc.status === 'fulfilled') setCenturiesRows(sc.value)
+      if (sbi.status === 'fulfilled') setBowlingInningsRows(sbi.value)
+      if (sbm.status === 'fulfilled') setBowlingMatchRows(sbm.value)
+    }).finally(() => setSirsLoading(false))
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, mainTab])
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
@@ -390,9 +514,16 @@ export default function Leaderboard() {
             ))}
           </div>
         )}
+        {mainTab === 'sirs' && (
+          <div className="flex flex-wrap gap-1 mb-4 pb-hairline-b">
+            {SIRS_TABS.map(t => (
+              <SortBtn key={t.key} label={t.label} active={sirsTab === t.key} onClick={() => setSirsTab(t.key)} />
+            ))}
+          </div>
+        )}
 
         {/* Table */}
-        {loading ? <PbSpinner /> : (
+        {mainTab !== 'sirs' && (loading ? <PbSpinner /> : (
           <>
             {mainTab === 'batting' && (
               battingRows.length === 0
@@ -410,6 +541,22 @@ export default function Leaderboard() {
                 : <FieldingTable rows={fieldingRows} sortBy={fieldingSort} fmt={fmt} />
             )}
           </>
+        ))}
+        {mainTab === 'sirs' && (
+          sirsLoading ? <PbSpinner /> : (() => {
+            const sirsRows = sirsTab === 'centuries' ? centuriesRows : sirsTab === 'bowling-innings' ? bowlingInningsRows : bowlingMatchRows
+            const threshold = SIRS_TABS.find(t => t.key === sirsTab)?.threshold
+            return sirsRows.length === 0
+              ? <p className="text-pb-faint text-sm py-8 text-center">No data yet.</p>
+              : (
+                <>
+                  {threshold && (
+                    <p className="text-pb-faint font-mono text-[10px] tracking-wide3 uppercase mb-3">{threshold} — click a row to expand</p>
+                  )}
+                  <SirsTable rows={sirsRows} sirsType={sirsTab} fmt={fmt} />
+                </>
+              )
+          })()
         )}
       </main>
     </div>

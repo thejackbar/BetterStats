@@ -7,6 +7,7 @@ from app.models.db import get_db
 from app.services.aggregations import (
     get_batting_leaderboard, get_bowling_leaderboard, get_fielding_leaderboard,
     get_batting_leaderboard_extended, get_bowling_leaderboard_extended,
+    get_sirs_batting, get_sirs_bowling_innings, get_sirs_bowling_match,
 )
 
 router = APIRouter(prefix="/leaderboard", tags=["leaderboard"])
@@ -62,3 +63,39 @@ async def fielding_leaderboard(
 ):
     rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit, grade_name, finals_only=finals_only)
     return _stringify(rows)
+
+
+@router.get("/sirs/batting")
+async def sirs_batting(
+    org_id: str,
+    season_id: Optional[str] = Query(None),
+    grade_name: Optional[str] = Query(None),
+    finals_only: Optional[bool] = Query(None),
+    limit: int = Query(200, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_sirs_batting(db, org_id, season_id, grade_name, finals_only, limit)
+
+
+@router.get("/sirs/bowling-innings")
+async def sirs_bowling_innings(
+    org_id: str,
+    season_id: Optional[str] = Query(None),
+    grade_name: Optional[str] = Query(None),
+    finals_only: Optional[bool] = Query(None),
+    limit: int = Query(200, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_sirs_bowling_innings(db, org_id, season_id, grade_name, finals_only, limit)
+
+
+@router.get("/sirs/bowling-match")
+async def sirs_bowling_match(
+    org_id: str,
+    season_id: Optional[str] = Query(None),
+    grade_name: Optional[str] = Query(None),
+    finals_only: Optional[bool] = Query(None),
+    limit: int = Query(200, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_sirs_bowling_match(db, org_id, season_id, grade_name, finals_only, limit)
