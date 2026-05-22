@@ -398,15 +398,17 @@ async def get_bowling_dismissal_breakdown(session: AsyncSession, player_id: str)
 
 
 async def get_bowling_by_batter_position(session: AsyncSession, player_id: str) -> list[dict]:
-    """How many batters at each batting position (1-11) this bowler has dismissed.
+    """How many batters at each batting position (1-13) this bowler has dismissed.
 
     Returns one row per position with a wicket count. Positions with zero
-    wickets are still returned so the chart shows the full 1-11 spread.
+    wickets are still returned so the chart shows the full spread. 12-13
+    cover the rare cases of substitutes / forfeits where CA assigns a higher
+    batting order than the standard 1-11.
     """
     result = await session.execute(
         text("""
             WITH positions AS (
-                SELECT generate_series(1, 11) AS batting_position
+                SELECT generate_series(1, 13) AS batting_position
             )
             SELECT
                 p.batting_position,
