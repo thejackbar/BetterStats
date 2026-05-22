@@ -26,10 +26,17 @@ PLAYER_ID = sys.argv[1] if len(sys.argv) > 1 else "b763a2d6-8c2e-4104-8419-3095e
 SINCE = "2022-09-01"  # start of Summer 2022/23
 
 GR_BASE = "https://grassrootsapiproxy.cricket.com.au/scores"
+# jsconfig=eccn:true is a ServiceStack flag that returns camelCase keys
+# (without it the API returns PascalCase and all dict lookups fail)
+_GR_PARAMS = "jsconfig=eccn%3Atrue"
 
 
 def fetch_json(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "BetterStats/1.0"})
+    sep = "&" if "?" in url else "?"
+    req = urllib.request.Request(
+        f"{url}{sep}{_GR_PARAMS}",
+        headers={"User-Agent": "BetterStats/1.0"},
+    )
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             if r.status == 204:
