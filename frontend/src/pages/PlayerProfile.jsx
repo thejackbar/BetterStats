@@ -711,11 +711,11 @@ const ANALYSIS_SUBTABS = [
   { key: 'team',     label: 'TEAM' },
 ]
 
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null }) {
+function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null }) {
   const [subTab, setSubTab] = useState('batting')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
-  const hasBowlingData = bowlingByGrade?.length || seasonStats?.some(s => (s.total_wickets ?? 0) > 0)
+  const hasBowlingData = bowlingByGrade?.length || bowlingDismissals?.length || bowlingByBatterPosition?.some(p => (p.wickets ?? 0) > 0) || seasonStats?.some(s => (s.total_wickets ?? 0) > 0)
 
   return (
     <div className="space-y-6">
@@ -908,6 +908,29 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                   <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
                   <Tooltip {...CHART_TOOLTIP_STYLE} />
                   <Bar dataKey="total_wickets" name="Wickets" fill="var(--pb-chart-wickets, #3b82f6)" radius={[3,3,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+          )}
+
+          {/* How I take wickets — bowler-method-of-dismissal donut */}
+          {bowlingDismissals?.length > 0 && (
+            <Card title="HOW I TAKE WICKETS">
+              <DismissalDonut dismissals={bowlingDismissals} />
+            </Card>
+          )}
+
+          {/* Wickets by batter's batting position 1-11 */}
+          {bowlingByBatterPosition?.some(p => (p.wickets ?? 0) > 0) && (
+            <Card title="WICKETS BY BATTING POSITION DISMISSED">
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">The batting position of the batters you've dismissed — are most of your wickets openers or tail-enders?</p>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={bowlingByBatterPosition} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
+                  <XAxis dataKey="batting_position" tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} tickFormatter={(v) => `#${v}`} />
+                  <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip {...CHART_TOOLTIP_STYLE} labelFormatter={(v) => `Position #${v}`} formatter={(v) => [v, 'Wickets']} />
+                  <Bar dataKey="wickets" name="Wickets" fill="var(--pb-chart-wickets, #3b82f6)" radius={[3,3,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
@@ -1445,6 +1468,8 @@ export default function PlayerProfile() {
   const [byGrade, setByGrade] = useState([])
   const [byPosition, setByPosition] = useState([])
   const [bowlingByGrade, setBowlingByGrade] = useState([])
+  const [bowlingDismissals, setBowlingDismissals] = useState([])
+  const [bowlingByBatterPosition, setBowlingByBatterPosition] = useState([])
   const [teamBreakdown, setTeamBreakdown] = useState({ rows: [], unattributed: 0, total_aggregate_matches: 0 })
   const [tab, setTab] = useState('batting')
 
@@ -1500,12 +1525,16 @@ export default function PlayerProfile() {
       api.getPlayerByGrade(playerId),
       api.getPlayerByPosition(playerId),
       api.getPlayerBowlingByGrade(playerId),
-    ]).then(([p, d, g, pos, bg]) => {
+      api.getPlayerBowlingDismissals(playerId),
+      api.getPlayerBowlingByBatterPosition(playerId),
+    ]).then(([p, d, g, pos, bg, bd, bbp]) => {
       if (p.status === 'fulfilled') setPartnerships(p.value)
       if (d.status === 'fulfilled') setDismissals(d.value)
       if (g.status === 'fulfilled') setByGrade(g.value)
       if (pos.status === 'fulfilled') setByPosition(pos.value)
       if (bg.status === 'fulfilled') setBowlingByGrade(bg.value)
+      if (bd.status === 'fulfilled') setBowlingDismissals(bd.value)
+      if (bbp.status === 'fulfilled') setBowlingByBatterPosition(bbp.value)
     })
   }, [playerId, data?.player])
 
@@ -1730,7 +1759,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
       </main>

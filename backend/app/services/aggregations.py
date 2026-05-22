@@ -375,6 +375,54 @@ async def get_dismissal_breakdown(session: AsyncSession, player_id: str) -> list
     return [dict(r) for r in result.mappings()]
 
 
+async def get_bowling_dismissal_breakdown(session: AsyncSession, player_id: str) -> list[dict]:
+    """Breakdown of HOW this bowler dismisses batters (bowled/caught/lbw/etc).
+
+    Counts bowler_wickets rows where bowler_id = player. caught-and-bowled is
+    its own slice. Excludes non-credit dismissal types (run-outs etc.) — they
+    aren't recorded in bowler_wickets in the first place.
+    """
+    result = await session.execute(
+        text("""
+            SELECT
+                COALESCE(bw.dismissal_type, 'unknown') AS dismissal_type,
+                COUNT(*) AS count
+            FROM bowler_wickets bw
+            WHERE bw.bowler_id = :pid
+            GROUP BY 1
+            ORDER BY COUNT(*) DESC
+        """),
+        {"pid": player_id},
+    )
+    return [dict(r) for r in result.mappings()]
+
+
+async def get_bowling_by_batter_position(session: AsyncSession, player_id: str) -> list[dict]:
+    """How many batters at each batting position (1-11) this bowler has dismissed.
+
+    Returns one row per position with a wicket count. Positions with zero
+    wickets are still returned so the chart shows the full 1-11 spread.
+    """
+    result = await session.execute(
+        text("""
+            WITH positions AS (
+                SELECT generate_series(1, 11) AS batting_position
+            )
+            SELECT
+                p.batting_position,
+                COALESCE(COUNT(bw.id), 0) AS wickets
+            FROM positions p
+            LEFT JOIN bowler_wickets bw
+              ON bw.batter_position = p.batting_position
+             AND bw.bowler_id = :pid
+            GROUP BY p.batting_position
+            ORDER BY p.batting_position
+        """),
+        {"pid": player_id},
+    )
+    return [dict(r) for r in result.mappings()]
+
+
 async def get_batting_by_position(session: AsyncSession, player_id: str) -> list[dict]:
     result = await session.execute(
         text("""

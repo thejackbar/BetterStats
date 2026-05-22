@@ -10,6 +10,7 @@ from sqlalchemy.sql import func
 from app.models.db import (
     Organisation, Season, Grade, Game, Player,
     BattingInnings, BowlingSpell, FieldingStat, FallOfWicket, Partnership, GameAppearance,
+    BowlerWicket,
     PlayerSeasonStats, PlayerSeasonGradeStats, Milestone, PhqIdSuggestion,
     SyncRun, async_session_maker
 )
@@ -732,6 +733,68 @@ _GR_DISMISSAL_SHORT = {
 _NON_WICKET_DT = {"absent", "did not bat", "dnb", "retired hurt", "retired not out"}
 
 
+# Bowler-credit dismissal types from CA's `dismissalType` field.
+# Run-outs, retirements, obstructions etc. don't credit the bowler.
+_BOWLER_CREDIT_DT = {"Caught", "Bowled", "LBW", "Stumped", "Hit Wicket"}
+
+
+def _parse_bowler_and_fielder(dismissal_text: str, dismissal_type: str) -> tuple[str | None, str | None, str]:
+    """Parse GR `dismissalText` to extract bowler name, fielder name, and a
+    canonical short dismissal method.
+
+    Formats (confirmed via /scorecard/gr-debug):
+      "b W Dagg"               -> bowler="W Dagg", fielder=None,    method="bowled"
+      "c S Aplin b W Dagg"     -> bowler="W Dagg", fielder="S Aplin", method="caught"
+      "c & b W Dagg"           -> bowler="W Dagg", fielder=None,    method="caught and bowled"
+      "c and b W Dagg"         -> same as above
+      "lbw b W Dagg"           -> bowler="W Dagg", fielder=None,    method="lbw"
+      "st †Smith b W Dagg"     -> bowler="W Dagg", fielder="Smith",  method="stumped"
+      "hit wicket b W Dagg"    -> bowler="W Dagg", fielder=None,    method="hit wicket"
+
+    Returns (bowler_name, fielder_name, method) — names trimmed, †/leading
+    punctuation removed. None when the relevant piece can't be parsed.
+    """
+    if not dismissal_text:
+        return None, None, ""
+    text = dismissal_text.strip()
+
+    # Bowler: everything after the final " b " or leading "b " (the bowled prefix).
+    bowler_name = None
+    if " b " in text:
+        bowler_name = text.rsplit(" b ", 1)[1].strip()
+    elif text.startswith("b "):
+        bowler_name = text[2:].strip()
+
+    # Method + fielder by dismissalType.
+    dt = (dismissal_type or "").strip()
+    if dt == "Bowled":
+        return bowler_name, None, "bowled"
+    if dt == "LBW":
+        return bowler_name, None, "lbw"
+    if dt == "Hit Wicket":
+        return bowler_name, None, "hit wicket"
+    if dt == "Stumped":
+        m = None
+        if text.startswith("st "):
+            tail = text[3:]
+            if " b " in tail:
+                m = tail.rsplit(" b ", 1)[0].strip()
+        fielder = m.lstrip("†").strip() if m else None
+        return bowler_name, fielder, "stumped"
+    if dt == "Caught":
+        # Caught-and-bowled: no separate fielder, method is its own slice.
+        if text.startswith("c & b ") or text.startswith("c and b "):
+            return bowler_name, None, "caught and bowled"
+        m = None
+        if text.startswith("c "):
+            tail = text[2:]
+            if " b " in tail:
+                m = tail.rsplit(" b ", 1)[0].strip()
+        fielder = m.lstrip("†").strip() if m else None
+        return bowler_name, fielder, "caught"
+    return bowler_name, None, ""
+
+
 def _count_dismissals_grassroots(batting_rows: list) -> int:
     """Number of wickets that actually fell in this innings."""
     return len(_dismissed_pids_grassroots(batting_rows))
@@ -1037,6 +1100,16 @@ async def sync_grassroots_game_level_data(
                 # teams array (which has no isHome field at all). Bug from
                 # initial version: was reading from teams_data and getting
                 # empty home_team on every game.
+                # Roster pid -> short name (covers both teams; used for bowler
+                # and fielder name resolution when parsing dismissalText).
+                pid_to_short_name: dict[str, str] = {}
+                for _team in teams_data:
+                    for _pl in ((_team.get("players") or []) + (_team.get("nonPlayingMembers") or [])):
+                        _pid = _pl.get("participantId") or _pl.get("id")
+                        _name = _pl.get("playerShortName") or _pl.get("displayName") or _pl.get("name")
+                        if _pid and _name:
+                            pid_to_short_name[_pid] = _name
+
                 summary_teams = (scorecard.get("matchSummary") or {}).get("teams") or []
                 home_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "")
                 away_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "")
@@ -1235,6 +1308,71 @@ async def sync_grassroots_game_level_data(
                             player_id=pid,
                         ))
                         fow_count += 1
+
+                    # Bowler wickets: emit one row per bowler-credit dismissal where
+                    # the bowler is one of our players. Resolves bowler/fielder
+                    # short names against this innings' bowling/fielding rosters,
+                    # then against the full match roster as a fallback.
+                    bowl_name_to_pid: dict[str, str] = {}
+                    for _row in bowling_rows:
+                        _pid_s = _row.get("participantId")
+                        if not _pid_s:
+                            continue
+                        _name = _row.get("playerShortName") or pid_to_short_name.get(_pid_s)
+                        if _name:
+                            bowl_name_to_pid.setdefault(_name, _pid_s)
+                    field_name_to_pid: dict[str, str] = {}
+                    for _row in fielding_rows:
+                        _pid_s = _row.get("participantId")
+                        if not _pid_s:
+                            continue
+                        _name = _row.get("playerShortName") or pid_to_short_name.get(_pid_s)
+                        if _name:
+                            field_name_to_pid.setdefault(_name, _pid_s)
+                    # Stumpers are fielders (the keeper) but may not appear in
+                    # fielding_rows if their only contribution was a stumping;
+                    # the bowling-side roster covers them too via pid_to_short_name.
+                    for _row in bowling_rows:
+                        _pid_s = _row.get("participantId")
+                        _name = _row.get("playerShortName") or pid_to_short_name.get(_pid_s) if _pid_s else None
+                        if _name and _name not in field_name_to_pid:
+                            field_name_to_pid[_name] = _pid_s
+
+                    def _resolve_our_pid(name_to_pid: dict, name: str | None) -> uuid.UUID | None:
+                        if not name:
+                            return None
+                        pid_str = name_to_pid.get(name)
+                        if not pid_str:
+                            return None
+                        try:
+                            p = uuid.UUID(pid_str)
+                        except ValueError:
+                            return None
+                        if p in known_player_ids:
+                            return p
+                        p2 = merged_away.get(p)
+                        if p2 is not None and p2 in known_player_ids:
+                            return p2
+                        return None
+
+                    for row in batting_rows:
+                        dt_long = row.get("dismissalType") or ""
+                        if dt_long not in _BOWLER_CREDIT_DT:
+                            continue
+                        d_text = row.get("dismissalText") or ""
+                        bowler_name, fielder_name, method = _parse_bowler_and_fielder(d_text, dt_long)
+                        bowler_pid = _resolve_our_pid(bowl_name_to_pid, bowler_name)
+                        if bowler_pid is None:
+                            continue  # opposition bowler — nothing to record from our perspective
+                        fielder_pid = _resolve_our_pid(field_name_to_pid, fielder_name) if fielder_name else None
+                        session.add(BowlerWicket(
+                            game_id=match_uuid, innings_number=inn_num,
+                            bowler_id=bowler_pid,
+                            fielder_id=fielder_pid,
+                            batter_name=row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or ""),
+                            batter_position=row.get("batOrder"),
+                            dismissal_type=method or None,
+                        ))
 
                     # Classify the innings: club batting or opposition? Prefer
                     # the authoritative batting-team id when the payload carries
