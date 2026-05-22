@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { PbSpinner, Btn } from '../../lib/presskit'
+import ImageEditorModal from '../../components/ImageEditorModal'
 
 const AWARD_PRESETS = [
   'Best & Fairest', 'Best Batter', 'Best Bowler', 'Best Fieldsman',
@@ -22,10 +23,16 @@ function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
   const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState(null)
   const [collapsed, setCollapsed] = useState(false)
+  const [editorSource, setEditorSource] = useState(null)
 
-  const handleFile = async (e) => {
+  const handleFile = (e) => {
     const file = e.target.files?.[0]
-    if (!file) return
+    e.target.value = ''
+    if (file) setEditorSource(file)
+  }
+
+  const uploadFile = async (file) => {
+    setEditorSource(null)
     setUploading(true)
     setErr(null)
     const fd = new FormData()
@@ -37,7 +44,6 @@ function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
       setErr(ex.message)
     } finally {
       setUploading(false)
-      e.target.value = ''
     }
   }
 
@@ -74,6 +80,9 @@ function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
                 <Btn onClick={() => inputRef.current?.click()} disabled={uploading}>
                   {uploading ? 'Uploading…' : 'Replace'}
                 </Btn>
+                <Btn onClick={() => setEditorSource(`/uploads/${heroPath}`)} disabled={uploading}>
+                  Edit
+                </Btn>
                 <button
                   onClick={handleClear}
                   className="px-3 py-1.5 text-[12px] font-mono text-red-400/60 hover:text-red-400 transition"
@@ -96,6 +105,17 @@ function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
           {err && <p className="text-[11px] text-red-400/80 mt-2">{err}</p>}
         </>
       )}
+      <ImageEditorModal
+        open={!!editorSource}
+        source={editorSource}
+        title="Edit Hero Image"
+        aspect={null}
+        outputType="image/jpeg"
+        outputName="hero.jpg"
+        allowBackgroundRemoval={false}
+        onCancel={() => setEditorSource(null)}
+        onApply={uploadFile}
+      />
     </div>
   )
 }
@@ -106,28 +126,33 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
   const [deleting, setDeleting] = useState(null)
   const [err, setErr] = useState(null)
   const [collapsed, setCollapsed] = useState(false)
+  const [editorQueue, setEditorQueue] = useState([])
 
   const galleryImages = images.filter(i => i.image_type === 'gallery')
 
-  const handleFile = async (e) => {
+  const handleFile = (e) => {
     const files = Array.from(e.target.files || [])
+    e.target.value = ''
     if (!files.length) return
+    setEditorQueue(files)
+  }
+
+  const uploadOne = async (file) => {
     setUploading(true)
     setErr(null)
     try {
-      for (const file of files) {
-        const fd = new FormData()
-        fd.append('file', file)
-        await api.uploadYearbookGallery(orgId, seasonId, fd)
-      }
+      const fd = new FormData()
+      fd.append('file', file)
+      await api.uploadYearbookGallery(orgId, seasonId, fd)
       onRefresh()
     } catch (ex) {
       setErr(ex.message)
     } finally {
       setUploading(false)
-      e.target.value = ''
     }
   }
+
+  const advanceQueue = () => setEditorQueue(q => q.slice(1))
 
   const handleDelete = async (img) => {
     setDeleting(img.id)
@@ -183,6 +208,20 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
           {err && <p className="text-[11px] text-red-400/80 mt-1">{err}</p>}
         </>
       )}
+      <ImageEditorModal
+        open={editorQueue.length > 0}
+        source={editorQueue[0]}
+        title={editorQueue.length > 1 ? `Edit Photo (${editorQueue.length} queued)` : 'Edit Photo'}
+        aspect={null}
+        outputType="image/jpeg"
+        outputName={editorQueue[0]?.name || 'photo.jpg'}
+        allowBackgroundRemoval={false}
+        onCancel={advanceQueue}
+        onApply={async (file) => {
+          advanceQueue()
+          await uploadOne(file)
+        }}
+      />
     </div>
   )
 }

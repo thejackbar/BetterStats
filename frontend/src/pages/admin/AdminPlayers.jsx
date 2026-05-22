@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import ImageEditorModal from '../../components/ImageEditorModal'
 import { nameMatchesSearch, formatPlayerName } from '../../lib/nameFormat'
 
 // ---------------------------------------------------------------------------
@@ -20,6 +21,7 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
   const [msgError, setMsgError] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [photoUrl, setPhotoUrl] = useState(player.photo_url || null)
+  const [editorSource, setEditorSource] = useState(null)
 
   // Close on Escape
   useEffect(() => {
@@ -199,7 +201,7 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
                   className="w-12 h-12 rounded object-cover border pb-hairline"
                 />
               )}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <label
                   className={`font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text cursor-pointer transition-colors ${uploadingPhoto ? 'opacity-50 pointer-events-none' : ''}`}
                 >
@@ -208,21 +210,48 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
                     type="file"
                     accept=".jpg,.jpeg,.png,.webp,.gif"
                     className="hidden"
-                    onChange={e => handlePhotoUpload(e.target.files?.[0])}
+                    onChange={e => {
+                      const f = e.target.files?.[0]
+                      e.target.value = ''
+                      if (f) setEditorSource(f)
+                    }}
                   />
                 </label>
                 {photoUrl && (
-                  <button
-                    onClick={handlePhotoDelete}
-                    disabled={uploadingPhoto}
-                    className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faintest hover:text-pb-red transition-colors disabled:opacity-50"
-                  >
-                    Remove
-                  </button>
+                  <>
+                    <button
+                      onClick={() => setEditorSource(photoUrl)}
+                      disabled={uploadingPhoto}
+                      className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={handlePhotoDelete}
+                      disabled={uploadingPhoto}
+                      className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faintest hover:text-pb-red transition-colors disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </>
                 )}
               </div>
             </div>
           </div>
+
+          <ImageEditorModal
+            open={!!editorSource}
+            source={editorSource}
+            title="Edit Player Photo"
+            aspect={1}
+            outputType="image/png"
+            outputName={`player-${player.id}.png`}
+            onCancel={() => setEditorSource(null)}
+            onApply={async (file) => {
+              setEditorSource(null)
+              await handlePhotoUpload(file)
+            }}
+          />
         </div>
 
         {/* Footer */}
