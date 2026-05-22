@@ -393,13 +393,46 @@ export const api = {
   seedAwardDefinitions: (orgId, template = 'global') =>
     request(`/award-definitions/seed?org_id=${orgId}&template=${template}`, { method: 'POST' }),
 
-  // StatLab
-  statlabQuery: (orgId, { mode = 'career', seasonId, groupBy = 'player', sortBy = 'runs', sortDir = 'desc', limit = 100, filters = [] } = {}) => {
-    const params = new URLSearchParams({ org_id: orgId, mode, group_by: groupBy, sort_by: sortBy, sort_dir: sortDir, limit })
-    if (seasonId) params.set('season_id', seasonId)
+  // StatLab — schema (targets, metrics, context filters, derived queries)
+  statlabSchema: () => request('/statlab/schema'),
+
+  // StatLab — main query
+  statlabQuery: (orgId, {
+    target = 'player_career',
+    sortBy = 'runs',
+    sortDir = 'desc',
+    limit = 100,
+    filters = [],
+    context = {},
+  } = {}) => {
+    const params = new URLSearchParams({ org_id: orgId, target, sort_by: sortBy, sort_dir: sortDir, limit })
     filters.forEach(f => params.append('filters', f))
+    Object.entries(context).forEach(([k, v]) => {
+      if (v === undefined || v === null || v === '' || v === false) return
+      params.set(k, v === true ? 'true' : String(v))
+    })
     return request(`/statlab/query?${params}`)
   },
+
+  // StatLab — derived (streak-style) queries
+  statlabDerived: (orgId, name, { limit = 100, context = {} } = {}) => {
+    const params = new URLSearchParams({ org_id: orgId, limit })
+    Object.entries(context).forEach(([k, v]) => {
+      if (v === undefined || v === null || v === '' || v === false) return
+      params.set(k, v === true ? 'true' : String(v))
+    })
+    return request(`/statlab/derived/${name}?${params}`)
+  },
+
+  // StatLab — saved reports
+  statlabListReports: (orgId) => request(`/statlab/reports?org_id=${orgId}`),
+  statlabGetReport: (slug, orgId) => request(`/statlab/reports/${slug}?org_id=${orgId}`),
+  statlabCreateReport: (data) =>
+    request('/statlab/reports', { method: 'POST', body: JSON.stringify(data) }),
+  statlabPatchReport: (reportId, data) =>
+    request(`/statlab/reports/${reportId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  statlabDeleteReport: (reportId) =>
+    request(`/statlab/reports/${reportId}`, { method: 'DELETE' }),
 
   // Sponsors (public)
   getClubSponsors: (slug) => request(`/clubs/${slug}/sponsors`),

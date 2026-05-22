@@ -7,7 +7,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import NavbarPlayerSearch from "./NavbarPlayerSearch";
 import betterStatsLogo from "../assets/betterstatslogo_white.png";
 
-export const SITE_VERSION = "v6.8.2.1";
+export const SITE_VERSION = "v6.9";
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();

@@ -112,6 +112,7 @@ export default function App() {
         <Route path="/:clubSlug/leaderboard" element={<Leaderboard />} />
         <Route path="/:clubSlug/records" element={<Records />} />
         <Route path="/:clubSlug/statlab" element={<StatLab />} />
+        <Route path="/:clubSlug/statlab/r/:reportSlug" element={<StatLab />} />
         <Route path="/:clubSlug/games" element={<GamesPage />} />
         <Route path="/:clubSlug/yearbook" element={<Yearbook />} />
         <Route path="/:clubSlug/yearbook/:seasonSlug" element={<Yearbook />} />
