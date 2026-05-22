@@ -246,6 +246,19 @@ class FieldingStat(Base):
     player = relationship("Player", back_populates="fielding_stats")
 
 
+class BowlerWicket(Base):
+    __tablename__ = "bowler_wickets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"))
+    innings_number = Column(Integer, nullable=False)
+    bowler_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    fielder_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    batter_name = Column(Text)
+    batter_position = Column(Integer)
+    dismissal_type = Column(Text, nullable=False)
+
+
 class GameAppearance(Base):
     __tablename__ = "game_appearances"
 
