@@ -731,6 +731,105 @@ _GR_DISMISSAL_SHORT = {
 }
 
 
+def extract_bowler_wickets(
+    scorecard: dict,
+    game_uuid: uuid.UUID,
+    known_player_ids: set,
+    merged_away: dict,
+) -> list:
+    """Return a list of BowlerWicket rows to insert from a GR scorecard.
+
+    For each innings, builds short-name → participantId maps from the bowling
+    and fielding rows (with the team-level roster as a fallback for stumpers
+    who didn't appear in fielding_rows), parses dismissalText, and emits one
+    BowlerWicket per credit-dismissal where the bowler resolves to one of
+    our players (directly or via the merge map).
+
+    Pure function — does NOT touch the DB. Caller adds the returned objects
+    to its own session.
+    """
+    out: list = []
+
+    pid_to_short_name: dict[str, str] = {}
+    for team in (scorecard.get("teams") or []):
+        for pl in ((team.get("players") or []) + (team.get("nonPlayingMembers") or [])):
+            pid = pl.get("participantId") or pl.get("id")
+            name = pl.get("playerShortName") or pl.get("displayName") or pl.get("name")
+            if pid and name:
+                pid_to_short_name[pid] = name
+
+    def _resolve(name_to_pid: dict, name):
+        if not name:
+            return None
+        pid_str = name_to_pid.get(name)
+        if not pid_str:
+            return None
+        try:
+            p = uuid.UUID(pid_str)
+        except ValueError:
+            return None
+        if p in known_player_ids:
+            return p
+        p2 = merged_away.get(p)
+        if p2 is not None and p2 in known_player_ids:
+            return p2
+        return None
+
+    for inn in (scorecard.get("innings") or []):
+        inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+        batting_rows = inn.get("batting") or []
+        bowling_rows = inn.get("bowling") or []
+        fielding_rows = inn.get("fielding") or []
+
+        bowl_name_to_pid: dict[str, str] = {}
+        for r in bowling_rows:
+            pid_s = r.get("participantId")
+            if not pid_s:
+                continue
+            name = r.get("playerShortName") or pid_to_short_name.get(pid_s)
+            if name:
+                bowl_name_to_pid.setdefault(name, pid_s)
+
+        field_name_to_pid: dict[str, str] = {}
+        for r in fielding_rows:
+            pid_s = r.get("participantId")
+            if not pid_s:
+                continue
+            name = r.get("playerShortName") or pid_to_short_name.get(pid_s)
+            if name:
+                field_name_to_pid.setdefault(name, pid_s)
+        # Stumpers are fielders (the keeper) but may not appear in
+        # fielding_rows if their only contribution was a stumping; the
+        # bowling-side roster covers them too via pid_to_short_name.
+        for r in bowling_rows:
+            pid_s = r.get("participantId")
+            name = r.get("playerShortName") or pid_to_short_name.get(pid_s) if pid_s else None
+            if name and name not in field_name_to_pid:
+                field_name_to_pid[name] = pid_s
+
+        for row in batting_rows:
+            dt_long = row.get("dismissalType") or ""
+            if dt_long not in _BOWLER_CREDIT_DT:
+                continue
+            d_text = row.get("dismissalText") or ""
+            bowler_name, fielder_name, method = _parse_bowler_and_fielder(d_text, dt_long)
+            bowler_pid = _resolve(bowl_name_to_pid, bowler_name)
+            if bowler_pid is None:
+                continue
+            fielder_pid = _resolve(field_name_to_pid, fielder_name) if fielder_name else None
+            out.append(BowlerWicket(
+                game_id=game_uuid,
+                innings_number=inn_num,
+                bowler_id=bowler_pid,
+                fielder_id=fielder_pid,
+                batter_name=row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or ""),
+                batter_position=row.get("batOrder"),
+                dismissal_type=method or None,
+            ))
+
+    return out
+
+
 _NON_WICKET_DT = {"absent", "did not bat", "dnb", "retired hurt", "retired not out"}
 
 
@@ -1327,71 +1426,6 @@ async def sync_grassroots_game_level_data(
                         ))
                         fow_count += 1
 
-                    # Bowler wickets: emit one row per bowler-credit dismissal where
-                    # the bowler is one of our players. Resolves bowler/fielder
-                    # short names against this innings' bowling/fielding rosters,
-                    # then against the full match roster as a fallback.
-                    bowl_name_to_pid: dict[str, str] = {}
-                    for _row in bowling_rows:
-                        _pid_s = _row.get("participantId")
-                        if not _pid_s:
-                            continue
-                        _name = _row.get("playerShortName") or pid_to_short_name.get(_pid_s)
-                        if _name:
-                            bowl_name_to_pid.setdefault(_name, _pid_s)
-                    field_name_to_pid: dict[str, str] = {}
-                    for _row in fielding_rows:
-                        _pid_s = _row.get("participantId")
-                        if not _pid_s:
-                            continue
-                        _name = _row.get("playerShortName") or pid_to_short_name.get(_pid_s)
-                        if _name:
-                            field_name_to_pid.setdefault(_name, _pid_s)
-                    # Stumpers are fielders (the keeper) but may not appear in
-                    # fielding_rows if their only contribution was a stumping;
-                    # the bowling-side roster covers them too via pid_to_short_name.
-                    for _row in bowling_rows:
-                        _pid_s = _row.get("participantId")
-                        _name = _row.get("playerShortName") or pid_to_short_name.get(_pid_s) if _pid_s else None
-                        if _name and _name not in field_name_to_pid:
-                            field_name_to_pid[_name] = _pid_s
-
-                    def _resolve_our_pid(name_to_pid: dict, name: str | None) -> uuid.UUID | None:
-                        if not name:
-                            return None
-                        pid_str = name_to_pid.get(name)
-                        if not pid_str:
-                            return None
-                        try:
-                            p = uuid.UUID(pid_str)
-                        except ValueError:
-                            return None
-                        if p in known_player_ids:
-                            return p
-                        p2 = merged_away.get(p)
-                        if p2 is not None and p2 in known_player_ids:
-                            return p2
-                        return None
-
-                    for row in batting_rows:
-                        dt_long = row.get("dismissalType") or ""
-                        if dt_long not in _BOWLER_CREDIT_DT:
-                            continue
-                        d_text = row.get("dismissalText") or ""
-                        bowler_name, fielder_name, method = _parse_bowler_and_fielder(d_text, dt_long)
-                        bowler_pid = _resolve_our_pid(bowl_name_to_pid, bowler_name)
-                        if bowler_pid is None:
-                            continue  # opposition bowler — nothing to record from our perspective
-                        fielder_pid = _resolve_our_pid(field_name_to_pid, fielder_name) if fielder_name else None
-                        session.add(BowlerWicket(
-                            game_id=match_uuid, innings_number=inn_num,
-                            bowler_id=bowler_pid,
-                            fielder_id=fielder_pid,
-                            batter_name=row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or ""),
-                            batter_position=row.get("batOrder"),
-                            dismissal_type=method or None,
-                        ))
-
                     # Classify the innings: club batting or opposition? Prefer
                     # the authoritative batting-team id when the payload carries
                     # one, else fall back to a roster-majority vote (the club
@@ -1455,6 +1489,13 @@ async def sync_grassroots_game_level_data(
                             is_club_innings=is_club_innings,
                         ))
                         part_count += 1
+
+                # Bowler wickets: emit rows for credit-dismissals attributable
+                # to one of our players. Helper builds short-name → pid maps
+                # from each innings' bowling/fielding rows and resolves through
+                # merged_away. Reused by app.scripts.rebuild_bowler_wickets.
+                for bw in extract_bowler_wickets(scorecard, match_uuid, known_player_ids, merged_away):
+                    session.add(bw)
 
                 if bat_count == 0 and bowl_count == 0 and appear_count == 0:
                     stats["gr_games_skipped_no_data"] += 1
