@@ -145,8 +145,8 @@ def _build_date_filter(start_date: Optional[str], end_date: Optional[str]) -> tu
     if not start_date and not end_date:
         return "", ""
 
-    joins = ("\n    JOIN grades gr ON gr.id = g.grade_id"
-             "\n    JOIN seasons s ON s.id = gr.season_id")
+    joins = ("\n    LEFT JOIN grades gr ON gr.id = g.grade_id"
+             "\n    LEFT JOIN seasons s ON s.id = gr.season_id")
 
     exact_parts = []
     season_parts = ["s.year IS NOT NULL"]
