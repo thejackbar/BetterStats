@@ -671,13 +671,13 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
           </span>
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, top: 230, right: 56, height: 680, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
+      <div style={{ position: 'absolute', left: 56, top: 230, right: 56, height: 370, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
         <div style={{ flexShrink: 0, maxWidth: 320, paddingBottom: 24 }}>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: palette.accent, marginBottom: 14 }}>// 1ST XI</div>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={260} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, color: palette.ink, opacity: 0.85, marginTop: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
         </div>
-        <div style={{ flex: 1, height: 680, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ flex: 1, height: 370, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'visible' }}>
           {(() => {
             const featured = featuredOf(players)
             const hasHead = !!(heroImage || (featured && featured.headshot))
