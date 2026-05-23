@@ -114,6 +114,196 @@ async def get_career_fielding(session: AsyncSession, player_id: str, season_id: 
     return dict(row) if row else None
 
 
+def _build_recent_games_cte(player_id_param: str, n_param: str) -> str:
+    return f"""recent_games AS (
+        SELECT DISTINCT g.id AS game_id
+        FROM (
+            SELECT bi.game_id FROM batting_innings bi WHERE bi.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT bs.game_id FROM bowling_spells bs WHERE bs.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT fs.game_id FROM fielding_stats fs WHERE fs.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:{player_id_param} AS UUID)
+        ) ap
+        JOIN games g ON g.id = ap.game_id
+        ORDER BY g.played_at DESC NULLS LAST
+        LIMIT :{n_param}
+    )"""
+
+
+async def get_career_batting_from_innings(
+    session: AsyncSession,
+    player_id: str,
+    last_n_games: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[dict]:
+    params: dict = {"pid": player_id}
+    ctes = []
+    game_filter = ""
+
+    if last_n_games:
+        params["n"] = last_n_games
+        ctes.append(_build_recent_games_cte("pid", "n"))
+        game_filter = "AND bi.game_id IN (SELECT game_id FROM recent_games)"
+    else:
+        date_parts = []
+        if start_date:
+            date_parts.append("g.played_at >= CAST(:start_date AS DATE)")
+            params["start_date"] = start_date
+        if end_date:
+            date_parts.append("g.played_at <= CAST(:end_date AS DATE)")
+            params["end_date"] = end_date
+        if date_parts:
+            game_filter = "AND " + " AND ".join(date_parts)
+
+    ctes.append(f"""qualifying AS (
+        SELECT bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out, bi.game_id
+        FROM batting_innings bi
+        JOIN games g ON g.id = bi.game_id
+        WHERE bi.player_id = CAST(:pid AS UUID)
+          AND NOT COALESCE(bi.did_not_bat, FALSE)
+          AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+          {game_filter}
+    )""")
+
+    sql = f"""
+        WITH {', '.join(ctes)}
+        SELECT
+            COALESCE(COUNT(*), 0) AS innings,
+            COALESCE(SUM(runs), 0) AS total_runs,
+            MAX(runs) AS high_score,
+            ROUND(SUM(runs)::numeric / NULLIF(COUNT(*) - SUM(not_out::int), 0), 2) AS average,
+            ROUND(SUM(runs)::numeric / NULLIF(SUM(balls), 0) * 100, 2) AS strike_rate,
+            COALESCE(SUM(CASE WHEN runs >= 50 AND runs < 100 THEN 1 ELSE 0 END), 0) AS fifties,
+            COALESCE(SUM(CASE WHEN runs >= 100 THEN 1 ELSE 0 END), 0) AS hundreds,
+            COALESCE(SUM(CASE WHEN runs = 0 AND NOT not_out THEN 1 ELSE 0 END), 0) AS ducks,
+            COALESCE(SUM(fours), 0) AS total_fours,
+            COALESCE(SUM(sixes), 0) AS total_sixes,
+            COUNT(DISTINCT game_id) AS games
+        FROM qualifying
+    """
+    result = await session.execute(text(sql), params)
+    row = result.mappings().first()
+    if not row:
+        return None
+    d = dict(row)
+    d["player_id"] = player_id
+    return d
+
+
+async def get_career_bowling_from_spells(
+    session: AsyncSession,
+    player_id: str,
+    last_n_games: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[dict]:
+    params: dict = {"pid": player_id}
+    ctes = []
+    game_filter = ""
+
+    if last_n_games:
+        params["n"] = last_n_games
+        ctes.append(_build_recent_games_cte("pid", "n"))
+        game_filter = "AND bs.game_id IN (SELECT game_id FROM recent_games)"
+    else:
+        date_parts = []
+        if start_date:
+            date_parts.append("g.played_at >= CAST(:start_date AS DATE)")
+            params["start_date"] = start_date
+        if end_date:
+            date_parts.append("g.played_at <= CAST(:end_date AS DATE)")
+            params["end_date"] = end_date
+        if date_parts:
+            game_filter = "AND " + " AND ".join(date_parts)
+
+    ctes.append(f"""qualifying AS (
+        SELECT bs.wickets, bs.runs, bs.maidens, bs.overs, bs.game_id
+        FROM bowling_spells bs
+        JOIN games g ON g.id = bs.game_id
+        WHERE bs.player_id = CAST(:pid AS UUID)
+          {game_filter}
+    )""")
+
+    sql = f"""
+        WITH {', '.join(ctes)}
+        SELECT
+            COALESCE(SUM(wickets), 0) AS total_wickets,
+            ROUND(SUM(runs)::numeric / NULLIF(SUM(wickets), 0), 2) AS average,
+            ROUND(SUM(runs)::numeric / NULLIF(SUM(overs), 0), 2) AS economy,
+            (SELECT wickets FROM qualifying ORDER BY wickets DESC, runs ASC LIMIT 1) AS best_figures_wickets,
+            (SELECT wickets::text || '/' || runs::text FROM qualifying ORDER BY wickets DESC, runs ASC LIMIT 1) AS best_bowling_figures,
+            COALESCE(SUM(maidens), 0) AS total_maidens,
+            COALESCE(SUM(overs), 0) AS total_overs,
+            COALESCE(SUM(CASE WHEN wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors,
+            COUNT(DISTINCT game_id) AS games,
+            ROUND(SUM(overs)::numeric * 6 / NULLIF(SUM(wickets), 0), 2) AS bowling_strike_rate
+        FROM qualifying
+    """
+    result = await session.execute(text(sql), params)
+    row = result.mappings().first()
+    if not row:
+        return None
+    d = dict(row)
+    d["player_id"] = player_id
+    return d
+
+
+async def get_career_fielding_from_stats(
+    session: AsyncSession,
+    player_id: str,
+    last_n_games: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[dict]:
+    params: dict = {"pid": player_id}
+    ctes = []
+    game_filter = ""
+
+    if last_n_games:
+        params["n"] = last_n_games
+        ctes.append(_build_recent_games_cte("pid", "n"))
+        game_filter = "AND fs.game_id IN (SELECT game_id FROM recent_games)"
+    else:
+        date_parts = []
+        if start_date:
+            date_parts.append("g.played_at >= CAST(:start_date AS DATE)")
+            params["start_date"] = start_date
+        if end_date:
+            date_parts.append("g.played_at <= CAST(:end_date AS DATE)")
+            params["end_date"] = end_date
+        if date_parts:
+            game_filter = "AND " + " AND ".join(date_parts)
+
+    ctes.append(f"""qualifying AS (
+        SELECT fs.catches, fs.run_outs, fs.stumpings, fs.game_id
+        FROM fielding_stats fs
+        JOIN games g ON g.id = fs.game_id
+        WHERE fs.player_id = CAST(:pid AS UUID)
+          {game_filter}
+    )""")
+
+    sql = f"""
+        WITH {', '.join(ctes)}
+        SELECT
+            COALESCE(SUM(catches), 0) AS total_catches,
+            COALESCE(SUM(run_outs), 0) AS total_run_outs,
+            COALESCE(SUM(stumpings), 0) AS total_stumpings,
+            COALESCE(SUM(catches + run_outs + stumpings), 0) AS total_dismissals,
+            COUNT(DISTINCT game_id) AS games
+        FROM qualifying
+    """
+    result = await session.execute(text(sql), params)
+    row = result.mappings().first()
+    if not row:
+        return None
+    d = dict(row)
+    d["player_id"] = player_id
+    return d
+
+
 async def get_batting_leaderboard(
     session: AsyncSession,
     org_id: str,

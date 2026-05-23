@@ -78,7 +78,7 @@ const BATTING_METRICS = [
 ]
 
 const BOWLING_METRICS = [
-  { key: 'total_wickets', label: 'CAREER WICKETS', higher: true },
+  { key: 'total_wickets', label: 'WICKETS', higher: true },
   { key: 'average', label: 'BOWLING AVG', higher: false },
   { key: 'economy', label: 'ECONOMY', higher: false },
   { key: 'best_figures_wickets', label: 'BEST SPELL', higher: true },
@@ -91,6 +91,16 @@ const FIELDING_METRICS = [
   { key: 'total_run_outs', label: 'RUN OUTS', higher: true },
   { key: 'total_stumpings', label: 'STUMPINGS', higher: true },
   { key: 'total_dismissals', label: 'TOTAL DISMISSALS', higher: true },
+]
+
+const FILTER_PRESETS = [
+  { id: 'career', label: 'All Time' },
+  { id: 'current_season', label: 'This Season' },
+  { id: 'last_season', label: 'Last Season' },
+  { id: 'last_1', label: 'Last Game' },
+  { id: 'last_3', label: 'Last 3 Games' },
+  { id: 'last_5', label: 'Last 5 Games' },
+  { id: 'custom', label: 'Custom' },
 ]
 
 function CompareBar({ v1, v2, higher }) {
@@ -158,6 +168,39 @@ function SectionDivider({ label }) {
   )
 }
 
+function buildFilterParams(filterMode, seasons, customStart, customEnd) {
+  if (filterMode === 'career') return {}
+  if (filterMode === 'current_season') {
+    const s = seasons[0]
+    return s ? { seasonId: s.id } : {}
+  }
+  if (filterMode === 'last_season') {
+    const s = seasons[1]
+    return s ? { seasonId: s.id } : {}
+  }
+  if (filterMode === 'last_1') return { lastNGames: 1 }
+  if (filterMode === 'last_3') return { lastNGames: 3 }
+  if (filterMode === 'last_5') return { lastNGames: 5 }
+  if (filterMode === 'custom') {
+    const p = {}
+    if (customStart) p.startDate = customStart
+    if (customEnd) p.endDate = customEnd
+    return p
+  }
+  return {}
+}
+
+function filterCaption(filterMode, seasons) {
+  if (filterMode === 'career') return 'ALL TIME'
+  if (filterMode === 'current_season') return seasons[0] ? seasons[0].name.toUpperCase() : 'CURRENT SEASON'
+  if (filterMode === 'last_season') return seasons[1] ? seasons[1].name.toUpperCase() : 'LAST SEASON'
+  if (filterMode === 'last_1') return 'LAST GAME'
+  if (filterMode === 'last_3') return 'LAST 3 GAMES'
+  if (filterMode === 'last_5') return 'LAST 5 GAMES'
+  if (filterMode === 'custom') return 'CUSTOM DATE RANGE'
+  return 'ALL TIME'
+}
+
 export default function PlayerComparison() {
   const { clubSlug } = useParams()
   const { club, orgId, inactive } = useClub(clubSlug)
@@ -167,6 +210,7 @@ export default function PlayerComparison() {
   if (inactive) return <ClubInactive />
 
   const [players, setPlayers] = useState([])
+  const [seasons, setSeasons] = useState([])
   const [player1, setPlayer1] = useState(null)
   const [player2, setPlayer2] = useState(null)
   const [bat1, setBat1] = useState(null)
@@ -177,31 +221,42 @@ export default function PlayerComparison() {
   const [field2, setField2] = useState(null)
   const [loading1, setLoading1] = useState(false)
   const [loading2, setLoading2] = useState(false)
+  const [filterMode, setFilterMode] = useState('career')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
 
   useEffect(() => {
     if (!orgId) return
     api.listPlayers(orgId).then(setPlayers).catch(() => setPlayers([]))
+    api.getOrgSeasons(orgId).then(setSeasons).catch(() => setSeasons([]))
   }, [orgId])
 
+  const filterParams = useMemo(
+    () => buildFilterParams(filterMode, seasons, customStart, customEnd),
+    [filterMode, seasons, customStart, customEnd]
+  )
+
+  const customReady = filterMode !== 'custom' || customStart || customEnd
+
   useEffect(() => {
-    if (!player1) { setBat1(null); setBowl1(null); setField1(null); return }
+    if (!player1 || !customReady) { if (!player1) { setBat1(null); setBowl1(null); setField1(null) }; return }
     setLoading1(true)
-    api.getPlayerStats(player1.id).then(data => {
+    api.getPlayerStats(player1.id, filterParams).then(data => {
       setBat1(data.career_batting || {})
       setBowl1(data.career_bowling || {})
       setField1(data.career_fielding || {})
     }).catch(() => {}).finally(() => setLoading1(false))
-  }, [player1])
+  }, [player1, filterParams, customReady])
 
   useEffect(() => {
-    if (!player2) { setBat2(null); setBowl2(null); setField2(null); return }
+    if (!player2 || !customReady) { if (!player2) { setBat2(null); setBowl2(null); setField2(null) }; return }
     setLoading2(true)
-    api.getPlayerStats(player2.id).then(data => {
+    api.getPlayerStats(player2.id, filterParams).then(data => {
       setBat2(data.career_batting || {})
       setBowl2(data.career_bowling || {})
       setField2(data.career_fielding || {})
     }).catch(() => {}).finally(() => setLoading2(false))
-  }, [player2])
+  }, [player2, filterParams, customReady])
 
   const showComparison = player1 && player2 && bat1 && bat2 && !loading1 && !loading2
 
@@ -211,20 +266,63 @@ export default function PlayerComparison() {
         <PageHeader
           eyebrow="HEAD TO HEAD"
           title="Compare players."
-          meta={[<span key="s">Career stats, side by side.</span>]}
+          meta={[<span key="s">Stats side by side.</span>]}
         />
 
         {/* Player pickers */}
-        <div className="grid md:grid-cols-2 gap-4 mb-6">
+        <div className="grid md:grid-cols-2 gap-4 mb-4">
           <PlayerSearch players={players} selected={player1} onSelect={setPlayer1} label="Player 1" side="left" fmt={fmt} />
           <PlayerSearch players={players} selected={player2} onSelect={setPlayer2} label="Player 2" side="right" fmt={fmt} />
+        </div>
+
+        {/* Filter bar */}
+        <div className="pb-card p-3 mb-6">
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mr-1">Filter</span>
+            {FILTER_PRESETS.map(p => (
+              <button
+                key={p.id}
+                onClick={() => setFilterMode(p.id)}
+                className={`font-mono text-[10px] tracking-wide2 px-2.5 py-1 rounded border transition-colors ${
+                  filterMode === p.id
+                    ? 'border-transparent text-white'
+                    : 'border-pb-hairline text-pb-dim hover:text-pb-text hover:border-pb-faint'
+                }`}
+                style={filterMode === p.id ? { background: 'var(--pb-accent)', borderColor: 'var(--pb-accent)' } : {}}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {filterMode === 'custom' && (
+            <div className="flex flex-wrap gap-3 mt-3 items-center">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] text-pb-faint">FROM</span>
+                <input
+                  type="date"
+                  value={customStart}
+                  onChange={e => setCustomStart(e.target.value)}
+                  className="bg-pb-surface border pb-hairline text-pb-text text-xs rounded px-2 py-1 focus:outline-none focus:border-pb-accent"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] text-pb-faint">TO</span>
+                <input
+                  type="date"
+                  value={customEnd}
+                  onChange={e => setCustomEnd(e.target.value)}
+                  className="bg-pb-surface border pb-hairline text-pb-text text-xs rounded px-2 py-1 focus:outline-none focus:border-pb-accent"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Empty state */}
         {!player1 && !player2 && (
           <Card>
             <div className="py-12 text-center">
-              <p className="text-pb-faint text-sm">Select two players above to compare their career stats.</p>
+              <p className="text-pb-faint text-sm">Select two players above to compare their stats.</p>
               <p className="text-pb-faintest text-xs mt-1">Accent colour highlights the superior stat.</p>
             </div>
           </Card>
@@ -292,7 +390,7 @@ export default function PlayerComparison() {
               </table>
             </div>
             <p className="text-center text-pb-faintest font-mono text-[10px] mt-3 tracking-wide2">
-              ACCENT = SUPERIOR STAT · CAREER TOTALS
+              ACCENT = SUPERIOR STAT · {filterCaption(filterMode, seasons)}
             </p>
           </>
         )}
