@@ -354,6 +354,8 @@ async def sync_organisation(
                 session.add(season)
             else:
                 season.grassroots_id = raw_season_id
+                if year is not None and season.year is None:
+                    season.year = year
             season.synced_at = datetime.now(timezone.utc)
             await session.commit()
             stats["seasons"] += 1
