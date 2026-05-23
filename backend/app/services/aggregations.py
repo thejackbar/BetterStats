@@ -115,8 +115,11 @@ async def get_career_fielding(session: AsyncSession, player_id: str, season_id: 
 
 
 def _build_recent_games_cte(player_id_param: str, n_param: str) -> str:
+    # UNION (not UNION ALL) already deduplicates game_ids; the JOIN with games
+    # is 1:1 on the PK, so no DISTINCT is needed — and PostgreSQL requires
+    # ORDER BY columns to appear in the SELECT list when DISTINCT is used.
     return f"""recent_games AS (
-        SELECT DISTINCT g.id AS game_id
+        SELECT g.id AS game_id
         FROM (
             SELECT bi.game_id FROM batting_innings bi WHERE bi.player_id = CAST(:{player_id_param} AS UUID)
             UNION

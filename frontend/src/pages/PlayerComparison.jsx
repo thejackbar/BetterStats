@@ -347,6 +347,15 @@ export default function PlayerComparison() {
           </Card>
         )}
 
+        {/* Custom date prompt */}
+        {player1 && player2 && filterMode === 'custom' && !customReady && (
+          <Card>
+            <div className="py-8 text-center">
+              <p className="text-pb-faint text-sm">Enter a date range above to filter stats.</p>
+            </div>
+          </Card>
+        )}
+
         {/* Loading */}
         {(loading1 || loading2) && player1 && player2 && <PbSpinner message="Loading stats…" />}
 
