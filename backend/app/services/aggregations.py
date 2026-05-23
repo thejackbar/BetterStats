@@ -135,39 +135,36 @@ def _build_recent_games_cte(player_id_param: str, n_param: str) -> str:
     )"""
 
 
-def _build_date_filter(start_date: Optional[str], end_date: Optional[str]) -> tuple[str, str]:
-    """Returns (extra_joins, WHERE fragment) for date filtering with season-year fallback.
+def _build_date_filtered_games_cte(player_id_param: str, start_date: Optional[str], end_date: Optional[str]) -> str:
+    """CTE: the player's games filtered by played_at within the date range.
 
-    Many historical games have played_at=NULL because the GR API omits matchSchedule
-    for old scorecards. When that happens we fall back to the cricket season's
-    approximate date window (Oct Y – Apr Y+1) derived from grades→seasons.
+    Same union-of-stat-tables approach as _build_recent_games_cte — discover
+    every game the player appeared in, join to games for the date, then filter
+    on played_at. Games with NULL played_at are excluded because we can't
+    place them on a calendar; that matches what Last N Games already does
+    (NULL games sort last there too).
     """
-    if not start_date and not end_date:
-        return "", ""
-
-    joins = ("\n    LEFT JOIN grades gr ON gr.id = g.grade_id"
-             "\n    LEFT JOIN seasons s ON s.id = gr.season_id")
-
-    exact_parts = []
-    season_parts = ["s.year IS NOT NULL"]
-
+    conds = ["g.played_at IS NOT NULL"]
     if start_date:
-        exact_parts.append("g.played_at >= CAST(:start_date AS DATE)")
-        season_parts.append("MAKE_DATE(s.year + 1, 4, 30) >= CAST(:start_date AS DATE)")
+        conds.append("g.played_at >= CAST(:start_date AS DATE)")
     if end_date:
-        exact_parts.append("g.played_at <= CAST(:end_date AS DATE)")
-        season_parts.append("MAKE_DATE(s.year, 10, 1) <= CAST(:end_date AS DATE)")
+        conds.append("g.played_at <= CAST(:end_date AS DATE)")
+    where_clause = "WHERE " + " AND ".join(conds)
 
-    exact_cond = " AND ".join(exact_parts)
-    season_cond = " AND ".join(season_parts)
-
-    clause = (
-        f"AND (\n"
-        f"          (g.played_at IS NOT NULL AND {exact_cond})\n"
-        f"          OR (g.played_at IS NULL AND {season_cond})\n"
-        f"      )"
-    )
-    return joins, clause
+    return f"""date_filtered_games AS (
+        SELECT g.id AS game_id
+        FROM (
+            SELECT bi.game_id FROM batting_innings bi WHERE bi.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT bs.game_id FROM bowling_spells bs WHERE bs.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT fs.game_id FROM fielding_stats fs WHERE fs.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:{player_id_param} AS UUID)
+        ) ap
+        JOIN games g ON g.id = ap.game_id
+        {where_clause}
+    )"""
 
 
 async def get_career_batting_from_innings(
@@ -180,23 +177,23 @@ async def get_career_batting_from_innings(
     params: dict = {"pid": player_id}
     ctes = []
     game_filter = ""
-    extra_joins = ""
 
     if last_n_games:
         params["n"] = last_n_games
         ctes.append(_build_recent_games_cte("pid", "n"))
         game_filter = "AND bi.game_id IN (SELECT game_id FROM recent_games)"
-    else:
+    elif start_date or end_date:
         if start_date:
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-        extra_joins, game_filter = _build_date_filter(start_date, end_date)
+        ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
+        game_filter = "AND bi.game_id IN (SELECT game_id FROM date_filtered_games)"
 
     ctes.append(f"""qualifying AS (
         SELECT bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out, bi.game_id
         FROM batting_innings bi
-        JOIN games g ON g.id = bi.game_id{extra_joins}
+        JOIN games g ON g.id = bi.game_id
         WHERE bi.player_id = CAST(:pid AS UUID)
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -238,23 +235,23 @@ async def get_career_bowling_from_spells(
     params: dict = {"pid": player_id}
     ctes = []
     game_filter = ""
-    extra_joins = ""
 
     if last_n_games:
         params["n"] = last_n_games
         ctes.append(_build_recent_games_cte("pid", "n"))
         game_filter = "AND bs.game_id IN (SELECT game_id FROM recent_games)"
-    else:
+    elif start_date or end_date:
         if start_date:
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-        extra_joins, game_filter = _build_date_filter(start_date, end_date)
+        ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
+        game_filter = "AND bs.game_id IN (SELECT game_id FROM date_filtered_games)"
 
     ctes.append(f"""qualifying AS (
         SELECT bs.wickets, bs.runs, bs.maidens, bs.overs, bs.game_id
         FROM bowling_spells bs
-        JOIN games g ON g.id = bs.game_id{extra_joins}
+        JOIN games g ON g.id = bs.game_id
         WHERE bs.player_id = CAST(:pid AS UUID)
           {game_filter}
     )""")
@@ -293,23 +290,23 @@ async def get_career_fielding_from_stats(
     params: dict = {"pid": player_id}
     ctes = []
     game_filter = ""
-    extra_joins = ""
 
     if last_n_games:
         params["n"] = last_n_games
         ctes.append(_build_recent_games_cte("pid", "n"))
         game_filter = "AND fs.game_id IN (SELECT game_id FROM recent_games)"
-    else:
+    elif start_date or end_date:
         if start_date:
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-        extra_joins, game_filter = _build_date_filter(start_date, end_date)
+        ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
+        game_filter = "AND fs.game_id IN (SELECT game_id FROM date_filtered_games)"
 
     ctes.append(f"""qualifying AS (
         SELECT fs.catches, fs.run_outs, fs.stumpings, fs.game_id
         FROM fielding_stats fs
-        JOIN games g ON g.id = fs.game_id{extra_joins}
+        JOIN games g ON g.id = fs.game_id
         WHERE fs.player_id = CAST(:pid AS UUID)
           {game_filter}
     )""")
