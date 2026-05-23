@@ -184,7 +184,7 @@ export default function SuperClubs() {
 
             <div ref={searchWrapRef} className="relative">
               <label className="font-mono text-[10px] text-pb-faint block mb-1">
-                Search Cricket Australia *
+                Search cricket associations *
               </label>
               <div className="relative">
                 <input

@@ -303,7 +303,7 @@ export default function AdminSync() {
                       <p className="text-pb-text text-sm font-medium">{req.player_name}</p>
                       {!req.playhq_id && req.status === 'pending' && (
                         <span className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-pb-amber/30 text-pb-amber">
-                          no PHQ ID
+                          no Organisation ID
                         </span>
                       )}
                     </div>

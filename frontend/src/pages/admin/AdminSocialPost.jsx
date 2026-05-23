@@ -341,7 +341,7 @@ export default function AdminSocialPost() {
     const urlOrId = scUrlInput.trim()
     const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
     const m = urlOrId.match(uuidRe)
-    if (!m) { setScUrlStatus('Paste a play.cricket.com.au match URL or a match UUID'); return }
+    if (!m) { setScUrlStatus('Paste a match URL or a match UUID'); return }
     const matchId = m[0]
     setScUrlStatus('loading')
     try {

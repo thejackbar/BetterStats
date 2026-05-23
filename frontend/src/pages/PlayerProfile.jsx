@@ -1223,7 +1223,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
               </div>
             </Card>
           ) : (
-            <p className="text-pb-faint text-sm py-4 font-mono">No venue data yet — venue tracking requires a Full Rebuild.</p>
+            <p className="text-pb-faint text-sm py-4 font-mono">Venue information isn't available for all games — some historical matches were recorded without a ground.</p>
           )}
         </div>
       )}

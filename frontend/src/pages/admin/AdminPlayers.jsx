@@ -450,7 +450,7 @@ export default function AdminPlayers() {
           </svg>
           <input
             type="text"
-            placeholder="Search by name (any order), display name or PHQ ID…"
+            placeholder="Search by name (any order), display name or external ID…"
             value={filter}
             onChange={e => setFilter(e.target.value)}
             className="w-full bg-pb-surface border pb-hairline rounded pl-9 pr-4 py-2.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent placeholder-pb-faintest"
@@ -485,9 +485,9 @@ export default function AdminPlayers() {
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
                     <span className="font-mono text-[10px] text-pb-faintest">{p.id}</span>
                     {p.playhq_id ? (
-                      <span className="font-mono text-[10px] text-pb-amber/70">PHQ: {p.playhq_id}</span>
+                      <span className="font-mono text-[10px] text-pb-amber/70">ID: {p.playhq_id}</span>
                     ) : (
-                      <span className="font-mono text-[10px] text-pb-faintest italic">no PHQ ID</span>
+                      <span className="font-mono text-[10px] text-pb-faintest italic">no external ID</span>
                     )}
                     {p.gender && (
                       <span className="font-mono text-[10px] text-pb-faint">{p.gender}</span>
