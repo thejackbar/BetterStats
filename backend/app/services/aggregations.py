@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import Optional
+from datetime import date as date_cls
 import uuid
 
 # Merge-aware grade match fragment (gr must already be joined).
@@ -195,9 +196,9 @@ async def get_career_batting_from_innings(
         game_filter = "AND bi.game_id IN (SELECT game_id FROM recent_games)"
     elif start_date or end_date:
         if start_date:
-            params["start_date"] = start_date
+            params["start_date"] = date_cls.fromisoformat(start_date)
         if end_date:
-            params["end_date"] = end_date
+            params["end_date"] = date_cls.fromisoformat(end_date)
         ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
         game_filter = "AND bi.game_id IN (SELECT game_id FROM date_filtered_games)"
 
@@ -253,9 +254,9 @@ async def get_career_bowling_from_spells(
         game_filter = "AND bs.game_id IN (SELECT game_id FROM recent_games)"
     elif start_date or end_date:
         if start_date:
-            params["start_date"] = start_date
+            params["start_date"] = date_cls.fromisoformat(start_date)
         if end_date:
-            params["end_date"] = end_date
+            params["end_date"] = date_cls.fromisoformat(end_date)
         ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
         game_filter = "AND bs.game_id IN (SELECT game_id FROM date_filtered_games)"
 
@@ -308,9 +309,9 @@ async def get_career_fielding_from_stats(
         game_filter = "AND fs.game_id IN (SELECT game_id FROM recent_games)"
     elif start_date or end_date:
         if start_date:
-            params["start_date"] = start_date
+            params["start_date"] = date_cls.fromisoformat(start_date)
         if end_date:
-            params["end_date"] = end_date
+            params["end_date"] = date_cls.fromisoformat(end_date)
         ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
         game_filter = "AND fs.game_id IN (SELECT game_id FROM date_filtered_games)"
 
