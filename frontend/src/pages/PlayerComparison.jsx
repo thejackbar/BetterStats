@@ -242,6 +242,7 @@ export default function PlayerComparison() {
   const [field2, setField2] = useState(null)
   const [loading1, setLoading1] = useState(false)
   const [loading2, setLoading2] = useState(false)
+  const [statsError, setStatsError] = useState(null)
   const [filterMode, setFilterMode] = useState('career')
   // draft: bound to the date inputs; applied: committed when user clicks Apply
   const [draftStart, setDraftStart] = useState('')
@@ -269,21 +270,23 @@ export default function PlayerComparison() {
   useEffect(() => {
     if (!player1 || !customReady) { if (!player1) { setBat1(null); setBowl1(null); setField1(null) }; return }
     setLoading1(true)
+    setStatsError(null)
     api.getPlayerStats(player1.id, JSON.parse(filterParamsKey)).then(data => {
       setBat1(data.career_batting || {})
       setBowl1(data.career_bowling || {})
       setField1(data.career_fielding || {})
-    }).catch(() => {}).finally(() => setLoading1(false))
+    }).catch(e => setStatsError(e?.message || 'Failed to load stats')).finally(() => setLoading1(false))
   }, [player1, filterParamsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!player2 || !customReady) { if (!player2) { setBat2(null); setBowl2(null); setField2(null) }; return }
     setLoading2(true)
+    setStatsError(null)
     api.getPlayerStats(player2.id, JSON.parse(filterParamsKey)).then(data => {
       setBat2(data.career_batting || {})
       setBowl2(data.career_bowling || {})
       setField2(data.career_fielding || {})
-    }).catch(() => {}).finally(() => setLoading2(false))
+    }).catch(e => setStatsError(e?.message || 'Failed to load stats')).finally(() => setLoading2(false))
   }, [player2, filterParamsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const showComparison = player1 && player2 && bat1 && bat2 && !loading1 && !loading2 && customReady
@@ -373,6 +376,13 @@ export default function PlayerComparison() {
               <p className="text-pb-faint text-sm">Enter a date range above to filter stats.</p>
             </div>
           </Card>
+        )}
+
+        {/* Error */}
+        {statsError && (
+          <div className="mb-4 px-4 py-3 rounded border border-red-500/40 bg-red-500/10 text-red-400 font-mono text-xs">
+            Error loading stats: {statsError}
+          </div>
         )}
 
         {/* Loading */}

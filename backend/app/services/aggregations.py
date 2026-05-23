@@ -138,29 +138,27 @@ def _build_recent_games_cte(player_id_param: str, n_param: str) -> str:
 def _build_date_filtered_games_cte(player_id_param: str, start_date: Optional[str], end_date: Optional[str]) -> str:
     """CTE: the player's games filtered to a date window.
 
-    Uses g.played_at when present; falls back to an approximate season window
-    (Oct year → Apr year+1) for games where played_at is NULL. Many historical
-    games have NULL played_at because the GR scorecard API doesn't always
-    return matchSchedule.startDateTime, so requiring played_at IS NOT NULL
-    would drop most of a player's career.
+    Uses g.played_at when present; falls back to season-window overlap
+    (Oct year → Apr year+1) for games where played_at is NULL. LATERAL
+    computes an effective year from either the year column or the first
+    4-digit run in the season name ("Summer 2022/23" → 2022), so games
+    whose seasons have year=NULL are still matched by name extraction.
     """
     date_conds = []
     season_conds = []
     if start_date:
         date_conds.append("g.played_at >= CAST(:start_date AS DATE)")
-        # Season end (Apr year+1) must be on or after start_date for overlap
-        season_conds.append("MAKE_DATE(s.year + 1, 4, 30) >= CAST(:start_date AS DATE)")
+        season_conds.append("MAKE_DATE(sy.yr + 1, 4, 30) >= CAST(:start_date AS DATE)")
     if end_date:
         date_conds.append("g.played_at <= CAST(:end_date AS DATE)")
-        # Season start (Oct year) must be on or before end_date for overlap
-        season_conds.append("MAKE_DATE(s.year, 10, 1) <= CAST(:end_date AS DATE)")
+        season_conds.append("MAKE_DATE(sy.yr, 10, 1) <= CAST(:end_date AS DATE)")
 
     date_clause = " AND ".join(date_conds) if date_conds else "TRUE"
     season_clause = " AND ".join(season_conds) if season_conds else "TRUE"
 
     where_clause = f"""WHERE (
             (g.played_at IS NOT NULL AND {date_clause})
-            OR (g.played_at IS NULL AND s.year IS NOT NULL AND {season_clause})
+            OR (g.played_at IS NULL AND sy.yr IS NOT NULL AND {season_clause})
         )"""
 
     return f"""date_filtered_games AS (
@@ -176,7 +174,13 @@ def _build_date_filtered_games_cte(player_id_param: str, start_date: Optional[st
         ) ap
         JOIN games g ON g.id = ap.game_id
         LEFT JOIN grades gr ON gr.id = g.grade_id
-        LEFT JOIN seasons s ON s.id = gr.season_id
+        LEFT JOIN seasons s ON s.id = gr.season_id,
+        LATERAL (
+            SELECT COALESCE(
+                s.year,
+                NULLIF(CAST(SUBSTRING(COALESCE(s.name, '') FROM '[0-9]{{4}}') AS INTEGER), 0)
+            ) AS yr
+        ) sy
         {where_clause}
     )"""
 
