@@ -286,7 +286,7 @@ export default function PlayerComparison() {
     }).catch(() => {}).finally(() => setLoading2(false))
   }, [player2, filterParamsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const showComparison = player1 && player2 && bat1 && bat2 && !loading1 && !loading2
+  const showComparison = player1 && player2 && bat1 && bat2 && !loading1 && !loading2 && customReady
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
