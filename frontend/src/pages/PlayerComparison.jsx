@@ -1,5 +1,5 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect, useMemo } from 'react'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { api } from '../lib/api'
@@ -7,14 +7,25 @@ import ClubInactive from './ClubInactive'
 import { PageHeader, PbSpinner, Card } from '../lib/presskit'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 
-function PlayerSearch({ players, selected, onSelect, label, side, fmt = n => n }) {
+function PlayerSearch({ players, playersLoading, selected, onSelect, label, fmt = n => n }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const blurTimer = useRef(null)
 
   const filtered = useMemo(() => {
     if (!query.trim()) return players.slice(0, 20)
     return players.filter(p => nameMatchesSearch(p.display_name || p.name, query)).slice(0, 20)
   }, [players, query])
+
+  const handleFocus = () => {
+    if (blurTimer.current) clearTimeout(blurTimer.current)
+    setOpen(true)
+  }
+  const handleBlur = () => {
+    blurTimer.current = setTimeout(() => setOpen(false), 200)
+  }
+
+  const showDropdown = open && (filtered.length > 0 || playersLoading)
 
   return (
     <div className="relative">
@@ -40,22 +51,26 @@ function PlayerSearch({ players, selected, onSelect, label, side, fmt = n => n }
               placeholder={`Search ${label.toLowerCase()}…`}
               value={query}
               onChange={e => { setQuery(e.target.value); setOpen(true) }}
-              onFocus={() => setOpen(true)}
-              onBlur={() => setTimeout(() => setOpen(false), 150)}
+              onFocus={handleFocus}
+              onBlur={handleBlur}
               className="w-full bg-pb-surface border pb-hairline text-pb-text text-sm rounded pl-9 pr-4 py-2.5 focus:outline-none focus:border-pb-accent placeholder-pb-faint"
             />
           </div>
-          {open && filtered.length > 0 && (
-            <div className="absolute z-20 w-full mt-1 bg-pb-surface border pb-hairline rounded shadow-xl max-h-60 overflow-y-auto pb-scroll">
-              {filtered.map(p => (
-                <button
-                  key={p.id}
-                  onMouseDown={() => { onSelect(p); setQuery(''); setOpen(false) }}
-                  className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text transition-colors"
-                >
-                  {fmt(p.display_name || p.name)}
-                </button>
-              ))}
+          {showDropdown && (
+            <div className="absolute z-50 w-full mt-1 bg-pb-surface border pb-hairline rounded shadow-xl max-h-60 overflow-y-auto pb-scroll">
+              {playersLoading && filtered.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-pb-faint">Loading players…</p>
+              ) : (
+                filtered.map(p => (
+                  <button
+                    key={p.id}
+                    onMouseDown={() => { onSelect(p); setQuery(''); setOpen(false) }}
+                    className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text transition-colors"
+                  >
+                    {fmt(p.display_name || p.name)}
+                  </button>
+                ))
+              )}
             </div>
           )}
         </>
@@ -210,6 +225,7 @@ export default function PlayerComparison() {
   if (inactive) return <ClubInactive />
 
   const [players, setPlayers] = useState([])
+  const [playersLoading, setPlayersLoading] = useState(false)
   const [seasons, setSeasons] = useState([])
   const [player1, setPlayer1] = useState(null)
   const [player2, setPlayer2] = useState(null)
@@ -227,7 +243,10 @@ export default function PlayerComparison() {
 
   useEffect(() => {
     if (!orgId) return
-    api.listPlayers(orgId).then(setPlayers).catch(() => setPlayers([]))
+    setPlayersLoading(true)
+    api.listPlayers(orgId)
+      .then(data => { setPlayers(data); setPlayersLoading(false) })
+      .catch(() => { setPlayers([]); setPlayersLoading(false) })
     api.getOrgSeasons(orgId).then(setSeasons).catch(() => setSeasons([]))
   }, [orgId])
 
@@ -271,8 +290,8 @@ export default function PlayerComparison() {
 
         {/* Player pickers */}
         <div className="grid md:grid-cols-2 gap-4 mb-4">
-          <PlayerSearch players={players} selected={player1} onSelect={setPlayer1} label="Player 1" side="left" fmt={fmt} />
-          <PlayerSearch players={players} selected={player2} onSelect={setPlayer2} label="Player 2" side="right" fmt={fmt} />
+          <PlayerSearch players={players} playersLoading={playersLoading} selected={player1} onSelect={setPlayer1} label="Player 1" fmt={fmt} />
+          <PlayerSearch players={players} playersLoading={playersLoading} selected={player2} onSelect={setPlayer2} label="Player 2" fmt={fmt} />
         </div>
 
         {/* Filter bar */}
