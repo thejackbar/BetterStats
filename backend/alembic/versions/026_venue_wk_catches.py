@@ -13,7 +13,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE games ADD COLUMN IF NOT EXISTS venue VARCHAR")
+    op.execute("ALTER TABLE games ADD COLUMN IF NOT EXISTS venue TEXT")
     op.execute("ALTER TABLE fielding_stats ADD COLUMN IF NOT EXISTS catches_wk INTEGER NOT NULL DEFAULT 0")
 
 
