@@ -13,6 +13,10 @@ import {
 
 // ─── Utility helpers ────────────────────────────────────────────────────────
 
+// Yearbook image paths can be either legacy on-disk relative paths
+// ("yearbooks/{org_id}/...") or new DB-backed serving URLs ("/api/images/...").
+const imageSrc = (p) => !p ? null : (p.startsWith('/') ? p : `/uploads/${p}`)
+
 function fmtDate(iso) {
   if (!iso) return null
   return new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
@@ -219,20 +223,7 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, ga
         </div>
       )}
 
-      {/* Photo gallery */}
-      {galleryImages?.length > 0 && (
-        <SectionCard title="Photo Gallery">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 p-1">
-            {galleryImages.map(img => (
-              <a key={img.id} href={`/uploads/${img.file_path}`} target="_blank" rel="noopener noreferrer"
-                 className="aspect-video block overflow-hidden rounded">
-                <img src={`/uploads/${img.file_path}`} alt={img.caption || ''}
-                     className="w-full h-full object-cover hover:scale-105 transition-transform duration-200" />
-              </a>
-            ))}
-          </div>
-        </SectionCard>
-      )}
+      {/* Photo gallery now lives in its own Photos tab. */}
 
       {/* By the Numbers */}
       {(() => {
@@ -1241,6 +1232,62 @@ function ReportsTab({ customSections }) {
   )
 }
 
+function PhotosTab({ galleryImages }) {
+  const [lightbox, setLightbox] = useState(null)
+  if (!galleryImages?.length) return null
+
+  return (
+    <div>
+      <div className="mb-6">
+        <p className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">Photo Gallery</p>
+        <p className="text-[12px] text-white/50">{galleryImages.length} {galleryImages.length === 1 ? 'photo' : 'photos'} from the season.</p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+        {galleryImages.map(img => (
+          <button
+            key={img.id}
+            onClick={() => setLightbox(img)}
+            className="aspect-square block overflow-hidden rounded border border-white/8 hover:border-white/20 transition-colors group"
+          >
+            <img
+              src={imageSrc(img.file_path)}
+              alt={img.caption || ''}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+            />
+          </button>
+        ))}
+      </div>
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 text-white/60 hover:text-white text-2xl font-mono w-10 h-10 flex items-center justify-center"
+            aria-label="Close"
+          >
+            ×
+          </button>
+          <img
+            src={imageSrc(lightbox.file_path)}
+            alt={lightbox.caption || ''}
+            className="max-w-full max-h-[90vh] object-contain rounded"
+            onClick={(e) => e.stopPropagation()}
+          />
+          {lightbox.caption && (
+            <p className="absolute bottom-6 left-1/2 -translate-x-1/2 text-white/70 text-sm font-mono bg-black/40 px-3 py-1 rounded">
+              {lightbox.caption}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const BASE_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'results', label: 'Results' },
@@ -1413,6 +1460,7 @@ export default function Yearbook() {
 
   const TABS = [
     ...BASE_TABS,
+    ...(galleryImages.length > 0 ? [{ id: 'photos', label: 'Photos' }] : []),
     ...customSections.map(s => ({ id: `section-${s.id}`, label: s.title })),
   ]
 
@@ -1423,7 +1471,7 @@ export default function Yearbook() {
         className="relative overflow-hidden"
         style={{
           background: yearbook.hero_image_path
-            ? `linear-gradient(to bottom, rgba(0,0,0,0.6), var(--pb-bg)), url('/uploads/${yearbook.hero_image_path}') center/cover no-repeat`
+            ? `linear-gradient(to bottom, rgba(0,0,0,0.6), var(--pb-bg)), url('${imageSrc(yearbook.hero_image_path)}') center/cover no-repeat`
             : `linear-gradient(135deg, color-mix(in srgb, var(--pb-accent) 20%, var(--pb-bg)), var(--pb-bg))`,
         }}
       >
@@ -1557,6 +1605,9 @@ export default function Yearbook() {
         )}
         {activeTab === 'grades' && (
           <GradesTab orgId={orgId} seasonId={seasonId} clubSlug={clubSlug} />
+        )}
+        {activeTab === 'photos' && (
+          <PhotosTab galleryImages={galleryImages} />
         )}
       </div>
 

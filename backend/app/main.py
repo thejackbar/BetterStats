@@ -224,6 +224,25 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_yearbook_awards_yearbook ON yearbook_club_awards(yearbook_id)"
         ))
+        # Persist yearbook images as binary data in the DB so they survive
+        # container recreation (the /app/uploads volume isn't guaranteed
+        # persistent across deploys — same fix that was applied to club logos).
+        await conn.execute(text(
+            "ALTER TABLE yearbooks ADD COLUMN IF NOT EXISTS hero_image_data BYTEA"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE yearbooks ADD COLUMN IF NOT EXISTS hero_image_mime TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE yearbook_images ADD COLUMN IF NOT EXISTS image_data BYTEA"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE yearbook_images ADD COLUMN IF NOT EXISTS image_mime TEXT"
+        ))
+        # file_path is legacy for binary uploads — must be nullable.
+        await conn.execute(text(
+            "ALTER TABLE yearbook_images ALTER COLUMN file_path DROP NOT NULL"
+        ))
         await conn.execute(text(
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS display_name_override TEXT"
         ))
