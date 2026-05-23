@@ -205,14 +205,19 @@ function buildFilterParams(filterMode, seasons, customStart, customEnd) {
   return {}
 }
 
-function filterCaption(filterMode, seasons) {
+function filterCaption(filterMode, seasons, appliedStart, appliedEnd) {
   if (filterMode === 'career') return 'ALL TIME'
   if (filterMode === 'current_season') return seasons[0] ? seasons[0].name.toUpperCase() : 'CURRENT SEASON'
   if (filterMode === 'last_season') return seasons[1] ? seasons[1].name.toUpperCase() : 'LAST SEASON'
   if (filterMode === 'last_1') return 'LAST GAME'
   if (filterMode === 'last_3') return 'LAST 3 GAMES'
   if (filterMode === 'last_5') return 'LAST 5 GAMES'
-  if (filterMode === 'custom') return 'CUSTOM DATE RANGE'
+  if (filterMode === 'custom') {
+    if (appliedStart && appliedEnd) return `${appliedStart} – ${appliedEnd}`
+    if (appliedStart) return `FROM ${appliedStart}`
+    if (appliedEnd) return `TO ${appliedEnd}`
+    return 'CUSTOM DATE RANGE'
+  }
   return 'ALL TIME'
 }
 
@@ -238,8 +243,11 @@ export default function PlayerComparison() {
   const [loading1, setLoading1] = useState(false)
   const [loading2, setLoading2] = useState(false)
   const [filterMode, setFilterMode] = useState('career')
-  const [customStart, setCustomStart] = useState('')
-  const [customEnd, setCustomEnd] = useState('')
+  // draft: bound to the date inputs; applied: committed when user clicks Apply
+  const [draftStart, setDraftStart] = useState('')
+  const [draftEnd, setDraftEnd] = useState('')
+  const [appliedStart, setAppliedStart] = useState('')
+  const [appliedEnd, setAppliedEnd] = useState('')
 
   useEffect(() => {
     if (!orgId) return
@@ -251,11 +259,12 @@ export default function PlayerComparison() {
   }, [orgId])
 
   const filterParamsKey = useMemo(
-    () => JSON.stringify(buildFilterParams(filterMode, seasons, customStart, customEnd)),
-    [filterMode, seasons, customStart, customEnd]
+    () => JSON.stringify(buildFilterParams(filterMode, seasons, appliedStart, appliedEnd)),
+    [filterMode, seasons, appliedStart, appliedEnd]
   )
 
-  const customReady = filterMode !== 'custom' || customStart || customEnd
+  const customReady = filterMode !== 'custom' || appliedStart || appliedEnd
+  const draftDirty = draftStart !== appliedStart || draftEnd !== appliedEnd
 
   useEffect(() => {
     if (!player1 || !customReady) { if (!player1) { setBat1(null); setBowl1(null); setField1(null) }; return }
@@ -319,8 +328,8 @@ export default function PlayerComparison() {
                 <span className="font-mono text-[10px] text-pb-faint">FROM</span>
                 <input
                   type="date"
-                  value={customStart}
-                  onChange={e => setCustomStart(e.target.value)}
+                  value={draftStart}
+                  onChange={e => setDraftStart(e.target.value)}
                   className="bg-pb-surface border pb-hairline text-pb-text text-xs rounded px-2 py-1 focus:outline-none focus:border-pb-accent"
                 />
               </div>
@@ -328,11 +337,21 @@ export default function PlayerComparison() {
                 <span className="font-mono text-[10px] text-pb-faint">TO</span>
                 <input
                   type="date"
-                  value={customEnd}
-                  onChange={e => setCustomEnd(e.target.value)}
+                  value={draftEnd}
+                  onChange={e => setDraftEnd(e.target.value)}
                   className="bg-pb-surface border pb-hairline text-pb-text text-xs rounded px-2 py-1 focus:outline-none focus:border-pb-accent"
                 />
               </div>
+              <button
+                onClick={() => { setAppliedStart(draftStart); setAppliedEnd(draftEnd) }}
+                disabled={!draftStart && !draftEnd}
+                className="font-mono text-[10px] tracking-wide2 px-3 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                style={draftDirty && (draftStart || draftEnd)
+                  ? { background: 'var(--pb-accent)', borderColor: 'var(--pb-accent)', color: 'white' }
+                  : { borderColor: 'var(--pb-hairline)', color: 'var(--pb-dim)' }}
+              >
+                Apply
+              </button>
             </div>
           )}
         </div>
@@ -418,7 +437,7 @@ export default function PlayerComparison() {
               </table>
             </div>
             <p className="text-center text-pb-faintest font-mono text-[10px] mt-3 tracking-wide2">
-              ACCENT = SUPERIOR STAT · {filterCaption(filterMode, seasons)}
+              ACCENT = SUPERIOR STAT · {filterCaption(filterMode, seasons, appliedStart, appliedEnd)}
             </p>
           </>
         )}
