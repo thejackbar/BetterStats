@@ -231,8 +231,8 @@ export default function PlayerComparison() {
     api.getOrgSeasons(orgId).then(setSeasons).catch(() => setSeasons([]))
   }, [orgId])
 
-  const filterParams = useMemo(
-    () => buildFilterParams(filterMode, seasons, customStart, customEnd),
+  const filterParamsKey = useMemo(
+    () => JSON.stringify(buildFilterParams(filterMode, seasons, customStart, customEnd)),
     [filterMode, seasons, customStart, customEnd]
   )
 
@@ -241,22 +241,22 @@ export default function PlayerComparison() {
   useEffect(() => {
     if (!player1 || !customReady) { if (!player1) { setBat1(null); setBowl1(null); setField1(null) }; return }
     setLoading1(true)
-    api.getPlayerStats(player1.id, filterParams).then(data => {
+    api.getPlayerStats(player1.id, JSON.parse(filterParamsKey)).then(data => {
       setBat1(data.career_batting || {})
       setBowl1(data.career_bowling || {})
       setField1(data.career_fielding || {})
     }).catch(() => {}).finally(() => setLoading1(false))
-  }, [player1, filterParams, customReady])
+  }, [player1, filterParamsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!player2 || !customReady) { if (!player2) { setBat2(null); setBowl2(null); setField2(null) }; return }
     setLoading2(true)
-    api.getPlayerStats(player2.id, filterParams).then(data => {
+    api.getPlayerStats(player2.id, JSON.parse(filterParamsKey)).then(data => {
       setBat2(data.career_batting || {})
       setBowl2(data.career_bowling || {})
       setField2(data.career_fielding || {})
     }).catch(() => {}).finally(() => setLoading2(false))
-  }, [player2, filterParams, customReady])
+  }, [player2, filterParamsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const showComparison = player1 && player2 && bat1 && bat2 && !loading1 && !loading2
 
