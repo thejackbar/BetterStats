@@ -89,7 +89,7 @@
   position: relative;
   padding: 0.55rem 0.6rem;
   border-radius: 0.6rem;
-  background: rgba(14, 17, 27, 0.75);
+  background: color-mix(in srgb, var(--pb-surface) 90%, transparent);
   backdrop-filter: blur(1rem) saturate(1.4);
   overflow: hidden;
   aspect-ratio: 1 / 1;

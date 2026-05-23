@@ -65,8 +65,8 @@ const DISMISSAL_COLORS = [
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return (
-    <div style={{ background: '#0c1a10', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
-      <div style={{ color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>{label}</div>
+    <div style={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+      <div style={{ color: 'var(--pb-faint)', marginBottom: 4 }}>{label}</div>
       {payload.map((p, i) => (
         <div key={i} style={{ color: p.color || '#4ade80', fontWeight: 600 }}>{p.value?.toLocaleString()} {p.name}</div>
       ))}
@@ -87,17 +87,17 @@ function YbTable({ headers, rows, rowStyles = [], className = '' }) {
     <div className={`overflow-x-auto ${className}`}>
       <table className="w-full text-[13px]">
         <thead>
-          <tr className="text-[10px] font-mono tracking-wide3 text-left border-b border-white/5">
+          <tr className="text-[10px] font-mono tracking-wide3 text-left border-b border-pb-hairline">
             {headers.map((h, i) => (
-              <th key={i} className={`py-2.5 px-3 font-medium text-white/40 ${i > 0 ? 'text-right' : ''}`}>{h}</th>
+              <th key={i} className={`py-2.5 px-3 font-medium text-pb-faint ${i > 0 ? 'text-right' : ''}`}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors" style={rowStyles[i] || {}}>
+            <tr key={i} className="border-b border-pb-hairline hover:bg-pb-surface2 transition-colors" style={rowStyles[i] || {}}>
               {row.map((cell, j) => (
-                <td key={j} className={`py-2.5 px-3 font-mono whitespace-nowrap ${j > 0 ? 'text-right text-white/60' : 'text-white/90'}`}>
+                <td key={j} className={`py-2.5 px-3 font-mono whitespace-nowrap ${j > 0 ? 'text-right text-pb-dim' : 'text-pb-text'}`}>
                   {cell}
                 </td>
               ))}
@@ -111,11 +111,11 @@ function YbTable({ headers, rows, rowStyles = [], className = '' }) {
 
 function SectionCard({ title, label, children, className = '' }) {
   return (
-    <div className={`rounded-xl border border-white/8 bg-white/3 overflow-hidden ${className}`}>
+    <div className={`rounded-xl border border-pb-hairline bg-pb-surface overflow-hidden ${className}`}>
       {title && (
-        <div className="px-5 py-3 border-b border-white/8 flex items-baseline gap-3">
-          <span className="font-mono text-[11px] tracking-wide3 font-semibold text-white/50 uppercase">{title}</span>
-          {label && <span className="font-mono text-[10px] text-white/25">{label}</span>}
+        <div className="px-5 py-3 border-b border-pb-hairline flex items-baseline gap-3">
+          <span className="font-mono text-[11px] tracking-wide3 font-semibold text-pb-faint uppercase">{title}</span>
+          {label && <span className="font-mono text-[10px] text-pb-faintest">{label}</span>}
         </div>
       )}
       {children}
@@ -128,12 +128,12 @@ function StatCallout({ value, label, sub, accent = false, className = '' }) {
     <div className={`flex flex-col items-center justify-center py-6 px-4 text-center ${className}`}>
       <div
         className="text-5xl font-bold tabular-nums leading-none mb-2"
-        style={{ color: accent ? 'var(--pb-accent)' : 'white' }}
+        style={{ color: accent ? 'var(--pb-accent)' : 'var(--pb-text)' }}
       >
         {value}
       </div>
-      <div className="text-[11px] font-mono tracking-wide3 text-white/50 uppercase">{label}</div>
-      {sub && <div className="text-[11px] text-white/35 mt-1">{sub}</div>}
+      <div className="text-[11px] font-mono tracking-wide3 text-pb-faint uppercase">{label}</div>
+      {sub && <div className="text-[11px] text-pb-faint mt-1">{sub}</div>}
     </div>
   )
 }
@@ -166,7 +166,7 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, ga
   return (
     <div className="space-y-8">
       {/* Headline stat trio */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-white/8 rounded-xl overflow-hidden">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-pb-hairline rounded-xl overflow-hidden">
         <StatCallout value={overview?.total_players ?? '—'} label="Players" />
         <StatCallout value={fmtRuns(overview?.total_runs)} label="Club Runs" />
         <StatCallout value={fmtRuns(overview?.total_wickets)} label="Wickets" />
@@ -193,15 +193,15 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, ga
                 <YAxis type="category" dataKey="name" hide />
                 <Tooltip content={<ChartTooltip />} />
                 <Bar dataKey="Won" stackId="a" fill="#4ade80" radius={[4,0,0,4]} />
-                <Bar dataKey="Drew" stackId="a" fill="rgba(255,255,255,0.2)" />
+                <Bar dataKey="Drew" stackId="a" fill="var(--pb-faintest)" />
                 <Bar dataKey="Lost" stackId="a" fill="#f87171" radius={[0,4,4,0]} />
               </BarChart>
             </ResponsiveContainer>
             <div className="flex justify-center gap-6 mt-2">
-              {[['Won', '#4ade80'], ['Drew', 'rgba(255,255,255,0.3)'], ['Lost', '#f87171']].map(([l, c]) => (
+              {[['Won', '#4ade80'], ['Drew', 'var(--pb-faintest)'], ['Lost', '#f87171']].map(([l, c]) => (
                 <div key={l} className="flex items-center gap-1.5">
                   <div className="w-2.5 h-2.5 rounded-sm" style={{ background: c }} />
-                  <span className="text-[11px] font-mono text-white/40">{l}</span>
+                  <span className="text-[11px] font-mono text-pb-faint">{l}</span>
                 </div>
               ))}
             </div>
@@ -211,9 +211,9 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, ga
 
       {/* Narrative / Season in Brief */}
       {narrative && (
-        <div className="rounded-xl border border-white/8 bg-white/3 px-6 py-5">
-          <p className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-3">Season in Brief</p>
-          <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed whitespace-pre-wrap">
+        <div className="rounded-xl border border-pb-hairline bg-pb-surface px-6 py-5">
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Season in Brief</p>
+          <div className="prose prose-sm max-w-none text-pb-text leading-relaxed whitespace-pre-wrap">
             {narrative}
           </div>
         </div>
@@ -238,7 +238,7 @@ function OverviewTab({ orgId, seasonId, gradeId, season, clubSlug, narrative, ga
       {(() => {
         return (
           <div className="space-y-8">
-            <p className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase">By The Numbers</p>
+            <p className="font-mono text-[11px] tracking-wide3 text-pb-faint uppercase">By The Numbers</p>
             {superlatives && <>
 
             {/* Match Stats */}
@@ -369,7 +369,7 @@ function SupCard({ label, value, name, playerId, clubSlug, sub, accent = false, 
   return (
     <div className="yb-futuristic-card">
       <div className="yb-fc-content">
-        <div className="font-mono text-[11px] tracking-wide text-white/40 uppercase leading-tight">{label}</div>
+        <div className="font-mono text-[11px] tracking-wide text-pb-faint uppercase leading-tight">{label}</div>
         <div
           className="text-xl font-bold tabular-nums leading-none"
           style={{ color: muted ? 'var(--pb-amber)' : 'var(--pb-accent)' }}
@@ -379,8 +379,8 @@ function SupCard({ label, value, name, playerId, clubSlug, sub, accent = false, 
         {name && playerId && clubSlug && (
           <div className="text-[12px] leading-tight"><PlayerLink id={playerId} name={name} slug={clubSlug} /></div>
         )}
-        {name && !playerId && <span className="text-[12px] text-white/60 leading-tight">{name}</span>}
-        {sub && <div className="text-[11px] text-white/35 leading-tight">{sub}</div>}
+        {name && !playerId && <span className="text-[12px] text-pb-dim leading-tight">{name}</span>}
+        {sub && <div className="text-[11px] text-pb-faint leading-tight">{sub}</div>}
       </div>
     </div>
   )
@@ -389,7 +389,7 @@ function SupCard({ label, value, name, playerId, clubSlug, sub, accent = false, 
 function StatGroup({ title, children }) {
   return (
     <div>
-      <p className="font-mono text-[10px] tracking-wide3 text-white/30 uppercase mb-3">{title}</p>
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-3">{title}</p>
       <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 gap-2">
         {children}
       </div>
@@ -411,7 +411,7 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
   }, [orgId, seasonId, gradeId])
 
   if (loading) return <PbSpinner />
-  if (!results?.length) return <p className="text-white/30 text-sm italic py-8 text-center">No match results found for this selection.</p>
+  if (!results?.length) return <p className="text-pb-faintest text-sm italic py-8 text-center">No match results found for this selection.</p>
 
   // Group by grade
   const byGrade = results.reduce((acc, g) => {
@@ -453,9 +453,9 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
                     <stop offset="95%" stopColor="#f87171" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <CartesianGrid stroke="var(--pb-hairline)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fill: 'var(--pb-faintest)', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fill: 'var(--pb-faintest)', fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
                 <Tooltip content={<ChartTooltip />} />
                 <Area type="monotone" dataKey="Wins" stroke="#4ade80" strokeWidth={2} fill="url(#winsGrad)" dot={false} />
                 <Area type="monotone" dataKey="Losses" stroke="#f87171" strokeWidth={1.5} fill="url(#lossesGrad)" dot={false} />
@@ -473,12 +473,12 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
                 ? { background: 'rgba(74,222,128,0.07)' }
                 : ['loss','lost'].includes(g.result?.toLowerCase())
                 ? { background: 'rgba(248,113,113,0.07)' }
-                : { background: 'rgba(255,255,255,0.02)' }
+                : {}
             )}
             rows={games.map(g => {
-              const resultColor = ['win','won'].includes(g.result?.toLowerCase()) ? '#4ade80' : ['loss','lost'].includes(g.result?.toLowerCase()) ? '#f87171' : 'rgba(255,255,255,0.4)'
+              const resultColor = ['win','won'].includes(g.result?.toLowerCase()) ? '#4ade80' : ['loss','lost'].includes(g.result?.toLowerCase()) ? '#f87171' : 'var(--pb-dim)'
               return [
-                <span className="text-white/40 text-[12px]">{fmtDate(g.played_at) || '—'}</span>,
+                <span className="text-pb-faint text-[12px]">{fmtDate(g.played_at) || '—'}</span>,
                 <span>{g.home_team && g.away_team ? `${g.home_team} vs ${g.away_team}` : (g.home_team || g.away_team || '—')}</span>,
                 <span className="font-semibold" style={{ color: resultColor }}>
                   {g.result ? g.result.charAt(0).toUpperCase() + g.result.slice(1).toLowerCase() : '—'}
@@ -486,13 +486,13 @@ function ResultsTab({ orgId, seasonId, gradeId, clubSlug }) {
                 g.top_batter ? (
                   <span>
                     <PlayerLink id={g.top_batter_id} name={g.top_batter} slug={clubSlug} />
-                    <span className="text-white/40 ml-1">{g.top_runs}{g.top_batter_no ? '*' : ''}</span>
+                    <span className="text-pb-faint ml-1">{g.top_runs}{g.top_batter_no ? '*' : ''}</span>
                   </span>
                 ) : '—',
                 g.top_bowler ? (
                   <span>
                     <PlayerLink id={g.top_bowler_id} name={g.top_bowler} slug={clubSlug} />
-                    <span className="text-white/40 ml-1">{g.top_wickets}/{g.top_bowl_runs}</span>
+                    <span className="text-pb-faint ml-1">{g.top_wickets}/{g.top_bowl_runs}</span>
                   </span>
                 ) : '—',
               ]
@@ -531,15 +531,15 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] font-mono text-white/40 tracking-wide3 uppercase">Min innings:</span>
+        <span className="text-[11px] font-mono text-pb-faint tracking-wide3 uppercase">Min innings:</span>
         {[1, 3, 5, 10].map(n => (
           <button
             key={n}
             onClick={() => setMinInnings(n)}
             className={`px-3 py-1 rounded font-mono text-[11px] tracking-wide border transition-colors ${
               minInnings === n
-                ? 'border-white/30 bg-white/10 text-white'
-                : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+                ? 'border-pb-hairline2 bg-pb-surface2 text-pb-text'
+                : 'border-pb-hairline text-pb-faint hover:border-pb-hairline2 hover:text-pb-dim'
             }`}
           >{n}+</button>
         ))}
@@ -551,7 +551,7 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
             headers={['Player', 'M', 'Inn', 'Runs', 'Avg', 'SR', 'HS', '50s', '100s', 'Ducks']}
             rows={data.map((p, i) => [
               <span className="flex items-center gap-2">
-                <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
+                <span className="font-mono text-[11px] text-pb-faintest w-5 text-right">{i + 1}</span>
                 <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
               </span>,
               p.matches ?? '—',
@@ -572,7 +572,7 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
 
       {!data?.length && (
         <SectionCard title="Batting Honours">
-          <p className="text-white/30 text-sm italic px-5 py-4">No batting data for this selection.</p>
+          <p className="text-pb-faintest text-sm italic px-5 py-4">No batting data for this selection.</p>
         </SectionCard>
       )}
 
@@ -585,8 +585,8 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
                 layout="vertical"
                 margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
               >
-                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
+                <XAxis type="number" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: 'var(--pb-dim)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
                 <Tooltip content={<ChartTooltip />} />
                 <Bar dataKey="runs" name="runs" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
               </BarChart>
@@ -625,9 +625,9 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
                       if (!active || !payload?.length) return null
                       const d = payload[0]
                       return (
-                        <div style={{ background: '#0c1a10', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+                        <div style={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
                           <div style={{ color: d.payload.fill, fontWeight: 600 }}>{d.name}</div>
-                          <div style={{ color: 'rgba(255,255,255,0.6)' }}>{d.value} ({d.payload.pct}%)</div>
+                          <div style={{ color: 'var(--pb-dim)' }}>{d.value} ({d.payload.pct}%)</div>
                         </div>
                       )
                     }}
@@ -641,9 +641,9 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
                       className="shrink-0 w-2.5 h-2.5 rounded-full"
                       style={{ background: DISMISSAL_COLORS[i % DISMISSAL_COLORS.length] }}
                     />
-                    <span className="text-[12px] text-white/70 flex-1 truncate">{d.name}</span>
-                    <span className="font-mono text-[11px] text-white/50 shrink-0">{d.value}</span>
-                    <span className="font-mono text-[11px] text-white/30 w-8 text-right shrink-0">{d.pct}%</span>
+                    <span className="text-[12px] text-pb-dim flex-1 truncate">{d.name}</span>
+                    <span className="font-mono text-[11px] text-pb-faint shrink-0">{d.value}</span>
+                    <span className="font-mono text-[11px] text-pb-faintest w-8 text-right shrink-0">{d.pct}%</span>
                   </div>
                 ))}
               </div>
@@ -660,9 +660,9 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
                 headers={['Batters', 'Wkt', 'Runs']}
                 rows={partnerships.top_partnerships.map((p, i) => [
                   <span>
-                    <span className="font-mono text-[11px] text-white/25 mr-2">{i + 1}</span>
+                    <span className="font-mono text-[11px] text-pb-faintest mr-2">{i + 1}</span>
                     <PlayerLink id={p.batter1_id} name={p.batter1_name} slug={clubSlug} />
-                    <span className="text-white/40 mx-1">&amp;</span>
+                    <span className="text-pb-faint mx-1">&amp;</span>
                     <PlayerLink id={p.batter2_id} name={p.batter2_name} slug={clubSlug} />
                   </span>,
                   ORDINALS[(p.wicket_number || 1) - 1],
@@ -670,7 +670,7 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
                 ])}
               />
             ) : (
-              <p className="text-white/30 text-sm italic px-5 py-4">No partnership data.</p>
+              <p className="text-pb-faintest text-sm italic px-5 py-4">No partnership data.</p>
             )}
           </SectionCard>
 
@@ -679,17 +679,17 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
               <YbTable
                 headers={['Wicket', 'Batters', 'Runs']}
                 rows={partnerships.by_wicket.map(p => [
-                  <span className="text-white/50">{ORDINALS[(p.wicket_number || 1) - 1]}</span>,
+                  <span className="text-pb-faint">{ORDINALS[(p.wicket_number || 1) - 1]}</span>,
                   <span>
                     <PlayerLink id={p.batter1_id} name={p.batter1_name} slug={clubSlug} />
-                    <span className="text-white/40 mx-1">&amp;</span>
+                    <span className="text-pb-faint mx-1">&amp;</span>
                     <PlayerLink id={p.batter2_id} name={p.batter2_name} slug={clubSlug} />
                   </span>,
                   <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.runs}</span>,
                 ])}
               />
             ) : (
-              <p className="text-white/30 text-sm italic px-5 py-4">No partnership data.</p>
+              <p className="text-pb-faintest text-sm italic px-5 py-4">No partnership data.</p>
             )}
           </SectionCard>
         </div>
@@ -717,15 +717,15 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] font-mono text-white/40 tracking-wide3 uppercase">Min wickets:</span>
+        <span className="text-[11px] font-mono text-pb-faint tracking-wide3 uppercase">Min wickets:</span>
         {[1, 5, 10, 20].map(n => (
           <button
             key={n}
             onClick={() => setMinWickets(n)}
             className={`px-3 py-1 rounded font-mono text-[11px] tracking-wide border transition-colors ${
               minWickets === n
-                ? 'border-white/30 bg-white/10 text-white'
-                : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+                ? 'border-pb-hairline2 bg-pb-surface2 text-pb-text'
+                : 'border-pb-hairline text-pb-faint hover:border-pb-hairline2 hover:text-pb-dim'
             }`}
           >{n}+</button>
         ))}
@@ -737,7 +737,7 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
             headers={['Player', 'M', 'Wkts', 'Overs', 'Avg', 'Econ', 'SR', 'Best', '5WI']}
             rows={data.map((p, i) => [
               <span className="flex items-center gap-2">
-                <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
+                <span className="font-mono text-[11px] text-pb-faintest w-5 text-right">{i + 1}</span>
                 <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
               </span>,
               p.matches ?? '—',
@@ -757,7 +757,7 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
 
       {!data?.length && (
         <SectionCard title="Bowling Honours">
-          <p className="text-white/30 text-sm italic px-5 py-4">No bowling data for this selection.</p>
+          <p className="text-pb-faintest text-sm italic px-5 py-4">No bowling data for this selection.</p>
         </SectionCard>
       )}
 
@@ -770,8 +770,8 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
                 layout="vertical"
                 margin={{ top: 0, right: 40, left: 90, bottom: 0 }}
               >
-                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} tickLine={false} axisLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
+                <XAxis type="number" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: 'var(--pb-dim)', fontSize: 11 }} tickLine={false} axisLine={false} width={88} />
                 <Tooltip content={<ChartTooltip />} />
                 <Bar dataKey="wickets" name="wickets" fill="var(--pb-accent)" fillOpacity={0.8} radius={[0,3,3,0]} barSize={14} />
               </BarChart>
@@ -797,7 +797,7 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
               headers={['Player', 'Best', 'Wkts', 'Overs', 'Avg']}
               rows={figRows.map((p, i) => [
                 <span className="flex items-center gap-2">
-                  <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
+                  <span className="font-mono text-[11px] text-pb-faintest w-5 text-right">{i + 1}</span>
                   <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
                 </span>,
                 <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.best_figures || '—'}</span>,
@@ -837,7 +837,7 @@ function FieldingTab({ orgId, seasonId, gradeId, clubSlug }) {
             headers={['Player', 'M', 'Ct', 'Ct (WK)', 'ROs', 'Stpgs', 'Total']}
             rows={data.map((p, i) => [
               <span className="flex items-center gap-2">
-                <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
+                <span className="font-mono text-[11px] text-pb-faintest w-5 text-right">{i + 1}</span>
                 <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
               </span>,
               p.matches ?? '—',
@@ -849,7 +849,7 @@ function FieldingTab({ orgId, seasonId, gradeId, clubSlug }) {
             ])}
           />
         ) : (
-          <p className="text-white/30 text-sm italic px-5 py-4">No fielding data for this selection.</p>
+          <p className="text-pb-faintest text-sm italic px-5 py-4">No fielding data for this selection.</p>
         )}
       </SectionCard>
 
@@ -878,29 +878,29 @@ function AllroundersTab({ orgId, seasonId, gradeId, clubSlug }) {
     <div className="space-y-6">
       <div className="space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] font-mono text-white/40 tracking-wide3 uppercase">Min runs:</span>
+          <span className="text-[11px] font-mono text-pb-faint tracking-wide3 uppercase">Min runs:</span>
           {[50, 100, 200, 300].map(n => (
             <button
               key={n}
               onClick={() => setMinRuns(n)}
               className={`px-3 py-1 rounded font-mono text-[11px] tracking-wide border transition-colors ${
                 minRuns === n
-                  ? 'border-white/30 bg-white/10 text-white'
-                  : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+                  ? 'border-pb-hairline2 bg-pb-surface2 text-pb-text'
+                  : 'border-pb-hairline text-pb-faint hover:border-pb-hairline2 hover:text-pb-dim'
               }`}
             >{n}+</button>
           ))}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] font-mono text-white/40 tracking-wide3 uppercase">Min wickets:</span>
+          <span className="text-[11px] font-mono text-pb-faint tracking-wide3 uppercase">Min wickets:</span>
           {[3, 5, 10, 20].map(n => (
             <button
               key={n}
               onClick={() => setMinWickets(n)}
               className={`px-3 py-1 rounded font-mono text-[11px] tracking-wide border transition-colors ${
                 minWickets === n
-                  ? 'border-white/30 bg-white/10 text-white'
-                  : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+                  ? 'border-pb-hairline2 bg-pb-surface2 text-pb-text'
+                  : 'border-pb-hairline text-pb-faint hover:border-pb-hairline2 hover:text-pb-dim'
               }`}
             >{n}+</button>
           ))}
@@ -913,7 +913,7 @@ function AllroundersTab({ orgId, seasonId, gradeId, clubSlug }) {
             headers={['Player', 'M', 'Runs', 'Bat Avg', 'Wkts', 'Bowl Avg', 'Index']}
             rows={data.map((p, i) => [
               <span className="flex items-center gap-2">
-                <span className="font-mono text-[11px] text-white/25 w-5 text-right">{i + 1}</span>
+                <span className="font-mono text-[11px] text-pb-faintest w-5 text-right">{i + 1}</span>
                 <PlayerLink id={p.player_id} name={p.name} slug={clubSlug} />
               </span>,
               p.matches ?? '—',
@@ -925,7 +925,7 @@ function AllroundersTab({ orgId, seasonId, gradeId, clubSlug }) {
             ])}
           />
         ) : (
-          <p className="text-white/30 text-sm italic px-5 py-4">No all-rounders meet these thresholds. Try lowering the minimums.</p>
+          <p className="text-pb-faintest text-sm italic px-5 py-4">No all-rounders meet these thresholds. Try lowering the minimums.</p>
         )}
       </SectionCard>
     </div>
@@ -968,17 +968,17 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
       {/* Club Awards (added directly to the yearbook) */}
       {clubAwards.length > 0 && (
         <SectionCard title="Club Awards">
-          <div className="grid sm:grid-cols-2 gap-px bg-white/5">
+          <div className="grid sm:grid-cols-2 gap-px bg-pb-surface2">
             {clubAwards.map(a => (
-              <div key={a.id} className="bg-white/2 px-5 py-4">
-                <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">{a.award_name}</div>
-                <div className="text-[15px] font-semibold text-white/90">
+              <div key={a.id} className="bg-pb-surface px-5 py-4">
+                <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">{a.award_name}</div>
+                <div className="text-[15px] font-semibold text-pb-text">
                   {a.player_id
                     ? <PlayerLink id={a.player_id} name={a.player_name || a.name_override} slug={clubSlug} />
                     : <span>{a.name_override}</span>
                   }
                 </div>
-                {a.notes && <div className="text-[12px] text-white/40 mt-1 italic">{a.notes}</div>}
+                {a.notes && <div className="text-[12px] text-pb-faint mt-1 italic">{a.notes}</div>}
               </div>
             ))}
           </div>
@@ -988,20 +988,20 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
       {/* Toggled-on awards from /admin/awards, grouped by category */}
       {orderedCategories.map(cat => (
         <SectionCard key={cat} title={cat === 'Club Award' ? 'Club Awards' : (cat.endsWith('s') ? cat : `${cat}s`)}>
-          <div className="grid sm:grid-cols-2 gap-px bg-white/5">
+          <div className="grid sm:grid-cols-2 gap-px bg-pb-surface2">
             {featuredByCategory[cat].map(a => (
-              <div key={`pulled-${a.id}`} className="bg-white/2 px-5 py-4">
-                <div className="font-mono text-[10px] tracking-wide3 text-white/40 uppercase mb-1">
+              <div key={`pulled-${a.id}`} className="bg-pb-surface px-5 py-4">
+                <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
                   {resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement)}
-                  {a.subcategory && <span className="text-white/30 normal-case ml-1.5">· {a.subcategory}</span>}
+                  {a.subcategory && <span className="text-pb-faintest normal-case ml-1.5">· {a.subcategory}</span>}
                 </div>
-                <div className="text-[15px] font-semibold text-white/90">
+                <div className="text-[15px] font-semibold text-pb-text">
                   {a.player_id
                     ? <PlayerLink id={a.player_id} name={a.player_name} slug={clubSlug} />
                     : <span>{a.player_name || '—'}</span>
                   }
                 </div>
-                {a.detail && <div className="text-[12px] text-white/40 mt-1 italic">{a.detail}</div>}
+                {a.detail && <div className="text-[12px] text-pb-faint mt-1 italic">{a.detail}</div>}
               </div>
             ))}
           </div>
@@ -1010,7 +1010,7 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
 
       {loading ? <PbSpinner /> : milestones?.length > 0 && (
         <SectionCard title="Career Milestones This Season">
-          <div className="divide-y divide-white/5">
+          <div className="divide-y divide-pb-hairline">
             {milestones.map(m => (
               <div key={m.id} className="flex items-center gap-4 px-5 py-3">
                 <div className="w-8 h-8 rounded-full flex items-center justify-center text-[14px]"
@@ -1019,7 +1019,7 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
                 </div>
                 <div className="flex-1">
                   <PlayerLink id={m.player_id} name={m.player_name} slug={clubSlug} />
-                  <div className="font-mono text-[11px] text-white/40 mt-0.5">
+                  <div className="font-mono text-[11px] text-pb-faint mt-0.5">
                     {m.milestone_type} — {m.milestone_value?.toLocaleString()}
                     {m.achieved_at && <span className="ml-2">{fmtDate(m.achieved_at)}</span>}
                   </div>
@@ -1032,9 +1032,9 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
 
       {!loading && milestones?.length === 0 &&
        clubAwards.length === 0 && featuredAwards.length === 0 && (
-        <div className="rounded-xl border border-white/8 border-dashed px-6 py-8 text-center">
-          <p className="font-mono text-[11px] text-white/30 uppercase tracking-wide3">Awards</p>
-          <p className="text-white/25 text-sm mt-2">
+        <div className="rounded-xl border border-pb-hairline border-dashed px-6 py-8 text-center">
+          <p className="font-mono text-[11px] text-pb-faintest uppercase tracking-wide3">Awards</p>
+          <p className="text-pb-faintest text-sm mt-2">
             Club admins can add award winners from the Yearbook admin panel.
           </p>
         </div>
@@ -1059,7 +1059,7 @@ function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
   }, [orgId, seasonId, gradeId])
 
   if (loading) return <PbSpinner />
-  if (!players?.length) return <p className="text-white/30 text-sm italic py-8 text-center">No player data for this selection.</p>
+  if (!players?.length) return <p className="text-pb-faintest text-sm italic py-8 text-center">No player data for this selection.</p>
 
   const filteredPlayers = players.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
 
@@ -1070,9 +1070,9 @@ function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
         placeholder="Search players..."
         value={search}
         onChange={e => setSearch(e.target.value)}
-        className="w-full sm:w-64 bg-white/5 border border-white/15 rounded px-3 py-1.5 text-[13px] text-white/80 placeholder-white/30 focus:outline-none focus:border-white/30 mb-4"
+        className="w-full sm:w-64 bg-pb-surface2 border border-pb-hairline rounded px-3 py-1.5 text-[13px] text-pb-text placeholder-pb-faintest focus:outline-none focus:border-pb-hairline2 mb-4"
       />
-      <p className="text-[12px] text-white/30 mb-4 font-mono">{filteredPlayers.length} players · click any card for full breakdown</p>
+      <p className="text-[12px] text-pb-faintest mb-4 font-mono">{filteredPlayers.length} players · click any card for full breakdown</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {filteredPlayers.map(p => (
           <div
@@ -1080,51 +1080,51 @@ function PlayersTab({ orgId, seasonId, gradeId, clubSlug }) {
             onClick={() => setExpanded(expanded === p.player_id ? null : p.player_id)}
             className={`rounded-xl border cursor-pointer transition-all ${
               expanded === p.player_id
-                ? 'border-white/25 bg-white/8'
-                : 'border-white/8 bg-white/3 hover:border-white/15 hover:bg-white/5'
+                ? 'border-pb-hairline2 bg-pb-surface2'
+                : 'border-pb-hairline bg-pb-surface hover:border-pb-hairline2 hover:bg-pb-surface2'
             }`}
           >
             <div className="px-4 py-3">
-              <div className="font-medium text-[13px] text-white/90 leading-tight mb-1.5">{p.name}</div>
+              <div className="font-medium text-[13px] text-pb-text leading-tight mb-1.5">{p.name}</div>
               <div className="grid grid-cols-3 gap-x-2 gap-y-1">
-                <div><span className="font-mono text-[10px] text-white/40">M </span><span className="font-mono text-[10px] text-white/70">{p.matches ?? '—'}</span></div>
-                <div><span className="font-mono text-[10px] text-white/40">Runs </span><span className="font-mono text-[10px] text-white/70">{p.runs != null ? fmtRuns(p.runs) : '—'}</span></div>
-                <div><span className="font-mono text-[10px] text-white/40">Avg </span><span className="font-mono text-[10px] text-white/70">{fmt(p.bat_avg)}</span></div>
-                <div><span className="font-mono text-[10px] text-white/40">Wkts </span><span className="font-mono text-[10px] text-white/70">{p.wickets ?? '—'}</span></div>
-                <div><span className="font-mono text-[10px] text-white/40">Bowl </span><span className="font-mono text-[10px] text-white/70">{fmt(p.bowl_avg)}</span></div>
-                <div><span className="font-mono text-[10px] text-white/40">Ct </span><span className="font-mono text-[10px] text-white/70">{p.catches ?? p.dismissals ?? '—'}</span></div>
+                <div><span className="font-mono text-[10px] text-pb-faint">M </span><span className="font-mono text-[10px] text-pb-dim">{p.matches ?? '—'}</span></div>
+                <div><span className="font-mono text-[10px] text-pb-faint">Runs </span><span className="font-mono text-[10px] text-pb-dim">{p.runs != null ? fmtRuns(p.runs) : '—'}</span></div>
+                <div><span className="font-mono text-[10px] text-pb-faint">Avg </span><span className="font-mono text-[10px] text-pb-dim">{fmt(p.bat_avg)}</span></div>
+                <div><span className="font-mono text-[10px] text-pb-faint">Wkts </span><span className="font-mono text-[10px] text-pb-dim">{p.wickets ?? '—'}</span></div>
+                <div><span className="font-mono text-[10px] text-pb-faint">Bowl </span><span className="font-mono text-[10px] text-pb-dim">{fmt(p.bowl_avg)}</span></div>
+                <div><span className="font-mono text-[10px] text-pb-faint">Ct </span><span className="font-mono text-[10px] text-pb-dim">{p.catches ?? p.dismissals ?? '—'}</span></div>
               </div>
             </div>
             {expanded === p.player_id && (
-              <div className="border-t border-white/8 px-4 py-3 space-y-1">
+              <div className="border-t border-pb-hairline px-4 py-3 space-y-1">
                 {p.runs > 0 && (
                   <div className="flex justify-between text-[12px]">
-                    <span className="text-white/50">Runs</span>
+                    <span className="text-pb-faint">Runs</span>
                     <span style={{ color: 'var(--pb-accent)' }}>{fmtRuns(p.runs)} {p.high_score != null ? `(HS ${p.high_score})` : ''}</span>
                   </div>
                 )}
                 {p.bat_avg && (
                   <div className="flex justify-between text-[12px]">
-                    <span className="text-white/50">Bat Avg</span>
-                    <span className="text-white/70">{fmt(p.bat_avg)}</span>
+                    <span className="text-pb-faint">Bat Avg</span>
+                    <span className="text-pb-dim">{fmt(p.bat_avg)}</span>
                   </div>
                 )}
                 {p.wickets > 0 && (
                   <div className="flex justify-between text-[12px]">
-                    <span className="text-white/50">Wickets</span>
+                    <span className="text-pb-faint">Wickets</span>
                     <span style={{ color: 'var(--pb-accent)' }}>{p.wickets}</span>
                   </div>
                 )}
                 {p.bowl_avg && p.wickets > 0 && (
                   <div className="flex justify-between text-[12px]">
-                    <span className="text-white/50">Bowl Avg</span>
-                    <span className="text-white/70">{fmt(p.bowl_avg)}</span>
+                    <span className="text-pb-faint">Bowl Avg</span>
+                    <span className="text-pb-dim">{fmt(p.bowl_avg)}</span>
                   </div>
                 )}
                 {p.dismissals > 0 && (
                   <div className="flex justify-between text-[12px]">
-                    <span className="text-white/50">Dismissals</span>
-                    <span className="text-white/70">{p.dismissals}</span>
+                    <span className="text-pb-faint">Dismissals</span>
+                    <span className="text-pb-dim">{p.dismissals}</span>
                   </div>
                 )}
                 <div className="pt-1">
@@ -1159,62 +1159,62 @@ function GradesTab({ orgId, seasonId, clubSlug }) {
   }, [orgId, seasonId])
 
   if (loading) return <PbSpinner />
-  if (!grades?.length) return <p className="text-white/30 text-sm italic py-8 text-center">No grade data available.</p>
+  if (!grades?.length) return <p className="text-pb-faintest text-sm italic py-8 text-center">No grade data available.</p>
 
   return (
     <div className="grid sm:grid-cols-2 gap-4">
       {grades.map(g => (
         <SectionCard key={g.id} title={g.name}>
-          <div className="grid grid-cols-2 divide-x divide-white/5">
+          <div className="grid grid-cols-2 divide-x divide-pb-hairline">
             <StatCallout value={fmtRuns(g.runs)} label="Runs" />
             <StatCallout value={g.wickets ?? '—'} label="Wickets" />
           </div>
           {(g.wins > 0 || g.losses > 0) && (
-            <div className="flex gap-4 px-5 py-2 border-t border-white/5">
+            <div className="flex gap-4 px-5 py-2 border-t border-pb-hairline">
               <span className="font-mono text-[11px]" style={{ color: '#4ade80' }}>{g.wins ?? 0}W</span>
               <span className="font-mono text-[11px]" style={{ color: '#f87171' }}>{g.losses ?? 0}L</span>
             </div>
           )}
-          <div className="border-t border-white/5 px-5 py-3 space-y-2">
+          <div className="border-t border-pb-hairline px-5 py-3 space-y-2">
             {g.top_batter?.name && (
               <div className="flex items-center gap-3 text-[12px]">
-                <span className="text-white/40 w-24 font-mono text-[10px] uppercase tracking-wide">Top Bat</span>
+                <span className="text-pb-faint w-24 font-mono text-[10px] uppercase tracking-wide">Top Bat</span>
                 <span className="flex-1">
                   <PlayerLink id={g.top_batter.id} name={g.top_batter.name} slug={clubSlug} />
-                  <span className="text-white/40 ml-2">{fmtRuns(g.top_batter.runs)} runs</span>
+                  <span className="text-pb-faint ml-2">{fmtRuns(g.top_batter.runs)} runs</span>
                 </span>
               </div>
             )}
             {g.top_bowler?.name && (
               <div className="flex items-center gap-3 text-[12px]">
-                <span className="text-white/40 w-24 font-mono text-[10px] uppercase tracking-wide">Top Bowl</span>
+                <span className="text-pb-faint w-24 font-mono text-[10px] uppercase tracking-wide">Top Bowl</span>
                 <span className="flex-1">
                   <PlayerLink id={g.top_bowler.id} name={g.top_bowler.name} slug={clubSlug} />
-                  <span className="text-white/40 ml-2">{g.top_bowler.wickets} wickets</span>
+                  <span className="text-pb-faint ml-2">{g.top_bowler.wickets} wickets</span>
                 </span>
               </div>
             )}
             {g.high_score != null && (
               <div className="flex items-center gap-3 text-[12px]">
-                <span className="text-white/40 w-24 font-mono text-[10px] uppercase tracking-wide">HS</span>
+                <span className="text-pb-faint w-24 font-mono text-[10px] uppercase tracking-wide">HS</span>
                 <span className="flex-1">
                   {g.high_score_player_id
                     ? <PlayerLink id={g.high_score_player_id} name={g.high_score_name} slug={clubSlug} />
-                    : <span className="text-white/60">{g.high_score_name}</span>
+                    : <span className="text-pb-dim">{g.high_score_name}</span>
                   }
-                  <span className="text-white/40 ml-2">{g.high_score}{g.high_score_not_out ? '*' : ''}</span>
+                  <span className="text-pb-faint ml-2">{g.high_score}{g.high_score_not_out ? '*' : ''}</span>
                 </span>
               </div>
             )}
             {g.best_bowling_wickets != null && (
               <div className="flex items-center gap-3 text-[12px]">
-                <span className="text-white/40 w-24 font-mono text-[10px] uppercase tracking-wide">Best Bowl</span>
+                <span className="text-pb-faint w-24 font-mono text-[10px] uppercase tracking-wide">Best Bowl</span>
                 <span className="flex-1">
                   {g.best_bowling_player_id
                     ? <PlayerLink id={g.best_bowling_player_id} name={g.best_bowling_name} slug={clubSlug} />
-                    : <span className="text-white/60">{g.best_bowling_name}</span>
+                    : <span className="text-pb-dim">{g.best_bowling_name}</span>
                   }
-                  <span className="text-white/40 ml-2">{g.best_bowling_wickets}/{g.best_bowling_runs}</span>
+                  <span className="text-pb-faint ml-2">{g.best_bowling_wickets}/{g.best_bowling_runs}</span>
                 </span>
               </div>
             )}
@@ -1231,12 +1231,100 @@ function ReportsTab({ customSections }) {
   return (
     <div className="space-y-8">
       {(customSections || []).map(s => (
-        <div key={s.id} className="rounded-xl border border-white/8 bg-white/3 px-6 py-5">
-          <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed whitespace-pre-wrap">
+        <div key={s.id} className="rounded-xl border border-pb-hairline bg-pb-surface px-6 py-5">
+          <div className="prose prose-sm max-w-none text-pb-text leading-relaxed whitespace-pre-wrap">
             {s.content_markdown}
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ─── Sponsors tab ─────────────────────────────────────────────────────────────
+
+function SponsorsTab({ clubSlug }) {
+  const [sponsors, setSponsors] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [hidden, setHidden] = useState(new Set())
+
+  useEffect(() => {
+    api.getClubSponsors(clubSlug).then(data => {
+      const list = data?.sponsors || []
+      setSponsors(list)
+      if (list.length > 5) {
+        const shuffled = [...list].sort(() => Math.random() - 0.5)
+        setHidden(new Set(shuffled.slice(5).map(s => s.id)))
+      }
+    }).finally(() => setLoading(false))
+  }, [clubSlug])
+
+  const toggle = (id) => setHidden(h => {
+    const next = new Set(h)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
+
+  if (loading) return <PbSpinner />
+
+  if (!sponsors.length) return (
+    <div className="rounded-xl border border-pb-hairline border-dashed px-6 py-10 text-center">
+      <p className="font-mono text-[11px] text-pb-faintest uppercase tracking-wide3">No sponsors</p>
+      <p className="text-pb-faintest text-sm mt-2">Add sponsors in the Admin area to display them here.</p>
+    </div>
+  )
+
+  const visibleCount = sponsors.filter(s => !hidden.has(s.id)).length
+
+  return (
+    <div className="space-y-4">
+      {sponsors.length > 5 && (
+        <p className="font-mono text-[11px] text-pb-faintest">
+          Showing {visibleCount} of {sponsors.length} sponsors · random selection on load
+        </p>
+      )}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        {sponsors.map(s => {
+          const isHidden = hidden.has(s.id)
+          const inner = (
+            <>
+              <img src={s.logo_url} alt={s.name} className="w-full h-16 object-contain" />
+              {s.name && <p className="text-center font-mono text-[10px] text-pb-faintest mt-2 truncate">{s.name}</p>}
+            </>
+          )
+          return (
+            <div
+              key={s.id}
+              className={`relative rounded-xl border p-4 transition-all ${
+                isHidden ? 'border-pb-hairline opacity-40' : 'border-pb-hairline2 bg-pb-surface'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => toggle(s.id)}
+                className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded text-pb-faintest hover:text-pb-faint hover:bg-pb-surface2 transition"
+                title={isHidden ? 'Show' : 'Hide'}
+              >
+                {isHidden ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                  </svg>
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                )}
+              </button>
+              {s.website_url
+                ? <a href={s.website_url} target="_blank" rel="noopener noreferrer">{inner}</a>
+                : inner
+              }
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -1251,6 +1339,7 @@ const BASE_TABS = [
   { id: 'awards', label: 'Awards' },
   { id: 'players', label: 'Players' },
   { id: 'grades', label: 'Grades' },
+  { id: 'sponsors', label: 'Sponsors' },
 ]
 
 export default function Yearbook() {
@@ -1323,7 +1412,7 @@ export default function Yearbook() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <p className="text-white/40 font-mono text-[13px]">Yearbook not found</p>
+          <p className="text-pb-faint font-mono text-[13px]">Yearbook not found</p>
           <Link to={`/${clubSlug}/dashboard`} className="mt-4 text-sm underline" style={{ color: 'var(--pb-accent)' }}>
             Back to dashboard
           </Link>
@@ -1338,20 +1427,20 @@ export default function Yearbook() {
     return (
       <div className="min-h-screen" style={{ background: 'var(--pb-bg)' }}>
         <div className="max-w-3xl mx-auto px-4 py-12">
-          <Link to={`/${clubSlug}/dashboard`} className="font-mono text-[11px] text-white/30 hover:text-white/50 transition mb-6 inline-block">
+          <Link to={`/${clubSlug}/dashboard`} className="font-mono text-[11px] text-pb-faintest hover:text-pb-faint transition mb-6 inline-block">
             ← Dashboard
           </Link>
           {club?.logo_url && (
             <img src={club.logo_url} alt={club.name} className="w-12 h-12 object-contain mb-4 opacity-80" />
           )}
-          <div className="font-mono text-[11px] tracking-wide3 text-white/40 uppercase mb-2">{club?.name}</div>
-          <h1 className="text-3xl font-bold text-white mb-1">Season Yearbooks</h1>
-          <p className="text-white/40 text-sm mb-8">Season-by-season editorial wrap-ups, stats, and club records.</p>
+          <div className="font-mono text-[11px] tracking-wide3 text-pb-faint uppercase mb-2">{club?.name}</div>
+          <h1 className="text-3xl font-bold text-pb-text mb-1">Season Yearbooks</h1>
+          <p className="text-pb-faint text-sm mb-8">Season-by-season editorial wrap-ups, stats, and club records.</p>
 
           {loading ? <PbSpinner /> : published.length === 0 ? (
-            <div className="rounded-xl border border-white/8 border-dashed px-6 py-10 text-center">
-              <p className="font-mono text-[11px] text-white/30 uppercase tracking-wide3">No yearbooks published yet</p>
-              <p className="text-white/25 text-sm mt-2">Check back after the season wraps up.</p>
+            <div className="rounded-xl border border-pb-hairline border-dashed px-6 py-10 text-center">
+              <p className="font-mono text-[11px] text-pb-faintest uppercase tracking-wide3">No yearbooks published yet</p>
+              <p className="text-pb-faintest text-sm mt-2">Check back after the season wraps up.</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -1361,19 +1450,19 @@ export default function Yearbook() {
                   <Link
                     key={yb.season_id}
                     to={`/${clubSlug}/yearbook/${slug}`}
-                    className="flex items-center justify-between gap-4 px-5 py-4 rounded-xl border border-white/8 bg-white/2 hover:bg-white/5 hover:border-white/20 transition-colors group"
+                    className="flex items-center justify-between gap-4 px-5 py-4 rounded-xl border border-pb-hairline bg-pb-surface hover:bg-pb-surface2 hover:border-pb-hairline2 transition-colors group"
                   >
                     <div>
-                      <div className="text-[15px] font-semibold text-white/85 group-hover:text-white transition-colors">
+                      <div className="text-[15px] font-semibold text-pb-text transition-colors">
                         {yb.season_name}
                       </div>
                       {yb.published_at && (
-                        <div className="font-mono text-[11px] text-white/30 mt-0.5">
+                        <div className="font-mono text-[11px] text-pb-faintest mt-0.5">
                           Published {new Date(yb.published_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </div>
                       )}
                     </div>
-                    <span className="font-mono text-[13px] text-white/25 group-hover:text-white/60 transition-colors shrink-0">→</span>
+                    <span className="font-mono text-[13px] text-pb-faintest group-hover:text-pb-dim transition-colors shrink-0">→</span>
                   </Link>
                 )
               })}
@@ -1390,11 +1479,11 @@ export default function Yearbook() {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--pb-bg)' }}>
         <div className="text-center px-4">
-          <div className="font-mono text-[11px] tracking-wide3 text-white/30 uppercase mb-3">
+          <div className="font-mono text-[11px] tracking-wide3 text-pb-faintest uppercase mb-3">
             {club?.name} · Season Yearbook
           </div>
-          <h1 className="text-2xl font-bold text-white mb-2">{yearbook.season?.name || seasonSlug}</h1>
-          <p className="text-white/40 text-sm mb-6">This yearbook hasn't been published yet.</p>
+          <h1 className="text-2xl font-bold text-pb-text mb-2">{yearbook.season?.name || seasonSlug}</h1>
+          <p className="text-pb-faint text-sm mb-6">This yearbook hasn't been published yet.</p>
           <Link to={`/${clubSlug}/dashboard`} className="font-mono text-[12px]" style={{ color: 'var(--pb-accent)' }}>
             ← Back to dashboard
           </Link>
@@ -1433,7 +1522,7 @@ export default function Yearbook() {
               {club.logo_url && (
                 <img src={club.logo_url} alt={club.name} className="w-12 h-12 sm:w-16 sm:h-16 object-contain mb-3 opacity-90" />
               )}
-              <div className="font-mono text-[10px] sm:text-[11px] tracking-wide3 text-white/40 uppercase mb-2">
+              <div className="font-mono text-[10px] sm:text-[11px] tracking-wide3 text-pb-faint uppercase mb-2">
                 {club.name} · Season Yearbook
               </div>
               <h1 className="text-2xl sm:text-4xl font-bold text-white leading-tight mb-2">
@@ -1441,7 +1530,7 @@ export default function Yearbook() {
               </h1>
               <div className="flex items-center gap-2 flex-wrap">
                 {yearbook.status === 'draft' && (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono tracking-wide3 border border-white/20 text-white/40">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono tracking-wide3 border border-pb-hairline2 text-pb-faint">
                     DRAFT
                   </span>
                 )}
@@ -1450,7 +1539,7 @@ export default function Yearbook() {
                   <select
                     value={seasonSlug || ''}
                     onChange={e => navigate(`/${clubSlug}/yearbook/${e.target.value}`)}
-                    className="print:hidden text-[11px] font-mono bg-white/8 border border-white/15 rounded px-2 py-1 text-white/60 focus:outline-none"
+                    className="print:hidden text-[11px] font-mono bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 text-pb-dim focus:outline-none"
                   >
                     {yearbooks.filter(yb => yb.status === 'published').map(yb => {
                       const sl = _seasonSlug(yb.season_name)
@@ -1464,7 +1553,7 @@ export default function Yearbook() {
             <div className="print:hidden flex flex-col sm:flex-row items-end sm:items-center gap-2 shrink-0 pt-1">
               <button
                 onClick={handleShare}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-white/20 text-[11px] font-mono text-white/50 hover:text-white/70 hover:border-white/30 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-pb-hairline2 text-[11px] font-mono text-pb-faint hover:text-pb-dim hover:border-pb-hairline2 transition-colors"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
@@ -1473,7 +1562,7 @@ export default function Yearbook() {
               </button>
               <button
                 onClick={handlePrint}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-white/20 text-[11px] font-mono text-white/50 hover:text-white/70 hover:border-white/30 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-pb-hairline2 text-[11px] font-mono text-pb-faint hover:text-pb-dim hover:border-pb-hairline2 transition-colors"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
@@ -1486,7 +1575,7 @@ export default function Yearbook() {
       </div>
 
       {/* Tab bar + grade filter */}
-      <div className="print:hidden sticky top-0 z-30 border-b border-white/8 backdrop-blur-sm"
+      <div className="print:hidden sticky top-0 z-30 border-b border-pb-hairline backdrop-blur-sm"
            style={{ background: 'color-mix(in srgb, var(--pb-bg) 92%, transparent)' }}>
         <div className="max-w-5xl mx-auto px-4">
           <div className="flex items-center justify-between gap-4">
@@ -1498,8 +1587,8 @@ export default function Yearbook() {
                     onClick={() => setActiveTab(t.id)}
                     className={`px-3 py-1.5 rounded font-mono text-[11px] tracking-wide whitespace-nowrap transition-colors ${
                       activeTab === t.id
-                        ? 'text-white font-semibold'
-                        : 'text-white/40 hover:text-white/60'
+                        ? 'text-pb-text font-semibold'
+                        : 'text-pb-faint hover:text-pb-dim'
                     }`}
                     style={activeTab === t.id ? { background: 'color-mix(in srgb, var(--pb-accent) 20%, transparent)', color: 'var(--pb-accent)' } : {}}
                   >
@@ -1513,7 +1602,7 @@ export default function Yearbook() {
                 <select
                   value={gradeId || ''}
                   onChange={e => setGradeId(e.target.value || null)}
-                  className="text-[11px] font-mono bg-pb-surface2 border border-white/15 rounded px-2 py-1.5 text-white/70 focus:outline-none"
+                  className="text-[11px] font-mono bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-pb-dim focus:outline-none"
                 >
                   <option value="">All Grades</option>
                   {grades.map(g => (
@@ -1558,11 +1647,14 @@ export default function Yearbook() {
         {activeTab === 'grades' && (
           <GradesTab orgId={orgId} seasonId={seasonId} clubSlug={clubSlug} />
         )}
+        {activeTab === 'sponsors' && (
+          <SponsorsTab clubSlug={clubSlug} />
+        )}
       </div>
 
       {/* Footer */}
-      <div className="border-t border-white/5 mt-12 py-6 text-center">
-        <p className="font-mono text-[10px] text-white/20 tracking-wide3">
+      <div className="border-t border-pb-hairline mt-12 py-6 text-center">
+        <p className="font-mono text-[10px] text-pb-faintest tracking-wide3">
           {club.name} · {season?.name} · Powered by BetterStats
         </p>
       </div>
