@@ -21,7 +21,7 @@ export default function Privacy() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">What information we collect</h2>
             <ul className="space-y-2 ml-4">
-              <li><strong className="text-pb-text">Cricket statistics:</strong> Player names and performance statistics sourced from PlayHQ's public data feed. This data is already publicly available.</li>
+              <li><strong className="text-pb-text">Cricket statistics:</strong> Player names and performance statistics sourced from publicly available cricket data.</li>
               <li><strong className="text-pb-text">Admin credentials:</strong> Username and hashed password for club administrator accounts. We never store passwords in plain text.</li>
               <li><strong className="text-pb-text">Club information:</strong> Club name, contact email address, and branding preferences provided by club administrators.</li>
               <li><strong className="text-pb-text">Usage data:</strong> Standard web server logs (IP addresses, page views) for security and performance monitoring.</li>
@@ -40,7 +40,7 @@ export default function Privacy() {
 
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Public statistics</h2>
-            <p>Player names and statistics are displayed publicly on club pages. This mirrors data already publicly available on PlayHQ. If a player wishes to have their statistics removed, they should contact their club administrator or us directly.</p>
+            <p>Player names and statistics are displayed publicly on club pages. This mirrors data already publicly available. If a player wishes to have their statistics removed, they should contact their club administrator or us directly.</p>
           </section>
 
           <section>

@@ -165,7 +165,7 @@ export default function MatchOverview() {
           <div className="pb-card p-4 mb-5 flex items-center justify-between gap-4">
             <div className="min-w-0">
               <p className="text-pb-text text-sm font-medium">Full scorecard</p>
-              <p className="font-mono text-[10px] text-pb-faint mt-0.5">Batting & bowling figures on PlayHQ</p>
+              <p className="font-mono text-[10px] text-pb-faint mt-0.5">Batting &amp; bowling figures online</p>
             </div>
             <a
               href={game.url}

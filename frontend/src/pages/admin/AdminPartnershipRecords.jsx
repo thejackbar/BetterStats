@@ -699,7 +699,7 @@ export default function AdminPartnershipRecords() {
         </div>
 
         <p className="font-mono text-[10px] text-pb-faint mb-5 leading-relaxed">
-          Manually add historical partnership records that predate PlayHQ sync. These appear in the Records board alongside auto-synced data.
+          Manually add historical partnership records that predate automatic sync. These appear in the Records board alongside auto-synced data.
         </p>
 
         <ImportPanel onImported={handleImported} />

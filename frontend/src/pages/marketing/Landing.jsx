@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 
 const FEATURES = [
-  { title: 'Live Stats', desc: 'Player batting, bowling and fielding averages updated after every game via PlayHQ sync.' },
+  { title: 'Live Stats', desc: 'Player batting, bowling and fielding averages updated automatically after every game.' },
   { title: 'Leaderboards', desc: 'Season and career leaderboards — runs, wickets, economy, strike rate, catches and more.' },
   { title: 'Player Profiles', desc: 'Rich individual profiles with career trends, partnership data, and milestone tracking.' },
   { title: 'Season Records', desc: 'Club and grade records updated automatically — best innings, best figures, partnerships.' },
@@ -25,7 +25,7 @@ export default function Landing() {
           <span style={{ color: 'var(--pb-accent)' }}>done properly.</span>
         </h1>
         <p className="text-pb-dim text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
-          BetterStats turns your PlayHQ data into a beautiful, public stats page your club members will actually use — with player profiles, leaderboards, records, and awards.
+          BetterStats turns your club's match data into a beautiful, public stats page your club members will actually use — with player profiles, leaderboards, records, and awards.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <a

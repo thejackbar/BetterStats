@@ -16,7 +16,7 @@ export default function Terms() {
           {[
             {
               title: '1. Service description',
-              body: 'BetterStats ("the Service") is a cricket statistics platform provided by KlubPro (ABN pending) to registered cricket clubs in Australia. The Service displays publicly available cricket statistics sourced from PlayHQ.',
+              body: 'BetterStats ("the Service") is a cricket statistics platform provided by KlubPro (ABN pending) to registered cricket clubs in Australia. The Service displays publicly available cricket statistics sourced from public cricket data.',
             },
             {
               title: '2. Account terms',
@@ -28,7 +28,7 @@ export default function Terms() {
             },
             {
               title: '4. Data',
-              body: 'Statistics displayed on BetterStats are sourced from PlayHQ\'s public data feed. We do not guarantee the accuracy of statistics. You retain ownership of any custom content you add (awards, descriptions, etc.). We may use aggregated, anonymised data to improve the Service.',
+              body: 'Statistics displayed on BetterStats are sourced from public cricket data feeds. We do not guarantee the accuracy of statistics. You retain ownership of any custom content you add (awards, descriptions, etc.). We may use aggregated, anonymised data to improve the Service.',
             },
             {
               title: '5. Acceptable use',

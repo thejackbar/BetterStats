@@ -177,9 +177,9 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
             </select>
           </div>
 
-          {/* PlayHQ ID */}
+          {/* External ID */}
           <div>
-            <label className="font-mono text-[10px] text-pb-faintest block mb-1">PlayHQ ID</label>
+            <label className="font-mono text-[10px] text-pb-faintest block mb-1">External ID</label>
             <input
               type="text"
               value={form.playhq_id}
@@ -409,7 +409,7 @@ export default function AdminPlayers() {
             </div>
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
-                <label className="font-mono text-[10px] text-pb-faintest block mb-1">PlayHQ ID (optional)</label>
+                <label className="font-mono text-[10px] text-pb-faintest block mb-1">External ID (optional)</label>
                 <input
                   type="text"
                   value={createForm.playhq_id}
@@ -458,7 +458,7 @@ export default function AdminPlayers() {
         </div>
 
         <p className="font-mono text-[10px] text-pb-faint mb-4">
-          Click <span style={{ color: 'var(--pb-accent)' }}>Edit</span> on any player to update their display name, gender, role, PlayHQ ID, or photo.
+          Click <span style={{ color: 'var(--pb-accent)' }}>Edit</span> on any player to update their display name, gender, role, external ID, or photo.
         </p>
 
         <div className="pb-card overflow-hidden">

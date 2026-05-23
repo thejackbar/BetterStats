@@ -141,7 +141,7 @@ export default function AdminSync() {
   const handleHardRefresh = async () => {
     if (!orgId || hardRefreshing || syncing || backfilling) return
     const ok = window.confirm(
-      'Full Rebuild wipes every stored game for this club and re-pulls all history from Cricket Australia. ' +
+      'Full Rebuild wipes every stored game for this club and re-pulls all history from the source. ' +
       'This may take an hour or longer for clubs with a lot of history. Continue?'
     )
     if (!ok) return
@@ -188,7 +188,7 @@ export default function AdminSync() {
             <div className="flex-1">
               <p className="text-pb-text text-sm font-medium mb-0.5">Pull latest games &amp; stats</p>
               <p className="text-pb-faint text-xs leading-relaxed">
-                Adds new games and updates existing players from Cricket Australia. Safe to run anytime —
+                Adds new games and updates existing players from the source. Safe to run anytime —
                 this is the normal weekly sync.
               </p>
             </div>
@@ -213,7 +213,7 @@ export default function AdminSync() {
               <p className="text-pb-text text-sm font-medium mb-0.5">Repair players showing 0 matches</p>
               <p className="text-pb-faint text-xs leading-relaxed">
                 Recomputes career totals from scorecards already in BetterStats. Use when a player&apos;s
-                headline reads 0 despite having visible innings. No data pulled from Cricket Australia —
+                headline reads 0 despite having visible innings. No data pulled from the source —
                 runs in seconds.
               </p>
             </div>
@@ -237,7 +237,7 @@ export default function AdminSync() {
             <div className="flex-1">
               <p className="text-pb-text text-sm font-medium mb-0.5">Wipe and re-pull everything</p>
               <p className="text-pb-faint text-xs leading-relaxed">
-                Deletes every stored game and re-pulls all history from Cricket Australia. Use after a
+                Deletes every stored game and re-pulls all history from the source. Use after a
                 sync-logic change or if data looks broadly wrong. Slow — an hour or more for a club with
                 a lot of history.
               </p>
@@ -253,7 +253,7 @@ export default function AdminSync() {
           {settings && (
             <div className="mt-4 pt-4 pb-hairline-t">
               <p className="font-mono text-[10px] text-pb-faint">
-                PlayHQ ID:{' '}
+                Organisation ID:{' '}
                 {settings.playhq_id
                   ? <span style={{ color: 'var(--pb-accent)' }}>{settings.playhq_id}</span>
                   : <span style={{ color: 'var(--pb-amber)' }}>not set — game-level data requires this</span>

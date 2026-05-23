@@ -3,7 +3,7 @@ import MarketingNav from '../../components/MarketingNav'
 
 const INCLUDED = [
   'Unlimited players and seasons',
-  'Automatic PlayHQ data sync',
+  'Automatic data sync',
   'Full public stats page',
   'Player profiles and leaderboards',
   'Awards and honours management',

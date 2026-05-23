@@ -41,7 +41,7 @@ export default function AdminGames() {
             ))}
           </select>
           <span className="font-mono text-[10px] text-pb-faint">
-            Match data is synced from PlayHQ and is read-only here.
+            Match data is synced automatically and is read-only here.
           </span>
         </div>
 
