@@ -33,9 +33,10 @@ const BOWLING_SORTS = [
 ]
 
 const FIELDING_SORTS = [
-  { key: 'total_catches',   label: 'CATCHES' },
-  { key: 'total_run_outs',  label: 'RUN OUTS' },
-  { key: 'total_stumpings', label: 'STUMPINGS' },
+  { key: 'total_catches',     label: 'CATCHES' },
+  { key: 'total_catches_wk',  label: 'WK CATCHES' },
+  { key: 'total_run_outs',    label: 'RUN OUTS' },
+  { key: 'total_stumpings',   label: 'STUMPINGS' },
 ]
 
 const MAIN_TABS = [
@@ -309,16 +310,17 @@ function FieldingTable({ rows, sortBy, fmt = n => n }) {
   return (
     <Card pad="p-0">
       <div className="overflow-x-auto pb-scroll">
-        <table className="w-full min-w-[460px] text-[14px]">
+        <table className="w-full min-w-[500px] text-[14px]">
           <thead>
             <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
               <th className="font-medium py-3 pl-5 w-10">#</th>
               <th className="font-medium py-3">PLAYER</th>
               <th className="font-medium py-3 text-right pr-3">M</th>
               <th className="font-medium py-3 text-right pr-3" style={{ color: 'var(--pb-accent)' }}>{primaryLabel}</th>
-              {sortBy !== 'total_catches'   && <th className="font-medium py-3 text-right pr-3">CATCHES</th>}
-              {sortBy !== 'total_run_outs'  && <th className="font-medium py-3 text-right pr-3">RUN OUTS</th>}
-              {sortBy !== 'total_stumpings' && <th className="font-medium py-3 pr-5 text-right">STUMPINGS</th>}
+              {sortBy !== 'total_catches'    && <th className="font-medium py-3 text-right pr-3">CATCHES</th>}
+              {sortBy !== 'total_catches_wk' && <th className="font-medium py-3 text-right pr-3">WK CT</th>}
+              {sortBy !== 'total_run_outs'   && <th className="font-medium py-3 text-right pr-3">RUN OUTS</th>}
+              {sortBy !== 'total_stumpings'  && <th className="font-medium py-3 pr-5 text-right">STUMPINGS</th>}
             </tr>
           </thead>
           <tbody>
@@ -334,9 +336,10 @@ function FieldingTable({ rows, sortBy, fmt = n => n }) {
                     {p[primaryKey] ?? '—'}
                   </span>
                 </td>
-                {sortBy !== 'total_catches'   && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_catches ?? '—'}</td>}
-                {sortBy !== 'total_run_outs'  && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_run_outs ?? '—'}</td>}
-                {sortBy !== 'total_stumpings' && <td className="py-3 pr-5 font-mono text-pb-dim text-right">{p.total_stumpings ?? '—'}</td>}
+                {sortBy !== 'total_catches'    && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_catches ?? '—'}</td>}
+                {sortBy !== 'total_catches_wk' && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_catches_wk ?? '—'}</td>}
+                {sortBy !== 'total_run_outs'   && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_run_outs ?? '—'}</td>}
+                {sortBy !== 'total_stumpings'  && <td className="py-3 pr-5 font-mono text-pb-dim text-right">{p.total_stumpings ?? '—'}</td>}
               </tr>
             ))}
           </tbody>

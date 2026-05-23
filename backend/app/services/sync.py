@@ -1244,6 +1244,7 @@ async def sync_grassroots_game_level_data(
                         break
 
                 # Game
+                venue_name = (scorecard.get("venue") or {}).get("name")
                 session.add(Game(
                     id=match_uuid,
                     grade_id=grade_uuid,
@@ -1253,6 +1254,7 @@ async def sync_grassroots_game_level_data(
                     result=result_text,
                     winning_team=winner_name,
                     is_final=match_to_is_final.get(match_id_str, False),
+                    venue=venue_name,
                 ))
                 try:
                     await session.flush()
@@ -1392,12 +1394,14 @@ async def sync_grassroots_game_level_data(
                             pid = merged_away.get(pid)
                             if pid is None or pid not in known_player_ids:
                                 continue
+                        catches_wk = row.get("wicketKeeperCatches") or 0
                         catches_total = row.get("totalCatches")
                         if catches_total is None:
-                            catches_total = (row.get("catches") or 0) + (row.get("wicketKeeperCatches") or 0)
+                            catches_total = (row.get("catches") or 0) + catches_wk
                         session.add(FieldingStat(
                             game_id=match_uuid, player_id=pid,
                             catches=catches_total or 0,
+                            catches_wk=catches_wk,
                             run_outs=row.get("runOuts") or 0,
                             stumpings=row.get("stumpings") or 0,
                         ))
