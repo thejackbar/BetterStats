@@ -76,9 +76,12 @@ async def get_player_stats(
 
     use_game_filter = last_n_games or start_date or end_date
     if use_game_filter:
-        batting = await get_career_batting_from_innings(db, player_id, last_n_games, start_date, end_date)
-        bowling = await get_career_bowling_from_spells(db, player_id, last_n_games, start_date, end_date)
-        fielding = await get_career_fielding_from_stats(db, player_id, last_n_games, start_date, end_date)
+        try:
+            batting = await get_career_batting_from_innings(db, player_id, last_n_games, start_date, end_date)
+            bowling = await get_career_bowling_from_spells(db, player_id, last_n_games, start_date, end_date)
+            fielding = await get_career_fielding_from_stats(db, player_id, last_n_games, start_date, end_date)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Stats query failed: {exc}")
     else:
         batting = await get_career_batting(db, player_id, season_id)
         bowling = await get_career_bowling(db, player_id, season_id)
