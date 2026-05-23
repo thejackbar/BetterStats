@@ -49,10 +49,13 @@ export const api = {
   // Players
   listPlayers: (orgId) => request(`/players?org_id=${orgId}`),
   getPlayer: (playerId) => request(`/players/${playerId}`),
-  getPlayerStats: (playerId, { seasonId, gradeId } = {}) => {
+  getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
+    if (lastNGames) params.set('last_n_games', lastNGames)
+    if (startDate) params.set('start_date', startDate)
+    if (endDate) params.set('end_date', endDate)
     return request(`/players/${playerId}/stats?${params}`)
   },
   getPlayerDismissals: (playerId) => request(`/players/${playerId}/dismissals`),

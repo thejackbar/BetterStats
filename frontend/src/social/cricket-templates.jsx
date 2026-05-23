@@ -185,7 +185,7 @@ export function orgToPalette(org) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 1 — Hero cutout + bold name list
 // ─────────────────────────────────────────────────────────────────────────────
-export function T1_HeroList({ team, opponent, match, players, palette }) {
+export function T1_HeroList({ team, opponent, match, players, palette, heroImage }) {
   const P = players.slice(0, 13)
   return (
     <div style={{
@@ -224,14 +224,14 @@ export function T1_HeroList({ team, opponent, match, players, palette }) {
         }} />
         {(() => {
           const featured = featuredOf(players)
-          const hasHead = !!(featured && featured.headshot)
-          const src = hasHead ? featured.headshot : team.logo
+          const hasHead = !!(heroImage || (featured && featured.headshot))
+          const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
           return (
             <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
               style={{
                 position: 'relative',
-                height: hasHead ? 980 : 460,
-                width: 'auto', marginBottom: hasHead ? -20 : 200,
+                height: hasHead ? 1960 : 920,
+                width: 'auto', marginBottom: hasHead ? -40 : 400,
                 objectFit: 'contain', objectPosition: 'bottom',
                 filter: `drop-shadow(0 30px 60px ${palette.primary}cc)`,
               }} />
@@ -419,7 +419,7 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 3 — Side image + numbered XI
 // ─────────────────────────────────────────────────────────────────────────────
-export function T3_SideNumbered({ team, opponent, match, players, palette }) {
+export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage }) {
   const P = players.slice(0, 11)
   return (
     <div style={{
@@ -446,8 +446,8 @@ export function T3_SideNumbered({ team, opponent, match, players, palette }) {
         <div style={{ position: 'absolute', left: -120, bottom: -120, width: 600, height: 600, background: `radial-gradient(circle at center, ${palette.accent}33 0%, transparent 60%)` }} />
         {(() => {
           const featured = featuredOf(players)
-          const hasHead = !!(featured && featured.headshot)
-          const src = hasHead ? featured.headshot : team.logo
+          const hasHead = !!(heroImage || (featured && featured.headshot))
+          const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
           return (
             <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
               style={{
@@ -649,7 +649,7 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 6 — Diagonal poster
 // ─────────────────────────────────────────────────────────────────────────────
-export function T6_Diagonal({ team, opponent, match, players, palette }) {
+export function T6_Diagonal({ team, opponent, match, players, palette, heroImage }) {
   const P = players.slice(0, 11)
   return (
     <div style={{
@@ -677,15 +677,15 @@ export function T6_Diagonal({ team, opponent, match, players, palette }) {
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={260} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, color: palette.ink, opacity: 0.85, marginTop: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
         </div>
-        <div style={{ flex: 1, height: 370, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ flex: 1, height: 370, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'visible' }}>
           {(() => {
             const featured = featuredOf(players)
-            const hasHead = !!(featured && featured.headshot)
-            const src = hasHead ? featured.headshot : team.logo
+            const hasHead = !!(heroImage || (featured && featured.headshot))
+            const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
             return (
               <img src={src} alt={featured?.last || team.short}
                 style={{
-                  maxHeight: 340,
+                  maxHeight: 680,
                   width: 'auto', objectFit: 'contain', objectPosition: 'bottom',
                   filter: `drop-shadow(0 20px 40px ${palette.primary}cc)`,
                 }} />
@@ -727,7 +727,7 @@ export function T6_Diagonal({ team, opponent, match, players, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 7 — Milestone spotlight
 // ─────────────────────────────────────────────────────────────────────────────
-export function T7_CaptainSpotlight({ team, opponent, match, players, palette, milestone }) {
+export function T7_CaptainSpotlight({ team, opponent, match, players, palette, milestone, heroImage }) {
   const player = milestone?.player || featuredOf(players)
   const value = milestone?.value || '1ST'
   const unit = milestone?.unit || 'XI'
@@ -753,8 +753,8 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
         </div>
       </div>
       <div style={{ position: 'absolute', right: 0, top: 60, width: 540, height: 660, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
-        {hasHead ? (
-          <img src={player.headshot} alt={player.last} style={{ height: 720, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+        {(heroImage || hasHead) ? (
+          <img src={heroImage || player.headshot} alt={player.last} style={{ height: 720, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 380, height: 380, objectFit: 'contain', marginBottom: 40 }} />
         )}

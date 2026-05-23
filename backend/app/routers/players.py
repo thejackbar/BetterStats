@@ -9,6 +9,7 @@ from app.models.db import Player, User, PlayerSyncRequest, get_db
 from app.routers.auth import get_current_user
 from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
+    get_career_batting_from_innings, get_career_bowling_from_spells, get_career_fielding_from_stats,
     get_player_batting_innings, get_player_bowling_spells,
     get_dismissal_breakdown, get_batting_by_position, get_batting_by_grade,
     get_bowling_by_grade, get_player_team_breakdown,
@@ -64,15 +65,24 @@ async def get_player_stats(
     player_id: str,
     season_id: Optional[str] = Query(None),
     grade_id: Optional[str] = Query(None),
+    last_n_games: Optional[int] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
 
-    batting = await get_career_batting(db, player_id, season_id)
-    bowling = await get_career_bowling(db, player_id, season_id)
-    fielding = await get_career_fielding(db, player_id, season_id)
+    use_game_filter = last_n_games or start_date or end_date
+    if use_game_filter:
+        batting = await get_career_batting_from_innings(db, player_id, last_n_games, start_date, end_date)
+        bowling = await get_career_bowling_from_spells(db, player_id, last_n_games, start_date, end_date)
+        fielding = await get_career_fielding_from_stats(db, player_id, last_n_games, start_date, end_date)
+    else:
+        batting = await get_career_batting(db, player_id, season_id)
+        bowling = await get_career_bowling(db, player_id, season_id)
+        fielding = await get_career_fielding(db, player_id, season_id)
     batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id)
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id)
 
