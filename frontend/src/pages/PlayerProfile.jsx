@@ -1214,7 +1214,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                         <td className="py-2.5 font-mono text-pb-text text-right border-l border-pb-hairline pl-3">{r.wickets > 0 ? r.wickets : '—'}</td>
                         <td className="py-2.5 font-mono text-pb-dim text-right">{r.bowling_average != null ? Number(r.bowling_average).toFixed(1) : '—'}</td>
                         <td className="py-2.5 font-mono text-pb-dim text-right">{r.economy != null ? Number(r.economy).toFixed(1) : '—'}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right border-l border-pb-hairline pl-3">{r.total_catches > 0 ? r.total_catches : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right border-l border-pb-hairline pl-3">{r.catches_non_wk > 0 ? r.catches_non_wk : '—'}</td>
                         <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">{r.stumpings > 0 ? r.stumpings : '—'}</td>
                       </tr>
                     ))}
