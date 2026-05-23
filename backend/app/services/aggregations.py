@@ -304,7 +304,7 @@ async def get_career_fielding_from_stats(
         game_filter = "AND fs.game_id IN (SELECT game_id FROM date_filtered_games)"
 
     ctes.append(f"""qualifying AS (
-        SELECT fs.catches, fs.run_outs, fs.stumpings, fs.game_id
+        SELECT fs.catches, fs.catches_wk, fs.run_outs, fs.stumpings, fs.game_id
         FROM fielding_stats fs
         JOIN games g ON g.id = fs.game_id
         WHERE fs.player_id = CAST(:pid AS UUID)
@@ -315,6 +315,8 @@ async def get_career_fielding_from_stats(
         WITH {', '.join(ctes)}
         SELECT
             COALESCE(SUM(catches), 0) AS total_catches,
+            COALESCE(SUM(catches_wk), 0) AS total_catches_wk,
+            COALESCE(SUM(catches - catches_wk), 0) AS total_catches_non_wk,
             COALESCE(SUM(run_outs), 0) AS total_run_outs,
             COALESCE(SUM(stumpings), 0) AS total_stumpings,
             COALESCE(SUM(catches + run_outs + stumpings), 0) AS total_dismissals,
@@ -363,7 +365,7 @@ async def get_fielding_leaderboard(
     finals_only: Optional[bool] = None,
     captain_only: Optional[bool] = None,
 ) -> list[dict]:
-    ALLOWED_SORTS = {"total_catches", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
+    ALLOWED_SORTS = {"total_catches", "total_catches_wk", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_dismissals"
 
@@ -379,6 +381,8 @@ async def get_fielding_leaderboard(
                 COALESCE(p.display_name_override, p.name) AS name,
                 COUNT(DISTINCT fs.game_id) AS games,
                 COALESCE(SUM(fs.catches), 0) AS total_catches,
+                COALESCE(SUM(fs.catches_wk), 0) AS total_catches_wk,
+                COALESCE(SUM(fs.catches - fs.catches_wk), 0) AS total_catches_non_wk,
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
@@ -403,6 +407,8 @@ async def get_fielding_leaderboard(
                 COALESCE(p.display_name_override, p.name) AS name,
                 COUNT(DISTINCT fs.game_id) AS games,
                 COALESCE(SUM(fs.catches), 0) AS total_catches,
+                COALESCE(SUM(fs.catches_wk), 0) AS total_catches_wk,
+                COALESCE(SUM(fs.catches - fs.catches_wk), 0) AS total_catches_non_wk,
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
@@ -429,6 +435,8 @@ async def get_fielding_leaderboard(
                 COALESCE(p.display_name_override, p.name) AS name,
                 COUNT(DISTINCT fs.game_id) AS games,
                 COALESCE(SUM(fs.catches), 0) AS total_catches,
+                COALESCE(SUM(fs.catches_wk), 0) AS total_catches_wk,
+                COALESCE(SUM(fs.catches - fs.catches_wk), 0) AS total_catches_non_wk,
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
@@ -455,6 +463,8 @@ async def get_fielding_leaderboard(
                 COALESCE(p.display_name_override, p.name) AS name,
                 COUNT(DISTINCT fs.game_id) AS games,
                 COALESCE(SUM(fs.catches), 0) AS total_catches,
+                COALESCE(SUM(fs.catches_wk), 0) AS total_catches_wk,
+                COALESCE(SUM(fs.catches - fs.catches_wk), 0) AS total_catches_non_wk,
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
@@ -477,6 +487,8 @@ async def get_fielding_leaderboard(
             COALESCE(p.display_name_override, p.name) AS name,
             SUM(pss.matches) AS games,
             SUM(pss.catches) AS total_catches,
+            SUM(pss.catches_wk) AS total_catches_wk,
+            SUM(pss.catches_non_wk) AS total_catches_non_wk,
             SUM(pss.run_outs) AS total_run_outs,
             SUM(pss.stumpings) AS total_stumpings,
             SUM(pss.catches + pss.run_outs + pss.stumpings) AS total_dismissals
@@ -1040,6 +1052,7 @@ async def get_season_by_season(session: AsyncSession, player_id: str) -> list[di
                 pss.maidens AS total_maidens,
                 pss.catches AS total_catches,
                 pss.catches_wk AS total_catches_wk,
+                pss.catches_non_wk AS total_catches_non_wk,
                 pss.run_outs AS total_run_outs,
                 pss.stumpings AS total_stumpings
             FROM player_season_stats pss
@@ -1995,6 +2008,85 @@ async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Op
             ORDER BY SUM(gs.wickets) DESC
         """),
         {"pid": player_id, "org_id": org_id},
+    )
+    return [dict(r) for r in result.mappings()]
+
+
+async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dict]:
+    result = await session.execute(
+        text("""
+            WITH games_by_venue AS (
+                SELECT
+                    g.venue,
+                    COUNT(*) AS games,
+                    COUNT(*) FILTER (WHERE g.result = 'WIN') AS wins,
+                    COUNT(*) FILTER (WHERE g.result = 'LOSS') AS losses
+                FROM game_appearances ga
+                JOIN games g ON g.id = ga.game_id
+                WHERE ga.player_id = CAST(:pid AS UUID)
+                  AND g.venue IS NOT NULL
+                GROUP BY g.venue
+            ),
+            batting_by_venue AS (
+                SELECT
+                    g.venue,
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL) AS innings,
+                    COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
+                    MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS dismissals
+                FROM batting_innings bi
+                JOIN games g ON g.id = bi.game_id
+                WHERE bi.player_id = CAST(:pid AS UUID)
+                  AND g.venue IS NOT NULL
+                GROUP BY g.venue
+            ),
+            bowling_by_venue AS (
+                SELECT
+                    g.venue,
+                    COALESCE(SUM(bs.wickets), 0) AS wickets,
+                    COALESCE(SUM(bs.runs), 0) AS bowling_runs,
+                    COALESCE(SUM(bs.overs), 0) AS bowling_overs
+                FROM bowling_spells bs
+                JOIN games g ON g.id = bs.game_id
+                WHERE bs.player_id = CAST(:pid AS UUID)
+                  AND g.venue IS NOT NULL
+                GROUP BY g.venue
+            ),
+            fielding_by_venue AS (
+                SELECT
+                    g.venue,
+                    COALESCE(SUM(fs.catches), 0) AS catches,
+                    COALESCE(SUM(fs.catches_wk), 0) AS catches_wk,
+                    COALESCE(SUM(fs.stumpings), 0) AS stumpings
+                FROM fielding_stats fs
+                JOIN games g ON g.id = fs.game_id
+                WHERE fs.player_id = CAST(:pid AS UUID)
+                  AND g.venue IS NOT NULL
+                GROUP BY g.venue
+            )
+            SELECT
+                gv.venue,
+                gv.games,
+                gv.wins,
+                gv.losses,
+                COALESCE(bav.innings, 0) AS innings,
+                COALESCE(bav.total_runs, 0) AS total_runs,
+                ROUND(bav.total_runs::numeric / NULLIF(bav.dismissals, 0), 2) AS batting_average,
+                bav.high_score,
+                COALESCE(bov.wickets, 0) AS wickets,
+                ROUND(bov.bowling_runs::numeric / NULLIF(bov.wickets, 0), 2) AS bowling_average,
+                ROUND(bov.bowling_runs::numeric / NULLIF(bov.bowling_overs, 0), 2) AS economy,
+                COALESCE(fv.catches, 0) AS total_catches,
+                COALESCE(fv.catches_wk, 0) AS catches_wk,
+                COALESCE(fv.catches - fv.catches_wk, 0) AS catches_non_wk,
+                COALESCE(fv.stumpings, 0) AS stumpings
+            FROM games_by_venue gv
+            LEFT JOIN batting_by_venue bav ON bav.venue = gv.venue
+            LEFT JOIN bowling_by_venue bov ON bov.venue = gv.venue
+            LEFT JOIN fielding_by_venue fv ON fv.venue = gv.venue
+            ORDER BY gv.games DESC
+        """),
+        {"pid": player_id},
     )
     return [dict(r) for r in result.mappings()]
 

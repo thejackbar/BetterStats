@@ -182,6 +182,7 @@ class Game(Base):
     winning_team = Column(Text)
     is_final = Column(Boolean, default=False, nullable=False, server_default='false')
     raw_payload = Column(JSON)
+    venue = Column(String)
 
     grade = relationship("Grade", back_populates="games")
     batting_innings = relationship("BattingInnings", back_populates="game")
@@ -239,6 +240,7 @@ class FieldingStat(Base):
     game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"))
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"))
     catches = Column(Integer, default=0)
+    catches_wk = Column(Integer, default=0)
     run_outs = Column(Integer, default=0)
     stumpings = Column(Integer, default=0)
 

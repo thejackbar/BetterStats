@@ -460,7 +460,8 @@ function FieldingTab({ fielding, seasonStats }) {
       <Card title="CAREER FIELDING">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4">
           {[
-            ['CATCHES', fielding.total_catches, true],
+            ['CATCHES', fielding.total_catches_non_wk ?? fielding.total_catches, true],
+            ['CATCHES (WK)', fielding.total_catches_wk],
             ['RUN OUTS', fielding.total_run_outs],
             ['STUMPINGS', fielding.total_stumpings],
           ].map(([label, value, accent]) => (
@@ -478,11 +479,12 @@ function FieldingTab({ fielding, seasonStats }) {
       {seasonStats?.length > 0 && (
         <Card title="SEASON BY SEASON" pad="p-0">
           <div className="overflow-x-auto pb-scroll">
-            <table className="w-full min-w-[400px] text-[13px]">
+            <table className="w-full min-w-[480px] text-[13px]">
               <thead className="text-pb-faint font-mono text-[10px] tracking-wide3">
                 <tr>
                   <th className="py-3 pl-5 text-left pb-2">SEASON</th>
-                  <SortTh label="CATCHES" sKey="total_catches" cur={sortKey} dir={sortDir} onSort={request} right />
+                  <SortTh label="CATCHES" sKey="total_catches_non_wk" cur={sortKey} dir={sortDir} onSort={request} right />
+                  <SortTh label="CT (WK)" sKey="total_catches_wk" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="RUN OUTS" sKey="total_run_outs" cur={sortKey} dir={sortDir} onSort={request} right />
                   <th className="py-3 pr-5 text-right pb-2 font-mono text-[10px] tracking-wide3">STUMPINGS</th>
                 </tr>
@@ -491,7 +493,8 @@ function FieldingTab({ fielding, seasonStats }) {
                 {sorted.map((s, i) => (
                   <tr key={s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{s.season_name}</td>
-                    <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_catches)}</td>
+                    <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_catches_non_wk ?? (s.total_catches - (s.total_catches_wk ?? 0)))}</td>
+                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.total_catches_wk)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.total_run_outs)}</td>
                     <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">{fmt(s.total_stumpings)}</td>
                   </tr>
@@ -710,6 +713,7 @@ const ANALYSIS_SUBTABS = [
   { key: 'bowling',  label: 'BOWLING' },
   { key: 'team',     label: 'TEAM' },
   { key: 'captain',  label: 'CAPTAIN' },
+  { key: 'venue',    label: 'VENUE' },
 ]
 
 function CaptainTab({ captainStats }) {
@@ -857,7 +861,7 @@ function CaptainTab({ captainStats }) {
   )
 }
 
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null, captainStats }) {
+function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [] }) {
   const [subTab, setSubTab] = useState('batting')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -1171,6 +1175,58 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
       )}
 
       {subTab === 'captain' && <CaptainTab captainStats={captainStats} />}
+
+      {subTab === 'venue' && (
+        <div className="space-y-6">
+          {byVenue.length > 0 ? (
+            <Card title="STATS BY VENUE" pad="p-0">
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pt-4 pb-2">Performance at each ground across all seasons.</p>
+              <div className="overflow-x-auto pb-scroll">
+                <table className="w-full min-w-[860px] text-[13px]">
+                  <thead>
+                    <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left">
+                      <th className="py-3 pl-5 pb-2">VENUE</th>
+                      <th className="py-3 text-right pb-2">M</th>
+                      <th className="py-3 text-right pb-2">W</th>
+                      <th className="py-3 text-right pb-2">L</th>
+                      <th className="py-3 text-right pb-2 border-l border-pb-hairline pl-3">INN</th>
+                      <th className="py-3 text-right pb-2">RUNS</th>
+                      <th className="py-3 text-right pb-2">AVG</th>
+                      <th className="py-3 text-right pb-2">HS</th>
+                      <th className="py-3 text-right pb-2 border-l border-pb-hairline pl-3">WKTS</th>
+                      <th className="py-3 text-right pb-2">AVG</th>
+                      <th className="py-3 text-right pb-2">ECO</th>
+                      <th className="py-3 text-right pb-2 border-l border-pb-hairline pl-3">CT</th>
+                      <th className="py-3 pr-5 text-right pb-2">ST</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {byVenue.map((r, i) => (
+                      <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                        <td className="py-2.5 pl-5 text-pb-text max-w-[200px] truncate">{r.venue}</td>
+                        <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{r.games}</td>
+                        <td className="py-2.5 font-mono text-pb-text text-right">{r.wins ?? 0}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.losses ?? 0}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right border-l border-pb-hairline pl-3">{r.innings || '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-text text-right">{r.total_runs > 0 ? r.total_runs : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.batting_average != null ? Number(r.batting_average).toFixed(1) : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.high_score ?? '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-text text-right border-l border-pb-hairline pl-3">{r.wickets > 0 ? r.wickets : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.bowling_average != null ? Number(r.bowling_average).toFixed(1) : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.economy != null ? Number(r.economy).toFixed(1) : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right border-l border-pb-hairline pl-3">{r.total_catches > 0 ? r.total_catches : '—'}</td>
+                        <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">{r.stumpings > 0 ? r.stumpings : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ) : (
+            <p className="text-pb-faint text-sm py-4 font-mono">No venue data yet — venue tracking requires a Full Rebuild.</p>
+          )}
+        </div>
+      )}
 
       {subTab === 'team' && (() => {
         const rows = teamBreakdown.rows || []
@@ -1618,6 +1674,7 @@ export default function PlayerProfile() {
   const [bowlingByGrade, setBowlingByGrade] = useState([])
   const [bowlingDismissals, setBowlingDismissals] = useState([])
   const [bowlingByBatterPosition, setBowlingByBatterPosition] = useState([])
+  const [byVenue, setByVenue] = useState([])
   const [teamBreakdown, setTeamBreakdown] = useState({ rows: [], unattributed: 0, total_aggregate_matches: 0 })
   const [captainStats, setCaptainStats] = useState(null)
   const [tab, setTab] = useState('batting')
@@ -1686,6 +1743,7 @@ export default function PlayerProfile() {
     setBowlingByGrade([])
     setBowlingDismissals([])
     setBowlingByBatterPosition([])
+    setByVenue([])
     Promise.allSettled([
       api.getPlayerPartnerships(playerId),
       api.getPlayerDismissals(playerId),
@@ -1694,7 +1752,8 @@ export default function PlayerProfile() {
       api.getPlayerBowlingByGrade(playerId),
       api.getPlayerBowlingDismissals(playerId),
       api.getPlayerBowlingByBatterPosition(playerId),
-    ]).then(([p, d, g, pos, bg, bd, bbp]) => {
+      api.getPlayerByVenue(playerId),
+    ]).then(([p, d, g, pos, bg, bd, bbp, bv]) => {
       if (p.status === 'fulfilled') setPartnerships(p.value)
       if (d.status === 'fulfilled') setDismissals(d.value)
       if (g.status === 'fulfilled') setByGrade(g.value)
@@ -1702,6 +1761,7 @@ export default function PlayerProfile() {
       if (bg.status === 'fulfilled') setBowlingByGrade(bg.value)
       if (bd.status === 'fulfilled') setBowlingDismissals(bd.value)
       if (bbp.status === 'fulfilled') setBowlingByBatterPosition(bbp.value)
+      if (bv.status === 'fulfilled') setByVenue(Array.isArray(bv.value) ? bv.value : [])
     })
   }, [playerId, data?.player])
 
@@ -1926,7 +1986,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
       </main>
