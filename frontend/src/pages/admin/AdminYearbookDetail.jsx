@@ -4,6 +4,10 @@ import { api } from '../../lib/api'
 import { PbSpinner, Btn } from '../../lib/presskit'
 import ImageEditorModal from '../../components/ImageEditorModal'
 
+// Yearbook image paths can be either legacy on-disk relative paths
+// ("yearbooks/{org_id}/...") or new DB-backed serving URLs ("/api/images/...").
+const imageSrc = (p) => !p ? null : (p.startsWith('/') ? p : `/uploads/${p}`)
+
 const AWARD_PRESETS = [
   'Best & Fairest', 'Best Batter', 'Best Bowler', 'Best Fieldsman',
   'Club Champion', 'Rookie of the Year', 'Most Improved',
@@ -72,7 +76,7 @@ function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
           {heroPath ? (
             <div className="mb-3">
               <img
-                src={`/uploads/${heroPath}`}
+                src={imageSrc(heroPath)}
                 alt="Hero"
                 className="w-full max-h-48 object-cover rounded-lg border border-white/10"
               />
@@ -80,7 +84,7 @@ function HeroImagePanel({ orgId, seasonId, heroPath, onRefresh }) {
                 <Btn onClick={() => inputRef.current?.click()} disabled={uploading}>
                   {uploading ? 'Uploading…' : 'Replace'}
                 </Btn>
-                <Btn onClick={() => setEditorSource(`/uploads/${heroPath}`)} disabled={uploading}>
+                <Btn onClick={() => setEditorSource(imageSrc(heroPath))} disabled={uploading}>
                   Edit
                 </Btn>
                 <button
@@ -187,7 +191,7 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
               {galleryImages.map(img => (
                 <div key={img.id} className="relative group aspect-square">
                   <img
-                    src={`/uploads/${img.file_path}`}
+                    src={imageSrc(img.file_path)}
                     alt=""
                     className="w-full h-full object-cover rounded-lg border border-white/8"
                   />

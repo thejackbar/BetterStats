@@ -5,7 +5,6 @@ from pydantic import BaseModel
 from typing import Optional
 import uuid
 import logging
-import shutil
 from pathlib import Path
 
 from app.models.db import get_db
@@ -51,10 +50,18 @@ def _season_match_keys(season_id: str, season_name: str | None) -> list[str]:
     return list(keys)
 
 
+# Columns to keep when SELECT *-ing yearbook rows for JSON responses.
+# `hero_image_data` is BYTEA and must be excluded — it's served separately by /api/images.
+_YEARBOOK_COLS = (
+    "id, org_id, season_id, status, published_at, hero_image_path, "
+    "created_at, updated_at"
+)
+
+
 async def _ensure_stub(db: AsyncSession, org_id: str, season_id: str) -> dict:
     """Get or create a yearbook stub for a season."""
     row = await db.execute(
-        text("SELECT * FROM yearbooks WHERE org_id = :o AND season_id = :s"),
+        text(f"SELECT {_YEARBOOK_COLS} FROM yearbooks WHERE org_id = :o AND season_id = :s"),
         {"o": org_id, "s": season_id},
     )
     yb = row.mappings().first()
@@ -72,7 +79,7 @@ async def _ensure_stub(db: AsyncSession, org_id: str, season_id: str) -> dict:
     )
     await db.commit()
     row = await db.execute(
-        text("SELECT * FROM yearbooks WHERE org_id = :o AND season_id = :s"),
+        text(f"SELECT {_YEARBOOK_COLS} FROM yearbooks WHERE org_id = :o AND season_id = :s"),
         {"o": org_id, "s": season_id},
     )
     return dict(row.mappings().first())
@@ -156,7 +163,13 @@ async def get_yearbook(org_id: str, season_id: str, db: AsyncSession = Depends(g
         {"yid": str(yb["id"])},
     )
     images = await db.execute(
-        text("SELECT * FROM yearbook_images WHERE yearbook_id = :yid ORDER BY image_type, sort_order"),
+        text("""
+            SELECT id, yearbook_id, file_path, caption, image_type,
+                   section_id, sort_order, created_at
+            FROM yearbook_images
+            WHERE yearbook_id = :yid
+            ORDER BY image_type, sort_order
+        """),
         {"yid": str(yb["id"])},
     )
     awards = await db.execute(
@@ -1302,27 +1315,49 @@ async def delete_honour_board_entry(
 
 
 # ─── Admin: image uploads ─────────────────────────────────────────────────────
+# Images are stored as binary data in the DB (BYTEA) so they survive container
+# recreation — the /app/uploads volume isn't guaranteed persistent across
+# deploys, which used to cause hero/gallery images to silently disappear.
+# The same fix was applied to club logos in `images.py`.
 
 ALLOWED_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
+MAX_BYTES = 20 * 1024 * 1024  # 20 MB
+
+_MIME_BY_EXT = {
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+}
 
 
-def _save_upload(file: UploadFile, org_id: str, prefix: str) -> str:
-    ext = Path(file.filename).suffix.lower()
+def _hero_url(yearbook_id: str) -> str:
+    return f"/api/images/yearbooks/{yearbook_id}/hero?v={uuid.uuid4().hex[:8]}"
+
+
+def _gallery_url(image_id: int) -> str:
+    return f"/api/images/yearbooks/gallery/{image_id}?v={uuid.uuid4().hex[:8]}"
+
+
+def _delete_legacy_file(rel_path: str | None) -> None:
+    """Best-effort cleanup of a pre-binary on-disk file. No-op for URLs and binary rows."""
+    if not rel_path or rel_path.startswith("/api/") or rel_path.startswith("http"):
+        return
+    p = UPLOAD_DIR / rel_path
+    if p.exists():
+        p.unlink(missing_ok=True)
+
+
+async def _read_image_upload(file: UploadFile) -> tuple[bytes, str]:
+    ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXTS:
         raise HTTPException(400, "Image files only (jpg, png, webp, gif)")
-    dest_dir = UPLOAD_DIR / "yearbooks" / org_id
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{prefix}_{uuid.uuid4().hex}{ext}"
-    with (dest_dir / filename).open("wb") as f:
-        shutil.copyfileobj(file.file, f)
-    return f"yearbooks/{org_id}/{filename}"
-
-
-def _delete_file(rel_path: str | None) -> None:
-    if rel_path:
-        p = UPLOAD_DIR / rel_path
-        if p.exists():
-            p.unlink(missing_ok=True)
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > MAX_BYTES:
+        raise HTTPException(400, "Image must be 20 MB or smaller")
+    return data, _MIME_BY_EXT[ext]
 
 
 @router.post("/{org_id}/{season_id}/upload/hero")
@@ -1333,22 +1368,33 @@ async def upload_hero(
     db: AsyncSession = Depends(get_db),
 ):
     yb = await _ensure_stub(db, org_id, season_id)
-    _delete_file(yb.get("hero_image_path"))
-    rel_path = _save_upload(file, org_id, "hero")
+    _delete_legacy_file(yb.get("hero_image_path"))
+    data, mime = await _read_image_upload(file)
+    serving_url = _hero_url(str(yb["id"]))
     await db.execute(
-        text("UPDATE yearbooks SET hero_image_path = :p, updated_at = NOW() WHERE id = :id"),
-        {"p": rel_path, "id": str(yb["id"])},
+        text("""
+            UPDATE yearbooks
+            SET hero_image_data = :d, hero_image_mime = :m,
+                hero_image_path = :p, updated_at = NOW()
+            WHERE id = :id
+        """),
+        {"d": data, "m": mime, "p": serving_url, "id": str(yb["id"])},
     )
     await db.commit()
-    return {"path": rel_path}
+    return {"path": serving_url}
 
 
 @router.delete("/{org_id}/{season_id}/upload/hero")
 async def clear_hero(org_id: str, season_id: str, db: AsyncSession = Depends(get_db)):
     yb = await _ensure_stub(db, org_id, season_id)
-    _delete_file(yb.get("hero_image_path"))
+    _delete_legacy_file(yb.get("hero_image_path"))
     await db.execute(
-        text("UPDATE yearbooks SET hero_image_path = NULL, updated_at = NOW() WHERE id = :id"),
+        text("""
+            UPDATE yearbooks
+            SET hero_image_path = NULL, hero_image_data = NULL, hero_image_mime = NULL,
+                updated_at = NOW()
+            WHERE id = :id
+        """),
         {"id": str(yb["id"])},
     )
     await db.commit()
@@ -1363,19 +1409,28 @@ async def upload_gallery(
     db: AsyncSession = Depends(get_db),
 ):
     yb = await _ensure_stub(db, org_id, season_id)
-    rel_path = _save_upload(file, org_id, "gallery")
+    data, mime = await _read_image_upload(file)
     result = await db.execute(
         text("""
-            INSERT INTO yearbook_images (yearbook_id, file_path, image_type, sort_order)
-            VALUES (:yid, :path, 'gallery',
-                COALESCE((SELECT MAX(sort_order) + 1 FROM yearbook_images WHERE yearbook_id = :yid), 0))
+            INSERT INTO yearbook_images (
+                yearbook_id, image_data, image_mime, image_type, sort_order
+            )
+            VALUES (
+                :yid, :d, :m, 'gallery',
+                COALESCE((SELECT MAX(sort_order) + 1 FROM yearbook_images WHERE yearbook_id = :yid), 0)
+            )
             RETURNING id
         """),
-        {"yid": str(yb["id"]), "path": rel_path},
+        {"yid": str(yb["id"]), "d": data, "m": mime},
     )
     new_id = result.scalar()
+    serving_url = _gallery_url(new_id)
+    await db.execute(
+        text("UPDATE yearbook_images SET file_path = :p WHERE id = :id"),
+        {"p": serving_url, "id": new_id},
+    )
     await db.commit()
-    return {"id": new_id, "path": rel_path}
+    return {"id": new_id, "path": serving_url}
 
 
 @router.delete("/{org_id}/{season_id}/images/{image_id}")
@@ -1392,7 +1447,7 @@ async def delete_gallery_image(
     )
     img = row.mappings().first()
     if img:
-        _delete_file(img["file_path"])
+        _delete_legacy_file(img["file_path"])
         await db.execute(
             text("DELETE FROM yearbook_images WHERE id = :id AND yearbook_id = :yid"),
             {"id": image_id, "yid": str(yb["id"])},
