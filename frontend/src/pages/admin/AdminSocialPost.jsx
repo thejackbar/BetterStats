@@ -14,12 +14,12 @@ import {
 // TEMPLATE REGISTRY
 // ─────────────────────────────────────────────────────────────────────────────
 const TEMPLATES = [
-  { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13, w: 1080, h: 2160 },
+  { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13 },
   { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: 12 },
   { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: 'Side photo + numbered XI',        maxPlayers: 11 },
   { id: 'T4', name: 'Batting Order',   component: T4_BattingOrder,    desc: 'Tactical batting order',          maxPlayers: 13 },
   { id: 'T5', name: 'Brutalist',       component: T5_Brutalist,       desc: 'Typography-forward XI',           maxPlayers: 11 },
-  { id: 'T6', name: 'Diagonal Poster', component: T6_Diagonal,        desc: 'Diagonal poster, match-day hype', maxPlayers: 11, w: 2160, h: 2160 },
+  { id: 'T6', name: 'Diagonal Poster', component: T6_Diagonal,        desc: 'Diagonal poster, match-day hype', maxPlayers: 11 },
   { id: 'T7', name: 'Milestone',       component: T7_CaptainSpotlight, desc: 'Milestone achievement showcase',  maxPlayers: 13 },
   { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: 11 },
   { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: 11 },
