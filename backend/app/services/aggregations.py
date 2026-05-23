@@ -365,7 +365,7 @@ async def get_fielding_leaderboard(
     finals_only: Optional[bool] = None,
     captain_only: Optional[bool] = None,
 ) -> list[dict]:
-    ALLOWED_SORTS = {"total_catches", "total_catches_wk", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
+    ALLOWED_SORTS = {"total_catches", "total_catches_non_wk", "total_catches_wk", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_dismissals"
 

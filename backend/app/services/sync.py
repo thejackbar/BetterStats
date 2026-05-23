@@ -1158,10 +1158,20 @@ async def sync_grassroots_game_level_data(
                 # checked batting_innings only, which re-processed forfeits/abandons
                 # every sync — now those save with appearances but no stats rows.
                 existing = await session.execute(
-                    text("SELECT 1 FROM games WHERE id=:gid LIMIT 1"),
+                    text("SELECT venue FROM games WHERE id=:gid LIMIT 1"),
                     {"gid": match_id_str},
                 )
-                if existing.scalar():
+                existing_row = existing.fetchone()
+                if existing_row is not None:
+                    if existing_row[0] is None:
+                        # Game exists but has no venue — backfill it from the scorecard.
+                        venue_name = (scorecard.get("venue") or {}).get("name")
+                        if venue_name:
+                            await session.execute(
+                                text("UPDATE games SET venue=:venue WHERE id=:gid"),
+                                {"venue": venue_name, "gid": match_id_str},
+                            )
+                            await session.commit()
                     stats["gr_games_skipped_done"] += 1
                     continue
 
