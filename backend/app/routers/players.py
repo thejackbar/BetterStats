@@ -16,7 +16,7 @@ from app.services.aggregations import (
     get_bowling_dismissal_breakdown, get_bowling_by_batter_position,
     get_season_by_season, get_player_milestones, get_player_partnerships,
     get_player_activity, get_upcoming_milestones_for_org,
-    get_player_rankings,
+    get_player_rankings, get_player_by_venue,
 )
 
 router = APIRouter(prefix="/players", tags=["players"])
@@ -145,6 +145,14 @@ async def get_player_bowling_by_batter_position(player_id: str, db: AsyncSession
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     return await get_bowling_by_batter_position(db, player_id)
+
+
+@router.get("/{player_id}/by-venue")
+async def get_player_by_venue_endpoint(player_id: str, db: AsyncSession = Depends(get_db)):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await get_player_by_venue(db, player_id)
 
 
 @router.get("/{player_id}/team-breakdown")
