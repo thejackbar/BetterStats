@@ -1199,17 +1199,12 @@ async def get_upcoming_milestones_for_org(
     )
     rows = [dict(r) for r in result.mappings()]
 
-    RUN_MILESTONES = [
-        50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000,
-        6000, 7000, 8000, 9000, 10000, 12500, 15000, 17500, 20000,
-        25000, 30000, 35000, 40000, 45000, 50000,
-    ]
-    WICKET_MILESTONES = [
-        10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500,
-        600, 700, 800, 900, 1000, 1500, 2000, 2500, 3000, 4000, 5000,
-    ]
-    MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000]
-    CATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000]
+    # Thresholds match the shared milestone scheme in milestone_rules.py.
+    # Lists are pre-expanded so the existing next_milestone scan still works.
+    RUN_MILESTONES = [500] + list(range(1000, 50001, 1000))
+    WICKET_MILESTONES = [50] + list(range(100, 5001, 100))
+    MATCH_MILESTONES = list(range(50, 1501, 50))
+    CATCH_MILESTONES = list(range(50, 2001, 50))
 
     def next_milestone(current, milestones):
         for m in milestones:

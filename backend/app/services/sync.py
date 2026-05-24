@@ -1594,40 +1594,32 @@ async def sync_grassroots_game_level_data(
     return stats
 
 
-_RUN_MILESTONES = [50, 100, 250, 500, 1000, 2000, 3000, 5000]
-_WICKET_MILESTONES = [5, 10, 25, 50, 100, 200, 300]
-_MATCH_MILESTONES = [10, 25, 50, 100, 150, 200]
-_CATCH_MILESTONES = [10, 25, 50, 100]
-
-
 async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: uuid.UUID):
     from sqlalchemy import text
+    from app.services.milestone_rules import crossed_thresholds
+
+    detail_fmt = {
+        "runs":    lambda v: f"{v:,} career runs",
+        "wickets": lambda v: f"{v} career wickets",
+        "matches": lambda v: f"{v} career matches",
+        "catches": lambda v: f"{v} career catches",
+    }
+
     for pid in player_ids:
         pid_str = str(pid)
 
-        run_res = await session.execute(
-            text("SELECT COALESCE(SUM(runs),0) FROM player_season_stats WHERE player_id=:pid"),
+        totals_res = await session.execute(
+            text("""
+                SELECT
+                    COALESCE(SUM(runs), 0)    AS runs,
+                    COALESCE(SUM(wickets), 0) AS wickets,
+                    COALESCE(SUM(matches), 0) AS matches,
+                    COALESCE(SUM(catches), 0) AS catches
+                FROM player_season_stats WHERE player_id=:pid
+            """),
             {"pid": pid_str}
         )
-        total_runs = int(run_res.scalar() or 0)
-
-        wkt_res = await session.execute(
-            text("SELECT COALESCE(SUM(wickets),0) FROM player_season_stats WHERE player_id=:pid"),
-            {"pid": pid_str}
-        )
-        total_wickets = int(wkt_res.scalar() or 0)
-
-        match_res = await session.execute(
-            text("SELECT COALESCE(SUM(matches),0) FROM player_season_stats WHERE player_id=:pid"),
-            {"pid": pid_str}
-        )
-        total_matches = int(match_res.scalar() or 0)
-
-        catch_res = await session.execute(
-            text("SELECT COALESCE(SUM(catches),0) FROM player_season_stats WHERE player_id=:pid"),
-            {"pid": pid_str}
-        )
-        total_catches = int(catch_res.scalar() or 0)
+        totals = dict(totals_res.mappings().first() or {})
 
         exist_res = await session.execute(
             text("SELECT milestone_type, milestone_value FROM milestones WHERE player_id=:pid"),
@@ -1638,32 +1630,14 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
         new_milestones = []
         today = date.today()
 
-        for threshold in _RUN_MILESTONES:
-            if total_runs >= threshold and ("runs", threshold) not in existing:
+        for mt in ("runs", "wickets", "matches", "catches"):
+            current = int(totals.get(mt) or 0)
+            for threshold in crossed_thresholds(mt, current):
+                if (mt, threshold) in existing:
+                    continue
                 new_milestones.append(Milestone(
-                    player_id=pid, milestone_type="runs", milestone_value=threshold,
-                    detail=f"{threshold:,} career runs", achieved_at=today,
-                ))
-
-        for threshold in _WICKET_MILESTONES:
-            if total_wickets >= threshold and ("wickets", threshold) not in existing:
-                new_milestones.append(Milestone(
-                    player_id=pid, milestone_type="wickets", milestone_value=threshold,
-                    detail=f"{threshold} career wickets", achieved_at=today,
-                ))
-
-        for threshold in _MATCH_MILESTONES:
-            if total_matches >= threshold and ("matches", threshold) not in existing:
-                new_milestones.append(Milestone(
-                    player_id=pid, milestone_type="matches", milestone_value=threshold,
-                    detail=f"{threshold} career matches", achieved_at=today,
-                ))
-
-        for threshold in _CATCH_MILESTONES:
-            if total_catches >= threshold and ("catches", threshold) not in existing:
-                new_milestones.append(Milestone(
-                    player_id=pid, milestone_type="catches", milestone_value=threshold,
-                    detail=f"{threshold} career catches", achieved_at=today,
+                    player_id=pid, milestone_type=mt, milestone_value=threshold,
+                    detail=detail_fmt[mt](threshold), achieved_at=today,
                 ))
 
         for m in new_milestones:

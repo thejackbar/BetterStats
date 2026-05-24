@@ -1384,67 +1384,153 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
 }
 
 // ── Milestones tab ───────────────────────────────────────────────────────
-function MilestonesTab({ playerId, upcomingMilestones, milestones }) {
+const MILESTONE_SUB_TABS = [
+  { key: 'batting',  label: 'BATTING'  },
+  { key: 'bowling',  label: 'BOWLING'  },
+  { key: 'fielding', label: 'FIELDING' },
+  { key: 'matches',  label: 'MATCHES'  },
+]
+
+const TYPE_LABELS = { runs: 'Runs', wickets: 'Wickets', matches: 'Matches', catches: 'Catches', grade_matches: 'Matches' }
+
+function UpcomingCard({ items }) {
+  if (!items?.length) return null
   return (
-    <div className="space-y-6">
-      {/* Upcoming */}
-      {upcomingMilestones?.length > 0 && (
-        <Card title="MILESTONES IN REACH">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {upcomingMilestones.map((m, i) => {
-              const pct = Math.min(100, Math.round((m.current / m.target) * 100))
-              return (
-                <div key={i} className="pb-card-2 p-4 rounded border border-pb-hairline">
-                  <Label>{m.label || m.type?.toUpperCase() || 'MILESTONE'}</Label>
-                  <div className="flex items-baseline justify-between mt-2 mb-2">
-                    <span className="font-mono text-[26px] font-bold pb-num leading-none" style={{ color: 'var(--pb-accent)' }}>
-                      <AnimatedNum value={m.current} />
-                    </span>
-                    <span className="font-mono text-[11px] text-pb-dim tracking-wide2">/ {m.target?.toLocaleString()}</span>
-                  </div>
-                  <div className="h-1 bg-pb-hairline rounded-sm overflow-hidden">
-                    <div className="h-full" style={{ width: `${pct}%`, background: 'var(--pb-accent)' }} />
-                  </div>
-                  <div className="font-mono text-[10.5px] text-pb-faint tracking-wide2 mt-1.5">{pct}% · {m.needed?.toLocaleString()} to go</div>
-                </div>
-              )
-            })}
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {items.map((m, i) => {
+        const pct = Math.min(100, Math.round((m.current / m.target) * 100))
+        return (
+          <div key={i} className="pb-card-2 p-4 rounded border border-pb-hairline">
+            <Label>{m.label || m.type?.toUpperCase() || 'MILESTONE'}</Label>
+            <div className="flex items-baseline justify-between mt-2 mb-2">
+              <span className="font-mono text-[26px] font-bold pb-num leading-none" style={{ color: 'var(--pb-accent)' }}>
+                <AnimatedNum value={m.current} />
+              </span>
+              <span className="font-mono text-[11px] text-pb-dim tracking-wide2">/ {m.target?.toLocaleString()}</span>
+            </div>
+            <div className="h-1 bg-pb-hairline rounded-sm overflow-hidden">
+              <div className="h-full" style={{ width: `${pct}%`, background: 'var(--pb-accent)' }} />
+            </div>
+            <div className="font-mono text-[10.5px] text-pb-faint tracking-wide2 mt-1.5">{pct}% · {m.needed?.toLocaleString()} to go</div>
           </div>
-        </Card>
-      )}
+        )
+      })}
+    </div>
+  )
+}
 
-      {/* Achieved */}
-      {milestones?.length > 0 && (
-        <Card title="ACHIEVED MILESTONES" pad="p-0">
-          <ul className="flex flex-col">
-            {milestones.map((m, i) => {
-              const typeLabel = { runs: 'Runs', wickets: 'Wickets', matches: 'Matches', catches: 'Catches', grade_matches: 'Matches' }[m.milestone_type] || m.milestone_type || 'Milestone'
-              const title = m.milestone_value != null ? `${m.milestone_value.toLocaleString()} ${typeLabel}` : typeLabel
-              const dateStr = m.achieved_at
-                ? new Date(m.achieved_at + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
-                : null
-              return (
-                <li key={i} className={`${i ? 'pb-hairline-t' : ''} flex items-center gap-4 px-5 py-3 hover:bg-pb-surface2`}>
-                  <ThiingIcon src={MILESTONE_ICON_SRC[m.milestone_type] || thiings.trophy} alt="" className="w-6 h-6 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-pb-text text-[14px] font-semibold">{title}</div>
-                    <div className="font-mono text-pb-faint text-[10.5px] tracking-wide2 mt-0.5">
-                      {[m.detail, dateStr].filter(Boolean).join(' · ')}
-                    </div>
-                  </div>
-                  <span className="font-mono text-[18px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
-                    {m.milestone_value?.toLocaleString()}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        </Card>
-      )}
+function AchievedList({ items }) {
+  if (!items?.length) return null
+  return (
+    <ul className="flex flex-col">
+      {items.map((m, i) => {
+        const typeLabel = TYPE_LABELS[m.milestone_type] || m.milestone_type || 'Milestone'
+        const title = m.milestone_value != null ? `${m.milestone_value.toLocaleString()} ${typeLabel}` : typeLabel
+        const dateStr = m.achieved_at
+          ? new Date(m.achieved_at + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+          : null
+        return (
+          <li key={i} className={`${i ? 'pb-hairline-t' : ''} flex items-center gap-4 px-5 py-3 hover:bg-pb-surface2`}>
+            <ThiingIcon src={MILESTONE_ICON_SRC[m.milestone_type] || thiings.trophy} alt="" className="w-6 h-6 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-pb-text text-[14px] font-semibold">{title}</div>
+              <div className="font-mono text-pb-faint text-[10.5px] tracking-wide2 mt-0.5">
+                {[m.detail, dateStr].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+            <span className="font-mono text-[18px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
+              {m.milestone_value?.toLocaleString()}
+            </span>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
 
-      {!upcomingMilestones?.length && !milestones?.length && (
-        <p className="text-pb-faint text-sm py-4">No milestone data available.</p>
-      )}
+function MilestonesTab({ playerId, upcomingMilestones, milestones }) {
+  const [sub, setSub] = useState('batting')
+
+  const upcoming = upcomingMilestones || []
+  const achieved = milestones || []
+
+  // Bucket upcoming by sub-tab. Matches bucket holds both club total and per-grade.
+  const upByCat = {
+    batting:  upcoming.filter(m => m.type === 'runs'),
+    bowling:  upcoming.filter(m => m.type === 'wickets'),
+    fielding: upcoming.filter(m => m.type === 'catches'),
+    matches:  upcoming.filter(m => m.type === 'matches'),
+  }
+  // For the matches tab, surface club total first, then per-grade by needed.
+  upByCat.matches = upByCat.matches.slice().sort((a, b) => {
+    if (!a.grade_name && b.grade_name) return -1
+    if (a.grade_name && !b.grade_name) return 1
+    return (a.needed ?? 9999) - (b.needed ?? 9999)
+  })
+
+  const sortByValueDesc = (a, b) => (b.milestone_value || 0) - (a.milestone_value || 0)
+  const achByCat = {
+    batting:  achieved.filter(m => m.milestone_type === 'runs').sort(sortByValueDesc),
+    bowling:  achieved.filter(m => m.milestone_type === 'wickets').sort(sortByValueDesc),
+    fielding: achieved.filter(m => m.milestone_type === 'catches').sort(sortByValueDesc),
+  }
+  const matchesClub = achieved.filter(m => m.milestone_type === 'matches').sort(sortByValueDesc)
+  // Per-grade: group by grade name, sort each grade's thresholds desc, then sort grades alphabetically.
+  const gradeBuckets = new Map()
+  for (const m of achieved.filter(x => x.milestone_type === 'grade_matches')) {
+    const key = m.detail || 'Unknown grade'
+    if (!gradeBuckets.has(key)) gradeBuckets.set(key, [])
+    gradeBuckets.get(key).push(m)
+  }
+  const matchesByGrade = Array.from(gradeBuckets.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .flatMap(([, rows]) => rows.sort(sortByValueDesc))
+
+  const renderTab = () => {
+    if (sub === 'matches') {
+      const up = upByCat.matches
+      const hasAny = up.length || matchesClub.length || matchesByGrade.length
+      if (!hasAny) {
+        return <p className="text-pb-faint text-sm py-4">No match milestones yet for this player.</p>
+      }
+      return (
+        <div className="space-y-6">
+          {up.length > 0 && (
+            <Card title="MILESTONES IN REACH"><UpcomingCard items={up} /></Card>
+          )}
+          {matchesClub.length > 0 && (
+            <Card title="ACHIEVED — CLUB TOTAL" pad="p-0"><AchievedList items={matchesClub} /></Card>
+          )}
+          {matchesByGrade.length > 0 && (
+            <Card title="ACHIEVED — BY GRADE" pad="p-0"><AchievedList items={matchesByGrade} /></Card>
+          )}
+        </div>
+      )
+    }
+
+    const up = upByCat[sub]
+    const ach = achByCat[sub]
+    const hasAny = (up?.length || 0) + (ach?.length || 0) > 0
+    if (!hasAny) {
+      const noun = { batting: 'batting', bowling: 'bowling', fielding: 'fielding' }[sub]
+      return <p className="text-pb-faint text-sm py-4">No {noun} milestones yet for this player.</p>
+    }
+    return (
+      <div className="space-y-6">
+        {up.length > 0 && (
+          <Card title="MILESTONES IN REACH"><UpcomingCard items={up} /></Card>
+        )}
+        {ach.length > 0 && (
+          <Card title="ACHIEVED" pad="p-0"><AchievedList items={ach} /></Card>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <TabBar tabs={MILESTONE_SUB_TABS} active={sub} onChange={setSub} />
+      {renderTab()}
     </div>
   )
 }
