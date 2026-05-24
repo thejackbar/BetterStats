@@ -19,6 +19,25 @@ from app.services import playhq_client
 
 logger = logging.getLogger(__name__)
 
+_TEAM_SUFFIX_RE = re.compile(
+    r'\s+(\d+(?:st|nd|rd|th)s?(?:\s+XI)?|XI|[A-Za-z]\s+Grade)\s*$',
+    re.IGNORECASE,
+)
+
+
+def strip_team_suffix(name: str) -> str:
+    """Return the club name by stripping grade/team-number suffixes.
+
+    'North Perth 2nd XI' -> 'North Perth'
+    'Applecross 1sts'    -> 'Applecross'
+    'South Perth A Grade'-> 'South Perth'
+    'North Perth'        -> 'North Perth'  (no suffix — unchanged)
+    """
+    if not name:
+        return name
+    stripped = _TEAM_SUFFIX_RE.sub('', name).strip()
+    return stripped or name
+
 
 def _parse_uuid(val: str) -> Optional[uuid.UUID]:
     try:
@@ -1263,6 +1282,8 @@ async def sync_grassroots_game_level_data(
                     played_at=played_at,
                     home_team=home_team_name,
                     away_team=away_team_name,
+                    home_club=strip_team_suffix(home_team_name),
+                    away_club=strip_team_suffix(away_team_name),
                     result=result_text,
                     winning_team=winner_name,
                     is_final=match_to_is_final.get(match_id_str, False),
@@ -1770,12 +1791,16 @@ async def deep_sync_player(
             except ValueError:
                 played_date = None
 
+            _ht = game_data.get("home_team", "")
+            _at = game_data.get("away_team", "")
             new_game = Game(
                 id=game_uuid,
                 grade_id=grade.id if grade else None,
                 played_at=played_date,
-                home_team=game_data.get("home_team", ""),
-                away_team=game_data.get("away_team", ""),
+                home_team=_ht,
+                away_team=_at,
+                home_club=strip_team_suffix(_ht),
+                away_club=strip_team_suffix(_at),
                 result=game_data.get("result"),
                 winning_team=game_data.get("winning_team"),
             )
