@@ -4,6 +4,8 @@ from typing import Optional
 from datetime import date as date_cls
 import uuid
 
+from app.services.milestone_rules import next_threshold, reach_window
+
 # Merge-aware grade match fragment (gr must already be joined).
 # Matches grades that are the selected canonical OR are aliases merged into it.
 _GRADE_MATCH = (
@@ -1199,49 +1201,38 @@ async def get_upcoming_milestones_for_org(
     )
     rows = [dict(r) for r in result.mappings()]
 
-    # Thresholds match the shared milestone scheme in milestone_rules.py.
-    # Lists are pre-expanded so the existing next_milestone scan still works.
-    RUN_MILESTONES = [500] + list(range(1000, 50001, 1000))
-    WICKET_MILESTONES = [50] + list(range(100, 5001, 100))
-    MATCH_MILESTONES = list(range(50, 1501, 50))
-    CATCH_MILESTONES = list(range(50, 2001, 50))
-
-    def next_milestone(current, milestones):
-        for m in milestones:
-            if current < m:
-                return m
-        return None
-
-    # Score formula: milestone_value² / needed
-    # Heavily weights milestone size so 500-from-9000 beats 1-from-100
+    # Score formula: milestone_value² / needed.
+    # Heavily weights milestone size so 500-from-9000 beats 1-from-100.
     def importance_score(target, needed):
         return (target ** 2) / (needed + 1)
 
+    CATEGORY_MAP = {
+        "runs": "batting",
+        "wickets": "bowling",
+        "matches": "matches",
+        "catches": "fielding",
+    }
+
     upcoming = []
     for row in rows:
-        runs = int(row["career_runs"] or 0)
-        wickets = int(row["career_wickets"] or 0)
-        matches = int(row["career_matches"] or 0)
-        catches = int(row["career_catches"] or 0)
         player_id = str(row["player_id"])
         name = row["name"]
-
-        CATEGORY_MAP = {
-            "runs": "batting",
-            "wickets": "bowling",
-            "matches": "matches",
-            "catches": "fielding",
+        totals = {
+            "runs":    int(row["career_runs"]    or 0),
+            "wickets": int(row["career_wickets"] or 0),
+            "matches": int(row["career_matches"] or 0),
+            "catches": int(row["career_catches"] or 0),
         }
-        for stat, current, milestones in [
-            ("runs", runs, RUN_MILESTONES),
-            ("wickets", wickets, WICKET_MILESTONES),
-            ("matches", matches, MATCH_MILESTONES),
-            ("catches", catches, CATCH_MILESTONES),
-        ]:
-            target = next_milestone(current, milestones)
+
+        for stat, current in totals.items():
+            target = next_threshold(stat, current)
             if target is None:
                 continue
             needed = target - current
+            # Same in-reach window as the player profile — dashboard only
+            # surfaces milestones that are genuinely imminent.
+            if needed > reach_window(stat, target):
+                continue
             upcoming.append({
                 "player_id": player_id,
                 "name": name,
