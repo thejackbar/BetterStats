@@ -45,6 +45,7 @@ export const api = {
   getRecentlyAchievedMilestones: (orgId) =>
     request(`/organisations/${orgId}/recently-achieved-milestones`),
   getOrgFixtures: (orgId) => request(`/organisations/${orgId}/fixtures`),
+  getGradeInfo: (orgId, gradeId) => request(`/organisations/${orgId}/grades/${gradeId}/info`),
 
   // Players
   listPlayers: (orgId) => request(`/players?org_id=${orgId}`),
