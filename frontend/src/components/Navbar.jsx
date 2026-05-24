@@ -7,7 +7,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import NavbarPlayerSearch from "./NavbarPlayerSearch";
 import betterStatsLogo from "../assets/betterstatslogo_white.png";
 
-export const SITE_VERSION = "v7.6.2.1";
+export const SITE_VERSION = "v7.6.3";
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
@@ -34,7 +34,7 @@ function ThemeToggle() {
   );
 }
 
-const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games'];
+const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games', 'fixtures'];
 
 function useSlug() {
   const { pathname } = useLocation();
@@ -69,6 +69,7 @@ export default function Navbar() {
     { label: "Records",     href: `/${slug}/records` },
     { label: "Yearbook",    href: `/${slug}/yearbook` },
     { label: "Games",       href: `/${slug}/games` },
+    { label: "Fixtures",    href: `/${slug}/fixtures` },
     { label: "Stat Lab",    href: `/${slug}/statlab` },
     { label: "Compare",     href: `/${slug}/compare` },
   ] : [];

@@ -330,19 +330,38 @@ export default function Dashboard() {
 
         {/* Upcoming fixtures */}
         {!fixturesLoading && fixtures.length > 0 && (
-          <Card title="UPCOMING FIXTURES" className="mb-6">
+          <Card title="UPCOMING FIXTURES" className="mb-6"
+                action={<Link to={`/${clubSlug}/fixtures`} className="text-2xs font-mono tracking-wide2 text-pb-dim hover:text-pb-text">SEE ALL →</Link>}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {fixtures.slice(0, 6).map((f, i) => (
-                <div key={f.id || i} className="pb-card-2 p-4 rounded border border-pb-hairline">
-                  <Label>{f.grade}</Label>
-                  <div className="text-pb-text font-display text-[20px] font-semibold leading-tight mt-2.5">
-                    {f.home_team} <span className="text-pb-faint text-base">v</span> {f.away_team}
+              {fixtures.slice(0, 3).map((f, i) => {
+                const roundLabel = f.round != null ? `Rd ${f.round}` : null
+                const meta = [f.grade, roundLabel].filter(Boolean).join(' · ')
+                const time = f.time ? (() => {
+                  const [h, m] = f.time.split(':')
+                  const hour = parseInt(h, 10)
+                  return `${hour > 12 ? hour - 12 : hour || 12}:${m}${hour >= 12 ? 'pm' : 'am'}`
+                })() : null
+                return (
+                  <div key={f.id || i} className="pb-card-2 p-4 rounded border border-pb-hairline flex flex-col gap-1.5">
+                    {meta && <Label>{meta}</Label>}
+                    <div className="text-pb-text text-[15px] font-semibold leading-tight mt-1">
+                      {f.home_team} <span className="text-pb-faint text-sm font-normal">v</span> {f.away_team}
+                    </div>
+                    <div className="font-mono text-pb-faint text-[10.5px] tracking-wide2">
+                      {new Date(f.date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}
+                      {time && ` · ${time}`}
+                    </div>
+                    {f.venue && (
+                      <div className="font-mono text-pb-faint text-[10.5px] tracking-wide2 truncate">{f.venue}</div>
+                    )}
+                    {f.id && (
+                      <Link to={`/scorecards/${f.id}`} className="mt-1 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-accent transition self-start">
+                        SCORECARD →
+                      </Link>
+                    )}
                   </div>
-                  <div className="font-mono text-pb-faint text-[11px] tracking-wide2 mt-1">
-                    {new Date(f.date).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </Card>
         )}
