@@ -740,105 +740,6 @@ function InningsStripChart({ innings }) {
   )
 }
 
-// ── Position × Season heatmap: where they bat and how they go ────────────
-function BattingPositionHeatmap({ innings }) {
-  if (!innings?.length) return null
-
-  const bucket = new Map() // `${season}|${pos}` → { runs, dismissals, count }
-  const seasons = new Set()
-  const positions = new Set()
-
-  for (const inn of innings) {
-    const pos = inn.batting_position
-    if (!pos || pos < 1 || pos > 11) continue
-    const season = inn.season_name || 'Unknown'
-    const key = `${season}|${pos}`
-    seasons.add(season)
-    positions.add(pos)
-    const cur = bucket.get(key) || { runs: 0, dismissals: 0, count: 0 }
-    cur.runs += inn.runs ?? 0
-    cur.count += 1
-    if (!inn.not_out) cur.dismissals += 1
-    bucket.set(key, cur)
-  }
-
-  if (!seasons.size) return null
-
-  const seasonYear = (name) => {
-    const m = String(name).match(/(\d{4})/)
-    return m ? parseInt(m[1], 10) : 0
-  }
-  const seasonList = [...seasons].sort((a, b) => seasonYear(a) - seasonYear(b))
-  const posList = [...positions].sort((a, b) => a - b)
-
-  let maxAvg = 0
-  for (const v of bucket.values()) {
-    const avg = v.dismissals > 0 ? v.runs / v.dismissals : v.runs
-    if (avg > maxAvg) maxAvg = avg
-  }
-
-  function shortSeason(name) {
-    const m = String(name).match(/(\d{2})(\d{2})\s*[\/_-]\s*(\d{2})/)
-    if (m) return `${m[2]}/${m[3]}`
-    const single = String(name).match(/(\d{4})/)
-    return single ? single[1].slice(2) : String(name).slice(0, 4)
-  }
-  function cellColor(avg) {
-    const intensity = Math.min(1, avg / Math.max(maxAvg, 1))
-    return `color-mix(in srgb, var(--pb-accent) ${Math.round(intensity * 75) + 8}%, transparent)`
-  }
-
-  return (
-    <div>
-      <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">
-        Average runs at each batting position, season by season. Brighter green = higher average from that slot. Number shown is the average (or run total if a single innings).
-      </p>
-      <div className="overflow-x-auto pb-scroll">
-        <table className="border-separate" style={{ borderSpacing: '2px' }}>
-          <thead>
-            <tr>
-              <th className="font-mono text-[9px] tracking-wide3 text-pb-faint pr-2 pb-1.5 text-right sticky left-0 bg-pb-bg">POS</th>
-              {seasonList.map(s => (
-                <th key={s} className="font-mono text-[9px] tracking-wide3 text-pb-faint pb-1.5 text-center min-w-[30px]" title={s}>
-                  {shortSeason(s)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {posList.map(p => (
-              <tr key={p}>
-                <td className="font-mono text-[11px] text-pb-dim pr-2 text-right sticky left-0 bg-pb-bg">#{p}</td>
-                {seasonList.map(s => {
-                  const v = bucket.get(`${s}|${p}`)
-                  if (!v) return (
-                    <td key={s} className="p-0">
-                      <div className="w-8 h-8 rounded-sm" style={{ background: 'var(--pb-hairline)', opacity: 0.25 }} />
-                    </td>
-                  )
-                  const avg = v.dismissals > 0 ? v.runs / v.dismissals : v.runs
-                  const txt = v.count === 1 ? String(v.runs) + (v.dismissals === 0 ? '*' : '') : avg.toFixed(0)
-                  return (
-                    <td key={s} className="p-0">
-                      <div
-                        className="w-8 h-8 rounded-sm flex items-center justify-center font-mono text-[10px] font-bold text-pb-text"
-                        style={{ background: cellColor(avg) }}
-                        title={`${s} · #${p} · ${v.count} inn · ${v.runs} runs · avg ${avg.toFixed(1)}`}
-                      >
-                        {txt}
-                      </div>
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
 // ── Career calendar: month × season heatmap of run output ───────────────
 function CareerCalendarHeatmap({ innings }) {
   if (!innings?.length) return null
@@ -1242,13 +1143,6 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           {battingInnings.some(i => i.played_at) && (
             <Card title="MONTHLY FORM CALENDAR">
               <CareerCalendarHeatmap innings={battingInnings} />
-            </Card>
-          )}
-
-          {/* Batting position heatmap */}
-          {battingInnings.some(i => i.batting_position) && (
-            <Card title="POSITION × SEASON HEATMAP">
-              <BattingPositionHeatmap innings={battingInnings} />
             </Card>
           )}
 
