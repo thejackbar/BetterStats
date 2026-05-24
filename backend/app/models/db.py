@@ -178,6 +178,8 @@ class Game(Base):
     played_at = Column(Date)
     home_team = Column(Text)
     away_team = Column(Text)
+    home_club = Column(Text)
+    away_club = Column(Text)
     result = Column(Text)
     winning_team = Column(Text)
     is_final = Column(Boolean, default=False, nullable=False, server_default='false')

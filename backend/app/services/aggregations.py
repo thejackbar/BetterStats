@@ -2048,21 +2048,17 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
             WITH player_games AS (
                 SELECT
                     ga.game_id,
-                    NULLIF(TRIM(regexp_replace(
-                        CASE
-                            WHEN ga.team_name = g.home_team THEN g.away_team
-                            ELSE g.home_team
-                        END,
-                        '\s+(\d+(st|nd|rd|th)s?|[A-Za-z]\s+Grade)\s*$',
-                        '',
-                        'i'
-                    )), '') AS opposition,
+                    CASE
+                        WHEN ga.team_name = g.home_team THEN g.away_club
+                        WHEN ga.team_name = g.away_team THEN g.home_club
+                        ELSE NULL
+                    END AS opposition,
                     g.result
                 FROM game_appearances ga
                 JOIN games g ON g.id = ga.game_id
                 WHERE ga.player_id = CAST(:pid AS UUID)
-                  AND g.home_team IS NOT NULL
-                  AND g.away_team IS NOT NULL
+                  AND g.home_club IS NOT NULL
+                  AND g.away_club IS NOT NULL
             ),
             games_by_opposition AS (
                 SELECT
