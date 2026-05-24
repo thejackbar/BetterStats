@@ -210,7 +210,29 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     rows = await get_player_milestones(db, player_id)
-    return [_str_keys(r) for r in rows]
+    milestones = [_str_keys(r) for r in rows]
+
+    # Append computed per-grade match milestones (not stored in DB).
+    GRADE_MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300]
+    breakdown = await get_player_team_breakdown(db, player_id, str(player.organisation_id))
+    grade_rows = sorted(breakdown.get("rows", []), key=lambda r: r.get("grade_name") or "")
+    for row in grade_rows:
+        matches_in_grade = int(row.get("matches") or 0)
+        grade_name = row.get("grade_name")
+        if not grade_name or matches_in_grade <= 0:
+            continue
+        for threshold in GRADE_MATCH_MILESTONES:
+            if matches_in_grade >= threshold:
+                milestones.append({
+                    "id": None,
+                    "milestone_type": "grade_matches",
+                    "milestone_value": threshold,
+                    "achieved_at": None,
+                    "detail": grade_name,
+                    "game_id": None,
+                })
+
+    return milestones
 
 
 @router.get("/{player_id}/partnerships")
@@ -284,8 +306,6 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
         needed = next_target - matches_in_grade
         # Only surface when within a meaningful window — otherwise the list
         # explodes for players who've sampled lots of grades briefly.
-        if needed > 15:
-            continue
         upcoming.append({
             "type": "matches",
             "current": matches_in_grade,

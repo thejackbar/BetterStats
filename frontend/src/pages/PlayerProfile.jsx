@@ -1418,7 +1418,7 @@ function MilestonesTab({ playerId, upcomingMilestones, milestones }) {
         <Card title="ACHIEVED MILESTONES" pad="p-0">
           <ul className="flex flex-col">
             {milestones.map((m, i) => {
-              const typeLabel = { runs: 'Runs', wickets: 'Wickets', matches: 'Matches', catches: 'Catches' }[m.milestone_type] || m.milestone_type || 'Milestone'
+              const typeLabel = { runs: 'Runs', wickets: 'Wickets', matches: 'Matches', catches: 'Catches', grade_matches: 'Matches' }[m.milestone_type] || m.milestone_type || 'Milestone'
               const title = m.milestone_value != null ? `${m.milestone_value.toLocaleString()} ${typeLabel}` : typeLabel
               const dateStr = m.achieved_at
                 ? new Date(m.achieved_at + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
