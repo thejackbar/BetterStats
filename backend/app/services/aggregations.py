@@ -2046,33 +2046,54 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
     result = await session.execute(
         text("""
             WITH player_games AS (
+                -- opp_key: stable org UUID when available (populated by sync),
+                -- falls back to suffix-stripped team name for pre-sync rows.
                 SELECT
                     ga.game_id,
-                    CASE
-                        WHEN ga.team_name = g.home_team THEN g.away_club
-                        WHEN ga.team_name = g.away_team THEN g.home_club
-                        ELSE NULL
-                    END AS opposition,
+                    g.played_at,
+                    COALESCE(
+                        g.opp_org_id,
+                        CASE
+                            WHEN ga.team_name = g.home_team THEN g.away_club
+                            WHEN ga.team_name = g.away_team THEN g.home_club
+                            ELSE NULL
+                        END
+                    ) AS opp_key,
+                    COALESCE(
+                        g.opp_club_name,
+                        CASE
+                            WHEN ga.team_name = g.home_team THEN g.away_club
+                            WHEN ga.team_name = g.away_team THEN g.home_club
+                            ELSE NULL
+                        END
+                    ) AS opp_name,
                     g.result
                 FROM game_appearances ga
                 JOIN games g ON g.id = ga.game_id
                 WHERE ga.player_id = CAST(:pid AS UUID)
-                  AND g.home_club IS NOT NULL
-                  AND g.away_club IS NOT NULL
+            ),
+            opp_display AS (
+                -- Most recently seen display name for each opp_key.
+                SELECT DISTINCT ON (opp_key)
+                    opp_key,
+                    opp_name AS opposition
+                FROM player_games
+                WHERE opp_key IS NOT NULL AND opp_name IS NOT NULL
+                ORDER BY opp_key, played_at DESC NULLS LAST
             ),
             games_by_opposition AS (
                 SELECT
-                    opposition,
+                    opp_key,
                     COUNT(*) AS games,
                     COUNT(*) FILTER (WHERE result = 'WIN') AS wins,
                     COUNT(*) FILTER (WHERE result = 'LOSS') AS losses
                 FROM player_games
-                WHERE opposition IS NOT NULL
-                GROUP BY opposition
+                WHERE opp_key IS NOT NULL
+                GROUP BY opp_key
             ),
             batting_by_opposition AS (
                 SELECT
-                    pg.opposition,
+                    pg.opp_key,
                     COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL) AS innings,
                     COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
                     MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
@@ -2080,35 +2101,35 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                 FROM batting_innings bi
                 JOIN player_games pg ON pg.game_id = bi.game_id
                 WHERE bi.player_id = CAST(:pid AS UUID)
-                  AND pg.opposition IS NOT NULL
-                GROUP BY pg.opposition
+                  AND pg.opp_key IS NOT NULL
+                GROUP BY pg.opp_key
             ),
             bowling_by_opposition AS (
                 SELECT
-                    pg.opposition,
+                    pg.opp_key,
                     COALESCE(SUM(bs.wickets), 0) AS wickets,
                     COALESCE(SUM(bs.runs), 0) AS bowling_runs,
                     COALESCE(SUM(bs.overs), 0) AS bowling_overs
                 FROM bowling_spells bs
                 JOIN player_games pg ON pg.game_id = bs.game_id
                 WHERE bs.player_id = CAST(:pid AS UUID)
-                  AND pg.opposition IS NOT NULL
-                GROUP BY pg.opposition
+                  AND pg.opp_key IS NOT NULL
+                GROUP BY pg.opp_key
             ),
             fielding_by_opposition AS (
                 SELECT
-                    pg.opposition,
+                    pg.opp_key,
                     COALESCE(SUM(fs.catches), 0) AS catches,
                     COALESCE(SUM(fs.catches_wk), 0) AS catches_wk,
                     COALESCE(SUM(fs.stumpings), 0) AS stumpings
                 FROM fielding_stats fs
                 JOIN player_games pg ON pg.game_id = fs.game_id
                 WHERE fs.player_id = CAST(:pid AS UUID)
-                  AND pg.opposition IS NOT NULL
-                GROUP BY pg.opposition
+                  AND pg.opp_key IS NOT NULL
+                GROUP BY pg.opp_key
             )
             SELECT
-                gbo.opposition,
+                COALESCE(od.opposition, gbo.opp_key) AS opposition,
                 gbo.games,
                 gbo.wins,
                 gbo.losses,
@@ -2124,9 +2145,10 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                 COALESCE(fo.catches - fo.catches_wk, 0) AS catches_non_wk,
                 COALESCE(fo.stumpings, 0) AS stumpings
             FROM games_by_opposition gbo
-            LEFT JOIN batting_by_opposition bao ON bao.opposition = gbo.opposition
-            LEFT JOIN bowling_by_opposition boo ON boo.opposition = gbo.opposition
-            LEFT JOIN fielding_by_opposition fo ON fo.opposition = gbo.opposition
+            LEFT JOIN opp_display od ON od.opp_key = gbo.opp_key
+            LEFT JOIN batting_by_opposition bao ON bao.opp_key = gbo.opp_key
+            LEFT JOIN bowling_by_opposition boo ON boo.opp_key = gbo.opp_key
+            LEFT JOIN fielding_by_opposition fo ON fo.opp_key = gbo.opp_key
             ORDER BY gbo.games DESC
         """),
         {"pid": player_id},

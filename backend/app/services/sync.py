@@ -1109,6 +1109,7 @@ async def sync_grassroots_game_level_data(
     seen_match_ids: set[str] = set()
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
+    match_to_opp: dict[str, tuple[str | None, str]] = {}  # match_id → (opp_org_id, opp_club_name)
     for grade_id, season_id, grade_name in grades:
         stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
         try:
@@ -1121,16 +1122,28 @@ async def sync_grassroots_game_level_data(
             if not mid or mid in seen_match_ids:
                 continue
             teams = m.get("teams") or []
-            org_playing = any(
-                (t.get("owningOrganisation") or {}).get("id", "").lower() == org_id_str_lower
-                for t in teams
+            our_team_m = next(
+                (t for t in teams if (t.get("owningOrganisation") or {}).get("id", "").lower() == org_id_str_lower),
+                None,
             )
-            if not org_playing:
+            if not our_team_m:
                 continue
             seen_match_ids.add(mid)
             match_to_season[mid] = season_id
             round_name = (m.get("round") or {}).get("name", "")
             match_to_is_final[mid] = "final" in round_name.lower()
+            opp_team_m = next((t for t in teams if t is not our_team_m), None)
+            if opp_team_m:
+                opp_org = opp_team_m.get("owningOrganisation") or {}
+                opp_id = opp_org.get("id")
+                opp_name = (
+                    opp_org.get("name")
+                    or opp_org.get("displayName")
+                    or opp_team_m.get("displayName")
+                    or opp_team_m.get("name")
+                    or ""
+                )
+                match_to_opp[mid] = (opp_id, opp_name)
         if run_id:
             await update_sync_run(run_id, stats)
 
@@ -1156,6 +1169,26 @@ async def sync_grassroots_game_level_data(
                 )
             await upd_session.commit()
         logger.info(f"GR-sync: bulk-updated is_final ({len(finals_ids)} finals, {len(non_finals_ids)} non-finals)")
+
+    if match_to_opp:
+        opp_rows = []
+        for mid, (opp_id, opp_name) in match_to_opp.items():
+            try:
+                opp_rows.append({"gid": uuid.UUID(mid), "opp_id": opp_id, "opp_name": opp_name})
+            except ValueError:
+                pass
+        if opp_rows:
+            async with async_session_maker() as upd_session:
+                await upd_session.execute(
+                    text("""
+                        UPDATE games
+                        SET opp_org_id = :opp_id, opp_club_name = :opp_name
+                        WHERE id = :gid AND opp_org_id IS NULL
+                    """),
+                    opp_rows,
+                )
+                await upd_session.commit()
+            logger.info(f"GR-sync: bulk-updated opp_org_id for up to {len(opp_rows)} games")
 
     # ── PER-GAME PROCESSING ───────────────────────────────────────────────────
     processed = 0
@@ -1276,6 +1309,7 @@ async def sync_grassroots_game_level_data(
 
                 # Game
                 venue_name = (scorecard.get("venue") or {}).get("name")
+                _opp_id, _opp_name = match_to_opp.get(match_id_str, (None, ""))
                 session.add(Game(
                     id=match_uuid,
                     grade_id=grade_uuid,
@@ -1284,6 +1318,8 @@ async def sync_grassroots_game_level_data(
                     away_team=away_team_name,
                     home_club=strip_team_suffix(home_team_name),
                     away_club=strip_team_suffix(away_team_name),
+                    opp_org_id=_opp_id,
+                    opp_club_name=_opp_name,
                     result=result_text,
                     winning_team=winner_name,
                     is_final=match_to_is_final.get(match_id_str, False),
