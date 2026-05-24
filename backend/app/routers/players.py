@@ -40,7 +40,14 @@ async def list_players(
     )
     players = result.scalars().all()
     return [
-        {"id": str(p.id), "name": p.name, "display_name": p.display_name, "claimed": p.claimed}
+        {
+            "id": str(p.id),
+            "name": p.name,
+            "display_name": p.display_name,
+            "claimed": p.claimed,
+            "photo_url": p.photo_url,
+            "player_role": p.player_role,
+        }
         for p in players
     ]
 
