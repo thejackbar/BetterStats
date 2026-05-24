@@ -9,9 +9,12 @@ export default function SeasonSelector({
   setFinalsOnly = () => {},
   captainOnly = false,
   setCaptainOnly = () => {},
+  gender = null,
+  setGender = () => {},
 }) {
   return (
-    <div className="flex flex-wrap gap-3 items-center">
+    <div className="flex flex-wrap gap-2 items-center">
+      {/* Season - always shown */}
       {seasons.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Season</label>
@@ -21,12 +24,17 @@ export default function SeasonSelector({
             className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
           >
             <option value="">All seasons</option>
-            {seasons.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
+            {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
       )}
+
+      {/* Visual divider when there are secondary filters */}
+      {(grades.length > 0 || seasons.length > 0) && (
+        <div className="h-5 w-px bg-pb-hairline mx-1 hidden sm:block" />
+      )}
+
+      {/* Grade */}
       {grades.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Grade</label>
@@ -36,36 +44,84 @@ export default function SeasonSelector({
             className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
           >
             <option value="">All grades</option>
-            {grades.map(g => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
+            {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
         </div>
       )}
+
+      {/* Gender filter - pill toggle */}
+      {seasons.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Gender</label>
+          <div className="flex items-center border pb-hairline rounded overflow-hidden">
+            {[
+              { value: null, label: 'All' },
+              { value: 'Male', label: 'Men' },
+              { value: 'Female', label: 'Women' },
+            ].map(opt => (
+              <button
+                key={opt.label}
+                onClick={() => setGender(opt.value)}
+                className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+                  gender === opt.value
+                    ? 'bg-pb-accent/15 text-pb-accent'
+                    : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Games - pill toggle */}
       {seasons.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Games</label>
-          <select
-            value={finalsOnly ? 'finals' : 'all'}
-            onChange={e => setFinalsOnly(e.target.value === 'finals')}
-            className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
-          >
-            <option value="all">All games</option>
-            <option value="finals">Finals only</option>
-          </select>
+          <div className="flex items-center border pb-hairline rounded overflow-hidden">
+            {[
+              { value: false, label: 'All' },
+              { value: true, label: 'Finals' },
+            ].map(opt => (
+              <button
+                key={opt.label}
+                onClick={() => setFinalsOnly(opt.value)}
+                className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+                  finalsOnly === opt.value
+                    ? 'bg-pb-accent/15 text-pb-accent'
+                    : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
+
+      {/* Captain filter - pill toggle */}
       {seasons.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Captain</label>
-          <select
-            value={captainOnly ? 'captain' : 'all'}
-            onChange={e => setCaptainOnly(e.target.value === 'captain')}
-            className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
-          >
-            <option value="all">All players</option>
-            <option value="captain">As captain</option>
-          </select>
+          <div className="flex items-center border pb-hairline rounded overflow-hidden">
+            {[
+              { value: false, label: 'All' },
+              { value: true, label: 'Captain' },
+            ].map(opt => (
+              <button
+                key={opt.label}
+                onClick={() => setCaptainOnly(opt.value)}
+                className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+                  captainOnly === opt.value
+                    ? 'bg-pb-accent/15 text-pb-accent'
+                    : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
