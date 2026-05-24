@@ -105,13 +105,13 @@ function BattingTable({ rows, fmt: fmtName }) {
               <td className="py-3 pl-4 font-mono text-[10px] text-pb-faint">{i + 1}</td>
               <td className="py-3">
                 <Link to={`/players/${r.player_id}`} className="font-semibold text-pb-text hover:text-pb-accent transition">
-                  {fmtName(r.player_name)}
+                  {fmtName(r.name)}
                 </Link>
               </td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">{r.innings ?? '—'}</td>
               <td className="py-3 text-right pr-4 font-mono font-semibold text-pb-text">{r.total_runs ?? '—'}</td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">{fmt(r.average)}</td>
-              <td className="py-3 text-right pr-4 font-mono text-pb-dim">{r.high_score ?? '—'}{r.is_hs_not_out ? '*' : ''}</td>
+              <td className="py-3 text-right pr-4 font-mono text-pb-dim">{r.high_score ?? '—'}</td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">{r.fifties ?? '—'}</td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">{r.hundreds ?? '—'}</td>
             </tr>
@@ -144,7 +144,7 @@ function BowlingTable({ rows, fmt: fmtName }) {
               <td className="py-3 pl-4 font-mono text-[10px] text-pb-faint">{i + 1}</td>
               <td className="py-3">
                 <Link to={`/players/${r.player_id}`} className="font-semibold text-pb-text hover:text-pb-accent transition">
-                  {fmtName(r.player_name)}
+                  {fmtName(r.name)}
                 </Link>
               </td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">{fmt(r.overs, 1)}</td>
@@ -184,7 +184,7 @@ function FieldingTable({ rows, fmt: fmtName }) {
               <td className="py-3 pl-4 font-mono text-[10px] text-pb-faint">{i + 1}</td>
               <td className="py-3">
                 <Link to={`/players/${r.player_id}`} className="font-semibold text-pb-text hover:text-pb-accent transition">
-                  {fmtName(r.player_name)}
+                  {fmtName(r.name)}
                 </Link>
               </td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">{r.total_catches_non_wk ?? '—'}</td>
@@ -287,11 +287,11 @@ export default function TeamDetail() {
 
   // Chart data — top 6 batters by runs, top 6 bowlers by wickets
   const topBatChart = batters.slice(0, 6).map(r => ({
-    name: fmtName(r.player_name),
+    name: fmtName(r.name),
     runs: r.total_runs ?? 0,
   }))
   const topBowlChart = bowlers.slice(0, 6).map(r => ({
-    name: fmtName(r.player_name),
+    name: fmtName(r.name),
     wickets: r.total_wickets ?? 0,
   }))
 
