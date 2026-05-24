@@ -597,14 +597,15 @@ function CareerBowlingProgressionChart({ spells }) {
       <LineChart data={points} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
         <XAxis dataKey="i" tick={{ fontSize: 10, fill: 'var(--pb-faint)', fontFamily: 'monospace' }} label={{ value: 'Spells', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--pb-faint)' }} />
-        <YAxis tick={{ fontSize: 10, fill: 'var(--pb-faint)', fontFamily: 'monospace' }} width={36} />
+        <YAxis yAxisId="left" tick={{ fontSize: 10, fill: 'var(--pb-accent)', fontFamily: 'monospace' }} width={36} />
+        <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: 'var(--pb-chart-milestone, #f5b542)', fontFamily: 'monospace' }} width={36} />
         <Tooltip
           contentStyle={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline)', borderRadius: 6, fontSize: 11 }}
           formatter={(v, name) => [v != null ? v.toFixed(2) : '—', name]}
         />
         <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'monospace' }} />
-        <Line type="monotone" dataKey="avg" name="Average" stroke="var(--pb-accent)" dot={false} strokeWidth={2} connectNulls />
-        <Line type="monotone" dataKey="econ" name="Economy" stroke="var(--pb-chart-milestone, #f5b542)" dot={false} strokeWidth={2} connectNulls />
+        <Line yAxisId="left" type="monotone" dataKey="avg" name="Average" stroke="var(--pb-accent)" dot={false} strokeWidth={2} connectNulls />
+        <Line yAxisId="right" type="monotone" dataKey="econ" name="Economy" stroke="var(--pb-chart-milestone, #f5b542)" dot={false} strokeWidth={2} connectNulls />
       </LineChart>
     </ResponsiveContainer>
   )
@@ -833,6 +834,108 @@ function BattingPositionHeatmap({ innings }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Career calendar: month × season heatmap of run output ───────────────
+function CareerCalendarHeatmap({ innings }) {
+  if (!innings?.length) return null
+
+  const cells = new Map() // `${seasonStart}|${month}` → { runs, innings, hundreds }
+  const seasonStarts = new Set()
+
+  for (const inn of innings) {
+    if (!inn.played_at) continue
+    const d = new Date(inn.played_at)
+    const m = d.getMonth() // 0-11
+    const y = d.getFullYear()
+    // Season Oct→Apr: Oct-Dec belong to season starting that year, Jan-Sep belong to season that started previous year.
+    const seasonStart = m >= 9 ? y : y - 1
+    seasonStarts.add(seasonStart)
+    const key = `${seasonStart}|${m}`
+    const cur = cells.get(key) || { runs: 0, innings: 0, hundreds: 0 }
+    cur.runs += (inn.runs ?? 0)
+    cur.innings += 1
+    if ((inn.runs ?? 0) >= 100) cur.hundreds += 1
+    cells.set(key, cur)
+  }
+
+  if (!cells.size) return null
+
+  // Cricket season months in order: Oct, Nov, Dec, Jan, Feb, Mar, Apr
+  const SEASON_MONTHS = [9, 10, 11, 0, 1, 2, 3]
+  const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const years = [...seasonStarts].sort((a, b) => a - b)
+
+  const maxRuns = Math.max(...[...cells.values()].map(c => c.runs))
+
+  function shortSeason(y) {
+    return `${String(y).slice(-2)}/${String(y + 1).slice(-2)}`
+  }
+  function calendarYear(seasonStart, m) {
+    return m >= 9 ? seasonStart : seasonStart + 1
+  }
+  function cellColor(runs, hundreds) {
+    if (runs === 0) return 'transparent'
+    if (hundreds > 0) {
+      const t = Math.min(1, runs / Math.max(maxRuns, 1))
+      return `color-mix(in srgb, var(--pb-chart-milestone) ${Math.round(t * 70) + 25}%, transparent)`
+    }
+    const intensity = Math.min(1, runs / Math.max(maxRuns, 1))
+    return `color-mix(in srgb, var(--pb-accent) ${Math.round(intensity * 75) + 8}%, transparent)`
+  }
+
+  return (
+    <div>
+      <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">
+        Runs scored each month of each season. Green intensity tracks volume; gold marks months containing a hundred. Columns are seasons left-to-right (oldest first), rows step through the Oct→Apr cricket calendar.
+      </p>
+      <div className="overflow-x-auto pb-scroll">
+        <table className="border-separate" style={{ borderSpacing: '2px' }}>
+          <thead>
+            <tr>
+              <th className="font-mono text-[9px] tracking-wide3 text-pb-faint pr-2 pb-1.5 text-right sticky left-0 bg-pb-bg">MONTH</th>
+              {years.map(y => (
+                <th key={y} className="font-mono text-[9px] tracking-wide3 text-pb-faint pb-1.5 text-center min-w-[34px]">
+                  {shortSeason(y)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {SEASON_MONTHS.map(m => (
+              <tr key={m}>
+                <td className="font-mono text-[10px] text-pb-dim pr-2 text-right sticky left-0 bg-pb-bg">{MONTH_NAMES[m]}</td>
+                {years.map(y => {
+                  const cell = cells.get(`${y}|${m}`)
+                  if (!cell) return (
+                    <td key={y} className="p-0">
+                      <div className="w-8 h-8 rounded-sm" style={{ background: 'var(--pb-hairline)', opacity: 0.25 }} />
+                    </td>
+                  )
+                  const cy = calendarYear(y, m)
+                  return (
+                    <td key={y} className="p-0" title={`${MONTH_NAMES[m]} ${cy} · ${cell.innings} inn · ${cell.runs} runs${cell.hundreds ? ` · ${cell.hundreds} ton${cell.hundreds > 1 ? 's' : ''}` : ''}`}>
+                      <div
+                        className="w-8 h-8 rounded-sm flex items-center justify-center font-mono text-[10px] font-bold text-pb-text"
+                        style={{ background: cellColor(cell.runs, cell.hundreds) }}
+                      >
+                        {cell.runs}
+                      </div>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex gap-4 mt-3 font-mono text-[9px] tracking-wide3 text-pb-faint flex-wrap">
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'color-mix(in srgb, var(--pb-accent) 25%, transparent)' }} />LIGHT</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'color-mix(in srgb, var(--pb-accent) 75%, transparent)' }} />HEAVY</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'color-mix(in srgb, var(--pb-chart-milestone) 70%, transparent)' }} />CONTAINS 100+</span>
       </div>
     </div>
   )
@@ -1135,6 +1238,13 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
             </Card>
           )}
 
+          {/* Monthly form calendar */}
+          {battingInnings.some(i => i.played_at) && (
+            <Card title="MONTHLY FORM CALENDAR">
+              <CareerCalendarHeatmap innings={battingInnings} />
+            </Card>
+          )}
+
           {/* Batting position heatmap */}
           {battingInnings.some(i => i.batting_position) && (
             <Card title="POSITION × SEASON HEATMAP">
@@ -1352,7 +1462,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           {/* Career bowling progression */}
           {bowlingSpells.length > 5 && (
             <Card title="CAREER BOWLING PROGRESSION">
-              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Running career bowling average and economy after each spell, chronological.</p>
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Running career bowling average (left axis, green) and economy (right axis, gold) after each spell, chronological — each on its own scale so economy movement is visible.</p>
               <CareerBowlingProgressionChart spells={bowlingSpells} />
             </Card>
           )}
@@ -1360,7 +1470,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           {/* Bowling averages over time */}
           {seasonStats?.some(s => s.bowling_average != null) && (
             <Card title="BOWLING AVERAGE & ECONOMY OVER TIME">
-              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Bowling average and economy rate season by season.</p>
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Bowling average (left axis) and economy rate (right axis) season by season — each scales independently so economy movement is readable.</p>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart
                   data={[...seasonStats].reverse().filter(s => s.bowling_average != null || s.economy != null).map(s => ({
@@ -1372,11 +1482,12 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
                   <XAxis dataKey="season" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
+                  <YAxis yAxisId="left" tick={{ fill: 'var(--pb-chart-wickets, #3b82f6)', fontSize: 11 }} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fill: 'var(--pb-chart-milestone, #f5b542)', fontSize: 11 }} />
                   <Tooltip {...CHART_TOOLTIP_STYLE} />
                   <Legend wrapperStyle={{ color: 'var(--pb-dim)', fontSize: 12 }} />
-                  <Line type="monotone" dataKey="bowl_avg" name="Bowling Avg" stroke="var(--pb-chart-wickets, #3b82f6)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                  <Line type="monotone" dataKey="economy" name="Economy" stroke="var(--pb-chart-milestone, #f5b542)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  <Line yAxisId="left" type="monotone" dataKey="bowl_avg" name="Bowling Avg" stroke="var(--pb-chart-wickets, #3b82f6)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  <Line yAxisId="right" type="monotone" dataKey="economy" name="Economy" stroke="var(--pb-chart-milestone, #f5b542)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             </Card>
