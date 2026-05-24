@@ -2042,6 +2042,102 @@ async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Op
     return [dict(r) for r in result.mappings()]
 
 
+async def get_player_by_opposition(session: AsyncSession, player_id: str) -> list[dict]:
+    result = await session.execute(
+        text("""
+            WITH player_games AS (
+                SELECT
+                    ga.game_id,
+                    NULLIF(TRIM(regexp_replace(
+                        CASE
+                            WHEN ga.team_name = g.home_team THEN g.away_team
+                            ELSE g.home_team
+                        END,
+                        '\s+(\d+(st|nd|rd|th)s?|[A-Za-z]\s+Grade)\s*$',
+                        '',
+                        'i'
+                    )), '') AS opposition,
+                    g.result
+                FROM game_appearances ga
+                JOIN games g ON g.id = ga.game_id
+                WHERE ga.player_id = CAST(:pid AS UUID)
+                  AND g.home_team IS NOT NULL
+                  AND g.away_team IS NOT NULL
+            ),
+            games_by_opposition AS (
+                SELECT
+                    opposition,
+                    COUNT(*) AS games,
+                    COUNT(*) FILTER (WHERE result = 'WIN') AS wins,
+                    COUNT(*) FILTER (WHERE result = 'LOSS') AS losses
+                FROM player_games
+                WHERE opposition IS NOT NULL
+                GROUP BY opposition
+            ),
+            batting_by_opposition AS (
+                SELECT
+                    pg.opposition,
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL) AS innings,
+                    COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
+                    MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS dismissals
+                FROM batting_innings bi
+                JOIN player_games pg ON pg.game_id = bi.game_id
+                WHERE bi.player_id = CAST(:pid AS UUID)
+                  AND pg.opposition IS NOT NULL
+                GROUP BY pg.opposition
+            ),
+            bowling_by_opposition AS (
+                SELECT
+                    pg.opposition,
+                    COALESCE(SUM(bs.wickets), 0) AS wickets,
+                    COALESCE(SUM(bs.runs), 0) AS bowling_runs,
+                    COALESCE(SUM(bs.overs), 0) AS bowling_overs
+                FROM bowling_spells bs
+                JOIN player_games pg ON pg.game_id = bs.game_id
+                WHERE bs.player_id = CAST(:pid AS UUID)
+                  AND pg.opposition IS NOT NULL
+                GROUP BY pg.opposition
+            ),
+            fielding_by_opposition AS (
+                SELECT
+                    pg.opposition,
+                    COALESCE(SUM(fs.catches), 0) AS catches,
+                    COALESCE(SUM(fs.catches_wk), 0) AS catches_wk,
+                    COALESCE(SUM(fs.stumpings), 0) AS stumpings
+                FROM fielding_stats fs
+                JOIN player_games pg ON pg.game_id = fs.game_id
+                WHERE fs.player_id = CAST(:pid AS UUID)
+                  AND pg.opposition IS NOT NULL
+                GROUP BY pg.opposition
+            )
+            SELECT
+                gbo.opposition,
+                gbo.games,
+                gbo.wins,
+                gbo.losses,
+                COALESCE(bao.innings, 0) AS innings,
+                COALESCE(bao.total_runs, 0) AS total_runs,
+                ROUND(bao.total_runs::numeric / NULLIF(bao.dismissals, 0), 2) AS batting_average,
+                bao.high_score,
+                COALESCE(boo.wickets, 0) AS wickets,
+                ROUND(boo.bowling_runs::numeric / NULLIF(boo.wickets, 0), 2) AS bowling_average,
+                ROUND(boo.bowling_runs::numeric / NULLIF(boo.bowling_overs, 0), 2) AS economy,
+                COALESCE(fo.catches, 0) AS total_catches,
+                COALESCE(fo.catches_wk, 0) AS catches_wk,
+                COALESCE(fo.catches - fo.catches_wk, 0) AS catches_non_wk,
+                COALESCE(fo.stumpings, 0) AS stumpings
+            FROM games_by_opposition gbo
+            LEFT JOIN batting_by_opposition bao ON bao.opposition = gbo.opposition
+            LEFT JOIN bowling_by_opposition boo ON boo.opposition = gbo.opposition
+            LEFT JOIN fielding_by_opposition fo ON fo.opposition = gbo.opposition
+            ORDER BY gbo.games DESC
+        """),
+        {"pid": player_id},
+    )
+    return [dict(r) for r in result.mappings()]
+
+
 async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dict]:
     result = await session.execute(
         text("""
