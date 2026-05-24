@@ -35,6 +35,8 @@ class User(Base):
     last_login_at = Column(TIMESTAMP(timezone=True), nullable=True)
     failed_login_count = Column(Integer, default=0, nullable=False)
     locked_until = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_notification_seen_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_seen_app_version = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

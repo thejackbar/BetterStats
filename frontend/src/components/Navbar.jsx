@@ -7,8 +7,9 @@ import { useClub } from "../hooks/useClub";
 import { useTheme } from "../contexts/ThemeContext";
 import NavbarPlayerSearch from "./NavbarPlayerSearch";
 import betterStatsLogo from "../assets/betterstatslogo_white.png";
+import { SITE_VERSION } from "../version";
 
-export const SITE_VERSION = "v7.7.2.1";
+export { SITE_VERSION };
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();

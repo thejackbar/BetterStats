@@ -1,7 +1,23 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { api } from '../../lib/api'
+import { SITE_VERSION } from '../../version'
+import { CHANGELOG } from '../../data/changelog'
+import NotificationBell from '../NotificationBell'
+import NotificationModal from '../NotificationModal'
 import betterStatsLogo from '../../assets/betterstatslogo_white.png'
+
+function compareVersions(a, b) {
+  const parse = v => (v || '').replace('v', '').split('.').map(Number)
+  const av = parse(a)
+  const bv = parse(b)
+  for (let i = 0; i < Math.max(av.length, bv.length); i++) {
+    const diff = (av[i] || 0) - (bv[i] || 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
 
 const NAV_SECTIONS = [
   { items: [{ to: '/admin', label: 'Dashboard', exact: true }] },
@@ -41,10 +57,45 @@ const SUPER_LINKS = [
 ]
 
 export default function AdminLayout({ children }) {
-  const { user, logout } = useAuth()
+  const { user, logout, justLoggedIn, clearJustLoggedIn } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [notifSummary, setNotifSummary] = useState(null)
+  const [bellRefreshKey, setBellRefreshKey] = useState(0)
+
+  const openNotifications = useCallback(async () => {
+    try {
+      const data = await api.getNotificationsSummary()
+      setNotifSummary(data)
+    } catch { /* show modal with whatever we have */ }
+    setNotifOpen(true)
+  }, [])
+
+  const closeNotifications = useCallback(async () => {
+    setNotifOpen(false)
+    try {
+      await api.markNotificationsSeen(SITE_VERSION)
+      setBellRefreshKey(k => k + 1)
+    } catch {}
+  }, [])
+
+  // Auto-open on login if there are unseen items or new changelog entries
+  useEffect(() => {
+    if (!justLoggedIn) return
+    clearJustLoggedIn()
+    api.getNotificationsSummary()
+      .then(data => {
+        const hasNewVersion = compareVersions(SITE_VERSION, data.last_seen_version) > 0
+        const newChangelog = CHANGELOG.filter(e => compareVersions(e.version, data.last_seen_version) > 0).length
+        if (data.unseen_count > 0 || hasNewVersion || newChangelog > 0) {
+          setNotifSummary(data)
+          setNotifOpen(true)
+        }
+      })
+      .catch(() => {})
+  }, [justLoggedIn, clearJustLoggedIn])
 
   const handleLogout = async () => {
     await logout()
@@ -81,6 +132,7 @@ export default function AdminLayout({ children }) {
                 <span className="ml-1 text-[10px]" style={{ color: 'var(--pb-accent)' }}>(SUPER)</span>
               )}
             </span>
+            <NotificationBell onOpen={openNotifications} refreshTrigger={bellRefreshKey} />
             <button
               onClick={handleLogout}
               className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-3 py-1.5"
@@ -162,6 +214,12 @@ export default function AdminLayout({ children }) {
           {children}
         </main>
       </div>
+
+      <NotificationModal
+        isOpen={notifOpen}
+        summary={notifSummary}
+        onClose={closeNotifications}
+      />
     </div>
   )
 }
