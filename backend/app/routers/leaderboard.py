@@ -28,9 +28,10 @@ async def batting_leaderboard(
     min_runs: int = Query(0),
     finals_only: Optional[bool] = Query(None),
     captain_only: Optional[bool] = Query(None),
+    gender: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await get_batting_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_runs, grade_name, finals_only=finals_only, captain_only=captain_only)
+    rows = await get_batting_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_runs, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender)
     return _stringify(rows)
 
 
@@ -46,9 +47,10 @@ async def bowling_leaderboard(
     min_wickets: int = Query(0),
     finals_only: Optional[bool] = Query(None),
     captain_only: Optional[bool] = Query(None),
+    gender: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await get_bowling_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_overs, min_wickets, grade_name, finals_only=finals_only, captain_only=captain_only)
+    rows = await get_bowling_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_overs, min_wickets, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender)
     return _stringify(rows)
 
 
@@ -62,9 +64,10 @@ async def fielding_leaderboard(
     limit: int = Query(20, le=50),
     finals_only: Optional[bool] = Query(None),
     captain_only: Optional[bool] = Query(None),
+    gender: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit, grade_name, finals_only=finals_only, captain_only=captain_only)
+    rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender)
     return _stringify(rows)
 
 
@@ -76,9 +79,10 @@ async def sirs_batting(
     finals_only: Optional[bool] = Query(None),
     captain_only: Optional[bool] = Query(None),
     limit: int = Query(200, le=500),
+    gender: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    return await get_sirs_batting(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only)
+    return await get_sirs_batting(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender)
 
 
 @router.get("/sirs/bowling-innings")
@@ -89,9 +93,10 @@ async def sirs_bowling_innings(
     finals_only: Optional[bool] = Query(None),
     captain_only: Optional[bool] = Query(None),
     limit: int = Query(200, le=500),
+    gender: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    return await get_sirs_bowling_innings(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only)
+    return await get_sirs_bowling_innings(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender)
 
 
 @router.get("/sirs/bowling-match")
@@ -102,6 +107,7 @@ async def sirs_bowling_match(
     finals_only: Optional[bool] = Query(None),
     captain_only: Optional[bool] = Query(None),
     limit: int = Query(200, le=500),
+    gender: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    return await get_sirs_bowling_match(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only)
+    return await get_sirs_bowling_match(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender)
