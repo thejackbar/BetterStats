@@ -476,6 +476,15 @@ export const api = {
   adminReorderSponsors: (items) =>
     request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
 
+  // Notifications
+  getNotificationsCount: () => request('/club-admin/notifications/count'),
+  getNotificationsSummary: () => request('/club-admin/notifications/summary'),
+  markNotificationsSeen: (appVersion) =>
+    request('/club-admin/notifications/seen', {
+      method: 'POST',
+      body: JSON.stringify({ app_version: appVersion }),
+    }),
+
   // Records
   getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender } = {}) => {
     const params = new URLSearchParams()

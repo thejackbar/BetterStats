@@ -4,6 +4,7 @@ const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(undefined) // undefined = loading, null = not authed
+  const [justLoggedIn, setJustLoggedIn] = useState(false)
 
   const fetchMe = useCallback(async () => {
     try {
@@ -33,6 +34,7 @@ export function AuthProvider({ children }) {
     }
     const data = await res.json()
     setUser(data)
+    setJustLoggedIn(true)
     return data
   }
 
@@ -41,8 +43,10 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
+  const clearJustLoggedIn = useCallback(() => setJustLoggedIn(false), [])
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, refetch: fetchMe }}>
+    <AuthContext.Provider value={{ user, login, logout, refetch: fetchMe, justLoggedIn, clearJustLoggedIn }}>
       {children}
     </AuthContext.Provider>
   )

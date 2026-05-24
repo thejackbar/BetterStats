@@ -1,0 +1,39 @@
+// Feature changelog — newest first.
+// Frontend reads this to determine "What's New" since the user's last seen version.
+// Add an entry whenever SITE_VERSION is bumped in src/version.js.
+
+export const CHANGELOG = [
+  {
+    version: 'v7.7.3',
+    date: '2026-05-24',
+    title: 'Notification Centre',
+    items: [
+      'Bell icon in the admin header shows upcoming milestones, sync results, and pending requests at a glance',
+      'What\'s New panel highlights features shipped since your last login',
+      'Notifications auto-clear when you dismiss the panel',
+    ],
+  },
+  {
+    version: 'v7.7.2',
+    date: '2026-05-22',
+    title: 'Sync & Data Quality Fixes',
+    items: [
+      'Hard Rebuild now correctly marks sync runs as completed (was stuck at "running" forever)',
+      'Absent and Did Not Bat dismissals no longer counted as batting innings — fixes inflated per-game innings counts',
+      'Merge history now resolves multi-step redirects correctly — stats no longer silently drop for merged players',
+      'Aggregate sync merge map filtered to active (non-undone) merges only — fixes poisoned redirects from reversed merges',
+    ],
+  },
+  {
+    version: 'v7.7',
+    date: '2026-05-20',
+    title: 'Full Historical Game Data',
+    items: [
+      'Game-level scorecards now load all the way back to the 1970s — every season, every grade',
+      'Home and away team names now correctly populate for all historical games',
+      'Duplicate batting/bowling rows from overlapping sync paths eliminated',
+      'PlayHQ Partner sync path removed — Grassroots covers all seasons including 2025/26 with fewer gaps',
+      'Player stats from scorecards now correctly attributed through merged player IDs',
+    ],
+  },
+]
