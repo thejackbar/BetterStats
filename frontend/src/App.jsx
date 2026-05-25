@@ -34,6 +34,7 @@ import AdminSync from './pages/admin/AdminSync'
 import AdminPartnershipRecords from './pages/admin/AdminPartnershipRecords'
 import AdminMilestones from './pages/admin/AdminMilestones'
 import AdminActivityLog from './pages/admin/AdminActivityLog'
+import AdminUsers from './pages/admin/AdminUsers'
 
 // Public club pages (slug-based)
 import Dashboard from './pages/Dashboard'
@@ -96,6 +97,7 @@ export default function App() {
         <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
         <Route path="/admin/milestones" element={<ProtectedRoute><AdminMilestones /></ProtectedRoute>} />
         <Route path="/admin/activity" element={<ProtectedRoute><AdminActivityLog /></ProtectedRoute>} />
+        <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
         <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
         <Route path="/admin/social-post" element={<ProtectedRoute><AdminSocialPost /></ProtectedRoute>} />

@@ -1,40 +1,48 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { CAP } from '../../lib/capabilities'
 import betterStatsLogo from '../../assets/betterstatslogo_white.png'
 
+// `cap: null` means everyone gets it (dashboard, read-only listing pages).
+// `cap: <CAP>` hides the link from users without that capability.
 const NAV_SECTIONS = [
-  { items: [{ to: '/admin', label: 'Dashboard', exact: true }] },
+  { items: [{ to: '/admin', label: 'Dashboard', exact: true, cap: null }] },
   {
     heading: 'Cricket Data',
     items: [
-      { to: '/admin/players', label: 'Players' },
-      { to: '/admin/games', label: 'Matches' },
-      { to: '/admin/seasons', label: 'Seasons' },
+      { to: '/admin/players', label: 'Players', cap: CAP.MANAGE_PLAYERS },
+      { to: '/admin/games', label: 'Matches', cap: null },
+      { to: '/admin/seasons', label: 'Seasons', cap: null },
     ],
   },
   {
     heading: 'Content',
     items: [
-      { to: '/admin/yearbook', label: 'Yearbooks' },
-      { to: '/admin/awards', label: 'Awards' },
-      { to: '/admin/award-definitions', label: 'Award Types' },
-      { to: '/admin/sponsors', label: 'Sponsors' },
-      { to: '/admin/social-post', label: 'Social Posts' },
+      { to: '/admin/yearbook', label: 'Yearbooks', cap: CAP.MANAGE_YEARBOOKS },
+      { to: '/admin/awards', label: 'Awards', cap: CAP.MANAGE_AWARDS },
+      { to: '/admin/award-definitions', label: 'Award Types', cap: CAP.MANAGE_AWARDS },
+      { to: '/admin/sponsors', label: 'Sponsors', cap: CAP.MANAGE_SPONSORS },
+      { to: '/admin/social-post', label: 'Social Posts', cap: CAP.MANAGE_SOCIAL },
     ],
   },
   {
     heading: 'Tools',
     items: [
-      { to: '/admin/milestones', label: 'Milestones' },
-      { to: '/admin/sync', label: 'Data Sync' },
-      { to: '/admin/merge', label: 'Merge Players' },
-      { to: '/admin/grades', label: 'Merge Grades' },
-      { to: '/admin/partnerships', label: 'Partnership Rec.' },
-      { to: '/admin/activity', label: 'Activity Log' },
+      { to: '/admin/milestones', label: 'Milestones', cap: CAP.MANAGE_MILESTONES },
+      { to: '/admin/sync', label: 'Data Sync', cap: CAP.RUN_SYNC },
+      { to: '/admin/merge', label: 'Merge Players', cap: CAP.MANAGE_MERGES },
+      { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
+      { to: '/admin/partnerships', label: 'Partnership Rec.', cap: CAP.MANAGE_AWARDS },
+      { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
     ],
   },
-  { items: [{ to: '/admin/settings', label: 'Settings' }] },
+  {
+    items: [
+      { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
+      { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
+    ],
+  },
 ]
 
 const SUPER_LINKS = [
@@ -43,10 +51,18 @@ const SUPER_LINKS = [
 ]
 
 export default function AdminLayout({ children }) {
-  const { user, logout } = useAuth()
+  const { user, logout, hasCapability } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Filter nav: drop links the user lacks the cap for. Empty sections are
+  // dropped too so club_member users don't see a bare heading with nothing
+  // under it.
+  const visibleSections = NAV_SECTIONS.map(s => ({
+    ...s,
+    items: s.items.filter(i => i.cap == null || hasCapability(i.cap)),
+  })).filter(s => s.items.length > 0)
 
   const handleLogout = async () => {
     await logout()
@@ -111,7 +127,7 @@ export default function AdminLayout({ children }) {
           w-full md:w-48 shrink-0 border-r pb-hairline-r pt-4 pb-8 px-2
         `}>
           <nav className="space-y-0.5">
-            {NAV_SECTIONS.map((section, i) => (
+            {visibleSections.map((section, i) => (
               <div key={section.heading || `section-${i}`} className={i > 0 ? 'pt-3' : ''}>
                 {section.heading && (
                   <div className="pb-1 px-3 font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase">

@@ -16,6 +16,7 @@ from app.models.db import (
     FieldingStat, FallOfWicket, Partnership, Milestone, User, Organisation, get_db,
 )
 from app.routers.auth import get_current_user
+from app.auth.capabilities import require_cap, MANAGE_MERGES
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -116,7 +117,7 @@ class IgnorePairRequest(BaseModel):
 
 
 @router.post("/ignore-pair")
-async def ignore_pair(req: IgnorePairRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def ignore_pair(req: IgnorePairRequest, db: AsyncSession = Depends(get_db), _: User = Depends(require_cap(MANAGE_MERGES))):
     """Permanently suppress a suggested duplicate pair."""
     a, b = sorted([req.player_a_id, req.player_b_id])
     await db.execute(
@@ -166,7 +167,7 @@ class MergeRequest(BaseModel):
 
 
 @router.post("/merge-players")
-async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_cap(MANAGE_MERGES))):
     """Merge remove_player into keep_player, reassigning all records."""
     keep_id = uuid.UUID(req.keep_player_id)
     remove_id = uuid.UUID(req.remove_player_id)
@@ -375,7 +376,7 @@ class MergeGradesRequest(BaseModel):
 
 
 @router.post("/merge-grades")
-async def merge_grades(req: MergeGradesRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def merge_grades(req: MergeGradesRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_cap(MANAGE_MERGES))):
     """Mark `alias_name` as a variant of `canonical_name` for the given org."""
     alias = req.alias_name.strip()
     canonical = req.canonical_name.strip()
@@ -471,7 +472,7 @@ class UndoGradeMergeRequest(BaseModel):
 
 
 @router.post("/undo-grade-merge")
-async def undo_grade_merge(req: UndoGradeMergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def undo_grade_merge(req: UndoGradeMergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_cap(MANAGE_MERGES))):
     result = await db.execute(
         text("""
             UPDATE grade_merge_logs
@@ -495,7 +496,7 @@ async def undo_grade_merge(req: UndoGradeMergeRequest, db: AsyncSession = Depend
 
 
 @router.post("/undo-merge")
-async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_cap(MANAGE_MERGES))):
     """Reverse a previous merge: re-create removed player and reassign records back."""
     log_row = await db.execute(
         text("SELECT * FROM merge_logs WHERE id = :id AND org_id = :org_id"),

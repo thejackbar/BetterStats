@@ -96,6 +96,10 @@ class ClubMembership(Base):
     club_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(Text, default="club_admin", nullable=False)
+    # JSONB array of capability strings. Empty list = "no extra caps beyond
+    # role". For super_admin/club_admin the list is ignored (those roles
+    # imply all caps). For club_member, this is the explicit allowlist.
+    capabilities = Column(JSONB, default=list, nullable=False, server_default="[]")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     club = relationship("Organisation", back_populates="memberships")
