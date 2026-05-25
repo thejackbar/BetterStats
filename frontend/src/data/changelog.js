@@ -4,6 +4,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.8.4',
+    date: '2026-05-25',
+    title: 'Mobile layout — Player Profile & Compare',
+    items: [
+      'All tab bars (Records, PlayerProfile, Analysis sub-tabs, Comparison) now scroll horizontally on mobile instead of overflowing — avoids the broken-indicator bug that flex-wrap would cause',
+      'Player Comparison: search box goes full-width on mobile, "Filter" label hidden on mobile to give filter chips more room',
+    ],
+  },
+  {
     version: 'v7.8.3',
     date: '2026-05-25',
     title: 'Mobile layout — Leaderboard & Records',

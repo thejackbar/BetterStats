@@ -69,6 +69,8 @@
 .pb-scroll::-webkit-scrollbar              { width: 8px; height: 8px; }
 .pb-scroll::-webkit-scrollbar-thumb        { background: var(--pb-hairline2); border-radius: 8px; }
 .pb-scroll::-webkit-scrollbar-track        { background: transparent; }
+.pb-no-scrollbar                           { scrollbar-width: none; -ms-overflow-style: none; }
+.pb-no-scrollbar::-webkit-scrollbar       { display: none; }
 
 @keyframes pb-ticker {
   from { transform: translateX(0); }

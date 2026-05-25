@@ -1105,7 +1105,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
   return (
     <div className="space-y-6">
       {/* Sub-tab navigation */}
-      <div className="flex gap-0 border-b border-pb-hairline">
+      <div className="flex overflow-x-auto pb-no-scrollbar border-b border-pb-hairline">
         {ANALYSIS_SUBTABS.map(t => (
           <button
             key={t.key}

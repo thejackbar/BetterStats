@@ -344,7 +344,7 @@ export default function PlayerComparison() {
               </div>
             ))}
             {canAddMore && (
-              <div className="w-48">
+              <div className="w-full sm:w-48">
                 <PlayerSearch
                   players={players}
                   playersLoading={playersLoading}
@@ -365,7 +365,7 @@ export default function PlayerComparison() {
         {/* ── Filter bar ── */}
         <div className="pb-card p-3 mb-4">
           <div className="flex flex-wrap gap-2 items-center">
-            <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mr-1">Filter</span>
+            <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mr-1 hidden sm:inline">Filter</span>
             {FILTER_PRESETS.map(p => (
               <button
                 key={p.id}
@@ -447,7 +447,7 @@ export default function PlayerComparison() {
         {hasEnough && customReady && (
           <div className="pb-card overflow-hidden">
             {/* Tab bar */}
-            <div className="flex" style={{ borderBottom: '1px solid var(--pb-hairline)' }}>
+            <div className="flex overflow-x-auto pb-no-scrollbar" style={{ borderBottom: '1px solid var(--pb-hairline)' }}>
               {TABS.map(tab => (
                 <button
                   key={tab.id}
