@@ -168,6 +168,5 @@ Bell icon in the AdminLayout header + drop-down panel that auto-opens on login w
 **Adding a new changelog entry**: bump `SITE_VERSION` in `src/version.js`, then prepend an entry in `src/data/changelog.js` with the same version string.
 
 **Open follow-ups worth investigating**:
-- The PHQ partner endpoints (`api.playhq.com/v1/seasons/.../grades`, `/grades/.../games`) still get hit during admin UI activity. These come from `suggest_phq_ids` and `deep_sync_player`. Both pre-date the Grassroots unlock and could probably be retired or repointed at GR. Low priority — they don't pollute the data anymore.
-- `get_org_games` has a per-`playhq_id` cache but no lock — concurrent first-callers will both fan out before the cache is populated. Observed as 2× "fetching games for 70 grades" log lines 27ms apart. Cheap fix: wrap with `asyncio.Lock`.
-- Season-alias coverage for the long-tail surfaces: yearbook (per-season pages become orphans for hidden variants), milestone calculators, achievements, statlab — all still key on a single raw `season_id` and won't roll up merged variants into their canonical.
+- `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
+- Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.
