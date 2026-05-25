@@ -47,9 +47,6 @@ import AdminYearbook from './pages/admin/AdminYearbook'
 import AdminYearbookDetail from './pages/admin/AdminYearbookDetail'
 
 import GamesPage from './pages/GamesPage'
-import Fixtures from './pages/Fixtures'
-import Teams from './pages/Teams'
-import TeamDetail from './pages/TeamDetail'
 
 // Game pages (game-level, UUID-based — no slug needed)
 import MatchScorecard from './pages/MatchScorecard'
@@ -119,9 +116,6 @@ export default function App() {
         <Route path="/:clubSlug/statlab" element={<StatLab />} />
         <Route path="/:clubSlug/statlab/r/:reportSlug" element={<StatLab />} />
         <Route path="/:clubSlug/games" element={<GamesPage />} />
-        <Route path="/:clubSlug/fixtures" element={<Fixtures />} />
-        <Route path="/:clubSlug/teams" element={<Teams />} />
-        <Route path="/:clubSlug/teams/:gradeId" element={<TeamDetail />} />
         <Route path="/:clubSlug/yearbook" element={<Yearbook />} />
         <Route path="/:clubSlug/yearbook/:seasonSlug" element={<Yearbook />} />
         <Route path="/players/:playerId" element={<PlayerProfile />} />

@@ -45,7 +45,6 @@ export const api = {
   getRecentlyAchievedMilestones: (orgId) =>
     request(`/organisations/${orgId}/recently-achieved-milestones`),
   getOrgFixtures: (orgId) => request(`/organisations/${orgId}/fixtures`),
-  getGradeInfo: (orgId, gradeId) => request(`/organisations/${orgId}/grades/${gradeId}/info`),
 
   // Players
   listPlayers: (orgId) => request(`/players?org_id=${orgId}`),
@@ -476,15 +475,6 @@ export const api = {
     request(`/club-admin/sponsors/${id}`, { method: 'DELETE' }),
   adminReorderSponsors: (items) =>
     request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
-
-  // Notifications
-  getNotificationsCount: () => request('/club-admin/notifications/count'),
-  getNotificationsSummary: () => request('/club-admin/notifications/summary'),
-  markNotificationsSeen: (appVersion) =>
-    request('/club-admin/notifications/seen', {
-      method: 'POST',
-      body: JSON.stringify({ app_version: appVersion }),
-    }),
 
   // Records
   getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender } = {}) => {
