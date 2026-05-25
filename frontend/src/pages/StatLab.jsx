@@ -749,6 +749,7 @@ export default function StatLab() {
   const [grades, setGrades] = useState([])
   const [activeDerived, setActiveDerived] = useState(null)
   const [openGroups, setOpenGroups] = useState(() => Object.fromEntries(PRESET_GROUPS.map(g => [g.key, g.defaultOpen])))
+  const [showCustomise, setShowCustomise] = useState(false)
 
   const queryRef = useRef(query)
   queryRef.current = query
@@ -1008,10 +1009,10 @@ export default function StatLab() {
           ) : null}
         />
 
-        {/* Target tabs */}
+        {/* Target tabs — informational on what data type results are showing */}
         <div className="flex gap-1 pb-hairline-b mb-4 overflow-x-auto pb-no-scrollbar">
           {TARGETS.map(t => (
-            <button key={t.key} onClick={() => { setQuery(q => ({ ...q, target: t.key })); setRows([]); setHasQueried(false); setActiveDerived(null) }}
+            <button key={t.key} onClick={() => { setQuery(q => ({ ...q, target: t.key })); setRows([]); setHasQueried(false); setActiveDerived(null); setShowCustomise(true) }}
               className={`relative px-3.5 py-2.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition ${query.target === t.key && !activeDerived ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'}`}>
               {t.label.toUpperCase()}
               {query.target === t.key && !activeDerived && <span className="absolute left-2 right-2 -bottom-px h-[2px]" style={{ background: 'var(--pb-accent)' }} />}
@@ -1019,59 +1020,9 @@ export default function StatLab() {
           ))}
         </div>
 
-        {/* Filter bar — categorised picker, nested AND/OR */}
-        <FilterBar
-          tree={query.filterTree}
-          categories={categoriesForTarget(targetMetrics)}
-          onChange={(tree) => setQuery(q => ({ ...q, filterTree: tree }))}
-          onClear={() => setQuery(q => ({ ...q, filterTree: emptyTree() }))}
-        />
-
-        <div className="grid grid-cols-1 xl:grid-cols-[340px_1fr] gap-5">
-          {/* Left panel: controls */}
+        <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-5">
+          {/* Left panel: REPORTS (primary) + SAVED REPORTS */}
           <div className="space-y-4">
-            <Card title="SORT BY">
-              <select className={selectCls} value={query.sortBy} onChange={e => setQuery(q => ({ ...q, sortBy: e.target.value }))}>
-                {targetMetrics.map(m => <option key={m} value={m}>{METRIC_LABELS[m]?.label || m}</option>)}
-              </select>
-              <div className="flex gap-1 mt-2">
-                {['desc','asc'].map(d => (
-                  <button key={d} onClick={() => setQuery(q => ({ ...q, sortDir: d }))}
-                    className={`flex-1 py-1 font-mono text-[10px] tracking-wide2 rounded border transition ${query.sortDir === d ? 'text-pb-text bg-pb-surface2 border-pb-hairline2' : 'text-pb-faint border-transparent hover:border-pb-hairline'}`}>
-                    {d === 'desc' ? 'HIGH → LOW' : 'LOW → HIGH'}
-                  </button>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 items-center gap-2 mt-3">
-                <Label>Limit</Label>
-                <select className={selectCls} value={query.limit} onChange={e => setQuery(q => ({ ...q, limit: Number(e.target.value) }))}>
-                  {[25, 50, 100, 200, 500].map(n => <option key={n} value={n}>Top {n}</option>)}
-                </select>
-              </div>
-            </Card>
-
-            <Card title="CONTEXT">
-              <ContextFiltersPanel
-                ctx={query.context || {}}
-                onChange={ctx => setQuery(q => ({ ...q, context: ctx }))}
-                seasons={seasons}
-                grades={grades}
-                targetShape={targetMeta.shape}
-                activeDerived={activeDerived}
-              />
-            </Card>
-
-            <div className="flex gap-2">
-              <Btn primary onClick={() => runQuery()} className="flex-1" disabled={loading}>
-                {loading ? 'Running…' : 'Run query →'}
-              </Btn>
-              <Btn onClick={resetAll}>Reset</Btn>
-            </div>
-
-            {canSave && hasQueried && rows.length > 0 && (
-              <Btn onClick={() => { setEditingReport(null); setSaveOpen(true) }} className="w-full">Save as report…</Btn>
-            )}
-
             <Card title="REPORTS" pad="p-0">
               <div>
                 {PRESET_GROUPS.map(group => {
@@ -1146,12 +1097,99 @@ export default function StatLab() {
             </Card>
           </div>
 
-          {/* Right panel: results */}
-          <div>
+          {/* Right panel: customise drawer + results */}
+          <div className="space-y-4">
+            {/* Customise drawer — secondary, collapsed by default */}
+            <div className="pb-card">
+              <button
+                onClick={() => setShowCustomise(v => !v)}
+                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-pb-surface2/60 transition text-left select-none"
+              >
+                <span className="font-mono text-[10.5px] font-semibold tracking-wide3 flex-1 text-pb-dim">
+                  {showCustomise ? 'CUSTOMISE QUERY' : '+ BUILD CUSTOM QUERY'}
+                </span>
+                {activeDerived || hasQueried ? (
+                  <span className="font-mono text-[9px] text-pb-faintest">
+                    {treeLeafCount(query.filterTree) > 0 && `${treeLeafCount(query.filterTree)} filter${treeLeafCount(query.filterTree) === 1 ? '' : 's'}`}
+                  </span>
+                ) : null}
+                <span className={`font-mono text-[11px] text-pb-faintest transition-transform duration-150 inline-block ${showCustomise ? 'rotate-90' : ''}`}>›</span>
+              </button>
+              {showCustomise && (
+                <div className="px-4 pb-4 pt-3 pb-hairline-t space-y-3">
+                  {/* Sort + Direction + Limit on one row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2 items-end">
+                    <div>
+                      <Label>Sort by</Label>
+                      <select className={selectCls + ' mt-1'} value={query.sortBy} onChange={e => setQuery(q => ({ ...q, sortBy: e.target.value }))}>
+                        {targetMetrics.map(m => <option key={m} value={m}>{METRIC_LABELS[m]?.label || m}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <Label>Direction</Label>
+                      <div className="flex gap-1 mt-1">
+                        {['desc','asc'].map(d => (
+                          <button key={d} onClick={() => setQuery(q => ({ ...q, sortDir: d }))}
+                            className={`px-2.5 py-1.5 font-mono text-[10px] tracking-wide2 rounded border transition ${query.sortDir === d ? 'text-pb-text bg-pb-surface2 border-pb-hairline2' : 'text-pb-faint border-pb-hairline hover:border-pb-hairline2'}`}>
+                            {d === 'desc' ? '↓' : '↑'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Limit</Label>
+                      <select className={selectCls + ' mt-1 w-24'} value={query.limit} onChange={e => setQuery(q => ({ ...q, limit: Number(e.target.value) }))}>
+                        {[25, 50, 100, 200, 500].map(n => <option key={n} value={n}>Top {n}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Filter bar — categorised picker, nested AND/OR */}
+                  <FilterBar
+                    tree={query.filterTree}
+                    categories={categoriesForTarget(targetMetrics)}
+                    onChange={(tree) => setQuery(q => ({ ...q, filterTree: tree }))}
+                    onClear={() => setQuery(q => ({ ...q, filterTree: emptyTree() }))}
+                  />
+
+                  {/* Context filters */}
+                  <div>
+                    <Label>Context</Label>
+                    <div className="mt-1 p-3 pb-card">
+                      <ContextFiltersPanel
+                        ctx={query.context || {}}
+                        onChange={ctx => setQuery(q => ({ ...q, context: ctx }))}
+                        seasons={seasons}
+                        grades={grades}
+                        targetShape={targetMeta.shape}
+                        activeDerived={activeDerived}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex gap-2">
+                    <Btn primary onClick={() => runQuery()} className="flex-1" disabled={loading}>
+                      {loading ? 'Running…' : 'Run query →'}
+                    </Btn>
+                    <Btn onClick={resetAll}>Reset</Btn>
+                    {canSave && hasQueried && rows.length > 0 && (
+                      <Btn onClick={() => { setEditingReport(null); setSaveOpen(true) }}>Save…</Btn>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Results */}
             {!hasQueried && !loading && (
               <div className="pb-card p-8 flex flex-col items-center justify-center text-center gap-3" style={{ minHeight: 320 }}>
                 <Label>READY</Label>
-                <p className="text-pb-dim text-[15px]">Configure your query and hit <span className="text-pb-text font-semibold">Run query</span>, or pick a preset / derived metric.</p>
+                <p className="text-pb-dim text-[15px]">
+                  Pick a report from the <span className="text-pb-text font-semibold">REPORTS</span> panel
+                  {' '}<span className="hidden xl:inline">on the left</span><span className="xl:hidden">above</span>,
+                  {' '}or click <span className="text-pb-text font-semibold">+ Build custom query</span> to build your own.
+                </p>
               </div>
             )}
 
@@ -1175,6 +1213,9 @@ export default function StatLab() {
                         ? ''
                         : `SORTED BY ${(METRIC_LABELS[query.sortBy]?.label || query.sortBy).toUpperCase()} ${query.sortDir === 'asc' ? '↑' : '↓'}`}
                     </span>
+                    {canSave && (
+                      <button onClick={() => { setEditingReport(null); setSaveOpen(true) }} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">SAVE</button>
+                    )}
                     <button onClick={downloadCSV} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">CSV</button>
                   </div>
                 }

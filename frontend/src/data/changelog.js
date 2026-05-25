@@ -4,6 +4,17 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.13.1',
+    date: '2026-05-25',
+    title: 'StatLab: reports-first layout',
+    items: [
+      'REPORTS panel is now the primary control in the left sidebar — pick a preset to run it immediately',
+      'Custom query builder collapsed into a "+ Build custom query" drawer that sits alongside the results',
+      'Empty state now points new users to the reports list instead of the builder',
+      'Save and CSV controls moved onto the results card itself so they\'re always reachable',
+    ],
+  },
+  {
     version: 'v7.13.0',
     date: '2026-05-25',
     title: 'StatLab: categorised reports + new derived queries',
