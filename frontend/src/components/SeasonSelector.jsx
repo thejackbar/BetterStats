@@ -17,7 +17,7 @@ export default function SeasonSelector({
       {/* Season - always shown */}
       {seasons.length > 0 && (
         <div className="flex items-center gap-2">
-          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Season</label>
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Season</label>
           <select
             value={selectedSeason || ''}
             onChange={e => setSelectedSeason(e.target.value || null)}
@@ -37,7 +37,7 @@ export default function SeasonSelector({
       {/* Grade */}
       {grades.length > 0 && (
         <div className="flex items-center gap-2">
-          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Grade</label>
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Grade</label>
           <select
             value={selectedGrade || ''}
             onChange={e => setSelectedGrade(e.target.value || null)}
@@ -52,7 +52,7 @@ export default function SeasonSelector({
       {/* Gender filter - pill toggle */}
       {seasons.length > 0 && (
         <div className="flex items-center gap-2">
-          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Gender</label>
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Gender</label>
           <div className="flex items-center border pb-hairline rounded overflow-hidden">
             {[
               { value: null, label: 'All' },
@@ -78,7 +78,7 @@ export default function SeasonSelector({
       {/* Games - pill toggle */}
       {seasons.length > 0 && (
         <div className="flex items-center gap-2">
-          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Games</label>
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Games</label>
           <div className="flex items-center border pb-hairline rounded overflow-hidden">
             {[
               { value: false, label: 'All' },
@@ -103,7 +103,7 @@ export default function SeasonSelector({
       {/* Captain filter - pill toggle */}
       {seasons.length > 0 && (
         <div className="flex items-center gap-2">
-          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Captain</label>
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Captain</label>
           <div className="flex items-center border pb-hairline rounded overflow-hidden">
             {[
               { value: false, label: 'All' },
