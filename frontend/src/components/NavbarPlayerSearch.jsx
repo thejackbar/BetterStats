@@ -5,7 +5,7 @@ import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 
 const MAX_RESULTS = 8
 
-export default function NavbarPlayerSearch({ orgId, club }) {
+export default function NavbarPlayerSearch({ orgId, club, variant = 'desktop', onSelect }) {
   const [query, setQuery] = useState('')
   const [players, setPlayers] = useState([])
   const [open, setOpen] = useState(false)
@@ -49,6 +49,7 @@ export default function NavbarPlayerSearch({ orgId, club }) {
     setQuery('')
     setOpen(false)
     inputRef.current?.blur()
+    onSelect?.()
     navigate(`/players/${p.id}`)
   }
 
@@ -74,48 +75,70 @@ export default function NavbarPlayerSearch({ orgId, club }) {
   if (!orgId) return null
 
   const showDropdown = open && query.trim().length > 0
+  const isMobile = variant === 'mobile'
 
   return (
-    <div ref={containerRef} className="relative shrink-0 hidden md:block ml-2">
-      <svg
-        className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-pb-faint pointer-events-none"
-        fill="none" stroke="currentColor" viewBox="0 0 24 24"
-      >
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-      </svg>
-      <input
-        ref={inputRef}
-        type="text"
-        placeholder="Search players…"
-        value={query}
-        onChange={e => { setQuery(e.target.value); setOpen(true) }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={onKeyDown}
-        className="w-[180px] lg:w-[220px] bg-pb-bg border pb-hairline text-pb-text text-[12px] rounded pl-7 pr-7 py-1.5 focus:outline-none focus:border-pb-accent placeholder-pb-faint"
-      />
-      {query && (
-        <button
-          type="button"
-          onClick={() => { setQuery(''); inputRef.current?.focus() }}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-pb-faint hover:text-pb-text text-sm leading-none"
-          aria-label="Clear search"
+    <div
+      ref={containerRef}
+      className={isMobile ? 'w-full' : 'relative shrink-0 hidden md:block ml-2'}
+    >
+      <div className="relative">
+        <svg
+          className={`absolute top-1/2 -translate-y-1/2 text-pb-faint pointer-events-none ${
+            isMobile ? 'left-3 w-4 h-4' : 'left-2.5 w-3 h-3'
+          }`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24"
         >
-          ×
-        </button>
-      )}
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="Search players…"
+          value={query}
+          onChange={e => { setQuery(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKeyDown}
+          className={
+            isMobile
+              ? 'w-full bg-pb-bg border pb-hairline text-pb-text text-[14px] rounded pl-10 pr-10 py-2.5 focus:outline-none focus:border-pb-accent placeholder-pb-faint'
+              : 'w-[180px] lg:w-[220px] bg-pb-bg border pb-hairline text-pb-text text-[12px] rounded pl-7 pr-7 py-1.5 focus:outline-none focus:border-pb-accent placeholder-pb-faint'
+          }
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={() => { setQuery(''); inputRef.current?.focus() }}
+            className={`absolute top-1/2 -translate-y-1/2 text-pb-faint hover:text-pb-text leading-none ${
+              isMobile ? 'right-3 text-lg w-8 h-8 flex items-center justify-center' : 'right-2 text-sm'
+            }`}
+            aria-label="Clear search"
+          >
+            ×
+          </button>
+        )}
+      </div>
       {showDropdown && (
-        <div className="absolute top-full right-0 mt-1 w-[260px] bg-pb-surface pb-hairline rounded shadow-lg overflow-hidden z-50 max-h-[400px] overflow-y-auto">
+        <div className={
+          isMobile
+            ? 'mt-2 w-full bg-pb-surface pb-hairline rounded shadow-lg overflow-hidden max-h-[60vh] overflow-y-auto'
+            : 'absolute top-full right-0 mt-1 w-[260px] bg-pb-surface pb-hairline rounded shadow-lg overflow-hidden z-50 max-h-[400px] overflow-y-auto'
+        }>
           {matches.length === 0 ? (
-            <div className="px-3 py-2 text-pb-faint text-[12px]">No players match.</div>
+            <div className={isMobile ? 'px-3 py-3 text-pb-faint text-[13px]' : 'px-3 py-2 text-pb-faint text-[12px]'}>
+              No players match.
+            </div>
           ) : matches.map((p, i) => (
             <Link
               key={p.id}
               to={`/players/${p.id}`}
-              onClick={() => { setQuery(''); setOpen(false) }}
+              onClick={() => { setQuery(''); setOpen(false); onSelect?.() }}
               onMouseEnter={() => setHighlight(i)}
-              className={`block px-3 py-1.5 text-[12px] text-pb-text hover:bg-pb-surface2 transition-colors ${
-                i === highlight ? 'bg-pb-surface2' : ''
-              }`}
+              className={
+                isMobile
+                  ? `block px-3 py-3 text-[14px] text-pb-text hover:bg-pb-surface2 transition-colors ${i === highlight ? 'bg-pb-surface2' : ''}`
+                  : `block px-3 py-1.5 text-[12px] text-pb-text hover:bg-pb-surface2 transition-colors ${i === highlight ? 'bg-pb-surface2' : ''}`
+              }
             >
               {fmt(p.display_name || p.name)}
             </Link>

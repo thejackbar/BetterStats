@@ -65,10 +65,11 @@ export default function Navbar() {
 
   const [openMenu, setOpenMenu] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const [mobileOpen, setMobileOpen] = useState(false);
   const btnRefs = useRef({});
 
   // Close on navigation
-  useEffect(() => { setOpenMenu(null); }, [pathname]);
+  useEffect(() => { setOpenMenu(null); setMobileOpen(false); }, [pathname]);
 
   // Close on scroll
   useEffect(() => {
@@ -168,8 +169,8 @@ export default function Navbar() {
             <div className="md:hidden text-pb-text text-[13px] font-bold tracking-wide2">{displayShort}</div>
           </Link>
 
-          {/* Nav links — scrollable on mobile */}
-          <nav className="flex items-center gap-0 overflow-x-auto pb-scroll flex-1 min-w-0">
+          {/* Desktop nav links — hidden on mobile */}
+          <nav className="hidden md:flex items-center gap-0 overflow-x-auto pb-scroll flex-1 min-w-0">
             {NAV.map((item) => {
               if (item.type === 'link') {
                 return (
@@ -217,13 +218,16 @@ export default function Navbar() {
             })}
           </nav>
 
+          {/* Spacer pushes right-side controls to the edge on mobile */}
+          <div className="flex-1 md:hidden" />
+
           <NavbarPlayerSearch orgId={club?.id} club={club} />
           <ThemeToggle />
 
           {customLogo && (
             <Link
               to="/"
-              className="flex items-center gap-1.5 shrink-0 ml-3 group"
+              className="hidden md:flex items-center gap-1.5 shrink-0 ml-3 group"
               title="Powered by BetterStats"
             >
               <span className="hidden sm:block text-pb-faint text-[9px] font-mono tracking-wide2 uppercase">
@@ -236,8 +240,96 @@ export default function Navbar() {
               />
             </Link>
           )}
+
+          {/* Mobile hamburger — only show when there are nav items */}
+          {slug && (
+            <button
+              type="button"
+              className="md:hidden ml-1 w-10 h-10 flex items-center justify-center rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition"
+              onClick={() => setMobileOpen(o => !o)}
+              aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={mobileOpen}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {mobileOpen
+                  ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                }
+              </svg>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Mobile menu panel */}
+      {mobileOpen && slug && (
+        <div className="md:hidden border-t pb-hairline-t bg-pb-surface">
+          <div className="px-4 py-3 space-y-3">
+            <NavbarPlayerSearch
+              orgId={club?.id}
+              club={club}
+              variant="mobile"
+              onSelect={() => setMobileOpen(false)}
+            />
+            <div className="flex flex-col">
+              {NAV.map((item) => {
+                if (item.type === 'link') {
+                  return (
+                    <NavLink
+                      key={item.href}
+                      to={item.href}
+                      end={item.href === `/${slug}/dashboard`}
+                      onClick={() => setMobileOpen(false)}
+                      className={({ isActive }) =>
+                        `py-3 px-2 text-[14px] font-mono font-semibold tracking-wide2 transition border-b pb-hairline-b ${
+                          isActive ? 'text-pb-text' : 'text-pb-faint hover:text-pb-text'
+                        }`
+                      }
+                    >
+                      {item.label.toUpperCase()}
+                    </NavLink>
+                  );
+                }
+                // Expand dropdown items inline on mobile
+                const items = DROPDOWNS[item.key] || [];
+                return (
+                  <div key={item.key} className="border-b pb-hairline-b">
+                    <div className="py-3 px-2 text-[11px] font-mono font-semibold tracking-wide3 text-pb-faintest uppercase">
+                      {item.label}
+                    </div>
+                    <div className="pb-2">
+                      {items.map(sub => (
+                        <NavLink
+                          key={sub.href}
+                          to={sub.href}
+                          onClick={() => setMobileOpen(false)}
+                          className={({ isActive }) =>
+                            `block py-2.5 pl-5 pr-2 text-[14px] font-mono tracking-wide2 transition ${
+                              isActive ? 'text-pb-text' : 'text-pb-faint hover:text-pb-text'
+                            }`
+                          }
+                        >
+                          {sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {customLogo && (
+              <Link
+                to="/"
+                onClick={() => setMobileOpen(false)}
+                className="flex items-center gap-2 py-2 text-pb-faint text-[10px] font-mono tracking-wide2 uppercase"
+              >
+                <img src={betterStatsLogo} alt="" className="w-5 h-5 opacity-75" />
+                Powered by BetterStats
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Dropdown panel — rendered via portal to escape overflow-x-auto */}
       {openMenu && DROPDOWNS[openMenu] && createPortal(
