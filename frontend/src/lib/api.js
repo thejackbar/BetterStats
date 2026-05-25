@@ -239,14 +239,6 @@ export const api = {
   adminClearResolvedSyncRequests: () =>
     request('/club-admin/sync-requests/resolved', { method: 'DELETE' }),
   adminGetMilestones: () => request('/club-admin/milestones'),
-  adminListPhqSuggestions: () => request('/club-admin/phq-suggestions'),
-  adminRunPhqSuggestions: () => request('/club-admin/phq-suggestions/run', { method: 'POST' }),
-  adminActionPhqSuggestion: (id, action, playerId) =>
-    request(`/club-admin/phq-suggestions/${id}`, {
-      method: 'POST',
-      body: JSON.stringify({ action, player_id: playerId }),
-    }),
-
   // Super admin
   superListClubs: () => request('/club-admin/super/clubs'),
   superCreateClub: (data) =>
