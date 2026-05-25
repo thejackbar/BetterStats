@@ -7,6 +7,7 @@ import { api } from '../lib/api'
 import SeasonSelector from '../components/SeasonSelector'
 import ClubInactive from './ClubInactive'
 import { useNameFormat } from '../lib/nameFormat'
+import { usePageMeta } from '../hooks/usePageMeta'
 import { MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import {
   AnimatedNum, Sparkline, MiniBars, Label, Card, Btn,
@@ -96,6 +97,27 @@ export default function Dashboard() {
   const { club, orgId, inactive } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
+
+  const clubJsonLd = club?.name ? {
+    '@context': 'https://schema.org',
+    '@type': 'SportsTeam',
+    name: club.name,
+    sport: 'Cricket',
+    url: `https://betterstats.cricket/${clubSlug}/dashboard`,
+    ...(club.logo_url ? { logo: club.logo_url } : {}),
+    areaServed: { '@type': 'Country', name: 'Australia' },
+  } : null
+  usePageMeta({
+    title: club?.name
+      ? `${club.name} — Cricket Stats, Records & Players | BetterStats`
+      : 'Club Cricket Stats | BetterStats',
+    description: club?.name
+      ? `Live cricket statistics, leaderboards, all-time records and player profiles for ${club.name} — updated automatically from PlayHQ and MyCricket on BetterStats.`
+      : null,
+    image: club?.logo_url || null,
+    url: `https://betterstats.cricket/${clubSlug}/dashboard`,
+    jsonLd: clubJsonLd,
+  })
 
   if (inactive) return <ClubInactive />
 

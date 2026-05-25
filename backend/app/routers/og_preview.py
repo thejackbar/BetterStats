@@ -4,8 +4,11 @@ Server-side OG tag injection for social-media crawlers.
 nginx detects crawler User-Agents and rewrites their requests to
 GET /og-preview?path=<original-path>, which lands here. We query the
 DB, build a minimal HTML page with correct Open Graph + Twitter Card
-meta tags, and return it. Regular users never hit this endpoint.
+meta tags + JSON-LD structured data, and return it. Regular users never
+hit this endpoint — search engines (Googlebot, bingbot) are excluded
+from the nginx rewrite and get the real SPA instead.
 """
+import json
 import re
 import uuid
 
@@ -59,7 +62,7 @@ def _esc(s: str) -> str:
     )
 
 
-def _html(title: str, description: str, image: str | None, url: str) -> str:
+def _html(title: str, description: str, image: str | None, url: str, jsonld: dict | None = None) -> str:
     img_tags = ""
     if image:
         img_tags = f"""
@@ -69,21 +72,33 @@ def _html(title: str, description: str, image: str | None, url: str) -> str:
     else:
         img_tags = '\n    <meta name="twitter:card" content="summary" />'
 
+    jsonld_tag = ""
+    if jsonld:
+        # json.dumps is safe inside a <script> tag because we escape the
+        # closing '</' sequence per the HTML5 spec.
+        encoded = json.dumps(jsonld, separators=(",", ":")).replace("</", "<\\/")
+        jsonld_tag = f'\n  <script type="application/ld+json">{encoded}</script>'
+
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en-AU">
 <head>
   <meta charset="UTF-8" />
   <title>{_esc(title)}</title>
   <meta name="description" content="{_esc(description)}" />
+  <link rel="canonical" href="{_esc(url)}" />
   <meta property="og:site_name" content="BetterStats" />
   <meta property="og:type" content="website" />
+  <meta property="og:locale" content="en_AU" />
   <meta property="og:title" content="{_esc(title)}" />
   <meta property="og:description" content="{_esc(description)}" />
   <meta property="og:url" content="{_esc(url)}" />{img_tags}
   <meta name="twitter:title" content="{_esc(title)}" />
-  <meta name="twitter:description" content="{_esc(description)}" />
+  <meta name="twitter:description" content="{_esc(description)}" />{jsonld_tag}
 </head>
-<body></body>
+<body>
+  <h1>{_esc(title)}</h1>
+  <p>{_esc(description)}</p>
+</body>
 </html>"""
 
 
@@ -105,9 +120,33 @@ async def _player_html(player_id: str, page_url: str, db: AsyncSession) -> str |
         if club_name
         else f"Explore {name}'s complete career cricket statistics — innings, wickets and more on BetterStats."
     )
-    image = _abs_url(org.logo_url if org else None)
+    image = _abs_url(player.photo_url) or _abs_url(org.logo_url if org else None)
 
-    return _html(f"{name} — Cricket Career Stats | BetterStats", description, image, page_url)
+    jsonld: dict = {
+        "@context": "https://schema.org",
+        "@type": "Person",
+        "name": name,
+        "url": page_url,
+        "sport": "Cricket",
+    }
+    if image:
+        jsonld["image"] = image
+    if org and org.name:
+        jsonld["memberOf"] = {
+            "@type": "SportsTeam",
+            "name": org.name,
+            "sport": "Cricket",
+        }
+        if org.slug:
+            jsonld["memberOf"]["url"] = f"{SITE}/{org.slug}/dashboard"
+
+    return _html(
+        f"{name} — Cricket Career Stats | BetterStats",
+        description,
+        image,
+        page_url,
+        jsonld=jsonld,
+    )
 
 
 async def _club_html(slug: str, page_url: str, db: AsyncSession) -> str | None:
@@ -122,7 +161,23 @@ async def _club_html(slug: str, page_url: str, db: AsyncSession) -> str | None:
         f"Batting averages, bowling figures, fielding stats, season records and player profiles "
         f"for {org.name} — all in one place on BetterStats."
     )
-    return _html(f"{org.name} Cricket Club Stats & Records | BetterStats", description, _abs_url(org.logo_url), page_url)
+    image = _abs_url(org.logo_url)
+    jsonld = {
+        "@context": "https://schema.org",
+        "@type": "SportsTeam",
+        "name": org.name,
+        "sport": "Cricket",
+        "url": page_url,
+        **({"logo": image} if image else {}),
+        "areaServed": {"@type": "Country", "name": "Australia"},
+    }
+    return _html(
+        f"{org.name} Cricket Club Stats & Records | BetterStats",
+        description,
+        image,
+        page_url,
+        jsonld=jsonld,
+    )
 
 
 @router.get("", response_class=HTMLResponse)

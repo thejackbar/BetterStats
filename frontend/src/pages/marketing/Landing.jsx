@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
+import { usePageMeta } from '../../hooks/usePageMeta'
 
 const FEATURES = [
   { title: 'Live Stats', desc: 'Player batting, bowling and fielding averages updated after every game via PlayHQ sync.' },
@@ -11,6 +12,12 @@ const FEATURES = [
 ]
 
 export default function Landing() {
+  usePageMeta({
+    title: 'BetterStats — Cricket Stats Platform for Australian Clubs',
+    description: 'Automated club cricket stats, leaderboards, records and season yearbooks — built for Australian cricket clubs. Pulls from PlayHQ and MyCricket; no manual data entry.',
+    image: 'https://betterstats.cricket/og-image.png',
+    url: 'https://betterstats.cricket/',
+  })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
@@ -72,10 +79,14 @@ export default function Landing() {
       </section>
 
       <footer className="pb-hairline-t py-8 text-center">
-        <div className="flex items-center justify-center gap-8 mb-3">
+        <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 mb-3">
+          <Link to="/features" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">FEATURES</Link>
+          <Link to="/pricing" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">PRICING</Link>
+          <Link to="/faq" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">FAQ</Link>
+          <Link to="/about" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">ABOUT</Link>
+          <Link to="/contact" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">CONTACT</Link>
           <Link to="/terms" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">TERMS</Link>
           <Link to="/privacy" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">PRIVACY</Link>
-          <Link to="/contact" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">CONTACT</Link>
         </div>
         <p className="font-mono text-[10px] text-pb-faintest">© {new Date().getFullYear()} BETTERSTATS</p>
       </footer>
