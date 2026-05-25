@@ -165,6 +165,9 @@ export const api = {
     }),
   adminUndoSeasonMerge: (mergeId) =>
     request(`/club-admin/season-merges/${mergeId}/undo`, { method: 'POST' }),
+  // Activity log (audit trail)
+  adminListActivityLog: (limit = 100) =>
+    request(`/club-admin/activity-log?limit=${limit}`),
   adminListGames: (seasonId) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)

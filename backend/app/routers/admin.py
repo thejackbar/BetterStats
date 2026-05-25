@@ -166,7 +166,7 @@ class MergeRequest(BaseModel):
 
 
 @router.post("/merge-players")
-async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Merge remove_player into keep_player, reassigning all records."""
     keep_id = uuid.UUID(req.keep_player_id)
     remove_id = uuid.UUID(req.remove_player_id)
@@ -269,6 +269,23 @@ async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db), _
         },
     )
 
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=org_id, user_id=current_user.id,
+        action="merge_players", target_type="player", target_id=str(keep_id),
+        details={
+            "kept_player": {"id": str(keep_id), "name": keep.name},
+            "removed_player": {"id": str(remove_id), "name": removed_name},
+            "rows_moved": {
+                "season_stats": len(moved_pss_ids),
+                "batting": len(_ids(batting_rows)),
+                "bowling": len(_ids(bowling_rows)),
+                "fielding": len(_ids(fielding_rows)),
+                "milestones": len(_ids(milestone_rows)),
+            },
+        },
+    )
+
     await db.commit()
 
     return {"status": "merged", "kept_player_id": str(keep_id), "removed_player_id": str(remove_id)}
@@ -358,7 +375,7 @@ class MergeGradesRequest(BaseModel):
 
 
 @router.post("/merge-grades")
-async def merge_grades(req: MergeGradesRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def merge_grades(req: MergeGradesRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Mark `alias_name` as a variant of `canonical_name` for the given org."""
     alias = req.alias_name.strip()
     canonical = req.canonical_name.strip()
@@ -412,6 +429,14 @@ async def merge_grades(req: MergeGradesRequest, db: AsyncSession = Depends(get_d
         """),
         {"org_id": req.org_id, "alias": alias, "canonical": resolved_canonical},
     )
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=req.org_id, user_id=current_user.id,
+        action="merge_grades", target_type="grade", target_id=resolved_canonical,
+        details={"alias_name": alias, "canonical_name": resolved_canonical},
+    )
+
     await db.commit()
     return {"status": "merged", "alias": alias, "canonical": resolved_canonical}
 
@@ -446,7 +471,7 @@ class UndoGradeMergeRequest(BaseModel):
 
 
 @router.post("/undo-grade-merge")
-async def undo_grade_merge(req: UndoGradeMergeRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def undo_grade_merge(req: UndoGradeMergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     result = await db.execute(
         text("""
             UPDATE grade_merge_logs
@@ -458,12 +483,19 @@ async def undo_grade_merge(req: UndoGradeMergeRequest, db: AsyncSession = Depend
     )
     if result.first() is None:
         raise HTTPException(status_code=404, detail="Merge log not found or already undone")
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=req.org_id, user_id=current_user.id,
+        action="undo_merge_grades", target_type="grade_merge_log",
+        target_id=str(req.merge_log_id),
+    )
     await db.commit()
     return {"status": "undone"}
 
 
 @router.post("/undo-merge")
-async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Reverse a previous merge: re-create removed player and reassign records back."""
     log_row = await db.execute(
         text("SELECT * FROM merge_logs WHERE id = :id AND org_id = :org_id"),
@@ -564,6 +596,17 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
     await db.execute(
         text("UPDATE merge_logs SET undone_at = NOW() WHERE id = :id"),
         {"id": req.merge_log_id},
+    )
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=req.org_id, user_id=current_user.id,
+        action="undo_merge_players", target_type="player", target_id=str(remove_id),
+        details={
+            "merge_log_id": req.merge_log_id,
+            "restored_player": {"id": str(remove_id), "name": log["removed_player_name"]},
+            "kept_player": {"id": str(keep_id), "name": log["keep_player_name"]},
+        },
     )
 
     await db.commit()

@@ -344,6 +344,17 @@ async def create_season_merge(
         ),
         {"org": str(club.id), "c": resolved_canonical, "a": str(alias_uuid)},
     )
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="merge_seasons", target_type="season", target_id=resolved_canonical,
+        details={
+            "canonical_season_id": resolved_canonical,
+            "alias_season_id": str(alias_uuid),
+        },
+    )
+
     await db.commit()
     return {"status": "merged", "canonical_id": resolved_canonical, "alias_id": str(alias_uuid)}
 
@@ -365,8 +376,64 @@ async def undo_season_merge(
     )
     if result.first() is None:
         raise HTTPException(status_code=404, detail="Merge not found or already undone")
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="undo_merge_seasons", target_type="season_alias",
+        target_id=str(merge_id),
+    )
     await db.commit()
     return {"status": "undone"}
+
+
+# ---------------------------------------------------------------------------
+# Activity log — append-only record of sensitive admin actions
+# ---------------------------------------------------------------------------
+
+
+@router.get("/activity-log")
+async def list_activity_log(
+    limit: int = 100,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent admin actions for this club, newest first."""
+    limit = max(1, min(limit, 500))
+    rows = await db.execute(
+        _text(
+            """
+            SELECT
+                al.id,
+                al.created_at,
+                al.action,
+                al.target_type,
+                al.target_id,
+                al.details,
+                al.user_id,
+                u.email AS user_email
+            FROM audit_logs al
+            LEFT JOIN users u ON u.id = al.user_id
+            WHERE al.org_id = :org
+            ORDER BY al.created_at DESC
+            LIMIT :lim
+            """
+        ),
+        {"org": str(club.id), "lim": limit},
+    )
+    return [
+        {
+            "id": r["id"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "action": r["action"],
+            "target_type": r["target_type"],
+            "target_id": r["target_id"],
+            "user_email": r["user_email"],
+            "details": r["details"] or {},
+        }
+        for r in rows.mappings().all()
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +644,22 @@ async def patch_settings(
             club.accent_color = clean["accent"]
     if data.player_name_format is not None and data.player_name_format in ("last_first", "first_last", "first_initial_last", "last_first_initial"):
         club.player_name_format = data.player_name_format
+
+    # Record which fields the admin touched. Don't dump full new values into
+    # the audit row — colour codes / names will already be visible in the
+    # settings UI and audit-only fields can pile up quickly. A list of
+    # changed-field names is enough to answer "who changed the club name
+    # last Tuesday?".
+    changed = [
+        k for k, v in data.dict(exclude_unset=True).items() if v is not None
+    ]
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="patch_settings", target_type="org", target_id=str(club.id),
+        details={"changed_fields": changed},
+    )
+
     await db.commit()
     return {"status": "updated"}
 

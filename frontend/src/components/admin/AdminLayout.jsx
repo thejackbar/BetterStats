@@ -31,6 +31,7 @@ const NAV_SECTIONS = [
       { to: '/admin/merge', label: 'Merge Players' },
       { to: '/admin/grades', label: 'Merge Grades' },
       { to: '/admin/partnerships', label: 'Partnership Rec.' },
+      { to: '/admin/activity', label: 'Activity Log' },
     ],
   },
   { items: [{ to: '/admin/settings', label: 'Settings' }] },

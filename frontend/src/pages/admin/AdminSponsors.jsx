@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import { validateImageFile } from '../../lib/validation'
 import ImageEditorModal from '../../components/ImageEditorModal'
 
 export default function AdminSponsors() {
@@ -297,7 +298,13 @@ export default function AdminSponsors() {
                             onChange={e => {
                               const f = e.target.files?.[0]
                               e.target.value = ''
-                              if (f) setEditor({ sponsorId: sponsor.id, source: f })
+                              if (!f) return
+                              const err = validateImageFile(f)
+                              if (err) {
+                                setLogoState(prev => ({ ...prev, [sponsor.id]: err }))
+                                return
+                              }
+                              setEditor({ sponsorId: sponsor.id, source: f })
                             }}
                           />
                         </label>
