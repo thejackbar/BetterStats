@@ -238,6 +238,7 @@ export const api = {
     request('/club-admin/sync-runs', { method: 'DELETE' }),
   adminClearResolvedSyncRequests: () =>
     request('/club-admin/sync-requests/resolved', { method: 'DELETE' }),
+  adminGetMilestones: () => request('/club-admin/milestones'),
   adminListPhqSuggestions: () => request('/club-admin/phq-suggestions'),
   adminRunPhqSuggestions: () => request('/club-admin/phq-suggestions/run', { method: 'POST' }),
   adminActionPhqSuggestion: (id, action, playerId) =>
