@@ -4,6 +4,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.8.3',
+    date: '2026-05-25',
+    title: 'Mobile layout — Leaderboard & Records',
+    items: [
+      'Records tab bar (Batting / Bowling / Partnerships / All-Rounders / Team) now wraps on narrow screens instead of overflowing',
+      'Grade filter label hidden on mobile across Leaderboard and Records — only the dropdown shows, saving horizontal space',
+    ],
+  },
+  {
     version: 'v7.8.2',
     date: '2026-05-25',
     title: 'Mobile layout polish',

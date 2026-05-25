@@ -607,7 +607,7 @@ export default function Records() {
           />
           {orgGrades.length > 0 && (
             <div className="flex items-center gap-2">
-              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Grade</label>
+              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Grade</label>
               <select
                 value={selectedGradeName || ''}
                 onChange={e => setSelectedGradeName(e.target.value || null)}
