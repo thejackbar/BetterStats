@@ -168,6 +168,14 @@ export const api = {
   // Activity log (audit trail)
   adminListActivityLog: (limit = 100) =>
     request(`/club-admin/activity-log?limit=${limit}`),
+  // Notification centre (bell icon)
+  getNotificationsCount: () => request('/club-admin/notifications/count'),
+  getNotificationsSummary: () => request('/club-admin/notifications/summary'),
+  markNotificationsSeen: (appVersion) =>
+    request('/club-admin/notifications/seen', {
+      method: 'POST',
+      body: JSON.stringify({ app_version: appVersion || null }),
+    }),
   // Club user management
   adminListClubUsers: () => request('/club-admin/users'),
   adminListCapabilities: () => request('/club-admin/users/capabilities'),
