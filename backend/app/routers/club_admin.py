@@ -177,12 +177,27 @@ async def list_seasons(
     db: AsyncSession = Depends(get_db),
 ):
     from app.routers.organisations import _season_sort_key
+    from app.services.season_aliases import load_active_alias_map, load_reverse_alias_map
     result = await db.execute(
         select(Season).where(Season.organisation_id == club.id)
     )
     seasons = sorted(result.scalars().all(), key=_season_sort_key)
+    alias_map = await load_active_alias_map(db, club.id)
+    reverse_map = await load_reverse_alias_map(db, club.id)
+    name_by_id = {str(s.id): s.name for s in seasons}
     return [
-        {"id": str(s.id), "name": s.name, "year": s.year, "synced_at": s.synced_at, "display_order": s.display_order}
+        {
+            "id": str(s.id),
+            "name": s.name,
+            "year": s.year,
+            "synced_at": s.synced_at,
+            "display_order": s.display_order,
+            "alias_of": reverse_map.get(str(s.id)),
+            "aliases": [
+                {"id": aid, "name": name_by_id.get(aid, "")}
+                for aid in alias_map.get(str(s.id), [])
+            ],
+        }
         for s in seasons
     ]
 
@@ -205,6 +220,153 @@ async def reorder_seasons(
             season.display_order = item.display_order
     await db.commit()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Season merges (aliases) — admin can merge Summer 25/26 + Winter 25/26 into
+# one canonical season for display + aggregation. Soft model: no row rewrites.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/season-merges")
+async def list_season_merges(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """All season-alias rows (active + undone) for this club, newest first."""
+    rows = await db.execute(
+        _text(
+            """
+            SELECT
+                sa.id,
+                sa.merged_at,
+                sa.undone_at,
+                sa.canonical_season_id,
+                sa.alias_season_id,
+                cs.name AS canonical_name,
+                als.name AS alias_name
+            FROM season_aliases sa
+            JOIN seasons cs  ON cs.id  = sa.canonical_season_id
+            JOIN seasons als ON als.id = sa.alias_season_id
+            WHERE sa.org_id = :org
+            ORDER BY sa.merged_at DESC
+            LIMIT 200
+            """
+        ),
+        {"org": str(club.id)},
+    )
+    return [
+        {
+            "id": r["id"],
+            "merged_at": r["merged_at"].isoformat() if r["merged_at"] else None,
+            "undone": r["undone_at"] is not None,
+            "canonical_id": str(r["canonical_season_id"]),
+            "canonical_name": r["canonical_name"],
+            "alias_id": str(r["alias_season_id"]),
+            "alias_name": r["alias_name"],
+        }
+        for r in rows.mappings().all()
+    ]
+
+
+class SeasonMergeRequest(BaseModel):
+    canonical_season_id: str
+    alias_season_id: str
+
+
+@router.post("/season-merges")
+async def create_season_merge(
+    req: SeasonMergeRequest,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark `alias_season_id` as merged into `canonical_season_id`.
+
+    Both seasons must belong to this club. If the canonical is itself
+    already an alias of a deeper canonical, the merge is chained up so
+    aliases always point at the deepest canonical (no cycles, no two-hop
+    resolution at query time).
+    """
+    if req.canonical_season_id == req.alias_season_id:
+        raise HTTPException(status_code=400, detail="Canonical and alias are the same season")
+
+    try:
+        canonical_uuid = uuid.UUID(req.canonical_season_id)
+        alias_uuid = uuid.UUID(req.alias_season_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid season id")
+
+    # Both seasons must belong to this club.
+    for sid in (canonical_uuid, alias_uuid):
+        season = await db.get(Season, sid)
+        if not season or season.organisation_id != club.id:
+            raise HTTPException(status_code=404, detail=f"Season {sid} not found in this club")
+
+    # If the canonical is itself currently an alias, redirect through.
+    chain = await db.execute(
+        _text(
+            "SELECT canonical_season_id FROM season_aliases "
+            "WHERE org_id = :org AND alias_season_id = :a AND undone_at IS NULL"
+        ),
+        {"org": str(club.id), "a": str(canonical_uuid)},
+    )
+    chain_row = chain.first()
+    resolved_canonical = str(chain_row[0]) if chain_row else str(canonical_uuid)
+
+    if resolved_canonical == str(alias_uuid):
+        raise HTTPException(status_code=400, detail="That merge would create a cycle")
+
+    # If alias is itself currently a canonical for other merges, redirect
+    # those rows to the new deeper canonical so we never need multi-hop.
+    await db.execute(
+        _text(
+            "UPDATE season_aliases SET canonical_season_id = :new "
+            "WHERE org_id = :org AND canonical_season_id = :old AND undone_at IS NULL"
+        ),
+        {"new": resolved_canonical, "org": str(club.id), "old": str(alias_uuid)},
+    )
+
+    # If this exact alias is already mapped (active), retire that row first.
+    await db.execute(
+        _text(
+            "UPDATE season_aliases SET undone_at = NOW() "
+            "WHERE org_id = :org AND alias_season_id = :a AND undone_at IS NULL"
+        ),
+        {"org": str(club.id), "a": str(alias_uuid)},
+    )
+
+    await db.execute(
+        _text(
+            "INSERT INTO season_aliases (org_id, canonical_season_id, alias_season_id) "
+            "VALUES (:org, :c, :a)"
+        ),
+        {"org": str(club.id), "c": resolved_canonical, "a": str(alias_uuid)},
+    )
+    await db.commit()
+    return {"status": "merged", "canonical_id": resolved_canonical, "alias_id": str(alias_uuid)}
+
+
+@router.post("/season-merges/{merge_id}/undo")
+async def undo_season_merge(
+    merge_id: int,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        _text(
+            "UPDATE season_aliases SET undone_at = NOW() "
+            "WHERE id = :id AND org_id = :org AND undone_at IS NULL "
+            "RETURNING id"
+        ),
+        {"id": merge_id, "org": str(club.id)},
+    )
+    if result.first() is None:
+        raise HTTPException(status_code=404, detail="Merge not found or already undone")
+    await db.commit()
+    return {"status": "undone"}
 
 
 # ---------------------------------------------------------------------------

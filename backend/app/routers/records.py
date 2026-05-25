@@ -141,9 +141,13 @@ async def get_records(
                 if m:
                     manual_season_year = int(m.group(1))
 
+    # Expand canonical season to include any merged-in alias seasons.
+    from app.services.season_aliases import resolve_season_filter
+    season_ids = await resolve_season_filter(db, org_id, season_id)
+
     p = {"org_id": org_id, "limit": _LIMIT}
-    if season_id:
-        p["season_id"] = season_id
+    if season_ids:
+        p["season_ids"] = season_ids
     if grade_id:
         p["grade_id"] = grade_id
     if grade_name:
@@ -152,10 +156,10 @@ async def get_records(
         p["gender"] = gender
 
     # Clauses for game-level queries (partnerships) that already JOIN games g
-    game_season_clause = " JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id" if season_id else ""
+    game_season_clause = " JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = ANY(:season_ids)" if season_ids else ""
 
     # Partnership queries now always JOIN grades gr for grade_name; season filter via WHERE
-    partnership_season_clause = " AND gr.season_id = :season_id" if season_id else ""
+    partnership_season_clause = " AND gr.season_id = ANY(:season_ids)" if season_ids else ""
 
     # Merge-aware grade match: also include grades that were merged (aliased) into the selected grade.
     _grade_match = (
@@ -174,27 +178,27 @@ async def get_records(
         game_grade_clause  = f" AND {_grade_match}"
         pairs_grade_clause = f" AND {_grade_match}"
         pairs_game_join = (
-            " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id"
-            if season_id else
+            " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = ANY(:season_ids)"
+            if season_ids else
             " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
         )
     else:
         game_grade_clause  = " AND g.grade_id = :grade_id" if grade_id else ""
         pairs_grade_clause = " AND g.grade_id = :grade_id" if grade_id else ""
         pairs_game_join = (
-            " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = :season_id"
-            if season_id else
+            " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = ANY(:season_ids)"
+            if season_ids else
             (" JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
              if (grade_id or finals_only) else "")
         )
 
     # Inline WHERE additions for player_season_stats aggregate queries
-    pss_season_clause  = "AND pss.season_id = :season_id " if season_id else ""
+    pss_season_clause  = "AND pss.season_id = ANY(:season_ids) " if season_ids else ""
     pss_gender_clause  = "AND p.gender = :gender " if gender else ""
     gender_clause      = f" AND p.gender = :gender" if gender else ""
 
     # When grade_name active: game-level join/where templates for batting and bowling
-    _gw_season = "AND s.id = :season_id" if season_id else ""
+    _gw_season = "AND s.id = ANY(:season_ids)" if season_ids else ""
     finals_clause = "AND g.is_final = TRUE" if finals_only else ""
     captain_bat_join = (
         " JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE"
@@ -340,7 +344,7 @@ async def get_records(
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id
-              """ + ("AND pss.season_id = :season_id " if season_id else "") + pss_gender_clause + """
+              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
               AND pss.high_score IS NOT NULL AND pss.high_score > 0
             ORDER BY pss.high_score DESC LIMIT :limit
         """)
@@ -476,7 +480,7 @@ async def get_records(
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id AND pss.runs > 0
-              """ + ("AND pss.season_id = :season_id " if season_id else "") + pss_gender_clause + """
+              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
             ORDER BY pss.runs DESC LIMIT :limit
         """)
 
@@ -540,7 +544,7 @@ async def get_records(
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id
-              """ + ("AND pss.season_id = :season_id " if season_id else "") + pss_gender_clause + """
+              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
               AND pss.best_bowling_figures IS NOT NULL
               AND pss.best_bowling_figures LIKE '%-%'
               AND pss.best_bowling_wickets > 0
@@ -653,7 +657,7 @@ async def get_records(
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id AND pss.wickets > 0
-              """ + ("AND pss.season_id = :season_id " if season_id else "") + pss_gender_clause + """
+              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
             ORDER BY pss.wickets DESC LIMIT :limit
         """)
 
@@ -886,7 +890,7 @@ async def get_records(
             ORDER BY matches DESC LIMIT :limit
         """)
     elif use_psgs_path:
-        psgs_season_clause = "AND psgs.season_id = :season_id" if season_id else ""
+        psgs_season_clause = "AND psgs.season_id = ANY(:season_ids)" if season_ids else ""
         most_matches = await q(f"""
             SELECT p.id::text AS player_id,
                    COALESCE(p.display_name_override, p.name) AS name,
@@ -981,7 +985,7 @@ async def get_records(
             ORDER BY seasons DESC LIMIT :limit
         """)
     elif use_psgs_path:
-        psgs_season_clause = "AND psgs.season_id = :season_id" if season_id else ""
+        psgs_season_clause = "AND psgs.season_id = ANY(:season_ids)" if season_ids else ""
         most_seasons = await q(f"""
             SELECT p.id::text AS player_id,
                    COALESCE(p.display_name_override, p.name) AS name,

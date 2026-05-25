@@ -142,14 +142,34 @@ def _year_from_name(name):
 
 @router.get("/{org_id}/seasons")
 async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
+    from app.services.season_aliases import load_active_alias_map, load_reverse_alias_map
+
     result = await db.execute(
         select(Season).where(Season.organisation_id == uuid.UUID(org_id))
     )
-    seasons = sorted(result.scalars().all(), key=lambda s: (-_year_from_name(s.name), s.name or ''))
-    return [
-        {"id": str(s.id), "name": s.name, "year": s.year, "synced_at": s.synced_at}
-        for s in seasons
-    ]
+    all_seasons = list(result.scalars().all())
+    alias_map = await load_active_alias_map(db, org_id)
+    reverse_map = await load_reverse_alias_map(db, org_id)
+    name_by_id = {str(s.id): s.name for s in all_seasons}
+
+    # Hide rows that are currently merged into another season.
+    canonical_seasons = [s for s in all_seasons if str(s.id) not in reverse_map]
+    canonical_seasons.sort(key=lambda s: (-_year_from_name(s.name), s.name or ''))
+
+    out = []
+    for s in canonical_seasons:
+        aliases = [
+            {"id": aid, "name": name_by_id.get(aid, "")}
+            for aid in alias_map.get(str(s.id), [])
+        ]
+        out.append({
+            "id": str(s.id),
+            "name": s.name,
+            "year": s.year,
+            "synced_at": s.synced_at,
+            "aliases": aliases,
+        })
+    return out
 
 
 @router.get("/{org_id}/grades")
