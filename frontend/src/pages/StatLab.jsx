@@ -1072,42 +1072,54 @@ export default function StatLab() {
               <Btn onClick={() => { setEditingReport(null); setSaveOpen(true) }} className="w-full">Save as report…</Btn>
             )}
 
-            <Card title="REPORTS">
-              <div className="flex flex-col">
-                {PRESET_GROUPS.map(group => (
-                  <div key={group.key} className="pb-hairline-b last:border-0">
-                    <button
-                      onClick={() => toggleGroup(group.key)}
-                      className="w-full flex items-center justify-between px-2 py-2 hover:bg-pb-surface2 transition rounded text-left"
-                    >
-                      <span className="font-mono text-[11px] font-semibold tracking-wide2 text-pb-dim">
-                        {group.label.toUpperCase()}
-                      </span>
-                      <span className="text-pb-faintest text-[10px]">{openGroups[group.key] ? '▾' : '▸'}</span>
-                    </button>
-                    {openGroups[group.key] && (
-                      <div className="flex flex-col gap-0.5 pb-2 pl-1">
-                        {group.items.map((item, idx) => {
-                          const isActive = item.type === 'derived'
-                            ? activeDerived === item.key
-                            : false
-                          return (
-                            <button
-                              key={item.key || item.label + idx}
-                              onClick={() => applyGroupItem(item)}
-                              className={`text-left px-2 py-1.5 rounded transition ${isActive ? 'text-pb-text bg-pb-surface2' : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'}`}
-                            >
-                              <div className="font-mono text-[11px] tracking-wide2">{item.label}</div>
-                              {item.description && (
-                                <div className="text-[10px] text-pb-faintest font-sans normal-case tracking-normal mt-0.5">{item.description}</div>
-                              )}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))}
+            <Card title="REPORTS" pad="p-0">
+              <div>
+                {PRESET_GROUPS.map(group => {
+                  const isOpen = openGroups[group.key]
+                  return (
+                    <div key={group.key} className="pb-hairline-b last:border-0">
+                      <button
+                        onClick={() => toggleGroup(group.key)}
+                        className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-pb-surface2/60 transition text-left select-none"
+                      >
+                        <span className={`font-mono text-[10.5px] font-semibold tracking-wide3 flex-1 transition ${isOpen ? 'text-pb-text' : 'text-pb-dim'}`}>
+                          {group.label.toUpperCase()}
+                        </span>
+                        <span className="font-mono text-[9px] text-pb-faintest tabular-nums">{group.items.length}</span>
+                        <span className={`font-mono text-[11px] text-pb-faintest transition-transform duration-150 inline-block ${isOpen ? 'rotate-90' : ''}`}>›</span>
+                      </button>
+                      {isOpen && (
+                        <div className="px-2 pb-2">
+                          {group.items.map((item, idx) => {
+                            const isActive = item.type === 'derived' && activeDerived === item.key
+                            const isDerived = item.type === 'derived'
+                            return (
+                              <button
+                                key={item.key || item.label + idx}
+                                onClick={() => applyGroupItem(item)}
+                                className={`w-full text-left flex items-start gap-1.5 px-2 py-1.5 rounded transition group ${isActive ? 'bg-pb-surface2' : 'hover:bg-pb-surface2/60'}`}
+                              >
+                                <span className={`font-mono text-[9px] mt-0.5 shrink-0 select-none ${isActive ? 'text-pb-accent' : 'text-pb-faintest group-hover:text-pb-dim'}`}>
+                                  {isDerived ? '≈' : '·'}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <div className={`font-mono text-[11px] tracking-wide leading-snug ${isActive ? 'text-pb-accent font-medium' : 'text-pb-faint group-hover:text-pb-text'}`}>
+                                    {item.label}
+                                  </div>
+                                  {isDerived && item.description && (
+                                    <div className="text-[9.5px] text-pb-faintest font-sans normal-case tracking-normal mt-0.5 leading-tight">
+                                      {item.description}
+                                    </div>
+                                  )}
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </Card>
 
