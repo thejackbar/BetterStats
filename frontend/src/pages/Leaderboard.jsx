@@ -33,9 +33,10 @@ const BOWLING_SORTS = [
 ]
 
 const FIELDING_SORTS = [
-  { key: 'total_catches',   label: 'CATCHES' },
-  { key: 'total_run_outs',  label: 'RUN OUTS' },
-  { key: 'total_stumpings', label: 'STUMPINGS' },
+  { key: 'total_catches_non_wk', label: 'CATCHES' },
+  { key: 'total_catches_wk',  label: 'WK CATCHES' },
+  { key: 'total_run_outs',    label: 'RUN OUTS' },
+  { key: 'total_stumpings',   label: 'STUMPINGS' },
 ]
 
 const MAIN_TABS = [
@@ -304,21 +305,22 @@ function BowlingTable({ rows, sortBy, fmt = n => n }) {
 
 function FieldingTable({ rows, sortBy, fmt = n => n }) {
   const primaryLabel = FIELDING_SORTS.find(s => s.key === sortBy)?.label || 'CATCHES'
-  const primaryKey = sortBy || 'total_catches'
+  const primaryKey = sortBy || 'total_catches_non_wk'
 
   return (
     <Card pad="p-0">
       <div className="overflow-x-auto pb-scroll">
-        <table className="w-full min-w-[460px] text-[14px]">
+        <table className="w-full min-w-[500px] text-[14px]">
           <thead>
             <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
               <th className="font-medium py-3 pl-5 w-10">#</th>
               <th className="font-medium py-3">PLAYER</th>
               <th className="font-medium py-3 text-right pr-3">M</th>
               <th className="font-medium py-3 text-right pr-3" style={{ color: 'var(--pb-accent)' }}>{primaryLabel}</th>
-              {sortBy !== 'total_catches'   && <th className="font-medium py-3 text-right pr-3">CATCHES</th>}
-              {sortBy !== 'total_run_outs'  && <th className="font-medium py-3 text-right pr-3">RUN OUTS</th>}
-              {sortBy !== 'total_stumpings' && <th className="font-medium py-3 pr-5 text-right">STUMPINGS</th>}
+              {sortBy !== 'total_catches_non_wk' && <th className="font-medium py-3 text-right pr-3">CATCHES</th>}
+              {sortBy !== 'total_catches_wk'     && <th className="font-medium py-3 text-right pr-3">WK CT</th>}
+              {sortBy !== 'total_run_outs'   && <th className="font-medium py-3 text-right pr-3">RUN OUTS</th>}
+              {sortBy !== 'total_stumpings'  && <th className="font-medium py-3 pr-5 text-right">STUMPINGS</th>}
             </tr>
           </thead>
           <tbody>
@@ -334,9 +336,10 @@ function FieldingTable({ rows, sortBy, fmt = n => n }) {
                     {p[primaryKey] ?? '—'}
                   </span>
                 </td>
-                {sortBy !== 'total_catches'   && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_catches ?? '—'}</td>}
-                {sortBy !== 'total_run_outs'  && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_run_outs ?? '—'}</td>}
-                {sortBy !== 'total_stumpings' && <td className="py-3 pr-5 font-mono text-pb-dim text-right">{p.total_stumpings ?? '—'}</td>}
+                {sortBy !== 'total_catches_non_wk' && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_catches_non_wk ?? '—'}</td>}
+                {sortBy !== 'total_catches_wk'     && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_catches_wk ?? '—'}</td>}
+                {sortBy !== 'total_run_outs'   && <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.total_run_outs ?? '—'}</td>}
+                {sortBy !== 'total_stumpings'  && <td className="py-3 pr-5 font-mono text-pb-dim text-right">{p.total_stumpings ?? '—'}</td>}
               </tr>
             ))}
           </tbody>
@@ -365,11 +368,12 @@ export default function Leaderboard() {
   const [selectedGradeName, setSelectedGradeName] = useState(null)
   const [finalsOnly, setFinalsOnly] = useState(false)
   const [captainOnly, setCaptainOnly] = useState(false)
+  const [gender, setGender] = useState(null)
 
   const [mainTab, setMainTab] = useState('batting')
   const [battingSort, setBattingSort] = useState('total_runs')
   const [bowlingSort, setBowlingSort] = useState('total_wickets')
-  const [fieldingSort, setFieldingSort] = useState('total_catches')
+  const [fieldingSort, setFieldingSort] = useState('total_catches_non_wk')
 
   const [minRuns, setMinRuns] = useState(500)
   const [minOvers, setMinOvers] = useState(100)
@@ -404,29 +408,29 @@ export default function Leaderboard() {
     if (!orgId) return
     setLoading(true)
     Promise.allSettled([
-      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns, finalsOnly, captainOnly }),
-      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets, finalsOnly, captainOnly }),
-      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30, finalsOnly, captainOnly }),
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns, finalsOnly, captainOnly, gender }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets, finalsOnly, captainOnly, gender }),
+      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30, finalsOnly, captainOnly, gender }),
     ]).then(([b, bw, f]) => {
       if (b.status === 'fulfilled') setBattingRows(b.value)
       if (bw.status === 'fulfilled') setBowlingRows(bw.value)
       if (f.status === 'fulfilled') setFieldingRows(f.value)
     }).finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, finalsOnly, captainOnly])
+  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, finalsOnly, captainOnly, gender])
 
   useEffect(() => {
     if (!orgId || mainTab !== 'sirs') return
     setSirsLoading(true)
     Promise.allSettled([
-      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly }),
-      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly }),
-      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly }),
+      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender }),
+      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender }),
+      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender }),
     ]).then(([sc, sbi, sbm]) => {
       if (sc.status === 'fulfilled') setCenturiesRows(sc.value)
       if (sbi.status === 'fulfilled') setBowlingInningsRows(sbi.value)
       if (sbm.status === 'fulfilled') setBowlingMatchRows(sbm.value)
     }).finally(() => setSirsLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, mainTab])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, mainTab])
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
@@ -455,10 +459,12 @@ export default function Leaderboard() {
             setFinalsOnly={setFinalsOnly}
             captainOnly={captainOnly}
             setCaptainOnly={setCaptainOnly}
+            gender={gender}
+            setGender={setGender}
           />
           {orgGrades.length > 0 && (
             <div className="flex items-center gap-2">
-              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Grade</label>
+              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Grade</label>
               <select
                 value={selectedGradeName || ''}
                 onChange={e => setSelectedGradeName(e.target.value || null)}

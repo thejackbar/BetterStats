@@ -69,6 +69,19 @@
 .pb-scroll::-webkit-scrollbar              { width: 8px; height: 8px; }
 .pb-scroll::-webkit-scrollbar-thumb        { background: var(--pb-hairline2); border-radius: 8px; }
 .pb-scroll::-webkit-scrollbar-track        { background: transparent; }
+.pb-no-scrollbar                           { scrollbar-width: none; -ms-overflow-style: none; }
+.pb-no-scrollbar::-webkit-scrollbar       { display: none; }
+
+/* Prevent iOS Safari auto-zoom on input focus by enforcing 16px font on touch
+   devices. Without this, iOS zooms in whenever a user taps an input with
+   font-size < 16px (e.g. Tailwind's text-sm = 14px), which is jarring. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
 
 @keyframes pb-ticker {
   from { transform: translateX(0); }

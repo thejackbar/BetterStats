@@ -241,7 +241,7 @@ export function PbSpinner({ message = "Loading…" }) {
 // ── Tab bar ────────────────────────────────────────────────────────────
 export function TabBar({ tabs, active, onChange }) {
   return (
-    <div className="flex gap-1 pb-hairline-b mb-5">
+    <div className="flex overflow-x-auto pb-no-scrollbar pb-hairline-b mb-5">
       {tabs.map(t => (
         <button
           key={t.key || t}

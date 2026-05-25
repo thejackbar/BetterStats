@@ -12,12 +12,31 @@ from app.models.db import (
     Organisation, Season, Grade, Game, Player,
     BattingInnings, BowlingSpell, FieldingStat, FallOfWicket, Partnership, GameAppearance,
     BowlerWicket,
-    PlayerSeasonStats, PlayerSeasonGradeStats, Milestone, PhqIdSuggestion,
+    PlayerSeasonStats, PlayerSeasonGradeStats, Milestone,
     SyncRun, async_session_maker
 )
 from app.services import playhq_client
 
 logger = logging.getLogger(__name__)
+
+_TEAM_SUFFIX_RE = re.compile(
+    r'\s+(\d+(?:st|nd|rd|th)s?(?:\s+XI)?|XI|[A-Za-z]\s+Grade)\s*$',
+    re.IGNORECASE,
+)
+
+
+def strip_team_suffix(name: str) -> str:
+    """Return the club name by stripping grade/team-number suffixes.
+
+    'North Perth 2nd XI' -> 'North Perth'
+    'Applecross 1sts'    -> 'Applecross'
+    'South Perth A Grade'-> 'South Perth'
+    'North Perth'        -> 'North Perth'  (no suffix — unchanged)
+    """
+    if not name:
+        return name
+    stripped = _TEAM_SUFFIX_RE.sub('', name).strip()
+    return stripped or name
 
 
 def _parse_uuid(val: str) -> Optional[uuid.UUID]:
@@ -29,16 +48,53 @@ def _parse_uuid(val: str) -> Optional[uuid.UUID]:
 
 async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisation:
     org_id = _parse_uuid(org_data.get("id", ""))
+    incoming_name = (org_data.get("name") or "").strip()
+
     org = await session.get(Organisation, org_id)
+
+    # Guard against duplicate rows when the same club has been synced under
+    # a different ID namespace (e.g. Grassroots GUID then PlayHQ UUID).
+    # Two layered checks before creating a new row:
+    #   1. playhq_id match — deterministic. If an existing org already has its
+    #      playhq_id populated with the incoming id, this is unambiguously the
+    #      same club seen from the PHQ side.
+    #   2. name match (case-insensitive) — fuzzy fallback for cases where the
+    #      cross-ID-space link was never recorded (e.g. legacy data, or sync
+    #      came in via PHQ before the GR-side playhq_id lookup ran).
+    if not org and org_id:
+        result = await session.execute(
+            select(Organisation).where(Organisation.playhq_id == str(org_id))
+        )
+        org = result.scalar_one_or_none()
+        if org:
+            logger.warning(
+                f"upsert_organisation: incoming id {org_id} matches existing "
+                f"org {org.id}'s playhq_id — reusing to avoid duplicate"
+            )
+
+    if not org and incoming_name:
+        result = await session.execute(
+            select(Organisation).where(
+                func.lower(Organisation.name) == incoming_name.lower()
+            )
+        )
+        org = result.scalar_one_or_none()
+        if org:
+            logger.warning(
+                f"upsert_organisation: id {org_id} not found but name "
+                f"'{incoming_name}' matches existing org {org.id} — reusing to avoid duplicate"
+            )
+
     if not org:
         org = Organisation(
             id=org_id,
-            name=org_data.get("name", ""),
+            name=incoming_name,
             short_name=org_data.get("shortName", ""),
         )
         session.add(org)
     else:
-        org.name = org_data.get("name") or org.name
+        org.name = incoming_name or org.name
+
     await session.commit()
     return org
 
@@ -309,7 +365,7 @@ async def sync_organisation(
             await finish_sync_run(run_id, {}, "Organisation not found")
         return {"error": "Organisation not found", "org_id": org_id_str}
 
-    stats = {"seasons": 0, "players": 0, "season_stats": 0,
+    stats = {"seasons": 0, "player_seasons": 0, "season_stats": 0,
              "games_new": 0, "batting": 0, "bowling": 0, "partnerships": 0,
              "playhq_games_found": 0, "playhq_games_final": 0}
 
@@ -354,6 +410,8 @@ async def sync_organisation(
                 session.add(season)
             else:
                 season.grassroots_id = raw_season_id
+                if year is not None and season.year is None:
+                    season.year = year
             season.synced_at = datetime.now(timezone.utc)
             await session.commit()
             stats["seasons"] += 1
@@ -528,7 +586,7 @@ async def sync_organisation(
                 session.add(row)
 
             await session.commit()
-            stats["players"] += len(player_data)
+            stats["player_seasons"] += len(player_data)
             stats["season_stats"] += len(player_data)
             logger.info(f"Season {season_data.get('name')}: {len(player_data)} players synced")
             if run_id:
@@ -1088,6 +1146,7 @@ async def sync_grassroots_game_level_data(
     seen_match_ids: set[str] = set()
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
+    match_to_opp: dict[str, tuple[str | None, str]] = {}  # match_id → (opp_org_id, opp_club_name)
     for grade_id, season_id, grade_name in grades:
         stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
         try:
@@ -1100,16 +1159,28 @@ async def sync_grassroots_game_level_data(
             if not mid or mid in seen_match_ids:
                 continue
             teams = m.get("teams") or []
-            org_playing = any(
-                (t.get("owningOrganisation") or {}).get("id", "").lower() == org_id_str_lower
-                for t in teams
+            our_team_m = next(
+                (t for t in teams if (t.get("owningOrganisation") or {}).get("id", "").lower() == org_id_str_lower),
+                None,
             )
-            if not org_playing:
+            if not our_team_m:
                 continue
             seen_match_ids.add(mid)
             match_to_season[mid] = season_id
             round_name = (m.get("round") or {}).get("name", "")
             match_to_is_final[mid] = "final" in round_name.lower()
+            opp_team_m = next((t for t in teams if t is not our_team_m), None)
+            if opp_team_m:
+                opp_org = opp_team_m.get("owningOrganisation") or {}
+                opp_id = opp_org.get("id")
+                opp_name = (
+                    opp_org.get("name")
+                    or opp_org.get("displayName")
+                    or opp_team_m.get("displayName")
+                    or opp_team_m.get("name")
+                    or ""
+                )
+                match_to_opp[mid] = (opp_id, opp_name)
         if run_id:
             await update_sync_run(run_id, stats)
 
@@ -1136,6 +1207,26 @@ async def sync_grassroots_game_level_data(
             await upd_session.commit()
         logger.info(f"GR-sync: bulk-updated is_final ({len(finals_ids)} finals, {len(non_finals_ids)} non-finals)")
 
+    if match_to_opp:
+        opp_rows = []
+        for mid, (opp_id, opp_name) in match_to_opp.items():
+            try:
+                opp_rows.append({"gid": uuid.UUID(mid), "opp_id": opp_id, "opp_name": opp_name})
+            except ValueError:
+                pass
+        if opp_rows:
+            async with async_session_maker() as upd_session:
+                await upd_session.execute(
+                    text("""
+                        UPDATE games
+                        SET opp_org_id = :opp_id, opp_club_name = :opp_name
+                        WHERE id = :gid AND opp_org_id IS NULL
+                    """),
+                    opp_rows,
+                )
+                await upd_session.commit()
+            logger.info(f"GR-sync: bulk-updated opp_org_id for up to {len(opp_rows)} games")
+
     # ── PER-GAME PROCESSING ───────────────────────────────────────────────────
     processed = 0
     for match_id_str in seen_match_ids:
@@ -1158,10 +1249,20 @@ async def sync_grassroots_game_level_data(
                 # checked batting_innings only, which re-processed forfeits/abandons
                 # every sync — now those save with appearances but no stats rows.
                 existing = await session.execute(
-                    text("SELECT 1 FROM games WHERE id=:gid LIMIT 1"),
+                    text("SELECT venue FROM games WHERE id=:gid LIMIT 1"),
                     {"gid": match_id_str},
                 )
-                if existing.scalar():
+                existing_row = existing.fetchone()
+                if existing_row is not None:
+                    if existing_row[0] is None:
+                        # Game exists but has no venue — backfill it from the scorecard.
+                        venue_name = (scorecard.get("venue") or {}).get("name")
+                        if venue_name:
+                            await session.execute(
+                                text("UPDATE games SET venue=:venue WHERE id=:gid"),
+                                {"venue": venue_name, "gid": match_id_str},
+                            )
+                            await session.commit()
                     stats["gr_games_skipped_done"] += 1
                     continue
 
@@ -1244,15 +1345,22 @@ async def sync_grassroots_game_level_data(
                         break
 
                 # Game
+                venue_name = (scorecard.get("venue") or {}).get("name")
+                _opp_id, _opp_name = match_to_opp.get(match_id_str, (None, ""))
                 session.add(Game(
                     id=match_uuid,
                     grade_id=grade_uuid,
                     played_at=played_at,
                     home_team=home_team_name,
                     away_team=away_team_name,
+                    home_club=strip_team_suffix(home_team_name),
+                    away_club=strip_team_suffix(away_team_name),
+                    opp_org_id=_opp_id,
+                    opp_club_name=_opp_name,
                     result=result_text,
                     winning_team=winner_name,
                     is_final=match_to_is_final.get(match_id_str, False),
+                    venue=venue_name,
                 ))
                 try:
                     await session.flush()
@@ -1392,12 +1500,14 @@ async def sync_grassroots_game_level_data(
                             pid = merged_away.get(pid)
                             if pid is None or pid not in known_player_ids:
                                 continue
+                        catches_wk = row.get("wicketKeeperCatches") or 0
                         catches_total = row.get("totalCatches")
                         if catches_total is None:
-                            catches_total = (row.get("catches") or 0) + (row.get("wicketKeeperCatches") or 0)
+                            catches_total = (row.get("catches") or 0) + catches_wk
                         session.add(FieldingStat(
                             game_id=match_uuid, player_id=pid,
                             catches=catches_total or 0,
+                            catches_wk=catches_wk,
                             run_outs=row.get("runOuts") or 0,
                             stumpings=row.get("stumpings") or 0,
                         ))
@@ -1521,40 +1631,32 @@ async def sync_grassroots_game_level_data(
     return stats
 
 
-_RUN_MILESTONES = [50, 100, 250, 500, 1000, 2000, 3000, 5000]
-_WICKET_MILESTONES = [5, 10, 25, 50, 100, 200, 300]
-_MATCH_MILESTONES = [10, 25, 50, 100, 150, 200]
-_CATCH_MILESTONES = [10, 25, 50, 100]
-
-
 async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: uuid.UUID):
     from sqlalchemy import text
+    from app.services.milestone_rules import crossed_thresholds
+
+    detail_fmt = {
+        "runs":    lambda v: f"{v:,} career runs",
+        "wickets": lambda v: f"{v} career wickets",
+        "matches": lambda v: f"{v} career matches",
+        "catches": lambda v: f"{v} career catches",
+    }
+
     for pid in player_ids:
         pid_str = str(pid)
 
-        run_res = await session.execute(
-            text("SELECT COALESCE(SUM(runs),0) FROM player_season_stats WHERE player_id=:pid"),
+        totals_res = await session.execute(
+            text("""
+                SELECT
+                    COALESCE(SUM(runs), 0)    AS runs,
+                    COALESCE(SUM(wickets), 0) AS wickets,
+                    COALESCE(SUM(matches), 0) AS matches,
+                    COALESCE(SUM(catches), 0) AS catches
+                FROM player_season_stats WHERE player_id=:pid
+            """),
             {"pid": pid_str}
         )
-        total_runs = int(run_res.scalar() or 0)
-
-        wkt_res = await session.execute(
-            text("SELECT COALESCE(SUM(wickets),0) FROM player_season_stats WHERE player_id=:pid"),
-            {"pid": pid_str}
-        )
-        total_wickets = int(wkt_res.scalar() or 0)
-
-        match_res = await session.execute(
-            text("SELECT COALESCE(SUM(matches),0) FROM player_season_stats WHERE player_id=:pid"),
-            {"pid": pid_str}
-        )
-        total_matches = int(match_res.scalar() or 0)
-
-        catch_res = await session.execute(
-            text("SELECT COALESCE(SUM(catches),0) FROM player_season_stats WHERE player_id=:pid"),
-            {"pid": pid_str}
-        )
-        total_catches = int(catch_res.scalar() or 0)
+        totals = dict(totals_res.mappings().first() or {})
 
         exist_res = await session.execute(
             text("SELECT milestone_type, milestone_value FROM milestones WHERE player_id=:pid"),
@@ -1565,32 +1667,14 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
         new_milestones = []
         today = date.today()
 
-        for threshold in _RUN_MILESTONES:
-            if total_runs >= threshold and ("runs", threshold) not in existing:
+        for mt in ("runs", "wickets", "matches", "catches"):
+            current = int(totals.get(mt) or 0)
+            for threshold in crossed_thresholds(mt, current):
+                if (mt, threshold) in existing:
+                    continue
                 new_milestones.append(Milestone(
-                    player_id=pid, milestone_type="runs", milestone_value=threshold,
-                    detail=f"{threshold:,} career runs", achieved_at=today,
-                ))
-
-        for threshold in _WICKET_MILESTONES:
-            if total_wickets >= threshold and ("wickets", threshold) not in existing:
-                new_milestones.append(Milestone(
-                    player_id=pid, milestone_type="wickets", milestone_value=threshold,
-                    detail=f"{threshold} career wickets", achieved_at=today,
-                ))
-
-        for threshold in _MATCH_MILESTONES:
-            if total_matches >= threshold and ("matches", threshold) not in existing:
-                new_milestones.append(Milestone(
-                    player_id=pid, milestone_type="matches", milestone_value=threshold,
-                    detail=f"{threshold} career matches", achieved_at=today,
-                ))
-
-        for threshold in _CATCH_MILESTONES:
-            if total_catches >= threshold and ("catches", threshold) not in existing:
-                new_milestones.append(Milestone(
-                    player_id=pid, milestone_type="catches", milestone_value=threshold,
-                    detail=f"{threshold} career catches", achieved_at=today,
+                    player_id=pid, milestone_type=mt, milestone_value=threshold,
+                    detail=detail_fmt[mt](threshold), achieved_at=today,
                 ))
 
         for m in new_milestones:
@@ -1754,12 +1838,16 @@ async def deep_sync_player(
             except ValueError:
                 played_date = None
 
+            _ht = game_data.get("home_team", "")
+            _at = game_data.get("away_team", "")
             new_game = Game(
                 id=game_uuid,
                 grade_id=grade.id if grade else None,
                 played_at=played_date,
-                home_team=game_data.get("home_team", ""),
-                away_team=game_data.get("away_team", ""),
+                home_team=_ht,
+                away_team=_at,
+                home_club=strip_team_suffix(_ht),
+                away_club=strip_team_suffix(_at),
                 result=game_data.get("result"),
                 winning_team=game_data.get("winning_team"),
             )
@@ -1866,187 +1954,3 @@ async def deep_sync_player(
         elif run_id:
             await update_sync_run(run_id, stats)
         return stats
-
-
-async def suggest_phq_ids(org_id_str: str) -> dict:
-    """
-    Scan game appearances to suggest PlayHQ ID → player links.
-    - Exact name match, unique: auto-link immediately (no admin needed)
-    - Exact name match, already used by another player: create 'high' confidence suggestion
-    - Partial/initial match: create 'low' confidence suggestion
-    Returns counts: {auto_linked, high, low, already_linked, skipped}
-    """
-    from app.services import playhq_partner_client
-    from datetime import datetime, timezone
-
-    logger.info(f"PhqSuggest: starting for org {org_id_str}")
-
-    stats = {"auto_linked": 0, "high": 0, "low": 0, "already_linked": 0, "skipped": 0}
-
-    async with async_session_maker() as session:
-        org = await session.get(Organisation, uuid.UUID(org_id_str))
-        if not org or not org.playhq_id:
-            return {"error": "Organisation not found or missing playhq_id"}
-
-        # Load all org players into lookup structures
-        players_res = await session.execute(
-            select(Player).where(Player.organisation_id == org.id)
-        )
-        all_players = players_res.scalars().all()
-
-        # phq_id → player (already linked)
-        phq_to_player: dict[str, Player] = {}
-        # normalised name → [players] (for matching)
-        name_to_players: dict[str, list[Player]] = {}
-
-        def _norm(s: str) -> str:
-            return (s or "").strip().lower()
-
-        for p in all_players:
-            if p.playhq_id:
-                phq_to_player[p.playhq_id] = p
-            n = _norm(p.name)
-            if n:
-                name_to_players.setdefault(n, []).append(p)
-                # also index the reversed form
-                if "," in n:
-                    parts = [x.strip() for x in n.split(",", 1)]
-                    rev = f"{parts[1]} {parts[0]}" if len(parts) == 2 else n
-                    name_to_players.setdefault(rev, []).append(p)
-                else:
-                    words = n.split()
-                    if len(words) >= 2:
-                        rev = f"{' '.join(words[1:])}, {words[0]}"
-                        name_to_players.setdefault(rev, []).append(p)
-
-        # Fetch all org games
-        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name)
-        final_games = [g for g in all_games if g.get("status") == "FINAL"]
-        logger.info(f"PhqSuggest: {len(final_games)} final games to scan")
-
-        # Collect unique PHQ player appearances: phq_id → {first, last, game_count}
-        phq_appearances: dict[str, dict] = {}
-        keyword = org.name.split()[0].lower() if org.name else ""
-
-        for game_data in final_games:
-            game_id = game_data.get("id")
-            if not game_id:
-                continue
-            try:
-                appearances, teams = await playhq_partner_client.get_game_appearances(game_id)
-            except Exception:
-                continue
-
-            matched_team_ids = {
-                t["id"] for t in teams
-                if keyword and keyword in t.get("name", "").lower()
-            }
-            if not matched_team_ids:
-                matched_team_ids = {t["id"] for t in teams if t.get("id")}
-
-            for app in appearances:
-                phq_id = app.get("id")
-                team_id = app.get("teamId")
-                if not phq_id or team_id not in matched_team_ids:
-                    continue
-                if phq_id in phq_appearances:
-                    phq_appearances[phq_id]["game_count"] += 1
-                else:
-                    phq_appearances[phq_id] = {
-                        "first": app.get("firstName", ""),
-                        "last": app.get("lastName", ""),
-                        "game_count": 1,
-                    }
-
-        logger.info(f"PhqSuggest: found {len(phq_appearances)} unique PHQ player IDs")
-
-        # Load existing suggestions to avoid duplicates
-        existing_sugg_res = await session.execute(
-            select(PhqIdSuggestion.phq_player_id)
-            .where(PhqIdSuggestion.org_id == org.id)
-        )
-        existing_phq_ids = {r[0] for r in existing_sugg_res.all()}
-
-        now = datetime.now(timezone.utc)
-
-        for phq_id, info in phq_appearances.items():
-            first = info["first"]
-            last = info["last"]
-            game_count = info["game_count"]
-            full_name = f"{first} {last}".strip()
-            full_name_rev = f"{last}, {first}".strip(", ")
-
-            # Already linked to a player
-            if phq_id in phq_to_player:
-                stats["already_linked"] += 1
-                continue
-
-            # Find candidate players by exact name match
-            candidates: list[Player] = []
-            for variant in [_norm(full_name), _norm(full_name_rev)]:
-                for p in name_to_players.get(variant, []):
-                    if p not in candidates:
-                        candidates.append(p)
-
-            # Also try initial match: "R Wilton" → match "Rob Wilton" / "Wilton, Rob"
-            initial_candidates: list[Player] = []
-            if not candidates and last:
-                last_norm = _norm(last)
-                first_initial = first[:1].lower() if first else ""
-                for n, ps in name_to_players.items():
-                    if last_norm in n and first_initial and n.startswith(first_initial):
-                        for p in ps:
-                            if p not in initial_candidates:
-                                initial_candidates.append(p)
-                    elif last_norm in n and last_norm == n.split()[-1]:
-                        for p in ps:
-                            if p not in initial_candidates:
-                                initial_candidates.append(p)
-
-            if not candidates and not initial_candidates:
-                stats["skipped"] += 1
-                continue
-
-            # Determine confidence and action
-            if len(candidates) == 1 and candidates[0].playhq_id is None:
-                player = candidates[0]
-                # Auto-link — exact unique match, player has no PHQ ID yet
-                player.playhq_id = phq_id
-                phq_to_player[phq_id] = player
-                await session.commit()
-                stats["auto_linked"] += 1
-                logger.info(f"PhqSuggest: auto-linked {full_name} → {player.name} (phq={phq_id})")
-                continue
-
-            # Need admin review — create suggestion if not already exists
-            if phq_id in existing_phq_ids:
-                continue
-
-            if candidates:
-                confidence = "high"
-                matched_player = candidates[0] if len(candidates) == 1 else None
-            else:
-                confidence = "low"
-                matched_player = initial_candidates[0] if len(initial_candidates) == 1 else None
-
-            sugg = PhqIdSuggestion(
-                org_id=org.id,
-                player_id=matched_player.id if matched_player else None,
-                phq_player_id=phq_id,
-                phq_first_name=first,
-                phq_last_name=last,
-                confidence=confidence,
-                game_count=game_count,
-                status="pending",
-            )
-            session.add(sugg)
-            existing_phq_ids.add(phq_id)
-            if confidence == "high":
-                stats["high"] += 1
-            else:
-                stats["low"] += 1
-
-        await session.commit()
-
-    logger.info(f"PhqSuggest: done for org {org_id_str}: {stats}")
-    return stats

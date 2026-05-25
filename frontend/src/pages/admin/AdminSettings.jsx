@@ -3,6 +3,7 @@ import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import { BRAND, COLOR_FIELDS, HONOUR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss } from '../../lib/theme'
+import { validateImageFile } from '../../lib/validation'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
@@ -39,6 +40,7 @@ export default function AdminSettings() {
   const [form, setForm] = useState({})
   const [theme, setTheme] = useState(() => resolveTheme(null))
   const [msg, setMsg] = useState('')
+  const [msgKind, setMsgKind] = useState('success') // 'success' | 'error'
   const [saving, setSaving] = useState(false)
   const [logoUrl, setLogoUrl] = useState(null)
   const [logoBusy, setLogoBusy] = useState(false)
@@ -73,7 +75,12 @@ export default function AdminSettings() {
 
   const flash = (text) => {
     setMsg(text)
+    setMsgKind('success')
     setTimeout(() => setMsg(''), 3000)
+  }
+  const flashError = (text) => {
+    setMsg(text)
+    setMsgKind('error')
   }
 
   const setColor = (key, val) => setTheme(t => ({ ...t, [key]: val }))
@@ -89,6 +96,11 @@ export default function AdminSettings() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    const err = validateImageFile(file)
+    if (err) {
+      flashError(err)
+      return
+    }
     setLogoEditorSource(file)
   }
 
@@ -101,7 +113,7 @@ export default function AdminSettings() {
       setLogoUrl(res.logo_url)
       flash('Logo updated')
     } catch (err) {
-      setMsg(err.message)
+      flashError(err.message)
     } finally {
       setLogoBusy(false)
     }
@@ -115,7 +127,7 @@ export default function AdminSettings() {
       setLogoUrl(null)
       flash('Logo removed')
     } catch (err) {
-      setMsg(err.message)
+      flashError(err.message)
     } finally {
       setLogoBusy(false)
     }
@@ -129,7 +141,7 @@ export default function AdminSettings() {
       await api.adminPatchSettings({ ...form, theme_config: theme })
       flash('Settings saved')
     } catch (err) {
-      setMsg(err.message)
+      flashError(err.message)
     } finally {
       setSaving(false)
     }
@@ -318,7 +330,14 @@ export default function AdminSettings() {
               style={{ background: 'var(--pb-accent)' }}>
               {saving ? 'Saving…' : 'SAVE SETTINGS'}
             </button>
-            {msg && <span className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>{msg}</span>}
+            {msg && (
+              <span
+                className="font-mono text-[11px]"
+                style={{ color: msgKind === 'error' ? 'var(--pb-negative)' : 'var(--pb-accent)' }}
+              >
+                {msg}
+              </span>
+            )}
           </div>
         </form>
 

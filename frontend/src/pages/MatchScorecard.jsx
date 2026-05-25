@@ -96,15 +96,15 @@ function MatchHeader({ game, innings }) {
       <div className="grid grid-cols-[1fr_auto_1fr]">
         {/* Home */}
         <div
-          className="px-5 sm:px-8 pt-5 pb-4 flex flex-col items-center text-center gap-1"
+          className="px-3 sm:px-8 pt-5 pb-4 flex flex-col items-center text-center gap-1"
           style={winner ? { background: homeWon ? winBg : lossBg } : undefined}
         >
           <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">HOME</div>
-          <div className="font-display font-bold text-[18px] sm:text-[22px] text-pb-text tracking-tight leading-tight">
+          <div className="font-display font-bold text-[14px] sm:text-[22px] text-pb-text tracking-tight leading-tight">
             {homeTeam || '—'}
           </div>
           {homeInn && fmtScore(homeInn.runs, homeInn.wickets) != null && (
-            <div className="font-mono font-bold text-[36px] sm:text-[48px] leading-none" style={{ color: homeWon ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
+            <div className="font-mono font-bold text-[28px] sm:text-[48px] leading-none" style={{ color: homeWon ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
               {fmtScore(homeInn.runs, homeInn.wickets)}
             </div>
           )}
@@ -116,7 +116,7 @@ function MatchHeader({ game, innings }) {
         </div>
 
         {/* Result */}
-        <div className="px-4 sm:px-8 py-5 flex flex-col items-center justify-center gap-2 pb-hairline-l pb-hairline-r min-w-[130px] sm:min-w-[160px]">
+        <div className="px-2 sm:px-8 py-5 flex flex-col items-center justify-center gap-2 pb-hairline-l pb-hairline-r min-w-[110px] sm:min-w-[160px]">
           <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">RESULT</div>
           <ResultPill result={game.result || 'N/R'} />
           {game.winning_team && (
@@ -136,15 +136,15 @@ function MatchHeader({ game, innings }) {
 
         {/* Away */}
         <div
-          className="px-5 sm:px-8 pt-5 pb-4 flex flex-col items-center text-center gap-1"
+          className="px-3 sm:px-8 pt-5 pb-4 flex flex-col items-center text-center gap-1"
           style={winner ? { background: awayWon ? winBg : lossBg } : undefined}
         >
           <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">AWAY</div>
-          <div className="font-display font-bold text-[18px] sm:text-[22px] text-pb-text tracking-tight leading-tight">
+          <div className="font-display font-bold text-[14px] sm:text-[22px] text-pb-text tracking-tight leading-tight">
             {awayTeam || '—'}
           </div>
           {awayInn && fmtScore(awayInn.runs, awayInn.wickets) != null && (
-            <div className="font-mono font-bold text-[36px] sm:text-[48px] leading-none" style={{ color: awayWon ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
+            <div className="font-mono font-bold text-[28px] sm:text-[48px] leading-none" style={{ color: awayWon ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
               {fmtScore(awayInn.runs, awayInn.wickets)}
             </div>
           )}

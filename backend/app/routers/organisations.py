@@ -12,6 +12,7 @@ from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
 from app.services import playhq_partner_client
 from app.routers.auth import get_current_user
+from app.auth.capabilities import require_cap, RUN_SYNC
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
@@ -142,14 +143,34 @@ def _year_from_name(name):
 
 @router.get("/{org_id}/seasons")
 async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
+    from app.services.season_aliases import load_active_alias_map, load_reverse_alias_map
+
     result = await db.execute(
         select(Season).where(Season.organisation_id == uuid.UUID(org_id))
     )
-    seasons = sorted(result.scalars().all(), key=lambda s: (-_year_from_name(s.name), s.name or ''))
-    return [
-        {"id": str(s.id), "name": s.name, "year": s.year, "synced_at": s.synced_at}
-        for s in seasons
-    ]
+    all_seasons = list(result.scalars().all())
+    alias_map = await load_active_alias_map(db, org_id)
+    reverse_map = await load_reverse_alias_map(db, org_id)
+    name_by_id = {str(s.id): s.name for s in all_seasons}
+
+    # Hide rows that are currently merged into another season.
+    canonical_seasons = [s for s in all_seasons if str(s.id) not in reverse_map]
+    canonical_seasons.sort(key=lambda s: (-_year_from_name(s.name), s.name or ''))
+
+    out = []
+    for s in canonical_seasons:
+        aliases = [
+            {"id": aid, "name": name_by_id.get(aid, "")}
+            for aid in alias_map.get(str(s.id), [])
+        ]
+        out.append({
+            "id": str(s.id),
+            "name": s.name,
+            "year": s.year,
+            "synced_at": s.synced_at,
+            "aliases": aliases,
+        })
+    return out
 
 
 @router.get("/{org_id}/grades")
@@ -323,7 +344,7 @@ async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full"):
 
 
 @router.post("/{org_id}/sync", status_code=202)
-async def trigger_sync(org_id: str, background_tasks: BackgroundTasks):
+async def trigger_sync(org_id: str, background_tasks: BackgroundTasks, _user: User = Depends(require_cap(RUN_SYNC))):
     from app.services.sync import start_sync_run
     if org_id in _org_sync_running:
         return {"status": "already_running", "org_id": org_id}
@@ -388,6 +409,20 @@ async def get_org_results(
         }
         for r in rows
     ]
+
+
+@router.get("/{org_id}/grades/{grade_id}/info")
+async def get_grade_info(org_id: str, grade_id: str, db: AsyncSession = Depends(get_db)):
+    grade = await db.get(Grade, uuid.UUID(grade_id))
+    if not grade:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    season = await db.get(Season, grade.season_id)
+    return {
+        "id": str(grade.id),
+        "name": grade.display_name_override or grade.name,
+        "season_id": str(grade.season_id),
+        "season_name": season.name if season else None,
+    }
 
 
 @router.get("/{org_id}/sync-logs")

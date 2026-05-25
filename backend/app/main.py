@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config.settings import settings
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -87,6 +87,49 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_grade_merge_logs_org_active "
             "ON grade_merge_logs(org_id, alias_name) WHERE undone_at IS NULL"
+        ))
+        # Season aliases — admin can mark one season as merged into another so
+        # they display and aggregate as a single season (e.g. Summer 25/26 +
+        # Winter 25/26 → 2025/26). Soft model: no row rewrites; downstream
+        # queries expand the canonical season_id to include all active alias
+        # season_ids. Mirrors grade_merge_logs but keyed on UUIDs not names.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS season_aliases (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                alias_season_id    UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_season_aliases_alias_active "
+            "ON season_aliases(alias_season_id) WHERE undone_at IS NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_season_aliases_canonical_active "
+            "ON season_aliases(canonical_season_id) WHERE undone_at IS NULL"
+        ))
+        # Audit log — records sensitive admin actions (merges, settings,
+        # destructive ops). Append-only from app code; no UPDATE/DELETE
+        # paths so the trail can't be quietly edited. user_id nullable for
+        # system-triggered actions (scheduled jobs, webhooks).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id SERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                user_id UUID,
+                action TEXT NOT NULL,
+                target_type TEXT,
+                target_id TEXT,
+                details JSONB DEFAULT '{}'
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_org_created "
+            "ON audit_logs(org_id, created_at DESC)"
         ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS player_season_grade_stats (
@@ -224,6 +267,25 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_yearbook_awards_yearbook ON yearbook_club_awards(yearbook_id)"
         ))
+        # Persist yearbook images as binary data in the DB so they survive
+        # container recreation (the /app/uploads volume isn't guaranteed
+        # persistent across deploys — same fix that was applied to club logos).
+        await conn.execute(text(
+            "ALTER TABLE yearbooks ADD COLUMN IF NOT EXISTS hero_image_data BYTEA"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE yearbooks ADD COLUMN IF NOT EXISTS hero_image_mime TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE yearbook_images ADD COLUMN IF NOT EXISTS image_data BYTEA"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE yearbook_images ADD COLUMN IF NOT EXISTS image_mime TEXT"
+        ))
+        # file_path is legacy for binary uploads — must be nullable.
+        await conn.execute(text(
+            "ALTER TABLE yearbook_images ALTER COLUMN file_path DROP NOT NULL"
+        ))
         await conn.execute(text(
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS display_name_override TEXT"
         ))
@@ -325,6 +387,8 @@ app.include_router(statlab.router)
 app.include_router(yearbooks.router)
 app.include_router(images.router)
 app.include_router(og_preview.router)
+app.include_router(notifications.router)
+app.include_router(seo.router)
 
 # Serve uploaded files (hero images, gallery photos)
 _upload_dir = Path("/app/uploads")

@@ -151,7 +151,15 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
     _set_session_cookie(response, token)
 
     role = membership.role if membership else None
-    return {"id": str(user.id), "username": user.username, "display_name": user.display_name, "role": role}
+    from app.auth.capabilities import effective_capabilities
+    caps = effective_capabilities(role, membership.capabilities if membership else None) if role else []
+    return {
+        "id": str(user.id),
+        "username": user.username,
+        "display_name": user.display_name,
+        "role": role,
+        "capabilities": caps,
+    }
 
 
 @router.post("/logout")
@@ -165,12 +173,15 @@ async def me(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.auth.capabilities import effective_capabilities
+
     membership_res = await db.execute(
         select(ClubMembership).where(ClubMembership.user_id == current_user.id)
     )
     membership = membership_res.scalar_one_or_none()
     role = membership.role if membership else None
     club_id = str(membership.club_id) if membership else None
+    caps = effective_capabilities(role, membership.capabilities if membership else None) if role else []
 
     return {
         "id": str(current_user.id),
@@ -178,4 +189,5 @@ async def me(
         "display_name": current_user.display_name,
         "role": role,
         "club_id": club_id,
+        "capabilities": caps,
     }

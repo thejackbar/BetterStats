@@ -1,38 +1,64 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { CAP } from '../../lib/capabilities'
+import { api } from '../../lib/api'
+import { SITE_VERSION } from '../../version'
+import { CHANGELOG } from '../../data/changelog'
+import NotificationBell from '../NotificationBell'
+import NotificationModal from '../NotificationModal'
 import betterStatsLogo from '../../assets/betterstatslogo_white.png'
 
+function compareVersions(a, b) {
+  const parse = v => (v || '').replace('v', '').split('.').map(Number)
+  const av = parse(a)
+  const bv = parse(b)
+  for (let i = 0; i < Math.max(av.length, bv.length); i++) {
+    const diff = (av[i] || 0) - (bv[i] || 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+// `cap: null` means everyone gets it (dashboard, read-only listing pages).
+// `cap: <CAP>` hides the link from users without that capability.
 const NAV_SECTIONS = [
-  { items: [{ to: '/admin', label: 'Dashboard', exact: true }] },
+  { items: [{ to: '/admin', label: 'Dashboard', exact: true, cap: null }] },
   {
     heading: 'Cricket Data',
     items: [
-      { to: '/admin/players', label: 'Players' },
-      { to: '/admin/games', label: 'Matches' },
-      { to: '/admin/seasons', label: 'Seasons' },
+      { to: '/admin/players', label: 'Players', cap: CAP.MANAGE_PLAYERS },
+      { to: '/admin/games', label: 'Matches', cap: null },
+      { to: '/admin/seasons', label: 'Seasons', cap: null },
     ],
   },
   {
     heading: 'Content',
     items: [
-      { to: '/admin/yearbook', label: 'Yearbooks' },
-      { to: '/admin/awards', label: 'Awards' },
-      { to: '/admin/award-definitions', label: 'Award Types' },
-      { to: '/admin/sponsors', label: 'Sponsors' },
-      { to: '/admin/social-post', label: 'Social Posts' },
+      { to: '/admin/yearbook', label: 'Yearbooks', cap: CAP.MANAGE_YEARBOOKS },
+      { to: '/admin/awards', label: 'Awards', cap: CAP.MANAGE_AWARDS },
+      { to: '/admin/award-definitions', label: 'Award Types', cap: CAP.MANAGE_AWARDS },
+      { to: '/admin/sponsors', label: 'Sponsors', cap: CAP.MANAGE_SPONSORS },
+      { to: '/admin/social-post', label: 'Social Posts', cap: CAP.MANAGE_SOCIAL },
     ],
   },
   {
     heading: 'Tools',
     items: [
-      { to: '/admin/sync', label: 'Data Sync' },
-      { to: '/admin/merge', label: 'Merge Players' },
-      { to: '/admin/grades', label: 'Merge Grades' },
-      { to: '/admin/partnerships', label: 'Partnership Rec.' },
+      { to: '/admin/milestones', label: 'Milestones', cap: CAP.MANAGE_MILESTONES },
+      { to: '/admin/sync', label: 'Data Sync', cap: CAP.RUN_SYNC },
+      { to: '/admin/merge', label: 'Merge Players', cap: CAP.MANAGE_MERGES },
+      { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
+      { to: '/admin/partnerships', label: 'Partnership Rec.', cap: CAP.MANAGE_AWARDS },
+      { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
     ],
   },
-  { items: [{ to: '/admin/settings', label: 'Settings' }] },
+  {
+    items: [
+      { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
+      { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
+    ],
+  },
 ]
 
 const SUPER_LINKS = [
@@ -41,10 +67,61 @@ const SUPER_LINKS = [
 ]
 
 export default function AdminLayout({ children }) {
-  const { user, logout } = useAuth()
+  const { user, logout, hasCapability, justLoggedIn, clearJustLoggedIn } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [bellOpen, setBellOpen] = useState(false)
+  const [bellSummary, setBellSummary] = useState(null)
+  const [bellRefresh, setBellRefresh] = useState(0)
+
+  // Filter nav: drop links the user lacks the cap for. Empty sections are
+  // dropped too so club_member users don't see a bare heading with nothing
+  // under it.
+  const visibleSections = NAV_SECTIONS.map(s => ({
+    ...s,
+    items: s.items.filter(i => i.cap == null || hasCapability(i.cap)),
+  })).filter(s => s.items.length > 0)
+
+  const openBell = useCallback(async () => {
+    try {
+      const s = await api.getNotificationsSummary()
+      setBellSummary(s)
+      setBellOpen(true)
+    } catch {
+      // silent — bell just won't open
+    }
+  }, [])
+
+  const closeBell = useCallback(async () => {
+    setBellOpen(false)
+    try {
+      await api.markNotificationsSeen(SITE_VERSION)
+      setBellRefresh(r => r + 1)
+    } catch {}
+  }, [])
+
+  // Auto-open on login if there's anything unseen (sync runs, milestones,
+  // pending requests, or a changelog entry newer than last_seen_version).
+  useEffect(() => {
+    if (!justLoggedIn || !user) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const s = await api.getNotificationsSummary()
+        if (cancelled) return
+        const hasNewChangelog = CHANGELOG.some(
+          e => compareVersions(e.version, s.last_seen_version) > 0
+        )
+        if ((s.unseen_count || 0) > 0 || hasNewChangelog) {
+          setBellSummary(s)
+          setBellOpen(true)
+        }
+      } catch {}
+      clearJustLoggedIn()
+    })()
+    return () => { cancelled = true }
+  }, [justLoggedIn, user, clearJustLoggedIn])
 
   const handleLogout = async () => {
     await logout()
@@ -75,6 +152,7 @@ export default function AdminLayout({ children }) {
           </div>
 
           <div className="flex items-center gap-3">
+            <NotificationBell onOpen={openBell} refreshTrigger={bellRefresh} />
             <span className="hidden sm:block font-mono text-[11px] text-pb-faint">
               {user?.display_name || user?.username}
               {user?.role === 'super_admin' && (
@@ -109,7 +187,7 @@ export default function AdminLayout({ children }) {
           w-full md:w-48 shrink-0 border-r pb-hairline-r pt-4 pb-8 px-2
         `}>
           <nav className="space-y-0.5">
-            {NAV_SECTIONS.map((section, i) => (
+            {visibleSections.map((section, i) => (
               <div key={section.heading || `section-${i}`} className={i > 0 ? 'pt-3' : ''}>
                 {section.heading && (
                   <div className="pb-1 px-3 font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase">
@@ -162,6 +240,8 @@ export default function AdminLayout({ children }) {
           {children}
         </main>
       </div>
+
+      <NotificationModal isOpen={bellOpen} summary={bellSummary} onClose={closeBell} />
     </div>
   )
 }

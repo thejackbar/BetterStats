@@ -35,6 +35,8 @@ class User(Base):
     last_login_at = Column(TIMESTAMP(timezone=True), nullable=True)
     failed_login_count = Column(Integer, default=0, nullable=False)
     locked_until = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_notification_seen_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_seen_app_version = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -94,6 +96,10 @@ class ClubMembership(Base):
     club_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(Text, default="club_admin", nullable=False)
+    # JSONB array of capability strings. Empty list = "no extra caps beyond
+    # role". For super_admin/club_admin the list is ignored (those roles
+    # imply all caps). For club_member, this is the explicit allowlist.
+    capabilities = Column(JSONB, default=list, nullable=False, server_default="[]")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     club = relationship("Organisation", back_populates="memberships")
@@ -178,10 +184,15 @@ class Game(Base):
     played_at = Column(Date)
     home_team = Column(Text)
     away_team = Column(Text)
+    home_club = Column(Text)
+    away_club = Column(Text)
+    opp_org_id = Column(Text)
+    opp_club_name = Column(Text)
     result = Column(Text)
     winning_team = Column(Text)
     is_final = Column(Boolean, default=False, nullable=False, server_default='false')
     raw_payload = Column(JSON)
+    venue = Column(Text)
 
     grade = relationship("Grade", back_populates="games")
     batting_innings = relationship("BattingInnings", back_populates="game")
@@ -194,6 +205,9 @@ class Game(Base):
 
 class BattingInnings(Base):
     __tablename__ = "batting_innings"
+    __table_args__ = (
+        UniqueConstraint("game_id", "innings_number", "player_id", name="uq_batting_innings_game_inns_player"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"))
@@ -239,6 +253,7 @@ class FieldingStat(Base):
     game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"))
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"))
     catches = Column(Integer, default=0)
+    catches_wk = Column(Integer, default=0)
     run_outs = Column(Integer, default=0)
     stumpings = Column(Integer, default=0)
 

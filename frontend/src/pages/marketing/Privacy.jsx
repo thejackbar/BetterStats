@@ -1,6 +1,12 @@
 import MarketingNav from '../../components/MarketingNav'
+import { usePageMeta } from '../../hooks/usePageMeta'
 
 export default function Privacy() {
+  usePageMeta({
+    title: 'Privacy Policy — BetterStats',
+    description: 'How BetterStats collects, stores and uses cricket statistics, club data and admin login information.',
+    url: 'https://betterstats.cricket/privacy',
+  })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />

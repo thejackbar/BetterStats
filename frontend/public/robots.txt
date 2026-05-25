@@ -1,0 +1,14 @@
+# BetterStats — robots policy
+# Search and AI crawlers are welcome. Admin and API routes are off-limits.
+
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /login
+Disallow: /onboard
+Disallow: /api/
+Disallow: /og-preview
+Disallow: /players/*/share
+
+Sitemap: https://betterstats.cricket/sitemap.xml

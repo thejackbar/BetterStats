@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import { useToast } from '../../contexts/ToastContext'
 
 function fmtDuration(startedAt, completedAt) {
   if (!startedAt || !completedAt) return null
@@ -31,6 +32,7 @@ function StatPill({ label, value, highlight }) {
 }
 
 export default function AdminSync() {
+  const toast = useToast()
   const [settings, setSettings] = useState(null)
   const [logs, setLogs] = useState([])
   const [syncing, setSyncing] = useState(false)
@@ -115,13 +117,13 @@ export default function AdminSync() {
       const res = await api.triggerSync(orgId)
       if (res.status === 'already_running') {
         setSyncing(false)
-        alert('A sync is already running for this club. Wait for it to complete.')
+        toast.info('A sync is already running for this club. Wait for it to complete.')
         return
       }
       setPolling(true)
     } catch (e) {
       setSyncing(false)
-      alert(`Failed to start sync: ${e.message}`)
+      toast.error(`Failed to start sync: ${e.message}`)
     }
   }
 
@@ -130,9 +132,9 @@ export default function AdminSync() {
     setBackfilling(true)
     try {
       const res = await api.adminBackfillAggregates()
-      alert(`Backfill complete — inserted ${res.inserted ?? 0} aggregate rows.`)
+      toast.success(`Backfill complete — inserted ${res.inserted ?? 0} aggregate rows.`)
     } catch (e) {
-      alert(`Backfill failed: ${e.message}`)
+      toast.error(`Backfill failed: ${e.message}`)
     } finally {
       setBackfilling(false)
     }
@@ -151,13 +153,13 @@ export default function AdminSync() {
       const res = await api.adminHardRefreshOrg()
       if (res.status === 'already_running') {
         setHardRefreshing(false)
-        alert('A full rebuild is already running for this club. Wait for it to complete.')
+        toast.info('A full rebuild is already running for this club. Wait for it to complete.')
         return
       }
       setPolling(true)
     } catch (e) {
       setHardRefreshing(false)
-      alert(`Failed to start full rebuild: ${e.message}`)
+      toast.error(`Failed to start full rebuild: ${e.message}`)
     }
   }
 
@@ -441,7 +443,7 @@ export default function AdminSync() {
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
                         {s.seasons != null && <StatPill label="seasons" value={s.seasons} />}
-                        {s.players != null && <StatPill label="players" value={s.players} />}
+                        {s.player_seasons != null && <StatPill label="player seasons" value={s.player_seasons} />}
                         {s.season_stats != null && <StatPill label="stat rows" value={s.season_stats} />}
                         {s.playhq_games_found != null && <StatPill label="phq games" value={s.playhq_games_found} highlight={s.playhq_games_found > 0} />}
                         {s.playhq_games_final != null && <StatPill label="phq final" value={s.playhq_games_final} highlight={s.playhq_games_final > 0} />}

@@ -1,5 +1,6 @@
 import MarketingNav from '../../components/MarketingNav'
 import { Link } from 'react-router-dom'
+import { usePageMeta } from '../../hooks/usePageMeta'
 
 const SECTIONS = [
   {
@@ -146,6 +147,12 @@ const SECTIONS = [
 ]
 
 export default function Features() {
+  usePageMeta({
+    title: 'Features — Automated Cricket Club Stats | BetterStats',
+    description: 'Every feature included with BetterStats: automatic PlayHQ/MyCricket sync, rich player profiles, leaderboards, all-time records, partnership records, season yearbooks, StatLab custom queries, awards & honours management, and admin tools.',
+    image: 'https://betterstats.cricket/og-image.png',
+    url: 'https://betterstats.cricket/features',
+  })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />

@@ -80,7 +80,22 @@ function ImportPanel({ orgId, onImported }) {
 
   const handleImport = async (e) => {
     const file = e.target.files?.[0]
+    e.target.value = '' // allow re-picking the same file after error
     if (!file) return
+    const ext = '.' + (file.name || '').split('.').pop().toLowerCase()
+    if (!['.csv', '.xlsx', '.xls'].includes(ext)) {
+      setError(`Unsupported file type: ${ext || 'unknown'}. Use .csv, .xlsx or .xls.`)
+      return
+    }
+    const MAX = 5 * 1024 * 1024
+    if (file.size > MAX) {
+      setError(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — must be 5 MB or smaller.`)
+      return
+    }
+    if (file.size === 0) {
+      setError('File is empty.')
+      return
+    }
     setImporting(true)
     setResult(null)
     setError(null)

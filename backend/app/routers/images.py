@@ -7,6 +7,7 @@ persisted in every deployment.
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation, Player, Sponsor, get_db
@@ -57,5 +58,38 @@ async def get_sponsor_logo(sponsor_id: str, db: AsyncSession = Depends(get_db)):
     return Response(
         content=sponsor.logo_data,
         media_type=sponsor.logo_mime or "image/png",
+        headers=_CACHE_HEADERS,
+    )
+
+
+@router.get("/yearbooks/{yearbook_id}/hero")
+async def get_yearbook_hero(yearbook_id: str, db: AsyncSession = Depends(get_db)):
+    _parse_uuid(yearbook_id)
+    row = await db.execute(
+        text("SELECT hero_image_data, hero_image_mime FROM yearbooks WHERE id = :id"),
+        {"id": yearbook_id},
+    )
+    rec = row.mappings().first()
+    if not rec or not rec["hero_image_data"]:
+        raise HTTPException(404, "No hero image")
+    return Response(
+        content=rec["hero_image_data"],
+        media_type=rec["hero_image_mime"] or "image/jpeg",
+        headers=_CACHE_HEADERS,
+    )
+
+
+@router.get("/yearbooks/gallery/{image_id}")
+async def get_yearbook_gallery_image(image_id: int, db: AsyncSession = Depends(get_db)):
+    row = await db.execute(
+        text("SELECT image_data, image_mime FROM yearbook_images WHERE id = :id"),
+        {"id": image_id},
+    )
+    rec = row.mappings().first()
+    if not rec or not rec["image_data"]:
+        raise HTTPException(404, "No image")
+    return Response(
+        content=rec["image_data"],
+        media_type=rec["image_mime"] or "image/jpeg",
         headers=_CACHE_HEADERS,
     )

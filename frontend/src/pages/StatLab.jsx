@@ -74,21 +74,84 @@ const OPERATORS = [
   { key: 'ne',  label: 'not equal' },
 ]
 
-const PRESETS = [
-  { id: 'p1',  label: 'Run scorers (all-time)',     target: 'player_career', sortBy: 'runs', sortDir: 'desc', filters: [], context: {} },
-  { id: 'p2',  label: 'Wicket takers (all-time)',   target: 'player_career', sortBy: 'wickets', sortDir: 'desc', filters: [], context: {} },
-  { id: 'p3',  label: 'Best batting averages',      target: 'player_career', sortBy: 'batting_average', sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '20' }], context: {} },
-  { id: 'p4',  label: 'Best bowling averages',      target: 'player_career', sortBy: 'bowling_average', sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '20' }], context: {} },
-  { id: 'p5',  label: 'All-rounders',                target: 'player_career', sortBy: 'runs', sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '500' }, { field: 'wickets', op: 'gte', value: '50' }], context: {} },
-  { id: 'p6',  label: 'Centurions',                  target: 'player_career', sortBy: 'hundreds', sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
-  { id: 'p7',  label: 'Five-for club',               target: 'player_career', sortBy: 'five_wicket_innings', sortDir: 'desc', filters: [{ field: 'five_wicket_innings', op: 'gte', value: '1' }], context: {} },
-  { id: 'p8',  label: 'Highest individual scores',   target: 'innings_list',  sortBy: 'runs', sortDir: 'desc', filters: [], context: {} },
-  { id: 'p9',  label: 'Best spells (by wickets)',    target: 'spell_list',    sortBy: 'wickets', sortDir: 'desc', filters: [], context: {} },
-  { id: 'p10', label: 'Biggest partnerships',        target: 'partnership_list', sortBy: 'runs', sortDir: 'desc', filters: [], context: {} },
-  { id: 'p11', label: 'Finals run scorers',          target: 'player_career', sortBy: 'runs', sortDir: 'desc', filters: [], context: { finals_only: true } },
-  { id: 'p12', label: 'Captain runs',                target: 'player_career', sortBy: 'runs', sortDir: 'desc', filters: [], context: { captain_only: true } },
-  { id: 'p13', label: 'Wicket-keeper catches',       target: 'player_career', sortBy: 'catches', sortDir: 'desc', filters: [], context: { keeper_only: true } },
-  { id: 'p14', label: 'Hundreds in losses',          target: 'innings_list',  sortBy: 'runs', sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '100' }], context: { result: 'lost' } },
+const PRESET_GROUPS = [
+  {
+    key: 'popular', label: 'Popular', defaultOpen: true,
+    items: [
+      { type: 'preset', label: 'Run scorers (all-time)',     target: 'player_career',    sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Wicket takers (all-time)',   target: 'player_career',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Best batting averages',      target: 'player_career',    sortBy: 'batting_average',     sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '20' }], context: {} },
+      { type: 'preset', label: 'Best bowling averages',      target: 'player_career',    sortBy: 'bowling_average',     sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '20' }], context: {} },
+      { type: 'preset', label: 'All-rounders',               target: 'player_career',    sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '500' }, { field: 'wickets', op: 'gte', value: '50' }], context: {} },
+      { type: 'preset', label: 'Highest individual scores',  target: 'innings_list',     sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Best spells (by wickets)',   target: 'spell_list',       sortBy: 'wickets',             sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Biggest partnerships',       target: 'partnership_list', sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Most matches played',        target: 'player_career',    sortBy: 'matches',             sortDir: 'desc', filters: [], context: {} },
+    ],
+  },
+  {
+    key: 'season', label: 'Season Honours', defaultOpen: false,
+    items: [
+      { type: 'preset', label: 'Most runs in a season',         target: 'player_season', sortBy: 'runs',            sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Best batting avg in a season',  target: 'player_season', sortBy: 'batting_average', sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '10' }], context: {} },
+      { type: 'preset', label: 'Most wickets in a season',      target: 'player_season', sortBy: 'wickets',         sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Best bowling avg in a season',  target: 'player_season', sortBy: 'bowling_average', sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '10' }], context: {} },
+      { type: 'preset', label: 'Most matches in a season',      target: 'player_season', sortBy: 'matches',         sortDir: 'desc', filters: [], context: {} },
+    ],
+  },
+  {
+    key: 'batting', label: 'Batting', defaultOpen: false,
+    items: [
+      { type: 'preset', label: 'Run scorers (all-time)',     target: 'player_career', sortBy: 'runs',            sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Best batting averages',      target: 'player_career', sortBy: 'batting_average', sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '20' }], context: {} },
+      { type: 'preset', label: 'Highest individual scores',  target: 'innings_list',  sortBy: 'runs',            sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Centurions',                 target: 'player_career', sortBy: 'hundreds',        sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most no outs',               target: 'player_career', sortBy: 'not_outs',        sortDir: 'desc', filters: [{ field: 'not_outs', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Hundreds in losses',         target: 'innings_list',  sortBy: 'runs',            sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '100' }], context: { result: 'lost' } },
+      { type: 'preset', label: 'Captain runs',               target: 'player_career', sortBy: 'runs',            sortDir: 'desc', filters: [], context: { captain_only: true } },
+      { type: 'preset', label: 'Finals run scorers',         target: 'player_career', sortBy: 'runs',            sortDir: 'desc', filters: [], context: { finals_only: true } },
+      { type: 'derived', key: 'consecutive_ducks',   label: 'Longest duck streak',       description: 'Most innings in a row scoring zero.' },
+      { type: 'derived', key: 'consecutive_fifties', label: 'Longest 50+ streak',         description: 'Most innings in a row scoring 50+.' },
+      { type: 'derived', key: 'carried_bat',         label: 'Carrying the bat',           description: 'Openers not out when team was bowled out.' },
+      { type: 'derived', key: 'most_runs_first_n',   label: 'Most runs after X matches',  description: 'Who scored the most in their first N matches (set N in Context).' },
+      { type: 'derived', key: 'milestone_runs',      label: 'Fastest to milestone',       description: 'Who reached a runs milestone in fewest matches (set milestone in Context).' },
+    ],
+  },
+  {
+    key: 'bowling', label: 'Bowling', defaultOpen: false,
+    items: [
+      { type: 'preset', label: 'Wicket takers (all-time)', target: 'player_career', sortBy: 'wickets',           sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Best bowling averages',    target: 'player_career', sortBy: 'bowling_average',   sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '20' }], context: {} },
+      { type: 'preset', label: 'Five-for club',            target: 'player_career', sortBy: 'five_wicket_innings', sortDir: 'desc', filters: [{ field: 'five_wicket_innings', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Best spells (by wickets)', target: 'spell_list',    sortBy: 'wickets',           sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Most wides bowled',        target: 'player_career', sortBy: 'wides',             sortDir: 'desc', filters: [{ field: 'wides', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most no-balls bowled',     target: 'player_career', sortBy: 'no_balls',          sortDir: 'desc', filters: [{ field: 'no_balls', op: 'gte', value: '1' }], context: {} },
+    ],
+  },
+  {
+    key: 'fielding', label: 'Fielding & Keeping', defaultOpen: false,
+    items: [
+      { type: 'preset', label: 'Wicket-keeper catches', target: 'player_career', sortBy: 'catches',   sortDir: 'desc', filters: [], context: { keeper_only: true } },
+      { type: 'preset', label: 'Most catches',          target: 'player_career', sortBy: 'catches',   sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Most run outs',         target: 'player_career', sortBy: 'run_outs',  sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Most stumpings',        target: 'player_career', sortBy: 'stumpings', sortDir: 'desc', filters: [{ field: 'stumpings', op: 'gte', value: '1' }], context: {} },
+    ],
+  },
+  {
+    key: 'partnerships', label: 'Partnerships', defaultOpen: false,
+    items: [
+      { type: 'preset', label: 'Biggest partnerships', target: 'partnership_list', sortBy: 'runs', sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'best_partnership_pair', label: 'Best partnership by pair', description: 'Best stand for each pair of batters.' },
+    ],
+  },
+  {
+    key: 'match', label: 'Match', defaultOpen: false,
+    items: [
+      { type: 'preset', label: 'Highest team scores',      target: 'match_list',    sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Biggest winning margins',  target: 'match_list',    sortBy: 'margin_runs',  sortDir: 'desc', filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Finals run scorers',       target: 'player_career', sortBy: 'runs',         sortDir: 'desc', filters: [], context: { finals_only: true } },
+    ],
+  },
 ]
 
 const RESULT_OPTIONS = [
@@ -125,6 +188,7 @@ const CONTEXT_KEYS = [
   'season_id','grade_id','grade_name','opposition','date_from','date_to',
   'min_year','max_year','finals_only','captain_only','keeper_only','result',
   'dismissal','position_min','position_max',
+  'first_n_matches','milestone_runs',
 ]
 
 // Category groupings for the field picker. Field membership is intersected
@@ -287,7 +351,7 @@ function csvEscape(v) {
 const inputCls = 'bg-pb-surface border border-pb-hairline2 text-pb-text text-xs rounded px-2 py-1.5 focus:outline-none focus:border-pb-accent w-full'
 const selectCls = inputCls + ' cursor-pointer'
 
-function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape }) {
+function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, activeDerived }) {
   const set = (k, v) => onChange({ ...ctx, [k]: v })
   const showInningsFilters = targetShape === 'list' || targetShape === 'aggregate'
   return (
@@ -367,6 +431,24 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape }) {
             </div>
           </div>
         </>
+      )}
+      {activeDerived === 'most_runs_first_n' && (
+        <div>
+          <Label>First N matches</Label>
+          <select className={selectCls + ' mt-1'} value={ctx.first_n_matches || '50'}
+                  onChange={e => set('first_n_matches', e.target.value)}>
+            {[10, 25, 50, 100, 200].map(n => <option key={n} value={n}>First {n}</option>)}
+          </select>
+        </div>
+      )}
+      {activeDerived === 'milestone_runs' && (
+        <div>
+          <Label>Runs milestone</Label>
+          <select className={selectCls + ' mt-1'} value={ctx.milestone_runs || '1000'}
+                  onChange={e => set('milestone_runs', e.target.value)}>
+            {[100, 500, 1000, 2000, 5000].map(n => <option key={n} value={n}>{n.toLocaleString()} runs</option>)}
+          </select>
+        </div>
       )}
     </div>
   )
@@ -666,9 +748,13 @@ export default function StatLab() {
 
   const [grades, setGrades] = useState([])
   const [activeDerived, setActiveDerived] = useState(null)
+  const [openGroups, setOpenGroups] = useState(() => Object.fromEntries(PRESET_GROUPS.map(g => [g.key, g.defaultOpen])))
 
   const queryRef = useRef(query)
   queryRef.current = query
+
+  const activeDerivedRef = useRef(activeDerived)
+  activeDerivedRef.current = activeDerived
 
   // Load schema once
   useEffect(() => {
@@ -743,16 +829,18 @@ export default function StatLab() {
 
   if (inactive) return <ClubInactive />
 
-  const runQuery = useCallback(async (overrideQuery, overrideDerived = null) => {
+  const runQuery = useCallback(async (overrideQuery, overrideDerived = undefined) => {
     if (!orgId) return
     const q = overrideQuery || queryRef.current
+    // undefined = preserve current derived; null = clear it; string = set new derived
+    const useDerived = overrideDerived !== undefined ? overrideDerived : activeDerivedRef.current
     setLoading(true); setError(null); setHasQueried(true); setClientSort({ col: null, dir: null })
-    setActiveDerived(overrideDerived)
+    setActiveDerived(useDerived)
     const cleaned = cleanTree(q.filterTree)
     try {
       let data
-      if (overrideDerived) {
-        data = await api.statlabDerived(orgId, overrideDerived, { limit: q.limit, context: q.context })
+      if (useDerived) {
+        data = await api.statlabDerived(orgId, useDerived, { limit: q.limit, context: q.context })
       } else {
         data = await api.statlabQuery(orgId, {
           target: q.target, sortBy: q.sortBy, sortDir: q.sortDir,
@@ -785,6 +873,16 @@ export default function StatLab() {
     setQuery(next)
     await runQuery(next, name)
   }, [runQuery])
+
+  const applyGroupItem = useCallback(async (item) => {
+    if (item.type === 'derived') {
+      await applyDerived(item.key)
+    } else {
+      await applyPreset(item)
+    }
+  }, [applyPreset, applyDerived])
+
+  const toggleGroup = (key) => setOpenGroups(prev => ({ ...prev, [key]: !prev[key] }))
 
   const resetAll = () => {
     setQuery(DEFAULT_QUERY)
@@ -911,7 +1009,7 @@ export default function StatLab() {
         />
 
         {/* Target tabs */}
-        <div className="flex flex-wrap gap-1 pb-hairline-b mb-4 overflow-x-auto">
+        <div className="flex gap-1 pb-hairline-b mb-4 overflow-x-auto pb-no-scrollbar">
           {TARGETS.map(t => (
             <button key={t.key} onClick={() => { setQuery(q => ({ ...q, target: t.key })); setRows([]); setHasQueried(false); setActiveDerived(null) }}
               className={`relative px-3.5 py-2.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition ${query.target === t.key && !activeDerived ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'}`}>
@@ -959,6 +1057,7 @@ export default function StatLab() {
                 seasons={seasons}
                 grades={grades}
                 targetShape={targetMeta.shape}
+                activeDerived={activeDerived}
               />
             </Card>
 
@@ -973,25 +1072,41 @@ export default function StatLab() {
               <Btn onClick={() => { setEditingReport(null); setSaveOpen(true) }} className="w-full">Save as report…</Btn>
             )}
 
-            <Card title="DERIVED">
-              <div className="flex flex-col gap-1">
-                {Object.entries(schema.derived || {}).map(([k, v]) => (
-                  <button key={k} onClick={() => applyDerived(k)}
-                    className={`text-left px-2 py-1.5 rounded hover:bg-pb-surface2 font-mono text-[11px] tracking-wide2 transition ${activeDerived === k ? 'text-pb-text bg-pb-surface2' : 'text-pb-faint hover:text-pb-text'}`}>
-                    {v.label}
-                    <div className="text-[10px] text-pb-faintest font-sans normal-case tracking-normal mt-0.5">{v.description}</div>
-                  </button>
-                ))}
-              </div>
-            </Card>
-
-            <Card title="QUICK PRESETS">
-              <div className="flex flex-col gap-1">
-                {PRESETS.map(p => (
-                  <button key={p.id} onClick={() => applyPreset(p)}
-                    className="text-left px-2 py-1.5 rounded hover:bg-pb-surface2 font-mono text-[11px] tracking-wide2 text-pb-faint hover:text-pb-text transition">
-                    {p.label}
-                  </button>
+            <Card title="REPORTS">
+              <div className="flex flex-col">
+                {PRESET_GROUPS.map(group => (
+                  <div key={group.key} className="pb-hairline-b last:border-0">
+                    <button
+                      onClick={() => toggleGroup(group.key)}
+                      className="w-full flex items-center justify-between px-2 py-2 hover:bg-pb-surface2 transition rounded text-left"
+                    >
+                      <span className="font-mono text-[11px] font-semibold tracking-wide2 text-pb-dim">
+                        {group.label.toUpperCase()}
+                      </span>
+                      <span className="text-pb-faintest text-[10px]">{openGroups[group.key] ? '▾' : '▸'}</span>
+                    </button>
+                    {openGroups[group.key] && (
+                      <div className="flex flex-col gap-0.5 pb-2 pl-1">
+                        {group.items.map((item, idx) => {
+                          const isActive = item.type === 'derived'
+                            ? activeDerived === item.key
+                            : false
+                          return (
+                            <button
+                              key={item.key || item.label + idx}
+                              onClick={() => applyGroupItem(item)}
+                              className={`text-left px-2 py-1.5 rounded transition ${isActive ? 'text-pb-text bg-pb-surface2' : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'}`}
+                            >
+                              <div className="font-mono text-[11px] tracking-wide2">{item.label}</div>
+                              {item.description && (
+                                <div className="text-[10px] text-pb-faintest font-sans normal-case tracking-normal mt-0.5">{item.description}</div>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </Card>

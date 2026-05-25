@@ -49,10 +49,13 @@ export const api = {
   // Players
   listPlayers: (orgId) => request(`/players?org_id=${orgId}`),
   getPlayer: (playerId) => request(`/players/${playerId}`),
-  getPlayerStats: (playerId, { seasonId, gradeId } = {}) => {
+  getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
+    if (lastNGames) params.set('last_n_games', lastNGames)
+    if (startDate) params.set('start_date', startDate)
+    if (endDate) params.set('end_date', endDate)
     return request(`/players/${playerId}/stats?${params}`)
   },
   getPlayerDismissals: (playerId) => request(`/players/${playerId}/dismissals`),
@@ -61,6 +64,8 @@ export const api = {
   getPlayerBowlingByGrade: (playerId) => request(`/players/${playerId}/bowling-by-grade`),
   getPlayerBowlingDismissals: (playerId) => request(`/players/${playerId}/bowling-dismissals`),
   getPlayerBowlingByBatterPosition: (playerId) => request(`/players/${playerId}/bowling-by-batter-position`),
+  getPlayerByVenue: (playerId) => request(`/players/${playerId}/by-venue`),
+  getPlayerByOpposition: (playerId) => request(`/players/${playerId}/by-opposition`),
   getPlayerTeamBreakdown: (playerId, { seasonId } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
@@ -151,6 +156,35 @@ export const api = {
   adminListSeasons: () => request('/club-admin/seasons'),
   adminReorderSeasons: (items) =>
     request('/club-admin/seasons/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+  // Season merges (aliases)
+  adminListSeasonMerges: () => request('/club-admin/season-merges'),
+  adminCreateSeasonMerge: (canonicalSeasonId, aliasSeasonId) =>
+    request('/club-admin/season-merges', {
+      method: 'POST',
+      body: JSON.stringify({ canonical_season_id: canonicalSeasonId, alias_season_id: aliasSeasonId }),
+    }),
+  adminUndoSeasonMerge: (mergeId) =>
+    request(`/club-admin/season-merges/${mergeId}/undo`, { method: 'POST' }),
+  // Activity log (audit trail)
+  adminListActivityLog: (limit = 100) =>
+    request(`/club-admin/activity-log?limit=${limit}`),
+  // Notification centre (bell icon)
+  getNotificationsCount: () => request('/club-admin/notifications/count'),
+  getNotificationsSummary: () => request('/club-admin/notifications/summary'),
+  markNotificationsSeen: (appVersion) =>
+    request('/club-admin/notifications/seen', {
+      method: 'POST',
+      body: JSON.stringify({ app_version: appVersion || null }),
+    }),
+  // Club user management
+  adminListClubUsers: () => request('/club-admin/users'),
+  adminListCapabilities: () => request('/club-admin/users/capabilities'),
+  adminCreateClubUser: (data) =>
+    request('/club-admin/users', { method: 'POST', body: JSON.stringify(data) }),
+  adminUpdateClubUser: (userId, data) =>
+    request(`/club-admin/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adminDeleteClubUser: (userId) =>
+    request(`/club-admin/users/${userId}`, { method: 'DELETE' }),
   adminListGames: (seasonId) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
@@ -233,14 +267,7 @@ export const api = {
     request('/club-admin/sync-runs', { method: 'DELETE' }),
   adminClearResolvedSyncRequests: () =>
     request('/club-admin/sync-requests/resolved', { method: 'DELETE' }),
-  adminListPhqSuggestions: () => request('/club-admin/phq-suggestions'),
-  adminRunPhqSuggestions: () => request('/club-admin/phq-suggestions/run', { method: 'POST' }),
-  adminActionPhqSuggestion: (id, action, playerId) =>
-    request(`/club-admin/phq-suggestions/${id}`, {
-      method: 'POST',
-      body: JSON.stringify({ action, player_id: playerId }),
-    }),
-
+  adminGetMilestones: () => request('/club-admin/milestones'),
   // Super admin
   superListClubs: () => request('/club-admin/super/clubs'),
   superCreateClub: (data) =>
@@ -471,13 +498,14 @@ export const api = {
     request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
 
   // Records
-  getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly } = {}) => {
+  getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
     if (gradeName) params.set('grade_name', gradeName)
     if (finalsOnly) params.set('finals_only', 'true')
     if (captainOnly) params.set('captain_only', 'true')
+    if (gender) params.set('gender', gender)
     return request(`/records/${orgId}?${params}`)
   },
   getRecordsGrades: (orgId, seasonId) => {
@@ -487,7 +515,7 @@ export const api = {
   },
 
   // Leaderboard
-  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, finalsOnly, captainOnly } = {}) => {
+  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, finalsOnly, captainOnly, gender } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -497,9 +525,10 @@ export const api = {
     if (minRuns != null) params.set('min_runs', minRuns)
     if (finalsOnly) params.set('finals_only', 'true')
     if (captainOnly) params.set('captain_only', 'true')
+    if (gender) params.set('gender', gender)
     return request(`/leaderboard/batting?${params}`)
   },
-  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, finalsOnly, captainOnly } = {}) => {
+  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, finalsOnly, captainOnly, gender } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -510,9 +539,10 @@ export const api = {
     if (minWickets != null) params.set('min_wickets', minWickets)
     if (finalsOnly) params.set('finals_only', 'true')
     if (captainOnly) params.set('captain_only', 'true')
+    if (gender) params.set('gender', gender)
     return request(`/leaderboard/bowling?${params}`)
   },
-  fieldingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, finalsOnly, captainOnly } = {}) => {
+  fieldingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, finalsOnly, captainOnly, gender } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -521,15 +551,17 @@ export const api = {
     if (limit) params.set('limit', limit)
     if (finalsOnly) params.set('finals_only', 'true')
     if (captainOnly) params.set('captain_only', 'true')
+    if (gender) params.set('gender', gender)
     return request(`/leaderboard/fielding?${params}`)
   },
-  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, captainOnly, limit } = {}) => {
+  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, captainOnly, limit, gender } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeName) params.set('grade_name', gradeName)
     if (finalsOnly) params.set('finals_only', 'true')
     if (captainOnly) params.set('captain_only', 'true')
     if (limit) params.set('limit', limit)
+    if (gender) params.set('gender', gender)
     return request(`/leaderboard/sirs/${type}?${params}`)
   },
   getPlayerCaptainStats: (playerId) => request(`/players/${playerId}/captain-stats`),

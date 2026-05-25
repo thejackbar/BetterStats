@@ -1,4 +1,5 @@
 """Admin API routes — all require authentication."""
+import json as _json
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,18 +14,20 @@ from pathlib import Path
 
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
-    PlayerSyncRequest, PhqIdSuggestion, Sponsor, get_db
+    PlayerSyncRequest, Sponsor, get_db
 )
 from sqlalchemy import text as _text
 import asyncio
 import logging as _logging
 from app.routers.auth import get_current_user, get_current_club, require_super_admin, _hash_password
+from app.auth.capabilities import (
+    require_cap, effective_capabilities, ALL_CAPABILITIES,
+    MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, RUN_HARD_REFRESH, RUN_SYNC,
+)
 from app.services import playhq_client
 
 # Keep strong references to background tasks so they aren't GC'd before completing
 _background_tasks: set = set()
-# Per-org scan locks to prevent concurrent PHQ suggestion scans
-_phq_scan_running: set = set()
 # Per-player deep sync locks
 _player_sync_running: set = set()
 
@@ -179,12 +182,27 @@ async def list_seasons(
     db: AsyncSession = Depends(get_db),
 ):
     from app.routers.organisations import _season_sort_key
+    from app.services.season_aliases import load_active_alias_map, load_reverse_alias_map
     result = await db.execute(
         select(Season).where(Season.organisation_id == club.id)
     )
     seasons = sorted(result.scalars().all(), key=_season_sort_key)
+    alias_map = await load_active_alias_map(db, club.id)
+    reverse_map = await load_reverse_alias_map(db, club.id)
+    name_by_id = {str(s.id): s.name for s in seasons}
     return [
-        {"id": str(s.id), "name": s.name, "year": s.year, "synced_at": s.synced_at, "display_order": s.display_order}
+        {
+            "id": str(s.id),
+            "name": s.name,
+            "year": s.year,
+            "synced_at": s.synced_at,
+            "display_order": s.display_order,
+            "alias_of": reverse_map.get(str(s.id)),
+            "aliases": [
+                {"id": aid, "name": name_by_id.get(aid, "")}
+                for aid in alias_map.get(str(s.id), [])
+            ],
+        }
         for s in seasons
     ]
 
@@ -207,6 +225,220 @@ async def reorder_seasons(
             season.display_order = item.display_order
     await db.commit()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Season merges (aliases) — admin can merge Summer 25/26 + Winter 25/26 into
+# one canonical season for display + aggregation. Soft model: no row rewrites.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/season-merges")
+async def list_season_merges(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """All season-alias rows (active + undone) for this club, newest first."""
+    rows = await db.execute(
+        _text(
+            """
+            SELECT
+                sa.id,
+                sa.merged_at,
+                sa.undone_at,
+                sa.canonical_season_id,
+                sa.alias_season_id,
+                cs.name AS canonical_name,
+                als.name AS alias_name
+            FROM season_aliases sa
+            JOIN seasons cs  ON cs.id  = sa.canonical_season_id
+            JOIN seasons als ON als.id = sa.alias_season_id
+            WHERE sa.org_id = :org
+            ORDER BY sa.merged_at DESC
+            LIMIT 200
+            """
+        ),
+        {"org": str(club.id)},
+    )
+    return [
+        {
+            "id": r["id"],
+            "merged_at": r["merged_at"].isoformat() if r["merged_at"] else None,
+            "undone": r["undone_at"] is not None,
+            "canonical_id": str(r["canonical_season_id"]),
+            "canonical_name": r["canonical_name"],
+            "alias_id": str(r["alias_season_id"]),
+            "alias_name": r["alias_name"],
+        }
+        for r in rows.mappings().all()
+    ]
+
+
+class SeasonMergeRequest(BaseModel):
+    canonical_season_id: str
+    alias_season_id: str
+
+
+@router.post("/season-merges")
+async def create_season_merge(
+    req: SeasonMergeRequest,
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark `alias_season_id` as merged into `canonical_season_id`.
+
+    Both seasons must belong to this club. If the canonical is itself
+    already an alias of a deeper canonical, the merge is chained up so
+    aliases always point at the deepest canonical (no cycles, no two-hop
+    resolution at query time).
+    """
+    if req.canonical_season_id == req.alias_season_id:
+        raise HTTPException(status_code=400, detail="Canonical and alias are the same season")
+
+    try:
+        canonical_uuid = uuid.UUID(req.canonical_season_id)
+        alias_uuid = uuid.UUID(req.alias_season_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid season id")
+
+    # Both seasons must belong to this club.
+    for sid in (canonical_uuid, alias_uuid):
+        season = await db.get(Season, sid)
+        if not season or season.organisation_id != club.id:
+            raise HTTPException(status_code=404, detail=f"Season {sid} not found in this club")
+
+    # If the canonical is itself currently an alias, redirect through.
+    chain = await db.execute(
+        _text(
+            "SELECT canonical_season_id FROM season_aliases "
+            "WHERE org_id = :org AND alias_season_id = :a AND undone_at IS NULL"
+        ),
+        {"org": str(club.id), "a": str(canonical_uuid)},
+    )
+    chain_row = chain.first()
+    resolved_canonical = str(chain_row[0]) if chain_row else str(canonical_uuid)
+
+    if resolved_canonical == str(alias_uuid):
+        raise HTTPException(status_code=400, detail="That merge would create a cycle")
+
+    # If alias is itself currently a canonical for other merges, redirect
+    # those rows to the new deeper canonical so we never need multi-hop.
+    await db.execute(
+        _text(
+            "UPDATE season_aliases SET canonical_season_id = :new "
+            "WHERE org_id = :org AND canonical_season_id = :old AND undone_at IS NULL"
+        ),
+        {"new": resolved_canonical, "org": str(club.id), "old": str(alias_uuid)},
+    )
+
+    # If this exact alias is already mapped (active), retire that row first.
+    await db.execute(
+        _text(
+            "UPDATE season_aliases SET undone_at = NOW() "
+            "WHERE org_id = :org AND alias_season_id = :a AND undone_at IS NULL"
+        ),
+        {"org": str(club.id), "a": str(alias_uuid)},
+    )
+
+    await db.execute(
+        _text(
+            "INSERT INTO season_aliases (org_id, canonical_season_id, alias_season_id) "
+            "VALUES (:org, :c, :a)"
+        ),
+        {"org": str(club.id), "c": resolved_canonical, "a": str(alias_uuid)},
+    )
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="merge_seasons", target_type="season", target_id=resolved_canonical,
+        details={
+            "canonical_season_id": resolved_canonical,
+            "alias_season_id": str(alias_uuid),
+        },
+    )
+
+    await db.commit()
+    return {"status": "merged", "canonical_id": resolved_canonical, "alias_id": str(alias_uuid)}
+
+
+@router.post("/season-merges/{merge_id}/undo")
+async def undo_season_merge(
+    merge_id: int,
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        _text(
+            "UPDATE season_aliases SET undone_at = NOW() "
+            "WHERE id = :id AND org_id = :org AND undone_at IS NULL "
+            "RETURNING id"
+        ),
+        {"id": merge_id, "org": str(club.id)},
+    )
+    if result.first() is None:
+        raise HTTPException(status_code=404, detail="Merge not found or already undone")
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="undo_merge_seasons", target_type="season_alias",
+        target_id=str(merge_id),
+    )
+    await db.commit()
+    return {"status": "undone"}
+
+
+# ---------------------------------------------------------------------------
+# Activity log — append-only record of sensitive admin actions
+# ---------------------------------------------------------------------------
+
+
+@router.get("/activity-log")
+async def list_activity_log(
+    limit: int = 100,
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent admin actions for this club, newest first."""
+    limit = max(1, min(limit, 500))
+    rows = await db.execute(
+        _text(
+            """
+            SELECT
+                al.id,
+                al.created_at,
+                al.action,
+                al.target_type,
+                al.target_id,
+                al.details,
+                al.user_id,
+                u.email AS user_email
+            FROM audit_logs al
+            LEFT JOIN users u ON u.id = al.user_id
+            WHERE al.org_id = :org
+            ORDER BY al.created_at DESC
+            LIMIT :lim
+            """
+        ),
+        {"org": str(club.id), "lim": limit},
+    )
+    return [
+        {
+            "id": r["id"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "action": r["action"],
+            "target_type": r["target_type"],
+            "target_id": r["target_id"],
+            "user_email": r["user_email"],
+            "details": r["details"] or {},
+        }
+        for r in rows.mappings().all()
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +626,7 @@ async def get_settings(
 @router.patch("/settings")
 async def patch_settings(
     data: SettingsPatch,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -417,6 +649,22 @@ async def patch_settings(
             club.accent_color = clean["accent"]
     if data.player_name_format is not None and data.player_name_format in ("last_first", "first_last", "first_initial_last", "last_first_initial"):
         club.player_name_format = data.player_name_format
+
+    # Record which fields the admin touched. Don't dump full new values into
+    # the audit row — colour codes / names will already be visible in the
+    # settings UI and audit-only fields can pile up quickly. A list of
+    # changed-field names is enough to answer "who changed the club name
+    # last Tuesday?".
+    changed = [
+        k for k, v in data.dict(exclude_unset=True).items() if v is not None
+    ]
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="patch_settings", target_type="org", target_id=str(club.id),
+        details={"changed_fields": changed},
+    )
+
     await db.commit()
     return {"status": "updated"}
 
@@ -448,7 +696,7 @@ def _remove_uploaded_logo(logo_url: Optional[str]) -> None:
 @router.post("/logo")
 async def upload_logo(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -471,7 +719,7 @@ async def upload_logo(
 
 @router.delete("/logo")
 async def delete_logo(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1460,136 +1708,6 @@ async def action_sync_request(
 
 
 # ---------------------------------------------------------------------------
-# PHQ ID Suggestions
-# ---------------------------------------------------------------------------
-
-@router.get("/phq-suggestions")
-async def list_phq_suggestions(
-    current_user: User = Depends(get_current_user),
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        _text("""
-            SELECT
-                s.id, s.phq_player_id, s.phq_first_name, s.phq_last_name,
-                s.confidence, s.game_count, s.status, s.created_at,
-                p.id::text AS player_id,
-                COALESCE(p.display_name_override, p.name) AS player_name,
-                p.playhq_id AS player_current_phq_id
-            FROM phq_id_suggestions s
-            LEFT JOIN players p ON p.id = s.player_id
-            WHERE s.org_id = :org_id
-            ORDER BY
-                CASE s.status WHEN 'pending' THEN 0 ELSE 1 END,
-                s.confidence DESC,
-                s.game_count DESC
-            LIMIT 200
-        """),
-        {"org_id": str(club.id)},
-    )
-    rows = result.mappings().all()
-    data = [
-        {
-            "id": r["id"],
-            "phq_player_id": r["phq_player_id"],
-            "phq_name": f"{r['phq_first_name'] or ''} {r['phq_last_name'] or ''}".strip(),
-            "phq_first_name": r["phq_first_name"],
-            "phq_last_name": r["phq_last_name"],
-            "confidence": r["confidence"],
-            "game_count": r["game_count"],
-            "status": r["status"],
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-            "player_id": r["player_id"],
-            "player_name": r["player_name"],
-            "player_current_phq_id": r["player_current_phq_id"],
-        }
-        for r in rows
-    ]
-    return {"suggestions": data, "scanning": str(club.id) in _phq_scan_running}
-
-
-@router.post("/phq-suggestions/run")
-async def run_phq_suggestions(
-    current_user: User = Depends(get_current_user),
-    club: Organisation = Depends(get_current_club),
-):
-    from app.services.sync import suggest_phq_ids
-    org_id_str = str(club.id)
-
-    if org_id_str in _phq_scan_running:
-        return {"status": "already_running", "message": "A scan is already in progress for this org"}
-
-    _phq_scan_running.add(org_id_str)
-
-    async def _run():
-        _logging.getLogger(__name__).info(f"PhqSuggest: background task started for org {org_id_str}")
-        try:
-            result = await suggest_phq_ids(org_id_str)
-            _logging.getLogger(__name__).info(f"PhqSuggest: done for org {org_id_str}: {result}")
-        except Exception as e:
-            _logging.getLogger(__name__).error(f"PhqSuggest: FAILED for org {org_id_str}: {e}", exc_info=True)
-        finally:
-            _phq_scan_running.discard(org_id_str)
-            _background_tasks.discard(asyncio.current_task())
-
-    task = asyncio.create_task(_run())
-    _background_tasks.add(task)
-    return {"status": "started", "message": "PHQ ID scan running in background"}
-
-
-class PhqSuggestionAction(BaseModel):
-    action: str  # "approve" or "dismiss"
-    player_id: Optional[str] = None  # override which player to link
-
-
-@router.post("/phq-suggestions/{suggestion_id}")
-async def action_phq_suggestion(
-    suggestion_id: int,
-    body: PhqSuggestionAction,
-    current_user: User = Depends(get_current_user),
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    from datetime import datetime, timezone
-    sugg = await db.get(PhqIdSuggestion, suggestion_id)
-    if not sugg or str(sugg.org_id) != str(club.id):
-        raise HTTPException(status_code=404, detail="Suggestion not found")
-    if sugg.status != "pending":
-        raise HTTPException(status_code=409, detail="Suggestion already resolved")
-    if body.action not in ("approve", "dismiss"):
-        raise HTTPException(status_code=422, detail="action must be 'approve' or 'dismiss'")
-
-    sugg.resolved_at = datetime.now(timezone.utc)
-    sugg.status = "approved" if body.action == "approve" else "dismissed"
-
-    if body.action == "approve":
-        target_player_id = body.player_id or (str(sugg.player_id) if sugg.player_id else None)
-        if not target_player_id:
-            raise HTTPException(status_code=422, detail="player_id required for approval")
-        player = await db.get(Player, uuid.UUID(target_player_id))
-        if not player or player.organisation_id != club.id:
-            raise HTTPException(status_code=404, detail="Player not found")
-
-        # Check for conflict
-        conflict = await db.execute(
-            select(Player).where(
-                Player.organisation_id == club.id,
-                Player.playhq_id == sugg.phq_player_id,
-                Player.id != player.id,
-            )
-        )
-        if conflict.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="Another player already has this PlayHQ ID")
-
-        player.playhq_id = sugg.phq_player_id
-        sugg.player_id = player.id
-
-    await db.commit()
-    return {"status": sugg.status}
-
-
-# ---------------------------------------------------------------------------
 # Sync runs (hard refresh + history)
 # ---------------------------------------------------------------------------
 
@@ -1599,7 +1717,7 @@ _hard_refresh_running: set = set()
 
 @router.post("/hard-refresh", status_code=202)
 async def hard_refresh_org(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(RUN_HARD_REFRESH)),
     club: Organisation = Depends(get_current_club),
 ):
     """Trigger a full historical re-sync of the org.
@@ -1615,7 +1733,20 @@ async def hard_refresh_org(
     background; poll GET /club-admin/sync-runs/{run_id} for progress.
     """
     from app.services.sync import sync_organisation, start_sync_run, finish_sync_run
+    from app.services.rate_limit import enforce
     org_id_str = str(club.id)
+
+    # 1 hard-refresh per club per hour. The operation itself takes 1h+ and
+    # the in-progress guard below blocks a *concurrent* second call, but
+    # nothing stops a user clicking the button repeatedly during the run or
+    # right after it finishes. This window covers both cases.
+    enforce(
+        f"hard-refresh:{org_id_str}",
+        limit=1,
+        window_sec=3600,
+        detail="Hard refresh is allowed once per hour. Try again later.",
+    )
+
     if org_id_str in _hard_refresh_running:
         return {"status": "already_running", "org_id": org_id_str}
 
@@ -1667,7 +1798,7 @@ async def hard_refresh_org(
 
 @router.post("/backfill-aggregates")
 async def backfill_aggregates(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(RUN_SYNC)),
     club: Organisation = Depends(get_current_club),
 ):
     """Synthesise missing player_season_stats rows from per-game scorecard data.
@@ -1924,3 +2055,457 @@ async def reorder_sponsors(
             sponsor.display_order = item.display_order
     await db.commit()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Club user management — Main Admin assigns capabilities to club members
+# ---------------------------------------------------------------------------
+
+
+class ClubUserCreate(BaseModel):
+    username: str
+    display_name: Optional[str] = None
+    password: str
+    role: str = "club_member"  # super_admin and club_admin invites still go through super-admin
+    capabilities: list[str] = []
+
+
+class ClubUserUpdate(BaseModel):
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    capabilities: Optional[list[str]] = None
+    password: Optional[str] = None
+
+
+@router.get("/users")
+async def list_club_users(
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """List members of this club with their role + capabilities."""
+    rows = await db.execute(
+        _text(
+            """
+            SELECT u.id, u.username, u.display_name, u.last_login_at,
+                   cm.role, cm.capabilities
+            FROM club_memberships cm
+            JOIN users u ON u.id = cm.user_id
+            WHERE cm.club_id = :org
+            ORDER BY cm.role, COALESCE(u.display_name, u.username)
+            """
+        ),
+        {"org": str(club.id)},
+    )
+    out = []
+    for r in rows.mappings().all():
+        out.append({
+            "id": str(r["id"]),
+            "username": r["username"],
+            "display_name": r["display_name"],
+            "last_login_at": r["last_login_at"].isoformat() if r["last_login_at"] else None,
+            "role": r["role"],
+            "capabilities": r["capabilities"] or [],
+            "effective_capabilities": effective_capabilities(r["role"], r["capabilities"]),
+        })
+    return out
+
+
+@router.get("/users/capabilities")
+async def list_capabilities(
+    _user: User = Depends(require_cap(MANAGE_USERS)),
+):
+    """All known capability constants — used by the UI to render checkboxes."""
+    return {"capabilities": list(ALL_CAPABILITIES)}
+
+
+def _validate_cap_payload(role: str, caps: list[str]) -> list[str]:
+    if role not in ("club_admin", "club_member"):
+        raise HTTPException(400, "role must be club_admin or club_member")
+    bad = [c for c in caps if c not in ALL_CAPABILITIES]
+    if bad:
+        raise HTTPException(400, f"Unknown capability: {bad[0]}")
+    # club_admin ignores caps anyway — store empty for cleanliness
+    if role == "club_admin":
+        return []
+    # de-dup preserving order
+    seen = set()
+    return [c for c in caps if not (c in seen or seen.add(c))]
+
+
+@router.post("/users")
+async def create_club_user(
+    data: ClubUserCreate,
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    username = (data.username or "").strip().lower()
+    if not username or len(data.password) < 6:
+        raise HTTPException(400, "Username required and password must be 6+ chars")
+
+    caps = _validate_cap_payload(data.role, data.capabilities)
+
+    # Username uniqueness
+    existing = await db.execute(_text("SELECT id FROM users WHERE username = :u"), {"u": username})
+    if existing.first():
+        raise HTTPException(409, "Username already in use")
+
+    new_user_id = uuid.uuid4()
+    await db.execute(
+        _text(
+            "INSERT INTO users (id, username, display_name, password_hash) "
+            "VALUES (:id, :u, :d, :h)"
+        ),
+        {"id": str(new_user_id), "u": username, "d": data.display_name, "h": _hash_password(data.password)},
+    )
+    await db.execute(
+        _text(
+            "INSERT INTO club_memberships (id, club_id, user_id, role, capabilities) "
+            "VALUES (:id, :club, :uid, :role, CAST(:caps AS JSONB))"
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "club": str(club.id),
+            "uid": str(new_user_id),
+            "role": data.role,
+            "caps": _json.dumps(caps),
+        },
+    )
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="create_club_user", target_type="user", target_id=str(new_user_id),
+        details={"username": username, "role": data.role, "capabilities": caps},
+    )
+
+    await db.commit()
+    return {"id": str(new_user_id), "username": username, "role": data.role, "capabilities": caps}
+
+
+@router.patch("/users/{user_id}")
+async def update_club_user(
+    user_id: str,
+    data: ClubUserUpdate,
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    if str(current_user.id) == user_id:
+        # Main Admin can edit display name + password on themselves, but not
+        # role/caps (prevents self-demotion locking everyone out of admin).
+        if data.role is not None or data.capabilities is not None:
+            raise HTTPException(400, "Use a different admin to change your own role or capabilities")
+
+    # Confirm target is a member of this club
+    row = await db.execute(
+        _text(
+            "SELECT cm.id AS membership_id, cm.role AS current_role, u.id AS user_id "
+            "FROM club_memberships cm JOIN users u ON u.id = cm.user_id "
+            "WHERE u.id = :uid AND cm.club_id = :club"
+        ),
+        {"uid": user_id, "club": str(club.id)},
+    )
+    target = row.mappings().first()
+    if not target:
+        raise HTTPException(404, "User not found in this club")
+
+    changes = {}
+    if data.display_name is not None:
+        await db.execute(_text("UPDATE users SET display_name = :d WHERE id = :id"), {"d": data.display_name, "id": user_id})
+        changes["display_name"] = True
+    if data.password is not None:
+        if len(data.password) < 6:
+            raise HTTPException(400, "Password must be 6+ chars")
+        await db.execute(_text("UPDATE users SET password_hash = :h WHERE id = :id"), {"h": _hash_password(data.password), "id": user_id})
+        changes["password"] = True
+
+    if data.role is not None or data.capabilities is not None:
+        new_role = data.role or target["current_role"]
+        new_caps = data.capabilities if data.capabilities is not None else []
+        new_caps = _validate_cap_payload(new_role, new_caps)
+        await db.execute(
+            _text("UPDATE club_memberships SET role = :r, capabilities = CAST(:c AS JSONB) WHERE id = :id"),
+            {"r": new_role, "c": _json.dumps(new_caps), "id": target["membership_id"]},
+        )
+        changes["role"] = new_role
+        changes["capabilities"] = new_caps
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="update_club_user", target_type="user", target_id=user_id,
+        details={"changes": list(changes.keys()), **{k: v for k, v in changes.items() if k in ("role", "capabilities")}},
+    )
+
+    await db.commit()
+    return {"status": "ok", **changes}
+
+
+@router.delete("/users/{user_id}")
+async def remove_club_user(
+    user_id: str,
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    if str(current_user.id) == user_id:
+        raise HTTPException(400, "Can't remove yourself")
+
+    row = await db.execute(
+        _text(
+            "DELETE FROM club_memberships "
+            "WHERE user_id = :uid AND club_id = :club "
+            "RETURNING id"
+        ),
+        {"uid": user_id, "club": str(club.id)},
+    )
+    if not row.first():
+        raise HTTPException(404, "User not found in this club")
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="remove_club_user", target_type="user", target_id=user_id,
+    )
+
+    await db.commit()
+    return {"status": "removed"}
+
+
+# ---------------------------------------------------------------------------
+# Milestones report
+# ---------------------------------------------------------------------------
+
+@router.get("/milestones")
+async def list_milestones_report(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return upcoming + achieved milestones for all club players for admin reporting."""
+    import datetime
+    from app.services.milestone_rules import (
+        next_threshold, reach_window, crossed_thresholds, is_displayable,
+    )
+
+    org_id = str(club.id)
+    _CAT = {
+        "runs": "batting",
+        "wickets": "bowling",
+        "catches": "fielding",
+        "matches": "matches",
+        "grade_matches": "matches",
+    }
+
+    # ------------------------------------------------------------------
+    # Achieved: stored milestones (runs, wickets, matches, catches)
+    # ------------------------------------------------------------------
+    ach_rows = await db.execute(
+        _text("""
+            SELECT
+                m.milestone_type, m.milestone_value, m.achieved_at, m.detail,
+                p.id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name
+            FROM milestones m
+            JOIN players p ON p.id = m.player_id
+            WHERE p.organisation_id = :org_id
+              AND p.is_player = TRUE
+            ORDER BY m.achieved_at DESC NULLS LAST, m.milestone_value DESC
+        """),
+        {"org_id": org_id},
+    )
+    achieved = []
+    for r in ach_rows.mappings().all():
+        mt = r["milestone_type"]
+        mv = r["milestone_value"]
+        if not is_displayable(mt, mv):
+            continue
+        achieved.append({
+            "player_id": r["player_id"],
+            "player_name": r["player_name"],
+            "type": mt,
+            "category": _CAT.get(mt, "matches"),
+            "milestone_value": mv,
+            "achieved_at": r["achieved_at"].isoformat() if r["achieved_at"] else None,
+            "detail": r["detail"],
+        })
+
+    # ------------------------------------------------------------------
+    # Achieved: computed grade_matches (all players, bulk SQL)
+    # ------------------------------------------------------------------
+    gm_rows = await db.execute(
+        _text("""
+            SELECT
+                p.id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                COUNT(DISTINCT ga.game_id) AS matches
+            FROM game_appearances ga
+            JOIN players p ON p.id = ga.player_id
+            JOIN games g ON g.id = ga.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN LATERAL (
+                SELECT canonical_name FROM grade_merge_logs gml
+                WHERE gml.org_id = CAST(:org_id AS UUID)
+                  AND gml.alias_name = gr.name AND gml.undone_at IS NULL
+                LIMIT 1
+            ) am ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT gr2.display_name_override FROM grades gr2
+                JOIN seasons s2 ON s2.id = gr2.season_id
+                WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                  AND gr2.display_name_override IS NOT NULL
+                LIMIT 1
+            ) gdn ON TRUE
+            WHERE s.organisation_id = :org_id AND p.is_player = TRUE
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name),
+                     COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
+            HAVING COUNT(DISTINCT ga.game_id) >= 50
+        """),
+        {"org_id": org_id},
+    )
+    for r in gm_rows.mappings().all():
+        n = int(r["matches"])
+        grade_name = r["grade_name"]
+        if not grade_name:
+            continue
+        for threshold in crossed_thresholds("grade_matches", n):
+            achieved.append({
+                "player_id": r["player_id"],
+                "player_name": r["player_name"],
+                "type": "grade_matches",
+                "category": "matches",
+                "milestone_value": threshold,
+                "achieved_at": None,
+                "detail": grade_name,
+            })
+
+    # ------------------------------------------------------------------
+    # Upcoming: active players only (stats in last 3 seasons)
+    # ------------------------------------------------------------------
+    current_year = datetime.date.today().year
+    cutoff = current_year - 2
+
+    totals_rows = await db.execute(
+        _text("""
+            WITH active_ids AS (
+                SELECT DISTINCT pss.player_id
+                FROM player_season_stats pss
+                JOIN seasons s ON s.id = pss.season_id
+                WHERE s.organisation_id = :org_id
+                  AND (s.year IS NULL OR s.year >= :cutoff)
+            )
+            SELECT
+                p.id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COALESCE(SUM(pss.runs), 0)    AS total_runs,
+                COALESCE(SUM(pss.wickets), 0) AS total_wickets,
+                COALESCE(SUM(pss.matches), 0) AS total_matches,
+                COALESCE(SUM(pss.catches), 0) AS total_catches
+            FROM players p
+            JOIN active_ids ai ON ai.player_id = p.id
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = :org_id AND p.is_player = TRUE
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ORDER BY COALESCE(p.display_name_override, p.name)
+        """),
+        {"org_id": org_id, "cutoff": cutoff},
+    )
+
+    upcoming = []
+    stat_defs = [
+        ("runs",    "batting",  "total_runs"),
+        ("wickets", "bowling",  "total_wickets"),
+        ("matches", "matches",  "total_matches"),
+        ("catches", "fielding", "total_catches"),
+    ]
+    for r in totals_rows.mappings().all():
+        for mt, cat, col in stat_defs:
+            current = int(r[col] or 0)
+            target = next_threshold(mt, current)
+            if target is None:
+                continue
+            needed = target - current
+            if needed > reach_window(mt, target):
+                continue
+            upcoming.append({
+                "player_id": r["player_id"],
+                "player_name": r["player_name"],
+                "type": mt,
+                "category": cat,
+                "current": current,
+                "target": target,
+                "needed": needed,
+                "detail": None,
+            })
+
+    # Upcoming: grade milestones for active players
+    gu_rows = await db.execute(
+        _text("""
+            WITH active_ids AS (
+                SELECT DISTINCT pss.player_id
+                FROM player_season_stats pss
+                JOIN seasons s ON s.id = pss.season_id
+                WHERE s.organisation_id = :org_id
+                  AND (s.year IS NULL OR s.year >= :cutoff)
+            )
+            SELECT
+                p.id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                COUNT(DISTINCT ga.game_id) AS matches
+            FROM game_appearances ga
+            JOIN players p ON p.id = ga.player_id
+            JOIN active_ids ai ON ai.player_id = p.id
+            JOIN games g ON g.id = ga.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN LATERAL (
+                SELECT canonical_name FROM grade_merge_logs gml
+                WHERE gml.org_id = CAST(:org_id AS UUID)
+                  AND gml.alias_name = gr.name AND gml.undone_at IS NULL
+                LIMIT 1
+            ) am ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT gr2.display_name_override FROM grades gr2
+                JOIN seasons s2 ON s2.id = gr2.season_id
+                WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                  AND gr2.display_name_override IS NOT NULL
+                LIMIT 1
+            ) gdn ON TRUE
+            WHERE s.organisation_id = :org_id AND p.is_player = TRUE
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name),
+                     COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
+        """),
+        {"org_id": org_id, "cutoff": cutoff},
+    )
+    for r in gu_rows.mappings().all():
+        n = int(r["matches"])
+        grade_name = r["grade_name"]
+        if not grade_name:
+            continue
+        target = next_threshold("grade_matches", n)
+        if target is None:
+            continue
+        needed = target - n
+        if needed > reach_window("grade_matches", target):
+            continue
+        upcoming.append({
+            "player_id": r["player_id"],
+            "player_name": r["player_name"],
+            "type": "grade_matches",
+            "category": "matches",
+            "current": n,
+            "target": target,
+            "needed": needed,
+            "detail": grade_name,
+        })
+
+    upcoming.sort(key=lambda m: m["needed"])
+
+    return {"upcoming": upcoming, "achieved": achieved}

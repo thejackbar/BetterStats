@@ -1,7 +1,14 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import Optional
+from datetime import date as date_cls
 import uuid
+
+from app.services.milestone_rules import next_threshold, reach_window
+from app.services.season_aliases import (
+    resolve_season_filter,
+    resolve_season_filter_no_org,
+)
 
 # Merge-aware grade match fragment (gr must already be joined).
 # Matches grades that are the selected canonical OR are aliases merged into it.
@@ -18,10 +25,11 @@ _GRADE_MATCH = (
 
 
 async def get_career_batting(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
-    season_clause = " AND pss.season_id = :sid" if season_id else ""
+    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
     params: dict = {"pid": player_id}
-    if season_id:
-        params["sid"] = season_id
+    if season_ids:
+        params["sids"] = season_ids
     result = await session.execute(
         text(f"""
             SELECT
@@ -51,10 +59,11 @@ async def get_career_batting(session: AsyncSession, player_id: str, season_id: O
 
 
 async def get_career_bowling(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
-    season_clause = " AND pss.season_id = :sid" if season_id else ""
+    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
     params: dict = {"pid": player_id}
-    if season_id:
-        params["sid"] = season_id
+    if season_ids:
+        params["sids"] = season_ids
     result = await session.execute(
         text(f"""
             SELECT
@@ -84,10 +93,11 @@ async def get_career_bowling(session: AsyncSession, player_id: str, season_id: O
 
 
 async def get_career_fielding(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
-    season_clause = " AND pss.season_id = :sid" if season_id else ""
+    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
     params: dict = {"pid": player_id}
-    if season_id:
-        params["sid"] = season_id
+    if season_ids:
+        params["sids"] = season_ids
     result = await session.execute(
         text(f"""
             SELECT
@@ -112,6 +122,235 @@ async def get_career_fielding(session: AsyncSession, player_id: str, season_id: 
     )
     row = result.mappings().first()
     return dict(row) if row else None
+
+
+def _build_recent_games_cte(player_id_param: str, n_param: str) -> str:
+    # UNION (not UNION ALL) already deduplicates game_ids; the JOIN with games
+    # is 1:1 on the PK, so no DISTINCT is needed — and PostgreSQL requires
+    # ORDER BY columns to appear in the SELECT list when DISTINCT is used.
+    return f"""recent_games AS (
+        SELECT g.id AS game_id
+        FROM (
+            SELECT bi.game_id FROM batting_innings bi WHERE bi.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT bs.game_id FROM bowling_spells bs WHERE bs.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT fs.game_id FROM fielding_stats fs WHERE fs.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:{player_id_param} AS UUID)
+        ) ap
+        JOIN games g ON g.id = ap.game_id
+        ORDER BY g.played_at DESC NULLS LAST
+        LIMIT :{n_param}
+    )"""
+
+
+def _build_date_filtered_games_cte(player_id_param: str, start_date: Optional[str], end_date: Optional[str]) -> str:
+    """CTE: the player's games filtered to a date window.
+
+    Uses g.played_at when present; falls back to season-window overlap
+    (Oct s.year → Apr s.year+1) for games where played_at is NULL.
+    Games whose seasons have no year (s.year IS NULL) are excluded from
+    the fallback path — they can only match via played_at.
+    """
+    date_conds = []
+    season_conds = []
+    if start_date:
+        date_conds.append("g.played_at >= CAST(:start_date AS DATE)")
+        season_conds.append("MAKE_DATE(s.year + 1, 4, 30) >= CAST(:start_date AS DATE)")
+    if end_date:
+        date_conds.append("g.played_at <= CAST(:end_date AS DATE)")
+        season_conds.append("MAKE_DATE(s.year, 10, 1) <= CAST(:end_date AS DATE)")
+
+    date_clause = " AND ".join(date_conds) if date_conds else "TRUE"
+    season_clause = " AND ".join(season_conds) if season_conds else "TRUE"
+
+    where_clause = f"""WHERE (
+            (g.played_at IS NOT NULL AND {date_clause})
+            OR (g.played_at IS NULL AND s.year IS NOT NULL AND {season_clause})
+        )"""
+
+    return f"""date_filtered_games AS (
+        SELECT g.id AS game_id
+        FROM (
+            SELECT bi.game_id FROM batting_innings bi WHERE bi.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT bs.game_id FROM bowling_spells bs WHERE bs.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT fs.game_id FROM fielding_stats fs WHERE fs.player_id = CAST(:{player_id_param} AS UUID)
+            UNION
+            SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:{player_id_param} AS UUID)
+        ) ap
+        JOIN games g ON g.id = ap.game_id
+        LEFT JOIN grades gr ON gr.id = g.grade_id
+        LEFT JOIN seasons s ON s.id = gr.season_id
+        {where_clause}
+    )"""
+
+
+async def get_career_batting_from_innings(
+    session: AsyncSession,
+    player_id: str,
+    last_n_games: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[dict]:
+    params: dict = {"pid": player_id}
+    ctes = []
+    game_filter = ""
+
+    if last_n_games:
+        params["n"] = last_n_games
+        ctes.append(_build_recent_games_cte("pid", "n"))
+        game_filter = "AND bi.game_id IN (SELECT game_id FROM recent_games)"
+    elif start_date or end_date:
+        if start_date:
+            params["start_date"] = date_cls.fromisoformat(start_date)
+        if end_date:
+            params["end_date"] = date_cls.fromisoformat(end_date)
+        ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
+        game_filter = "AND bi.game_id IN (SELECT game_id FROM date_filtered_games)"
+
+    ctes.append(f"""qualifying AS (
+        SELECT bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out, bi.game_id
+        FROM batting_innings bi
+        JOIN games g ON g.id = bi.game_id
+        WHERE bi.player_id = CAST(:pid AS UUID)
+          AND NOT COALESCE(bi.did_not_bat, FALSE)
+          AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+          {game_filter}
+    )""")
+
+    sql = f"""
+        WITH {', '.join(ctes)}
+        SELECT
+            COALESCE(COUNT(*), 0) AS innings,
+            COALESCE(SUM(runs), 0) AS total_runs,
+            MAX(runs) AS high_score,
+            ROUND(SUM(runs)::numeric / NULLIF(COUNT(*) - SUM(not_out::int), 0), 2) AS average,
+            ROUND(SUM(runs)::numeric / NULLIF(SUM(balls), 0) * 100, 2) AS strike_rate,
+            COALESCE(SUM(CASE WHEN runs >= 50 AND runs < 100 THEN 1 ELSE 0 END), 0) AS fifties,
+            COALESCE(SUM(CASE WHEN runs >= 100 THEN 1 ELSE 0 END), 0) AS hundreds,
+            COALESCE(SUM(CASE WHEN runs = 0 AND NOT not_out THEN 1 ELSE 0 END), 0) AS ducks,
+            COALESCE(SUM(fours), 0) AS total_fours,
+            COALESCE(SUM(sixes), 0) AS total_sixes,
+            COUNT(DISTINCT game_id) AS games
+        FROM qualifying
+    """
+    result = await session.execute(text(sql), params)
+    row = result.mappings().first()
+    if not row:
+        return None
+    d = dict(row)
+    d["player_id"] = player_id
+    return d
+
+
+async def get_career_bowling_from_spells(
+    session: AsyncSession,
+    player_id: str,
+    last_n_games: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[dict]:
+    params: dict = {"pid": player_id}
+    ctes = []
+    game_filter = ""
+
+    if last_n_games:
+        params["n"] = last_n_games
+        ctes.append(_build_recent_games_cte("pid", "n"))
+        game_filter = "AND bs.game_id IN (SELECT game_id FROM recent_games)"
+    elif start_date or end_date:
+        if start_date:
+            params["start_date"] = date_cls.fromisoformat(start_date)
+        if end_date:
+            params["end_date"] = date_cls.fromisoformat(end_date)
+        ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
+        game_filter = "AND bs.game_id IN (SELECT game_id FROM date_filtered_games)"
+
+    ctes.append(f"""qualifying AS (
+        SELECT bs.wickets, bs.runs, bs.maidens, bs.overs, bs.game_id
+        FROM bowling_spells bs
+        JOIN games g ON g.id = bs.game_id
+        WHERE bs.player_id = CAST(:pid AS UUID)
+          {game_filter}
+    )""")
+
+    sql = f"""
+        WITH {', '.join(ctes)}
+        SELECT
+            COALESCE(SUM(wickets), 0) AS total_wickets,
+            ROUND(SUM(runs)::numeric / NULLIF(SUM(wickets), 0), 2) AS average,
+            ROUND(SUM(runs)::numeric / NULLIF(SUM(overs), 0), 2) AS economy,
+            (SELECT wickets FROM qualifying ORDER BY wickets DESC, runs ASC LIMIT 1) AS best_figures_wickets,
+            (SELECT wickets::text || '/' || runs::text FROM qualifying ORDER BY wickets DESC, runs ASC LIMIT 1) AS best_bowling_figures,
+            COALESCE(SUM(maidens), 0) AS total_maidens,
+            COALESCE(SUM(overs), 0) AS total_overs,
+            COALESCE(SUM(CASE WHEN wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors,
+            COUNT(DISTINCT game_id) AS games,
+            ROUND(SUM(overs)::numeric * 6 / NULLIF(SUM(wickets), 0), 2) AS bowling_strike_rate
+        FROM qualifying
+    """
+    result = await session.execute(text(sql), params)
+    row = result.mappings().first()
+    if not row:
+        return None
+    d = dict(row)
+    d["player_id"] = player_id
+    return d
+
+
+async def get_career_fielding_from_stats(
+    session: AsyncSession,
+    player_id: str,
+    last_n_games: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[dict]:
+    params: dict = {"pid": player_id}
+    ctes = []
+    game_filter = ""
+
+    if last_n_games:
+        params["n"] = last_n_games
+        ctes.append(_build_recent_games_cte("pid", "n"))
+        game_filter = "AND fs.game_id IN (SELECT game_id FROM recent_games)"
+    elif start_date or end_date:
+        if start_date:
+            params["start_date"] = date_cls.fromisoformat(start_date)
+        if end_date:
+            params["end_date"] = date_cls.fromisoformat(end_date)
+        ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
+        game_filter = "AND fs.game_id IN (SELECT game_id FROM date_filtered_games)"
+
+    ctes.append(f"""qualifying AS (
+        SELECT fs.catches, fs.catches_wk, fs.run_outs, fs.stumpings, fs.game_id
+        FROM fielding_stats fs
+        JOIN games g ON g.id = fs.game_id
+        WHERE fs.player_id = CAST(:pid AS UUID)
+          {game_filter}
+    )""")
+
+    sql = f"""
+        WITH {', '.join(ctes)}
+        SELECT
+            COALESCE(SUM(catches), 0) AS total_catches,
+            COALESCE(SUM(catches_wk), 0) AS total_catches_wk,
+            COALESCE(SUM(catches - catches_wk), 0) AS total_catches_non_wk,
+            COALESCE(SUM(run_outs), 0) AS total_run_outs,
+            COALESCE(SUM(stumpings), 0) AS total_stumpings,
+            COALESCE(SUM(catches + run_outs + stumpings), 0) AS total_dismissals,
+            COUNT(DISTINCT game_id) AS games
+        FROM qualifying
+    """
+    result = await session.execute(text(sql), params)
+    row = result.mappings().first()
+    if not row:
+        return None
+    d = dict(row)
+    d["player_id"] = player_id
+    return d
 
 
 async def get_batting_leaderboard(
@@ -146,14 +385,22 @@ async def get_fielding_leaderboard(
     grade_name: Optional[str] = None,
     finals_only: Optional[bool] = None,
     captain_only: Optional[bool] = None,
+    gender: Optional[str] = None,
 ) -> list[dict]:
-    ALLOWED_SORTS = {"total_catches", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
+    ALLOWED_SORTS = {"total_catches", "total_catches_non_wk", "total_catches_wk", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_dismissals"
 
+    season_ids = await resolve_season_filter(session, org_id, season_id)
+
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     captain_join = (" JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE" if captain_only else "")
+    gender_clause = f" AND p.gender = :gender" if gender else ""
     params: dict = {"org_id": org_id, "limit": limit}
+    if gender:
+        params["gender"] = gender
+    if season_ids:
+        params["season_ids"] = season_ids
 
     if grade_id:
         params["grade_id"] = grade_id
@@ -163,13 +410,15 @@ async def get_fielding_leaderboard(
                 COALESCE(p.display_name_override, p.name) AS name,
                 COUNT(DISTINCT fs.game_id) AS games,
                 COALESCE(SUM(fs.catches), 0) AS total_catches,
+                COALESCE(SUM(fs.catches_wk), 0) AS total_catches_wk,
+                COALESCE(SUM(fs.catches - fs.catches_wk), 0) AS total_catches_non_wk,
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
             FROM fielding_stats fs
             JOIN games g ON g.id = fs.game_id{captain_join}
             JOIN players p ON p.id = fs.player_id
-            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}
+            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -178,15 +427,15 @@ async def get_fielding_leaderboard(
 
     if grade_name:
         params["grade_name"] = grade_name
-        season_clause = " AND gr.season_id = :season_id" if season_id else ""
-        if season_id:
-            params["season_id"] = season_id
+        season_clause = " AND gr.season_id = ANY(:season_ids)" if season_ids else ""
         base = f"""
             SELECT
                 p.id AS player_id,
                 COALESCE(p.display_name_override, p.name) AS name,
                 COUNT(DISTINCT fs.game_id) AS games,
                 COALESCE(SUM(fs.catches), 0) AS total_catches,
+                COALESCE(SUM(fs.catches_wk), 0) AS total_catches_wk,
+                COALESCE(SUM(fs.catches - fs.catches_wk), 0) AS total_catches_non_wk,
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
@@ -195,7 +444,7 @@ async def get_fielding_leaderboard(
             JOIN grades gr ON gr.id = g.grade_id{captain_join}
             JOIN players p ON p.id = fs.player_id
             WHERE {_GRADE_MATCH}{season_clause}
-              AND p.organisation_id = :org_id{finals_clause}
+              AND p.organisation_id = :org_id{finals_clause}{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -204,15 +453,15 @@ async def get_fielding_leaderboard(
 
     if finals_only:
         # When finals_only=True with no grade filter, switch to per-game query
-        season_clause = " AND s.id = :season_id" if season_id else ""
-        if season_id:
-            params["season_id"] = season_id
+        season_clause = " AND s.id = ANY(:season_ids)" if season_ids else ""
         base = f"""
             SELECT
                 p.id AS player_id,
                 COALESCE(p.display_name_override, p.name) AS name,
                 COUNT(DISTINCT fs.game_id) AS games,
                 COALESCE(SUM(fs.catches), 0) AS total_catches,
+                COALESCE(SUM(fs.catches_wk), 0) AS total_catches_wk,
+                COALESCE(SUM(fs.catches - fs.catches_wk), 0) AS total_catches_non_wk,
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
@@ -222,7 +471,7 @@ async def get_fielding_leaderboard(
             JOIN seasons s ON s.id = gr.season_id{captain_join}
             JOIN players p ON p.id = fs.player_id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
-              AND g.is_final = TRUE{season_clause}
+              AND g.is_final = TRUE{season_clause}{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -230,15 +479,15 @@ async def get_fielding_leaderboard(
         return [dict(r) for r in result.mappings()]
 
     elif captain_only:
-        season_clause = " AND s.id = :season_id" if season_id else ""
-        if season_id:
-            params["season_id"] = season_id
+        season_clause = " AND s.id = ANY(:season_ids)" if season_ids else ""
         base = f"""
             SELECT
                 p.id AS player_id,
                 COALESCE(p.display_name_override, p.name) AS name,
                 COUNT(DISTINCT fs.game_id) AS games,
                 COALESCE(SUM(fs.catches), 0) AS total_catches,
+                COALESCE(SUM(fs.catches_wk), 0) AS total_catches_wk,
+                COALESCE(SUM(fs.catches - fs.catches_wk), 0) AS total_catches_non_wk,
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
@@ -248,7 +497,7 @@ async def get_fielding_leaderboard(
             JOIN seasons s ON s.id = gr.season_id
             JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE
             JOIN players p ON p.id = fs.player_id
-            WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}
+            WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -261,6 +510,8 @@ async def get_fielding_leaderboard(
             COALESCE(p.display_name_override, p.name) AS name,
             SUM(pss.matches) AS games,
             SUM(pss.catches) AS total_catches,
+            SUM(pss.catches_wk) AS total_catches_wk,
+            SUM(pss.catches_non_wk) AS total_catches_non_wk,
             SUM(pss.run_outs) AS total_run_outs,
             SUM(pss.stumpings) AS total_stumpings,
             SUM(pss.catches + pss.run_outs + pss.stumpings) AS total_dismissals
@@ -269,9 +520,10 @@ async def get_fielding_leaderboard(
         JOIN seasons s ON s.id = pss.season_id
         WHERE p.organisation_id = :org_id
     """
-    if season_id:
-        base += " AND pss.season_id = :season_id"
-        params["season_id"] = season_id
+    if season_ids:
+        base += " AND pss.season_id = ANY(:season_ids)"
+    if gender:
+        base += " AND p.gender = :gender"
     base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
@@ -284,11 +536,12 @@ async def get_player_batting_innings(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
 ) -> list[dict]:
+    season_ids = await resolve_season_filter_no_org(session, season_id)
     clauses = ["bi.player_id = :pid"]
     params: dict = {"pid": player_id}
-    if season_id:
-        clauses.append("s.id = :sid")
-        params["sid"] = season_id
+    if season_ids:
+        clauses.append("s.id = ANY(:sids)")
+        params["sids"] = season_ids
     if grade_id:
         clauses.append("gr.id = :gid")
         params["gid"] = grade_id
@@ -332,11 +585,12 @@ async def get_player_bowling_spells(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
 ) -> list[dict]:
+    season_ids = await resolve_season_filter_no_org(session, season_id)
     clauses = ["bs.player_id = :pid"]
     params: dict = {"pid": player_id}
-    if season_id:
-        clauses.append("s.id = :sid")
-        params["sid"] = season_id
+    if season_ids:
+        clauses.append("s.id = ANY(:sids)")
+        params["sids"] = season_ids
     if grade_id:
         clauses.append("gr.id = :gid")
         params["gid"] = grade_id
@@ -543,10 +797,11 @@ async def get_player_team_breakdown(
     season_clause_gr = ""
     season_clause_pss = ""
     params: dict = {"pid": player_id, "org_id": org_id}
-    if season_id:
-        season_clause_gr = " AND gr.season_id = CAST(:sid AS UUID)"
-        season_clause_pss = " AND pss.season_id = CAST(:sid AS UUID)"
-        params["sid"] = season_id
+    season_ids = await resolve_season_filter(session, org_id, season_id) if season_id else None
+    if season_ids:
+        season_clause_gr = " AND gr.season_id = ANY(:sids)"
+        season_clause_pss = " AND pss.season_id = ANY(:sids)"
+        params["sids"] = season_ids
 
     # Per-grade summary: roll up appearances to the canonical grade name.
     summary = await session.execute(
@@ -700,7 +955,7 @@ async def get_player_team_breakdown(
                 LIMIT 1
             ) gdn ON TRUE
             WHERE psgs.player_id = CAST(:pid AS UUID)
-              {(" AND psgs.season_id = CAST(:sid AS UUID)") if season_id else ""}
+              {(" AND psgs.season_id = ANY(:sids)") if season_ids else ""}
         """),
         params,
     )
@@ -795,40 +1050,55 @@ async def get_player_team_breakdown(
 
 
 async def get_season_by_season(session: AsyncSession, player_id: str) -> list[dict]:
+    # Merge-aware: if Summer 25/26 + Winter 25/26 are aliased into one canonical
+    # season, sum their stats into a single row keyed on the canonical season.
+    # Non-aliased seasons map to themselves so the GROUP BY collapses to one
+    # row per season either way.
     result = await session.execute(
         text("""
+            WITH per_pss AS (
+                SELECT
+                    pss.*,
+                    COALESCE(sa.canonical_season_id, pss.season_id) AS canonical_season_id
+                FROM player_season_stats pss
+                LEFT JOIN season_aliases sa
+                  ON sa.alias_season_id = pss.season_id
+                 AND sa.undone_at IS NULL
+                WHERE pss.player_id = :pid
+            )
             SELECT
                 s.id AS season_id,
                 s.name AS season_name,
                 s.year,
-                pss.matches,
-                pss.batting_innings,
-                pss.runs AS total_runs,
-                pss.high_score,
-                pss.batting_average,
-                pss.batting_strike_rate AS strike_rate,
-                pss.fifties,
-                pss.hundreds,
-                pss.not_outs,
-                pss.ducks,
-                pss.fours AS total_fours,
-                pss.sixes AS total_sixes,
-                pss.wickets AS total_wickets,
-                pss.runs_conceded AS bowling_runs_conceded,
-                pss.overs AS total_overs,
-                pss.bowling_average,
-                pss.bowling_economy AS economy,
-                pss.best_bowling_wickets,
-                pss.best_bowling_figures,
-                pss.five_wicket_innings AS five_fors,
-                pss.maidens AS total_maidens,
-                pss.catches AS total_catches,
-                pss.catches_wk AS total_catches_wk,
-                pss.run_outs AS total_run_outs,
-                pss.stumpings AS total_stumpings
-            FROM player_season_stats pss
-            JOIN seasons s ON s.id = pss.season_id
-            WHERE pss.player_id = :pid
+                SUM(p.matches) AS matches,
+                SUM(p.batting_innings) AS batting_innings,
+                SUM(p.runs) AS total_runs,
+                MAX(p.high_score) AS high_score,
+                ROUND(SUM(p.runs)::numeric / NULLIF(SUM(p.batting_innings) - SUM(p.not_outs), 0), 2) AS batting_average,
+                ROUND(SUM(p.runs)::numeric / NULLIF(SUM(p.balls_faced), 0) * 100, 2) AS strike_rate,
+                SUM(p.fifties) AS fifties,
+                SUM(p.hundreds) AS hundreds,
+                SUM(p.not_outs) AS not_outs,
+                SUM(p.ducks) AS ducks,
+                SUM(p.fours) AS total_fours,
+                SUM(p.sixes) AS total_sixes,
+                SUM(p.wickets) AS total_wickets,
+                SUM(p.runs_conceded) AS bowling_runs_conceded,
+                SUM(p.overs) AS total_overs,
+                ROUND(SUM(p.runs_conceded)::numeric / NULLIF(SUM(p.wickets), 0), 2) AS bowling_average,
+                ROUND(SUM(p.runs_conceded)::numeric / NULLIF(SUM(p.bowling_balls), 0) * 6, 2) AS economy,
+                MAX(p.best_bowling_wickets) AS best_bowling_wickets,
+                MAX(p.best_bowling_figures) AS best_bowling_figures,
+                SUM(p.five_wicket_innings) AS five_fors,
+                SUM(p.maidens) AS total_maidens,
+                SUM(p.catches) AS total_catches,
+                SUM(p.catches_wk) AS total_catches_wk,
+                SUM(p.catches_non_wk) AS total_catches_non_wk,
+                SUM(p.run_outs) AS total_run_outs,
+                SUM(p.stumpings) AS total_stumpings
+            FROM per_pss p
+            JOIN seasons s ON s.id = p.canonical_season_id
+            GROUP BY s.id, s.name, s.year
             ORDER BY s.year DESC NULLS LAST, s.name
         """),
         {"pid": player_id}
@@ -952,54 +1222,38 @@ async def get_upcoming_milestones_for_org(
     )
     rows = [dict(r) for r in result.mappings()]
 
-    RUN_MILESTONES = [
-        50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000,
-        6000, 7000, 8000, 9000, 10000, 12500, 15000, 17500, 20000,
-        25000, 30000, 35000, 40000, 45000, 50000,
-    ]
-    WICKET_MILESTONES = [
-        10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500,
-        600, 700, 800, 900, 1000, 1500, 2000, 2500, 3000, 4000, 5000,
-    ]
-    MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000]
-    CATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000]
-
-    def next_milestone(current, milestones):
-        for m in milestones:
-            if current < m:
-                return m
-        return None
-
-    # Score formula: milestone_value² / needed
-    # Heavily weights milestone size so 500-from-9000 beats 1-from-100
+    # Score formula: milestone_value² / needed.
+    # Heavily weights milestone size so 500-from-9000 beats 1-from-100.
     def importance_score(target, needed):
         return (target ** 2) / (needed + 1)
 
+    CATEGORY_MAP = {
+        "runs": "batting",
+        "wickets": "bowling",
+        "matches": "matches",
+        "catches": "fielding",
+    }
+
     upcoming = []
     for row in rows:
-        runs = int(row["career_runs"] or 0)
-        wickets = int(row["career_wickets"] or 0)
-        matches = int(row["career_matches"] or 0)
-        catches = int(row["career_catches"] or 0)
         player_id = str(row["player_id"])
         name = row["name"]
-
-        CATEGORY_MAP = {
-            "runs": "batting",
-            "wickets": "bowling",
-            "matches": "matches",
-            "catches": "fielding",
+        totals = {
+            "runs":    int(row["career_runs"]    or 0),
+            "wickets": int(row["career_wickets"] or 0),
+            "matches": int(row["career_matches"] or 0),
+            "catches": int(row["career_catches"] or 0),
         }
-        for stat, current, milestones in [
-            ("runs", runs, RUN_MILESTONES),
-            ("wickets", wickets, WICKET_MILESTONES),
-            ("matches", matches, MATCH_MILESTONES),
-            ("catches", catches, CATCH_MILESTONES),
-        ]:
-            target = next_milestone(current, milestones)
+
+        for stat, current in totals.items():
+            target = next_threshold(stat, current)
             if target is None:
                 continue
             needed = target - current
+            # Same in-reach window as the player profile — dashboard only
+            # surfaces milestones that are genuinely imminent.
+            if needed > reach_window(stat, target):
+                continue
             upcoming.append({
                 "player_id": player_id,
                 "name": name,
@@ -1248,6 +1502,7 @@ async def get_batting_leaderboard_extended(
     grade_name: Optional[str] = None,
     finals_only: Optional[bool] = None,
     captain_only: Optional[bool] = None,
+    gender: Optional[str] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_runs", "average", "strike_rate", "total_sixes",
@@ -1256,9 +1511,16 @@ async def get_batting_leaderboard_extended(
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_runs"
 
+    season_ids = await resolve_season_filter(session, org_id, season_id)
+
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     captain_join = (" JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE" if captain_only else "")
+    gender_clause = f" AND p.gender = :gender" if gender else ""
     params: dict = {"org_id": org_id, "limit": limit}
+    if gender:
+        params["gender"] = gender
+    if season_ids:
+        params["season_ids"] = season_ids
 
     if grade_id:
         params["grade_id"] = grade_id
@@ -1287,7 +1549,7 @@ async def get_batting_leaderboard_extended(
                 COALESCE(SUM(q.sixes), 0) AS total_sixes
             FROM qualifying q
             JOIN players p ON p.id = q.player_id
-            WHERE p.organisation_id = :org_id
+            WHERE p.organisation_id = :org_id{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """
         if min_runs > 0:
@@ -1299,9 +1561,7 @@ async def get_batting_leaderboard_extended(
 
     if grade_name:
         params["grade_name"] = grade_name
-        season_clause = " AND gr.season_id = :season_id" if season_id else ""
-        if season_id:
-            params["season_id"] = season_id
+        season_clause = " AND gr.season_id = ANY(:season_ids)" if season_ids else ""
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
@@ -1328,7 +1588,7 @@ async def get_batting_leaderboard_extended(
                 COALESCE(SUM(q.sixes), 0) AS total_sixes
             FROM qualifying q
             JOIN players p ON p.id = q.player_id
-            WHERE p.organisation_id = :org_id
+            WHERE p.organisation_id = :org_id{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """
         if min_runs > 0:
@@ -1340,9 +1600,7 @@ async def get_batting_leaderboard_extended(
 
     if finals_only:
         # When finals_only=True with no grade filter, switch to per-game query
-        season_clause = " AND s.id = :season_id" if season_id else ""
-        if season_id:
-            params["season_id"] = season_id
+        season_clause = " AND s.id = ANY(:season_ids)" if season_ids else ""
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
@@ -1371,7 +1629,7 @@ async def get_batting_leaderboard_extended(
                 COALESCE(SUM(q.sixes), 0) AS total_sixes
             FROM qualifying q
             JOIN players p ON p.id = q.player_id
-            WHERE p.organisation_id = :org_id
+            WHERE p.organisation_id = :org_id{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """
         if min_runs > 0:
@@ -1382,9 +1640,7 @@ async def get_batting_leaderboard_extended(
         return [dict(r) for r in result.mappings()]
 
     elif captain_only:
-        season_clause = " AND s.id = :season_id" if season_id else ""
-        if season_id:
-            params["season_id"] = season_id
+        season_clause = " AND s.id = ANY(:season_ids)" if season_ids else ""
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
@@ -1413,7 +1669,7 @@ async def get_batting_leaderboard_extended(
                 COALESCE(SUM(q.sixes), 0) AS total_sixes
             FROM qualifying q
             JOIN players p ON p.id = q.player_id
-            WHERE p.organisation_id = :org_id
+            WHERE p.organisation_id = :org_id{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """
         if min_runs > 0:
@@ -1443,9 +1699,10 @@ async def get_batting_leaderboard_extended(
         JOIN seasons s ON s.id = pss.season_id
         WHERE p.organisation_id = :org_id
     """
-    if season_id:
-        base += " AND pss.season_id = :season_id"
-        params["season_id"] = season_id
+    if season_ids:
+        base += " AND pss.season_id = ANY(:season_ids)"
+    if gender:
+        base += " AND p.gender = :gender"
     base += " GROUP BY p.id, COALESCE(p.display_name_override, p.name)"
     if min_runs > 0:
         base += " HAVING SUM(pss.runs) >= :min_runs"
@@ -1468,6 +1725,7 @@ async def get_bowling_leaderboard_extended(
     grade_name: Optional[str] = None,
     finals_only: Optional[bool] = None,
     captain_only: Optional[bool] = None,
+    gender: Optional[str] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_wickets", "average", "economy", "best_figures_wickets",
@@ -1476,9 +1734,16 @@ async def get_bowling_leaderboard_extended(
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_wickets"
 
+    season_ids = await resolve_season_filter(session, org_id, season_id)
+
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     captain_join = (" JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE" if captain_only else "")
+    gender_clause = f" AND p.gender = :gender" if gender else ""
     params: dict = {"org_id": org_id, "limit": limit}
+    if gender:
+        params["gender"] = gender
+    if season_ids:
+        params["season_ids"] = season_ids
     sort_dir = "ASC" if sort_by in ("economy", "average") else "DESC"
 
     if grade_id:
@@ -1510,7 +1775,7 @@ async def get_bowling_leaderboard_extended(
             JOIN games g ON g.id = bs.game_id{captain_join}
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}
+            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """
         having_clauses = []
@@ -1528,9 +1793,7 @@ async def get_bowling_leaderboard_extended(
 
     if grade_name:
         params["grade_name"] = grade_name
-        season_clause = " AND gr.season_id = :season_id" if season_id else ""
-        if season_id:
-            params["season_id"] = season_id
+        season_clause = " AND gr.season_id = ANY(:season_ids)" if season_ids else ""
         base = f"""
             WITH best_spell AS (
                 SELECT DISTINCT ON (bs.player_id)
@@ -1561,7 +1824,7 @@ async def get_bowling_leaderboard_extended(
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
-              AND p.organisation_id = :org_id
+              AND p.organisation_id = :org_id{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """
         having_clauses = []
@@ -1579,9 +1842,7 @@ async def get_bowling_leaderboard_extended(
 
     if finals_only:
         # When finals_only=True with no grade filter, switch to per-game query
-        season_clause = " AND s.id = :season_id" if season_id else ""
-        if season_id:
-            params["season_id"] = season_id
+        season_clause = " AND s.id = ANY(:season_ids)" if season_ids else ""
         base = f"""
             WITH best_spell AS (
                 SELECT DISTINCT ON (bs.player_id)
@@ -1616,7 +1877,7 @@ async def get_bowling_leaderboard_extended(
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND g.is_final = TRUE{season_clause}
-              AND p.organisation_id = :org_id
+              AND p.organisation_id = :org_id{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """
         having_clauses = []
@@ -1633,9 +1894,7 @@ async def get_bowling_leaderboard_extended(
         return [dict(r) for r in result.mappings()]
 
     elif captain_only:
-        season_clause = " AND s.id = :season_id" if season_id else ""
-        if season_id:
-            params["season_id"] = season_id
+        season_clause = " AND s.id = ANY(:season_ids)" if season_ids else ""
         base = f"""
             WITH best_spell AS (
                 SELECT DISTINCT ON (bs.player_id)
@@ -1670,7 +1929,7 @@ async def get_bowling_leaderboard_extended(
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}
-              AND p.organisation_id = :org_id
+              AND p.organisation_id = :org_id{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """
         having_clauses = []
@@ -1704,9 +1963,10 @@ async def get_bowling_leaderboard_extended(
         JOIN seasons s ON s.id = pss.season_id
         WHERE p.organisation_id = :org_id
     """
-    if season_id:
-        base += " AND pss.season_id = :season_id"
-        params["season_id"] = season_id
+    if season_ids:
+        base += " AND pss.season_id = ANY(:season_ids)"
+    if gender:
+        base += " AND p.gender = :gender"
     base += " GROUP BY p.id, COALESCE(p.display_name_override, p.name)"
     having_clauses = []
     if min_overs > 0:
@@ -1783,6 +2043,199 @@ async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Op
     return [dict(r) for r in result.mappings()]
 
 
+async def get_player_by_opposition(session: AsyncSession, player_id: str) -> list[dict]:
+    result = await session.execute(
+        text("""
+            WITH player_games AS (
+                -- opp_key: stable org UUID when available (populated by sync),
+                -- falls back to suffix-stripped team name for pre-sync rows.
+                SELECT
+                    ga.game_id,
+                    g.played_at,
+                    COALESCE(
+                        g.opp_org_id,
+                        CASE
+                            WHEN ga.team_name = g.home_team THEN g.away_club
+                            WHEN ga.team_name = g.away_team THEN g.home_club
+                            ELSE NULL
+                        END
+                    ) AS opp_key,
+                    COALESCE(
+                        g.opp_club_name,
+                        CASE
+                            WHEN ga.team_name = g.home_team THEN g.away_club
+                            WHEN ga.team_name = g.away_team THEN g.home_club
+                            ELSE NULL
+                        END
+                    ) AS opp_name,
+                    g.result
+                FROM game_appearances ga
+                JOIN games g ON g.id = ga.game_id
+                WHERE ga.player_id = CAST(:pid AS UUID)
+            ),
+            opp_display AS (
+                -- Most recently seen display name for each opp_key.
+                SELECT DISTINCT ON (opp_key)
+                    opp_key,
+                    opp_name AS opposition
+                FROM player_games
+                WHERE opp_key IS NOT NULL AND opp_name IS NOT NULL
+                ORDER BY opp_key, played_at DESC NULLS LAST
+            ),
+            games_by_opposition AS (
+                SELECT
+                    opp_key,
+                    COUNT(*) AS games,
+                    COUNT(*) FILTER (WHERE result = 'WIN') AS wins,
+                    COUNT(*) FILTER (WHERE result = 'LOSS') AS losses
+                FROM player_games
+                WHERE opp_key IS NOT NULL
+                GROUP BY opp_key
+            ),
+            batting_by_opposition AS (
+                SELECT
+                    pg.opp_key,
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL) AS innings,
+                    COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
+                    MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS dismissals
+                FROM batting_innings bi
+                JOIN player_games pg ON pg.game_id = bi.game_id
+                WHERE bi.player_id = CAST(:pid AS UUID)
+                  AND pg.opp_key IS NOT NULL
+                GROUP BY pg.opp_key
+            ),
+            bowling_by_opposition AS (
+                SELECT
+                    pg.opp_key,
+                    COALESCE(SUM(bs.wickets), 0) AS wickets,
+                    COALESCE(SUM(bs.runs), 0) AS bowling_runs,
+                    COALESCE(SUM(bs.overs), 0) AS bowling_overs
+                FROM bowling_spells bs
+                JOIN player_games pg ON pg.game_id = bs.game_id
+                WHERE bs.player_id = CAST(:pid AS UUID)
+                  AND pg.opp_key IS NOT NULL
+                GROUP BY pg.opp_key
+            ),
+            fielding_by_opposition AS (
+                SELECT
+                    pg.opp_key,
+                    COALESCE(SUM(fs.catches), 0) AS catches,
+                    COALESCE(SUM(fs.catches_wk), 0) AS catches_wk,
+                    COALESCE(SUM(fs.stumpings), 0) AS stumpings
+                FROM fielding_stats fs
+                JOIN player_games pg ON pg.game_id = fs.game_id
+                WHERE fs.player_id = CAST(:pid AS UUID)
+                  AND pg.opp_key IS NOT NULL
+                GROUP BY pg.opp_key
+            )
+            SELECT
+                COALESCE(od.opposition, gbo.opp_key) AS opposition,
+                gbo.games,
+                gbo.wins,
+                gbo.losses,
+                COALESCE(bao.innings, 0) AS innings,
+                COALESCE(bao.total_runs, 0) AS total_runs,
+                ROUND(bao.total_runs::numeric / NULLIF(bao.dismissals, 0), 2) AS batting_average,
+                bao.high_score,
+                COALESCE(boo.wickets, 0) AS wickets,
+                ROUND(boo.bowling_runs::numeric / NULLIF(boo.wickets, 0), 2) AS bowling_average,
+                ROUND(boo.bowling_runs::numeric / NULLIF(boo.bowling_overs, 0), 2) AS economy,
+                COALESCE(fo.catches, 0) AS total_catches,
+                COALESCE(fo.catches_wk, 0) AS catches_wk,
+                COALESCE(fo.catches - fo.catches_wk, 0) AS catches_non_wk,
+                COALESCE(fo.stumpings, 0) AS stumpings
+            FROM games_by_opposition gbo
+            LEFT JOIN opp_display od ON od.opp_key = gbo.opp_key
+            LEFT JOIN batting_by_opposition bao ON bao.opp_key = gbo.opp_key
+            LEFT JOIN bowling_by_opposition boo ON boo.opp_key = gbo.opp_key
+            LEFT JOIN fielding_by_opposition fo ON fo.opp_key = gbo.opp_key
+            ORDER BY gbo.games DESC
+        """),
+        {"pid": player_id},
+    )
+    return [dict(r) for r in result.mappings()]
+
+
+async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dict]:
+    result = await session.execute(
+        text("""
+            WITH games_by_venue AS (
+                SELECT
+                    g.venue,
+                    COUNT(*) AS games,
+                    COUNT(*) FILTER (WHERE g.result = 'WIN') AS wins,
+                    COUNT(*) FILTER (WHERE g.result = 'LOSS') AS losses
+                FROM game_appearances ga
+                JOIN games g ON g.id = ga.game_id
+                WHERE ga.player_id = CAST(:pid AS UUID)
+                  AND g.venue IS NOT NULL
+                GROUP BY g.venue
+            ),
+            batting_by_venue AS (
+                SELECT
+                    g.venue,
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL) AS innings,
+                    COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
+                    MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS dismissals
+                FROM batting_innings bi
+                JOIN games g ON g.id = bi.game_id
+                WHERE bi.player_id = CAST(:pid AS UUID)
+                  AND g.venue IS NOT NULL
+                GROUP BY g.venue
+            ),
+            bowling_by_venue AS (
+                SELECT
+                    g.venue,
+                    COALESCE(SUM(bs.wickets), 0) AS wickets,
+                    COALESCE(SUM(bs.runs), 0) AS bowling_runs,
+                    COALESCE(SUM(bs.overs), 0) AS bowling_overs
+                FROM bowling_spells bs
+                JOIN games g ON g.id = bs.game_id
+                WHERE bs.player_id = CAST(:pid AS UUID)
+                  AND g.venue IS NOT NULL
+                GROUP BY g.venue
+            ),
+            fielding_by_venue AS (
+                SELECT
+                    g.venue,
+                    COALESCE(SUM(fs.catches), 0) AS catches,
+                    COALESCE(SUM(fs.catches_wk), 0) AS catches_wk,
+                    COALESCE(SUM(fs.stumpings), 0) AS stumpings
+                FROM fielding_stats fs
+                JOIN games g ON g.id = fs.game_id
+                WHERE fs.player_id = CAST(:pid AS UUID)
+                  AND g.venue IS NOT NULL
+                GROUP BY g.venue
+            )
+            SELECT
+                gv.venue,
+                gv.games,
+                gv.wins,
+                gv.losses,
+                COALESCE(bav.innings, 0) AS innings,
+                COALESCE(bav.total_runs, 0) AS total_runs,
+                ROUND(bav.total_runs::numeric / NULLIF(bav.dismissals, 0), 2) AS batting_average,
+                bav.high_score,
+                COALESCE(bov.wickets, 0) AS wickets,
+                ROUND(bov.bowling_runs::numeric / NULLIF(bov.wickets, 0), 2) AS bowling_average,
+                ROUND(bov.bowling_runs::numeric / NULLIF(bov.bowling_overs, 0), 2) AS economy,
+                COALESCE(fv.catches, 0) AS total_catches,
+                COALESCE(fv.catches_wk, 0) AS catches_wk,
+                COALESCE(fv.catches - fv.catches_wk, 0) AS catches_non_wk,
+                COALESCE(fv.stumpings, 0) AS stumpings
+            FROM games_by_venue gv
+            LEFT JOIN batting_by_venue bav ON bav.venue = gv.venue
+            LEFT JOIN bowling_by_venue bov ON bov.venue = gv.venue
+            LEFT JOIN fielding_by_venue fv ON fv.venue = gv.venue
+            ORDER BY gv.games DESC
+        """),
+        {"pid": player_id},
+    )
+    return [dict(r) for r in result.mappings()]
+
+
 async def get_club_summary(
     session: AsyncSession,
     org_id: str,
@@ -1791,9 +2244,10 @@ async def get_club_summary(
 ) -> dict:
     where = "WHERE p.organisation_id = :org_id"
     params: dict = {"org_id": org_id}
-    if season_id:
-        where += " AND pss.season_id = :season_id"
-        params["season_id"] = season_id
+    season_ids = await resolve_season_filter(session, org_id, season_id)
+    if season_ids:
+        where += " AND pss.season_id = ANY(:season_ids)"
+        params["season_ids"] = season_ids
 
     res = await session.execute(
         text(f"""
@@ -1857,10 +2311,11 @@ async def get_player_rankings(
 ) -> dict:
     """Return the player's rank for runs, wickets, and catches within their org.
     Returns None for each category if the player is outside the top 100."""
-    season_clause = " AND pss.season_id = :season_id" if season_id else ""
+    season_ids = await resolve_season_filter(session, org_id, season_id)
+    season_clause = " AND pss.season_id = ANY(:season_ids)" if season_ids else ""
     params: dict = {"org_id": org_id, "player_id": player_id}
-    if season_id:
-        params["season_id"] = season_id
+    if season_ids:
+        params["season_ids"] = season_ids
 
     result = await session.execute(
         text(f"""
@@ -1920,12 +2375,13 @@ async def get_player_rankings(
     }
 
 
-def _sirs_base_clauses(org_id, season_id, grade_name, finals_only, params, captain_only=False, stat_alias='bi'):
+async def _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=False, stat_alias='bi'):
     """Return (season_clause, finals_clause, grade_clause, captain_join) strings and mutate params."""
     season_clause = ""
-    if season_id:
-        params["season_id"] = season_id
-        season_clause = " AND s.id = CAST(:season_id AS UUID)"
+    season_ids = await resolve_season_filter(session, org_id, season_id) if season_id else None
+    if season_ids:
+        params["season_ids"] = season_ids
+        season_clause = " AND s.id = ANY(:season_ids)"
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     grade_clause = ""
     if grade_name:
@@ -1954,9 +2410,13 @@ async def get_sirs_batting(
     finals_only: Optional[bool] = None,
     limit: int = 200,
     captain_only: Optional[bool] = None,
+    gender: Optional[str] = None,
 ) -> list[dict]:
     params: dict = {"org_id": org_id, "limit": limit}
-    season_clause, finals_clause, grade_clause, captain_join = _sirs_base_clauses(org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bi')
+    season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bi')
+    gender_clause = f" AND p.gender = :gender" if gender else ""
+    if gender:
+        params["gender"] = gender
     result = await session.execute(text(f"""
         SELECT
             p.id AS player_id,
@@ -1979,7 +2439,7 @@ async def get_sirs_batting(
           AND s.organisation_id = CAST(:org_id AS UUID)
           AND bi.runs >= 100
           AND NOT COALESCE(bi.did_not_bat, FALSE)
-          AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){season_clause}{finals_clause}{grade_clause}
+          AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){season_clause}{finals_clause}{grade_clause}{gender_clause}
         GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         ORDER BY century_count DESC NULLS LAST
         LIMIT :limit
@@ -1995,9 +2455,13 @@ async def get_sirs_bowling_innings(
     finals_only: Optional[bool] = None,
     limit: int = 200,
     captain_only: Optional[bool] = None,
+    gender: Optional[str] = None,
 ) -> list[dict]:
     params: dict = {"org_id": org_id, "limit": limit}
-    season_clause, finals_clause, grade_clause, captain_join = _sirs_base_clauses(org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bs')
+    season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bs')
+    gender_clause = f" AND p.gender = :gender" if gender else ""
+    if gender:
+        params["gender"] = gender
     result = await session.execute(text(f"""
         SELECT
             p.id AS player_id,
@@ -2019,7 +2483,7 @@ async def get_sirs_bowling_innings(
         JOIN players p ON p.id = bs.player_id{captain_join}
         WHERE p.organisation_id = CAST(:org_id AS UUID)
           AND s.organisation_id = CAST(:org_id AS UUID)
-          AND bs.wickets >= 7{season_clause}{finals_clause}{grade_clause}
+          AND bs.wickets >= 7{season_clause}{finals_clause}{grade_clause}{gender_clause}
         GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         ORDER BY haul_count DESC NULLS LAST
         LIMIT :limit
@@ -2035,9 +2499,13 @@ async def get_sirs_bowling_match(
     finals_only: Optional[bool] = None,
     limit: int = 200,
     captain_only: Optional[bool] = None,
+    gender: Optional[str] = None,
 ) -> list[dict]:
     params: dict = {"org_id": org_id, "limit": limit}
-    season_clause, finals_clause, grade_clause, captain_join = _sirs_base_clauses(org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bs')
+    season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bs')
+    gender_clause = f" AND p.gender = :gender" if gender else ""
+    if gender:
+        params["gender"] = gender
     result = await session.execute(text(f"""
         WITH match_totals AS (
             SELECT
@@ -2051,7 +2519,7 @@ async def get_sirs_bowling_match(
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = bs.player_id{captain_join}
             WHERE p.organisation_id = CAST(:org_id AS UUID)
-              AND s.organisation_id = CAST(:org_id AS UUID){season_clause}{finals_clause}{grade_clause}
+              AND s.organisation_id = CAST(:org_id AS UUID){season_clause}{finals_clause}{grade_clause}{gender_clause}
             GROUP BY bs.player_id, bs.game_id
             HAVING SUM(bs.wickets) >= 10
         )

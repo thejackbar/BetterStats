@@ -41,6 +41,7 @@ export const MILESTONE_ICON_SRC = {
   wickets: lightningBolt,
   matches: calendar,
   catches: handshake,
+  grade_matches: target,
 }
 
 export function ThiingIcon({ src, alt = '', className = 'w-5 h-5', ...rest }) {

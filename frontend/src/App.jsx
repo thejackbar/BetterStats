@@ -1,6 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
+import { ToastProvider } from './contexts/ToastContext'
+import ErrorBoundary from './components/ErrorBoundary'
 import ProtectedRoute from './components/ProtectedRoute'
 
 // Marketing
@@ -11,6 +13,7 @@ import About from './pages/marketing/About'
 import Contact from './pages/marketing/Contact'
 import Terms from './pages/marketing/Terms'
 import Privacy from './pages/marketing/Privacy'
+import FAQ from './pages/marketing/FAQ'
 
 // Auth
 import Login from './pages/Login'
@@ -31,6 +34,9 @@ import AdminMerge from './pages/admin/AdminMerge'
 import AdminGrades from './pages/admin/AdminGrades'
 import AdminSync from './pages/admin/AdminSync'
 import AdminPartnershipRecords from './pages/admin/AdminPartnershipRecords'
+import AdminMilestones from './pages/admin/AdminMilestones'
+import AdminActivityLog from './pages/admin/AdminActivityLog'
+import AdminUsers from './pages/admin/AdminUsers'
 
 // Public club pages (slug-based)
 import Dashboard from './pages/Dashboard'
@@ -64,6 +70,8 @@ export default function App() {
   return (
     <AuthProvider>
       <ThemeProvider>
+      <ToastProvider>
+      <ErrorBoundary>
       <div className="min-h-screen bg-pb-bg">
         <Navbar />
       <Routes>
@@ -73,6 +81,7 @@ export default function App() {
         <Route path="/pricing" element={<Pricing />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
+        <Route path="/faq" element={<FAQ />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
 
@@ -90,6 +99,9 @@ export default function App() {
         <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
         <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
         <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
+        <Route path="/admin/milestones" element={<ProtectedRoute><AdminMilestones /></ProtectedRoute>} />
+        <Route path="/admin/activity" element={<ProtectedRoute><AdminActivityLog /></ProtectedRoute>} />
+        <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
         <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
         <Route path="/admin/social-post" element={<ProtectedRoute><AdminSocialPost /></ProtectedRoute>} />
@@ -124,6 +136,8 @@ export default function App() {
       </Routes>
       <SponsorFooter />
       </div>
+      </ErrorBoundary>
+      </ToastProvider>
       </ThemeProvider>
     </AuthProvider>
   )

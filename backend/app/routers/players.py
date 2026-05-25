@@ -9,13 +9,17 @@ from app.models.db import Player, User, PlayerSyncRequest, get_db
 from app.routers.auth import get_current_user
 from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
+    get_career_batting_from_innings, get_career_bowling_from_spells, get_career_fielding_from_stats,
     get_player_batting_innings, get_player_bowling_spells,
     get_dismissal_breakdown, get_batting_by_position, get_batting_by_grade,
     get_bowling_by_grade, get_player_team_breakdown,
     get_bowling_dismissal_breakdown, get_bowling_by_batter_position,
     get_season_by_season, get_player_milestones, get_player_partnerships,
     get_player_activity, get_upcoming_milestones_for_org,
-    get_player_rankings,
+    get_player_rankings, get_player_by_venue, get_player_by_opposition,
+)
+from app.services.milestone_rules import (
+    crossed_thresholds, is_displayable, next_threshold, reach_window,
 )
 
 router = APIRouter(prefix="/players", tags=["players"])
@@ -39,7 +43,14 @@ async def list_players(
     )
     players = result.scalars().all()
     return [
-        {"id": str(p.id), "name": p.name, "display_name": p.display_name, "claimed": p.claimed}
+        {
+            "id": str(p.id),
+            "name": p.name,
+            "display_name": p.display_name,
+            "claimed": p.claimed,
+            "photo_url": p.photo_url,
+            "player_role": p.player_role,
+        }
         for p in players
     ]
 
@@ -64,15 +75,27 @@ async def get_player_stats(
     player_id: str,
     season_id: Optional[str] = Query(None),
     grade_id: Optional[str] = Query(None),
+    last_n_games: Optional[int] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
 
-    batting = await get_career_batting(db, player_id, season_id)
-    bowling = await get_career_bowling(db, player_id, season_id)
-    fielding = await get_career_fielding(db, player_id, season_id)
+    use_game_filter = last_n_games or start_date or end_date
+    if use_game_filter:
+        try:
+            batting = await get_career_batting_from_innings(db, player_id, last_n_games, start_date, end_date)
+            bowling = await get_career_bowling_from_spells(db, player_id, last_n_games, start_date, end_date)
+            fielding = await get_career_fielding_from_stats(db, player_id, last_n_games, start_date, end_date)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Stats query failed: {exc}")
+    else:
+        batting = await get_career_batting(db, player_id, season_id)
+        bowling = await get_career_bowling(db, player_id, season_id)
+        fielding = await get_career_fielding(db, player_id, season_id)
     batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id)
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id)
 
@@ -134,6 +157,22 @@ async def get_player_bowling_by_batter_position(player_id: str, db: AsyncSession
     return await get_bowling_by_batter_position(db, player_id)
 
 
+@router.get("/{player_id}/by-venue")
+async def get_player_by_venue_endpoint(player_id: str, db: AsyncSession = Depends(get_db)):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await get_player_by_venue(db, player_id)
+
+
+@router.get("/{player_id}/by-opposition")
+async def get_player_by_opposition_endpoint(player_id: str, db: AsyncSession = Depends(get_db)):
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return await get_player_by_opposition(db, player_id)
+
+
 @router.get("/{player_id}/team-breakdown")
 async def get_player_team_breakdown_endpoint(
     player_id: str,
@@ -174,7 +213,32 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     rows = await get_player_milestones(db, player_id)
-    return [_str_keys(r) for r in rows]
+    # Filter out pre-existing rows that don't match the current threshold scheme
+    # (10/25 matches, 100/250 runs, etc.) — they stay in the DB, just hidden.
+    milestones = [
+        _str_keys(r) for r in rows
+        if is_displayable(r["milestone_type"], r["milestone_value"])
+    ]
+
+    # Append computed per-grade match milestones (not stored in DB).
+    breakdown = await get_player_team_breakdown(db, player_id, str(player.organisation_id))
+    grade_rows = sorted(breakdown.get("rows", []), key=lambda r: r.get("grade_name") or "")
+    for row in grade_rows:
+        matches_in_grade = int(row.get("matches") or 0)
+        grade_name = row.get("grade_name")
+        if not grade_name:
+            continue
+        for threshold in crossed_thresholds("grade_matches", matches_in_grade):
+            milestones.append({
+                "id": None,
+                "milestone_type": "grade_matches",
+                "milestone_value": threshold,
+                "achieved_at": None,
+                "detail": grade_name,
+                "game_id": None,
+            })
+
+    return milestones
 
 
 @router.get("/{player_id}/partnerships")
@@ -199,61 +263,54 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    RUN_MILESTONES = [50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 5000]
-    WICKET_MILESTONES = [10, 25, 50, 75, 100, 150, 200]
-    MATCH_MILESTONES = [10, 25, 50, 100, 150, 200]
 
-    from sqlalchemy import text
     agg_res = await db.execute(
         text("""
             SELECT
-                COALESCE(SUM(runs), 0) AS total_runs,
+                COALESCE(SUM(runs), 0)    AS total_runs,
                 COALESCE(SUM(wickets), 0) AS total_wickets,
-                COALESCE(SUM(matches), 0) AS total_matches
+                COALESCE(SUM(matches), 0) AS total_matches,
+                COALESCE(SUM(catches), 0) AS total_catches
             FROM player_season_stats WHERE player_id=:pid
         """),
         {"pid": player_id}
     )
     agg = dict(agg_res.mappings().first() or {})
-    total_runs = int(agg.get("total_runs") or 0)
-    total_wickets = int(agg.get("total_wickets") or 0)
-    total_matches = int(agg.get("total_matches") or 0)
+    totals = {
+        "runs":    int(agg.get("total_runs")    or 0),
+        "wickets": int(agg.get("total_wickets") or 0),
+        "matches": int(agg.get("total_matches") or 0),
+        "catches": int(agg.get("total_catches") or 0),
+    }
 
     upcoming = []
-    for m in RUN_MILESTONES:
-        if total_runs < m:
-            upcoming.append({"type": "runs", "current": total_runs, "target": m, "needed": m - total_runs})
-            break
-    for m in WICKET_MILESTONES:
-        if total_wickets < m:
-            upcoming.append({"type": "wickets", "current": total_wickets, "target": m, "needed": m - total_wickets})
-            break
-    for m in MATCH_MILESTONES:
-        if total_matches < m:
-            upcoming.append({"type": "matches", "current": total_matches, "target": m, "needed": m - total_matches})
-            break
+    for mt, current in totals.items():
+        target = next_threshold(mt, current)
+        if target is None:
+            continue
+        needed = target - current
+        if needed > reach_window(mt, target):
+            continue
+        upcoming.append({"type": mt, "current": current, "target": target, "needed": needed})
 
     # Per-grade match milestones — uses the same merge-aware breakdown the
     # Team tab does so canonical/merged grade names line up.
     breakdown = await get_player_team_breakdown(db, player_id, str(player.organisation_id))
-    GRADE_MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300]
     for row in breakdown.get("rows", []):
         matches_in_grade = int(row.get("matches") or 0)
         grade_name = row.get("grade_name")
         if not grade_name or matches_in_grade <= 0:
             continue
-        next_target = next((m for m in GRADE_MATCH_MILESTONES if matches_in_grade < m), None)
-        if next_target is None:
+        target = next_threshold("grade_matches", matches_in_grade)
+        if target is None:
             continue
-        needed = next_target - matches_in_grade
-        # Only surface when within a meaningful window — otherwise the list
-        # explodes for players who've sampled lots of grades briefly.
-        if needed > 15:
+        needed = target - matches_in_grade
+        if needed > reach_window("grade_matches", target):
             continue
         upcoming.append({
             "type": "matches",
             "current": matches_in_grade,
-            "target": next_target,
+            "target": target,
             "needed": needed,
             "label": f"MATCHES — {grade_name}",
             "grade_name": grade_name,

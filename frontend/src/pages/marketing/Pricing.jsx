@@ -1,5 +1,46 @@
 import { Link } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
+import { usePageMeta } from '../../hooks/usePageMeta'
+
+const PRICING_JSONLD = {
+  '@context': 'https://schema.org',
+  '@type': 'Product',
+  name: 'BetterStats — Cricket Club Stats Platform',
+  description: 'Automated club cricket statistics platform with player profiles, leaderboards, records, partnerships, season yearbooks, awards and shareable stat cards. PlayHQ and MyCricket sync included.',
+  brand: { '@type': 'Brand', name: 'BetterStats' },
+  url: 'https://betterstats.cricket/pricing',
+  image: 'https://betterstats.cricket/og-image.png',
+  offers: [
+    {
+      '@type': 'Offer',
+      name: 'Monthly subscription',
+      price: '49',
+      priceCurrency: 'AUD',
+      availability: 'https://schema.org/InStock',
+      url: 'https://betterstats.cricket/pricing',
+      priceSpecification: {
+        '@type': 'UnitPriceSpecification',
+        price: '49',
+        priceCurrency: 'AUD',
+        unitText: 'MONTH',
+      },
+    },
+    {
+      '@type': 'Offer',
+      name: 'Annual subscription',
+      price: '400',
+      priceCurrency: 'AUD',
+      availability: 'https://schema.org/InStock',
+      url: 'https://betterstats.cricket/pricing',
+      priceSpecification: {
+        '@type': 'UnitPriceSpecification',
+        price: '400',
+        priceCurrency: 'AUD',
+        unitText: 'ANN',
+      },
+    },
+  ],
+}
 
 const INCLUDED = [
   'Unlimited players and seasons',
@@ -17,6 +58,13 @@ const INCLUDED = [
 const FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform'
 
 export default function Pricing() {
+  usePageMeta({
+    title: 'Pricing — $49/mo or $400/yr per club | BetterStats',
+    description: 'Simple, transparent cricket stats pricing for Australian clubs. $49 AUD per month or $400 AUD per year per club — unlimited players, full historical sync, season yearbooks, admin panel and email support included. No lock-in.',
+    image: 'https://betterstats.cricket/og-image.png',
+    url: 'https://betterstats.cricket/pricing',
+    jsonLd: PRICING_JSONLD,
+  })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />

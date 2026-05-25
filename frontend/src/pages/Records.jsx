@@ -554,6 +554,7 @@ export default function Records() {
   const [selectedGradeName, setSelectedGradeName] = useState(null)
   const [finalsOnly, setFinalsOnly] = useState(false)
   const [captainOnly, setCaptainOnly] = useState(false)
+  const [gender, setGender] = useState(null)
   const [tab, setTab] = useState('batting')
   const [records, setRecords] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -571,11 +572,11 @@ export default function Records() {
   useEffect(() => {
     if (!orgId) return
     setLoading(true)
-    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly })
+    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender })
       .then(setRecords)
       .catch(() => setRecords(null))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender])
 
   if (clubLoading) return <PbSpinner message="Loading club data…" />
 
@@ -601,10 +602,12 @@ export default function Records() {
             setFinalsOnly={setFinalsOnly}
             captainOnly={captainOnly}
             setCaptainOnly={setCaptainOnly}
+            gender={gender}
+            setGender={setGender}
           />
           {orgGrades.length > 0 && (
             <div className="flex items-center gap-2">
-              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap">Grade</label>
+              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Grade</label>
               <select
                 value={selectedGradeName || ''}
                 onChange={e => setSelectedGradeName(e.target.value || null)}
