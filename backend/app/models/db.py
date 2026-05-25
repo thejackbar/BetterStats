@@ -201,6 +201,9 @@ class Game(Base):
 
 class BattingInnings(Base):
     __tablename__ = "batting_innings"
+    __table_args__ = (
+        UniqueConstraint("game_id", "innings_number", "player_id", name="uq_batting_innings_game_inns_player"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"))

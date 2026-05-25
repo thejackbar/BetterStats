@@ -441,7 +441,7 @@ export default function AdminSync() {
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
                         {s.seasons != null && <StatPill label="seasons" value={s.seasons} />}
-                        {s.players != null && <StatPill label="players" value={s.players} />}
+                        {s.player_seasons != null && <StatPill label="player seasons" value={s.player_seasons} />}
                         {s.season_stats != null && <StatPill label="stat rows" value={s.season_stats} />}
                         {s.playhq_games_found != null && <StatPill label="phq games" value={s.playhq_games_found} highlight={s.playhq_games_found > 0} />}
                         {s.playhq_games_final != null && <StatPill label="phq final" value={s.playhq_games_final} highlight={s.playhq_games_final > 0} />}

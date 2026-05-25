@@ -348,7 +348,7 @@ async def sync_organisation(
             await finish_sync_run(run_id, {}, "Organisation not found")
         return {"error": "Organisation not found", "org_id": org_id_str}
 
-    stats = {"seasons": 0, "players": 0, "season_stats": 0,
+    stats = {"seasons": 0, "player_seasons": 0, "season_stats": 0,
              "games_new": 0, "batting": 0, "bowling": 0, "partnerships": 0,
              "playhq_games_found": 0, "playhq_games_final": 0}
 
@@ -569,7 +569,7 @@ async def sync_organisation(
                 session.add(row)
 
             await session.commit()
-            stats["players"] += len(player_data)
+            stats["player_seasons"] += len(player_data)
             stats["season_stats"] += len(player_data)
             logger.info(f"Season {season_data.get('name')}: {len(player_data)} players synced")
             if run_id:
