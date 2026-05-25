@@ -1,7 +1,14 @@
 import MarketingNav from '../../components/MarketingNav'
 import { Link } from 'react-router-dom'
+import { usePageMeta } from '../../hooks/usePageMeta'
 
 export default function About() {
+  usePageMeta({
+    title: 'About — BetterStats Cricket Stats Platform',
+    description: 'BetterStats was built by a club cricketer at Applecross Cricket Club in Perth, Western Australia, who was tired of maintaining stats in spreadsheets. Now offered to any Australian cricket club.',
+    image: 'https://betterstats.cricket/og-image.png',
+    url: 'https://betterstats.cricket/about',
+  })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />

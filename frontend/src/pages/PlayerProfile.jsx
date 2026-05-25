@@ -2107,10 +2107,31 @@ export default function PlayerProfile() {
     const club = org?.name ? `${org.name} cricket` : 'club cricket'
     return parts.length ? `${parts.join(' · ')} — ${club} statistics on BetterStats.` : null
   })()
+  const playerJsonLd = (() => {
+    if (!player || !metaName) return null
+    const ld = {
+      '@context': 'https://schema.org',
+      '@type': 'Person',
+      name: metaName,
+      url: `https://betterstats.cricket/players/${player.id}`,
+      sport: 'Cricket',
+    }
+    if (data?.player?.photo_url) ld.image = data.player.photo_url
+    if (org?.name) {
+      ld.memberOf = {
+        '@type': 'SportsTeam',
+        name: org.name,
+        sport: 'Cricket',
+        ...(org.slug ? { url: `https://betterstats.cricket/${org.slug}/dashboard` } : {}),
+      }
+    }
+    return ld
+  })()
   usePageMeta({
-    title: metaName ? `${metaName} — BetterStats` : null,
+    title: metaName ? `${metaName} — Cricket Career Stats | BetterStats` : null,
     description: metaDesc,
-    image: org?.logo_url || null,
+    image: data?.player?.photo_url || org?.logo_url || null,
+    jsonLd: playerJsonLd,
   })
 
   useEffect(() => {

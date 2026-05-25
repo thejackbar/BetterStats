@@ -1,6 +1,12 @@
 import MarketingNav from '../../components/MarketingNav'
+import { usePageMeta } from '../../hooks/usePageMeta'
 
 export default function Terms() {
+  usePageMeta({
+    title: 'Terms of Service — BetterStats',
+    description: 'BetterStats terms of service for Australian cricket clubs subscribing to the platform.',
+    url: 'https://betterstats.cricket/terms',
+  })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />

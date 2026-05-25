@@ -11,6 +11,7 @@ import About from './pages/marketing/About'
 import Contact from './pages/marketing/Contact'
 import Terms from './pages/marketing/Terms'
 import Privacy from './pages/marketing/Privacy'
+import FAQ from './pages/marketing/FAQ'
 
 // Auth
 import Login from './pages/Login'
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="/pricing" element={<Pricing />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
+        <Route path="/faq" element={<FAQ />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
 

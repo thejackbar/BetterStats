@@ -1,6 +1,13 @@
 import MarketingNav from '../../components/MarketingNav'
+import { usePageMeta } from '../../hooks/usePageMeta'
 
 export default function Contact() {
+  usePageMeta({
+    title: 'Contact — Request Access for Your Cricket Club | BetterStats',
+    description: 'Request access for your Australian cricket club, ask a question, or email the BetterStats team directly at betterstatsau@gmail.com.',
+    image: 'https://betterstats.cricket/og-image.png',
+    url: 'https://betterstats.cricket/contact',
+  })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />

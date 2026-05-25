@@ -138,6 +138,8 @@ These are the page types each connected club gets at `betterstats.cricket/{club-
 
 - **Email:** betterstatsau@gmail.com
 - **Website:** https://betterstats.cricket
+- **X / Twitter:** https://x.com/betterstatsau
+- **Facebook:** https://www.facebook.com/profile.php?id=61590372751599
 - **Request access form:** linked from the homepage, features page, pricing page, and contact page
 
 ## Common Questions BetterStats Answers

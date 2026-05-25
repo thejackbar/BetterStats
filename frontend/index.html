@@ -1,20 +1,126 @@
 <!DOCTYPE html>
-<html lang="en" class="dark" data-theme="dark">
+<html lang="en-AU" class="dark" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BetterStats — Club Cricket Analytics & Player Statistics</title>
-    <meta name="description" content="Track batting averages, bowling figures and fielding stats with BetterStats — the complete cricket analytics platform for club players, coaches and administrators." />
+    <meta name="theme-color" content="#0b1220" />
+    <meta name="google-site-verification" content="JaTqUSOcpWh1Y1fBdgsPaBoxgUMr3MF2EralyhDFRi8" />
+    <title>BetterStats — Cricket Stats Platform for Australian Clubs</title>
+    <meta name="description" content="BetterStats turns PlayHQ and MyCricket data into a beautiful, automated club cricket website — full player profiles, leaderboards, records and season yearbooks. Built for Australian cricket clubs." />
+    <meta name="author" content="BetterStats" />
+    <meta name="keywords" content="cricket stats, club cricket, cricket statistics, PlayHQ alternative, MyCricket stats, Australian cricket, cricket leaderboards, cricket records, club cricket website, cricket yearbook, cricket player profiles" />
+    <link rel="canonical" href="https://betterstats.cricket/" />
+    <link rel="icon" type="image/png" href="/og-image.png" />
+    <link rel="apple-touch-icon" href="/og-image.png" />
+
+    <!-- Open Graph -->
     <meta property="og:site_name" content="BetterStats" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="BetterStats — Club Cricket Analytics & Player Statistics" />
-    <meta property="og:description" content="Track batting averages, bowling figures and fielding stats with BetterStats — the complete cricket analytics platform for club players, coaches and administrators." />
-    <meta property="og:url" content="https://betterstats.cricket" />
+    <meta property="og:locale" content="en_AU" />
+    <meta property="og:title" content="BetterStats — Cricket Stats Platform for Australian Clubs" />
+    <meta property="og:description" content="Automated club cricket stats, leaderboards, records and season yearbooks — built for Australian cricket clubs. Pulls from PlayHQ and MyCricket; no manual data entry." />
+    <meta property="og:url" content="https://betterstats.cricket/" />
     <meta property="og:image" content="https://betterstats.cricket/og-image.png" />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="BetterStats — cricket statistics platform" />
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@betterstatsau" />
+    <meta name="twitter:creator" content="@betterstatsau" />
+    <meta name="twitter:title" content="BetterStats — Cricket Stats Platform for Australian Clubs" />
+    <meta name="twitter:description" content="Automated club cricket stats, leaderboards, records and season yearbooks — built for Australian cricket clubs." />
     <meta name="twitter:image" content="https://betterstats.cricket/og-image.png" />
-    <meta name="twitter:title" content="BetterStats — Club Cricket Analytics & Player Statistics" />
-    <meta name="twitter:description" content="Track batting averages, bowling figures and fielding stats with BetterStats — the complete cricket analytics platform for club players, coaches and administrators." />
+
+    <!-- Tell AI engines where the structured product overview lives -->
+    <link rel="alternate" type="text/plain" title="llms.txt" href="/llms.txt" />
+
+    <!-- Organisation structured data (JSON-LD). Per-page schemas live in
+         their respective React routes via usePageMeta({ jsonLd }). -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://betterstats.cricket/#organization",
+          "name": "BetterStats",
+          "url": "https://betterstats.cricket/",
+          "logo": "https://betterstats.cricket/og-image.png",
+          "email": "betterstatsau@gmail.com",
+          "areaServed": { "@type": "Country", "name": "Australia" },
+          "description": "BetterStats is an automated cricket statistics and analytics platform for Australian club cricket. It pulls every batting, bowling and fielding stat from PlayHQ and MyCricket and turns it into a beautiful public club website — with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards.",
+          "founder": { "@type": "Person", "name": "Jack Barendse" },
+          "sameAs": [
+            "https://x.com/betterstatsau",
+            "https://www.facebook.com/profile.php?id=61590372751599"
+          ],
+          "contactPoint": {
+            "@type": "ContactPoint",
+            "contactType": "customer support",
+            "email": "betterstatsau@gmail.com",
+            "areaServed": "AU",
+            "availableLanguage": ["en"]
+          }
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://betterstats.cricket/#website",
+          "url": "https://betterstats.cricket/",
+          "name": "BetterStats",
+          "publisher": { "@id": "https://betterstats.cricket/#organization" },
+          "inLanguage": "en-AU",
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://betterstats.cricket/{club_slug}/players?q={search_term_string}",
+            "query-input": "required name=search_term_string"
+          }
+        },
+        {
+          "@type": "SoftwareApplication",
+          "@id": "https://betterstats.cricket/#app",
+          "name": "BetterStats",
+          "applicationCategory": "SportsApplication",
+          "applicationSubCategory": "Cricket statistics",
+          "operatingSystem": "Web",
+          "url": "https://betterstats.cricket/",
+          "description": "Automated club cricket statistics platform — public player profiles, leaderboards, records, partnerships, awards and season yearbooks, powered by PlayHQ and MyCricket data.",
+          "offers": [
+            {
+              "@type": "Offer",
+              "name": "Monthly subscription",
+              "price": "49",
+              "priceCurrency": "AUD",
+              "priceSpecification": {
+                "@type": "UnitPriceSpecification",
+                "price": "49",
+                "priceCurrency": "AUD",
+                "unitText": "MONTH",
+                "billingIncrement": 1
+              },
+              "url": "https://betterstats.cricket/pricing"
+            },
+            {
+              "@type": "Offer",
+              "name": "Annual subscription",
+              "price": "400",
+              "priceCurrency": "AUD",
+              "priceSpecification": {
+                "@type": "UnitPriceSpecification",
+                "price": "400",
+                "priceCurrency": "AUD",
+                "unitText": "ANN",
+                "billingIncrement": 1
+              },
+              "url": "https://betterstats.cricket/pricing"
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
