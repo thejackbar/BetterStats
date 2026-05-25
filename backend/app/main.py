@@ -88,6 +88,29 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_grade_merge_logs_org_active "
             "ON grade_merge_logs(org_id, alias_name) WHERE undone_at IS NULL"
         ))
+        # Season aliases — admin can mark one season as merged into another so
+        # they display and aggregate as a single season (e.g. Summer 25/26 +
+        # Winter 25/26 → 2025/26). Soft model: no row rewrites; downstream
+        # queries expand the canonical season_id to include all active alias
+        # season_ids. Mirrors grade_merge_logs but keyed on UUIDs not names.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS season_aliases (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                alias_season_id    UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_season_aliases_alias_active "
+            "ON season_aliases(alias_season_id) WHERE undone_at IS NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_season_aliases_canonical_active "
+            "ON season_aliases(canonical_season_id) WHERE undone_at IS NULL"
+        ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS player_season_grade_stats (
                 id SERIAL PRIMARY KEY,
