@@ -168,8 +168,6 @@ Bell icon in the AdminLayout header + drop-down panel that auto-opens on login w
 **Adding a new changelog entry**: bump `SITE_VERSION` in `src/version.js`, then prepend an entry in `src/data/changelog.js` with the same version string.
 
 **Open follow-ups worth investigating**:
-- `upsert_organisation` defensive check for duplicate orgs across Grassroots GUID and PlayHQ UUID id-spaces (CLAUDE.md flagged it; Applecross duplicate was hand-cleaned but the trap remains).
-- Rename `stats["players"]` → `stats["player_seasons"]` to match what it actually counts.
 - The PHQ partner endpoints (`api.playhq.com/v1/seasons/.../grades`, `/grades/.../games`) still get hit during admin UI activity. These come from `suggest_phq_ids` and `deep_sync_player`. Both pre-date the Grassroots unlock and could probably be retired or repointed at GR. Low priority — they don't pollute the data anymore.
 - `get_org_games` has a per-`playhq_id` cache but no lock — concurrent first-callers will both fan out before the cache is populated. Observed as 2× "fetching games for 70 grades" log lines 27ms apart. Cheap fix: wrap with `asyncio.Lock`.
-- Add `UNIQUE (game_id, innings_number, player_id)` constraint to `batting_innings` — would prevent duplicate-row scenarios. Needs careful de-duping migration step before the constraint can be added.
+- Season-alias coverage for the long-tail surfaces: yearbook (per-season pages become orphans for hidden variants), milestone calculators, achievements, statlab — all still key on a single raw `season_id` and won't roll up merged variants into their canonical.
