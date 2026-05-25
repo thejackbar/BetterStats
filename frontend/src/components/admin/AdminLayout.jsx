@@ -42,6 +42,7 @@ const NAV_SECTIONS = [
   {
     heading: 'Tools',
     items: [
+      { to: '/admin/milestones', label: 'Milestones' },
       { to: '/admin/sync', label: 'Data Sync' },
       { to: '/admin/merge', label: 'Merge Players' },
       { to: '/admin/grades', label: 'Merge Grades' },

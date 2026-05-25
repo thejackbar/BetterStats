@@ -19,6 +19,7 @@ export default function AdminDashboard() {
     { to: '/admin/yearbook', label: 'Yearbooks', desc: 'Publish season yearbooks' },
     { to: '/admin/awards', label: 'Awards', desc: 'Add season awards & achievements' },
     { to: '/admin/merge', label: 'Merge Players', desc: 'Fix duplicate player entries' },
+    { to: '/admin/milestones', label: 'Milestones', desc: 'Upcoming & achieved milestones report' },
     { to: '/admin/sync', label: 'Data Sync', desc: 'Trigger sync & view sync log' },
     { to: '/admin/games', label: 'View Matches', desc: 'Browse match results' },
     { to: '/admin/social-post', label: 'Social Posts', desc: 'Design & export match day graphics' },

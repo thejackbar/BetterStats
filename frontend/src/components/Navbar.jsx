@@ -9,7 +9,7 @@ import NavbarPlayerSearch from "./NavbarPlayerSearch";
 import betterStatsLogo from "../assets/betterstatslogo_white.png";
 import { SITE_VERSION } from "../version";
 
-export { SITE_VERSION };
+export const SITE_VERSION = "v7.7.1";
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
