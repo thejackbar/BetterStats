@@ -1,4 +1,5 @@
 """Admin API routes — all require authentication."""
+import json as _json
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,10 @@ from sqlalchemy import text as _text
 import asyncio
 import logging as _logging
 from app.routers.auth import get_current_user, get_current_club, require_super_admin, _hash_password
+from app.auth.capabilities import (
+    require_cap, effective_capabilities, ALL_CAPABILITIES,
+    MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, RUN_HARD_REFRESH, RUN_SYNC,
+)
 from app.services import playhq_client
 
 # Keep strong references to background tasks so they aren't GC'd before completing
@@ -278,7 +283,7 @@ class SeasonMergeRequest(BaseModel):
 @router.post("/season-merges")
 async def create_season_merge(
     req: SeasonMergeRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -344,6 +349,17 @@ async def create_season_merge(
         ),
         {"org": str(club.id), "c": resolved_canonical, "a": str(alias_uuid)},
     )
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="merge_seasons", target_type="season", target_id=resolved_canonical,
+        details={
+            "canonical_season_id": resolved_canonical,
+            "alias_season_id": str(alias_uuid),
+        },
+    )
+
     await db.commit()
     return {"status": "merged", "canonical_id": resolved_canonical, "alias_id": str(alias_uuid)}
 
@@ -351,7 +367,7 @@ async def create_season_merge(
 @router.post("/season-merges/{merge_id}/undo")
 async def undo_season_merge(
     merge_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -365,8 +381,64 @@ async def undo_season_merge(
     )
     if result.first() is None:
         raise HTTPException(status_code=404, detail="Merge not found or already undone")
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="undo_merge_seasons", target_type="season_alias",
+        target_id=str(merge_id),
+    )
     await db.commit()
     return {"status": "undone"}
+
+
+# ---------------------------------------------------------------------------
+# Activity log — append-only record of sensitive admin actions
+# ---------------------------------------------------------------------------
+
+
+@router.get("/activity-log")
+async def list_activity_log(
+    limit: int = 100,
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent admin actions for this club, newest first."""
+    limit = max(1, min(limit, 500))
+    rows = await db.execute(
+        _text(
+            """
+            SELECT
+                al.id,
+                al.created_at,
+                al.action,
+                al.target_type,
+                al.target_id,
+                al.details,
+                al.user_id,
+                u.email AS user_email
+            FROM audit_logs al
+            LEFT JOIN users u ON u.id = al.user_id
+            WHERE al.org_id = :org
+            ORDER BY al.created_at DESC
+            LIMIT :lim
+            """
+        ),
+        {"org": str(club.id), "lim": limit},
+    )
+    return [
+        {
+            "id": r["id"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "action": r["action"],
+            "target_type": r["target_type"],
+            "target_id": r["target_id"],
+            "user_email": r["user_email"],
+            "details": r["details"] or {},
+        }
+        for r in rows.mappings().all()
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +626,7 @@ async def get_settings(
 @router.patch("/settings")
 async def patch_settings(
     data: SettingsPatch,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -577,6 +649,22 @@ async def patch_settings(
             club.accent_color = clean["accent"]
     if data.player_name_format is not None and data.player_name_format in ("last_first", "first_last", "first_initial_last", "last_first_initial"):
         club.player_name_format = data.player_name_format
+
+    # Record which fields the admin touched. Don't dump full new values into
+    # the audit row — colour codes / names will already be visible in the
+    # settings UI and audit-only fields can pile up quickly. A list of
+    # changed-field names is enough to answer "who changed the club name
+    # last Tuesday?".
+    changed = [
+        k for k, v in data.dict(exclude_unset=True).items() if v is not None
+    ]
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="patch_settings", target_type="org", target_id=str(club.id),
+        details={"changed_fields": changed},
+    )
+
     await db.commit()
     return {"status": "updated"}
 
@@ -608,7 +696,7 @@ def _remove_uploaded_logo(logo_url: Optional[str]) -> None:
 @router.post("/logo")
 async def upload_logo(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -631,7 +719,7 @@ async def upload_logo(
 
 @router.delete("/logo")
 async def delete_logo(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1629,7 +1717,7 @@ _hard_refresh_running: set = set()
 
 @router.post("/hard-refresh", status_code=202)
 async def hard_refresh_org(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(RUN_HARD_REFRESH)),
     club: Organisation = Depends(get_current_club),
 ):
     """Trigger a full historical re-sync of the org.
@@ -1645,7 +1733,20 @@ async def hard_refresh_org(
     background; poll GET /club-admin/sync-runs/{run_id} for progress.
     """
     from app.services.sync import sync_organisation, start_sync_run, finish_sync_run
+    from app.services.rate_limit import enforce
     org_id_str = str(club.id)
+
+    # 1 hard-refresh per club per hour. The operation itself takes 1h+ and
+    # the in-progress guard below blocks a *concurrent* second call, but
+    # nothing stops a user clicking the button repeatedly during the run or
+    # right after it finishes. This window covers both cases.
+    enforce(
+        f"hard-refresh:{org_id_str}",
+        limit=1,
+        window_sec=3600,
+        detail="Hard refresh is allowed once per hour. Try again later.",
+    )
+
     if org_id_str in _hard_refresh_running:
         return {"status": "already_running", "org_id": org_id_str}
 
@@ -1697,7 +1798,7 @@ async def hard_refresh_org(
 
 @router.post("/backfill-aggregates")
 async def backfill_aggregates(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(RUN_SYNC)),
     club: Organisation = Depends(get_current_club),
 ):
     """Synthesise missing player_season_stats rows from per-game scorecard data.
@@ -1954,6 +2055,223 @@ async def reorder_sponsors(
             sponsor.display_order = item.display_order
     await db.commit()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Club user management — Main Admin assigns capabilities to club members
+# ---------------------------------------------------------------------------
+
+
+class ClubUserCreate(BaseModel):
+    username: str
+    display_name: Optional[str] = None
+    password: str
+    role: str = "club_member"  # super_admin and club_admin invites still go through super-admin
+    capabilities: list[str] = []
+
+
+class ClubUserUpdate(BaseModel):
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    capabilities: Optional[list[str]] = None
+    password: Optional[str] = None
+
+
+@router.get("/users")
+async def list_club_users(
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """List members of this club with their role + capabilities."""
+    rows = await db.execute(
+        _text(
+            """
+            SELECT u.id, u.username, u.display_name, u.last_login_at,
+                   cm.role, cm.capabilities
+            FROM club_memberships cm
+            JOIN users u ON u.id = cm.user_id
+            WHERE cm.club_id = :org
+            ORDER BY cm.role, COALESCE(u.display_name, u.username)
+            """
+        ),
+        {"org": str(club.id)},
+    )
+    out = []
+    for r in rows.mappings().all():
+        out.append({
+            "id": str(r["id"]),
+            "username": r["username"],
+            "display_name": r["display_name"],
+            "last_login_at": r["last_login_at"].isoformat() if r["last_login_at"] else None,
+            "role": r["role"],
+            "capabilities": r["capabilities"] or [],
+            "effective_capabilities": effective_capabilities(r["role"], r["capabilities"]),
+        })
+    return out
+
+
+@router.get("/users/capabilities")
+async def list_capabilities(
+    _user: User = Depends(require_cap(MANAGE_USERS)),
+):
+    """All known capability constants — used by the UI to render checkboxes."""
+    return {"capabilities": list(ALL_CAPABILITIES)}
+
+
+def _validate_cap_payload(role: str, caps: list[str]) -> list[str]:
+    if role not in ("club_admin", "club_member"):
+        raise HTTPException(400, "role must be club_admin or club_member")
+    bad = [c for c in caps if c not in ALL_CAPABILITIES]
+    if bad:
+        raise HTTPException(400, f"Unknown capability: {bad[0]}")
+    # club_admin ignores caps anyway — store empty for cleanliness
+    if role == "club_admin":
+        return []
+    # de-dup preserving order
+    seen = set()
+    return [c for c in caps if not (c in seen or seen.add(c))]
+
+
+@router.post("/users")
+async def create_club_user(
+    data: ClubUserCreate,
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    username = (data.username or "").strip().lower()
+    if not username or len(data.password) < 6:
+        raise HTTPException(400, "Username required and password must be 6+ chars")
+
+    caps = _validate_cap_payload(data.role, data.capabilities)
+
+    # Username uniqueness
+    existing = await db.execute(_text("SELECT id FROM users WHERE username = :u"), {"u": username})
+    if existing.first():
+        raise HTTPException(409, "Username already in use")
+
+    new_user_id = uuid.uuid4()
+    await db.execute(
+        _text(
+            "INSERT INTO users (id, username, display_name, password_hash) "
+            "VALUES (:id, :u, :d, :h)"
+        ),
+        {"id": str(new_user_id), "u": username, "d": data.display_name, "h": _hash_password(data.password)},
+    )
+    await db.execute(
+        _text(
+            "INSERT INTO club_memberships (id, club_id, user_id, role, capabilities) "
+            "VALUES (:id, :club, :uid, :role, CAST(:caps AS JSONB))"
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "club": str(club.id),
+            "uid": str(new_user_id),
+            "role": data.role,
+            "caps": _json.dumps(caps),
+        },
+    )
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="create_club_user", target_type="user", target_id=str(new_user_id),
+        details={"username": username, "role": data.role, "capabilities": caps},
+    )
+
+    await db.commit()
+    return {"id": str(new_user_id), "username": username, "role": data.role, "capabilities": caps}
+
+
+@router.patch("/users/{user_id}")
+async def update_club_user(
+    user_id: str,
+    data: ClubUserUpdate,
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    if str(current_user.id) == user_id:
+        # Main Admin can edit display name + password on themselves, but not
+        # role/caps (prevents self-demotion locking everyone out of admin).
+        if data.role is not None or data.capabilities is not None:
+            raise HTTPException(400, "Use a different admin to change your own role or capabilities")
+
+    # Confirm target is a member of this club
+    row = await db.execute(
+        _text(
+            "SELECT cm.id AS membership_id, cm.role AS current_role, u.id AS user_id "
+            "FROM club_memberships cm JOIN users u ON u.id = cm.user_id "
+            "WHERE u.id = :uid AND cm.club_id = :club"
+        ),
+        {"uid": user_id, "club": str(club.id)},
+    )
+    target = row.mappings().first()
+    if not target:
+        raise HTTPException(404, "User not found in this club")
+
+    changes = {}
+    if data.display_name is not None:
+        await db.execute(_text("UPDATE users SET display_name = :d WHERE id = :id"), {"d": data.display_name, "id": user_id})
+        changes["display_name"] = True
+    if data.password is not None:
+        if len(data.password) < 6:
+            raise HTTPException(400, "Password must be 6+ chars")
+        await db.execute(_text("UPDATE users SET password_hash = :h WHERE id = :id"), {"h": _hash_password(data.password), "id": user_id})
+        changes["password"] = True
+
+    if data.role is not None or data.capabilities is not None:
+        new_role = data.role or target["current_role"]
+        new_caps = data.capabilities if data.capabilities is not None else []
+        new_caps = _validate_cap_payload(new_role, new_caps)
+        await db.execute(
+            _text("UPDATE club_memberships SET role = :r, capabilities = CAST(:c AS JSONB) WHERE id = :id"),
+            {"r": new_role, "c": _json.dumps(new_caps), "id": target["membership_id"]},
+        )
+        changes["role"] = new_role
+        changes["capabilities"] = new_caps
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="update_club_user", target_type="user", target_id=user_id,
+        details={"changes": list(changes.keys()), **{k: v for k, v in changes.items() if k in ("role", "capabilities")}},
+    )
+
+    await db.commit()
+    return {"status": "ok", **changes}
+
+
+@router.delete("/users/{user_id}")
+async def remove_club_user(
+    user_id: str,
+    current_user: User = Depends(require_cap(MANAGE_USERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    if str(current_user.id) == user_id:
+        raise HTTPException(400, "Can't remove yourself")
+
+    row = await db.execute(
+        _text(
+            "DELETE FROM club_memberships "
+            "WHERE user_id = :uid AND club_id = :club "
+            "RETURNING id"
+        ),
+        {"uid": user_id, "club": str(club.id)},
+    )
+    if not row.first():
+        raise HTTPException(404, "User not found in this club")
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=current_user.id,
+        action="remove_club_user", target_type="user", target_id=user_id,
+    )
+
+    await db.commit()
+    return {"status": "removed"}
 
 
 # ---------------------------------------------------------------------------

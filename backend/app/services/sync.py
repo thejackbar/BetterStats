@@ -52,10 +52,27 @@ async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisa
 
     org = await session.get(Organisation, org_id)
 
+    # Guard against duplicate rows when the same club has been synced under
+    # a different ID namespace (e.g. Grassroots GUID then PlayHQ UUID).
+    # Two layered checks before creating a new row:
+    #   1. playhq_id match — deterministic. If an existing org already has its
+    #      playhq_id populated with the incoming id, this is unambiguously the
+    #      same club seen from the PHQ side.
+    #   2. name match (case-insensitive) — fuzzy fallback for cases where the
+    #      cross-ID-space link was never recorded (e.g. legacy data, or sync
+    #      came in via PHQ before the GR-side playhq_id lookup ran).
+    if not org and org_id:
+        result = await session.execute(
+            select(Organisation).where(Organisation.playhq_id == str(org_id))
+        )
+        org = result.scalar_one_or_none()
+        if org:
+            logger.warning(
+                f"upsert_organisation: incoming id {org_id} matches existing "
+                f"org {org.id}'s playhq_id — reusing to avoid duplicate"
+            )
+
     if not org and incoming_name:
-        # Guard against duplicate rows when the same club has been synced under
-        # a different ID namespace (e.g. Grassroots GUID then PlayHQ UUID).
-        # Match by name (case-insensitive) before creating a new row.
         result = await session.execute(
             select(Organisation).where(
                 func.lower(Organisation.name) == incoming_name.lower()

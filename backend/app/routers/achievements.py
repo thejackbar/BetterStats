@@ -98,7 +98,15 @@ async def list_achievements(
         base_filter = "org_id = :org_id"
 
     if season:
-        base_filter += " AND season = :season"
+        # Expand to include any seasons currently aliased into this one, so
+        # picking "2025/26" includes achievements recorded under Summer or
+        # Winter 2025/26 too. Achievements store season as TEXT (typically a
+        # UUID string) so we cast both sides.
+        base_filter += (
+            " AND (season = :season OR season IN ("
+            "SELECT alias_season_id::text FROM season_aliases "
+            "WHERE canonical_season_id::text = :season AND undone_at IS NULL))"
+        )
         params["season"] = season
 
     # Resolve UUID season values → season names via a global seasons JOIN.

@@ -66,7 +66,7 @@ Cricket Australia hosts club cricket data across **two separate backends**, both
 
 3. **Pagination quirk**: PlayHQ's `links.next` is sometimes returned forever even when the data is exhausted (observed paginating past page 1100 on a single grade). Our pagination loops cap at MAX_PAGES=200 and stop on the first short batch — never trust `links.next` alone.
 
-4. **Org duplication trap**: `upsert_organisation` keys on whatever `id` is passed in, so calling sync with a PlayHQ UUID after the org was already created with a Grassroots GUID creates a duplicate row (one with `playhq_id=NULL` matching the other org's `id`). Detected May 2026 for Applecross, cleaned up via direct DELETE. Worth a defensive check in `upsert_organisation`.
+4. **Org duplication trap**: `upsert_organisation` keys on whatever `id` is passed in, so calling sync with a PlayHQ UUID after the org was already created with a Grassroots GUID would create a duplicate row (one with `playhq_id=NULL` matching the other org's `id`). Detected May 2026 for Applecross, cleaned up via direct DELETE. Guarded since commit ceadd84 — layered check on (a) primary id, (b) existing org's `playhq_id` matching incoming id, (c) name match (case-insensitive) before inserting.
 
 ## Sync Architecture
 
@@ -126,7 +126,7 @@ are unchanged.)
 - PostgreSQL `ORDER BY year DESC` defaults to NULLS FIRST — always use `.nullslast()`
 - API field names: `bowlingEconomyRate`, `fieldingTotalCatches`, no `bowlingOvers` (derive from `bowlingBalls`)
 - `Season.year` is NULL when Grassroots doesn't return `startDate` — extract from name (`"Summer 2010/11"` → `2010`) as a fallback
-- `stats["players"]` in sync is misleading — it's `len(player_data)` summed across seasons, i.e. player-season records, not unique players. With 52 seasons × ~3.4 avg seasons/player ≈ 5326 (which Applecross actually shows). Worth renaming to `player_seasons`.
+- `stats["player_seasons"]` in sync is `len(player_data)` summed across seasons, i.e. player-season records, not unique players. With 52 seasons × ~3.4 avg seasons/player ≈ 5326 (which Applecross actually shows). Renamed from `stats["players"]` to match what it counts.
 
 ## May 2026 Historical Data Fix — Resolution Log
 
@@ -168,8 +168,5 @@ Bell icon in the AdminLayout header + drop-down panel that auto-opens on login w
 **Adding a new changelog entry**: bump `SITE_VERSION` in `src/version.js`, then prepend an entry in `src/data/changelog.js` with the same version string.
 
 **Open follow-ups worth investigating**:
-- `upsert_organisation` defensive check for duplicate orgs across Grassroots GUID and PlayHQ UUID id-spaces (CLAUDE.md flagged it; Applecross duplicate was hand-cleaned but the trap remains).
-- Rename `stats["players"]` → `stats["player_seasons"]` to match what it actually counts.
-- The PHQ partner endpoints (`api.playhq.com/v1/seasons/.../grades`, `/grades/.../games`) still get hit during admin UI activity. These come from `suggest_phq_ids` and `deep_sync_player`. Both pre-date the Grassroots unlock and could probably be retired or repointed at GR. Low priority — they don't pollute the data anymore.
-- `get_org_games` has a per-`playhq_id` cache but no lock — concurrent first-callers will both fan out before the cache is populated. Observed as 2× "fetching games for 70 grades" log lines 27ms apart. Cheap fix: wrap with `asyncio.Lock`.
-- Add `UNIQUE (game_id, innings_number, player_id)` constraint to `batting_innings` — would prevent duplicate-row scenarios. Needs careful de-duping migration step before the constraint can be added.
+- `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
+- Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.

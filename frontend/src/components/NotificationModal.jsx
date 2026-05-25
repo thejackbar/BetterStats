@@ -136,6 +136,7 @@ export default function NotificationModal({ isOpen, summary, onClose }) {
   const newMilestones = summary?.new_milestones || []
   const upcoming = (summary?.upcoming_milestones || []).slice(0, 5)
   const pendingCount = summary?.pending_sync_requests || 0
+  const failedSyncs = syncRuns.filter(r => r.status === 'error')
 
   const hasSinceLastVisit = syncRuns.length > 0 || newMilestones.length > 0
   const hasAnything = newEntries.length > 0 || hasSinceLastVisit || upcoming.length > 0 || pendingCount > 0
@@ -166,6 +167,34 @@ export default function NotificationModal({ isOpen, summary, onClose }) {
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+
+          {/* Sync Failures — top callout when scheduled syncs have errored */}
+          {failedSyncs.length > 0 && (
+            <section>
+              <SectionHead title="Sync Failures" color="var(--pb-negative)" />
+              <Link
+                to="/admin/sync"
+                onClick={onClose}
+                className="block px-3 py-2.5 rounded-lg border hover:bg-pb-surface2 transition"
+                style={{ borderColor: 'var(--pb-negative)', background: 'color-mix(in srgb, var(--pb-negative) 8%, transparent)' }}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: 'var(--pb-negative)' }} />
+                  <span className="text-sm font-medium text-pb-text">
+                    {failedSyncs.length} sync {failedSyncs.length === 1 ? 'run' : 'runs'} failed since your last visit
+                  </span>
+                </div>
+                {failedSyncs[0].error && (
+                  <p className="text-xs text-pb-dim pl-4 truncate">
+                    Latest: {failedSyncs[0].error.slice(0, 100)}{failedSyncs[0].error.length > 100 ? '…' : ''}
+                  </p>
+                )}
+                <p className="text-[10px] text-pb-faintest pl-4 mt-1 font-mono uppercase tracking-wide3">
+                  Open admin → sync to retry
+                </p>
+              </Link>
+            </section>
+          )}
 
           {/* Needs Attention */}
           {pendingCount > 0 && (

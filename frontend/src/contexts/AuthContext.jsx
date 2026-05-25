@@ -45,8 +45,17 @@ export function AuthProvider({ children }) {
 
   const clearJustLoggedIn = useCallback(() => setJustLoggedIn(false), [])
 
+  // super_admin / club_admin implicitly have everything (backend sends the
+  // expanded list anyway, but checking role short-circuits race conditions
+  // where the role is set but capabilities haven't arrived yet).
+  const hasCapability = useCallback((cap) => {
+    if (!user) return false
+    if (user.role === 'super_admin' || user.role === 'club_admin') return true
+    return Array.isArray(user.capabilities) && user.capabilities.includes(cap)
+  }, [user])
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, refetch: fetchMe, justLoggedIn, clearJustLoggedIn }}>
+    <AuthContext.Provider value={{ user, login, logout, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability }}>
       {children}
     </AuthContext.Provider>
   )

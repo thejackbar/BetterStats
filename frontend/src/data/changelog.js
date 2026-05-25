@@ -4,6 +4,47 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.12',
+    date: '2026-05-25',
+    title: 'Finer-grained admin roles + Club Users page',
+    items: [
+      'New Admin → Users page lets a club Main Admin invite club members and toggle 11 fine-grained capabilities per user: settings, players, merges, yearbooks, awards, sponsors, social posts, milestones, run sync, run hard refresh, manage users',
+      'Existing club_admin users keep full access (treated as "Main Admin" — all capabilities implicit). New "club_member" role gets only what is explicitly granted',
+      'Sensitive endpoints now enforce capabilities server-side (merges, settings, logo upload, sync, hard refresh, user management). The nav hides links a user can\'t use',
+      'Audit log records user-management actions too (create / update / remove)',
+    ],
+  },
+  {
+    version: 'v7.11',
+    date: '2026-05-25',
+    title: 'Activity Log + form validation polish',
+    items: [
+      'New Admin → Activity Log page records every sensitive admin action — player merges (and undo), grade merges, season merges, settings changes — with who did it, when, and what changed. Append-only; useful for diagnosing "wait, where did that come from?" moments',
+      'Image uploads (club logo, player photo, sponsor logo) now fail fast on the client with a clear error when the file is too big or the wrong format — no more 30-second upload + cryptic 400 from the server',
+      'CSV / XLSX imports (achievements, partnership records) get the same pre-flight checks: format + 5 MB cap with a helpful message',
+      'AdminSettings save status now shows in red when something failed instead of the default accent green — was previously indistinguishable from a success',
+    ],
+  },
+  {
+    version: 'v7.10',
+    date: '2026-05-25',
+    title: 'Sync-failure alerts + rate limiting on expensive endpoints',
+    items: [
+      'Bell icon turns red when any scheduled sync has failed since your last visit. The notification panel now shows a "Sync Failures" callout at the top with the latest error and a one-click jump to Admin → Sync',
+      'Rate limits: Hard Refresh is capped at 1 per hour per club, narrative generation at 5 per hour per club. Server returns 429 with a Retry-After header if exceeded — protects against accidental button-mashing and runaway costs',
+    ],
+  },
+  {
+    version: 'v7.9.1',
+    date: '2026-05-25',
+    title: 'Merge Seasons — long-tail coverage (yearbook, statlab, achievements)',
+    items: [
+      'Yearbook stats roll up correctly when viewing a merged season — picking "2025/26" in a yearbook now shows the combined Summer+Winter overview, batting/bowling/fielding leaders, partnerships, etc.',
+      'StatLab queries with a season filter now include any aliased seasons in the result set — custom queries respect merges the same way leaderboards already do',
+      'Achievements list filtered by season now also surfaces achievements recorded under merged-away variants of that season',
+    ],
+  },
+  {
     version: 'v7.9',
     date: '2026-05-25',
     title: 'Merge Seasons — combine split-year seasons into one',

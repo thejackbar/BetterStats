@@ -12,6 +12,7 @@ from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
 from app.services import playhq_partner_client
 from app.routers.auth import get_current_user
+from app.auth.capabilities import require_cap, RUN_SYNC
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
@@ -343,7 +344,7 @@ async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full"):
 
 
 @router.post("/{org_id}/sync", status_code=202)
-async def trigger_sync(org_id: str, background_tasks: BackgroundTasks):
+async def trigger_sync(org_id: str, background_tasks: BackgroundTasks, _user: User = Depends(require_cap(RUN_SYNC))):
     from app.services.sync import start_sync_run
     if org_id in _org_sync_running:
         return {"status": "already_running", "org_id": org_id}

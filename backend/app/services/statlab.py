@@ -137,7 +137,7 @@ TARGETS: dict[str, dict] = {
 MATCH_CONTEXT_FILTERS: dict[str, dict] = {
     "date_from":    {"sql": "g.played_at >= :ctx_date_from",                          "value_kind": "date"},
     "date_to":      {"sql": "g.played_at <= :ctx_date_to",                            "value_kind": "date"},
-    "season_id":    {"sql": "s.id = CAST(:ctx_season_id AS UUID)",                    "value_kind": "uuid"},
+    "season_id":    {"sql": "(s.id = CAST(:ctx_season_id AS UUID) OR s.id IN (SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:ctx_season_id AS UUID) AND undone_at IS NULL))", "value_kind": "uuid"},
     "min_year":     {"sql": "COALESCE(s.year, 0) >= :ctx_min_year",                   "value_kind": "int"},
     "max_year":     {"sql": "COALESCE(s.year, 9999) <= :ctx_max_year",                "value_kind": "int"},
     "grade_id":     {"sql": "gr.id = CAST(:ctx_grade_id AS UUID)",                    "value_kind": "uuid"},
@@ -715,7 +715,12 @@ async def query_player_season(
     else:
         season_filter = ""
         if context.get("season_id"):
-            season_filter = "AND s.id = CAST(:ctx_season_id AS UUID)"
+            season_filter = (
+                "AND (s.id = CAST(:ctx_season_id AS UUID) "
+                "OR s.id IN (SELECT alias_season_id FROM season_aliases "
+                "WHERE canonical_season_id = CAST(:ctx_season_id AS UUID) "
+                "AND undone_at IS NULL))"
+            )
             params["ctx_season_id"] = context["season_id"]
         sql = f"""
             WITH agg AS (

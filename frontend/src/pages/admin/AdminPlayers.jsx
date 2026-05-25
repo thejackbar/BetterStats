@@ -3,6 +3,7 @@ import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import { nameMatchesSearch, formatPlayerName } from '../../lib/nameFormat'
+import { validateImageFile } from '../../lib/validation'
 
 // ---------------------------------------------------------------------------
 // EditPlayerModal
@@ -213,7 +214,10 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
                     onChange={e => {
                       const f = e.target.files?.[0]
                       e.target.value = ''
-                      if (f) setEditorSource(f)
+                      if (!f) return
+                      const err = validateImageFile(f)
+                      if (err) { setError(err); return }
+                      setEditorSource(f)
                     }}
                   />
                 </label>

@@ -165,6 +165,18 @@ export const api = {
     }),
   adminUndoSeasonMerge: (mergeId) =>
     request(`/club-admin/season-merges/${mergeId}/undo`, { method: 'POST' }),
+  // Activity log (audit trail)
+  adminListActivityLog: (limit = 100) =>
+    request(`/club-admin/activity-log?limit=${limit}`),
+  // Club user management
+  adminListClubUsers: () => request('/club-admin/users'),
+  adminListCapabilities: () => request('/club-admin/users/capabilities'),
+  adminCreateClubUser: (data) =>
+    request('/club-admin/users', { method: 'POST', body: JSON.stringify(data) }),
+  adminUpdateClubUser: (userId, data) =>
+    request(`/club-admin/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adminDeleteClubUser: (userId) =>
+    request(`/club-admin/users/${userId}`, { method: 'DELETE' }),
   adminListGames: (seasonId) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)

@@ -111,6 +111,26 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_season_aliases_canonical_active "
             "ON season_aliases(canonical_season_id) WHERE undone_at IS NULL"
         ))
+        # Audit log — records sensitive admin actions (merges, settings,
+        # destructive ops). Append-only from app code; no UPDATE/DELETE
+        # paths so the trail can't be quietly edited. user_id nullable for
+        # system-triggered actions (scheduled jobs, webhooks).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id SERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                user_id UUID,
+                action TEXT NOT NULL,
+                target_type TEXT,
+                target_id TEXT,
+                details JSONB DEFAULT '{}'
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_org_created "
+            "ON audit_logs(org_id, created_at DESC)"
+        ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS player_season_grade_stats (
                 id SERIAL PRIMARY KEY,
