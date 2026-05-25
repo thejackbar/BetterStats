@@ -156,6 +156,15 @@ export const api = {
   adminListSeasons: () => request('/club-admin/seasons'),
   adminReorderSeasons: (items) =>
     request('/club-admin/seasons/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+  // Season merges (aliases)
+  adminListSeasonMerges: () => request('/club-admin/season-merges'),
+  adminCreateSeasonMerge: (canonicalSeasonId, aliasSeasonId) =>
+    request('/club-admin/season-merges', {
+      method: 'POST',
+      body: JSON.stringify({ canonical_season_id: canonicalSeasonId, alias_season_id: aliasSeasonId }),
+    }),
+  adminUndoSeasonMerge: (mergeId) =>
+    request(`/club-admin/season-merges/${mergeId}/undo`, { method: 'POST' }),
   adminListGames: (seasonId) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)

@@ -177,12 +177,27 @@ async def list_seasons(
     db: AsyncSession = Depends(get_db),
 ):
     from app.routers.organisations import _season_sort_key
+    from app.services.season_aliases import load_active_alias_map, load_reverse_alias_map
     result = await db.execute(
         select(Season).where(Season.organisation_id == club.id)
     )
     seasons = sorted(result.scalars().all(), key=_season_sort_key)
+    alias_map = await load_active_alias_map(db, club.id)
+    reverse_map = await load_reverse_alias_map(db, club.id)
+    name_by_id = {str(s.id): s.name for s in seasons}
     return [
-        {"id": str(s.id), "name": s.name, "year": s.year, "synced_at": s.synced_at, "display_order": s.display_order}
+        {
+            "id": str(s.id),
+            "name": s.name,
+            "year": s.year,
+            "synced_at": s.synced_at,
+            "display_order": s.display_order,
+            "alias_of": reverse_map.get(str(s.id)),
+            "aliases": [
+                {"id": aid, "name": name_by_id.get(aid, "")}
+                for aid in alias_map.get(str(s.id), [])
+            ],
+        }
         for s in seasons
     ]
 
