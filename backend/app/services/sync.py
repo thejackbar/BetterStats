@@ -48,16 +48,36 @@ def _parse_uuid(val: str) -> Optional[uuid.UUID]:
 
 async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisation:
     org_id = _parse_uuid(org_data.get("id", ""))
+    incoming_name = (org_data.get("name") or "").strip()
+
     org = await session.get(Organisation, org_id)
+
+    if not org and incoming_name:
+        # Guard against duplicate rows when the same club has been synced under
+        # a different ID namespace (e.g. Grassroots GUID then PlayHQ UUID).
+        # Match by name (case-insensitive) before creating a new row.
+        result = await session.execute(
+            select(Organisation).where(
+                func.lower(Organisation.name) == incoming_name.lower()
+            )
+        )
+        org = result.scalar_one_or_none()
+        if org:
+            logger.warning(
+                f"upsert_organisation: id {org_id} not found but name "
+                f"'{incoming_name}' matches existing org {org.id} — reusing to avoid duplicate"
+            )
+
     if not org:
         org = Organisation(
             id=org_id,
-            name=org_data.get("name", ""),
+            name=incoming_name,
             short_name=org_data.get("shortName", ""),
         )
         session.add(org)
     else:
-        org.name = org_data.get("name") or org.name
+        org.name = incoming_name or org.name
+
     await session.commit()
     return org
 

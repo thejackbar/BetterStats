@@ -20,6 +20,7 @@ _SEMAPHORE = asyncio.Semaphore(4)  # max 4 concurrent PlayHQ requests
 _cache: dict[str, tuple[float, list]] = {}
 _scorecard_cache: dict[str, tuple[float, dict]] = {}
 _appearances_cache: dict[str, tuple[float, tuple]] = {}
+_org_games_locks: dict[str, asyncio.Lock] = {}
 APPEARANCES_CACHE_TTL = 86400  # 24 hours — FINAL game appearances never change
 
 PUBLIC_API_KEY = "6e02cae8-e3f0-4846-b024-4072716f1c60"
@@ -213,103 +214,112 @@ async def get_org_games(
     if not playhq_id:
         return []
 
-    # Full result cache — avoids repeating the expensive multi-API fan-out
+    # Full result cache — avoids repeating the expensive multi-API fan-out.
+    # Lock per playhq_id prevents concurrent first-callers from both triggering
+    # the fetch before the cache is populated (double-checked locking pattern).
     cache_key = f"org_games:{playhq_id}"
     cached = _get_cached(cache_key)
     if cached is not None:
         return cached
 
-    # ── Discover seasons ──────────────────────────────────────────────────────
-    try:
-        api_seasons = await get_org_seasons(playhq_id)
-    except Exception as e:
-        logger.warning(f"PlayHQ: failed to get seasons for {playhq_id}: {e}")
-        api_seasons = []
+    if playhq_id not in _org_games_locks:
+        _org_games_locks[playhq_id] = asyncio.Lock()
+    async with _org_games_locks[playhq_id]:
+        cached = _get_cached(cache_key)
+        if cached is not None:
+            return cached
 
-    api_name_to_id: dict[str, str] = {
-        (s.get("name") or "").strip().lower(): s["id"]
-        for s in api_seasons if s.get("id")
-    }
+        # ── Discover seasons ──────────────────────────────────────────────────
+        try:
+            api_seasons = await get_org_seasons(playhq_id)
+        except Exception as e:
+            logger.warning(f"PlayHQ: failed to get seasons for {playhq_id}: {e}")
+            api_seasons = []
 
-    seen_season_ids: set[str] = set()
-    unique_seasons: list[dict] = []
-    for s in api_seasons:
-        sid = s.get("id")
-        if sid and sid not in seen_season_ids:
-            seen_season_ids.add(sid)
-            unique_seasons.append({"id": sid, "name": s.get("name", "")})
-    for s in (db_seasons or []):
-        db_name = (s.get("name") or "").strip().lower()
-        if api_name_to_id.get(db_name):
-            continue
-        db_sid = str(s.get("id", ""))
-        if db_sid and db_sid not in seen_season_ids:
-            seen_season_ids.add(db_sid)
-            unique_seasons.append({"id": db_sid, "name": s.get("name", "")})
+        api_name_to_id: dict[str, str] = {
+            (s.get("name") or "").strip().lower(): s["id"]
+            for s in api_seasons if s.get("id")
+        }
 
-    logger.info(f"PlayHQ: {len(unique_seasons)} seasons to probe for {playhq_id}: {[s['name'] for s in unique_seasons[:10]]}")
+        seen_season_ids: set[str] = set()
+        unique_seasons: list[dict] = []
+        for s in api_seasons:
+            sid = s.get("id")
+            if sid and sid not in seen_season_ids:
+                seen_season_ids.add(sid)
+                unique_seasons.append({"id": sid, "name": s.get("name", "")})
+        for s in (db_seasons or []):
+            db_name = (s.get("name") or "").strip().lower()
+            if api_name_to_id.get(db_name):
+                continue
+            db_sid = str(s.get("id", ""))
+            if db_sid and db_sid not in seen_season_ids:
+                seen_season_ids.add(db_sid)
+                unique_seasons.append({"id": db_sid, "name": s.get("name", "")})
 
-    # ── Discover grades via season IDs (cached per season) ─────────────────────────
-    season_grade_results = await asyncio.gather(
-        *[get_season_grades(s["id"]) for s in unique_seasons],
-        return_exceptions=True,
-    )
+        logger.info(f"PlayHQ: {len(unique_seasons)} seasons to probe for {playhq_id}: {[s['name'] for s in unique_seasons[:10]]}")
 
-    seen_grade_ids: set[str] = set()
-    grade_season_pairs: list[tuple[dict, str]] = []
+        # ── Discover grades via season IDs (cached per season) ───────────────
+        season_grade_results = await asyncio.gather(
+            *[get_season_grades(s["id"]) for s in unique_seasons],
+            return_exceptions=True,
+        )
 
-    for i, grades in enumerate(season_grade_results):
-        if isinstance(grades, list):
-            season_name = unique_seasons[i].get("name", "")
-            for g in grades:
+        seen_grade_ids: set[str] = set()
+        grade_season_pairs: list[tuple[dict, str]] = []
+
+        for i, grades in enumerate(season_grade_results):
+            if isinstance(grades, list):
+                season_name = unique_seasons[i].get("name", "")
+                for g in grades:
+                    gid = g.get("id", "")
+                    if gid and gid not in seen_grade_ids:
+                        seen_grade_ids.add(gid)
+                        grade_season_pairs.append((g, season_name))
+
+        # ── Also try org-level grades endpoint (may return all historical grades) ──
+        try:
+            org_grades_data = await _get(f"{BASE_URL}/v1/organisations/{playhq_id}/grades")
+            org_grades = org_grades_data.get("data", [])
+            logger.info(f"PlayHQ: org-grades endpoint returned {len(org_grades)} grades for {playhq_id}")
+            for g in org_grades:
                 gid = g.get("id", "")
                 if gid and gid not in seen_grade_ids:
                     seen_grade_ids.add(gid)
+                    season_name = (g.get("season") or {}).get("name", "")
                     grade_season_pairs.append((g, season_name))
+        except Exception as e:
+            logger.debug(f"PlayHQ: org-grades endpoint unavailable for {playhq_id}: {e}")
 
-    # ── Also try org-level grades endpoint (may return all historical grades) ──
-    try:
-        org_grades_data = await _get(f"{BASE_URL}/v1/organisations/{playhq_id}/grades")
-        org_grades = org_grades_data.get("data", [])
-        logger.info(f"PlayHQ: org-grades endpoint returned {len(org_grades)} grades for {playhq_id}")
-        for g in org_grades:
-            gid = g.get("id", "")
-            if gid and gid not in seen_grade_ids:
-                seen_grade_ids.add(gid)
-                season_name = (g.get("season") or {}).get("name", "")
-                grade_season_pairs.append((g, season_name))
-    except Exception as e:
-        logger.debug(f"PlayHQ: org-grades endpoint unavailable for {playhq_id}: {e}")
+        if not grade_season_pairs:
+            logger.info(f"PlayHQ: no grades found for {playhq_id}")
+            return _set_cached(cache_key, [])
 
-    if not grade_season_pairs:
-        logger.info(f"PlayHQ: no grades found for {playhq_id}")
-        return _set_cached(cache_key, [])
+        logger.info(f"PlayHQ: fetching games for {len(grade_season_pairs)} grades")
 
-    logger.info(f"PlayHQ: fetching games for {len(grade_season_pairs)} grades")
+        # ── Fetch games for all grades concurrently (semaphore limits rate) ──
+        game_results = await asyncio.gather(
+            *[get_grade_games(g["id"]) for g, _ in grade_season_pairs],
+            return_exceptions=True,
+        )
 
-    # ── Fetch games for all grades concurrently (semaphore limits rate) ───
-    game_results = await asyncio.gather(
-        *[get_grade_games(g["id"]) for g, _ in grade_season_pairs],
-        return_exceptions=True,
-    )
+        keyword = org_name.split()[0].lower() if org_name else ""
+        all_games = []
 
-    keyword = org_name.split()[0].lower() if org_name else ""
-    all_games = []
+        for i, games in enumerate(game_results):
+            if not isinstance(games, list):
+                if isinstance(games, Exception):
+                    logger.warning(f"PlayHQ: grade fetch failed: {games}")
+                continue
+            grade, season_name = grade_season_pairs[i]
+            grade_name = grade.get("name", "")
+            grade_id = grade.get("id", "")
+            for game in games:
+                parsed = _parse_game(game, grade_name, grade_id, season_name, keyword)
+                if parsed:
+                    all_games.append(parsed)
 
-    for i, games in enumerate(game_results):
-        if not isinstance(games, list):
-            if isinstance(games, Exception):
-                logger.warning(f"PlayHQ: grade fetch failed: {games}")
-            continue
-        grade, season_name = grade_season_pairs[i]
-        grade_name = grade.get("name", "")
-        grade_id = grade.get("id", "")
-        for game in games:
-            parsed = _parse_game(game, grade_name, grade_id, season_name, keyword)
-            if parsed:
-                all_games.append(parsed)
-
-    return _set_cached(cache_key, all_games)
+        return _set_cached(cache_key, all_games)
 
 
 def _player_name_from_gql(player: dict) -> str:
