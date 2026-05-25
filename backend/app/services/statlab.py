@@ -73,6 +73,8 @@ PLAYER_AGG_METRICS: dict[str, str] = {
     "catches": "catches",
     "run_outs": "run_outs",
     "stumpings": "stumpings",
+    "wides": "wides",
+    "no_balls": "no_balls",
 }
 
 INNINGS_METRICS: dict[str, str] = {
@@ -481,7 +483,9 @@ def _player_agg_innings_cte(
                 COALESCE(SUM(bs.runs), 0)                         AS runs_conceded,
                 COALESCE(SUM(bs.maidens), 0)                      AS maidens,
                 COUNT(*) FILTER (WHERE bs.wickets >= 5)           AS five_wicket_innings,
-                MAX(bs.wickets)                                   AS best_bowling_wickets
+                MAX(bs.wickets)                                   AS best_bowling_wickets,
+                COALESCE(SUM(bs.wides), 0)    AS wides,
+                COALESCE(SUM(bs.no_balls), 0) AS no_balls
             FROM game_universe gu
             JOIN bowling_spells bs ON bs.game_id = gu.game_id
             JOIN players p ON p.id = bs.player_id
@@ -572,6 +576,8 @@ async def query_player_career(
                     COALESCE(bowl.five_wicket_innings, 0)                             AS five_wicket_innings,
                     COALESCE(bowl.maidens, 0)                                         AS maidens,
                     bowl.best_bowling_wickets                                          AS best_bowling_wickets,
+                    COALESCE(bowl.wides, 0)    AS wides,
+                    COALESCE(bowl.no_balls, 0) AS no_balls,
                     COALESCE(field.catches, 0)                                        AS catches,
                     COALESCE(field.run_outs, 0)                                       AS run_outs,
                     COALESCE(field.stumpings, 0)                                      AS stumpings
@@ -616,6 +622,8 @@ async def query_player_career(
                     COALESCE(SUM(pss.five_wicket_innings), 0)                                    AS five_wicket_innings,
                     COALESCE(SUM(pss.maidens), 0)                                                AS maidens,
                     MAX(pss.best_bowling_wickets)                                                AS best_bowling_wickets,
+                    COALESCE(SUM(pss.wides), 0)    AS wides,
+                    COALESCE(SUM(pss.no_balls), 0) AS no_balls,
                     COALESCE(SUM(pss.catches), 0)                                                AS catches,
                     COALESCE(SUM(pss.run_outs), 0)                                               AS run_outs,
                     COALESCE(SUM(pss.stumpings), 0)                                              AS stumpings
@@ -697,6 +705,8 @@ async def query_player_season(
                     COALESCE(bowl.five_wicket_innings, 0)             AS five_wicket_innings,
                     COALESCE(bowl.maidens, 0)                         AS maidens,
                     bowl.best_bowling_wickets                         AS best_bowling_wickets,
+                    COALESCE(bowl.wides, 0)    AS wides,
+                    COALESCE(bowl.no_balls, 0) AS no_balls,
                     COALESCE(field.catches, 0)                        AS catches,
                     COALESCE(field.run_outs, 0)                       AS run_outs,
                     COALESCE(field.stumpings, 0)                      AS stumpings
@@ -754,6 +764,8 @@ async def query_player_season(
                     COALESCE(pss.five_wicket_innings, 0)                                          AS five_wicket_innings,
                     COALESCE(pss.maidens, 0)                                                      AS maidens,
                     pss.best_bowling_wickets                                                       AS best_bowling_wickets,
+                    COALESCE(pss.wides, 0)    AS wides,
+                    COALESCE(pss.no_balls, 0) AS no_balls,
                     COALESCE(pss.catches, 0)                                                      AS catches,
                     COALESCE(pss.run_outs, 0)                                                     AS run_outs,
                     COALESCE(pss.stumpings, 0)                                                    AS stumpings
@@ -830,6 +842,8 @@ async def query_player_grade(
                 COALESCE(bowl.five_wicket_innings, 0)                   AS five_wicket_innings,
                 COALESCE(bowl.maidens, 0)                               AS maidens,
                 bowl.best_bowling_wickets                                AS best_bowling_wickets,
+                COALESCE(bowl.wides, 0)    AS wides,
+                COALESCE(bowl.no_balls, 0) AS no_balls,
                 COALESCE(field.catches, 0)                              AS catches,
                 COALESCE(field.run_outs, 0)                             AS run_outs,
                 COALESCE(field.stumpings, 0)                            AS stumpings
@@ -1303,6 +1317,189 @@ async def derived_best_partnership_pair(
     return [dict(r) for r in result.mappings()]
 
 
+async def derived_carried_bat(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Players who carried the bat — batted at #1 or #2 and were not out when
+    their team was bowled out (9+ dismissals in that innings)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 200), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        innings_wickets AS (
+            SELECT
+                bi.game_id,
+                bi.innings_number,
+                COUNT(*) FILTER (
+                    WHERE bi.not_out = FALSE
+                      AND bi.did_not_bat IS NOT TRUE
+                      AND bi.dismissal_type IS NOT NULL
+                      AND LOWER(bi.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')
+                ) AS wickets_fell
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            WHERE p.organisation_id = :org_id
+            GROUP BY bi.game_id, bi.innings_number
+        ),
+        carried AS (
+            SELECT
+                bi.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                bi.runs,
+                bi.batting_position
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            JOIN innings_wickets iw ON iw.game_id = bi.game_id
+                                   AND iw.innings_number = bi.innings_number
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id
+                                          AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.not_out = TRUE
+              AND bi.batting_position IN (1, 2)
+              AND bi.did_not_bat IS NOT TRUE
+              AND iw.wickets_fell >= 9
+              {player_extra}
+        ),
+        agg AS (
+            SELECT
+                player_id::text AS player_id,
+                player_name,
+                COUNT(*)::int   AS carried_bat_count,
+                MAX(runs)::int  AS highest_score
+            FROM carried
+            GROUP BY player_id, player_name
+        )
+        SELECT * FROM agg
+        ORDER BY carried_bat_count DESC, highest_score DESC NULLS LAST
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_most_runs_first_n(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Who scored the most runs in their first N career matches.
+    N comes from context['first_n_matches'] (default 50)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    try:
+        first_n = max(1, int(float(context.get("first_n_matches") or 50)))
+    except (ValueError, TypeError):
+        first_n = 50
+    params = {"org_id": org_id, "limit": min(max(1, limit), 200), "first_n": first_n, **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        match_nums AS (
+            SELECT
+                p.id        AS player_id,
+                gu.game_id,
+                DENSE_RANK() OVER (
+                    PARTITION BY p.id ORDER BY gu.played_at, gu.game_id
+                ) AS match_rn
+            FROM game_universe gu
+            JOIN game_appearances gap ON gap.game_id = gu.game_id
+            JOIN players p ON p.id = gap.player_id
+            WHERE p.organisation_id = :org_id {player_extra}
+        ),
+        first_n_agg AS (
+            SELECT
+                mn.player_id,
+                COALESCE(p.display_name_override, p.name)             AS player_name,
+                COUNT(DISTINCT mn.match_rn)::int                       AS matches_played,
+                COALESCE(SUM(bi.runs) FILTER (
+                    WHERE bi.did_not_bat IS NOT TRUE
+                ), 0)::int                                             AS runs
+            FROM match_nums mn
+            JOIN players p ON p.id = mn.player_id
+            LEFT JOIN batting_innings bi
+                   ON bi.game_id = mn.game_id AND bi.player_id = mn.player_id
+            WHERE mn.match_rn <= :first_n
+            GROUP BY mn.player_id, COALESCE(p.display_name_override, p.name)
+        )
+        SELECT
+            player_id::text AS player_id,
+            player_name,
+            runs,
+            matches_played
+        FROM first_n_agg
+        WHERE matches_played >= :first_n
+        ORDER BY runs DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_milestone_runs(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Who reached a runs milestone in the fewest career matches.
+    Milestone comes from context['milestone_runs'] (default 1000)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    try:
+        milestone = max(1, int(float(context.get("milestone_runs") or 1000)))
+    except (ValueError, TypeError):
+        milestone = 1000
+    params = {"org_id": org_id, "limit": min(max(1, limit), 200), "milestone": milestone, **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        player_innings AS (
+            SELECT
+                bi.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.played_at,
+                gu.game_id,
+                DENSE_RANK() OVER (
+                    PARTITION BY bi.player_id ORDER BY gu.played_at, gu.game_id
+                ) AS match_rn,
+                SUM(COALESCE(bi.runs, 0)) OVER (
+                    PARTITION BY bi.player_id
+                    ORDER BY gu.played_at, gu.game_id, bi.id
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS cumulative_runs
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id
+                                          AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              {player_extra}
+        ),
+        crossings AS (
+            SELECT DISTINCT ON (player_id)
+                player_id,
+                player_name,
+                played_at           AS reached_on,
+                match_rn::int       AS matches_to_milestone,
+                cumulative_runs::int AS runs_at_crossing
+            FROM player_innings
+            WHERE cumulative_runs >= :milestone
+            ORDER BY player_id, played_at, match_rn, cumulative_runs
+        )
+        SELECT
+            player_id::text     AS player_id,
+            player_name,
+            matches_to_milestone,
+            reached_on,
+            runs_at_crossing
+        FROM crossings
+        ORDER BY matches_to_milestone ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
 DERIVED_QUERIES: dict[str, dict] = {
     "consecutive_ducks": {
         "label": "Longest duck streak",
@@ -1333,6 +1530,37 @@ DERIVED_QUERIES: dict[str, dict] = {
             {"key": "wicket_number", "label": "WKT", "decimal": False},
             {"key": "grade_name", "label": "GRADE"},
             {"key": "season_name", "label": "SEASON"},
+        ],
+    },
+    "carried_bat": {
+        "label": "Carrying the bat",
+        "description": "Openers (pos 1–2) not out when their team was bowled out.",
+        "fn": derived_carried_bat,
+        "columns": [
+            {"key": "player_id", "label": "PLAYER", "kind": "player"},
+            {"key": "carried_bat_count", "label": "TIMES", "decimal": False},
+            {"key": "highest_score", "label": "TOP SCORE", "decimal": False},
+        ],
+    },
+    "most_runs_first_n": {
+        "label": "Most runs after X matches",
+        "description": "Who scored the most runs in their first N career matches (set N in Context).",
+        "fn": derived_most_runs_first_n,
+        "columns": [
+            {"key": "player_id", "label": "PLAYER", "kind": "player"},
+            {"key": "runs", "label": "RUNS", "decimal": False},
+            {"key": "matches_played", "label": "MATCHES", "decimal": False},
+        ],
+    },
+    "milestone_runs": {
+        "label": "Fastest to runs milestone",
+        "description": "Who reached a career runs milestone in the fewest matches (set milestone in Context).",
+        "fn": derived_milestone_runs,
+        "columns": [
+            {"key": "player_id", "label": "PLAYER", "kind": "player"},
+            {"key": "matches_to_milestone", "label": "MATCHES", "decimal": False},
+            {"key": "reached_on", "label": "DATE"},
+            {"key": "runs_at_crossing", "label": "RUNS AT", "decimal": False},
         ],
     },
 }
