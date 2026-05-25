@@ -1645,7 +1645,20 @@ async def hard_refresh_org(
     background; poll GET /club-admin/sync-runs/{run_id} for progress.
     """
     from app.services.sync import sync_organisation, start_sync_run, finish_sync_run
+    from app.services.rate_limit import enforce
     org_id_str = str(club.id)
+
+    # 1 hard-refresh per club per hour. The operation itself takes 1h+ and
+    # the in-progress guard below blocks a *concurrent* second call, but
+    # nothing stops a user clicking the button repeatedly during the run or
+    # right after it finishes. This window covers both cases.
+    enforce(
+        f"hard-refresh:{org_id_str}",
+        limit=1,
+        window_sec=3600,
+        detail="Hard refresh is allowed once per hour. Try again later.",
+    )
+
     if org_id_str in _hard_refresh_running:
         return {"status": "already_running", "org_id": org_id_str}
 

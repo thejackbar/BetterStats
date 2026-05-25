@@ -1639,6 +1639,17 @@ Write 3–4 paragraphs as a warm, conversational club yearbook narrative. Rules:
 
 @router.post("/{org_id}/{season_id}/generate-narrative")
 async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Depends(get_db)):
+    from app.services.rate_limit import enforce
+
+    # Narrative gen calls Anthropic per request — both server CPU and $$ cost
+    # per call. 5/hour/org allows admins to iterate on copy without hammering.
+    enforce(
+        f"narrative:{org_id}",
+        limit=5,
+        window_sec=3600,
+        detail="Narrative generation is limited to 5 per hour. Try again soon.",
+    )
+
     if not settings.anthropic_api_key:
         raise HTTPException(status_code=503, detail="Anthropic API key not configured")
 

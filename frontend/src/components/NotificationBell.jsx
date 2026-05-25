@@ -38,13 +38,19 @@ export default function NotificationBell({ onOpen, refreshTrigger }) {
 
   const totalCount = (data.unseen_count || 0) + newChangelogCount
   const capped = totalCount > 99 ? '99+' : totalCount
+  const hasFailures = (data.failed_sync_count || 0) > 0
+  const badgeBg = hasFailures ? 'var(--pb-negative)' : 'var(--pb-accent)'
+  const badgeColor = hasFailures ? '#fff' : '#000'
+  const tooltip = hasFailures
+    ? `${data.failed_sync_count} sync failure${data.failed_sync_count > 1 ? 's' : ''} — open notifications`
+    : 'Notifications'
 
   return (
     <button
       onClick={onOpen}
       className="relative w-8 h-8 flex items-center justify-center rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition"
-      title="Notifications"
-      aria-label="Open notifications"
+      title={tooltip}
+      aria-label={tooltip}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -53,7 +59,7 @@ export default function NotificationBell({ onOpen, refreshTrigger }) {
       {totalCount > 0 && (
         <span
           className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] flex items-center justify-center rounded-full font-mono text-[9px] font-bold leading-none px-[3px]"
-          style={{ background: 'var(--pb-accent)', color: '#000' }}
+          style={{ background: badgeBg, color: badgeColor }}
         >
           {capped}
         </span>

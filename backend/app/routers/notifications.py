@@ -42,6 +42,17 @@ async def get_notifications_count(
         .where(SyncRun.completed_at > ws)
     ) or 0
 
+    # Failed runs need separate counting so the bell can flag a red badge
+    # rather than the default accent — sync errors are higher-urgency than
+    # a milestone or pending merge request.
+    failed_sync_count = await db.scalar(
+        select(func.count(SyncRun.id))
+        .where(SyncRun.org_id == club.id)
+        .where(SyncRun.status == "error")
+        .where(SyncRun.player_id.is_(None))
+        .where(SyncRun.completed_at > ws)
+    ) or 0
+
     milestone_count = await db.scalar(
         select(func.count(Milestone.id))
         .join(Player, Player.id == Milestone.player_id)
@@ -58,6 +69,7 @@ async def get_notifications_count(
 
     return {
         "unseen_count": sync_count + milestone_count + pending_count,
+        "failed_sync_count": failed_sync_count,
         "last_seen_version": current_user.last_seen_app_version,
     }
 
@@ -109,11 +121,13 @@ async def get_notifications_summary(
     ) or 0
 
     unseen_count = len(sync_runs) + len(milestone_rows) + pending_count
+    failed_sync_count = sum(1 for r in sync_runs if r.status == "error")
 
     return {
         "last_seen_at": last_seen.isoformat() if last_seen else None,
         "last_seen_version": current_user.last_seen_app_version,
         "unseen_count": unseen_count,
+        "failed_sync_count": failed_sync_count,
         "sync_runs": [
             {
                 "id": str(r.id),
