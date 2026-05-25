@@ -1,1 +1,1 @@
-export const SITE_VERSION = 'v7.8.4'
+export const SITE_VERSION = 'v7.8.5'

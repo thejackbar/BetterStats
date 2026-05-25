@@ -911,7 +911,7 @@ export default function StatLab() {
         />
 
         {/* Target tabs */}
-        <div className="flex flex-wrap gap-1 pb-hairline-b mb-4 overflow-x-auto">
+        <div className="flex gap-1 pb-hairline-b mb-4 overflow-x-auto pb-no-scrollbar">
           {TARGETS.map(t => (
             <button key={t.key} onClick={() => { setQuery(q => ({ ...q, target: t.key })); setRows([]); setHasQueried(false); setActiveDerived(null) }}
               className={`relative px-3.5 py-2.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition ${query.target === t.key && !activeDerived ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'}`}>

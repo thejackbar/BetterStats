@@ -131,7 +131,7 @@ function StatCallout({ value, label, sub, accent = false, className = '' }) {
   return (
     <div className={`flex flex-col items-center justify-center py-6 px-4 text-center ${className}`}>
       <div
-        className="text-5xl font-bold tabular-nums leading-none mb-2"
+        className="text-3xl sm:text-5xl font-bold tabular-nums leading-none mb-2"
         style={{ color: accent ? 'var(--pb-accent)' : 'var(--pb-text)' }}
       >
         {value}
@@ -381,7 +381,7 @@ function StatGroup({ title, children }) {
   return (
     <div>
       <p className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-3">{title}</p>
-      <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
         {children}
       </div>
     </div>
@@ -1627,7 +1627,7 @@ export default function Yearbook() {
            style={{ background: 'color-mix(in srgb, var(--pb-bg) 92%, transparent)' }}>
         <div className="max-w-5xl mx-auto px-4">
           <div className="flex items-center justify-between gap-4">
-            <div className="flex-1 overflow-x-auto">
+            <div className="flex-1 overflow-x-auto pb-no-scrollbar">
               <div className="flex gap-1 py-2">
                 {TABS.map(t => (
                   <button
