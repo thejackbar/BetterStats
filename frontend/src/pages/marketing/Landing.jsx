@@ -88,6 +88,10 @@ export default function Landing() {
           <Link to="/terms" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">TERMS</Link>
           <Link to="/privacy" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">PRIVACY</Link>
         </div>
+        <div className="flex items-center justify-center gap-4 mb-3">
+          <a href="https://x.com/betterstatsau" target="_blank" rel="noopener noreferrer me" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">X / TWITTER</a>
+          <a href="https://www.facebook.com/profile.php?id=61590372751599" target="_blank" rel="noopener noreferrer me" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">FACEBOOK</a>
+        </div>
         <p className="font-mono text-[10px] text-pb-faintest">© {new Date().getFullYear()} BETTERSTATS</p>
       </footer>
     </div>
