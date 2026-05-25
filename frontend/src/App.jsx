@@ -1,6 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
+import { ToastProvider } from './contexts/ToastContext'
+import ErrorBoundary from './components/ErrorBoundary'
 import ProtectedRoute from './components/ProtectedRoute'
 
 // Marketing
@@ -68,6 +70,8 @@ export default function App() {
   return (
     <AuthProvider>
       <ThemeProvider>
+      <ToastProvider>
+      <ErrorBoundary>
       <div className="min-h-screen bg-pb-bg">
         <Navbar />
       <Routes>
@@ -132,6 +136,8 @@ export default function App() {
       </Routes>
       <SponsorFooter />
       </div>
+      </ErrorBoundary>
+      </ToastProvider>
       </ThemeProvider>
     </AuthProvider>
   )

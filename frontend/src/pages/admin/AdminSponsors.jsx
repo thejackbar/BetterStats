@@ -3,8 +3,10 @@ import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { validateImageFile } from '../../lib/validation'
 import ImageEditorModal from '../../components/ImageEditorModal'
+import { useToast } from '../../contexts/ToastContext'
 
 export default function AdminSponsors() {
+  const toast = useToast()
   const [sponsors, setSponsors] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -78,7 +80,7 @@ export default function AdminSponsors() {
       setSponsors(prev => prev.filter(s => s.id !== id))
       showFlash('Sponsor deleted')
     } catch (e) {
-      alert(e.message)
+      toast.error(e.message)
     }
   }
 
@@ -100,7 +102,7 @@ export default function AdminSponsors() {
       cancelEdit(id)
       showFlash('Saved')
     } catch (e) {
-      alert(e.message)
+      toast.error(e.message)
     } finally {
       setSaving(prev => { const n = { ...prev }; delete n[id]; return n })
     }
@@ -124,7 +126,7 @@ export default function AdminSponsors() {
       setSponsors(prev => prev.map(s => s.id === id ? { ...s, ...updated } : s))
       showFlash('Logo removed')
     } catch (e) {
-      alert(e.message)
+      toast.error(e.message)
     }
   }
 
@@ -158,7 +160,7 @@ export default function AdminSponsors() {
       setDirty(false)
       showFlash('Order saved')
     } catch (e) {
-      alert(e.message)
+      toast.error(e.message)
     } finally {
       setReordering(false)
     }
