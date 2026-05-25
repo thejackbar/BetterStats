@@ -1,13 +1,15 @@
 // Navbar — PressNav design with slug-based routing
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useClub } from "../hooks/useClub";
 import { useTheme } from "../contexts/ThemeContext";
 import NavbarPlayerSearch from "./NavbarPlayerSearch";
 import betterStatsLogo from "../assets/betterstatslogo_white.png";
+import { SITE_VERSION } from "../version";
 
-export const SITE_VERSION = "v7.6.3";
+export const SITE_VERSION = "v7.7.1";
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
@@ -34,7 +36,7 @@ function ThemeToggle() {
   );
 }
 
-const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games'];
+const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games', 'fixtures', 'teams'];
 
 function useSlug() {
   const { pathname } = useLocation();
@@ -45,15 +47,62 @@ function useSlug() {
   return sessionStorage.getItem('bs_last_slug') || null;
 }
 
+function ChevronDown({ open }) {
+  return (
+    <svg
+      width="8" height="5" viewBox="0 0 8 5" fill="currentColor"
+      className={`ml-0.5 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+    >
+      <path d="M0 0l4 5 4-5z" />
+    </svg>
+  );
+}
+
 export default function Navbar() {
   const { user } = useAuth();
   const slug = useSlug();
   const { club } = useClub(slug);
+  const { pathname } = useLocation();
 
-  // White-labelling: when a club has uploaded a custom logo, it takes the
-  // top-left slot and the BetterStats logo moves to the top-right.
+  const [openMenu, setOpenMenu] = useState(null);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const btnRefs = useRef({});
+
+  // Close on navigation
+  useEffect(() => { setOpenMenu(null); }, [pathname]);
+
+  // Close on scroll
+  useEffect(() => {
+    if (!openMenu) return;
+    const handler = () => setOpenMenu(null);
+    window.addEventListener('scroll', handler, { passive: true });
+    return () => window.removeEventListener('scroll', handler);
+  }, [openMenu]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!openMenu) return;
+    const handler = (e) => {
+      const panel = document.getElementById('nb-dropdown-panel');
+      if (panel && panel.contains(e.target)) return;
+      const trigger = btnRefs.current[openMenu];
+      if (trigger && trigger.contains(e.target)) return;
+      setOpenMenu(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openMenu]);
+
+  const toggleMenu = (key, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (openMenu === key) { setOpenMenu(null); return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenuPos({ top: rect.bottom, left: rect.left });
+    setOpenMenu(key);
+  };
+
   const customLogo = club?.logo_url || null;
-
   const displayName = club?.name || slug || "BetterStats";
   const displayShort = displayName
     .split(" ")
@@ -62,23 +111,45 @@ export default function Navbar() {
     .toUpperCase()
     .slice(0, 4) || "BS";
 
+  const DROPDOWNS = slug ? {
+    stats: [
+      { label: "Leaderboard", href: `/${slug}/leaderboard` },
+      { label: "Records",     href: `/${slug}/records` },
+      { label: "Teams",       href: `/${slug}/teams` },
+      { label: "Stat Lab",    href: `/${slug}/statlab` },
+    ],
+    games: [
+      { label: "Fixtures", href: `/${slug}/fixtures` },
+      { label: "Results",  href: `/${slug}/games` },
+    ],
+  } : {};
+
+  const statsActive = slug && ['leaderboard', 'records', 'teams', 'statlab'].some(s =>
+    pathname === `/${slug}/${s}` || pathname.startsWith(`/${slug}/${s}/`)
+  );
+  const gamesActive = slug && ['games', 'fixtures'].some(s =>
+    pathname === `/${slug}/${s}` || pathname.startsWith(`/${slug}/${s}/`)
+  );
+
   const NAV = slug ? [
-    { label: "Dashboard",   href: `/${slug}/dashboard` },
-    { label: "Players",     href: `/${slug}/players` },
-    { label: "Leaderboard", href: `/${slug}/leaderboard` },
-    { label: "Records",     href: `/${slug}/records` },
-    { label: "Yearbook",    href: `/${slug}/yearbook` },
-    { label: "Games",       href: `/${slug}/games` },
-    { label: "Stat Lab",    href: `/${slug}/statlab` },
-    { label: "Compare",     href: `/${slug}/compare` },
+    { type: 'link',     label: "Home",    href: `/${slug}/dashboard` },
+    { type: 'link',     label: "Players", href: `/${slug}/players` },
+    { type: 'dropdown', label: "Stats",   key: 'stats', isActive: statsActive },
+    { type: 'dropdown', label: "Games",   key: 'games', isActive: gamesActive },
+    { type: 'link',     label: "Compare", href: `/${slug}/compare` },
+    { type: 'link',     label: "Yearbook",href: `/${slug}/yearbook` },
   ] : [];
 
-  const allLinks = [...NAV];
+  const navItemClass = (isActive) =>
+    `relative px-3 py-1.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition flex items-center gap-0.5 ${
+      isActive ? "text-pb-text" : "text-pb-faint hover:text-pb-dim"
+    }`;
 
   return (
     <header className="sticky top-0 z-50 bg-pb-surface pb-hairline-b">
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6">
         <div className="flex items-center gap-0 h-14">
+
           {/* Logo / club name */}
           <Link
             to={`/${slug}`}
@@ -89,51 +160,67 @@ export default function Navbar() {
               alt={customLogo ? displayName : "BetterStats"}
               className="w-8 h-8 rounded object-contain"
             />
-          <div className="hidden md:block leading-tight">
-            <div className="text-pb-text text-[13px] font-semibold tracking-tight">{displayName}</div>
-            <div className="text-pb-faint text-[10px] font-mono tracking-wide2">
-              {customLogo ? slug?.toUpperCase() : "BETTERSTATS"} · {SITE_VERSION}
+            <div className="hidden md:block leading-tight">
+              <div className="text-pb-text text-[13px] font-semibold tracking-tight">{displayName}</div>
+              <div className="text-pb-faint text-[10px] font-mono tracking-wide2">
+                {customLogo ? slug?.toUpperCase() : "BETTERSTATS"} · {SITE_VERSION}
+              </div>
             </div>
-          </div>
-          <div className="md:hidden text-pb-text text-[13px] font-bold tracking-wide2">{displayShort}</div>
-        </Link>
+            <div className="md:hidden text-pb-text text-[13px] font-bold tracking-wide2">{displayShort}</div>
+          </Link>
 
           {/* Nav links — scrollable on mobile */}
           <nav className="flex items-center gap-0 overflow-x-auto pb-scroll flex-1 min-w-0">
-            {allLinks.map((item) => (
-              <NavLink
-                key={item.href}
-                to={item.href}
-                end={item.href === `/${slug}`}
-                className={({ isActive }) =>
-                  `relative px-3 py-1.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition ${
-                    isActive
-                      ? "text-pb-text"
-                      : "text-pb-faint hover:text-pb-dim"
-                  }`
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    {item.label}
-                    {isActive && (
-                      <span
-                        className="absolute left-1 right-1 -bottom-[1px] h-[2px]"
-                        style={{ background: "var(--pb-accent)" }}
-                      />
+            {NAV.map((item) => {
+              if (item.type === 'link') {
+                return (
+                  <NavLink
+                    key={item.href}
+                    to={item.href}
+                    end={item.href === `/${slug}/dashboard`}
+                    className={({ isActive }) => navItemClass(isActive)}
+                  >
+                    {({ isActive }) => (
+                      <>
+                        {item.label}
+                        {isActive && (
+                          <span
+                            className="absolute left-1 right-1 -bottom-[1px] h-[2px]"
+                            style={{ background: "var(--pb-accent)" }}
+                          />
+                        )}
+                      </>
                     )}
-                  </>
-                )}
-              </NavLink>
-            ))}
+                  </NavLink>
+                );
+              }
+
+              // Dropdown trigger
+              const isOpen = openMenu === item.key;
+              const isActive = item.isActive || isOpen;
+              return (
+                <button
+                  key={item.key}
+                  ref={el => { btnRefs.current[item.key] = el; }}
+                  onClick={(e) => toggleMenu(item.key, e)}
+                  className={navItemClass(isActive)}
+                >
+                  {item.label}
+                  <ChevronDown open={isOpen} />
+                  {item.isActive && !isOpen && (
+                    <span
+                      className="absolute left-1 right-1 -bottom-[1px] h-[2px]"
+                      style={{ background: "var(--pb-accent)" }}
+                    />
+                  )}
+                </button>
+              );
+            })}
           </nav>
 
           <NavbarPlayerSearch orgId={club?.id} club={club} />
-
           <ThemeToggle />
 
-          {/* White-label: BetterStats logo sits top-right when the club
-              supplies its own logo for the top-left slot. */}
           {customLogo && (
             <Link
               to="/"
@@ -150,9 +237,35 @@ export default function Navbar() {
               />
             </Link>
           )}
-
         </div>
       </div>
+
+      {/* Dropdown panel — rendered via portal to escape overflow-x-auto */}
+      {openMenu && DROPDOWNS[openMenu] && createPortal(
+        <div
+          id="nb-dropdown-panel"
+          style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, zIndex: 200 }}
+          className="bg-pb-surface border pb-hairline rounded-b shadow-xl py-1 min-w-[140px]"
+        >
+          {DROPDOWNS[openMenu].map(item => (
+            <NavLink
+              key={item.href}
+              to={item.href}
+              onClick={() => setOpenMenu(null)}
+              className={({ isActive }) =>
+                `block px-4 py-2 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition ${
+                  isActive
+                    ? 'text-pb-text bg-pb-surface2'
+                    : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+                }`
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </div>,
+        document.body
+      )}
     </header>
   );
 }

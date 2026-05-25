@@ -390,6 +390,20 @@ async def get_org_results(
     ]
 
 
+@router.get("/{org_id}/grades/{grade_id}/info")
+async def get_grade_info(org_id: str, grade_id: str, db: AsyncSession = Depends(get_db)):
+    grade = await db.get(Grade, uuid.UUID(grade_id))
+    if not grade:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    season = await db.get(Season, grade.season_id)
+    return {
+        "id": str(grade.id),
+        "name": grade.display_name_override or grade.name,
+        "season_id": str(grade.season_id),
+        "season_name": season.name if season else None,
+    }
+
+
 @router.get("/{org_id}/sync-logs")
 async def get_sync_logs(org_id: str, db: AsyncSession = Depends(get_db)):
     from app.models.db import SyncRun

@@ -25,7 +25,7 @@ The canonical public domain is **`https://betterstats.cricket`** (no `www`). The
 
 ## Version Numbers
 
-Bump version in `frontend/src/components/Navbar.jsx` with every change:
+Bump version in **`frontend/src/version.js`** (`SITE_VERSION`) with every change — `Navbar.jsx` re-exports it for backwards compat:
 - Small fix: `+0.0.0.1`
 - Medium change: `+0.0.1`
 - Large change: `+0.1`
@@ -146,6 +146,26 @@ GR scorecard parser was reading `isHome` from the top-level `teams` array — si
 
 **Fix 3 — successful hard-refresh stuck at `running`** (discovered during the verification of Fixes 1+2):
 `sync_organisation` only calls `finish_sync_run` when it owns the run (i.e. when called without a `run_id`). The hard-refresh handler owns the run itself but only called `finish_sync_run` in its exception branch. Fixed `club_admin.py::hard_refresh_org._run` to call `finish_sync_run(run_id, stats)` after a successful `await sync_organisation(...)`.
+
+## Notification Centre (v7.7.3, May 2026)
+
+Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.
+
+**Architecture** — no dedicated notifications table:
+- `User` model gains `last_notification_seen_at TIMESTAMP` and `last_seen_app_version TEXT` (migration `029`).
+- Three endpoints under `/club-admin/notifications/`:
+  - `GET /count` — cheap badge poll (runs every 60s). Counts sync runs + milestones + pending sync requests since last seen. Returns `{ unseen_count, last_seen_version }`.
+  - `GET /summary` — full data fetched only when the modal opens. Returns sync runs, new milestones, upcoming milestones (top 5), pending count.
+  - `POST /seen` — sets `last_notification_seen_at = now()` and `last_seen_app_version = <passed version>`.
+- "Since last visit" window defaults to 14 days if user has never dismissed notifications.
+
+**Feature Changelog** (`frontend/src/data/changelog.js`):
+- Static JS array, newest entry first. Each entry has `{ version, date, title, items[] }`.
+- `SITE_VERSION` moved to `frontend/src/version.js` — `Navbar.jsx` re-exports it for backwards compat.
+- The bell computes `newChangelogCount` (entries with version > `last_seen_version`) client-side and adds it to the backend `unseen_count` for the badge.
+- Auto-open on login fires if `unseen_count > 0 || any changelog entry is newer than last_seen_version`.
+
+**Adding a new changelog entry**: bump `SITE_VERSION` in `src/version.js`, then prepend an entry in `src/data/changelog.js` with the same version string.
 
 **Open follow-ups worth investigating**:
 - `upsert_organisation` defensive check for duplicate orgs across Grassroots GUID and PlayHQ UUID id-spaces (CLAUDE.md flagged it; Applecross duplicate was hand-cleaned but the trap remains).

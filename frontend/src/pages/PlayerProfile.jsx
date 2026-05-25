@@ -17,6 +17,7 @@ import {
   BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   LineChart, Line, PieChart, Pie, Cell,
+  Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from 'recharts'
 
 const MAIN_TABS = [
@@ -596,16 +597,248 @@ function CareerBowlingProgressionChart({ spells }) {
       <LineChart data={points} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
         <XAxis dataKey="i" tick={{ fontSize: 10, fill: 'var(--pb-faint)', fontFamily: 'monospace' }} label={{ value: 'Spells', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--pb-faint)' }} />
-        <YAxis tick={{ fontSize: 10, fill: 'var(--pb-faint)', fontFamily: 'monospace' }} width={36} />
+        <YAxis yAxisId="left" tick={{ fontSize: 10, fill: 'var(--pb-accent)', fontFamily: 'monospace' }} width={36} />
+        <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: 'var(--pb-chart-milestone, #f5b542)', fontFamily: 'monospace' }} width={36} />
         <Tooltip
           contentStyle={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline)', borderRadius: 6, fontSize: 11 }}
           formatter={(v, name) => [v != null ? v.toFixed(2) : '—', name]}
         />
         <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'monospace' }} />
-        <Line type="monotone" dataKey="avg" name="Average" stroke="var(--pb-accent)" dot={false} strokeWidth={2} connectNulls />
-        <Line type="monotone" dataKey="econ" name="Economy" stroke="var(--pb-chart-milestone, #f5b542)" dot={false} strokeWidth={2} connectNulls />
+        <Line yAxisId="left" type="monotone" dataKey="avg" name="Average" stroke="var(--pb-accent)" dot={false} strokeWidth={2} connectNulls />
+        <Line yAxisId="right" type="monotone" dataKey="econ" name="Economy" stroke="var(--pb-chart-milestone, #f5b542)" dot={false} strokeWidth={2} connectNulls />
       </LineChart>
     </ResponsiveContainer>
+  )
+}
+
+// ── Profile radar: 6-axis all-rounder fingerprint ───────────────────────
+function PlayerRadarChart({ batting, bowling, fielding, innings }) {
+  if (!batting && !bowling) return null
+
+  const validInnings = (innings || []).filter(i => i.runs != null)
+  const inningsCount = validInnings.length
+
+  const battingAvg = batting?.average != null ? Number(batting.average) : 0
+  const totalBalls = validInnings.reduce((s, i) => s + (Number(i.balls) || 0), 0)
+  const totalRuns = validInnings.reduce((s, i) => s + (Number(i.runs) || 0), 0)
+  const strikeRate = totalBalls > 0 ? (totalRuns / totalBalls) * 100 : 0
+  const bigScores = validInnings.filter(i => (i.runs ?? 0) >= 50).length
+  const bigScoreRate = inningsCount > 0 ? bigScores / inningsCount : 0
+
+  const hasBowled = (bowling?.total_wickets ?? 0) > 0
+  const bowlingAvg = bowling?.average != null ? Number(bowling.average) : null
+  const economy = bowling?.economy != null ? Number(bowling.economy) : null
+
+  const games = batting?.games || bowling?.games || 0
+  const totalDismissals = (fielding?.total_dismissals ?? 0)
+    || ((fielding?.total_catches ?? 0) + (fielding?.total_stumpings ?? 0) + (fielding?.total_run_outs ?? 0))
+  const fieldingPerMatch = games > 0 ? totalDismissals / games : 0
+
+  const norm = (v, max) => Math.max(0, Math.min(100, (v / max) * 100))
+  const normInv = (v, lo, hi) => v == null ? 0 : Math.max(0, Math.min(100, ((hi - v) / (hi - lo)) * 100))
+
+  const axes = [
+    { axis: 'Bat Avg',    raw: battingAvg > 0 ? battingAvg.toFixed(1) : '—',                    value: norm(battingAvg, 50) },
+    { axis: 'Strike Rt',  raw: totalBalls > 0 ? strikeRate.toFixed(0) : '—',                    value: norm(strikeRate, 120) },
+    { axis: 'Big Scores', raw: inningsCount > 0 ? `${(bigScoreRate * 100).toFixed(0)}%` : '—',  value: norm(bigScoreRate, 0.35) },
+    { axis: 'Bowl Avg',   raw: hasBowled && bowlingAvg != null ? bowlingAvg.toFixed(1) : '—',   value: hasBowled ? normInv(bowlingAvg, 12, 40) : 0 },
+    { axis: 'Economy',    raw: hasBowled && economy != null ? economy.toFixed(2) : '—',         value: hasBowled ? normInv(economy, 3, 8) : 0 },
+    { axis: 'Fielding',   raw: games > 0 ? `${fieldingPerMatch.toFixed(2)}/g` : '—',            value: norm(fieldingPerMatch, 0.8) },
+  ]
+
+  return (
+    <div className="flex flex-col md:flex-row gap-6 items-center">
+      <div className="w-full md:w-[420px] h-[320px] shrink-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <RadarChart data={axes} margin={{ top: 16, right: 28, bottom: 16, left: 28 }}>
+            <PolarGrid stroke="var(--pb-hairline)" />
+            <PolarAngleAxis dataKey="axis" tick={{ fill: 'var(--pb-dim)', fontSize: 11, fontFamily: 'monospace' }} />
+            <PolarRadiusAxis angle={90} domain={[0, 100]} tick={false} axisLine={false} />
+            <Radar
+              name="Player"
+              dataKey="value"
+              stroke="var(--pb-accent)"
+              fill="var(--pb-accent)"
+              fillOpacity={0.25}
+              strokeWidth={2}
+            />
+            <Tooltip
+              contentStyle={CHART_TOOLTIP_STYLE.contentStyle}
+              formatter={(_, __, props) => [props.payload.raw, props.payload.axis]}
+            />
+          </RadarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex flex-col gap-2 flex-1 min-w-0 w-full">
+        {axes.map((a, i) => (
+          <div key={i} className="flex items-center gap-3 text-sm">
+            <span className="font-mono text-[10px] tracking-wide3 text-pb-faint w-20 shrink-0 uppercase">{a.axis}</span>
+            <div className="flex-1 h-1.5 bg-pb-hairline rounded-sm overflow-hidden">
+              <div className="h-full transition-all duration-500" style={{ width: `${a.value}%`, background: 'var(--pb-accent)' }} />
+            </div>
+            <span className="font-mono font-bold text-pb-text text-[12px] w-14 text-right pb-num">{a.raw}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Innings strip: every innings as a bar, height=runs, colour=milestone ─
+function InningsStripChart({ innings }) {
+  if (!innings?.length) return null
+  const asc = [...innings].reverse() // API returns DESC, flip to chronological
+  const cap = Math.max(150, ...asc.map(i => i.runs ?? 0))
+
+  function bandColor(r) {
+    if (r >= 100) return 'var(--pb-chart-milestone)'
+    if (r >= 50)  return 'var(--pb-accent)'
+    if (r >= 20)  return 'var(--pb-chart-2)'
+    if (r > 0)    return 'var(--pb-dim)'
+    return 'var(--pb-faint)'
+  }
+
+  return (
+    <div>
+      <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">
+        Every innings, oldest left to newest right. Bar height = runs scored, colour = milestone band. {asc.length.toLocaleString()} innings.
+      </p>
+      <div className="overflow-x-auto pb-scroll">
+        <div
+          className="flex items-end gap-[1px] h-32"
+          style={{ width: `${Math.max(asc.length * 5, 400)}px` }}
+        >
+          {asc.map((inn, i) => {
+            const r = inn.runs ?? 0
+            const h = Math.max(2, (r / cap) * 100)
+            const dateStr = inn.played_at
+              ? new Date(inn.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: '2-digit' })
+              : ''
+            const match = inn.home_team && inn.away_team ? `${inn.home_team} vs ${inn.away_team}` : ''
+            const title = `${dateStr}${match ? ' · ' + match : ''} · ${r}${inn.not_out ? '*' : ''} ${inn.grade_name ? '· ' + inn.grade_name : ''}`
+            const bar = (
+              <div
+                className="flex-1 min-w-[4px] hover:opacity-70 transition-opacity"
+                style={{ height: `${h}%`, background: bandColor(r) }}
+                title={title}
+              />
+            )
+            return inn.game_id
+              ? <Link key={i} to={`/games/${inn.game_id}`} className="flex-1 min-w-[4px] flex items-end" style={{ height: '100%' }}>{bar}</Link>
+              : <div key={i} className="flex-1 min-w-[4px] flex items-end" style={{ height: '100%' }}>{bar}</div>
+          })}
+        </div>
+      </div>
+      <div className="flex gap-4 mt-3 font-mono text-[9px] tracking-wide3 text-pb-faint flex-wrap">
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5" style={{ background: 'var(--pb-faint)' }} />DUCK</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5" style={{ background: 'var(--pb-dim)' }} />1–19</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5" style={{ background: 'var(--pb-chart-2)' }} />20–49</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5" style={{ background: 'var(--pb-accent)' }} />50–99</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5" style={{ background: 'var(--pb-chart-milestone)' }} />100+</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Career calendar: month × season heatmap of run output ───────────────
+function CareerCalendarHeatmap({ innings }) {
+  if (!innings?.length) return null
+
+  const cells = new Map() // `${seasonStart}|${month}` → { runs, innings, hundreds }
+  const seasonStarts = new Set()
+
+  for (const inn of innings) {
+    if (!inn.played_at) continue
+    const d = new Date(inn.played_at)
+    const m = d.getMonth() // 0-11
+    const y = d.getFullYear()
+    // Season Oct→Apr: Oct-Dec belong to season starting that year, Jan-Sep belong to season that started previous year.
+    const seasonStart = m >= 9 ? y : y - 1
+    seasonStarts.add(seasonStart)
+    const key = `${seasonStart}|${m}`
+    const cur = cells.get(key) || { runs: 0, innings: 0, hundreds: 0 }
+    cur.runs += (inn.runs ?? 0)
+    cur.innings += 1
+    if ((inn.runs ?? 0) >= 100) cur.hundreds += 1
+    cells.set(key, cur)
+  }
+
+  if (!cells.size) return null
+
+  // Cricket season months in order: Oct, Nov, Dec, Jan, Feb, Mar, Apr
+  const SEASON_MONTHS = [9, 10, 11, 0, 1, 2, 3]
+  const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const years = [...seasonStarts].sort((a, b) => a - b)
+
+  const maxRuns = Math.max(...[...cells.values()].map(c => c.runs))
+
+  function shortSeason(y) {
+    return `${String(y).slice(-2)}/${String(y + 1).slice(-2)}`
+  }
+  function calendarYear(seasonStart, m) {
+    return m >= 9 ? seasonStart : seasonStart + 1
+  }
+  function cellColor(runs, hundreds) {
+    if (runs === 0) return 'transparent'
+    if (hundreds > 0) {
+      const t = Math.min(1, runs / Math.max(maxRuns, 1))
+      return `color-mix(in srgb, var(--pb-chart-milestone) ${Math.round(t * 70) + 25}%, transparent)`
+    }
+    const intensity = Math.min(1, runs / Math.max(maxRuns, 1))
+    return `color-mix(in srgb, var(--pb-accent) ${Math.round(intensity * 75) + 8}%, transparent)`
+  }
+
+  return (
+    <div>
+      <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">
+        Runs scored each month of each season. Green intensity tracks volume; gold marks months containing a hundred. Columns are seasons left-to-right (oldest first), rows step through the Oct→Apr cricket calendar.
+      </p>
+      <div className="overflow-x-auto pb-scroll">
+        <table className="border-separate" style={{ borderSpacing: '2px' }}>
+          <thead>
+            <tr>
+              <th className="font-mono text-[9px] tracking-wide3 text-pb-faint pr-2 pb-1.5 text-right sticky left-0 bg-pb-bg">MONTH</th>
+              {years.map(y => (
+                <th key={y} className="font-mono text-[9px] tracking-wide3 text-pb-faint pb-1.5 text-center min-w-[34px]">
+                  {shortSeason(y)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {SEASON_MONTHS.map(m => (
+              <tr key={m}>
+                <td className="font-mono text-[10px] text-pb-dim pr-2 text-right sticky left-0 bg-pb-bg">{MONTH_NAMES[m]}</td>
+                {years.map(y => {
+                  const cell = cells.get(`${y}|${m}`)
+                  if (!cell) return (
+                    <td key={y} className="p-0">
+                      <div className="w-8 h-8 rounded-sm" style={{ background: 'var(--pb-hairline)', opacity: 0.25 }} />
+                    </td>
+                  )
+                  const cy = calendarYear(y, m)
+                  return (
+                    <td key={y} className="p-0" title={`${MONTH_NAMES[m]} ${cy} · ${cell.innings} inn · ${cell.runs} runs${cell.hundreds ? ` · ${cell.hundreds} ton${cell.hundreds > 1 ? 's' : ''}` : ''}`}>
+                      <div
+                        className="w-8 h-8 rounded-sm flex items-center justify-center font-mono text-[10px] font-bold text-pb-text"
+                        style={{ background: cellColor(cell.runs, cell.hundreds) }}
+                      >
+                        {cell.runs}
+                      </div>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex gap-4 mt-3 font-mono text-[9px] tracking-wide3 text-pb-faint flex-wrap">
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'color-mix(in srgb, var(--pb-accent) 25%, transparent)' }} />LIGHT</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'color-mix(in srgb, var(--pb-accent) 75%, transparent)' }} />HEAVY</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'color-mix(in srgb, var(--pb-chart-milestone) 70%, transparent)' }} />CONTAINS 100+</span>
+      </div>
+    </div>
   )
 }
 
@@ -709,6 +942,7 @@ function SpellHistoryTable({ spells }) {
 
 // ── Analysis tab ─────────────────────────────────────────────────────────
 const ANALYSIS_SUBTABS = [
+  { key: 'profile',  label: 'PROFILE' },
   { key: 'batting',  label: 'BATTING' },
   { key: 'bowling',  label: 'BOWLING' },
   { key: 'team',     label: 'TEAM' },
@@ -862,8 +1096,8 @@ function CaptainTab({ captainStats }) {
   )
 }
 
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [] }) {
-  const [subTab, setSubTab] = useState('batting')
+function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null }) {
+  const [subTab, setSubTab] = useState('profile')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
   const hasBowlingData = bowlingByGrade?.length || bowlingDismissals?.length || bowlingByBatterPosition?.some(p => (p.wickets ?? 0) > 0) || seasonStats?.some(s => (s.total_wickets ?? 0) > 0)
@@ -885,6 +1119,38 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           </button>
         ))}
       </div>
+
+      {subTab === 'profile' && (
+        <div className="space-y-6">
+          {/* All-rounder radar */}
+          {(careerBatting || careerBowling) && (
+            <Card title="PLAYER PROFILE">
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-4">
+                Six-axis fingerprint of the player. Each axis is scaled against a strong-club-cricket benchmark — a hexagon stretched to the edge is an elite all-rounder.
+              </p>
+              <PlayerRadarChart batting={careerBatting} bowling={careerBowling} fielding={careerFielding} innings={battingInnings} />
+            </Card>
+          )}
+
+          {/* Career innings strip */}
+          {battingInnings.length > 0 && (
+            <Card title="CAREER INNINGS STRIP">
+              <InningsStripChart innings={battingInnings} />
+            </Card>
+          )}
+
+          {/* Monthly form calendar */}
+          {battingInnings.some(i => i.played_at) && (
+            <Card title="MONTHLY FORM CALENDAR">
+              <CareerCalendarHeatmap innings={battingInnings} />
+            </Card>
+          )}
+
+          {!careerBatting && !careerBowling && battingInnings.length === 0 && (
+            <p className="text-pb-faint text-sm py-4">No data yet to build a profile — game-level data may still be syncing.</p>
+          )}
+        </div>
+      )}
 
       {subTab === 'batting' && (
         <div className="space-y-6">
@@ -1090,7 +1356,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           {/* Career bowling progression */}
           {bowlingSpells.length > 5 && (
             <Card title="CAREER BOWLING PROGRESSION">
-              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Running career bowling average and economy after each spell, chronological.</p>
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Running career bowling average (left axis, green) and economy (right axis, gold) after each spell, chronological — each on its own scale so economy movement is visible.</p>
               <CareerBowlingProgressionChart spells={bowlingSpells} />
             </Card>
           )}
@@ -1098,7 +1364,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           {/* Bowling averages over time */}
           {seasonStats?.some(s => s.bowling_average != null) && (
             <Card title="BOWLING AVERAGE & ECONOMY OVER TIME">
-              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Bowling average and economy rate season by season.</p>
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Bowling average (left axis) and economy rate (right axis) season by season — each scales independently so economy movement is readable.</p>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart
                   data={[...seasonStats].reverse().filter(s => s.bowling_average != null || s.economy != null).map(s => ({
@@ -1110,11 +1376,12 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
                   <XAxis dataKey="season" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
+                  <YAxis yAxisId="left" tick={{ fill: 'var(--pb-chart-wickets, #3b82f6)', fontSize: 11 }} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fill: 'var(--pb-chart-milestone, #f5b542)', fontSize: 11 }} />
                   <Tooltip {...CHART_TOOLTIP_STYLE} />
                   <Legend wrapperStyle={{ color: 'var(--pb-dim)', fontSize: 12 }} />
-                  <Line type="monotone" dataKey="bowl_avg" name="Bowling Avg" stroke="var(--pb-chart-wickets, #3b82f6)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                  <Line type="monotone" dataKey="economy" name="Economy" stroke="var(--pb-chart-milestone, #f5b542)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  <Line yAxisId="left" type="monotone" dataKey="bowl_avg" name="Bowling Avg" stroke="var(--pb-chart-wickets, #3b82f6)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  <Line yAxisId="right" type="monotone" dataKey="economy" name="Economy" stroke="var(--pb-chart-milestone, #f5b542)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             </Card>
@@ -2129,7 +2396,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
       </main>
