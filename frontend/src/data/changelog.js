@@ -4,6 +4,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.17.2.1',
+    date: '2026-05-26',
+    title: 'StatLab: fix golden ducks inflicted and golden duck counts',
+    items: [
+      'Golden ducks inflicted and most golden ducks (batter perspective) were severely undercounting — the GR API records first-ball dismissals as ballsFaced=0, not 1. Both queries now use the correct filter.',
+    ],
+  },
+  {
     version: 'v7.17.2',
     date: '2026-05-26',
     title: 'StatLab: fix ducks/golden ducks inflicted reports',

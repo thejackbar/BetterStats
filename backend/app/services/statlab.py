@@ -2160,7 +2160,8 @@ async def derived_most_run_outs_in_match(session, *, org_id, limit, offset=0, co
 async def derived_golden_ducks(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Out for 0 off exactly 1 ball (golden duck) — count per player."""
+    """Out for 0 off the first ball (golden duck) — count per player.
+    GR API records ballsFaced = 0 for golden ducks (balls before dismissal)."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -2177,7 +2178,7 @@ async def derived_golden_ducks(
               AND bi.runs = 0
               AND bi.not_out = FALSE
               AND bi.did_not_bat IS NOT TRUE
-              AND bi.balls = 1
+              AND bi.balls = 0
               AND bi.dismissal_type IS NOT NULL
               AND LOWER(bi.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')
               {player_extra}
@@ -3247,8 +3248,8 @@ async def derived_ducks_inflicted(
 async def derived_golden_ducks_inflicted(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Same as ducks_inflicted but only innings where batter faced exactly 1 ball.
-    Reads denormalised batter_runs / batter_balls on bowler_wickets."""
+    """Same as ducks_inflicted but only first-ball dismissals (golden ducks).
+    GR API records ballsFaced = 0 for golden ducks (balls before dismissal)."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -3265,7 +3266,7 @@ async def derived_golden_ducks_inflicted(
         LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
         WHERE p.organisation_id = :org_id
           AND bw.batter_runs = 0
-          AND bw.batter_balls = 1
+          AND bw.batter_balls = 0
           {player_extra}
         GROUP BY bw.bowler_id, COALESCE(p.display_name_override, p.name)
         HAVING COUNT(*) > 0
