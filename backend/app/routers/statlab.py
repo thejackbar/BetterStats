@@ -16,7 +16,7 @@ from app.services import statlab as svc
 router = APIRouter(prefix="/statlab", tags=["statlab"])
 
 
-# ─── Schema ───────────────────────────────────────────────────────────────────────────────
+# ─── Schema ─────────────────────────────────────────────────────────────────────
 
 @router.get("/schema")
 async def get_schema():
@@ -25,7 +25,7 @@ async def get_schema():
     return svc.schema()
 
 
-# ─── Main query ──────────────────────────────────────────────────────────────────────────
+# ─── Main query ────────────────────────────────────────────────────────────────
 
 def _serialise(rows: list[dict]) -> list[dict]:
     def clean(v: Any):
@@ -217,7 +217,7 @@ async def picker_values(
     return [{"value": r[0]} for r in result.fetchall()]
 
 
-# ─── Saved Reports ───────────────────────────────────────────────────────────────────────
+# ─── Saved Reports ─────────────────────────────────────────────────────────────
 
 class SaveReportIn(BaseModel):
     title: str = Field(..., min_length=2, max_length=120)
@@ -381,7 +381,7 @@ async def delete_report(
     return {"ok": True}
 
 
-# ─── Back-compat ────────────────────────────────────────────────────────────────────────────
+# ─── Back-compat ────────────────────────────────────────────────────────────────
 # The original /statlab/fields endpoint is preserved so any old bookmarks /
 # external pages continue to work; new UI should use /statlab/schema.
 
