@@ -432,11 +432,12 @@ export const api = {
     sortBy = 'runs',
     sortDir = 'desc',
     limit = 100,
+    page = 1,
     filters = [],
     filterTree = null,
     context = {},
   } = {}) => {
-    const params = new URLSearchParams({ org_id: orgId, target, sort_by: sortBy, sort_dir: sortDir, limit })
+    const params = new URLSearchParams({ org_id: orgId, target, sort_by: sortBy, sort_dir: sortDir, limit, page })
     if (filterTree) {
       params.set('filter_tree', JSON.stringify(filterTree))
     } else {
@@ -450,8 +451,8 @@ export const api = {
   },
 
   // StatLab — derived (streak-style) queries
-  statlabDerived: (orgId, name, { limit = 100, context = {} } = {}) => {
-    const params = new URLSearchParams({ org_id: orgId, limit })
+  statlabDerived: (orgId, name, { limit = 100, page = 1, context = {} } = {}) => {
+    const params = new URLSearchParams({ org_id: orgId, limit, page })
     Object.entries(context).forEach(([k, v]) => {
       if (v === undefined || v === null || v === '' || v === false) return
       params.set(k, v === true ? 'true' : String(v))
