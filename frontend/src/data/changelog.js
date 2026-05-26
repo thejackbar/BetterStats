@@ -4,6 +4,16 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.17.1.7',
+    date: '2026-05-26',
+    title: 'StatLab: restore Families reports group',
+    items: [
+      'Families preset group is back in StatLab — Most runs/wickets/matches/catches by family (career) and by season',
+      'Family target types (family_career, family_season, family_grade) restored to the target schema and column sets',
+      '"In family" context filter re-added so any player-level report can be scoped to a single family',
+    ],
+  },
+  {
     version: 'v7.17.1.6',
     date: '2026-05-26',
     title: 'Fix: notification bell unclickable + permanent changelog page',
