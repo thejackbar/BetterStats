@@ -63,6 +63,7 @@ _CTX_KEYS_TEXT = {
     "result", "dismissal",
     "gender", "player_role",
     "award_category", "award_subcategory", "award_name", "office_bearer",
+    "family_id",
 }
 _CTX_KEYS_INT = {
     "min_year", "max_year", "position_min", "position_max",

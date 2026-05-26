@@ -13,6 +13,7 @@ export const CAP = {
   RUN_HARD_REFRESH: 'run_hard_refresh',
   MANAGE_USERS: 'manage_users',
   MANAGE_REPORTS: 'manage_reports',
+  MANAGE_FAMILIES: 'manage_families',
 }
 
 // Display metadata for the user-management UI checkboxes.
@@ -29,4 +30,5 @@ export const CAPABILITY_INFO = [
   { key: CAP.RUN_HARD_REFRESH, label: 'Run hard refresh', hint: 'Destructive — wipes + re-syncs everything (1h+)' },
   { key: CAP.MANAGE_USERS, label: 'Manage users', hint: 'Invite club members + assign capabilities' },
   { key: CAP.MANAGE_REPORTS, label: 'Manage saved reports', hint: 'Approve / reject saved StatLab reports' },
+  { key: CAP.MANAGE_FAMILIES, label: 'Manage families', hint: 'Create and edit player family groupings' },
 ]

@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config.settings import settings
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -330,6 +330,48 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_org_sponsors_org "
             "ON org_sponsors(organisation_id, display_order)"
         ))
+        # Families — groups of related players within an org. The relationship
+        # field is free text; suggestion-dismissals are sticky per surname.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS families (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (organisation_id, name)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_families_org ON families(organisation_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS family_members (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                family_id UUID NOT NULL REFERENCES families(id) ON DELETE CASCADE,
+                player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                relationship TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (family_id, player_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_family_members_family ON family_members(family_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_family_members_player ON family_members(player_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS family_suggestions_dismissed (
+                id SERIAL PRIMARY KEY,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                surname_key TEXT NOT NULL,
+                dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                dismissed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                UNIQUE (organisation_id, surname_key)
+            )
+        """))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
@@ -389,6 +431,7 @@ app.include_router(images.router)
 app.include_router(og_preview.router)
 app.include_router(notifications.router)
 app.include_router(seo.router)
+app.include_router(families.router)
 
 # Serve uploaded files (hero images, gallery photos)
 _upload_dir = Path("/app/uploads")

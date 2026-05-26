@@ -125,6 +125,44 @@ export const api = {
       body: JSON.stringify({ merge_log_id: mergeLogId, org_id: orgId }),
     }),
 
+  // Families
+  listFamilies: (orgId) => request(`/families?org_id=${encodeURIComponent(orgId)}`),
+  getFamily: (familyId, orgId) =>
+    request(`/families/${familyId}?org_id=${encodeURIComponent(orgId)}`),
+  createFamily: (orgId, name, notes) =>
+    request('/families', {
+      method: 'POST',
+      body: JSON.stringify({ org_id: orgId, name, notes: notes || null }),
+    }),
+  updateFamily: (familyId, orgId, patch) =>
+    request(`/families/${familyId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ org_id: orgId, ...patch }),
+    }),
+  deleteFamily: (familyId, orgId) =>
+    request(`/families/${familyId}?org_id=${encodeURIComponent(orgId)}`, { method: 'DELETE' }),
+  addFamilyMember: (familyId, orgId, playerId, relationship) =>
+    request(`/families/${familyId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ org_id: orgId, player_id: playerId, relationship: relationship || null }),
+    }),
+  updateFamilyMember: (familyId, playerId, orgId, relationship) =>
+    request(`/families/${familyId}/members/${playerId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ org_id: orgId, relationship: relationship || null }),
+    }),
+  removeFamilyMember: (familyId, playerId, orgId) =>
+    request(`/families/${familyId}/members/${playerId}?org_id=${encodeURIComponent(orgId)}`, {
+      method: 'DELETE',
+    }),
+  getFamilySuggestions: (orgId) =>
+    request(`/families/suggestions/list?org_id=${encodeURIComponent(orgId)}`),
+  dismissFamilySuggestion: (orgId, surnameKey) =>
+    request('/families/suggestions/dismiss', {
+      method: 'POST',
+      body: JSON.stringify({ org_id: orgId, surname_key: surnameKey }),
+    }),
+
   // Grade merge tools
   listGradesWithStats: (orgId) => request(`/admin/grades-with-stats?org_id=${orgId}`),
   mergeGrades: (orgId, aliasName, canonicalName) =>

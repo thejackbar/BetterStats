@@ -4,15 +4,14 @@
 
 export const CHANGELOG = [
   {
-    version: 'v7.15.0.3',
+    version: 'v7.16.0',
     date: '2026-05-26',
-    title: 'Fix: Ducks/Golden Ducks Inflicted — store opposition batter’s score',
+    title: 'Families: group related players and filter StatLab by family',
     items: [
-      'Most Ducks Inflicted and Most Golden Ducks Inflicted were returning empty because they joined bowler_wickets to batting_innings, but batting_innings only stores OUR club’s batters — our bowlers can only dismiss opposition batters, so the join never matched.',
-      'Added batter_runs / batter_balls columns to bowler_wickets (migration 033) and updated the sync to denormalise the dismissed opposition batter’s score onto the wicket row at save time.',
-      'Both reports now read these columns directly — Most Ducks Inflicted = rows where batter_runs = 0, Most Golden Ducks Inflicted = rows where batter_runs = 0 AND batter_balls IN (0, 1).',
-      'Existing bowler_wickets rows have batter_runs = NULL. A Full Rebuild from Admin → Data Sync is required to backfill them (one-time cost).',
-      'Top Bowler/Fielder Combinations: query is structurally correct (joins bowler_wickets where fielder_id is set) but description now notes that data quality depends on the catcher’s name in dismissalText resolving to a known player — substitute fielders or unrecognised names fall through. No SQL change.',
+      'New Admin → Families page. Create a family, add players to it, and tag each member\'s relationship (Father, Son, Cousin — free text with autocomplete suggestions).',
+      'Suggestions tab groups same-surname players who aren\'t already in a family and offers one-click "Create family" or "Add to existing". Dismiss a surname to never see it again.',
+      'StatLab → Player Attributes gains a "Family" dropdown. Pick a family and reports restrict to its members — works on every report and saved-query.',
+      'New MANAGE_FAMILIES capability — granted to super_admin and club_admin by default; can be granted to club members.',
     ],
   },
   {
