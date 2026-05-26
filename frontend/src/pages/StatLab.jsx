@@ -13,6 +13,9 @@ const TARGETS = [
   { key: 'player_career',    label: 'Player career',     shape: 'aggregate', dim: 'player' },
   { key: 'player_season',    label: 'Player season',     shape: 'aggregate', dim: 'player_season' },
   { key: 'player_grade',     label: 'Player by grade',   shape: 'aggregate', dim: 'player_grade' },
+  { key: 'family_career',    label: 'Family career',     shape: 'aggregate', dim: 'family' },
+  { key: 'family_season',    label: 'Family by season',  shape: 'aggregate', dim: 'family_season' },
+  { key: 'family_grade',     label: 'Family by grade',   shape: 'aggregate', dim: 'family_grade' },
   { key: 'innings_list',     label: 'Innings list',      shape: 'list',      dim: 'innings' },
   { key: 'spell_list',       label: 'Bowling spells',    shape: 'list',      dim: 'spell' },
   { key: 'match_list',       label: 'Match list',        shape: 'list',      dim: 'match' },
@@ -65,6 +68,7 @@ const METRIC_LABELS = {
   wicket_number: { label: 'Wicket Number', short: 'Wkt #', decimal: false },
   batter1_runs: { label: 'Batter 1 Runs', short: 'B1 R', decimal: false },
   batter2_runs: { label: 'Batter 2 Runs', short: 'B2 R', decimal: false },
+  member_count: { label: 'Members', short: 'Members', decimal: false },
 }
 
 const OPERATORS = [
@@ -103,6 +107,18 @@ const PRESET_GROUPS = [
       { type: 'preset', label: 'Top wicket aggregates by season',  target: 'player_season', sortBy: 'wickets',         sortDir: 'desc', filters: [], context: {} },
       { type: 'preset', label: 'Top bowling averages by season',   target: 'player_season', sortBy: 'bowling_average', sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '10' }], context: {} },
       { type: 'preset', label: 'Most matches in a season',         target: 'player_season', sortBy: 'matches',         sortDir: 'desc', filters: [], context: {} },
+    ],
+  },
+  {
+    key: 'families', label: 'Families', defaultOpen: false,
+    items: [
+      { type: 'preset', label: 'Most runs by family (career)',      target: 'family_career', sortBy: 'runs',     sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Most wickets by family (career)',   target: 'family_career', sortBy: 'wickets',  sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Most matches by family (career)',   target: 'family_career', sortBy: 'matches',  sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Most catches by family (career)',   target: 'family_career', sortBy: 'catches',  sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Family runs by season',             target: 'family_season', sortBy: 'runs',     sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Family wickets by season',          target: 'family_season', sortBy: 'wickets',  sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Family matches by season',          target: 'family_season', sortBy: 'matches',  sortDir: 'desc', filters: [], context: {} },
     ],
   },
   {
@@ -297,6 +313,9 @@ const COLUMN_SETS = {
   player_career:    ['matches','batting_innings','runs','not_outs','batting_average','high_score','hundreds','fifties','ducks','wickets','bowling_average','bowling_economy','five_wicket_innings','catches','run_outs','stumpings'],
   player_season:    ['matches','batting_innings','runs','batting_average','high_score','hundreds','fifties','wickets','bowling_average','catches'],
   player_grade:     ['matches','batting_innings','runs','batting_average','high_score','hundreds','wickets','bowling_average','catches'],
+  family_career:    ['member_count','matches','batting_innings','runs','batting_average','high_score','hundreds','fifties','ducks','wickets','bowling_average','five_wicket_innings','catches','run_outs','stumpings'],
+  family_season:    ['member_count','matches','batting_innings','runs','batting_average','high_score','hundreds','wickets','bowling_average','catches'],
+  family_grade:     ['member_count','matches','batting_innings','runs','batting_average','high_score','wickets','bowling_average','catches'],
   innings_list:     ['runs','balls','fours','sixes','strike_rate','batting_position'],
   spell_list:       ['overs','maidens','runs','wickets','economy'],
   match_list:       ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs'],
@@ -317,7 +336,7 @@ const CONTEXT_KEYS = [
 // fields hide automatically. Kept in sync with backend METRIC_CATEGORIES.
 const FILTER_CATEGORIES = [
   { key: 'participation', label: 'Participation',
-    fields: ['matches','seasons_played','batting_innings','bowling_innings'] },
+    fields: ['matches','seasons_played','batting_innings','bowling_innings','member_count'] },
   { key: 'batting', label: 'Batting',
     fields: ['runs','not_outs','batting_average','batting_strike_rate','high_score',
              'fifties','hundreds','ducks','fours','sixes','balls_faced','balls',
@@ -552,9 +571,12 @@ function PickerInput({ orgId, kind, value, placeholder, onChange }) {
   )
 }
 
-function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, activeDerived, orgId }) {
+function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, target, activeDerived, orgId }) {
   const set = (k, v) => onChange({ ...ctx, [k]: v })
   const showInningsFilters = targetShape === 'list' || targetShape === 'aggregate'
+  // Family targets are themselves family-aggregations, so a "filter to one
+  // family" dropdown is redundant (you'd just see one row). Hide it there.
+  const isFamilyTarget = typeof target === 'string' && target.startsWith('family_')
   const [families, setFamilies] = useState([])
   useEffect(() => {
     if (!orgId) return
@@ -695,9 +717,9 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, acti
                          placeholder="e.g. President, Secretary"
                          onChange={v => set('office_bearer', v)} />
           </div>
-          {families.length > 0 && (
+          {families.length > 0 && !isFamilyTarget && (
             <div>
-              <Label>Family</Label>
+              <Label>In family</Label>
               <select className={selectCls + ' mt-1'} value={ctx.family_id || ''} onChange={e => set('family_id', e.target.value)}>
                 <option value="">Any family</option>
                 {families.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -1480,6 +1502,7 @@ export default function StatLab() {
                         seasons={seasons}
                         grades={grades}
                         targetShape={targetMeta.shape}
+                        target={query.target}
                         activeDerived={activeDerived}
                         orgId={orgId}
                       />
@@ -1631,6 +1654,12 @@ function entityHeader(target, activeDerived) {
       return [{ key: 'player_name', label: 'PLAYER' }, { key: 'season_name', label: 'SEASON' }]
     case 'player_grade':
       return [{ key: 'player_name', label: 'PLAYER' }, { key: 'display_grade_name', label: 'GRADE' }]
+    case 'family_career':
+      return [{ key: 'family_name', label: 'FAMILY' }, { key: 'members', label: 'MEMBERS' }]
+    case 'family_season':
+      return [{ key: 'family_name', label: 'FAMILY' }, { key: 'season_name', label: 'SEASON' }, { key: 'members', label: 'MEMBERS' }]
+    case 'family_grade':
+      return [{ key: 'family_name', label: 'FAMILY' }, { key: 'display_grade_name', label: 'GRADE' }, { key: 'members', label: 'MEMBERS' }]
     case 'innings_list':
       return [
         { key: 'player_name', label: 'PLAYER' },
@@ -1746,6 +1775,12 @@ function renderDimCell(key, row, clubSlug) {
   }
   if (key === 'player_name' && row.player_id) {
     return <Link to={`/players/${row.player_id}`} className="text-pb-text hover:text-pb-accent">{row.player_name || row.name}</Link>
+  }
+  if (key === 'family_name') {
+    return <span className="text-pb-text">{row.family_name || '—'}</span>
+  }
+  if (key === 'members') {
+    return <span className="text-pb-faint text-xs">{row.members || '—'}</span>
   }
   if (key === 'result') {
     const r = row.result
