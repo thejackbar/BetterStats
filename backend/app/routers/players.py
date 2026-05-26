@@ -102,7 +102,7 @@ async def get_player_stats(
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id)
 
     return {
-        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url},
+        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url, "is_overseas": player.is_overseas, "overseas_country": player.overseas_country},
         "career_batting": _str_keys(batting),
         "career_bowling": _str_keys(bowling),
         "career_fielding": _str_keys(fielding),
