@@ -137,10 +137,16 @@ export default function NotificationModal({ isOpen, summary, error, onClose }) {
   const newMilestones = summary?.new_milestones || []
   const upcoming = (summary?.upcoming_milestones || []).slice(0, 5)
   const pendingCount = summary?.pending_sync_requests || 0
+  const pendingReportsCount = summary?.pending_reports_count || 0
   const failedSyncs = syncRuns.filter(r => r.status === 'error')
 
   const hasSinceLastVisit = syncRuns.length > 0 || newMilestones.length > 0
-  const hasAnything = newEntries.length > 0 || hasSinceLastVisit || upcoming.length > 0 || pendingCount > 0
+  const hasAnything =
+    newEntries.length > 0 ||
+    hasSinceLastVisit ||
+    upcoming.length > 0 ||
+    pendingCount > 0 ||
+    pendingReportsCount > 0
 
   return (
     <div className="fixed inset-0 z-[60] flex" onClick={onClose}>
@@ -211,22 +217,41 @@ export default function NotificationModal({ isOpen, summary, error, onClose }) {
           )}
 
           {/* Needs Attention */}
-          {pendingCount > 0 && (
+          {(pendingCount > 0 || pendingReportsCount > 0) && (
             <section>
               <SectionHead title="Needs Attention" color="#f59e0b" />
-              <Link
-                to="/admin/sync"
-                onClick={onClose}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg border pb-hairline hover:bg-pb-surface2 transition"
-              >
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: '#f59e0b' }} />
-                <span className="text-sm text-pb-text flex-1">
-                  {pendingCount} player sync {pendingCount === 1 ? 'request' : 'requests'} awaiting approval
-                </span>
-                <svg className="text-pb-faintest" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M5 12h14M12 5l7 7-7 7" />
-                </svg>
-              </Link>
+              <div className="space-y-1.5">
+                {pendingCount > 0 && (
+                  <Link
+                    to="/admin/sync"
+                    onClick={onClose}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-lg border pb-hairline hover:bg-pb-surface2 transition"
+                  >
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: '#f59e0b' }} />
+                    <span className="text-sm text-pb-text flex-1">
+                      {pendingCount} player sync {pendingCount === 1 ? 'request' : 'requests'} awaiting approval
+                    </span>
+                    <svg className="text-pb-faintest" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M5 12h14M12 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                )}
+                {pendingReportsCount > 0 && (
+                  <Link
+                    to="/admin/reports"
+                    onClick={onClose}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-lg border pb-hairline hover:bg-pb-surface2 transition"
+                  >
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: '#f59e0b' }} />
+                    <span className="text-sm text-pb-text flex-1">
+                      {pendingReportsCount} saved {pendingReportsCount === 1 ? 'report' : 'reports'} awaiting approval
+                    </span>
+                    <svg className="text-pb-faintest" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M5 12h14M12 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                )}
+              </div>
             </section>
           )}
 
