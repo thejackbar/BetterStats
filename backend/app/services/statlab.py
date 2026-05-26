@@ -147,6 +147,7 @@ MATCH_CONTEXT_FILTERS: dict[str, dict] = {
     "opposition":   {"sql": "LOWER(COALESCE(CASE WHEN ga.team_name = g.home_team THEN g.away_team WHEN ga.team_name = g.away_team THEN g.home_team ELSE NULL END, '')) LIKE LOWER(:ctx_opposition)", "value_kind": "text_like"},
     "finals_only":  {"sql": "g.is_final = TRUE",                                       "value_kind": "flag"},
     "result":       {"sql": "(CASE WHEN g.winning_team IS NULL OR g.winning_team = '' THEN 'drawn' WHEN ga.team_name IS NOT NULL AND g.winning_team = ga.team_name THEN 'won' WHEN ga.team_name IS NOT NULL THEN 'lost' ELSE 'drawn' END) = :ctx_result", "value_kind": "result"},
+    "on_this_day":  {"sql": "EXTRACT(MONTH FROM g.played_at) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(DAY FROM g.played_at) = EXTRACT(DAY FROM CURRENT_DATE)", "value_kind": "flag"},
 }
 
 # Per-innings filters — applied to batting_innings (bi) joins only; relevant
@@ -2777,6 +2778,356 @@ async def derived_catches_stumpings(
     return [dict(r) for r in result.mappings()]
 
 
+# ─── Bowler-wickets driven derived ─────────────────────────────────────────────
+
+async def derived_ducks_inflicted(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Count of times each bowler dismissed a batter for 0.
+    Joins bowler_wickets (which records who got the wicket) to batting_innings
+    (which records the batter's actual score) by (game_id, innings_number, batter_name)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc).replace("gap.", "gap_b.")) if pc else ""
+    sql = f"""
+        WITH {universe},
+        wkts AS (
+            SELECT
+                bw.bowler_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                bw.game_id, bw.innings_number, bw.batter_name
+            FROM game_universe gu
+            JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+            JOIN players p ON p.id = bw.bowler_id
+            LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
+        ),
+        agg AS (
+            SELECT
+                wkts.bowler_id::text AS player_id,
+                wkts.player_name,
+                COUNT(*)::int AS ducks_inflicted
+            FROM wkts
+            JOIN batting_innings bi
+              ON bi.game_id = wkts.game_id
+             AND bi.innings_number = wkts.innings_number
+             AND LOWER(TRIM(bi.player_id::text)) <> LOWER(TRIM(wkts.bowler_id::text))
+            JOIN players bp ON bp.id = bi.player_id
+            WHERE LOWER(COALESCE(bp.display_name_override, bp.name)) = LOWER(TRIM(wkts.batter_name))
+              AND bi.runs = 0
+              AND bi.not_out = FALSE
+              AND bi.did_not_bat IS NOT TRUE
+              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+            GROUP BY wkts.bowler_id, wkts.player_name
+        )
+        SELECT * FROM agg
+        ORDER BY ducks_inflicted DESC, player_name ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_golden_ducks_inflicted(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Same as ducks_inflicted but only innings where batter faced 0 or 1 ball."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc).replace("gap.", "gap_b.")) if pc else ""
+    sql = f"""
+        WITH {universe},
+        wkts AS (
+            SELECT
+                bw.bowler_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                bw.game_id, bw.innings_number, bw.batter_name
+            FROM game_universe gu
+            JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+            JOIN players p ON p.id = bw.bowler_id
+            LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
+        ),
+        agg AS (
+            SELECT
+                wkts.bowler_id::text AS player_id,
+                wkts.player_name,
+                COUNT(*)::int AS golden_ducks_inflicted
+            FROM wkts
+            JOIN batting_innings bi
+              ON bi.game_id = wkts.game_id
+             AND bi.innings_number = wkts.innings_number
+            JOIN players bp ON bp.id = bi.player_id
+            WHERE LOWER(COALESCE(bp.display_name_override, bp.name)) = LOWER(TRIM(wkts.batter_name))
+              AND bi.runs = 0
+              AND COALESCE(bi.balls, 0) IN (0, 1)
+              AND bi.not_out = FALSE
+              AND bi.did_not_bat IS NOT TRUE
+              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+            GROUP BY wkts.bowler_id, wkts.player_name
+        )
+        SELECT * FROM agg
+        ORDER BY golden_ducks_inflicted DESC, player_name ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_bowler_fielder_combo(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Most productive bowler+fielder partnerships — count of wickets where
+    fielder caught/ran out a batter off this bowler."""
+    mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    sql = f"""
+        WITH {universe},
+        wkts AS (
+            SELECT bw.bowler_id, bw.fielder_id
+            FROM game_universe gu
+            JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+            JOIN players pb ON pb.id = bw.bowler_id
+            WHERE pb.organisation_id = :org_id
+              AND bw.fielder_id IS NOT NULL
+              AND bw.fielder_id <> bw.bowler_id
+        ),
+        agg AS (
+            SELECT bowler_id, fielder_id, COUNT(*)::int AS wickets
+            FROM wkts
+            GROUP BY bowler_id, fielder_id
+        )
+        SELECT
+            agg.bowler_id::text  AS player_a_id,
+            COALESCE(pb.display_name_override, pb.name) AS player_a_name,
+            agg.fielder_id::text AS player_b_id,
+            COALESCE(pf.display_name_override, pf.name) AS player_b_name,
+            agg.wickets
+        FROM agg
+        JOIN players pb ON pb.id = agg.bowler_id
+        JOIN players pf ON pf.id = agg.fielder_id
+        ORDER BY agg.wickets DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_top_opening_bowlers(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Count of games where this player opened the bowling (took the new ball).
+    A player is an "opener" for an innings if they have the lowest spell.id among
+    all of that innings's spells — proxy for "took the first over"."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        first_spell_per_innings AS (
+            SELECT DISTINCT ON (bs.game_id, bs.innings_number)
+                bs.game_id, bs.innings_number, bs.player_id
+            FROM game_universe gu
+            JOIN bowling_spells bs ON bs.game_id = gu.game_id
+            JOIN players p ON p.id = bs.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bs.innings_number IS NOT NULL
+              {player_extra}
+            ORDER BY bs.game_id, bs.innings_number, bs.id
+        ),
+        agg AS (
+            SELECT
+                fs.player_id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COUNT(*)::int AS opening_innings,
+                COUNT(DISTINCT fs.game_id)::int AS opening_matches
+            FROM first_spell_per_innings fs
+            JOIN players p ON p.id = fs.player_id
+            GROUP BY fs.player_id, COALESCE(p.display_name_override, p.name)
+        )
+        SELECT * FROM agg
+        ORDER BY opening_matches DESC, opening_innings DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── Hat tricks — sourced from manually-recorded achievements ─────────────────
+
+async def derived_hat_tricks(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Hat tricks from the player_achievements table (manually recorded).
+    Each row in the achievements table represents one hat trick instance; group
+    by player to get the count per player."""
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500)}
+    sql = """
+        WITH ht AS (
+            SELECT
+                pa.player_id,
+                COALESCE(NULLIF(pa.player_name, ''), '?') AS player_name,
+                pa.season,
+                pa.detail
+            FROM player_achievements pa
+            WHERE pa.org_id = CAST(:org_id AS UUID)
+              AND (
+                LOWER(COALESCE(pa.subcategory, '')) = 'hat tricks'
+                OR LOWER(pa.achievement) = 'hat trick'
+                OR LOWER(pa.achievement) LIKE 'hat-trick%'
+                OR LOWER(pa.achievement) LIKE 'hat trick%'
+              )
+        )
+        SELECT
+            COALESCE(player_id::text, MD5(player_name)) AS player_id,
+            player_name,
+            COUNT(*)::int AS hat_tricks,
+            STRING_AGG(DISTINCT NULLIF(season, ''), ', ' ORDER BY NULLIF(season, '')) AS seasons
+        FROM ht
+        GROUP BY player_id, player_name
+        ORDER BY hat_tricks DESC, player_name ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── C&B dismissals — separate from generic 'caught' ──────────────────────────
+
+async def derived_caught_and_bowled(session, *, org_id, limit, context):
+    """Count of times each batter was dismissed caught & bowled by the same player."""
+    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+                                   like_patterns=["caught and bowled%", "c & b%", "c&b%"],
+                                   result_col="c_and_b_count")
+
+
+# ─── Batting collapses (fall_of_wickets-based) ────────────────────────────────
+
+async def _wicket_collapse(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict, n_wickets: int, max_run_span: int = 30,
+) -> list[dict]:
+    """Find matches where N consecutive wickets fell within max_run_span runs.
+    Reports one row per (game, innings) where it happened, with the start/end
+    wicket numbers and run span."""
+    mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
+    params = {
+        "org_id": org_id,
+        "limit": min(max(1, limit), 500),
+        "n_wkts": n_wickets,
+        "span": max_run_span,
+        **mp, **pp,
+    }
+    universe = _game_universe_sql(mc)
+    sql = f"""
+        WITH {universe},
+        fow AS (
+            SELECT
+                fw.game_id, fw.innings_number, fw.wicket_number,
+                fw.score_at_fall,
+                LEAD(fw.score_at_fall, :n_wkts - 1) OVER (
+                    PARTITION BY fw.game_id, fw.innings_number ORDER BY fw.wicket_number
+                ) AS end_score,
+                LEAD(fw.wicket_number, :n_wkts - 1) OVER (
+                    PARTITION BY fw.game_id, fw.innings_number ORDER BY fw.wicket_number
+                ) AS end_wicket
+            FROM game_universe gu
+            JOIN fall_of_wickets fw ON fw.game_id = gu.game_id
+        ),
+        collapses AS (
+            SELECT
+                gu.game_id::text                          AS game_id,
+                gu.played_at                              AS played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                fow.innings_number,
+                fow.wicket_number                         AS from_wicket,
+                fow.end_wicket                            AS to_wicket,
+                fow.score_at_fall                         AS from_score,
+                fow.end_score                             AS to_score,
+                (fow.end_score - fow.score_at_fall)::int  AS run_span
+            FROM fow
+            JOIN game_universe gu ON gu.game_id = fow.game_id
+            WHERE fow.end_score IS NOT NULL
+              AND (fow.end_score - fow.score_at_fall) <= :span
+              AND (fow.end_score - fow.score_at_fall) >= 0
+              AND fow.end_wicket - fow.wicket_number = :n_wkts - 1
+        )
+        SELECT * FROM collapses
+        ORDER BY run_span ASC, played_at DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_5wkt_collapse(session, *, org_id, limit, context):
+    return await _wicket_collapse(session, org_id=org_id, limit=limit, context=context, n_wickets=5, max_run_span=30)
+
+
+async def derived_6wkt_collapse(session, *, org_id, limit, context):
+    return await _wicket_collapse(session, org_id=org_id, limit=limit, context=context, n_wickets=6, max_run_span=40)
+
+
+async def derived_7wkt_collapse(session, *, org_id, limit, context):
+    return await _wicket_collapse(session, org_id=org_id, limit=limit, context=context, n_wickets=7, max_run_span=50)
+
+
+async def derived_8wkt_collapse(session, *, org_id, limit, context):
+    return await _wicket_collapse(session, org_id=org_id, limit=limit, context=context, n_wickets=8, max_run_span=60)
+
+
+async def derived_9wkt_collapse(session, *, org_id, limit, context):
+    return await _wicket_collapse(session, org_id=org_id, limit=limit, context=context, n_wickets=9, max_run_span=70)
+
+
+# ─── Total season minutes batted ───────────────────────────────────────────────
+# We don't have per-innings minutes, but player_season_stats.batting_minutes is
+# populated, so a season-level "most minutes batted" report is possible.
+
+async def derived_most_minutes_in_season(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Most batting minutes accumulated in a single season."""
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500)}
+    season_filter = ""
+    if context.get("season_id"):
+        season_filter = (
+            "AND (s.id = CAST(:ctx_season_id AS UUID) "
+            "OR s.id IN (SELECT alias_season_id FROM season_aliases "
+            "WHERE canonical_season_id = CAST(:ctx_season_id AS UUID) "
+            "AND undone_at IS NULL))"
+        )
+        params["ctx_season_id"] = context["season_id"]
+    sql = f"""
+        SELECT
+            p.id::text                                   AS player_id,
+            COALESCE(p.display_name_override, p.name)    AS player_name,
+            s.name                                       AS season_name,
+            pss.batting_minutes::int                     AS minutes,
+            pss.runs::int                                AS runs,
+            pss.batting_innings::int                     AS innings
+        FROM player_season_stats pss
+        JOIN players p ON p.id = pss.player_id
+        JOIN seasons s ON s.id = pss.season_id
+        WHERE p.organisation_id = :org_id
+          AND COALESCE(pss.batting_minutes, 0) > 0
+          {season_filter}
+        ORDER BY pss.batting_minutes DESC NULLS LAST
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
 DERIVED_QUERIES: dict[str, dict] = {
     "consecutive_ducks": {
         "label": "Longest duck streak",
@@ -3232,6 +3583,144 @@ DERIVED_QUERIES: dict[str, dict] = {
             {"key": "catches", "label": "CT", "decimal": False},
             {"key": "stumpings", "label": "ST", "decimal": False},
             {"key": "run_outs", "label": "RO", "decimal": False},
+        ],
+    },
+    # Hat tricks — from manually-recorded achievements
+    "hat_tricks": {
+        "label": "Hat tricks",
+        "description": "Hat tricks recorded in Admin → Awards. Manual entries.",
+        "fn": derived_hat_tricks,
+        "columns": [
+            {"key": "hat_tricks", "label": "HT", "decimal": False},
+            {"key": "seasons", "label": "SEASONS"},
+        ],
+    },
+    # C&B — caught and bowled by same player
+    "caught_and_bowled": {
+        "label": "Highest caught & bowled count",
+        "description": "Players most often dismissed caught & bowled by the same bowler.",
+        "fn": derived_caught_and_bowled,
+        "columns": [{"key": "c_and_b_count", "label": "C&B", "decimal": False}],
+    },
+    # Ducks inflicted — bowler caused a batter's 0
+    "ducks_inflicted": {
+        "label": "Most ducks inflicted",
+        "description": "Bowlers ranked by how often they dismissed a batter for 0.",
+        "fn": derived_ducks_inflicted,
+        "columns": [
+            {"key": "ducks_inflicted", "label": "DUCKS", "decimal": False},
+        ],
+    },
+    "golden_ducks_inflicted": {
+        "label": "Most golden ducks inflicted",
+        "description": "Bowlers ranked by golden ducks (0 off 0–1 balls) they caused.",
+        "fn": derived_golden_ducks_inflicted,
+        "columns": [
+            {"key": "golden_ducks_inflicted", "label": "GOLDEN", "decimal": False},
+        ],
+    },
+    # Bowler+fielder combos
+    "bowler_fielder_combo": {
+        "label": "Top bowler/fielder combinations",
+        "description": "Bowler+fielder pairs ranked by wickets they took together.",
+        "fn": derived_bowler_fielder_combo,
+        "columns": [
+            {"key": "player_a_id", "label": "BOWLER", "kind": "player_a"},
+            {"key": "player_b_id", "label": "FIELDER", "kind": "player_b"},
+            {"key": "wickets", "label": "WKTS", "decimal": False},
+        ],
+    },
+    # Top opening bowlers
+    "top_opening_bowlers": {
+        "label": "Top opening bowlers by match count",
+        "description": "Players who've taken the new ball most often (lowest spell ID per innings).",
+        "fn": derived_top_opening_bowlers,
+        "columns": [
+            {"key": "opening_matches", "label": "MATCHES", "decimal": False},
+            {"key": "opening_innings", "label": "INNS", "decimal": False},
+        ],
+    },
+    # Wicket collapses
+    "collapse_5w": {
+        "label": "5-wicket collapses",
+        "description": "5 wickets fell within 30 runs (from fall-of-wicket scores).",
+        "fn": derived_5wkt_collapse,
+        "columns": [
+            {"key": "run_span", "label": "RUNS", "decimal": False},
+            {"key": "from_wicket", "label": "FROM", "decimal": False},
+            {"key": "to_wicket", "label": "TO", "decimal": False},
+            {"key": "innings_number", "label": "INN#", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "collapse_6w": {
+        "label": "6-wicket collapses",
+        "description": "6 wickets fell within 40 runs.",
+        "fn": derived_6wkt_collapse,
+        "columns": [
+            {"key": "run_span", "label": "RUNS", "decimal": False},
+            {"key": "from_wicket", "label": "FROM", "decimal": False},
+            {"key": "to_wicket", "label": "TO", "decimal": False},
+            {"key": "innings_number", "label": "INN#", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "collapse_7w": {
+        "label": "7-wicket collapses",
+        "description": "7 wickets fell within 50 runs.",
+        "fn": derived_7wkt_collapse,
+        "columns": [
+            {"key": "run_span", "label": "RUNS", "decimal": False},
+            {"key": "from_wicket", "label": "FROM", "decimal": False},
+            {"key": "to_wicket", "label": "TO", "decimal": False},
+            {"key": "innings_number", "label": "INN#", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "collapse_8w": {
+        "label": "8-wicket collapses",
+        "description": "8 wickets fell within 60 runs.",
+        "fn": derived_8wkt_collapse,
+        "columns": [
+            {"key": "run_span", "label": "RUNS", "decimal": False},
+            {"key": "from_wicket", "label": "FROM", "decimal": False},
+            {"key": "to_wicket", "label": "TO", "decimal": False},
+            {"key": "innings_number", "label": "INN#", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "collapse_9w": {
+        "label": "9-wicket collapses",
+        "description": "9 wickets fell within 70 runs.",
+        "fn": derived_9wkt_collapse,
+        "columns": [
+            {"key": "run_span", "label": "RUNS", "decimal": False},
+            {"key": "from_wicket", "label": "FROM", "decimal": False},
+            {"key": "to_wicket", "label": "TO", "decimal": False},
+            {"key": "innings_number", "label": "INN#", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    # Season minutes batted
+    "most_minutes_in_season": {
+        "label": "Most batting minutes in a season",
+        "description": "Total minutes at the crease across a season (per-season stat).",
+        "fn": derived_most_minutes_in_season,
+        "columns": [
+            {"key": "minutes", "label": "MINS", "decimal": False},
+            {"key": "runs", "label": "RUNS", "decimal": False},
+            {"key": "innings", "label": "INNS", "decimal": False},
+            {"key": "season_name", "label": "SEASON"},
         ],
     },
 }
