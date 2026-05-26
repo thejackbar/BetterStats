@@ -51,7 +51,7 @@ const INCLUDED = [
   'Admin login for your stats volunteers',
   'CSV import and export',
   'Duplicate player merge tool',
-  'Season yearbook (Phase 2)',
+  'Season yearbook',
   'Email support',
 ]
 

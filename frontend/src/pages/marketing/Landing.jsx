@@ -8,7 +8,7 @@ const FEATURES = [
   { title: 'Player Profiles', desc: 'Rich individual profiles with career trends, partnership data, and milestone tracking.' },
   { title: 'Season Records', desc: 'Club and grade records updated automatically — best innings, best figures, partnerships.' },
   { title: 'Awards & Honours', desc: 'Log every club award, association honour, hall of fame inductee, and office bearer.' },
-  { title: 'Season Yearbook', desc: 'A shareable, web-based season summary your members will actually read. (Phase 2)' },
+  { title: 'Season Yearbook', desc: 'A shareable, web-based season publication auto-populated with stats, honours, photos, and editorial content.' },
 ]
 
 export default function Landing() {
