@@ -172,6 +172,16 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'dismissal_run_out',             label: 'Highest run-out count',      description: 'Players most often run out.' },
       { type: 'derived', key: 'dismissal_stumped',             label: 'Highest stumped count',      description: 'Players most often stumped.' },
       { type: 'derived', key: 'unusual_dismissals',            label: 'Unusual dismissals',         description: 'Rare dismissals (hit wicket, retired, handled, etc.).' },
+      { type: 'derived', key: 'caught_and_bowled',             label: 'Highest C&B count',          description: 'Most often caught & bowled by the same bowler.' },
+      { type: 'derived', key: 'most_minutes_in_season',        label: 'Most batting minutes in a season', description: 'Most minutes at the crease over one season.' },
+      // Collapses
+      { type: 'derived', key: 'collapse_5w',                   label: '5-wicket batting collapses', description: '5 wickets fell within 30 runs.' },
+      { type: 'derived', key: 'collapse_6w',                   label: '6-wicket batting collapses', description: '6 wickets fell within 40 runs.' },
+      { type: 'derived', key: 'collapse_7w',                   label: '7-wicket batting collapses', description: '7 wickets fell within 50 runs.' },
+      { type: 'derived', key: 'collapse_8w',                   label: '8-wicket batting collapses', description: '8 wickets fell within 60 runs.' },
+      { type: 'derived', key: 'collapse_9w',                   label: '9-wicket batting collapses', description: '9 wickets fell within 70 runs.' },
+      // On this day
+      { type: 'preset', label: 'On this day — batting',        target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [], context: { on_this_day: true } },
     ],
   },
   {
@@ -182,6 +192,7 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'partnership_aggregates_pair',     label: 'Top partnership aggregates',  description: 'Total partnership runs per pair of batters.' },
       { type: 'derived', key: 'century_partnerships_pair',       label: 'Most century partnerships by pair', description: 'Count of 100+ partnerships per pair.' },
       { type: 'derived', key: 'best_partnership_pair',           label: 'Best partnership by pair',    description: 'Highest single partnership for each pair.' },
+      { type: 'preset', label: 'On this day — partnerships',     target: 'partnership_list', sortBy: 'runs', sortDir: 'desc', filters: [], context: { on_this_day: true } },
     ],
   },
   {
@@ -214,6 +225,13 @@ const PRESET_GROUPS = [
       { type: 'preset', label: 'Most wides bowled (career)',       target: 'player_career', sortBy: 'wides',               sortDir: 'desc', filters: [{ field: 'wides', op: 'gte', value: '1' }], context: {} },
       { type: 'preset', label: 'Most no-balls bowled (career)',    target: 'player_career', sortBy: 'no_balls',            sortDir: 'desc', filters: [{ field: 'no_balls', op: 'gte', value: '1' }], context: {} },
       { type: 'preset', label: 'Most maidens (career)',            target: 'player_career', sortBy: 'maidens',             sortDir: 'desc', filters: [], context: {} },
+      // Special bowling reports
+      { type: 'derived', key: 'hat_tricks',                        label: 'Hat tricks',                description: 'From Admin → Awards (manually recorded).' },
+      { type: 'derived', key: 'ducks_inflicted',                   label: 'Most ducks inflicted',      description: 'Bowlers who dismissed batters for 0 most often.' },
+      { type: 'derived', key: 'golden_ducks_inflicted',            label: 'Most golden ducks inflicted', description: 'Bowlers who dismissed batters for 0 off 0–1 balls.' },
+      { type: 'derived', key: 'bowler_fielder_combo',              label: 'Top bowler/fielder combinations', description: 'Most productive bowler+catcher partnerships.' },
+      { type: 'derived', key: 'top_opening_bowlers',               label: 'Top opening bowlers by match count', description: 'Players who most often take the new ball.' },
+      { type: 'preset', label: 'On this day — bowling',            target: 'spell_list',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: { on_this_day: true } },
     ],
   },
   {
@@ -282,7 +300,7 @@ const CONTEXT_KEYS = [
   'season_id','grade_id','grade_name','opposition','date_from','date_to',
   'min_year','max_year','finals_only','captain_only','keeper_only','result',
   'dismissal','position_min','position_max',
-  'first_n_matches','milestone_runs',
+  'first_n_matches','milestone_runs','on_this_day',
 ]
 
 // Category groupings for the field picker. Field membership is intersected
@@ -320,6 +338,7 @@ const PAIR_DERIVED = new Set([
   'partnership_aggregates_pair',
   'century_partnerships_pair',
   'top_partnerships_by_wicket',
+  'bowler_fielder_combo',
 ])
 
 let _treeIdCounter = 1000
@@ -431,7 +450,7 @@ function decodeParamsToQuery(params) {
   CONTEXT_KEYS.forEach(k => {
     const v = params.get(`c_${k}`)
     if (v == null) return
-    if (k === 'finals_only' || k === 'captain_only' || k === 'keeper_only') {
+    if (k === 'finals_only' || k === 'captain_only' || k === 'keeper_only' || k === 'on_this_day') {
       context[k] = v === '1' || v === 'true'
     } else {
       context[k] = v
@@ -506,6 +525,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, acti
           { k: 'finals_only',  label: 'Finals only' },
           { k: 'captain_only', label: 'As captain' },
           { k: 'keeper_only',  label: 'As keeper' },
+          { k: 'on_this_day',  label: 'On this day' },
         ].map(({ k, label }) => (
           <label key={k} className="flex items-center gap-1 text-xs text-pb-dim cursor-pointer">
             <input type="checkbox" checked={!!ctx[k]} onChange={e => set(k, e.target.checked)} />
