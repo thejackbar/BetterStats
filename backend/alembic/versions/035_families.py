@@ -1,7 +1,7 @@
 """Family relationships within an organisation.
 
-Revision ID: 033
-Revises: 032
+Revision ID: 035
+Revises: 034
 Create Date: 2026-05-26
 
 A `family` groups players that share a real-world family unit. The
@@ -16,8 +16,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = '033'
-down_revision = '032'
+revision = '035'
+down_revision = '034'
 branch_labels = None
 depends_on = None
 

@@ -1,8 +1,8 @@
 """Add batter_runs / batter_balls to bowler_wickets so we can derive 'ducks
 inflicted' style reports without needing opposition batting tables.
 
-Revision ID: 033
-Revises: 032
+Revision ID: 034
+Revises: 033
 Create Date: 2026-05-26
 
 batting_innings only stores OUR club's batters, so the old ducks_inflicted
@@ -19,8 +19,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = '033'
-down_revision = '032'
+revision = '034'
+down_revision = '033'
 branch_labels = None
 depends_on = None
 
