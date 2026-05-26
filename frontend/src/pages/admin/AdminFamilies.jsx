@@ -342,19 +342,38 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
   const [adding, setAdding] = useState(false)
   const [familyName, setFamilyName] = useState(`${suggestion.surname_display} Family`)
   const [chosenFamilyId, setChosenFamilyId] = useState('')
+  // All players selected by default — toggling lets the admin split a
+  // mixed surname group (e.g. two unrelated Matthews families) into one
+  // family at a time. Unselected players stay in the suggestion list and
+  // come back on the next refresh.
+  const [selectedIds, setSelectedIds] = useState(
+    () => new Set(suggestion.players.map(p => p.id))
+  )
 
-  const playerCount = suggestion.players.length
+  function toggle(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const setAll = () => setSelectedIds(new Set(suggestion.players.map(p => p.id)))
+  const setNone = () => setSelectedIds(new Set())
+
+  const selectedCount = selectedIds.size
+  const selectedPlayers = suggestion.players.filter(p => selectedIds.has(p.id))
 
   async function handleCreate() {
     const trimmed = familyName.trim()
-    if (!trimmed) return
+    if (!trimmed || selectedCount === 0) return
     setCreating(true)
     try {
       const fam = await api.createFamily(orgId, trimmed)
-      for (const p of suggestion.players) {
+      for (const p of selectedPlayers) {
         await api.addFamilyMember(fam.id, orgId, p.id, null)
       }
-      toast.success(`Created "${trimmed}" with ${playerCount} members`)
+      toast.success(`Created "${trimmed}" with ${selectedCount} ${selectedCount === 1 ? 'member' : 'members'}`)
       onActioned?.()
     } catch (e) {
       toast.error(e.message)
@@ -363,17 +382,17 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
   }
 
   async function handleAddToExisting() {
-    if (!chosenFamilyId) return
+    if (!chosenFamilyId || selectedCount === 0) return
     setAdding(true)
     try {
-      for (const p of suggestion.players) {
+      for (const p of selectedPlayers) {
         try {
           await api.addFamilyMember(chosenFamilyId, orgId, p.id, null)
         } catch (e) {
           if (!/already in this family/i.test(e.message)) throw e
         }
       }
-      toast.success(`Added ${playerCount} players`)
+      toast.success(`Added ${selectedCount} ${selectedCount === 1 ? 'player' : 'players'}`)
       onActioned?.()
     } catch (e) {
       toast.error(e.message)
@@ -390,6 +409,9 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
     }
   }
 
+  const playerCount = suggestion.players.length
+  const partialSelection = selectedCount > 0 && selectedCount < playerCount
+
   return (
     <div className="pb-card p-4">
       <div className="flex items-center justify-between gap-2 mb-3">
@@ -397,15 +419,59 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
           <div className="font-mono text-[10px] tracking-wide3 text-pb-faint">POSSIBLE FAMILY</div>
           <div className="text-pb-text font-semibold text-base">{suggestion.surname_display}</div>
         </div>
-        <span className="font-mono text-[10px] text-pb-faint">{playerCount} PLAYERS</span>
+        <span className="font-mono text-[10px] text-pb-faint">
+          {selectedCount === playerCount
+            ? `${playerCount} PLAYERS`
+            : `${selectedCount} / ${playerCount} SELECTED`}
+        </span>
       </div>
 
-      <div className="flex flex-wrap gap-1.5 mb-3">
-        {suggestion.players.map(p => (
-          <span key={p.id} className="font-mono text-[10px] px-2 py-1 rounded border pb-hairline text-pb-dim bg-pb-surface2/40">
-            {p.name}
+      <div className="font-mono text-[10px] text-pb-faintest mb-1.5">
+        Click a player to toggle. Unselected players stay in the suggestion list.
+      </div>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {suggestion.players.map(p => {
+          const on = selectedIds.has(p.id)
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => toggle(p.id)}
+              className={`font-mono text-[10px] px-2 py-1 rounded border transition ${
+                on
+                  ? 'pb-hairline text-pb-text bg-pb-surface2'
+                  : 'border-dashed border-pb-faintest text-pb-faintest line-through bg-transparent hover:text-pb-faint'
+              }`}
+              title={on ? 'Click to exclude from this family' : 'Click to include in this family'}
+            >
+              {p.name}
+            </button>
+          )
+        })}
+      </div>
+      <div className="flex gap-2 mb-3">
+        <button
+          type="button"
+          onClick={setAll}
+          disabled={selectedCount === playerCount}
+          className="font-mono text-[10px] text-pb-faint hover:text-pb-text disabled:opacity-30 disabled:hover:text-pb-faint"
+        >
+          Select all
+        </button>
+        <span className="font-mono text-[10px] text-pb-faintest">·</span>
+        <button
+          type="button"
+          onClick={setNone}
+          disabled={selectedCount === 0}
+          className="font-mono text-[10px] text-pb-faint hover:text-pb-text disabled:opacity-30 disabled:hover:text-pb-faint"
+        >
+          Select none
+        </button>
+        {partialSelection && (
+          <span className="font-mono text-[10px] text-pb-accent ml-auto">
+            {playerCount - selectedCount} will be re-suggested
           </span>
-        ))}
+        )}
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3">
@@ -419,11 +485,11 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
           />
           <button
             onClick={handleCreate}
-            disabled={creating || !familyName.trim()}
+            disabled={creating || !familyName.trim() || selectedCount === 0}
             className="w-full py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40"
             style={{ background: 'var(--pb-accent)' }}
           >
-            {creating ? 'Creating…' : `Create + add ${playerCount}`}
+            {creating ? 'Creating…' : `Create + add ${selectedCount}`}
           </button>
         </div>
 
@@ -439,10 +505,10 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
           </select>
           <button
             onClick={handleAddToExisting}
-            disabled={adding || !chosenFamilyId}
+            disabled={adding || !chosenFamilyId || selectedCount === 0}
             className="w-full py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-40"
           >
-            {adding ? 'Adding…' : `Add ${playerCount}`}
+            {adding ? 'Adding…' : `Add ${selectedCount}`}
           </button>
         </div>
       </div>
