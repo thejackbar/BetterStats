@@ -1964,7 +1964,7 @@ async def _longest_streak(
 
 
 async def derived_consecutive_no_century(
-    session, *, org_id, limit, context,
+    session, *, org_id, limit, offset=0, context,
 ) -> list[dict]:
     """Longest streak of innings scoring under 100."""
     return await _longest_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
@@ -1972,7 +1972,7 @@ async def derived_consecutive_no_century(
 
 
 async def derived_consecutive_hundreds(
-    session, *, org_id, limit, context,
+    session, *, org_id, limit, offset=0, context,
 ) -> list[dict]:
     """Longest streak of innings scoring 100+."""
     return await _longest_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
@@ -2226,29 +2226,36 @@ async def _dismissal_count(
     return [dict(r) for r in result.mappings()]
 
 
+# Dismissal-type patterns must match what's actually stored. Grassroots sync
+# canonicalises dismissal_type to bare short forms ('b', 'c', 'st', 'lbw',
+# 'run out', etc.) via _GR_DISMISSAL_SHORT in sync.py — so each pattern set
+# includes both the bare short form and the long form for resilience against
+# any older / non-GR rows. See aggregations.py:_dismissal_breakdown for the
+# canonical matcher used elsewhere.
+
 async def derived_dismissal_bowled(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["bowled", "b %", "b. %"], result_col="bowled_count")
+                                   like_patterns=["b", "b %", "b. %", "bowled", "bowled%"], result_col="bowled_count")
 
 
 async def derived_dismissal_caught(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["caught%", "c %", "c. %", "ct%"], result_col="caught_count")
+                                   like_patterns=["c", "c %", "c. %", "ct%", "caught", "caught%"], result_col="caught_count")
 
 
 async def derived_dismissal_lbw(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["lbw%"], result_col="lbw_count")
+                                   like_patterns=["lbw", "lbw %", "lbw%", "leg before wicket%"], result_col="lbw_count")
 
 
 async def derived_dismissal_run_out(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["run out%", "ro%"], result_col="run_out_count")
+                                   like_patterns=["run out", "run out%", "ro", "ro%"], result_col="run_out_count")
 
 
 async def derived_dismissal_stumped(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["stumped%", "st %", "st. %"], result_col="stumped_count")
+                                   like_patterns=["st", "st %", "st. %", "stumped", "stumped%"], result_col="stumped_count")
 
 
 async def derived_unusual_dismissals(
@@ -3092,12 +3099,49 @@ async def derived_hat_tricks(
 
 
 # ─── C&B dismissals — separate from generic 'caught' ──────────────────────────
+# batting_innings.dismissal_type for a c&b is just 'c' (same as a normal
+# catch), so we can't tell c&b apart by querying batting_innings alone.
+# bowler_wickets DOES tag c&b canonically as 'caught and bowled', so the
+# batter view joins through that table and groups by the dismissed batter.
 
-async def derived_caught_and_bowled(session, *, org_id, limit, offset=0, context):
+async def derived_caught_and_bowled(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+) -> list[dict]:
     """Count of times each batter was dismissed caught & bowled (batter view)."""
-    return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["caught and bowled%", "c & b%", "c&b%", "caught & bowled%", "c and b%"],
-                                   result_col="c_and_b_count")
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe}
+        SELECT
+            bi.player_id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            COUNT(DISTINCT (bi.game_id, bi.innings_number, bi.player_id))::int AS c_and_b_count
+        FROM game_universe gu
+        JOIN batting_innings bi ON bi.game_id = gu.game_id
+        JOIN players p ON p.id = bi.player_id
+        JOIN bowler_wickets bw
+          ON bw.game_id = bi.game_id
+         AND bw.innings_number = bi.innings_number
+         AND LOWER(bw.dismissal_type) IN ('caught and bowled', 'c&b', 'c & b')
+         AND (
+           (bw.batter_position IS NOT NULL AND bi.batting_position = bw.batter_position)
+           OR (bw.batter_position IS NULL
+               AND LOWER(TRIM(COALESCE(p.display_name_override, p.name))) = LOWER(TRIM(bw.batter_name)))
+         )
+        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND bi.did_not_bat IS NOT TRUE
+          {player_extra}
+        GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name)
+        HAVING COUNT(*) > 0
+        ORDER BY c_and_b_count DESC, player_name ASC
+        LIMIT :limit OFFSET :offset
+    """
+    params["offset"] = offset
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
 
 
 async def derived_caught_and_bowled_bowler(
