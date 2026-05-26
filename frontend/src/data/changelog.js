@@ -4,6 +4,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.17.4',
+    date: '2026-05-26',
+    title: 'Bulk player editing',
+    items: [
+      'Select multiple players in the admin player list using checkboxes, then apply role, gender, overseas status, or player type to all of them in one click.',
+      '"Select all" checkbox selects every player matching the current search/filter.',
+    ],
+  },
+  {
     version: 'v7.17.3',
     date: '2026-05-26',
     title: 'Overseas player support',
