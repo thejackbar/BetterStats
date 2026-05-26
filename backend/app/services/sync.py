@@ -882,6 +882,10 @@ def extract_bowler_wickets(
                 fielder_id=fielder_pid,
                 batter_name=row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or ""),
                 batter_position=row.get("batOrder"),
+                # Denormalise the dismissed batter's score so 'ducks inflicted'
+                # style reports work without an opposition batting table.
+                batter_runs=row.get("runsScored"),
+                batter_balls=row.get("ballsFaced"),
                 dismissal_type=method or None,
             ))
 

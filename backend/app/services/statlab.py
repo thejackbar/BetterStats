@@ -2861,55 +2861,31 @@ async def derived_ducks_inflicted(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Count of times each bowler dismissed a batter for 0.
-    Joins bowler_wickets → batting_innings primarily on (game_id, innings_number,
-    batter_position) — position is unambiguous within an innings. Falls back to
-    a name match when position isn't populated. Previously this used name-only
-    matching which silently dropped wickets when batter_name spellings differed
-    between the two tables."""
+
+    Reads from bowler_wickets.batter_runs (denormalised during sync) so we
+    can count opposition batters' scores — we don't store opposition
+    batting in batting_innings. Rows synced before migration 033 have
+    batter_runs = NULL and are excluded until the next Full Rebuild
+    repopulates them."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
     player_extra = (" AND " + " AND ".join(pc).replace("gap.", "gap_b.")) if pc else ""
     sql = f"""
-        WITH {universe},
-        wkts AS (
-            SELECT
-                bw.bowler_id,
-                COALESCE(p.display_name_override, p.name) AS player_name,
-                bw.game_id, bw.innings_number, bw.batter_name, bw.batter_position
-            FROM game_universe gu
-            JOIN bowler_wickets bw ON bw.game_id = gu.game_id
-            JOIN players p ON p.id = bw.bowler_id
-            LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
-            WHERE p.organisation_id = :org_id {player_extra}
-        ),
-        agg AS (
-            SELECT
-                wkts.bowler_id::text AS player_id,
-                wkts.player_name,
-                COUNT(DISTINCT (bi.game_id, bi.innings_number, bi.player_id))::int AS ducks_inflicted
-            FROM wkts
-            JOIN batting_innings bi
-              ON bi.game_id = wkts.game_id
-             AND bi.innings_number = wkts.innings_number
-             AND bi.player_id <> wkts.bowler_id
-             AND (
-               -- Prefer position match (robust to name variations).
-               (wkts.batter_position IS NOT NULL AND bi.batting_position = wkts.batter_position)
-               -- Fall back to case/space-insensitive name match.
-               OR (wkts.batter_position IS NULL
-                   AND LOWER(TRIM(COALESCE((SELECT display_name_override FROM players WHERE id = bi.player_id),
-                                            (SELECT name FROM players WHERE id = bi.player_id))))
-                       = LOWER(TRIM(wkts.batter_name)))
-             )
-            WHERE bi.runs = 0
-              AND bi.not_out = FALSE
-              AND bi.did_not_bat IS NOT TRUE
-              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
-            GROUP BY wkts.bowler_id, wkts.player_name
-        )
-        SELECT * FROM agg
-        WHERE ducks_inflicted > 0
+        WITH {universe}
+        SELECT
+            bw.bowler_id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            COUNT(*)::int AS ducks_inflicted
+        FROM game_universe gu
+        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN players p ON p.id = bw.bowler_id
+        LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND bw.batter_runs = 0
+          {player_extra}
+        GROUP BY bw.bowler_id, COALESCE(p.display_name_override, p.name)
+        HAVING COUNT(*) > 0
         ORDER BY ducks_inflicted DESC, player_name ASC
         LIMIT :limit OFFSET :offset
     """
@@ -2922,50 +2898,27 @@ async def derived_golden_ducks_inflicted(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Same as ducks_inflicted but only innings where batter faced 0 or 1 ball.
-    Uses position-preferred matching to avoid name-mismatch dropouts."""
+    Reads denormalised batter_runs / batter_balls on bowler_wickets."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
     player_extra = (" AND " + " AND ".join(pc).replace("gap.", "gap_b.")) if pc else ""
     sql = f"""
-        WITH {universe},
-        wkts AS (
-            SELECT
-                bw.bowler_id,
-                COALESCE(p.display_name_override, p.name) AS player_name,
-                bw.game_id, bw.innings_number, bw.batter_name, bw.batter_position
-            FROM game_universe gu
-            JOIN bowler_wickets bw ON bw.game_id = gu.game_id
-            JOIN players p ON p.id = bw.bowler_id
-            LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
-            WHERE p.organisation_id = :org_id {player_extra}
-        ),
-        agg AS (
-            SELECT
-                wkts.bowler_id::text AS player_id,
-                wkts.player_name,
-                COUNT(DISTINCT (bi.game_id, bi.innings_number, bi.player_id))::int AS golden_ducks_inflicted
-            FROM wkts
-            JOIN batting_innings bi
-              ON bi.game_id = wkts.game_id
-             AND bi.innings_number = wkts.innings_number
-             AND bi.player_id <> wkts.bowler_id
-             AND (
-               (wkts.batter_position IS NOT NULL AND bi.batting_position = wkts.batter_position)
-               OR (wkts.batter_position IS NULL
-                   AND LOWER(TRIM(COALESCE((SELECT display_name_override FROM players WHERE id = bi.player_id),
-                                            (SELECT name FROM players WHERE id = bi.player_id))))
-                       = LOWER(TRIM(wkts.batter_name)))
-             )
-            WHERE bi.runs = 0
-              AND COALESCE(bi.balls, 0) IN (0, 1)
-              AND bi.not_out = FALSE
-              AND bi.did_not_bat IS NOT TRUE
-              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
-            GROUP BY wkts.bowler_id, wkts.player_name
-        )
-        SELECT * FROM agg
-        WHERE golden_ducks_inflicted > 0
+        WITH {universe}
+        SELECT
+            bw.bowler_id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            COUNT(*)::int AS golden_ducks_inflicted
+        FROM game_universe gu
+        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN players p ON p.id = bw.bowler_id
+        LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND bw.batter_runs = 0
+          AND COALESCE(bw.batter_balls, 0) IN (0, 1)
+          {player_extra}
+        GROUP BY bw.bowler_id, COALESCE(p.display_name_override, p.name)
+        HAVING COUNT(*) > 0
         ORDER BY golden_ducks_inflicted DESC, player_name ASC
         LIMIT :limit OFFSET :offset
     """
@@ -3868,7 +3821,7 @@ DERIVED_QUERIES: dict[str, dict] = {
     # Ducks inflicted — bowler caused a batter's 0
     "ducks_inflicted": {
         "label": "Most ducks inflicted",
-        "description": "Bowlers ranked by how often they dismissed a batter for 0.",
+        "description": "Bowlers ranked by how often they dismissed a batter for 0. Requires a Full Rebuild post-v7.15.0.3 to backfill opposition batting scores.",
         "fn": derived_ducks_inflicted,
         "columns": [
             {"key": "ducks_inflicted", "label": "DUCKS", "decimal": False},
@@ -3876,7 +3829,7 @@ DERIVED_QUERIES: dict[str, dict] = {
     },
     "golden_ducks_inflicted": {
         "label": "Most golden ducks inflicted",
-        "description": "Bowlers ranked by golden ducks (0 off 0–1 balls) they caused.",
+        "description": "Bowlers ranked by golden ducks (0 off 0–1 balls) they caused. Requires a Full Rebuild post-v7.15.0.3 to backfill opposition batting scores.",
         "fn": derived_golden_ducks_inflicted,
         "columns": [
             {"key": "golden_ducks_inflicted", "label": "GOLDEN", "decimal": False},
@@ -3885,7 +3838,7 @@ DERIVED_QUERIES: dict[str, dict] = {
     # Bowler+fielder combos
     "bowler_fielder_combo": {
         "label": "Top bowler/fielder combinations",
-        "description": "Bowler+fielder pairs ranked by wickets they took together.",
+        "description": "Bowler+fielder pairs ranked by catches and stumpings they took together. Depends on the catcher's name in the scorecard's dismissalText resolving to a known player — substitute fielders or unrecognised names fall through.",
         "fn": derived_bowler_fielder_combo,
         "columns": [
             {"key": "player_a_id", "label": "BOWLER", "kind": "player_a"},
