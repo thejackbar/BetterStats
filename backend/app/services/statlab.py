@@ -1964,7 +1964,7 @@ async def _longest_streak(
 
 
 async def derived_consecutive_no_century(
-    session, *, org_id, limit, context,
+    session, *, org_id, limit, offset=0, context,
 ) -> list[dict]:
     """Longest streak of innings scoring under 100."""
     return await _longest_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
@@ -1972,7 +1972,7 @@ async def derived_consecutive_no_century(
 
 
 async def derived_consecutive_hundreds(
-    session, *, org_id, limit, context,
+    session, *, org_id, limit, offset=0, context,
 ) -> list[dict]:
     """Longest streak of innings scoring 100+."""
     return await _longest_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
