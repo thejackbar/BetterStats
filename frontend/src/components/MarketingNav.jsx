@@ -5,6 +5,7 @@ import betterStatsLogo from '../assets/betterstatslogo_white.png'
 const LINKS = [
   { to: '/features', label: 'Features' },
   { to: '/pricing', label: 'Pricing' },
+  { to: '/blog', label: 'Blog' },
   { to: '/faq', label: 'FAQ' },
   { to: '/about', label: 'About' },
   { to: '/contact', label: 'Contact' },
