@@ -3288,14 +3288,27 @@ async def derived_bowler_fielder_combo(
     universe = _game_universe_sql(mc)
     sql = f"""
         WITH {universe},
+        merge_map AS (
+            SELECT removed_player_id,
+                   COALESCE(m2.keep_player_id, m1.keep_player_id) AS canonical_id
+            FROM merge_logs m1
+            LEFT JOIN merge_logs m2
+                   ON m2.removed_player_id = m1.keep_player_id AND m2.undone_at IS NULL
+            WHERE m1.undone_at IS NULL
+        ),
         wkts AS (
-            SELECT bw.bowler_id, bw.fielder_id
+            SELECT
+                COALESCE(mb.canonical_id, bw.bowler_id)  AS bowler_id,
+                COALESCE(mf.canonical_id, bw.fielder_id) AS fielder_id
             FROM game_universe gu
             JOIN bowler_wickets bw ON bw.game_id = gu.game_id
             JOIN players pb ON pb.id = bw.bowler_id
+            LEFT JOIN merge_map mb ON mb.removed_player_id = bw.bowler_id
+            LEFT JOIN merge_map mf ON mf.removed_player_id = bw.fielder_id
             WHERE pb.organisation_id = :org_id
               AND bw.fielder_id IS NOT NULL
-              AND bw.fielder_id <> bw.bowler_id
+              AND COALESCE(mf.canonical_id, bw.fielder_id) <>
+                  COALESCE(mb.canonical_id, bw.bowler_id)
               AND bw.dismissal_type = 'caught'
         ),
         agg AS (
