@@ -27,38 +27,39 @@ const NAV_SECTIONS = [
   {
     heading: 'Cricket Data',
     items: [
-      { to: '/admin/players', label: 'Players', cap: CAP.MANAGE_PLAYERS },
       { to: '/admin/games', label: 'Matches', cap: null },
+      { to: '/admin/players', label: 'Players', cap: CAP.MANAGE_PLAYERS },
       { to: '/admin/seasons', label: 'Seasons', cap: null },
     ],
   },
   {
     heading: 'Content',
     items: [
-      { to: '/admin/yearbook', label: 'Yearbooks', cap: CAP.MANAGE_YEARBOOKS },
-      { to: '/admin/awards', label: 'Awards', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/award-definitions', label: 'Award Types', cap: CAP.MANAGE_AWARDS },
-      { to: '/admin/sponsors', label: 'Sponsors', cap: CAP.MANAGE_SPONSORS },
+      { to: '/admin/awards', label: 'Awards', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/social-post', label: 'Social Posts', cap: CAP.MANAGE_SOCIAL },
+      { to: '/admin/sponsors', label: 'Sponsors', cap: CAP.MANAGE_SPONSORS },
+      { to: '/admin/yearbook', label: 'Yearbooks', cap: CAP.MANAGE_YEARBOOKS },
     ],
   },
   {
     heading: 'Tools',
     items: [
-      { to: '/admin/milestones', label: 'Milestones', cap: CAP.MANAGE_MILESTONES },
+      { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
       { to: '/admin/sync', label: 'Data Sync', cap: CAP.RUN_SYNC },
-      { to: '/admin/merge', label: 'Merge Players', cap: CAP.MANAGE_MERGES },
-      { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
       { to: '/admin/families', label: 'Families', cap: CAP.MANAGE_FAMILIES },
+      { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
+      { to: '/admin/merge', label: 'Merge Players', cap: CAP.MANAGE_MERGES },
+      { to: '/admin/milestones', label: 'Milestones', cap: CAP.MANAGE_MILESTONES },
       { to: '/admin/partnerships', label: 'Partnership Rec.', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/reports', label: 'Saved Reports', cap: CAP.MANAGE_REPORTS },
-      { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
     ],
   },
   {
+    heading: 'Account',
     items: [
-      { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
       { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
+      { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
     ],
   },
 ]
@@ -186,13 +187,16 @@ export default function AdminLayout({ children }) {
         {/* Sidebar */}
         <aside className={`
           ${mobileOpen ? 'block' : 'hidden'} md:block
-          w-full md:w-48 shrink-0 border-r pb-hairline-r pt-4 pb-8 px-2
+          w-full md:w-40 shrink-0 border-r pb-hairline-r pt-3 pb-6 px-1.5
         `}>
-          <nav className="space-y-0.5">
+          <nav>
             {visibleSections.map((section, i) => (
-              <div key={section.heading || `section-${i}`} className={i > 0 ? 'pt-3' : ''}>
+              <div
+                key={section.heading || `section-${i}`}
+                className={i > 0 ? 'mt-3 pt-3 border-t pb-hairline-t' : ''}
+              >
                 {section.heading && (
-                  <div className="pb-1 px-3 font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase">
+                  <div className="pb-1 px-2 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
                     {section.heading}
                   </div>
                 )}
@@ -201,7 +205,7 @@ export default function AdminLayout({ children }) {
                     key={link.to}
                     to={link.to}
                     onClick={() => setMobileOpen(false)}
-                    className={`block px-3 py-2 rounded text-sm transition-colors font-mono text-[11px] tracking-wide2 ${
+                    className={`block px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
                       isActive(link.to, link.exact)
                         ? 'bg-pb-surface2 text-pb-text'
                         : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
@@ -215,14 +219,14 @@ export default function AdminLayout({ children }) {
             ))}
 
             {user?.role === 'super_admin' && (
-              <>
-                <div className="pt-5 pb-1 px-3 font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase">Super Admin</div>
+              <div className="mt-3 pt-3 border-t pb-hairline-t">
+                <div className="pb-1 px-2 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Super Admin</div>
                 {SUPER_LINKS.map(link => (
                   <Link
                     key={link.to}
                     to={link.to}
                     onClick={() => setMobileOpen(false)}
-                    className={`block px-3 py-2 rounded text-sm transition-colors font-mono text-[11px] tracking-wide2 ${
+                    className={`block px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
                       isActive(link.to)
                         ? 'bg-pb-surface2'
                         : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
@@ -232,7 +236,7 @@ export default function AdminLayout({ children }) {
                     {link.label.toUpperCase()}
                   </Link>
                 ))}
-              </>
+              </div>
             )}
           </nav>
         </aside>
