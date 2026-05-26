@@ -193,6 +193,7 @@ class Game(Base):
     is_final = Column(Boolean, default=False, nullable=False, server_default='false')
     raw_payload = Column(JSON)
     venue = Column(Text)
+    match_format = Column(Text, nullable=True)
 
     grade = relationship("Grade", back_populates="games")
     batting_innings = relationship("BattingInnings", back_populates="game")
@@ -271,6 +272,11 @@ class BowlerWicket(Base):
     fielder_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
     batter_name = Column(Text)
     batter_position = Column(Integer)
+    # Denormalised from the dismissed batter's scorecard row. We don't store
+    # opposition batting in batting_innings, so without these columns we have
+    # no way to derive 'ducks/golden ducks inflicted'.
+    batter_runs = Column(Integer, nullable=True)
+    batter_balls = Column(Integer, nullable=True)
     dismissal_type = Column(Text, nullable=False)
 
 
