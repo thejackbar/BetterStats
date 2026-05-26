@@ -4,6 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import { nameMatchesSearch, formatPlayerName } from '../../lib/nameFormat'
 import { validateImageFile } from '../../lib/validation'
+import { CRICKET_COUNTRIES } from '../../data/countries'
 
 // ---------------------------------------------------------------------------
 // EditPlayerModal
@@ -202,12 +203,16 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
               <label className="font-mono text-[10px] text-pb-faintest block mb-1">Country</label>
               <input
                 type="text"
+                list="cricket-countries"
                 value={form.overseas_country}
                 onChange={e => setForm(f => ({ ...f, overseas_country: e.target.value }))}
                 placeholder={form.is_overseas ? 'e.g. England' : ''}
                 disabled={!form.is_overseas}
                 className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent disabled:opacity-40"
               />
+              <datalist id="cricket-countries">
+                {CRICKET_COUNTRIES.map(c => <option key={c} value={c} />)}
+              </datalist>
             </div>
           </div>
 
@@ -332,6 +337,7 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
 export default function AdminPlayers() {
   const [players, setPlayers] = useState([])
   const [filter, setFilter] = useState('')
+  const [overseasFilter, setOverseasFilter] = useState('all') // 'all' | 'only' | 'exclude'
   const [msg, setMsg] = useState('')
   const [nameFormat, setNameFormat] = useState('last_first')
   const [showCreate, setShowCreate] = useState(false)
@@ -348,6 +354,8 @@ export default function AdminPlayers() {
   const fmt = (name) => formatPlayerName(name, nameFormat)
 
   const filtered = players.filter(p => {
+    if (overseasFilter === 'only' && !p.is_overseas) return false
+    if (overseasFilter === 'exclude' && p.is_overseas) return false
     const q = filter.trim()
     if (!q) return true
     return (
@@ -494,9 +502,31 @@ export default function AdminPlayers() {
           />
         </div>
 
-        <p className="font-mono text-[10px] text-pb-faint mb-4">
-          Click <span style={{ color: 'var(--pb-accent)' }}>Edit</span> on any player to update their display name, gender, role, PlayHQ ID, or photo.
-        </p>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Overseas</span>
+          <div className="flex items-center border pb-hairline rounded overflow-hidden">
+            {[
+              { value: 'all',     label: 'All' },
+              { value: 'exclude', label: 'Local' },
+              { value: 'only',    label: 'Overseas' },
+            ].map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setOverseasFilter(opt.value)}
+                className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+                  overseasFilter === opt.value
+                    ? 'bg-pb-accent/15 text-pb-accent'
+                    : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <span className="font-mono text-[10px] text-pb-faintest ml-1">
+            Click <span style={{ color: 'var(--pb-accent)' }}>Edit</span> on any player to update their details.
+          </span>
+        </div>
 
         <div className="pb-card overflow-hidden">
           {filtered.length === 0 && (

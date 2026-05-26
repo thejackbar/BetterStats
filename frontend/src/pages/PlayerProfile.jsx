@@ -13,6 +13,7 @@ import {
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
 import '../styles/honour-badge.css'
+import { countryFlag } from '../data/countries'
 import {
   BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -2249,7 +2250,9 @@ export default function PlayerProfile() {
               {player.is_overseas && (
                 <span className="ml-2 font-mono text-[10px] tracking-wide2 px-2 py-0.5 rounded-sm border"
                   style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 40%, transparent)', color: 'var(--pb-amber)', background: 'color-mix(in srgb, var(--pb-amber) 10%, transparent)' }}>
-                  {player.overseas_country ? `Overseas · ${player.overseas_country}` : 'Overseas'}
+                  {player.overseas_country
+                    ? `${countryFlag(player.overseas_country)} ${player.overseas_country}`
+                    : 'Overseas'}
                 </span>
               )}
             </Label>
@@ -2314,14 +2317,29 @@ export default function PlayerProfile() {
         {/* Quick stat strip */}
         {(batting || bowling || fielding) && (
           <div className="space-y-3 mb-6">
-            {/* Row 1 — Matches */}
-            <div className="pb-card p-4 flex items-center gap-4">
-              <div>
-                <Label>MATCHES</Label>
-                <span className="font-mono text-[36px] font-bold pb-num leading-none mt-1 text-pb-text">
-                  <AnimatedNum value={batting?.games || bowling?.games || 0} />
-                </span>
+            {/* Row 1 — Matches + optional overseas info */}
+            <div className="flex gap-3">
+              <div className="pb-card p-4 flex items-center gap-4 flex-1">
+                <div>
+                  <Label>MATCHES</Label>
+                  <span className="font-mono text-[36px] font-bold pb-num leading-none mt-1 text-pb-text">
+                    <AnimatedNum value={batting?.games || bowling?.games || 0} />
+                  </span>
+                </div>
               </div>
+              {player.is_overseas && (
+                <div className="pb-card p-4 flex items-center gap-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 30%, transparent)' }}>
+                  <div>
+                    <Label style={{ color: 'var(--pb-amber)' }}>OVERSEAS PLAYER</Label>
+                    <div className="font-mono text-[22px] leading-none mt-1">
+                      {countryFlag(player.overseas_country)}
+                      {player.overseas_country && (
+                        <span className="text-[15px] ml-1.5 text-pb-text font-semibold">{player.overseas_country}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Row 2 — Batting */}
