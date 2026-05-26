@@ -480,6 +480,13 @@ class SavedReport(Base):
     query_json = Column(JSONB, nullable=False)
     visibility = Column(Text, nullable=False, server_default="club")
     view_count = Column(Integer, nullable=False, server_default="0")
+    # Club-visibility reports start as 'pending' and only show on the public
+    # list after an admin approves them. Private and admin-authored reports
+    # are auto-approved on save. Values: 'pending' | 'approved' | 'rejected'.
+    status = Column(Text, nullable=False, server_default="approved")
+    reviewed_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    review_note = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

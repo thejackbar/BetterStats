@@ -476,6 +476,9 @@ export const api = {
     request(`/statlab/reports/${reportId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   statlabDeleteReport: (reportId) =>
     request(`/statlab/reports/${reportId}`, { method: 'DELETE' }),
+  statlabListPendingReports: () => request('/statlab/reports/pending'),
+  statlabReviewReport: (reportId, data) =>
+    request(`/statlab/reports/${reportId}/review`, { method: 'POST', body: JSON.stringify(data) }),
 
   // Sponsors (public)
   getClubSponsors: (slug) => request(`/clubs/${slug}/sponsors`),

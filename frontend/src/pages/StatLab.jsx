@@ -39,7 +39,7 @@ const METRIC_LABELS = {
   sixes: { label: 'Sixes', short: '6s', decimal: false },
   bowling_innings: { label: 'Bowling Spells', short: 'Spells', decimal: false },
   wickets: { label: 'Wickets', short: 'Wkts', decimal: false },
-  overs: { label: 'Overs', short: 'Overs', decimal: true },
+  overs: { label: 'Overs', short: 'Overs', decimal: false },
   runs_conceded: { label: 'Runs Conceded', short: 'R Conc', decimal: false },
   bowling_average: { label: 'Bowling Average', short: 'Bowl Avg', decimal: true },
   bowling_economy: { label: 'Economy Rate', short: 'Econ', decimal: true },
@@ -136,8 +136,12 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'golden_ducks',                  label: 'Most golden ducks',         description: 'Out for 0 off 0 or 1 ball.' },
       { type: 'derived', key: 'duck_pairs',                    label: 'Duck pairs',                description: 'Ducks in both innings of the same match.' },
       // Scores ranges
-      { type: 'preset', label: 'Most 90s',                     target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '90' }, { field: 'runs', op: 'lt', value: '100' }], context: {} },
-      { type: 'preset', label: 'Most 40s',                     target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '40' }, { field: 'runs', op: 'lt', value: '50' }], context: {} },
+      // Most 90s/40s — count per player (the "leaderboard" view)
+      { type: 'derived', key: 'most_90s',                      label: 'Most 90s',                  description: 'Count per player of innings scored in the 90s.' },
+      { type: 'derived', key: 'most_40s',                      label: 'Most 40s',                  description: 'Count per player of innings scored in the 40s.' },
+      // The individual-scores list (preserved under a clearer name)
+      { type: 'preset', label: 'Scores in the 90s',            target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '90' }, { field: 'runs', op: 'lt', value: '100' }], context: {} },
+      { type: 'preset', label: 'Scores in the 40s',            target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '40' }, { field: 'runs', op: 'lt', value: '50' }], context: {} },
       // Hundreds
       { type: 'preset', label: 'Most hundreds (career)',       target: 'player_career', sortBy: 'hundreds',            sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
       { type: 'preset', label: 'Most hundreds in a season',    target: 'player_season', sortBy: 'hundreds',            sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
@@ -173,8 +177,8 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'dismissal_lbw',                 label: 'Highest LBW count',          description: 'Players most often dismissed LBW.' },
       { type: 'derived', key: 'dismissal_run_out',             label: 'Highest run-out count',      description: 'Players most often run out.' },
       { type: 'derived', key: 'dismissal_stumped',             label: 'Highest stumped count',      description: 'Players most often stumped.' },
-      { type: 'derived', key: 'unusual_dismissals',            label: 'Unusual dismissals',         description: 'Rare dismissals (hit wicket, retired, handled, etc.).' },
-      { type: 'derived', key: 'caught_and_bowled',             label: 'Highest C&B count',          description: 'Most often caught & bowled by the same bowler.' },
+      { type: 'derived', key: 'unusual_dismissals',            label: 'Unusual dismissals',         description: 'Rare dismissals (hit wicket, retired hurt, handled, etc.).' },
+      { type: 'derived', key: 'caught_and_bowled',             label: 'Highest C&B count (batter)', description: 'Batters most often dismissed caught & bowled.' },
       { type: 'derived', key: 'most_minutes_in_season',        label: 'Most batting minutes in a season', description: 'Most minutes at the crease over one season.' },
       // Collapses
       { type: 'derived', key: 'collapse_5w',                   label: '5-wicket batting collapses', description: '5 wickets fell within 30 runs.' },
@@ -231,6 +235,8 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'hat_tricks',                        label: 'Hat tricks',                description: 'From Admin → Awards (manually recorded).' },
       { type: 'derived', key: 'ducks_inflicted',                   label: 'Most ducks inflicted',      description: 'Bowlers who dismissed batters for 0 most often.' },
       { type: 'derived', key: 'golden_ducks_inflicted',            label: 'Most golden ducks inflicted', description: 'Bowlers who dismissed batters for 0 off 0–1 balls.' },
+      { type: 'derived', key: 'caught_and_bowled_bowler',          label: 'Highest C&B count (bowler)', description: 'Bowlers ranked by caught-and-bowled wickets taken.' },
+      { type: 'derived', key: 'most_wickets_in_match',             label: 'Most wickets in a match',   description: 'Most wickets by one bowler across both innings.' },
       { type: 'derived', key: 'bowler_fielder_combo',              label: 'Top bowler/fielder combinations', description: 'Most productive bowler+catcher partnerships.' },
       { type: 'derived', key: 'top_opening_bowlers',               label: 'Top opening bowlers by match count', description: 'Players who most often take the new ball.' },
       { type: 'preset', label: 'On this day — bowling',            target: 'spell_list',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: { on_this_day: true } },
@@ -262,7 +268,6 @@ const PRESET_GROUPS = [
       { type: 'preset', label: 'Biggest winning margins',  target: 'match_list', sortBy: 'margin_runs',  sortDir: 'desc', filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
       { type: 'preset', label: 'Closest wins',             target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
       { type: 'preset', label: 'Biggest defeats',          target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'lt', value: '0' }], context: { result: 'lost' } },
-      { type: 'derived', key: 'most_wickets_in_match',     label: 'Most wickets taken in a match', description: 'Most wickets by one bowler across both innings.' },
       { type: 'preset', label: 'Finals',                   target: 'match_list', sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: { finals_only: true } },
     ],
   },
@@ -946,7 +951,11 @@ function SaveReportModal({ open, onClose, onSave, defaultTitle, initial }) {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-pb-faintest mt-1">{visibility === 'club' ? 'Anyone visiting this club can view this report.' : 'Only you (when logged in) will see this report in the list.'}</p>
+            <p className="text-[10px] text-pb-faintest mt-1">
+              {visibility === 'club'
+                ? 'Sent to your club admin for approval. Once approved, it will appear in the Saved Reports list for everyone at your club.'
+                : 'Only you (when logged in) will see this report in the list.'}
+            </p>
           </div>
           {error && <p className="text-pb-red text-sm">{error}</p>}
           <div className="flex gap-2 justify-end pt-2">
@@ -1197,6 +1206,7 @@ export default function StatLab() {
     URL.revokeObjectURL(url)
   }
 
+  const [saveFlash, setSaveFlash] = useState(null)
   const saveReport = useCallback(async (payload) => {
     const q = queryRef.current
     const cleanedTree = cleanTree(q.filterTree)
@@ -1209,14 +1219,26 @@ export default function StatLab() {
       context: q.context || {},
       derived: activeDerived || null,
     }
+    let saved
     if (editingReport) {
-      await api.statlabPatchReport(editingReport.id, { ...payload, query_json: queryJson })
+      saved = await api.statlabPatchReport(editingReport.id, { ...payload, query_json: queryJson })
     } else {
-      await api.statlabCreateReport({ ...payload, query_json: queryJson })
+      saved = await api.statlabCreateReport({ ...payload, query_json: queryJson })
     }
     setSaveOpen(false)
     setEditingReport(null)
     refreshReports()
+    if (saved?.status === 'pending') {
+      setSaveFlash({
+        kind: 'pending',
+        message: 'Sent to your club admin for approval. Once approved, it will appear in the Saved Reports list for everyone at your club.',
+      })
+    } else if (saved?.visibility === 'private') {
+      setSaveFlash({ kind: 'ok', message: 'Saved as a private report. Only you will see it.' })
+    } else {
+      setSaveFlash({ kind: 'ok', message: 'Report saved and published to your club.' })
+    }
+    setTimeout(() => setSaveFlash(null), 8000)
   }, [editingReport, activeDerived, refreshReports])
 
   const deleteReport = useCallback(async (r) => {
@@ -1232,6 +1254,15 @@ export default function StatLab() {
   if (clubLoading || !schema) return <PbSpinner message="Loading…" />
 
   const canSave = !!user && user.club_id === orgId
+
+  // Indicators for the Customise drawer — show how many fields are "active"
+  // relative to defaults so users can see at a glance what's been tweaked.
+  const filterCount = treeLeafCount(query.filterTree)
+  const contextCount = countActiveContext(query.context)
+  // The sort is "active" when it's set (any value) and we're not currently
+  // viewing a derived report (derived reports manage their own sort).
+  const sortIsActive = !activeDerived && !!query.sortBy
+  const activeFieldCount = filterCount + contextCount + (sortIsActive ? 1 : 0)
 
   // ─── Layout ────────────────────────────────────────────────────────────────
   return (
@@ -1347,29 +1378,47 @@ export default function StatLab() {
 
           {/* Right panel: customise drawer + results */}
           <div className="space-y-4">
-            {/* Customise drawer — secondary, collapsed by default */}
+            {/* Customise drawer — modify the current report's sort, filters, context */}
             <div className="pb-card">
               <button
                 onClick={() => setShowCustomise(v => !v)}
                 className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-pb-surface2/60 transition text-left select-none"
               >
-                <span className="font-mono text-[10.5px] font-semibold tracking-wide3 flex-1 text-pb-dim">
-                  {showCustomise ? 'CUSTOMISE QUERY' : '+ BUILD CUSTOM QUERY'}
-                </span>
-                {activeDerived || hasQueried ? (
-                  <span className="font-mono text-[9px] text-pb-faintest">
-                    {treeLeafCount(query.filterTree) > 0 && `${treeLeafCount(query.filterTree)} filter${treeLeafCount(query.filterTree) === 1 ? '' : 's'}`}
+                <div className="flex-1 min-w-0">
+                  <span className="font-mono text-[10.5px] font-semibold tracking-wide3 text-pb-dim block">
+                    CUSTOMISE QUERY
                   </span>
-                ) : null}
-                <span className={`font-mono text-[11px] text-pb-faintest transition-transform duration-150 inline-block ${showCustomise ? 'rotate-90' : ''}`}>›</span>
+                  <span className="font-sans text-[10.5px] text-pb-faintest mt-0.5 block normal-case tracking-normal">
+                    Tweak sort, filters and context for the current report.
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {!showCustomise && activeFieldCount > 0 && (
+                    <span
+                      className="font-mono text-[9px] tracking-wide2 px-1.5 py-0.5 rounded"
+                      style={{ background: 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: 'var(--pb-accent)' }}
+                    >
+                      {activeFieldCount} ACTIVE
+                    </span>
+                  )}
+                  <span className={`font-mono text-[11px] text-pb-faintest transition-transform duration-150 inline-block ${showCustomise ? 'rotate-90' : ''}`}>›</span>
+                </div>
               </button>
               {showCustomise && (
                 <div className="px-4 pb-4 pt-3 pb-hairline-t space-y-3">
                   {/* Sort + Direction + Limit on one row */}
                   <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2 items-end">
                     <div>
-                      <Label>Sort by</Label>
-                      <select className={selectCls + ' mt-1'} value={query.sortBy} onChange={e => setQuery(q => ({ ...q, sortBy: e.target.value }))}>
+                      <Label>
+                        Sort by
+                        {sortIsActive && <ActiveDot />}
+                      </Label>
+                      <select
+                        className={selectCls + ' mt-1' + (sortIsActive ? ' border-pb-accent' : '')}
+                        value={query.sortBy}
+                        onChange={e => setQuery(q => ({ ...q, sortBy: e.target.value }))}
+                        disabled={!!activeDerived}
+                      >
                         {targetMetrics.map(m => <option key={m} value={m}>{METRIC_LABELS[m]?.label || m}</option>)}
                       </select>
                     </div>
@@ -1378,7 +1427,8 @@ export default function StatLab() {
                       <div className="flex gap-1 mt-1">
                         {['desc','asc'].map(d => (
                           <button key={d} onClick={() => setQuery(q => ({ ...q, sortDir: d }))}
-                            className={`px-2.5 py-1.5 font-mono text-[10px] tracking-wide2 rounded border transition ${query.sortDir === d ? 'text-pb-text bg-pb-surface2 border-pb-hairline2' : 'text-pb-faint border-pb-hairline hover:border-pb-hairline2'}`}>
+                            disabled={!!activeDerived}
+                            className={`px-2.5 py-1.5 font-mono text-[10px] tracking-wide2 rounded border transition ${query.sortDir === d ? 'text-pb-text bg-pb-surface2 border-pb-hairline2' : 'text-pb-faint border-pb-hairline hover:border-pb-hairline2'} ${activeDerived ? 'opacity-50 cursor-not-allowed' : ''}`}>
                             {d === 'desc' ? '↓' : '↑'}
                           </button>
                         ))}
@@ -1393,17 +1443,22 @@ export default function StatLab() {
                   </div>
 
                   {/* Filter bar — categorised picker, nested AND/OR */}
-                  <FilterBar
-                    tree={query.filterTree}
-                    categories={categoriesForTarget(targetMetrics)}
-                    onChange={(tree) => setQuery(q => ({ ...q, filterTree: tree }))}
-                    onClear={() => setQuery(q => ({ ...q, filterTree: emptyTree() }))}
-                  />
+                  <div className={filterCount > 0 ? 'ring-1 ring-pb-accent/40 rounded-md' : ''}>
+                    <FilterBar
+                      tree={query.filterTree}
+                      categories={categoriesForTarget(targetMetrics)}
+                      onChange={(tree) => setQuery(q => ({ ...q, filterTree: tree }))}
+                      onClear={() => setQuery(q => ({ ...q, filterTree: emptyTree() }))}
+                    />
+                  </div>
 
                   {/* Context filters */}
                   <div>
-                    <Label>Context</Label>
-                    <div className="mt-1 p-3 pb-card">
+                    <Label>
+                      Context
+                      {contextCount > 0 && <ActiveDot />}
+                    </Label>
+                    <div className={`mt-1 p-3 pb-card ${contextCount > 0 ? 'border-pb-accent/40' : ''}`}>
                       <ContextFiltersPanel
                         ctx={query.context || {}}
                         onChange={ctx => setQuery(q => ({ ...q, context: ctx }))}
@@ -1430,6 +1485,28 @@ export default function StatLab() {
               )}
             </div>
 
+            {/* Save flash — surfaces approval-pending notice or save confirmation */}
+            {saveFlash && (
+              <div
+                className={`pb-card p-3 ${saveFlash.kind === 'pending' ? 'border-pb-accent/40' : ''}`}
+                style={saveFlash.kind === 'pending' ? { borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' } : undefined}
+              >
+                <div className="flex items-start gap-2">
+                  <span
+                    className="font-mono text-[10px] tracking-wide3 px-1.5 py-0.5 rounded mt-0.5"
+                    style={{ background: 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: 'var(--pb-accent)' }}
+                  >
+                    {saveFlash.kind === 'pending' ? 'PENDING' : 'SAVED'}
+                  </span>
+                  <p className="text-pb-text text-sm flex-1">{saveFlash.message}</p>
+                  <button
+                    onClick={() => setSaveFlash(null)}
+                    className="text-pb-faint hover:text-pb-text font-mono text-base leading-none px-1"
+                  >×</button>
+                </div>
+              </div>
+            )}
+
             {/* Results */}
             {!hasQueried && !loading && (
               <div className="pb-card p-8 flex flex-col items-center justify-center text-center gap-3" style={{ minHeight: 320 }}>
@@ -1437,7 +1514,7 @@ export default function StatLab() {
                 <p className="text-pb-dim text-[15px]">
                   Pick a report from the <span className="text-pb-text font-semibold">REPORTS</span> panel
                   {' '}<span className="hidden xl:inline">on the left</span><span className="xl:hidden">above</span>,
-                  {' '}or click <span className="text-pb-text font-semibold">+ Build custom query</span> to build your own.
+                  {' '}then open <span className="text-pb-text font-semibold">Customise Query</span> to tweak its sort, filters or context.
                 </p>
               </div>
             )}
@@ -1625,6 +1702,12 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
 
 function formatCell(v, col) {
   if (v == null || v === '') return '—'
+  // Overs are stored as Numeric(5,1) — display X.Y where Y is 0-5 (balls).
+  // Use 1 decimal place; never round to .6 etc. (the DB already enforces 0-5).
+  if (col?.kind === 'overs' || col?.key === 'overs') {
+    const n = Number(v)
+    return isFinite(n) ? n.toFixed(1) : v
+  }
   if (col?.decimal) return Number(v).toFixed(2)
   if (col?.key === 'played_at' && typeof v === 'string') {
     try { return new Date(v).toISOString().slice(0, 10) } catch { return v }
@@ -1659,6 +1742,23 @@ function renderDimCell(key, row, clubSlug) {
     try { return new Date(row.played_at).toISOString().slice(0, 10) } catch { return row.played_at }
   }
   return row[key] || '—'
+}
+
+// Small inline indicator placed next to a section label when the user has
+// changed it from the preset's defaults. Keeps the customise drawer scannable.
+function ActiveDot() {
+  return (
+    <span
+      className="inline-block w-1.5 h-1.5 rounded-full ml-1.5 align-middle"
+      style={{ background: 'var(--pb-accent)' }}
+      title="Active — modified from the report's defaults"
+    />
+  )
+}
+
+function countActiveContext(ctx) {
+  if (!ctx || typeof ctx !== 'object') return 0
+  return Object.entries(ctx).filter(([, v]) => v !== '' && v != null && v !== false).length
 }
 
 function defaultTitleFor(q, activeDerived, schema) {
