@@ -88,6 +88,7 @@ async def statlab_query(
     sort_by: str = Query("runs"),
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(100, ge=1, le=500),
+    page: int = Query(1, ge=1),
     filters: list[str] = Query(default=[]),
     filter_tree: Optional[str] = Query(None, description="URL-encoded JSON filter tree (overrides `filters` when present)"),
     db: AsyncSession = Depends(get_db),
@@ -104,20 +105,21 @@ async def statlab_query(
             raise HTTPException(status_code=400, detail="filter_tree must be valid JSON")
     ctx = _ctx_from_request(request)
     try:
-        rows = await svc.run_query(
+        result = await svc.run_query(
             db,
             org_id=org_id,
             target=target,
             sort_by=sort_by,
             sort_dir=sort_dir,
             limit=limit,
+            page=page,
             metric_filters=filters,
             filter_tree=parsed_tree,
             context=ctx,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return _serialise(rows)
+    return {"rows": _serialise(result["rows"]), "has_more": result["has_more"], "page": result["page"]}
 
 
 @router.get("/derived/{name}")
@@ -126,13 +128,14 @@ async def statlab_derived(
     request: Request,
     org_id: str,
     limit: int = Query(100, ge=1, le=500),
+    page: int = Query(1, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
     if name not in svc.DERIVED_QUERIES:
         raise HTTPException(status_code=400, detail=f"Unknown derived query: {name}")
     ctx = _ctx_from_request(request)
-    rows = await svc.run_derived(db, name=name, org_id=org_id, limit=limit, context=ctx)
-    return _serialise(rows)
+    result = await svc.run_derived(db, name=name, org_id=org_id, limit=limit, page=page, context=ctx)
+    return {"rows": _serialise(result["rows"]), "has_more": result["has_more"], "page": result["page"]}
 
 
 @router.get("/picker-values")

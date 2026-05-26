@@ -976,6 +976,8 @@ export default function StatLab() {
   const [hasQueried, setHasQueried] = useState(false)
   const [error, setError] = useState(null)
   const [clientSort, setClientSort] = useState({ col: null, dir: null })
+  const [currentPage, setCurrentPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
 
   const [reports, setReports] = useState([])
   const [reportsLoading, setReportsLoading] = useState(false)
@@ -1067,7 +1069,7 @@ export default function StatLab() {
 
   if (inactive) return <ClubInactive />
 
-  const runQuery = useCallback(async (overrideQuery, overrideDerived = undefined) => {
+  const runQuery = useCallback(async (overrideQuery, overrideDerived = undefined, page = 1) => {
     if (!orgId) return
     const q = overrideQuery || queryRef.current
     // undefined = preserve current derived; null = clear it; string = set new derived
@@ -1078,16 +1080,18 @@ export default function StatLab() {
     try {
       let data
       if (useDerived) {
-        data = await api.statlabDerived(orgId, useDerived, { limit: q.limit, context: q.context })
+        data = await api.statlabDerived(orgId, useDerived, { limit: q.limit, page, context: q.context })
       } else {
         data = await api.statlabQuery(orgId, {
           target: q.target, sortBy: q.sortBy, sortDir: q.sortDir,
-          limit: q.limit, filterTree: cleaned, context: q.context,
+          limit: q.limit, page, filterTree: cleaned, context: q.context,
         })
       }
-      setRows(data)
+      setRows(data.rows)
+      setHasMore(data.has_more)
+      setCurrentPage(data.page)
     } catch (e) {
-      setError(e.message); setRows([])
+      setError(e.message); setRows([]); setHasMore(false); setCurrentPage(1)
     } finally { setLoading(false) }
   }, [orgId])
 
@@ -1120,11 +1124,16 @@ export default function StatLab() {
     }
   }, [applyPreset, applyDerived])
 
+  const changePage = useCallback((page) => {
+    runQuery(undefined, undefined, page)
+  }, [runQuery])
+
   const toggleGroup = (key) => setOpenGroups(prev => ({ ...prev, [key]: !prev[key] }))
 
   const resetAll = () => {
     setQuery(DEFAULT_QUERY)
     setRows([]); setHasQueried(false); setError(null); setActiveDerived(null)
+    setCurrentPage(1); setHasMore(false)
     setOpenReport(null)
     if (reportSlug) navigate(`/${clubSlug}/statlab`, { replace: true })
   }
@@ -1446,9 +1455,14 @@ export default function StatLab() {
             {sortedRows.length > 0 && (
               <div className="pb-card">
                 <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 pb-hairline-b">
-                  <Label>
-                    {`${sortedRows.length} ${activeDerived ? 'PLAYERS' : (targetMeta.shape === 'list' ? 'ROWS' : 'GROUPS')}${activeDerived ? ' · ' + schema.derived[activeDerived].label.toUpperCase() : ''}`}
-                  </Label>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Label>
+                      {`${sortedRows.length} ${activeDerived ? 'PLAYERS' : (targetMeta.shape === 'list' ? 'ROWS' : 'GROUPS')}${activeDerived ? ' · ' + schema.derived[activeDerived].label.toUpperCase() : ''}`}
+                    </Label>
+                    {(currentPage > 1 || hasMore) && (
+                      <span className="font-mono text-[10px] text-pb-faintest">PAGE {currentPage}{hasMore ? '' : ' · END'}</span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-3">
                     <span className="font-mono text-2xs tracking-wide2 text-pb-faintest hidden sm:inline">
                       {activeDerived
@@ -1474,7 +1488,27 @@ export default function StatLab() {
                   onSort={handleColSort}
                   sortBy={query.sortBy}
                   clubSlug={clubSlug}
+                  rowOffset={(currentPage - 1) * query.limit}
                 />
+                {(currentPage > 1 || hasMore) && (
+                  <div className="flex items-center justify-center gap-2 px-5 py-3 pb-hairline-t">
+                    <button
+                      onClick={() => changePage(currentPage - 1)}
+                      disabled={currentPage <= 1 || loading}
+                      className="font-mono text-[10.5px] tracking-wide2 px-3 py-1.5 rounded border border-pb-hairline hover:border-pb-hairline2 text-pb-faint hover:text-pb-text transition disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      ← Prev
+                    </button>
+                    <span className="font-mono text-[10.5px] text-pb-faint px-2">Page {currentPage}</span>
+                    <button
+                      onClick={() => changePage(currentPage + 1)}
+                      disabled={!hasMore || loading}
+                      className="font-mono text-[10.5px] tracking-wide2 px-3 py-1.5 rounded border border-pb-hairline hover:border-pb-hairline2 text-pb-faint hover:text-pb-text transition disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      Next →
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1539,7 +1573,7 @@ function entityHeader(target, activeDerived) {
   }
 }
 
-function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort, sortBy, clubSlug }) {
+function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort, sortBy, clubSlug, rowOffset = 0 }) {
   const dimCols = activeDerived
     ? (PAIR_DERIVED.has(activeDerived)
         ? [{ key: 'pair', label: 'PAIR' }]
@@ -1567,7 +1601,7 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
         <tbody>
           {rows.map((row, i) => (
             <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-              <td className="py-2.5 pl-5 font-mono text-pb-faintest">{i + 1}</td>
+              <td className="py-2.5 pl-5 font-mono text-pb-faintest">{rowOffset + i + 1}</td>
               {dimCols.map(dc => (
                 <td key={dc.key} className="py-2.5 pr-3 font-medium text-pb-text">
                   {renderDimCell(dc.key, row, clubSlug)}
