@@ -1,7 +1,7 @@
 """StatLab routes — flexible query engine + saved reports."""
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, text
 from pydantic import BaseModel, Field
 from typing import Optional, Any
 import json
@@ -40,44 +40,49 @@ def _serialise(rows: list[dict]) -> list[dict]:
     return [{k: clean(v) for k, v in row.items()} for row in rows]
 
 
-def _ctx_from_query(
-    season_id: Optional[str],
-    grade_id: Optional[str],
-    grade_name: Optional[str],
-    opposition: Optional[str],
-    date_from: Optional[str],
-    date_to: Optional[str],
-    min_year: Optional[int],
-    max_year: Optional[int],
-    finals_only: Optional[bool],
-    captain_only: Optional[bool],
-    keeper_only: Optional[bool],
-    result: Optional[str],
-    dismissal: Optional[str],
-    position_min: Optional[int],
-    position_max: Optional[int],
-) -> dict:
-    ctx = {}
-    if season_id:    ctx["season_id"] = season_id
-    if grade_id:     ctx["grade_id"] = grade_id
-    if grade_name:   ctx["grade_name"] = grade_name
-    if opposition:   ctx["opposition"] = opposition
-    if date_from:    ctx["date_from"] = date_from
-    if date_to:      ctx["date_to"] = date_to
-    if min_year is not None: ctx["min_year"] = min_year
-    if max_year is not None: ctx["max_year"] = max_year
-    if finals_only:  ctx["finals_only"] = True
-    if captain_only: ctx["captain_only"] = True
-    if keeper_only:  ctx["keeper_only"] = True
-    if result:       ctx["result"] = result
-    if dismissal:    ctx["dismissal"] = dismissal
-    if position_min is not None: ctx["position_min"] = position_min
-    if position_max is not None: ctx["position_max"] = position_max
+# Keys we extract from the query string into the StatLab context dict.
+# Anything not in this list is silently ignored.
+_CTX_KEYS_TEXT = {
+    "season_id", "grade_id", "grade_name", "opposition", "date_from", "date_to",
+    "result", "dismissal",
+    "gender", "player_role",
+    "award_category", "award_subcategory", "award_name", "office_bearer",
+}
+_CTX_KEYS_INT = {
+    "min_year", "max_year", "position_min", "position_max",
+    "first_n_matches", "milestone_runs",
+}
+_CTX_KEYS_BOOL = {
+    "finals_only", "captain_only", "keeper_only", "on_this_day",
+}
+
+
+def _ctx_from_request(request: Request) -> dict:
+    """Pull StatLab context filters from query-string params. Whitelist-based
+    so unknown params (or stray API junk) don't leak into the SQL builder."""
+    ctx: dict = {}
+    qp = request.query_params
+    for k in _CTX_KEYS_TEXT:
+        v = qp.get(k)
+        if v not in (None, ""):
+            ctx[k] = v
+    for k in _CTX_KEYS_INT:
+        v = qp.get(k)
+        if v not in (None, ""):
+            try:
+                ctx[k] = int(float(v))
+            except (TypeError, ValueError):
+                pass
+    for k in _CTX_KEYS_BOOL:
+        v = qp.get(k)
+        if v not in (None, ""):
+            ctx[k] = str(v).lower() in ("1", "true", "yes", "on")
     return ctx
 
 
 @router.get("/query")
 async def statlab_query(
+    request: Request,
     org_id: str,
     target: str = Query("player_career"),
     sort_by: str = Query("runs"),
@@ -85,25 +90,10 @@ async def statlab_query(
     limit: int = Query(100, ge=1, le=500),
     filters: list[str] = Query(default=[]),
     filter_tree: Optional[str] = Query(None, description="URL-encoded JSON filter tree (overrides `filters` when present)"),
-    # Context filters as flat query params (easier on the URL than nested JSON)
-    season_id: Optional[str] = Query(None),
-    grade_id: Optional[str] = Query(None),
-    grade_name: Optional[str] = Query(None),
-    opposition: Optional[str] = Query(None),
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    min_year: Optional[int] = Query(None),
-    max_year: Optional[int] = Query(None),
-    finals_only: Optional[bool] = Query(None),
-    captain_only: Optional[bool] = Query(None),
-    keeper_only: Optional[bool] = Query(None),
-    result: Optional[str] = Query(None),
-    dismissal: Optional[str] = Query(None),
-    position_min: Optional[int] = Query(None),
-    position_max: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """Run a StatLab query against one of the registered targets."""
+    """Run a StatLab query against one of the registered targets.
+    Context filters are read directly from the URL — see _CTX_KEYS_* whitelists."""
     if target not in svc.TARGET_DISPATCH:
         raise HTTPException(status_code=400, detail=f"Unknown query target: {target}")
     parsed_tree = None
@@ -112,11 +102,7 @@ async def statlab_query(
             parsed_tree = json.loads(filter_tree)
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="filter_tree must be valid JSON")
-    ctx = _ctx_from_query(
-        season_id, grade_id, grade_name, opposition, date_from, date_to,
-        min_year, max_year, finals_only, captain_only, keeper_only, result,
-        dismissal, position_min, position_max,
-    )
+    ctx = _ctx_from_request(request)
     try:
         rows = await svc.run_query(
             db,
@@ -137,31 +123,95 @@ async def statlab_query(
 @router.get("/derived/{name}")
 async def statlab_derived(
     name: str,
+    request: Request,
     org_id: str,
-    limit: int = Query(100, ge=1, le=200),
-    season_id: Optional[str] = Query(None),
-    grade_id: Optional[str] = Query(None),
-    grade_name: Optional[str] = Query(None),
-    opposition: Optional[str] = Query(None),
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    min_year: Optional[int] = Query(None),
-    max_year: Optional[int] = Query(None),
-    finals_only: Optional[bool] = Query(None),
-    captain_only: Optional[bool] = Query(None),
-    keeper_only: Optional[bool] = Query(None),
-    result: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
     if name not in svc.DERIVED_QUERIES:
         raise HTTPException(status_code=400, detail=f"Unknown derived query: {name}")
-    ctx = _ctx_from_query(
-        season_id, grade_id, grade_name, opposition, date_from, date_to,
-        min_year, max_year, finals_only, captain_only, keeper_only, result,
-        None, None, None,
-    )
+    ctx = _ctx_from_request(request)
     rows = await svc.run_derived(db, name=name, org_id=org_id, limit=limit, context=ctx)
     return _serialise(rows)
+
+
+@router.get("/picker-values")
+async def picker_values(
+    org_id: str,
+    kind: str = Query(..., pattern="^(player_role|gender|award_category|award_subcategory|award_name|office_bearer)$"),
+    search: str = Query("", max_length=80),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return distinct values for an attribute picker. Used by the StatLab
+    Context panel for autocomplete dropdowns (gender, player role, awards,
+    office bearers)."""
+    q = (search or "").strip().lower()
+    params = {"org_id": org_id, "q": f"%{q}%" if q else "%"}
+    if kind == "player_role":
+        sql = """
+            SELECT DISTINCT player_role AS value
+            FROM players
+            WHERE organisation_id = CAST(:org_id AS UUID)
+              AND COALESCE(player_role, '') <> ''
+              AND LOWER(player_role) LIKE :q
+            ORDER BY value
+            LIMIT 50
+        """
+    elif kind == "gender":
+        sql = """
+            SELECT DISTINCT gender AS value
+            FROM players
+            WHERE organisation_id = CAST(:org_id AS UUID)
+              AND COALESCE(gender, '') <> ''
+              AND LOWER(gender) LIKE :q
+            ORDER BY value
+            LIMIT 50
+        """
+    elif kind == "award_category":
+        sql = """
+            SELECT DISTINCT category AS value
+            FROM player_achievements
+            WHERE org_id = CAST(:org_id AS UUID)
+              AND COALESCE(category, '') <> ''
+              AND LOWER(category) LIKE :q
+            ORDER BY value
+            LIMIT 50
+        """
+    elif kind == "award_subcategory":
+        sql = """
+            SELECT DISTINCT subcategory AS value
+            FROM player_achievements
+            WHERE org_id = CAST(:org_id AS UUID)
+              AND COALESCE(subcategory, '') <> ''
+              AND LOWER(subcategory) LIKE :q
+            ORDER BY value
+            LIMIT 50
+        """
+    elif kind == "award_name":
+        sql = """
+            SELECT DISTINCT achievement AS value
+            FROM player_achievements
+            WHERE org_id = CAST(:org_id AS UUID)
+              AND COALESCE(achievement, '') <> ''
+              AND LOWER(achievement) LIKE :q
+            ORDER BY value
+            LIMIT 50
+        """
+    elif kind == "office_bearer":
+        sql = """
+            SELECT DISTINCT achievement AS value
+            FROM player_achievements
+            WHERE org_id = CAST(:org_id AS UUID)
+              AND LOWER(COALESCE(category, '')) = 'office bearer'
+              AND COALESCE(achievement, '') <> ''
+              AND LOWER(achievement) LIKE :q
+            ORDER BY value
+            LIMIT 50
+        """
+    else:
+        raise HTTPException(status_code=400, detail="Unknown picker kind")
+    result = await db.execute(text(sql), params)
+    return [{"value": r[0]} for r in result.fetchall()]
 
 
 # ─── Saved Reports ─────────────────────────────────────────────────────────────

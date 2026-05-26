@@ -459,6 +459,13 @@ export const api = {
     return request(`/statlab/derived/${name}?${params}`)
   },
 
+  // StatLab — distinct values for attribute pickers (gender, role, awards, etc.)
+  statlabPickerValues: (orgId, kind, search = '') => {
+    const params = new URLSearchParams({ org_id: orgId, kind })
+    if (search) params.set('search', search)
+    return request(`/statlab/picker-values?${params}`)
+  },
+
   // StatLab — saved reports
   statlabListReports: (orgId) => request(`/statlab/reports?org_id=${orgId}`),
   statlabGetReport: (slug, orgId) => request(`/statlab/reports/${slug}?org_id=${orgId}`),
