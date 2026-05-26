@@ -209,8 +209,6 @@ export const api = {
     request('/club-admin/players', { method: 'POST', body: JSON.stringify(data) }),
   adminPatchPlayer: (playerId, data) =>
     request(`/club-admin/players/${playerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  adminBulkPatchPlayers: (playerIds, patch) =>
-    request('/club-admin/players/bulk-patch', { method: 'POST', body: JSON.stringify({ player_ids: playerIds, ...patch }) }),
   adminListSeasons: () => request('/club-admin/seasons'),
   adminReorderSeasons: (items) =>
     request('/club-admin/seasons/reorder', { method: 'PUT', body: JSON.stringify(items) }),

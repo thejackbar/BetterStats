@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
@@ -331,103 +331,6 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
 }
 
 // ---------------------------------------------------------------------------
-// BulkActionBar
-// ---------------------------------------------------------------------------
-
-const ROLES = ['Batter', 'Bowler', 'Wicketkeeper', 'All Rounder']
-
-function BulkActionBar({ count, onApply, onClear, applying, msg, msgError }) {
-  const btnBase = 'font-mono text-[10px] px-2 py-1 rounded border pb-hairline transition-colors disabled:opacity-40'
-  const btnNormal = `${btnBase} text-pb-faint hover:text-pb-text hover:border-pb-accent/40`
-  const btnDanger = `${btnBase} text-pb-faintest hover:text-pb-red/80 hover:border-pb-red/30`
-
-  return (
-    <div className="mb-3 pb-card px-4 py-3 border-l-2 flex flex-wrap items-center gap-x-4 gap-y-2" style={{ borderLeftColor: 'var(--pb-accent)' }}>
-      {/* Selection count */}
-      <div className="flex items-center gap-2 shrink-0">
-        <span className="font-mono text-[10px] font-semibold tracking-wide3 uppercase" style={{ color: 'var(--pb-accent)' }}>
-          {count} selected
-        </span>
-        <button onClick={onClear} className="font-mono text-[10px] text-pb-faintest hover:text-pb-text transition-colors">
-          ✕ Clear
-        </button>
-      </div>
-
-      <div className="w-px h-4 bg-pb-hairline self-center shrink-0" />
-
-      {/* Role */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="font-mono text-[10px] text-pb-faintest uppercase tracking-wide3">Role</span>
-        {ROLES.map(role => (
-          <button
-            key={role}
-            onClick={() => onApply({ player_role: role })}
-            disabled={applying}
-            className={btnNormal}
-          >
-            {role}
-          </button>
-        ))}
-        <button onClick={() => onApply({ player_role: '' })} disabled={applying} className={btnDanger} title="Clear role">
-          —
-        </button>
-      </div>
-
-      <div className="w-px h-4 bg-pb-hairline self-center shrink-0" />
-
-      {/* Gender */}
-      <div className="flex items-center gap-1.5">
-        <span className="font-mono text-[10px] text-pb-faintest uppercase tracking-wide3">Gender</span>
-        {['Male', 'Female'].map(g => (
-          <button key={g} onClick={() => onApply({ gender: g })} disabled={applying} className={btnNormal}>
-            {g}
-          </button>
-        ))}
-        <button onClick={() => onApply({ gender: '' })} disabled={applying} className={btnDanger} title="Clear gender">
-          —
-        </button>
-      </div>
-
-      <div className="w-px h-4 bg-pb-hairline self-center shrink-0" />
-
-      {/* Overseas */}
-      <div className="flex items-center gap-1.5">
-        <button onClick={() => onApply({ is_overseas: true })} disabled={applying} className={btnNormal}>
-          Overseas
-        </button>
-        <button
-          onClick={() => onApply({ is_overseas: false, overseas_country: '' })}
-          disabled={applying}
-          className={btnNormal}
-        >
-          Local
-        </button>
-      </div>
-
-      <div className="w-px h-4 bg-pb-hairline self-center shrink-0" />
-
-      {/* Player type */}
-      <div className="flex items-center gap-1.5">
-        <button onClick={() => onApply({ is_player: false })} disabled={applying} className={btnDanger}>
-          Non-Player
-        </button>
-        <button onClick={() => onApply({ is_player: true })} disabled={applying} className={btnNormal}>
-          Player
-        </button>
-      </div>
-
-      {/* Feedback */}
-      {applying && <span className="font-mono text-[10px] text-pb-faintest">…</span>}
-      {msg && (
-        <span className="font-mono text-[10px]" style={{ color: msgError ? 'var(--pb-red)' : 'var(--pb-accent)' }}>
-          {msg}
-        </span>
-      )}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // AdminPlayers
 // ---------------------------------------------------------------------------
 
@@ -441,14 +344,7 @@ export default function AdminPlayers() {
   const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', playhq_id: '', display_name_override: '' })
   const [creating, setCreating] = useState(false)
   const [createMsg, setCreateMsg] = useState('')
-  const [editingPlayer, setEditingPlayer] = useState(null)
-
-  // Bulk selection
-  const [selected, setSelected] = useState(new Set())
-  const [bulkApplying, setBulkApplying] = useState(false)
-  const [bulkMsg, setBulkMsg] = useState('')
-  const [bulkMsgError, setBulkMsgError] = useState(false)
-  const selectAllRef = useRef(null)
+  const [editingPlayer, setEditingPlayer] = useState(null) // player object or null
 
   useEffect(() => {
     api.adminListPlayers().then(setPlayers).catch(() => {})
@@ -469,67 +365,9 @@ export default function AdminPlayers() {
     )
   })
 
-  // Keep select-all checkbox indeterminate state in sync
-  useEffect(() => {
-    const el = selectAllRef.current
-    if (!el) return
-    const someSelected = filtered.some(p => selected.has(p.id))
-    const allSelected = filtered.length > 0 && filtered.every(p => selected.has(p.id))
-    el.indeterminate = someSelected && !allSelected
-  }, [filtered, selected])
-
-  const allVisibleSelected = filtered.length > 0 && filtered.every(p => selected.has(p.id))
-
-  const toggleSelect = useCallback((id) => {
-    setSelected(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }, [])
-
-  const toggleSelectAll = useCallback(() => {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (filtered.every(p => prev.has(p.id))) {
-        filtered.forEach(p => next.delete(p.id))
-      } else {
-        filtered.forEach(p => next.add(p.id))
-      }
-      return next
-    })
-  }, [filtered])
-
-  const applyBulk = useCallback(async (patch) => {
-    const ids = [...selected]
-    setBulkApplying(true)
-    setBulkMsg('')
-    try {
-      const result = await api.adminBulkPatchPlayers(ids, patch)
-      setPlayers(ps => ps.map(p => {
-        if (!selected.has(p.id)) return p
-        const u = { ...p }
-        if ('player_role' in patch) u.player_role = patch.player_role || null
-        if ('gender' in patch) u.gender = patch.gender || null
-        if ('is_player' in patch) u.is_player = patch.is_player
-        if ('is_overseas' in patch) u.is_overseas = patch.is_overseas
-        if ('overseas_country' in patch) u.overseas_country = patch.overseas_country || null
-        return u
-      }))
-      setSelected(new Set())
-      setBulkMsgError(false)
-      setBulkMsg(`${result.updated} updated`)
-      setTimeout(() => setBulkMsg(''), 2500)
-    } catch (err) {
-      setBulkMsgError(true)
-      setBulkMsg(err.message || 'Failed')
-    } finally {
-      setBulkApplying(false)
-    }
-  }, [selected])
-
   const handleModalSaved = useCallback((updated) => {
     setPlayers(ps => ps.map(p => p.id === updated.id ? { ...p, ...updated } : p))
+    // If modal is still open, keep it open — user closed it themselves
   }, [])
 
   const handleModalClose = useCallback(() => {
@@ -664,7 +502,7 @@ export default function AdminPlayers() {
           />
         </div>
 
-        <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <div className="flex items-center gap-2 mb-4">
           <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Overseas</span>
           <div className="flex items-center border pb-hairline rounded overflow-hidden">
             {[
@@ -685,57 +523,26 @@ export default function AdminPlayers() {
               </button>
             ))}
           </div>
-
-          <div className="w-px h-4 bg-pb-hairline self-center" />
-
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <input
-              ref={selectAllRef}
-              type="checkbox"
-              checked={allVisibleSelected}
-              onChange={toggleSelectAll}
-              className="accent-pb-accent"
-            />
-            <span className="font-mono text-[10px] text-pb-faintest">
-              {allVisibleSelected ? 'Deselect all' : `Select all ${filtered.length}`}
-            </span>
-          </label>
-
-          {selected.size > 0 && !allVisibleSelected && (
-            <span className="font-mono text-[10px]" style={{ color: 'var(--pb-accent)' }}>
-              {selected.size} selected
-            </span>
-          )}
+          <span className="font-mono text-[10px] text-pb-faintest ml-1">
+            Click <span style={{ color: 'var(--pb-accent)' }}>Edit</span> on any player to update their details.
+          </span>
         </div>
-
-        {selected.size > 0 && (
-          <BulkActionBar
-            count={selected.size}
-            onApply={applyBulk}
-            onClear={() => setSelected(new Set())}
-            applying={bulkApplying}
-            msg={bulkMsg}
-            msgError={bulkMsgError}
-          />
-        )}
 
         <div className="pb-card overflow-hidden">
           {filtered.length === 0 && (
             <div className="px-5 py-8 text-center text-pb-faint font-mono text-[11px]">No players found</div>
           )}
           {filtered.map((p, i) => (
-            <div
-              key={p.id}
-              className={`px-4 py-3.5 flex items-start gap-3 ${i > 0 ? 'pb-hairline-t' : ''} ${selected.has(p.id) ? 'bg-pb-accent/5' : ''}`}
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(p.id)}
-                onChange={() => toggleSelect(p.id)}
-                className="mt-1 accent-pb-accent shrink-0 cursor-pointer"
-              />
-              <div className="min-w-0 flex-1 flex items-start justify-between gap-2">
-                <div className="min-w-0">
+            <div key={p.id} className={`px-5 py-3.5 flex items-start justify-between gap-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
+              <div className="min-w-0 flex items-center gap-3">
+                {p.photo_url && (
+                  <img
+                    src={p.photo_url}
+                    alt=""
+                    className="w-8 h-8 rounded-full object-cover shrink-0 border pb-hairline"
+                  />
+                )}
+                <div>
                   <p className="text-pb-text text-sm font-medium">
                     {p.display_name_override || fmt(p.name)}
                     {p.display_name_override && (
@@ -765,14 +572,14 @@ export default function AdminPlayers() {
                     )}
                   </div>
                 </div>
-
-                <button
-                  onClick={() => setEditingPlayer(p)}
-                  className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors shrink-0"
-                >
-                  Edit
-                </button>
               </div>
+
+              <button
+                onClick={() => setEditingPlayer(p)}
+                className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors shrink-0"
+              >
+                Edit
+              </button>
             </div>
           ))}
         </div>

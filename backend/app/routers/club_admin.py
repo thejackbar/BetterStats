@@ -130,47 +130,6 @@ async def patch_player(
     }
 
 
-class BulkPlayerPatch(BaseModel):
-    player_ids: list[str]
-    player_role: Optional[str] = None
-    gender: Optional[str] = None
-    is_player: Optional[bool] = None
-    is_overseas: Optional[bool] = None
-    overseas_country: Optional[str] = None
-
-
-@router.post("/players/bulk-patch")
-async def bulk_patch_players(
-    data: BulkPlayerPatch,
-    current_user: User = Depends(get_current_user),
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    if not data.player_ids:
-        return {"updated": 0}
-    try:
-        ids = [uuid.UUID(pid) for pid in data.player_ids]
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid player ID format")
-    result = await db.execute(
-        select(Player).where(Player.id.in_(ids), Player.organisation_id == club.id)
-    )
-    players = result.scalars().all()
-    for player in players:
-        if data.player_role is not None:
-            player.player_role = data.player_role.strip() or None
-        if data.gender is not None:
-            player.gender = data.gender.strip() or None
-        if data.is_player is not None:
-            player.is_player = data.is_player
-        if data.is_overseas is not None:
-            player.is_overseas = data.is_overseas
-        if data.overseas_country is not None:
-            player.overseas_country = data.overseas_country.strip() or None
-    await db.commit()
-    return {"updated": len(players)}
-
-
 class PlayerCreate(BaseModel):
     first_name: str
     last_name: str
