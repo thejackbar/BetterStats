@@ -78,78 +78,172 @@ const PRESET_GROUPS = [
   {
     key: 'popular', label: 'Popular', defaultOpen: true,
     items: [
-      { type: 'preset', label: 'Run scorers (all-time)',     target: 'player_career',    sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Wicket takers (all-time)',   target: 'player_career',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Best batting averages',      target: 'player_career',    sortBy: 'batting_average',     sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '20' }], context: {} },
-      { type: 'preset', label: 'Best bowling averages',      target: 'player_career',    sortBy: 'bowling_average',     sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '20' }], context: {} },
-      { type: 'preset', label: 'All-rounders',               target: 'player_career',    sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '500' }, { field: 'wickets', op: 'gte', value: '50' }], context: {} },
-      { type: 'preset', label: 'Highest individual scores',  target: 'innings_list',     sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Best spells (by wickets)',   target: 'spell_list',       sortBy: 'wickets',             sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Biggest partnerships',       target: 'partnership_list', sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Most matches played',        target: 'player_career',    sortBy: 'matches',             sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top run aggregates',          target: 'player_career',    sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top run scores',              target: 'innings_list',     sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top batting averages',        target: 'player_career',    sortBy: 'batting_average',     sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '20' }], context: {} },
+      { type: 'preset', label: 'Top batting strike rates',    target: 'player_career',    sortBy: 'batting_strike_rate', sortDir: 'desc', filters: [{ field: 'balls_faced', op: 'gte', value: '500' }], context: {} },
+      { type: 'preset', label: 'Most runs in a season',       target: 'player_season',    sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top partnerships',            target: 'partnership_list', sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top wicket takers',           target: 'player_career',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Best bowling in an innings',  target: 'spell_list',       sortBy: 'wickets',             sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top bowling averages',        target: 'player_career',    sortBy: 'bowling_average',     sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '20' }], context: {} },
+      { type: 'preset', label: 'Most wickets in a season',    target: 'player_season',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'catches_stumpings',            label: 'Top catches & stumpings',  description: 'Combined catches + stumpings per player.' },
+      { type: 'preset', label: 'Most matches played',         target: 'player_career',    sortBy: 'matches',             sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top all-rounders',            target: 'player_career',    sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '500' }, { field: 'wickets', op: 'gte', value: '50' }], context: {} },
     ],
   },
   {
     key: 'season', label: 'Season Honours', defaultOpen: false,
     items: [
-      { type: 'preset', label: 'Most runs in a season',         target: 'player_season', sortBy: 'runs',            sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Best batting avg in a season',  target: 'player_season', sortBy: 'batting_average', sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '10' }], context: {} },
-      { type: 'preset', label: 'Most wickets in a season',      target: 'player_season', sortBy: 'wickets',         sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Best bowling avg in a season',  target: 'player_season', sortBy: 'bowling_average', sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '10' }], context: {} },
-      { type: 'preset', label: 'Most matches in a season',      target: 'player_season', sortBy: 'matches',         sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top run aggregates by season',     target: 'player_season', sortBy: 'runs',            sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top batting averages by season',   target: 'player_season', sortBy: 'batting_average', sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '10' }], context: {} },
+      { type: 'preset', label: 'Top wicket aggregates by season',  target: 'player_season', sortBy: 'wickets',         sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top bowling averages by season',   target: 'player_season', sortBy: 'bowling_average', sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '10' }], context: {} },
+      { type: 'preset', label: 'Most matches in a season',         target: 'player_season', sortBy: 'matches',         sortDir: 'desc', filters: [], context: {} },
     ],
   },
   {
     key: 'batting', label: 'Batting', defaultOpen: false,
     items: [
-      { type: 'preset', label: 'Run scorers (all-time)',     target: 'player_career', sortBy: 'runs',            sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Best batting averages',      target: 'player_career', sortBy: 'batting_average', sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '20' }], context: {} },
-      { type: 'preset', label: 'Highest individual scores',  target: 'innings_list',  sortBy: 'runs',            sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Centurions',                 target: 'player_career', sortBy: 'hundreds',        sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
-      { type: 'preset', label: 'Most no outs',               target: 'player_career', sortBy: 'not_outs',        sortDir: 'desc', filters: [{ field: 'not_outs', op: 'gte', value: '1' }], context: {} },
-      { type: 'preset', label: 'Hundreds in losses',         target: 'innings_list',  sortBy: 'runs',            sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '100' }], context: { result: 'lost' } },
-      { type: 'preset', label: 'Captain runs',               target: 'player_career', sortBy: 'runs',            sortDir: 'desc', filters: [], context: { captain_only: true } },
-      { type: 'preset', label: 'Finals run scorers',         target: 'player_career', sortBy: 'runs',            sortDir: 'desc', filters: [], context: { finals_only: true } },
-      { type: 'derived', key: 'consecutive_ducks',   label: 'Longest duck streak',       description: 'Most innings in a row scoring zero.' },
-      { type: 'derived', key: 'consecutive_fifties', label: 'Longest 50+ streak',         description: 'Most innings in a row scoring 50+.' },
-      { type: 'derived', key: 'carried_bat',         label: 'Carrying the bat',           description: 'Openers not out when team was bowled out.' },
-      { type: 'derived', key: 'most_runs_first_n',   label: 'Most runs after X matches',  description: 'Who scored the most in their first N matches (set N in Context).' },
-      { type: 'derived', key: 'milestone_runs',      label: 'Fastest to milestone',       description: 'Who reached a runs milestone in fewest matches (set milestone in Context).' },
-    ],
-  },
-  {
-    key: 'bowling', label: 'Bowling', defaultOpen: false,
-    items: [
-      { type: 'preset', label: 'Wicket takers (all-time)', target: 'player_career', sortBy: 'wickets',           sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Best bowling averages',    target: 'player_career', sortBy: 'bowling_average',   sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '20' }], context: {} },
-      { type: 'preset', label: 'Five-for club',            target: 'player_career', sortBy: 'five_wicket_innings', sortDir: 'desc', filters: [{ field: 'five_wicket_innings', op: 'gte', value: '1' }], context: {} },
-      { type: 'preset', label: 'Best spells (by wickets)', target: 'spell_list',    sortBy: 'wickets',           sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Most wides bowled',        target: 'player_career', sortBy: 'wides',             sortDir: 'desc', filters: [{ field: 'wides', op: 'gte', value: '1' }], context: {} },
-      { type: 'preset', label: 'Most no-balls bowled',     target: 'player_career', sortBy: 'no_balls',          sortDir: 'desc', filters: [{ field: 'no_balls', op: 'gte', value: '1' }], context: {} },
-    ],
-  },
-  {
-    key: 'fielding', label: 'Fielding & Keeping', defaultOpen: false,
-    items: [
-      { type: 'preset', label: 'Wicket-keeper catches', target: 'player_career', sortBy: 'catches',   sortDir: 'desc', filters: [], context: { keeper_only: true } },
-      { type: 'preset', label: 'Most catches',          target: 'player_career', sortBy: 'catches',   sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Most run outs',         target: 'player_career', sortBy: 'run_outs',  sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Most stumpings',        target: 'player_career', sortBy: 'stumpings', sortDir: 'desc', filters: [{ field: 'stumpings', op: 'gte', value: '1' }], context: {} },
+      // Aggregates
+      { type: 'preset', label: 'Top run aggregates',           target: 'player_career', sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Top run scores',               target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'top_scores_by_position',        label: 'Top run scores by batting position', description: 'Best individual score at each position 1-11.' },
+      { type: 'preset', label: 'Top batting averages',         target: 'player_career', sortBy: 'batting_average',     sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '20' }], context: {} },
+      { type: 'preset', label: 'Top batting average in a season', target: 'player_season', sortBy: 'batting_average',  sortDir: 'desc', filters: [{ field: 'batting_innings', op: 'gte', value: '10' }], context: {} },
+      { type: 'preset', label: 'Top batting strike rates',     target: 'player_career', sortBy: 'batting_strike_rate', sortDir: 'desc', filters: [{ field: 'balls_faced', op: 'gte', value: '500' }], context: {} },
+      { type: 'derived', key: 'most_runs_in_match',            label: 'Most runs in a match', description: 'Highest combined runs by one batter in a single match.' },
+      { type: 'derived', key: 'most_boundaries_in_match',      label: 'Most boundaries in a match', description: 'Most 4s + 6s by one batter in a match.' },
+      // Sixes
+      { type: 'preset', label: 'Most sixes (career)',          target: 'player_career', sortBy: 'sixes',              sortDir: 'desc', filters: [{ field: 'sixes', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most sixes in an innings',     target: 'innings_list',  sortBy: 'sixes',              sortDir: 'desc', filters: [{ field: 'sixes', op: 'gte', value: '1' }], context: {} },
+      { type: 'derived', key: 'most_sixes_in_match',           label: 'Most sixes in a match', description: 'Most sixes by one batter across both innings.' },
+      { type: 'preset', label: 'Most sixes in a season',       target: 'player_season', sortBy: 'sixes',              sortDir: 'desc', filters: [], context: {} },
+      // Fours
+      { type: 'preset', label: 'Most fours (career)',          target: 'player_career', sortBy: 'fours',              sortDir: 'desc', filters: [{ field: 'fours', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most fours in an innings',     target: 'innings_list',  sortBy: 'fours',              sortDir: 'desc', filters: [{ field: 'fours', op: 'gte', value: '1' }], context: {} },
+      { type: 'derived', key: 'most_fours_in_match',           label: 'Most fours in a match', description: 'Most fours by one batter across both innings.' },
+      { type: 'preset', label: 'Most fours in a season',       target: 'player_season', sortBy: 'fours',              sortDir: 'desc', filters: [], context: {} },
+      // Ducks
+      { type: 'preset', label: 'Most ducks (career)',          target: 'player_career', sortBy: 'ducks',              sortDir: 'desc', filters: [{ field: 'ducks', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most ducks in a season',       target: 'player_season', sortBy: 'ducks',              sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'ducks_on_debut',                label: 'Ducks on debut',           description: 'Players whose debut innings was a duck.' },
+      { type: 'derived', key: 'consecutive_ducks',             label: 'Most consecutive ducks',    description: 'Longest run of consecutive innings out for 0.' },
+      { type: 'derived', key: 'consecutive_no_duck',           label: 'Most consecutive scores without a duck', description: 'Longest streak of innings without a duck.' },
+      { type: 'derived', key: 'golden_ducks',                  label: 'Most golden ducks',         description: 'Out for 0 off 0 or 1 ball.' },
+      { type: 'derived', key: 'duck_pairs',                    label: 'Duck pairs',                description: 'Ducks in both innings of the same match.' },
+      // Scores ranges
+      { type: 'preset', label: 'Most 90s',                     target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '90' }, { field: 'runs', op: 'lt', value: '100' }], context: {} },
+      { type: 'preset', label: 'Most 40s',                     target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '40' }, { field: 'runs', op: 'lt', value: '50' }], context: {} },
+      // Hundreds
+      { type: 'preset', label: 'Most hundreds (career)',       target: 'player_career', sortBy: 'hundreds',            sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most hundreds in a season',    target: 'player_season', sortBy: 'hundreds',            sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
+      { type: 'derived', key: 'consecutive_hundreds',          label: 'Most consecutive hundreds',  description: 'Longest run of innings scoring 100+.' },
+      { type: 'preset', label: 'Centurions',                   target: 'player_career', sortBy: 'hundreds',            sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
+      { type: 'derived', key: 'century_each_innings',          label: 'A century in each innings',  description: 'Players who scored 100+ in both innings of a match.' },
+      { type: 'derived', key: 'century_and_duck',              label: 'Century and duck in same match', description: 'A 100 and a 0 in the same match.' },
+      { type: 'derived', key: 'innings_without_century',       label: 'Most innings without a century', description: 'Players with most innings and no 100.' },
+      { type: 'derived', key: 'consecutive_no_century',        label: 'Most consecutive scores without a century', description: 'Longest sub-100 streak.' },
+      { type: 'derived', key: 'lowest_century_conversion',     label: 'Lowest century conversions', description: '50→100 conversion rate (5+ scores of 50+).' },
+      // Fifties
+      { type: 'preset', label: 'Most fifties (career)',        target: 'player_career', sortBy: 'fifties',             sortDir: 'desc', filters: [{ field: 'fifties', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most fifties in a season',     target: 'player_season', sortBy: 'fifties',             sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'consecutive_fifties',           label: 'Most consecutive fifties',  description: 'Longest streak of innings scoring 50+.' },
+      { type: 'derived', key: 'innings_per_fifty',             label: 'Top innings per fifty',     description: 'Lowest innings-per-50 ratio (most frequent 50+ scorer).' },
+      { type: 'derived', key: 'top_scores_pct_innings',        label: 'Top run scores as % of innings', description: 'Individual scores as % of club innings total.' },
+      // Other
+      { type: 'preset', label: 'Top all-rounders',             target: 'player_career', sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '500' }, { field: 'wickets', op: 'gte', value: '50' }], context: {} },
+      { type: 'derived', key: 'opening_bat_and_bowl',          label: 'Opening batting and bowling in the same match', description: 'Opened batting AND bowled in innings 1.' },
+      { type: 'derived', key: 'batting_on_debut',              label: 'Top batting on debut',      description: 'Best score in a player’s first match.' },
+      { type: 'preset', label: 'Most balls faced in an innings', target: 'innings_list', sortBy: 'balls',              sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Most balls faced for a duck',  target: 'innings_list',  sortBy: 'balls',               sortDir: 'desc', filters: [{ field: 'runs', op: 'eq', value: '0' }], context: { dismissal: '' } },
+      { type: 'derived', key: 'carried_bat',                   label: 'Carrying the bat',           description: 'Openers not out when team was bowled out.' },
+      { type: 'preset', label: 'Hundreds in losses',           target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '100' }], context: { result: 'lost' } },
+      { type: 'preset', label: 'Captain runs',                 target: 'player_career', sortBy: 'runs',                sortDir: 'desc', filters: [], context: { captain_only: true } },
+      { type: 'preset', label: 'Finals run scorers',           target: 'player_career', sortBy: 'runs',                sortDir: 'desc', filters: [], context: { finals_only: true } },
+      { type: 'derived', key: 'most_runs_first_n',             label: 'Most runs after X matches',  description: 'Who scored most in their first N matches (set N in Context).' },
+      { type: 'derived', key: 'milestone_runs',                label: 'Fastest to milestone',       description: 'Who reached a runs milestone in fewest matches.' },
+      // Not out / dismissal
+      { type: 'preset', label: 'Highest not out count',        target: 'player_career', sortBy: 'not_outs',            sortDir: 'desc', filters: [{ field: 'not_outs', op: 'gte', value: '1' }], context: {} },
+      { type: 'derived', key: 'dismissal_bowled',              label: 'Highest bowled count',       description: 'Players most often dismissed bowled.' },
+      { type: 'derived', key: 'dismissal_caught',              label: 'Highest caught count',       description: 'Players most often dismissed caught.' },
+      { type: 'derived', key: 'dismissal_lbw',                 label: 'Highest LBW count',          description: 'Players most often dismissed LBW.' },
+      { type: 'derived', key: 'dismissal_run_out',             label: 'Highest run-out count',      description: 'Players most often run out.' },
+      { type: 'derived', key: 'dismissal_stumped',             label: 'Highest stumped count',      description: 'Players most often stumped.' },
+      { type: 'derived', key: 'unusual_dismissals',            label: 'Unusual dismissals',         description: 'Rare dismissals (hit wicket, retired, handled, etc.).' },
     ],
   },
   {
     key: 'partnerships', label: 'Partnerships', defaultOpen: false,
     items: [
-      { type: 'preset', label: 'Biggest partnerships', target: 'partnership_list', sortBy: 'runs', sortDir: 'desc', filters: [], context: {} },
-      { type: 'derived', key: 'best_partnership_pair', label: 'Best partnership by pair', description: 'Best stand for each pair of batters.' },
+      { type: 'preset', label: 'Top partnerships',               target: 'partnership_list', sortBy: 'runs', sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'top_partnerships_by_wicket',      label: 'Top partnerships by wicket',  description: 'Best partnership at each wicket position.' },
+      { type: 'derived', key: 'partnership_aggregates_pair',     label: 'Top partnership aggregates',  description: 'Total partnership runs per pair of batters.' },
+      { type: 'derived', key: 'century_partnerships_pair',       label: 'Most century partnerships by pair', description: 'Count of 100+ partnerships per pair.' },
+      { type: 'derived', key: 'best_partnership_pair',           label: 'Best partnership by pair',    description: 'Highest single partnership for each pair.' },
+    ],
+  },
+  {
+    key: 'bowling', label: 'Bowling', defaultOpen: false,
+    items: [
+      // Aggregates
+      { type: 'preset', label: 'Top wicket takers',                target: 'player_career', sortBy: 'wickets',             sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Best bowling in an innings',       target: 'spell_list',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'best_bowling_in_match',             label: 'Best bowling in a match',  description: 'Combined wickets across both innings of a match.' },
+      { type: 'preset', label: 'Top bowling averages',             target: 'player_career', sortBy: 'bowling_average',     sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '20' }], context: {} },
+      { type: 'preset', label: 'Top bowling average in a season',  target: 'player_season', sortBy: 'bowling_average',     sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '10' }], context: {} },
+      { type: 'preset', label: 'Top economy rates',                target: 'player_career', sortBy: 'bowling_economy',     sortDir: 'asc',  filters: [{ field: 'overs', op: 'gte', value: '50' }], context: {} },
+      { type: 'preset', label: 'Top bowling strike rates',         target: 'player_career', sortBy: 'bowling_strike_rate', sortDir: 'asc',  filters: [{ field: 'wickets', op: 'gte', value: '20' }], context: {} },
+      { type: 'preset', label: 'Most wickets in a season',         target: 'player_season', sortBy: 'wickets',             sortDir: 'desc', filters: [], context: {} },
+      // Five-wicket innings
+      { type: 'preset', label: 'Most five-wicket innings',         target: 'player_career', sortBy: 'five_wicket_innings', sortDir: 'desc', filters: [{ field: 'five_wicket_innings', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most 5WI in a season',             target: 'player_season', sortBy: 'five_wicket_innings', sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'consecutive_5wi',                   label: 'Most consecutive 5-wicket innings', description: 'Longest run of bowling spells with 5+ wickets.' },
+      { type: 'derived', key: 'consecutive_innings_with_wicket',   label: 'Most consecutive innings taking a wicket', description: 'Longest bowling streak with 1+ wicket.' },
+      // Debut
+      { type: 'derived', key: 'bowling_on_debut',                  label: 'Best bowling on debut',     description: 'Best figures in a player’s first spell.' },
+      // Spells
+      { type: 'preset', label: 'Most expensive bowling in an innings', target: 'spell_list', sortBy: 'runs',               sortDir: 'desc', filters: [{ field: 'overs', op: 'gte', value: '3' }], context: {} },
+      { type: 'preset', label: 'Least expensive bowling in an innings', target: 'spell_list', sortBy: 'runs',              sortDir: 'asc',  filters: [{ field: 'overs', op: 'gte', value: '5' }], context: {} },
+      { type: 'preset', label: 'Most wides in an innings',         target: 'spell_list',    sortBy: 'wides',               sortDir: 'desc', filters: [{ field: 'wides', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most no-balls in an innings',      target: 'spell_list',    sortBy: 'no_balls',            sortDir: 'desc', filters: [{ field: 'no_balls', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most overs in an innings',         target: 'spell_list',    sortBy: 'overs',               sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'most_balls_bowled_match',           label: 'Most balls bowled in a match', description: 'Most deliveries by one bowler in a match.' },
+      // Career extras
+      { type: 'preset', label: 'Most wides bowled (career)',       target: 'player_career', sortBy: 'wides',               sortDir: 'desc', filters: [{ field: 'wides', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most no-balls bowled (career)',    target: 'player_career', sortBy: 'no_balls',            sortDir: 'desc', filters: [{ field: 'no_balls', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most maidens (career)',            target: 'player_career', sortBy: 'maidens',             sortDir: 'desc', filters: [], context: {} },
+    ],
+  },
+  {
+    key: 'fielding', label: 'Fielding & Keeping', defaultOpen: false,
+    items: [
+      { type: 'preset', label: 'Most catches (career)',     target: 'player_career', sortBy: 'catches',   sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Most catches in a season',  target: 'player_season', sortBy: 'catches',   sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'most_catches_in_match',      label: 'Most catches in a match', description: 'Most catches by one fielder in a single match.' },
+      { type: 'preset', label: 'Wicket-keeper catches',     target: 'player_career', sortBy: 'catches',   sortDir: 'desc', filters: [], context: { keeper_only: true } },
+      { type: 'preset', label: 'Most stumpings (career)',   target: 'player_career', sortBy: 'stumpings', sortDir: 'desc', filters: [{ field: 'stumpings', op: 'gte', value: '1' }], context: {} },
+      { type: 'preset', label: 'Most stumpings in a season',target: 'player_season', sortBy: 'stumpings', sortDir: 'desc', filters: [{ field: 'stumpings', op: 'gte', value: '1' }], context: {} },
+      { type: 'derived', key: 'most_stumpings_in_match',    label: 'Most stumpings in a match', description: 'Most stumpings by one keeper in a single match.' },
+      { type: 'preset', label: 'Most run outs (career)',    target: 'player_career', sortBy: 'run_outs',  sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Most run outs in a season', target: 'player_season', sortBy: 'run_outs',  sortDir: 'desc', filters: [], context: {} },
+      { type: 'derived', key: 'most_run_outs_in_match',     label: 'Most run outs in a match', description: 'Most run outs effected by one fielder in a single match.' },
+      { type: 'derived', key: 'catches_stumpings',          label: 'Top catches & stumpings combined', description: 'Sum of catches + stumpings per player.' },
     ],
   },
   {
     key: 'match', label: 'Match', defaultOpen: false,
     items: [
-      { type: 'preset', label: 'Highest team scores',      target: 'match_list',    sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Biggest winning margins',  target: 'match_list',    sortBy: 'margin_runs',  sortDir: 'desc', filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: {} },
-      { type: 'preset', label: 'Finals run scorers',       target: 'player_career', sortBy: 'runs',         sortDir: 'desc', filters: [], context: { finals_only: true } },
+      { type: 'preset', label: 'Highest team scores',      target: 'match_list', sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Lowest team scores',       target: 'match_list', sortBy: 'team_runs',    sortDir: 'asc',  filters: [{ field: 'team_runs', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Highest opposition scores',target: 'match_list', sortBy: 'opp_runs',     sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Lowest opposition scores', target: 'match_list', sortBy: 'opp_runs',     sortDir: 'asc',  filters: [{ field: 'opp_runs', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Biggest winning margins',  target: 'match_list', sortBy: 'margin_runs',  sortDir: 'desc', filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
+      { type: 'preset', label: 'Closest wins',             target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
+      { type: 'preset', label: 'Biggest defeats',          target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'lt', value: '0' }], context: { result: 'lost' } },
+      { type: 'derived', key: 'most_wickets_in_match',     label: 'Most wickets taken in a match', description: 'Most wickets by one bowler across both innings.' },
+      { type: 'preset', label: 'Finals',                   target: 'match_list', sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: { finals_only: true } },
     ],
   },
 ]
@@ -220,6 +314,13 @@ const CATEGORY_LOOKUP = (() => {
 })()
 
 const OPERATOR_SYMBOLS = { gte: '≥', gt: '>', eq: '=', lte: '≤', lt: '<', ne: '≠' }
+
+const PAIR_DERIVED = new Set([
+  'best_partnership_pair',
+  'partnership_aggregates_pair',
+  'century_partnerships_pair',
+  'top_partnerships_by_wicket',
+])
 
 let _treeIdCounter = 1000
 const newTreeId = () => ++_treeIdCounter
@@ -914,7 +1015,9 @@ export default function StatLab() {
   // Columns to render in the results table
   const tableColumns = useMemo(() => {
     if (activeDerived && schema?.derived?.[activeDerived]) {
-      return schema.derived[activeDerived].columns
+      // Skip player identity columns — those are rendered as the dim column already.
+      const dimKeys = new Set(['player_id', 'player_name', 'player_a_id', 'player_a_name', 'player_b_id', 'player_b_name', 'pair'])
+      return schema.derived[activeDerived].columns.filter(c => !dimKeys.has(c.key))
     }
     const set = COLUMN_SETS[query.target] || []
     // Promote filtered fields and the active sort to the front
@@ -1204,23 +1307,27 @@ export default function StatLab() {
             )}
 
             {sortedRows.length > 0 && (
-              <Card
-                title={`${sortedRows.length} ${activeDerived ? 'PLAYERS' : (targetMeta.shape === 'list' ? 'ROWS' : 'GROUPS')}${activeDerived ? ' · ' + schema.derived[activeDerived].label.toUpperCase() : ''}`}
-                action={
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-2xs tracking-wide2 text-pb-faintest">
+              <div className="pb-card">
+                <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 pb-hairline-b">
+                  <Label>
+                    {`${sortedRows.length} ${activeDerived ? 'PLAYERS' : (targetMeta.shape === 'list' ? 'ROWS' : 'GROUPS')}${activeDerived ? ' · ' + schema.derived[activeDerived].label.toUpperCase() : ''}`}
+                  </Label>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-2xs tracking-wide2 text-pb-faintest hidden sm:inline">
                       {activeDerived
                         ? ''
                         : `SORTED BY ${(METRIC_LABELS[query.sortBy]?.label || query.sortBy).toUpperCase()} ${query.sortDir === 'asc' ? '↑' : '↓'}`}
                     </span>
                     {canSave && (
-                      <button onClick={() => { setEditingReport(null); setSaveOpen(true) }} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">SAVE</button>
+                      <Btn primary onClick={() => { setEditingReport(null); setSaveOpen(true) }}>
+                        Save report
+                      </Btn>
                     )}
-                    <button onClick={downloadCSV} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">CSV</button>
+                    <button onClick={downloadCSV} className="font-mono text-[10.5px] tracking-wide2 text-pb-faint hover:text-pb-text px-2 py-1 rounded border border-pb-hairline hover:border-pb-hairline2 transition">
+                      CSV
+                    </button>
                   </div>
-                }
-                pad="p-0"
-              >
+                </div>
                 <ResultsTable
                   rows={sortedRows}
                   columns={tableColumns}
@@ -1231,7 +1338,7 @@ export default function StatLab() {
                   sortBy={query.sortBy}
                   clubSlug={clubSlug}
                 />
-              </Card>
+              </div>
             )}
           </div>
         </div>
@@ -1251,7 +1358,7 @@ export default function StatLab() {
 // ─── Results table ────────────────────────────────────────────────────────────
 
 function entityHeader(target, activeDerived) {
-  if (activeDerived === 'best_partnership_pair') {
+  if (activeDerived && PAIR_DERIVED.has(activeDerived)) {
     return [{ key: 'pair', label: 'PAIR' }]
   }
   switch (target) {
@@ -1297,7 +1404,7 @@ function entityHeader(target, activeDerived) {
 
 function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort, sortBy, clubSlug }) {
   const dimCols = activeDerived
-    ? (activeDerived === 'best_partnership_pair'
+    ? (PAIR_DERIVED.has(activeDerived)
         ? [{ key: 'pair', label: 'PAIR' }]
         : [{ key: 'player_name', label: 'PLAYER' }])
     : entityHeader(target, null)
@@ -1348,6 +1455,9 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
 function formatCell(v, col) {
   if (v == null || v === '') return '—'
   if (col?.decimal) return Number(v).toFixed(2)
+  if (col?.key === 'played_at' && typeof v === 'string') {
+    try { return new Date(v).toISOString().slice(0, 10) } catch { return v }
+  }
   return v
 }
 

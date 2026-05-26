@@ -1500,6 +1500,1283 @@ async def derived_milestone_runs(
     return [dict(r) for r in result.mappings()]
 
 
+# ─── Per-match aggregates ──────────────────────────────────────────────────────
+# Most X in a single match — sum across both innings of a game and rank.
+# Each function follows the same pattern: build game_universe, group by
+# (player, game), order by the target metric desc.
+
+async def derived_most_runs_in_match(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Highest (player, match) batting aggregates — sums across both innings."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        per_match AS (
+            SELECT
+                bi.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.game_id::text                          AS game_id,
+                gu.played_at                              AS played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                SUM(COALESCE(bi.runs, 0))::int            AS runs,
+                SUM(COALESCE(bi.balls, 0))::int           AS balls,
+                COUNT(*)                                  AS innings_count
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+              {player_extra}
+            GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name),
+                     gu.game_id, gu.played_at, gu.display_grade_name,
+                     gu.club_team, gu.home_team, gu.away_team
+        )
+        SELECT player_id::text AS player_id, * FROM per_match
+        ORDER BY runs DESC, balls ASC NULLS LAST
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_most_sixes_in_match(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Most sixes by one player in a single match (across both innings)."""
+    return await _per_match_batting_metric(session, org_id=org_id, limit=limit, context=context, metric_col="sixes")
+
+
+async def derived_most_fours_in_match(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Most fours by one player in a single match."""
+    return await _per_match_batting_metric(session, org_id=org_id, limit=limit, context=context, metric_col="fours")
+
+
+async def derived_most_boundaries_in_match(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Most boundaries (4s + 6s) by one player in a single match."""
+    return await _per_match_batting_metric(session, org_id=org_id, limit=limit, context=context,
+                                            metric_col="(COALESCE(bi.fours,0)+COALESCE(bi.sixes,0))", metric_label="boundaries")
+
+
+async def _per_match_batting_metric(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict, metric_col: str, metric_label: str | None = None,
+) -> list[dict]:
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    label = metric_label or metric_col
+    sql = f"""
+        WITH {universe},
+        per_match AS (
+            SELECT
+                bi.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.game_id::text                          AS game_id,
+                gu.played_at                              AS played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                SUM({metric_col})::int                    AS {label}
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              {player_extra}
+            GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name),
+                     gu.game_id, gu.played_at, gu.display_grade_name,
+                     gu.club_team, gu.home_team, gu.away_team
+            HAVING SUM({metric_col}) > 0
+        )
+        SELECT player_id::text AS player_id, * FROM per_match
+        ORDER BY {label} DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_best_bowling_in_match(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Best bowling figures in a single match — combined wickets, total runs conceded."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        per_match AS (
+            SELECT
+                bs.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.game_id::text                          AS game_id,
+                gu.played_at                              AS played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                SUM(COALESCE(bs.wickets, 0))::int         AS wickets,
+                SUM(COALESCE(bs.runs, 0))::int            AS runs,
+                SUM(COALESCE(bs.overs, 0))::numeric       AS overs
+            FROM game_universe gu
+            JOIN bowling_spells bs ON bs.game_id = gu.game_id
+            JOIN players p ON p.id = bs.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
+            GROUP BY bs.player_id, COALESCE(p.display_name_override, p.name),
+                     gu.game_id, gu.played_at, gu.display_grade_name,
+                     gu.club_team, gu.home_team, gu.away_team
+            HAVING SUM(COALESCE(bs.wickets, 0)) > 0
+        )
+        SELECT player_id::text AS player_id, * FROM per_match
+        ORDER BY wickets DESC, runs ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_most_wickets_in_match(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Same data as best_bowling_in_match but sorted by wickets only."""
+    return await derived_best_bowling_in_match(session, org_id=org_id, limit=limit, context=context)
+
+
+async def derived_most_balls_bowled_match(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Most balls bowled by one player in a single match."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        per_match AS (
+            SELECT
+                bs.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.game_id::text                          AS game_id,
+                gu.played_at                              AS played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                SUM(COALESCE(bs.overs, 0))::numeric       AS overs,
+                ROUND(SUM(COALESCE(bs.overs, 0) * 6))::int AS balls_bowled
+            FROM game_universe gu
+            JOIN bowling_spells bs ON bs.game_id = gu.game_id
+            JOIN players p ON p.id = bs.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
+            GROUP BY bs.player_id, COALESCE(p.display_name_override, p.name),
+                     gu.game_id, gu.played_at, gu.display_grade_name,
+                     gu.club_team, gu.home_team, gu.away_team
+        )
+        SELECT player_id::text AS player_id, * FROM per_match
+        WHERE balls_bowled > 0
+        ORDER BY balls_bowled DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def _per_match_fielding_metric(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict, col: str, label: str,
+) -> list[dict]:
+    """Highest single-match values of catches / run_outs / stumpings."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        per_match AS (
+            SELECT
+                fs.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.game_id::text                          AS game_id,
+                gu.played_at                              AS played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                COALESCE(fs.{col}, 0)::int                AS {label}
+            FROM game_universe gu
+            JOIN fielding_stats fs ON fs.game_id = gu.game_id
+            JOIN players p ON p.id = fs.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND COALESCE(fs.{col}, 0) > 0
+              {player_extra}
+        )
+        SELECT player_id::text AS player_id, * FROM per_match
+        ORDER BY {label} DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_most_catches_in_match(session, *, org_id, limit, context):
+    return await _per_match_fielding_metric(session, org_id=org_id, limit=limit, context=context, col="catches", label="catches")
+
+
+async def derived_most_stumpings_in_match(session, *, org_id, limit, context):
+    return await _per_match_fielding_metric(session, org_id=org_id, limit=limit, context=context, col="stumpings", label="stumpings")
+
+
+async def derived_most_run_outs_in_match(session, *, org_id, limit, context):
+    return await _per_match_fielding_metric(session, org_id=org_id, limit=limit, context=context, col="run_outs", label="run_outs")
+
+
+# ─── Duck variants ─────────────────────────────────────────────────────────────
+
+async def derived_golden_ducks(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Out for 0 off 0 balls (golden duck) — count per player."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        ducks AS (
+            SELECT bi.player_id, COALESCE(p.display_name_override, p.name) AS player_name
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.runs = 0
+              AND bi.not_out = FALSE
+              AND bi.did_not_bat IS NOT TRUE
+              AND COALESCE(bi.balls, 0) IN (0, 1)
+              AND bi.dismissal_type IS NOT NULL
+              AND LOWER(bi.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')
+              {player_extra}
+        )
+        SELECT
+            player_id::text AS player_id,
+            player_name,
+            COUNT(*)::int AS golden_ducks
+        FROM ducks
+        GROUP BY player_id, player_name
+        ORDER BY golden_ducks DESC, player_name ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_duck_pairs(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Players who scored a duck in BOTH innings of the same match — count per player."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        per_match_ducks AS (
+            SELECT
+                bi.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.game_id,
+                COUNT(*) FILTER (
+                    WHERE bi.runs = 0
+                      AND bi.not_out = FALSE
+                      AND bi.did_not_bat IS NOT TRUE
+                      AND bi.dismissal_type IS NOT NULL
+                      AND LOWER(bi.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')
+                ) AS ducks_in_match
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
+            GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name), gu.game_id
+            HAVING COUNT(*) FILTER (
+                WHERE bi.runs = 0
+                  AND bi.not_out = FALSE
+                  AND bi.did_not_bat IS NOT TRUE
+                  AND bi.dismissal_type IS NOT NULL
+                  AND LOWER(bi.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')
+            ) >= 2
+        )
+        SELECT
+            player_id::text AS player_id,
+            player_name,
+            COUNT(*)::int AS duck_pairs
+        FROM per_match_ducks
+        GROUP BY player_id, player_name
+        ORDER BY duck_pairs DESC, player_name ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_consecutive_no_duck(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Longest run of consecutive innings without being dismissed for a duck."""
+    return await _longest_streak(session, org_id=org_id, limit=limit, context=context,
+                                  is_match_expr=(
+                                      "(bi.runs > 0 OR bi.not_out = TRUE OR "
+                                      "bi.dismissal_type IS NULL OR "
+                                      "LOWER(bi.dismissal_type) IN ('absent', 'did not bat', 'dnb'))"
+                                  ),
+                                  result_col="longest_no_duck_streak")
+
+
+# ─── Streak helpers ────────────────────────────────────────────────────────────
+
+async def _longest_streak(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict, is_match_expr: str, result_col: str,
+) -> list[dict]:
+    """Generic longest-streak-of-innings helper. is_match_expr is a SQL bool
+    expression evaluated per batting_innings row inside the streak CTE."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 200), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        seq AS (
+            SELECT
+                bi.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                CASE WHEN {is_match_expr} THEN 1 ELSE 0 END AS is_match,
+                ROW_NUMBER() OVER (PARTITION BY bi.player_id ORDER BY gu.played_at, bi.innings_number, bi.id) AS rn
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+              {player_extra}
+        ),
+        grp AS (
+            SELECT player_id, player_name, rn, is_match,
+                   rn - SUM(is_match) OVER (PARTITION BY player_id ORDER BY rn) AS streak_grp
+            FROM seq
+        ),
+        streaks AS (
+            SELECT player_id, player_name, streak_grp, SUM(is_match) AS streak_len
+            FROM grp
+            WHERE is_match = 1
+            GROUP BY player_id, player_name, streak_grp
+        ),
+        best AS (
+            SELECT player_id::text AS player_id, player_name, MAX(streak_len)::int AS {result_col}
+            FROM streaks
+            GROUP BY player_id, player_name
+        )
+        SELECT * FROM best
+        WHERE {result_col} >= 2
+        ORDER BY {result_col} DESC, player_name ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_consecutive_no_century(
+    session, *, org_id, limit, context,
+) -> list[dict]:
+    """Longest streak of innings scoring under 100."""
+    return await _longest_streak(session, org_id=org_id, limit=limit, context=context,
+                                  is_match_expr="bi.runs < 100", result_col="longest_no_century_streak")
+
+
+async def derived_consecutive_hundreds(
+    session, *, org_id, limit, context,
+) -> list[dict]:
+    """Longest streak of innings scoring 100+."""
+    return await _longest_streak(session, org_id=org_id, limit=limit, context=context,
+                                  is_match_expr="bi.runs >= 100", result_col="longest_hundred_streak")
+
+
+# ─── Bowling streaks ───────────────────────────────────────────────────────────
+
+async def _longest_bowling_streak(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict, is_match_expr: str, result_col: str,
+) -> list[dict]:
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 200), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        seq AS (
+            SELECT
+                bs.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                CASE WHEN {is_match_expr} THEN 1 ELSE 0 END AS is_match,
+                ROW_NUMBER() OVER (PARTITION BY bs.player_id ORDER BY gu.played_at, bs.innings_number, bs.id) AS rn
+            FROM game_universe gu
+            JOIN bowling_spells bs ON bs.game_id = gu.game_id
+            JOIN players p ON p.id = bs.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
+        ),
+        grp AS (
+            SELECT player_id, player_name, rn, is_match,
+                   rn - SUM(is_match) OVER (PARTITION BY player_id ORDER BY rn) AS streak_grp
+            FROM seq
+        ),
+        streaks AS (
+            SELECT player_id, player_name, streak_grp, SUM(is_match) AS streak_len
+            FROM grp
+            WHERE is_match = 1
+            GROUP BY player_id, player_name, streak_grp
+        ),
+        best AS (
+            SELECT player_id::text AS player_id, player_name, MAX(streak_len)::int AS {result_col}
+            FROM streaks
+            GROUP BY player_id, player_name
+        )
+        SELECT * FROM best
+        WHERE {result_col} >= 2
+        ORDER BY {result_col} DESC, player_name ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_consecutive_innings_with_wicket(session, *, org_id, limit, context):
+    """Longest streak of bowling innings (spells) where player took 1+ wicket."""
+    return await _longest_bowling_streak(session, org_id=org_id, limit=limit, context=context,
+                                          is_match_expr="COALESCE(bs.wickets, 0) >= 1",
+                                          result_col="longest_wicket_streak")
+
+
+async def derived_consecutive_5wi(session, *, org_id, limit, context):
+    """Longest streak of bowling innings with 5+ wickets."""
+    return await _longest_bowling_streak(session, org_id=org_id, limit=limit, context=context,
+                                          is_match_expr="COALESCE(bs.wickets, 0) >= 5",
+                                          result_col="longest_5wi_streak")
+
+
+# ─── Debut performances ────────────────────────────────────────────────────────
+
+async def derived_batting_on_debut(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Best score in a player's debut match (sum across both innings of that match)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        debut_match AS (
+            SELECT DISTINCT ON (gap.player_id)
+                gap.player_id,
+                gu.game_id,
+                gu.played_at,
+                gu.display_grade_name AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END AS opposition
+            FROM game_universe gu
+            JOIN game_appearances gap ON gap.game_id = gu.game_id
+            JOIN players p ON p.id = gap.player_id
+            WHERE p.organisation_id = :org_id {player_extra}
+            ORDER BY gap.player_id, gu.played_at, gu.game_id
+        ),
+        debut_runs AS (
+            SELECT
+                dm.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                dm.game_id::text                          AS game_id,
+                dm.played_at,
+                dm.grade_name,
+                dm.opposition,
+                COALESCE(SUM(bi.runs), 0)::int            AS runs,
+                COALESCE(SUM(bi.balls), 0)::int           AS balls
+            FROM debut_match dm
+            JOIN players p ON p.id = dm.player_id
+            LEFT JOIN batting_innings bi
+                   ON bi.game_id = dm.game_id AND bi.player_id = dm.player_id
+                  AND bi.did_not_bat IS NOT TRUE
+            GROUP BY dm.player_id, COALESCE(p.display_name_override, p.name),
+                     dm.game_id, dm.played_at, dm.grade_name, dm.opposition
+        )
+        SELECT player_id::text AS player_id, * FROM debut_runs
+        ORDER BY runs DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_ducks_on_debut(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Players whose debut batting innings was a duck."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        first_inn AS (
+            SELECT DISTINCT ON (bi.player_id)
+                bi.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.game_id::text                          AS game_id,
+                gu.played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                bi.runs,
+                bi.balls,
+                bi.not_out,
+                bi.dismissal_type
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+              {player_extra}
+            ORDER BY bi.player_id, gu.played_at, bi.innings_number, bi.id
+        )
+        SELECT player_id::text AS player_id, * FROM first_inn
+        WHERE runs = 0 AND not_out = FALSE
+        ORDER BY played_at DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_bowling_on_debut_innings(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Best bowling figures in a player's debut spell."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        first_spell AS (
+            SELECT DISTINCT ON (bs.player_id)
+                bs.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.game_id::text                          AS game_id,
+                gu.played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                COALESCE(bs.wickets, 0)::int              AS wickets,
+                COALESCE(bs.runs, 0)::int                 AS runs,
+                COALESCE(bs.overs, 0)::numeric            AS overs
+            FROM game_universe gu
+            JOIN bowling_spells bs ON bs.game_id = gu.game_id
+            JOIN players p ON p.id = bs.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
+            ORDER BY bs.player_id, gu.played_at, bs.innings_number, bs.id
+        )
+        SELECT player_id::text AS player_id, * FROM first_spell
+        ORDER BY wickets DESC, runs ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── Dismissal-type counts ─────────────────────────────────────────────────────
+
+async def _dismissal_count(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict, like_patterns: list[str], result_col: str,
+) -> list[dict]:
+    """Generic dismissal-type counter — counts batting_innings rows where
+    LOWER(dismissal_type) matches any of the LIKE patterns."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    pattern_clause = " OR ".join([f"LOWER(bi.dismissal_type) LIKE :dp_{i}" for i in range(len(like_patterns))])
+    for i, p in enumerate(like_patterns):
+        params[f"dp_{i}"] = p
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        counts AS (
+            SELECT
+                bi.player_id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COUNT(*)::int AS {result_col}
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              AND ({pattern_clause})
+              {player_extra}
+            GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name)
+        )
+        SELECT * FROM counts
+        WHERE {result_col} > 0
+        ORDER BY {result_col} DESC, player_name ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_dismissal_bowled(session, *, org_id, limit, context):
+    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+                                   like_patterns=["bowled", "b %", "b. %"], result_col="bowled_count")
+
+
+async def derived_dismissal_caught(session, *, org_id, limit, context):
+    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+                                   like_patterns=["caught%", "c %", "c. %", "ct%"], result_col="caught_count")
+
+
+async def derived_dismissal_lbw(session, *, org_id, limit, context):
+    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+                                   like_patterns=["lbw%"], result_col="lbw_count")
+
+
+async def derived_dismissal_run_out(session, *, org_id, limit, context):
+    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+                                   like_patterns=["run out%", "ro%"], result_col="run_out_count")
+
+
+async def derived_dismissal_stumped(session, *, org_id, limit, context):
+    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+                                   like_patterns=["stumped%", "st %", "st. %"], result_col="stumped_count")
+
+
+async def derived_unusual_dismissals(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Innings dismissed by uncommon means (hit wicket, retired hurt/out, handled, obstructing)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe}
+        SELECT
+            bi.player_id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            gu.game_id::text                          AS game_id,
+            gu.played_at                              AS played_at,
+            gu.display_grade_name                     AS grade_name,
+            CASE
+                WHEN gu.club_team = gu.home_team THEN gu.away_team
+                WHEN gu.club_team = gu.away_team THEN gu.home_team
+                ELSE NULL
+            END                                       AS opposition,
+            bi.runs::int                              AS runs,
+            bi.dismissal_type                         AS dismissal_type
+        FROM game_universe gu
+        JOIN batting_innings bi ON bi.game_id = gu.game_id
+        JOIN players p ON p.id = bi.player_id
+        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND bi.did_not_bat IS NOT TRUE
+          AND bi.dismissal_type IS NOT NULL
+          AND (
+            LOWER(bi.dismissal_type) LIKE 'hit wicket%'
+            OR LOWER(bi.dismissal_type) LIKE 'retired%'
+            OR LOWER(bi.dismissal_type) LIKE 'handled%'
+            OR LOWER(bi.dismissal_type) LIKE 'obstruct%'
+            OR LOWER(bi.dismissal_type) LIKE 'timed out%'
+            OR LOWER(bi.dismissal_type) LIKE 'hit ball twice%'
+          )
+          {player_extra}
+        ORDER BY gu.played_at DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── Century / fifty derived ───────────────────────────────────────────────────
+
+async def derived_century_and_duck_same_match(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Players who scored a 100 and a duck in the same match."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        per_match AS (
+            SELECT
+                bi.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.game_id::text                          AS game_id,
+                gu.played_at                              AS played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                MAX(bi.runs)::int                         AS top_score,
+                MIN(bi.runs)::int                         AS low_score,
+                COUNT(*) FILTER (
+                    WHERE bi.runs = 0 AND bi.not_out = FALSE AND bi.did_not_bat IS NOT TRUE
+                      AND bi.dismissal_type IS NOT NULL
+                      AND LOWER(bi.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')
+                ) AS duck_count,
+                COUNT(*) FILTER (WHERE bi.runs >= 100) AS hundred_count
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              {player_extra}
+            GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name),
+                     gu.game_id, gu.played_at, gu.display_grade_name,
+                     gu.club_team, gu.home_team, gu.away_team
+            HAVING COUNT(*) FILTER (
+                WHERE bi.runs = 0 AND bi.not_out = FALSE AND bi.did_not_bat IS NOT TRUE
+                  AND bi.dismissal_type IS NOT NULL
+                  AND LOWER(bi.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')
+            ) >= 1 AND COUNT(*) FILTER (WHERE bi.runs >= 100) >= 1
+        )
+        SELECT player_id::text AS player_id, * FROM per_match
+        ORDER BY top_score DESC, played_at DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_century_each_innings(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Player scored 100+ in both innings of the same match."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        per_match AS (
+            SELECT
+                bi.player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                gu.game_id::text                          AS game_id,
+                gu.played_at                              AS played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                MAX(bi.runs)::int                         AS top_score,
+                SUM(bi.runs)::int                         AS match_runs,
+                COUNT(*) FILTER (WHERE bi.runs >= 100)    AS hundreds_count
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              {player_extra}
+            GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name),
+                     gu.game_id, gu.played_at, gu.display_grade_name,
+                     gu.club_team, gu.home_team, gu.away_team
+            HAVING COUNT(*) FILTER (WHERE bi.runs >= 100) >= 2
+        )
+        SELECT player_id::text AS player_id, * FROM per_match
+        ORDER BY match_runs DESC, played_at DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_innings_without_century(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Players with most innings who've never scored a century, ranked by inns count."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        agg AS (
+            SELECT
+                bi.player_id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COUNT(*)::int AS innings_played,
+                MAX(bi.runs)::int AS top_score,
+                COUNT(*) FILTER (WHERE bi.runs >= 100) AS hundreds
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+              {player_extra}
+            GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name)
+        )
+        SELECT * FROM agg
+        WHERE hundreds = 0
+        ORDER BY innings_played DESC, top_score DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_lowest_century_conversion(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Players with the lowest fifty→hundred conversion rate (must have 5+ fifties)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        agg AS (
+            SELECT
+                bi.player_id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100)::int AS fifties,
+                COUNT(*) FILTER (WHERE bi.runs >= 100)::int                   AS hundreds
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              {player_extra}
+            GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name)
+        )
+        SELECT
+            player_id, player_name, fifties, hundreds,
+            ROUND(100.0 * hundreds / NULLIF(fifties + hundreds, 0), 1) AS conversion_pct
+        FROM agg
+        WHERE (fifties + hundreds) >= 5
+        ORDER BY conversion_pct ASC NULLS FIRST, fifties DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_innings_per_fifty(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Lowest innings-per-50 ratio (lower = more frequent 50s)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        agg AS (
+            SELECT
+                bi.player_id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COUNT(*)::int AS innings_played,
+                COUNT(*) FILTER (WHERE bi.runs >= 50)::int AS fifty_plus
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+              {player_extra}
+            GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name)
+        )
+        SELECT
+            player_id, player_name, innings_played, fifty_plus,
+            ROUND(innings_played::numeric / NULLIF(fifty_plus, 0), 2) AS innings_per_fifty
+        FROM agg
+        WHERE fifty_plus >= 5
+        ORDER BY innings_per_fifty ASC NULLS LAST
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── Partnership derived ───────────────────────────────────────────────────────
+
+async def derived_top_partnerships_by_wicket(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Best partnership at each wicket position (1st wicket … 10th wicket)."""
+    mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    sql = f"""
+        WITH {universe},
+        ranked AS (
+            SELECT
+                pt.wicket_number,
+                pt.runs::int                                          AS runs,
+                pt.batter1_id::text                                   AS player_a_id,
+                COALESCE(p1.display_name_override, p1.name)           AS player_a_name,
+                pt.batter2_id::text                                   AS player_b_id,
+                COALESCE(p2.display_name_override, p2.name)           AS player_b_name,
+                gu.game_id::text                                      AS game_id,
+                gu.played_at                                          AS played_at,
+                gu.display_grade_name                                 AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                                   AS opposition,
+                ROW_NUMBER() OVER (PARTITION BY pt.wicket_number ORDER BY pt.runs DESC) AS rk
+            FROM game_universe gu
+            JOIN partnerships pt ON pt.game_id = gu.game_id
+            LEFT JOIN players p1 ON p1.id = pt.batter1_id
+            LEFT JOIN players p2 ON p2.id = pt.batter2_id
+            WHERE pt.is_club_innings IS NOT FALSE
+              AND pt.wicket_number BETWEEN 1 AND 10
+              AND (p1.organisation_id = :org_id OR p2.organisation_id = :org_id)
+        )
+        SELECT * FROM ranked WHERE rk = 1
+        ORDER BY wicket_number ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_partnership_aggregates_pair(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Total partnership runs for each pair of batters across all their matches."""
+    mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    sql = f"""
+        WITH {universe},
+        pairs AS (
+            SELECT
+                LEAST(pt.batter1_id, pt.batter2_id)    AS player_a_id,
+                GREATEST(pt.batter1_id, pt.batter2_id) AS player_b_id,
+                pt.runs::int                            AS runs
+            FROM game_universe gu
+            JOIN partnerships pt ON pt.game_id = gu.game_id
+            WHERE pt.is_club_innings IS NOT FALSE
+              AND pt.batter1_id IS NOT NULL AND pt.batter2_id IS NOT NULL
+        ),
+        agg AS (
+            SELECT
+                player_a_id, player_b_id,
+                SUM(runs)::int   AS total_runs,
+                COUNT(*)::int    AS partnerships,
+                MAX(runs)::int   AS best_partnership
+            FROM pairs
+            GROUP BY player_a_id, player_b_id
+        )
+        SELECT
+            pa.id::text   AS player_a_id,
+            COALESCE(pa.display_name_override, pa.name) AS player_a_name,
+            pb.id::text   AS player_b_id,
+            COALESCE(pb.display_name_override, pb.name) AS player_b_name,
+            agg.total_runs, agg.partnerships, agg.best_partnership
+        FROM agg
+        JOIN players pa ON pa.id = agg.player_a_id
+        JOIN players pb ON pb.id = agg.player_b_id
+        WHERE pa.organisation_id = :org_id
+        ORDER BY agg.total_runs DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_century_partnerships_pair(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Number of 100+ partnerships per pair of batters."""
+    mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    sql = f"""
+        WITH {universe},
+        pairs AS (
+            SELECT
+                LEAST(pt.batter1_id, pt.batter2_id)    AS player_a_id,
+                GREATEST(pt.batter1_id, pt.batter2_id) AS player_b_id,
+                pt.runs::int                            AS runs
+            FROM game_universe gu
+            JOIN partnerships pt ON pt.game_id = gu.game_id
+            WHERE pt.is_club_innings IS NOT FALSE
+              AND pt.batter1_id IS NOT NULL AND pt.batter2_id IS NOT NULL
+              AND pt.runs >= 100
+        ),
+        agg AS (
+            SELECT player_a_id, player_b_id,
+                   COUNT(*)::int AS century_partnerships,
+                   MAX(runs)::int AS best_partnership
+            FROM pairs
+            GROUP BY player_a_id, player_b_id
+        )
+        SELECT
+            pa.id::text   AS player_a_id,
+            COALESCE(pa.display_name_override, pa.name) AS player_a_name,
+            pb.id::text   AS player_b_id,
+            COALESCE(pb.display_name_override, pb.name) AS player_b_name,
+            agg.century_partnerships, agg.best_partnership
+        FROM agg
+        JOIN players pa ON pa.id = agg.player_a_id
+        JOIN players pb ON pb.id = agg.player_b_id
+        WHERE pa.organisation_id = :org_id
+        ORDER BY agg.century_partnerships DESC, agg.best_partnership DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── Batting position ──────────────────────────────────────────────────────────
+
+async def derived_top_scores_by_position(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Top individual scores at each batting position (1-11)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        ranked AS (
+            SELECT
+                bi.batting_position::int                  AS batting_position,
+                bi.player_id::text                        AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                bi.runs::int                              AS runs,
+                bi.balls::int                             AS balls,
+                bi.not_out                                AS not_out,
+                gu.played_at                              AS played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition,
+                ROW_NUMBER() OVER (PARTITION BY bi.batting_position ORDER BY bi.runs DESC) AS rk
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              AND bi.batting_position BETWEEN 1 AND 11
+              {player_extra}
+        )
+        SELECT * FROM ranked WHERE rk = 1
+        ORDER BY batting_position ASC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── Opening bat & bowl same match ─────────────────────────────────────────────
+
+async def derived_opening_bat_and_bowl(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Players who batted at #1 or #2 AND took the new ball (bowled in innings #1, first spell)
+    in the same match."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        openers_bat AS (
+            SELECT DISTINCT bi.player_id, bi.game_id
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.batting_position IN (1, 2)
+              {player_extra}
+        ),
+        opening_bowlers AS (
+            SELECT DISTINCT bs.player_id, bs.game_id
+            FROM game_universe gu
+            JOIN bowling_spells bs ON bs.game_id = gu.game_id
+              AND bs.innings_number IN (1, 2)
+            JOIN players p ON p.id = bs.player_id
+            WHERE p.organisation_id = :org_id
+        ),
+        both AS (
+            SELECT ob.player_id, ob.game_id
+            FROM openers_bat ob
+            JOIN opening_bowlers obw ON obw.player_id = ob.player_id AND obw.game_id = ob.game_id
+        ),
+        per_player AS (
+            SELECT player_id::text AS player_id,
+                   COALESCE(p.display_name_override, p.name) AS player_name,
+                   COUNT(*)::int AS occurrences
+            FROM both b
+            JOIN players p ON p.id = b.player_id
+            GROUP BY b.player_id, COALESCE(p.display_name_override, p.name)
+        )
+        SELECT * FROM per_player
+        ORDER BY occurrences DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── Top scores as % of innings total ──────────────────────────────────────────
+
+async def derived_top_scores_pct_innings(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Individual scores expressed as a % of the club innings total in which they were made."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        innings_totals AS (
+            SELECT
+                bi.game_id,
+                bi.innings_number,
+                SUM(bi.runs) AS team_innings_total
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+            GROUP BY bi.game_id, bi.innings_number
+        ),
+        rows AS (
+            SELECT
+                bi.player_id::text                        AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                bi.runs::int                              AS runs,
+                it.team_innings_total::int                AS team_innings_total,
+                ROUND(100.0 * bi.runs / NULLIF(it.team_innings_total, 0), 1) AS pct_of_innings,
+                gu.played_at                              AS played_at,
+                gu.display_grade_name                     AS grade_name,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                                       AS opposition
+            FROM game_universe gu
+            JOIN batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            JOIN innings_totals it ON it.game_id = bi.game_id AND it.innings_number = bi.innings_number
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              AND it.team_innings_total >= 50
+              {player_extra}
+        )
+        SELECT * FROM rows
+        WHERE pct_of_innings IS NOT NULL
+        ORDER BY pct_of_innings DESC, runs DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── Catches + stumpings combined ──────────────────────────────────────────────
+
+async def derived_catches_stumpings(
+    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+) -> list[dict]:
+    """Career catches + stumpings combined (typical wicketkeeper / fielder metric)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        agg AS (
+            SELECT
+                fs.player_id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COALESCE(SUM(fs.catches), 0)::int   AS catches,
+                COALESCE(SUM(fs.stumpings), 0)::int AS stumpings,
+                COALESCE(SUM(fs.run_outs), 0)::int  AS run_outs,
+                COALESCE(SUM(fs.catches) + SUM(fs.stumpings), 0)::int AS catches_stumpings
+            FROM game_universe gu
+            JOIN fielding_stats fs ON fs.game_id = gu.game_id
+            JOIN players p ON p.id = fs.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id {player_extra}
+            GROUP BY fs.player_id, COALESCE(p.display_name_override, p.name)
+        )
+        SELECT * FROM agg
+        WHERE catches_stumpings > 0
+        ORDER BY catches_stumpings DESC, catches DESC
+        LIMIT :limit
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
 DERIVED_QUERIES: dict[str, dict] = {
     "consecutive_ducks": {
         "label": "Longest duck streak",
@@ -1561,6 +2838,400 @@ DERIVED_QUERIES: dict[str, dict] = {
             {"key": "matches_to_milestone", "label": "MATCHES", "decimal": False},
             {"key": "reached_on", "label": "DATE"},
             {"key": "runs_at_crossing", "label": "RUNS AT", "decimal": False},
+        ],
+    },
+    # Per-match aggregates
+    "most_runs_in_match": {
+        "label": "Most runs in a match",
+        "description": "Highest combined batting score by one player across both innings of a match.",
+        "fn": derived_most_runs_in_match,
+        "columns": [
+            {"key": "runs", "label": "RUNS", "decimal": False},
+            {"key": "balls", "label": "BALLS", "decimal": False},
+            {"key": "innings_count", "label": "INNS", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "most_sixes_in_match": {
+        "label": "Most sixes in a match",
+        "description": "Most sixes by one player across both innings of a match.",
+        "fn": derived_most_sixes_in_match,
+        "columns": [
+            {"key": "sixes", "label": "6s", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "most_fours_in_match": {
+        "label": "Most fours in a match",
+        "description": "Most fours by one player across both innings of a match.",
+        "fn": derived_most_fours_in_match,
+        "columns": [
+            {"key": "fours", "label": "4s", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "most_boundaries_in_match": {
+        "label": "Most boundaries in a match",
+        "description": "Most 4s + 6s by one player across both innings of a match.",
+        "fn": derived_most_boundaries_in_match,
+        "columns": [
+            {"key": "boundaries", "label": "4s+6s", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "best_bowling_in_match": {
+        "label": "Best bowling in a match",
+        "description": "Best combined bowling figures across both innings of a match.",
+        "fn": derived_best_bowling_in_match,
+        "columns": [
+            {"key": "wickets", "label": "W", "decimal": False},
+            {"key": "runs", "label": "R", "decimal": False},
+            {"key": "overs", "label": "OV", "decimal": True},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "most_wickets_in_match": {
+        "label": "Most wickets in a match",
+        "description": "Most wickets by one bowler across both innings of a match.",
+        "fn": derived_most_wickets_in_match,
+        "columns": [
+            {"key": "wickets", "label": "W", "decimal": False},
+            {"key": "runs", "label": "R", "decimal": False},
+            {"key": "overs", "label": "OV", "decimal": True},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "most_balls_bowled_match": {
+        "label": "Most balls bowled in a match",
+        "description": "Most deliveries bowled by one player in a single match.",
+        "fn": derived_most_balls_bowled_match,
+        "columns": [
+            {"key": "balls_bowled", "label": "BALLS", "decimal": False},
+            {"key": "overs", "label": "OV", "decimal": True},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "most_catches_in_match": {
+        "label": "Most catches in a match",
+        "description": "Most catches taken by one fielder in a single match.",
+        "fn": derived_most_catches_in_match,
+        "columns": [
+            {"key": "catches", "label": "CT", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "most_stumpings_in_match": {
+        "label": "Most stumpings in a match",
+        "description": "Most stumpings by one keeper in a single match.",
+        "fn": derived_most_stumpings_in_match,
+        "columns": [
+            {"key": "stumpings", "label": "ST", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "most_run_outs_in_match": {
+        "label": "Most run outs in a match",
+        "description": "Most run outs effected by one fielder in a single match.",
+        "fn": derived_most_run_outs_in_match,
+        "columns": [
+            {"key": "run_outs", "label": "RO", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    # Duck variants
+    "golden_ducks": {
+        "label": "Most golden ducks",
+        "description": "Out for 0 off 0 or 1 ball — count per player.",
+        "fn": derived_golden_ducks,
+        "columns": [
+            {"key": "golden_ducks", "label": "GOLDEN", "decimal": False},
+        ],
+    },
+    "duck_pairs": {
+        "label": "Most duck pairs",
+        "description": "Players who scored a duck in both innings of the same match.",
+        "fn": derived_duck_pairs,
+        "columns": [
+            {"key": "duck_pairs", "label": "PAIRS", "decimal": False},
+        ],
+    },
+    "consecutive_no_duck": {
+        "label": "Most consecutive scores without a duck",
+        "description": "Longest run of innings without being dismissed for 0.",
+        "fn": derived_consecutive_no_duck,
+        "columns": [
+            {"key": "longest_no_duck_streak", "label": "STREAK", "decimal": False},
+        ],
+    },
+    # Century/fifty
+    "consecutive_hundreds": {
+        "label": "Most consecutive hundreds",
+        "description": "Longest run of innings scoring 100+.",
+        "fn": derived_consecutive_hundreds,
+        "columns": [
+            {"key": "longest_hundred_streak", "label": "STREAK", "decimal": False},
+        ],
+    },
+    "consecutive_no_century": {
+        "label": "Most consecutive scores without a century",
+        "description": "Longest run of innings scoring under 100.",
+        "fn": derived_consecutive_no_century,
+        "columns": [
+            {"key": "longest_no_century_streak", "label": "STREAK", "decimal": False},
+        ],
+    },
+    "century_each_innings": {
+        "label": "A century in each innings",
+        "description": "Players who scored 100+ in both innings of the same match.",
+        "fn": derived_century_each_innings,
+        "columns": [
+            {"key": "top_score", "label": "TOP", "decimal": False},
+            {"key": "match_runs", "label": "MATCH", "decimal": False},
+            {"key": "hundreds_count", "label": "100s", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "century_and_duck": {
+        "label": "Century and duck in same match",
+        "description": "Players who scored a 100 and a duck in the same match.",
+        "fn": derived_century_and_duck_same_match,
+        "columns": [
+            {"key": "top_score", "label": "TOP", "decimal": False},
+            {"key": "low_score", "label": "LOW", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "innings_without_century": {
+        "label": "Most innings without a century",
+        "description": "Players with the most innings who've never scored a hundred.",
+        "fn": derived_innings_without_century,
+        "columns": [
+            {"key": "innings_played", "label": "INNS", "decimal": False},
+            {"key": "top_score", "label": "HS", "decimal": False},
+        ],
+    },
+    "lowest_century_conversion": {
+        "label": "Lowest century conversions",
+        "description": "Lowest fifty→hundred conversion rate (5+ scores of 50+ required).",
+        "fn": derived_lowest_century_conversion,
+        "columns": [
+            {"key": "fifties", "label": "50s", "decimal": False},
+            {"key": "hundreds", "label": "100s", "decimal": False},
+            {"key": "conversion_pct", "label": "CONV %", "decimal": True},
+        ],
+    },
+    "innings_per_fifty": {
+        "label": "Top innings per fifty",
+        "description": "Lowest innings-per-50 ratio (most frequent 50+ scorer).",
+        "fn": derived_innings_per_fifty,
+        "columns": [
+            {"key": "innings_played", "label": "INNS", "decimal": False},
+            {"key": "fifty_plus", "label": "50+", "decimal": False},
+            {"key": "innings_per_fifty", "label": "INNS/50", "decimal": True},
+        ],
+    },
+    # Bowling streaks
+    "consecutive_innings_with_wicket": {
+        "label": "Most consecutive innings with a wicket",
+        "description": "Longest run of bowling spells with at least one wicket.",
+        "fn": derived_consecutive_innings_with_wicket,
+        "columns": [
+            {"key": "longest_wicket_streak", "label": "STREAK", "decimal": False},
+        ],
+    },
+    "consecutive_5wi": {
+        "label": "Most consecutive 5-wicket innings",
+        "description": "Longest run of bowling spells with 5+ wickets.",
+        "fn": derived_consecutive_5wi,
+        "columns": [
+            {"key": "longest_5wi_streak", "label": "STREAK", "decimal": False},
+        ],
+    },
+    # Debut performances
+    "batting_on_debut": {
+        "label": "Top batting on debut",
+        "description": "Best batting score in a player's first ever match.",
+        "fn": derived_batting_on_debut,
+        "columns": [
+            {"key": "runs", "label": "RUNS", "decimal": False},
+            {"key": "balls", "label": "BALLS", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "ducks_on_debut": {
+        "label": "Ducks on debut",
+        "description": "Players whose debut innings was a duck.",
+        "fn": derived_ducks_on_debut,
+        "columns": [
+            {"key": "runs", "label": "RUNS", "decimal": False},
+            {"key": "balls", "label": "BALLS", "decimal": False},
+            {"key": "dismissal_type", "label": "OUT"},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "bowling_on_debut": {
+        "label": "Best bowling on debut",
+        "description": "Best bowling figures in a player's first ever spell.",
+        "fn": derived_bowling_on_debut_innings,
+        "columns": [
+            {"key": "wickets", "label": "W", "decimal": False},
+            {"key": "runs", "label": "R", "decimal": False},
+            {"key": "overs", "label": "OV", "decimal": True},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    # Dismissal counts
+    "dismissal_bowled": {
+        "label": "Highest bowled count",
+        "description": "Players most often dismissed bowled.",
+        "fn": derived_dismissal_bowled,
+        "columns": [{"key": "bowled_count", "label": "BOWLED", "decimal": False}],
+    },
+    "dismissal_caught": {
+        "label": "Highest caught count",
+        "description": "Players most often dismissed caught.",
+        "fn": derived_dismissal_caught,
+        "columns": [{"key": "caught_count", "label": "CAUGHT", "decimal": False}],
+    },
+    "dismissal_lbw": {
+        "label": "Highest LBW count",
+        "description": "Players most often dismissed leg-before-wicket.",
+        "fn": derived_dismissal_lbw,
+        "columns": [{"key": "lbw_count", "label": "LBW", "decimal": False}],
+    },
+    "dismissal_run_out": {
+        "label": "Highest run out count",
+        "description": "Players most often run out.",
+        "fn": derived_dismissal_run_out,
+        "columns": [{"key": "run_out_count", "label": "RUN OUT", "decimal": False}],
+    },
+    "dismissal_stumped": {
+        "label": "Highest stumped count",
+        "description": "Players most often stumped.",
+        "fn": derived_dismissal_stumped,
+        "columns": [{"key": "stumped_count", "label": "STUMPED", "decimal": False}],
+    },
+    "unusual_dismissals": {
+        "label": "Unusual dismissals",
+        "description": "Innings ending in rare dismissals (hit wicket, retired, handled, obstructed, timed out).",
+        "fn": derived_unusual_dismissals,
+        "columns": [
+            {"key": "runs", "label": "RUNS", "decimal": False},
+            {"key": "dismissal_type", "label": "OUT"},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    # Partnership derived
+    "top_partnerships_by_wicket": {
+        "label": "Top partnerships by wicket",
+        "description": "Best partnership at each wicket position (1st wicket through 10th).",
+        "fn": derived_top_partnerships_by_wicket,
+        "columns": [
+            {"key": "wicket_number", "label": "WKT", "decimal": False},
+            {"key": "player_a_id", "label": "BATTER A", "kind": "player_a"},
+            {"key": "player_b_id", "label": "BATTER B", "kind": "player_b"},
+            {"key": "runs", "label": "RUNS", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "partnership_aggregates_pair": {
+        "label": "Top partnership aggregates",
+        "description": "Total partnership runs accumulated by each pair of batters.",
+        "fn": derived_partnership_aggregates_pair,
+        "columns": [
+            {"key": "player_a_id", "label": "BATTER A", "kind": "player_a"},
+            {"key": "player_b_id", "label": "BATTER B", "kind": "player_b"},
+            {"key": "total_runs", "label": "TOTAL", "decimal": False},
+            {"key": "partnerships", "label": "STANDS", "decimal": False},
+            {"key": "best_partnership", "label": "BEST", "decimal": False},
+        ],
+    },
+    "century_partnerships_pair": {
+        "label": "Most century partnerships by pair",
+        "description": "Number of 100+ partnerships shared by each pair.",
+        "fn": derived_century_partnerships_pair,
+        "columns": [
+            {"key": "player_a_id", "label": "BATTER A", "kind": "player_a"},
+            {"key": "player_b_id", "label": "BATTER B", "kind": "player_b"},
+            {"key": "century_partnerships", "label": "100+", "decimal": False},
+            {"key": "best_partnership", "label": "BEST", "decimal": False},
+        ],
+    },
+    "top_scores_by_position": {
+        "label": "Top scores by batting position",
+        "description": "Best individual score recorded at each batting position (1 through 11).",
+        "fn": derived_top_scores_by_position,
+        "columns": [
+            {"key": "batting_position", "label": "POS", "decimal": False},
+            {"key": "runs", "label": "RUNS", "decimal": False},
+            {"key": "balls", "label": "BALLS", "decimal": False},
+            {"key": "opposition", "label": "VS"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "opening_bat_and_bowl": {
+        "label": "Opening bat & bowl same match",
+        "description": "Players who batted at #1 or #2 and bowled in innings 1 of the same match.",
+        "fn": derived_opening_bat_and_bowl,
+        "columns": [
+            {"key": "occurrences", "label": "TIMES", "decimal": False},
+        ],
+    },
+    "top_scores_pct_innings": {
+        "label": "Top scores as % of innings",
+        "description": "Individual scores as a percentage of the club innings total.",
+        "fn": derived_top_scores_pct_innings,
+        "columns": [
+            {"key": "runs", "label": "RUNS", "decimal": False},
+            {"key": "team_innings_total", "label": "OF", "decimal": False},
+            {"key": "pct_of_innings", "label": "%", "decimal": True},
+            {"key": "opposition", "label": "VS"},
+            {"key": "grade_name", "label": "GRADE"},
+            {"key": "played_at", "label": "DATE"},
+        ],
+    },
+    "catches_stumpings": {
+        "label": "Top catches & stumpings",
+        "description": "Combined dismissals (catches + stumpings) per player.",
+        "fn": derived_catches_stumpings,
+        "columns": [
+            {"key": "catches_stumpings", "label": "CT+ST", "decimal": False},
+            {"key": "catches", "label": "CT", "decimal": False},
+            {"key": "stumpings", "label": "ST", "decimal": False},
+            {"key": "run_outs", "label": "RO", "decimal": False},
         ],
     },
 }
