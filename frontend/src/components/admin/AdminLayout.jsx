@@ -58,6 +58,7 @@ const NAV_SECTIONS = [
   {
     heading: 'Account',
     items: [
+      { to: '/admin/changelog', label: 'Changelog', cap: null },
       { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
       { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
     ],
@@ -76,6 +77,7 @@ export default function AdminLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [bellOpen, setBellOpen] = useState(false)
   const [bellSummary, setBellSummary] = useState(null)
+  const [bellError, setBellError] = useState(null)
   const [bellRefresh, setBellRefresh] = useState(0)
 
   // Filter nav: drop links the user lacks the cap for. Empty sections are
@@ -86,13 +88,17 @@ export default function AdminLayout({ children }) {
     items: s.items.filter(i => i.cap == null || hasCapability(i.cap)),
   })).filter(s => s.items.length > 0)
 
+  // Open the modal immediately, then fetch the summary in the background.
+  // If we wait for the fetch to resolve and it errors, the modal silently
+  // never opens — which presents as "clicking the bell does nothing".
   const openBell = useCallback(async () => {
+    setBellError(null)
+    setBellOpen(true)
     try {
       const s = await api.getNotificationsSummary()
       setBellSummary(s)
-      setBellOpen(true)
-    } catch {
-      // silent — bell just won't open
+    } catch (e) {
+      setBellError(e?.message || 'Failed to load notifications')
     }
   }, [])
 
@@ -247,7 +253,7 @@ export default function AdminLayout({ children }) {
         </main>
       </div>
 
-      <NotificationModal isOpen={bellOpen} summary={bellSummary} onClose={closeBell} />
+      <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} />
     </div>
   )
 }
