@@ -354,6 +354,47 @@ def _build_filter_block(ctx: dict, spec_dict: dict) -> tuple[list[str], dict, bo
     return clauses, params, used
 
 
+def _build_match_list_filters(ctx: dict) -> tuple[list[str], dict]:
+    """Multi-select MATCH-scope filters (season_ids, grade_ids).
+    These don't fit the per-value spec dict because their SQL clause grows
+    with the number of selected IDs. Expanded inline as
+    ``IN (:p_0, :p_1, …)`` with one bound param per ID.
+
+    Accepts either a list (canonical) or a comma-separated string (back-compat
+    when the API receives a single repeated query param)."""
+
+    def _normalise(v):
+        if v is None or v == "":
+            return []
+        if isinstance(v, (list, tuple, set)):
+            return [str(x) for x in v if x not in (None, "")]
+        return [s.strip() for s in str(v).split(",") if s.strip()]
+
+    clauses: list[str] = []
+    params: dict = {}
+
+    season_ids = _normalise(ctx.get("season_ids"))
+    if season_ids:
+        ph = ", ".join(f"CAST(:ctx_season_ids_{i} AS UUID)" for i in range(len(season_ids)))
+        # Match canonical seasons OR any alias mapped to one of them so a
+        # user who selects a canonical season still sees alias-tagged stats.
+        clauses.append(
+            f"(s.id IN ({ph}) OR s.id IN (SELECT alias_season_id FROM season_aliases "
+            f"WHERE canonical_season_id IN ({ph}) AND undone_at IS NULL))"
+        )
+        for i, v in enumerate(season_ids):
+            params[f"ctx_season_ids_{i}"] = v
+
+    grade_ids = _normalise(ctx.get("grade_ids"))
+    if grade_ids:
+        ph = ", ".join(f"CAST(:ctx_grade_ids_{i} AS UUID)" for i in range(len(grade_ids)))
+        clauses.append(f"gr.id IN ({ph})")
+        for i, v in enumerate(grade_ids):
+            params[f"ctx_grade_ids_{i}"] = v
+
+    return clauses, params
+
+
 def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict, list[str], dict, bool]:
     """Returns (match_clauses, match_params, innings_clauses, innings_params,
     player_clauses, player_params, any_match_used).
@@ -362,6 +403,12 @@ def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict,
     via a gap LEFT JOIN that callers must provide.
     """
     mc, mp, mu = _build_filter_block(ctx, MATCH_CONTEXT_FILTERS)
+    # Merge in multi-select MATCH filters (season_ids, grade_ids).
+    list_clauses, list_params = _build_match_list_filters(ctx)
+    if list_clauses:
+        mc = mc + list_clauses
+        mp = {**mp, **list_params}
+        mu = True
     ic, ip, _iu = _build_filter_block(ctx, INNINGS_CONTEXT_FILTERS)
     pc, pp, _pu = _build_filter_block(ctx, PLAYER_CONTEXT_FILTERS)
     return mc, mp, ic, ip, pc, pp, mu
@@ -765,7 +812,20 @@ async def query_player_season(
         """
     else:
         season_filter = ""
-        if context.get("season_id"):
+        # Multi-select season_ids takes precedence over the legacy single key.
+        season_ids = context.get("season_ids")
+        if isinstance(season_ids, str):
+            season_ids = [s.strip() for s in season_ids.split(",") if s.strip()]
+        if season_ids:
+            ph = ", ".join(f"CAST(:ctx_pss_season_ids_{i} AS UUID)" for i in range(len(season_ids)))
+            season_filter = (
+                f"AND (s.id IN ({ph}) "
+                f"OR s.id IN (SELECT alias_season_id FROM season_aliases "
+                f"WHERE canonical_season_id IN ({ph}) AND undone_at IS NULL))"
+            )
+            for i, v in enumerate(season_ids):
+                params[f"ctx_pss_season_ids_{i}"] = v
+        elif context.get("season_id"):
             season_filter = (
                 "AND (s.id = CAST(:ctx_season_id AS UUID) "
                 "OR s.id IN (SELECT alias_season_id FROM season_aliases "
@@ -3584,7 +3644,19 @@ async def derived_most_minutes_in_season(
     """Most batting minutes accumulated in a single season."""
     params = {"org_id": org_id, "limit": min(max(1, limit), 500)}
     season_filter = ""
-    if context.get("season_id"):
+    season_ids = context.get("season_ids")
+    if isinstance(season_ids, str):
+        season_ids = [s.strip() for s in season_ids.split(",") if s.strip()]
+    if season_ids:
+        ph = ", ".join(f"CAST(:ctx_mm_season_ids_{i} AS UUID)" for i in range(len(season_ids)))
+        season_filter = (
+            f"AND (s.id IN ({ph}) "
+            f"OR s.id IN (SELECT alias_season_id FROM season_aliases "
+            f"WHERE canonical_season_id IN ({ph}) AND undone_at IS NULL))"
+        )
+        for i, v in enumerate(season_ids):
+            params[f"ctx_mm_season_ids_{i}"] = v
+    elif context.get("season_id"):
         season_filter = (
             "AND (s.id = CAST(:ctx_season_id AS UUID) "
             "OR s.id IN (SELECT alias_season_id FROM season_aliases "
