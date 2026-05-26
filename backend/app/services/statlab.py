@@ -2254,7 +2254,8 @@ async def derived_dismissal_stumped(session, *, org_id, limit, offset=0, context
 async def derived_unusual_dismissals(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Innings dismissed by uncommon means (hit wicket, retired hurt/out, handled, obstructing)."""
+    """Innings dismissed by uncommon means (hit wicket, retired hurt, handled, obstructing).
+    'Retired not out' is excluded — it's a routine voluntary retirement, not unusual."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -2283,12 +2284,14 @@ async def derived_unusual_dismissals(
           AND bi.dismissal_type IS NOT NULL
           AND (
             LOWER(bi.dismissal_type) LIKE 'hit wicket%'
-            OR LOWER(bi.dismissal_type) LIKE 'retired%'
+            OR LOWER(bi.dismissal_type) LIKE 'retired hurt%'
+            OR LOWER(bi.dismissal_type) LIKE 'retired out%'
             OR LOWER(bi.dismissal_type) LIKE 'handled%'
             OR LOWER(bi.dismissal_type) LIKE 'obstruct%'
             OR LOWER(bi.dismissal_type) LIKE 'timed out%'
             OR LOWER(bi.dismissal_type) LIKE 'hit ball twice%'
           )
+          AND LOWER(bi.dismissal_type) NOT LIKE 'retired not out%'
           {player_extra}
         ORDER BY gu.played_at DESC
         LIMIT :limit OFFSET :offset
@@ -2851,8 +2854,11 @@ async def derived_ducks_inflicted(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Count of times each bowler dismissed a batter for 0.
-    Joins bowler_wickets (which records who got the wicket) to batting_innings
-    (which records the batter's actual score) by (game_id, innings_number, batter_name)."""
+    Joins bowler_wickets → batting_innings primarily on (game_id, innings_number,
+    batter_position) — position is unambiguous within an innings. Falls back to
+    a name match when position isn't populated. Previously this used name-only
+    matching which silently dropped wickets when batter_name spellings differed
+    between the two tables."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -2863,7 +2869,7 @@ async def derived_ducks_inflicted(
             SELECT
                 bw.bowler_id,
                 COALESCE(p.display_name_override, p.name) AS player_name,
-                bw.game_id, bw.innings_number, bw.batter_name
+                bw.game_id, bw.innings_number, bw.batter_name, bw.batter_position
             FROM game_universe gu
             JOIN bowler_wickets bw ON bw.game_id = gu.game_id
             JOIN players p ON p.id = bw.bowler_id
@@ -2874,21 +2880,29 @@ async def derived_ducks_inflicted(
             SELECT
                 wkts.bowler_id::text AS player_id,
                 wkts.player_name,
-                COUNT(*)::int AS ducks_inflicted
+                COUNT(DISTINCT (bi.game_id, bi.innings_number, bi.player_id))::int AS ducks_inflicted
             FROM wkts
             JOIN batting_innings bi
               ON bi.game_id = wkts.game_id
              AND bi.innings_number = wkts.innings_number
-             AND LOWER(TRIM(bi.player_id::text)) <> LOWER(TRIM(wkts.bowler_id::text))
-            JOIN players bp ON bp.id = bi.player_id
-            WHERE LOWER(COALESCE(bp.display_name_override, bp.name)) = LOWER(TRIM(wkts.batter_name))
-              AND bi.runs = 0
+             AND bi.player_id <> wkts.bowler_id
+             AND (
+               -- Prefer position match (robust to name variations).
+               (wkts.batter_position IS NOT NULL AND bi.batting_position = wkts.batter_position)
+               -- Fall back to case/space-insensitive name match.
+               OR (wkts.batter_position IS NULL
+                   AND LOWER(TRIM(COALESCE((SELECT display_name_override FROM players WHERE id = bi.player_id),
+                                            (SELECT name FROM players WHERE id = bi.player_id))))
+                       = LOWER(TRIM(wkts.batter_name)))
+             )
+            WHERE bi.runs = 0
               AND bi.not_out = FALSE
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
             GROUP BY wkts.bowler_id, wkts.player_name
         )
         SELECT * FROM agg
+        WHERE ducks_inflicted > 0
         ORDER BY ducks_inflicted DESC, player_name ASC
         LIMIT :limit OFFSET :offset
     """
@@ -2900,7 +2914,8 @@ async def derived_ducks_inflicted(
 async def derived_golden_ducks_inflicted(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Same as ducks_inflicted but only innings where batter faced 0 or 1 ball."""
+    """Same as ducks_inflicted but only innings where batter faced 0 or 1 ball.
+    Uses position-preferred matching to avoid name-mismatch dropouts."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -2911,7 +2926,7 @@ async def derived_golden_ducks_inflicted(
             SELECT
                 bw.bowler_id,
                 COALESCE(p.display_name_override, p.name) AS player_name,
-                bw.game_id, bw.innings_number, bw.batter_name
+                bw.game_id, bw.innings_number, bw.batter_name, bw.batter_position
             FROM game_universe gu
             JOIN bowler_wickets bw ON bw.game_id = gu.game_id
             JOIN players p ON p.id = bw.bowler_id
@@ -2922,14 +2937,20 @@ async def derived_golden_ducks_inflicted(
             SELECT
                 wkts.bowler_id::text AS player_id,
                 wkts.player_name,
-                COUNT(*)::int AS golden_ducks_inflicted
+                COUNT(DISTINCT (bi.game_id, bi.innings_number, bi.player_id))::int AS golden_ducks_inflicted
             FROM wkts
             JOIN batting_innings bi
               ON bi.game_id = wkts.game_id
              AND bi.innings_number = wkts.innings_number
-            JOIN players bp ON bp.id = bi.player_id
-            WHERE LOWER(COALESCE(bp.display_name_override, bp.name)) = LOWER(TRIM(wkts.batter_name))
-              AND bi.runs = 0
+             AND bi.player_id <> wkts.bowler_id
+             AND (
+               (wkts.batter_position IS NOT NULL AND bi.batting_position = wkts.batter_position)
+               OR (wkts.batter_position IS NULL
+                   AND LOWER(TRIM(COALESCE((SELECT display_name_override FROM players WHERE id = bi.player_id),
+                                            (SELECT name FROM players WHERE id = bi.player_id))))
+                       = LOWER(TRIM(wkts.batter_name)))
+             )
+            WHERE bi.runs = 0
               AND COALESCE(bi.balls, 0) IN (0, 1)
               AND bi.not_out = FALSE
               AND bi.did_not_bat IS NOT TRUE
@@ -2937,6 +2958,7 @@ async def derived_golden_ducks_inflicted(
             GROUP BY wkts.bowler_id, wkts.player_name
         )
         SELECT * FROM agg
+        WHERE golden_ducks_inflicted > 0
         ORDER BY golden_ducks_inflicted DESC, player_name ASC
         LIMIT :limit OFFSET :offset
     """
@@ -3072,10 +3094,42 @@ async def derived_hat_tricks(
 # ─── C&B dismissals — separate from generic 'caught' ──────────────────────────
 
 async def derived_caught_and_bowled(session, *, org_id, limit, offset=0, context):
-    """Count of times each batter was dismissed caught & bowled by the same player."""
+    """Count of times each batter was dismissed caught & bowled (batter view)."""
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["caught and bowled%", "c & b%", "c&b%"],
+                                   like_patterns=["caught and bowled%", "c & b%", "c&b%", "caught & bowled%", "c and b%"],
                                    result_col="c_and_b_count")
+
+
+async def derived_caught_and_bowled_bowler(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+) -> list[dict]:
+    """Count of caught-and-bowled wickets taken by each bowler (bowler view).
+    Uses the bowler_wickets table where dismissal_type was canonicalised to
+    'caught and bowled' during sync."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe}
+        SELECT
+            bw.bowler_id::text                        AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            COUNT(*)::int                             AS c_and_b_count
+        FROM game_universe gu
+        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN players p ON p.id = bw.bowler_id
+        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND LOWER(bw.dismissal_type) IN ('caught and bowled', 'c&b', 'c & b')
+          {player_extra}
+        GROUP BY bw.bowler_id, COALESCE(p.display_name_override, p.name)
+        ORDER BY c_and_b_count DESC, player_name ASC
+        LIMIT :limit OFFSET :offset
+    """
+    params["offset"] = offset
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
 
 
 # ─── Batting collapses (fall_of_wickets-based) ────────────────────────────────
@@ -3085,7 +3139,13 @@ async def _wicket_collapse(
 ) -> list[dict]:
     """Find matches where N consecutive wickets fell within max_run_span runs.
     Reports one row per (game, innings) where it happened, with the start/end
-    wicket numbers and run span."""
+    wicket numbers and run span.
+
+    Only considers (game, innings) where the fall-of-wicket data is *complete*
+    — i.e. the FOW rows form a contiguous run from wicket 1 to max(wicket_number)
+    with no gaps. Sparse FOW data would produce false-positive collapses
+    (e.g. wickets 1, 5, 6, 7 only would falsely report a 4-wicket collapse from
+    1→5 simply because wickets 2, 3, 4 weren't recorded)."""
     mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
     params = {
         "org_id": org_id,
@@ -3097,6 +3157,21 @@ async def _wicket_collapse(
     universe = _game_universe_sql(mc)
     sql = f"""
         WITH {universe},
+        innings_fow_quality AS (
+            -- Treat (game, innings) FOW as "full" when rows are contiguous
+            -- from wicket 1 with no gaps (count = max wicket number).
+            SELECT
+                fw.game_id, fw.innings_number,
+                COUNT(*)                       AS rows_recorded,
+                MAX(fw.wicket_number)          AS max_wkt,
+                MIN(fw.wicket_number)          AS min_wkt
+            FROM game_universe gu
+            JOIN fall_of_wickets fw ON fw.game_id = gu.game_id
+            GROUP BY fw.game_id, fw.innings_number
+            HAVING MIN(fw.wicket_number) = 1
+               AND COUNT(*) = MAX(fw.wicket_number)
+               AND MAX(fw.wicket_number) >= :n_wkts
+        ),
         fow AS (
             SELECT
                 fw.game_id, fw.innings_number, fw.wicket_number,
@@ -3109,6 +3184,8 @@ async def _wicket_collapse(
                 ) AS end_wicket
             FROM game_universe gu
             JOIN fall_of_wickets fw ON fw.game_id = gu.game_id
+            JOIN innings_fow_quality q
+              ON q.game_id = fw.game_id AND q.innings_number = fw.innings_number
         ),
         collapses AS (
             SELECT
@@ -3160,6 +3237,55 @@ async def derived_8wkt_collapse(session, *, org_id, limit, offset=0, context):
 
 async def derived_9wkt_collapse(session, *, org_id, limit, offset=0, context):
     return await _wicket_collapse(session, org_id=org_id, limit=limit, offset=offset, context=context, n_wickets=9, max_run_span=70)
+
+
+# ─── Score-range counts (most 40s, most 90s, etc.) ─────────────────────────────
+
+async def _score_range_count(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+    min_runs: int, max_runs: int, result_col: str,
+) -> list[dict]:
+    """Per-player count of innings where runs fell within [min_runs, max_runs)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {
+        "org_id": org_id, "limit": min(max(1, limit), 500),
+        "min_runs": min_runs, "max_runs": max_runs,
+        **mp, **pp,
+    }
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe}
+        SELECT
+            bi.player_id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            COUNT(*)::int AS {result_col}
+        FROM game_universe gu
+        JOIN batting_innings bi ON bi.game_id = gu.game_id
+        JOIN players p ON p.id = bi.player_id
+        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND bi.did_not_bat IS NOT TRUE
+          AND bi.runs >= :min_runs
+          AND bi.runs < :max_runs
+          {player_extra}
+        GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name)
+        ORDER BY {result_col} DESC, player_name ASC
+        LIMIT :limit OFFSET :offset
+    """
+    params["offset"] = offset
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_most_90s(session, *, org_id, limit, offset=0, context):
+    return await _score_range_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
+                                     min_runs=90, max_runs=100, result_col="scores_in_90s")
+
+
+async def derived_most_40s(session, *, org_id, limit, offset=0, context):
+    return await _score_range_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
+                                     min_runs=40, max_runs=50, result_col="scores_in_40s")
 
 
 # ─── Total season minutes batted ───────────────────────────────────────────────
@@ -3319,7 +3445,7 @@ DERIVED_QUERIES: dict[str, dict] = {
         "columns": [
             {"key": "wickets", "label": "W", "decimal": False},
             {"key": "runs", "label": "R", "decimal": False},
-            {"key": "overs", "label": "OV", "decimal": True},
+            {"key": "overs", "label": "OV", "kind": "overs"},
             {"key": "opposition", "label": "VS"},
             {"key": "grade_name", "label": "GRADE"},
             {"key": "played_at", "label": "DATE"},
@@ -3332,7 +3458,7 @@ DERIVED_QUERIES: dict[str, dict] = {
         "columns": [
             {"key": "wickets", "label": "W", "decimal": False},
             {"key": "runs", "label": "R", "decimal": False},
-            {"key": "overs", "label": "OV", "decimal": True},
+            {"key": "overs", "label": "OV", "kind": "overs"},
             {"key": "opposition", "label": "VS"},
             {"key": "grade_name", "label": "GRADE"},
             {"key": "played_at", "label": "DATE"},
@@ -3340,11 +3466,10 @@ DERIVED_QUERIES: dict[str, dict] = {
     },
     "most_balls_bowled_match": {
         "label": "Most balls bowled in a match",
-        "description": "Most deliveries bowled by one player in a single match.",
+        "description": "Most deliveries bowled by one player in a single match (sum across both innings).",
         "fn": derived_most_balls_bowled_match,
         "columns": [
             {"key": "balls_bowled", "label": "BALLS", "decimal": False},
-            {"key": "overs", "label": "OV", "decimal": True},
             {"key": "opposition", "label": "VS"},
             {"key": "grade_name", "label": "GRADE"},
             {"key": "played_at", "label": "DATE"},
@@ -3529,7 +3654,7 @@ DERIVED_QUERIES: dict[str, dict] = {
         "columns": [
             {"key": "wickets", "label": "W", "decimal": False},
             {"key": "runs", "label": "R", "decimal": False},
-            {"key": "overs", "label": "OV", "decimal": True},
+            {"key": "overs", "label": "OV", "kind": "overs"},
             {"key": "opposition", "label": "VS"},
             {"key": "grade_name", "label": "GRADE"},
             {"key": "played_at", "label": "DATE"},
@@ -3669,12 +3794,32 @@ DERIVED_QUERIES: dict[str, dict] = {
             {"key": "seasons", "label": "SEASONS"},
         ],
     },
-    # C&B — caught and bowled by same player
+    # C&B — caught and bowled (batter view: dismissals)
     "caught_and_bowled": {
-        "label": "Highest caught & bowled count",
-        "description": "Players most often dismissed caught & bowled by the same bowler.",
+        "label": "Highest C&B count (batter)",
+        "description": "Batters most often dismissed caught & bowled.",
         "fn": derived_caught_and_bowled,
         "columns": [{"key": "c_and_b_count", "label": "C&B", "decimal": False}],
+    },
+    # C&B — caught and bowled (bowler view: wickets taken)
+    "caught_and_bowled_bowler": {
+        "label": "Highest C&B count (bowler)",
+        "description": "Bowlers ranked by caught-and-bowled wickets taken.",
+        "fn": derived_caught_and_bowled_bowler,
+        "columns": [{"key": "c_and_b_count", "label": "C&B", "decimal": False}],
+    },
+    # Score-range counts (renamed from list presets in the UI)
+    "most_90s": {
+        "label": "Most 90s",
+        "description": "Per-player count of innings scored in the 90s (90-99 inclusive).",
+        "fn": derived_most_90s,
+        "columns": [{"key": "scores_in_90s", "label": "90s", "decimal": False}],
+    },
+    "most_40s": {
+        "label": "Most 40s",
+        "description": "Per-player count of innings scored in the 40s (40-49 inclusive).",
+        "fn": derived_most_40s,
+        "columns": [{"key": "scores_in_40s", "label": "40s", "decimal": False}],
     },
     # Ducks inflicted — bowler caused a batter's 0
     "ducks_inflicted": {

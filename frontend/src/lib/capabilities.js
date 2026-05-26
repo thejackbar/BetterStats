@@ -12,6 +12,7 @@ export const CAP = {
   RUN_SYNC: 'run_sync',
   RUN_HARD_REFRESH: 'run_hard_refresh',
   MANAGE_USERS: 'manage_users',
+  MANAGE_REPORTS: 'manage_reports',
 }
 
 // Display metadata for the user-management UI checkboxes.
@@ -27,4 +28,5 @@ export const CAPABILITY_INFO = [
   { key: CAP.RUN_SYNC, label: 'Run data sync', hint: 'Sync Now + Fix Missing Totals' },
   { key: CAP.RUN_HARD_REFRESH, label: 'Run hard refresh', hint: 'Destructive — wipes + re-syncs everything (1h+)' },
   { key: CAP.MANAGE_USERS, label: 'Manage users', hint: 'Invite club members + assign capabilities' },
+  { key: CAP.MANAGE_REPORTS, label: 'Manage saved reports', hint: 'Approve / reject saved StatLab reports' },
 ]

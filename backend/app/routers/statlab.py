@@ -1,16 +1,32 @@
 """StatLab routes — flexible query engine + saved reports."""
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, text
+from sqlalchemy import select, update, delete, text, func
 from pydantic import BaseModel, Field
 from typing import Optional, Any
 import json
 import re
 import uuid
 
+from app.auth.capabilities import (
+    MANAGE_REPORTS, membership_has_capability, PRIVILEGED_ROLES,
+)
 from app.models.db import get_db, SavedReport, User, ClubMembership, Organisation
 from app.routers.auth import get_current_user, get_current_club
 from app.services import statlab as svc
+
+
+async def _user_can_manage_reports(db: AsyncSession, user: User, club: Organisation) -> bool:
+    """True when the user has the MANAGE_REPORTS capability on this club."""
+    row = await db.execute(
+        select(ClubMembership)
+        .where(ClubMembership.user_id == user.id, ClubMembership.org_id == club.id)
+    )
+    m = row.scalar_one_or_none()
+    if not m:
+        return user.role in PRIVILEGED_ROLES
+    return membership_has_capability(m.role, m.capabilities, MANAGE_REPORTS)
 
 
 router = APIRouter(prefix="/statlab", tags=["statlab"])
@@ -267,6 +283,9 @@ def _report_to_dict(r: SavedReport, owner_name: Optional[str] = None) -> dict:
         "query_json": r.query_json,
         "visibility": r.visibility,
         "view_count": r.view_count,
+        "status": r.status,
+        "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+        "review_note": r.review_note,
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
     }
@@ -277,11 +296,16 @@ async def list_reports(
     org_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Public list of club-visible saved reports for an organisation."""
+    """Public list of club-visible saved reports for an organisation.
+    Only returns reports that have been approved by an admin."""
     rows = (await db.execute(
         select(SavedReport, User.display_name, User.username)
         .outerjoin(User, User.id == SavedReport.owner_user_id)
-        .where(SavedReport.org_id == org_id, SavedReport.visibility == "club")
+        .where(
+            SavedReport.org_id == org_id,
+            SavedReport.visibility == "club",
+            SavedReport.status == "approved",
+        )
         .order_by(SavedReport.view_count.desc(), SavedReport.created_at.desc())
         .limit(200)
     )).all()
@@ -289,6 +313,51 @@ async def list_reports(
         _report_to_dict(r, owner_name=(dn or un))
         for r, dn, un in rows
     ]
+
+
+@router.get("/reports/pending")
+async def list_pending_reports(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin-only list of club-visible reports awaiting approval."""
+    if not await _user_can_manage_reports(db, current_user, club):
+        raise HTTPException(status_code=403, detail="Missing capability: manage_reports")
+    rows = (await db.execute(
+        select(SavedReport, User.display_name, User.username)
+        .outerjoin(User, User.id == SavedReport.owner_user_id)
+        .where(
+            SavedReport.org_id == club.id,
+            SavedReport.visibility == "club",
+            SavedReport.status == "pending",
+        )
+        .order_by(SavedReport.created_at.asc())
+    )).all()
+    return [
+        _report_to_dict(r, owner_name=(dn or un))
+        for r, dn, un in rows
+    ]
+
+
+@router.get("/reports/pending/count")
+async def pending_reports_count(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cheap count for the admin notification badge."""
+    if not await _user_can_manage_reports(db, current_user, club):
+        return {"count": 0}
+    count = await db.scalar(
+        select(func.count(SavedReport.id))
+        .where(
+            SavedReport.org_id == club.id,
+            SavedReport.visibility == "club",
+            SavedReport.status == "pending",
+        )
+    ) or 0
+    return {"count": count}
 
 
 @router.get("/reports/{slug}")
@@ -309,6 +378,9 @@ async def get_report(
         # Private reports require auth and ownership — defer to a separate route
         # path. Keeping it simple: 404 to avoid leaking existence.
         raise HTTPException(status_code=404, detail="Report not found")
+    if r.status != "approved":
+        # Pending/rejected reports are not publicly visible.
+        raise HTTPException(status_code=404, detail="Report not found")
     await db.execute(
         update(SavedReport).where(SavedReport.id == r.id).values(view_count=SavedReport.view_count + 1)
     )
@@ -325,6 +397,17 @@ async def create_report(
 ):
     base = _slugify(payload.slug or payload.title)
     slug = await _unique_slug(db, club.id, base)
+
+    # Club-visibility reports go to admin approval queue first unless the
+    # author already has the MANAGE_REPORTS capability (admins can self-approve
+    # their own saves). Private reports auto-approve since they're not listed
+    # publicly anyway.
+    is_admin = await _user_can_manage_reports(db, current_user, club)
+    if payload.visibility == "club" and not is_admin:
+        status = "pending"
+    else:
+        status = "approved"
+
     r = SavedReport(
         org_id=club.id,
         owner_user_id=current_user.id,
@@ -333,6 +416,9 @@ async def create_report(
         description=payload.description,
         query_json=payload.query_json,
         visibility=payload.visibility,
+        status=status,
+        reviewed_by_user_id=current_user.id if status == "approved" else None,
+        reviewed_at=datetime.now(timezone.utc) if status == "approved" else None,
     )
     db.add(r)
     await db.commit()
@@ -351,16 +437,57 @@ async def patch_report(
     r = await db.get(SavedReport, report_id)
     if not r or r.org_id != club.id:
         raise HTTPException(status_code=404, detail="Report not found")
+    is_admin = await _user_can_manage_reports(db, current_user, club)
     if payload.title is not None:
         r.title = payload.title.strip()
     if payload.description is not None:
         r.description = payload.description
     if payload.query_json is not None:
         r.query_json = payload.query_json
+    # If a non-admin edits an approved club report or flips a private report
+    # to club visibility, drop it back to pending so the admin re-checks.
     if payload.visibility is not None:
+        flipping_to_club = (payload.visibility == "club" and r.visibility != "club")
         r.visibility = payload.visibility
+        if flipping_to_club and not is_admin:
+            r.status = "pending"
+            r.reviewed_at = None
+            r.reviewed_by_user_id = None
+    elif r.visibility == "club" and payload.query_json is not None and not is_admin:
+        # Query content changed — re-queue for approval.
+        r.status = "pending"
+        r.reviewed_at = None
+        r.reviewed_by_user_id = None
     from sqlalchemy.sql import func as sql_func
     r.updated_at = sql_func.now()
+    await db.commit()
+    await db.refresh(r)
+    return _report_to_dict(r)
+
+
+class ReviewReportIn(BaseModel):
+    action: str = Field(..., pattern="^(approve|reject)$")
+    note: Optional[str] = Field(None, max_length=500)
+
+
+@router.post("/reports/{report_id}/review")
+async def review_report(
+    report_id: str,
+    payload: ReviewReportIn,
+    club: Organisation = Depends(get_current_club),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin approval/rejection of a pending club-visibility report."""
+    if not await _user_can_manage_reports(db, current_user, club):
+        raise HTTPException(status_code=403, detail="Missing capability: manage_reports")
+    r = await db.get(SavedReport, report_id)
+    if not r or r.org_id != club.id:
+        raise HTTPException(status_code=404, detail="Report not found")
+    r.status = "approved" if payload.action == "approve" else "rejected"
+    r.reviewed_by_user_id = current_user.id
+    r.reviewed_at = datetime.now(timezone.utc)
+    r.review_note = payload.note
     await db.commit()
     await db.refresh(r)
     return _report_to_dict(r)

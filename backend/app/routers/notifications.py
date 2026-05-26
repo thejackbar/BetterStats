@@ -6,11 +6,24 @@ from sqlalchemy import select, func
 from pydantic import BaseModel
 from typing import Optional
 
+from app.auth.capabilities import MANAGE_REPORTS, membership_has_capability, PRIVILEGED_ROLES
 from app.models.db import (
-    User, Organisation, Player, PlayerSyncRequest, SyncRun, Milestone, get_db
+    ClubMembership, User, Organisation, Player, PlayerSyncRequest, SavedReport,
+    SyncRun, Milestone, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club
 from app.services.aggregations import get_upcoming_milestones_for_org
+
+
+async def _user_can_manage_reports(db: AsyncSession, user: User, club: Organisation) -> bool:
+    row = await db.execute(
+        select(ClubMembership)
+        .where(ClubMembership.user_id == user.id, ClubMembership.org_id == club.id)
+    )
+    m = row.scalar_one_or_none()
+    if not m:
+        return user.role in PRIVILEGED_ROLES
+    return membership_has_capability(m.role, m.capabilities, MANAGE_REPORTS)
 
 router = APIRouter(prefix="/club-admin", tags=["notifications"])
 
@@ -67,9 +80,20 @@ async def get_notifications_count(
         .where(PlayerSyncRequest.status == "pending")
     ) or 0
 
+    # Saved-report approval queue — only counted for users who can act on it.
+    pending_reports_count = 0
+    if await _user_can_manage_reports(db, current_user, club):
+        pending_reports_count = await db.scalar(
+            select(func.count(SavedReport.id))
+            .where(SavedReport.org_id == club.id)
+            .where(SavedReport.visibility == "club")
+            .where(SavedReport.status == "pending")
+        ) or 0
+
     return {
-        "unseen_count": sync_count + milestone_count + pending_count,
+        "unseen_count": sync_count + milestone_count + pending_count + pending_reports_count,
         "failed_sync_count": failed_sync_count,
+        "pending_reports_count": pending_reports_count,
         "last_seen_version": current_user.last_seen_app_version,
     }
 
@@ -120,7 +144,17 @@ async def get_notifications_summary(
         .where(PlayerSyncRequest.status == "pending")
     ) or 0
 
-    unseen_count = len(sync_runs) + len(milestone_rows) + pending_count
+    # Pending saved-report approvals (admin-only)
+    pending_reports_count = 0
+    if await _user_can_manage_reports(db, current_user, club):
+        pending_reports_count = await db.scalar(
+            select(func.count(SavedReport.id))
+            .where(SavedReport.org_id == club.id)
+            .where(SavedReport.visibility == "club")
+            .where(SavedReport.status == "pending")
+        ) or 0
+
+    unseen_count = len(sync_runs) + len(milestone_rows) + pending_count + pending_reports_count
     failed_sync_count = sum(1 for r in sync_runs if r.status == "error")
 
     return {
@@ -152,6 +186,7 @@ async def get_notifications_summary(
         ],
         "upcoming_milestones": upcoming_top,
         "pending_sync_requests": pending_count,
+        "pending_reports_count": pending_reports_count,
     }
 
 

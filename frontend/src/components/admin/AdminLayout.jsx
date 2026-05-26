@@ -50,6 +50,7 @@ const NAV_SECTIONS = [
       { to: '/admin/merge', label: 'Merge Players', cap: CAP.MANAGE_MERGES },
       { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
       { to: '/admin/partnerships', label: 'Partnership Rec.', cap: CAP.MANAGE_AWARDS },
+      { to: '/admin/reports', label: 'Saved Reports', cap: CAP.MANAGE_REPORTS },
       { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
     ],
   },

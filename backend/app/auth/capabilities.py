@@ -33,6 +33,7 @@ MANAGE_MILESTONES = "manage_milestones"       # milestones (definitions, manual 
 RUN_SYNC = "run_sync"                         # Sync Now + Fix Missing Totals
 RUN_HARD_REFRESH = "run_hard_refresh"         # destructive full rebuild
 MANAGE_USERS = "manage_users"                 # invite/edit club members
+MANAGE_REPORTS = "manage_reports"             # approve/reject saved StatLab reports
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -46,6 +47,7 @@ ALL_CAPABILITIES = (
     RUN_SYNC,
     RUN_HARD_REFRESH,
     MANAGE_USERS,
+    MANAGE_REPORTS,
 )
 
 
