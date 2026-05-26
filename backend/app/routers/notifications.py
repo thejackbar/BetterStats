@@ -18,7 +18,7 @@ from app.services.aggregations import get_upcoming_milestones_for_org
 async def _user_can_manage_reports(db: AsyncSession, user: User, club: Organisation) -> bool:
     row = await db.execute(
         select(ClubMembership)
-        .where(ClubMembership.user_id == user.id, ClubMembership.org_id == club.id)
+        .where(ClubMembership.user_id == user.id, ClubMembership.club_id == club.id)
     )
     m = row.scalar_one_or_none()
     if not m:
