@@ -193,6 +193,7 @@ class Game(Base):
     is_final = Column(Boolean, default=False, nullable=False, server_default='false')
     raw_payload = Column(JSON)
     venue = Column(Text)
+    match_format = Column(Text, nullable=True)
 
     grade = relationship("Grade", back_populates="games")
     batting_innings = relationship("BattingInnings", back_populates="game")
