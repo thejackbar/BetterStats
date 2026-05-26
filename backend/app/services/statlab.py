@@ -114,10 +114,20 @@ PARTNERSHIP_METRICS: dict[str, str] = {
     "batter2_runs": "batter2_runs",
 }
 
+# Family targets reuse every PLAYER_AGG_METRICS dimension (sums across all
+# family members) and add a family-specific member_count column.
+FAMILY_AGG_METRICS: dict[str, str] = {
+    "member_count": "member_count",
+    **PLAYER_AGG_METRICS,
+}
+
 TARGETS: dict[str, dict] = {
     "player_career":    {"metrics": PLAYER_AGG_METRICS,  "default_sort": "runs"},
     "player_season":    {"metrics": PLAYER_AGG_METRICS,  "default_sort": "runs"},
     "player_grade":     {"metrics": PLAYER_AGG_METRICS,  "default_sort": "runs"},
+    "family_career":    {"metrics": FAMILY_AGG_METRICS,  "default_sort": "runs"},
+    "family_season":    {"metrics": FAMILY_AGG_METRICS,  "default_sort": "runs"},
+    "family_grade":     {"metrics": FAMILY_AGG_METRICS,  "default_sort": "runs"},
     "innings_list":     {"metrics": INNINGS_METRICS,     "default_sort": "runs"},
     "spell_list":       {"metrics": SPELL_METRICS,       "default_sort": "wickets"},
     "match_list":       {"metrics": MATCH_METRICS,       "default_sort": "team_runs"},
@@ -185,6 +195,12 @@ PLAYER_CONTEXT_FILTERS: dict[str, dict] = {
     "office_bearer": {
         "sql": "p.id IN (SELECT player_id FROM player_achievements WHERE org_id = CAST(:org_id AS UUID) AND LOWER(COALESCE(category, '')) = 'office bearer' AND LOWER(COALESCE(achievement, '')) = LOWER(:ctx_office_bearer) AND player_id IS NOT NULL)",
         "value_kind": "text",
+    },
+    # Family filter — restrict to players in the chosen family. The family
+    # must belong to the same org; the org_id bind is already in scope.
+    "family_id": {
+        "sql": "p.id IN (SELECT fm.player_id FROM family_members fm JOIN families f ON f.id = fm.family_id WHERE f.id = CAST(:ctx_family_id AS UUID) AND f.organisation_id = CAST(:org_id AS UUID))",
+        "value_kind": "uuid",
     },
 }
 
@@ -948,6 +964,279 @@ async def query_player_grade(
     """
 
     params["offset"] = offset
+    result = await session.execute(text(_inline_helpers(sql)), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── Family-aggregate queries ──────────────────────────────────────────────────
+# One row per family (or per family+season / family+grade). Stats are summed
+# across every member of the family; averages and rate stats are re-derived
+# from the family-level sums so e.g. "Family batting average" treats the whole
+# family as one combined career, which is what users intuitively expect.
+#
+# Players that aren't in any family don't appear in these reports (the JOIN is
+# inner). The family_id context filter is ignored here — every row is a
+# different family by construction, so filtering to one family would just
+# return that one row, which the existing player_career + family_id filter
+# already covers.
+#
+# member_count and members are family-shaped columns that aren't in
+# PLAYER_AGG_METRICS; they always come through regardless of metric filters.
+
+# Family-aggregate SUM/derivation SQL shared by all three targets. Takes the
+# group_cols / select_extra / join_extra / order_extra placeholders that
+# differentiate career / season / grade.
+def _family_agg_select_cols() -> str:
+    return """
+        f.id::text                                                                              AS family_id,
+        f.name                                                                                  AS family_name,
+        COUNT(DISTINCT p.id)                                                                    AS member_count,
+        STRING_AGG(DISTINCT COALESCE(p.display_name_override, p.name), ', '
+                   ORDER BY COALESCE(p.display_name_override, p.name))                          AS members,
+        COUNT(DISTINCT pss.season_id)                                                           AS seasons_played,
+        COALESCE(SUM(pss.matches), 0)                                                           AS matches,
+        COALESCE(SUM(pss.batting_innings), 0)                                                   AS batting_innings,
+        COALESCE(SUM(pss.runs), 0)                                                              AS runs,
+        COALESCE(SUM(pss.not_outs), 0)                                                          AS not_outs,
+        COALESCE(SUM(pss.balls_faced), 0)                                                       AS balls_faced,
+        ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS batting_average,
+        ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)                AS batting_strike_rate,
+        MAX(pss.high_score)                                                                     AS high_score,
+        COALESCE(SUM(pss.fifties), 0)                                                           AS fifties,
+        COALESCE(SUM(pss.hundreds), 0)                                                          AS hundreds,
+        COALESCE(SUM(pss.ducks), 0)                                                             AS ducks,
+        COALESCE(SUM(pss.fours), 0)                                                             AS fours,
+        COALESCE(SUM(pss.sixes), 0)                                                             AS sixes,
+        COALESCE(SUM(pss.bowling_innings), 0)                                                   AS bowling_innings,
+        COALESCE(SUM(pss.wickets), 0)                                                           AS wickets,
+        COALESCE(SUM(pss.overs), 0)                                                             AS overs,
+        COALESCE(SUM(pss.runs_conceded), 0)                                                     AS runs_conceded,
+        ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2)                 AS bowling_average,
+        ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2)       AS bowling_economy,
+        ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2)                 AS bowling_strike_rate,
+        COALESCE(SUM(pss.five_wicket_innings), 0)                                               AS five_wicket_innings,
+        COALESCE(SUM(pss.maidens), 0)                                                           AS maidens,
+        MAX(pss.best_bowling_wickets)                                                           AS best_bowling_wickets,
+        COALESCE(SUM(pss.wides), 0)                                                             AS wides,
+        COALESCE(SUM(pss.no_balls), 0)                                                          AS no_balls,
+        COALESCE(SUM(pss.catches), 0)                                                           AS catches,
+        COALESCE(SUM(pss.run_outs), 0)                                                          AS run_outs,
+        COALESCE(SUM(pss.stumpings), 0)                                                         AS stumpings
+    """
+
+
+async def query_family_career(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    sort_by: str,
+    sort_dir: str,
+    limit: int,
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
+    offset: int = 0,
+    context: dict,
+) -> list[dict]:
+    """One row per family — sums of every member's career stats."""
+    sort_by, sort_dir, limit = _validated("family_career", sort_by, sort_dir, limit)
+
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, FAMILY_AGG_METRICS)
+    params = {"org_id": org_id, "limit": limit, "offset": offset, **metric_params}
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+
+    select_cols = _family_agg_select_cols()
+    sql = f"""
+        WITH agg AS (
+            SELECT {select_cols}
+            FROM families f
+            JOIN family_members fm ON fm.family_id = f.id
+            JOIN players p ON p.id = fm.player_id
+            LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE f.organisation_id = :org_id
+            GROUP BY f.id, f.name
+        )
+        SELECT * FROM agg
+        {where_sql}
+        ORDER BY {sort_by} {sort_dir} NULLS LAST
+        LIMIT :limit OFFSET :offset
+    """
+
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def query_family_season(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    sort_by: str,
+    sort_dir: str,
+    limit: int,
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
+    offset: int = 0,
+    context: dict,
+) -> list[dict]:
+    """One row per (family, season). INNER JOIN to pss so a season the family
+    didn't play doesn't appear (member_count would be 0 anyway)."""
+    sort_by, sort_dir, limit = _validated("family_season", sort_by, sort_dir, limit)
+
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, FAMILY_AGG_METRICS)
+    params = {"org_id": org_id, "limit": limit, "offset": offset, **metric_params}
+
+    season_filter = ""
+    if context.get("season_id"):
+        season_filter = (
+            "AND (s.id = CAST(:ctx_season_id AS UUID) "
+            "OR s.id IN (SELECT alias_season_id FROM season_aliases "
+            "WHERE canonical_season_id = CAST(:ctx_season_id AS UUID) "
+            "AND undone_at IS NULL))"
+        )
+        params["ctx_season_id"] = context["season_id"]
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+
+    select_cols = _family_agg_select_cols()
+    sql = f"""
+        WITH agg AS (
+            SELECT {select_cols},
+                   s.id::text                AS season_id,
+                   s.name                    AS season_name,
+                   COALESCE(s.year, 0)       AS season_year
+            FROM families f
+            JOIN family_members fm ON fm.family_id = f.id
+            JOIN players p ON p.id = fm.player_id
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN seasons s ON s.id = pss.season_id
+            WHERE f.organisation_id = :org_id {season_filter}
+            GROUP BY f.id, f.name, s.id, s.name, s.year
+        )
+        SELECT * FROM agg
+        {where_sql}
+        ORDER BY {sort_by} {sort_dir} NULLS LAST, season_year DESC
+        LIMIT :limit OFFSET :offset
+    """
+
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def query_family_grade(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    sort_by: str,
+    sort_dir: str,
+    limit: int,
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
+    offset: int = 0,
+    context: dict,
+) -> list[dict]:
+    """One row per (family, canonical grade). Lives off the same per-innings
+    CTEs as player_grade — pss has no grade dimension. Heavier than the other
+    two family queries; that's intrinsic to the per-grade breakdown."""
+    sort_by, sort_dir, limit = _validated("family_grade", sort_by, sort_dir, limit)
+
+    mc, mp, ic, ip, pc, pp, _ = _build_context_filters(context)
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, FAMILY_AGG_METRICS)
+    params = {"org_id": org_id, "limit": limit, "offset": offset, **mp, **ip, **pp, **metric_params}
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+
+    # Reuse the per-player innings CTEs and aggregate them up to family level
+    # in an outer GROUP BY. The CTE groups by (player_id, grade_name); we then
+    # join to family_members and re-group by (family_id, grade_name).
+    cte = _player_agg_innings_cte(
+        mc, ic, pc,
+        group_cols="p.id, gu.canonical_grade_name, gu.display_grade_name",
+        select_cols="p.id AS player_id, gu.canonical_grade_name AS grade_name, gu.display_grade_name,",
+    )
+    sql = f"""
+        {cte},
+        per_player AS (
+            SELECT
+                COALESCE(appear.player_id, bat.player_id, bowl.player_id, field.player_id) AS player_id,
+                COALESCE(appear.grade_name, bat.grade_name, bowl.grade_name, field.grade_name) AS grade_name,
+                COALESCE(appear.display_grade_name, bat.display_grade_name, bowl.display_grade_name, field.display_grade_name) AS display_grade_name,
+                COALESCE(appear.matches, 0)             AS matches,
+                COALESCE(bat.batting_innings, 0)        AS batting_innings,
+                COALESCE(bat.runs, 0)                   AS runs,
+                COALESCE(bat.not_outs, 0)               AS not_outs,
+                COALESCE(bat.balls_faced, 0)            AS balls_faced,
+                COALESCE(bat.high_score, 0)             AS high_score,
+                COALESCE(bat.fifties, 0)                AS fifties,
+                COALESCE(bat.hundreds, 0)               AS hundreds,
+                COALESCE(bat.ducks, 0)                  AS ducks,
+                COALESCE(bat.fours, 0)                  AS fours,
+                COALESCE(bat.sixes, 0)                  AS sixes,
+                COALESCE(bowl.bowling_innings, 0)       AS bowling_innings,
+                COALESCE(bowl.wickets, 0)               AS wickets,
+                COALESCE(bowl.overs, 0)                 AS overs,
+                COALESCE(bowl.runs_conceded, 0)         AS runs_conceded,
+                COALESCE(bowl.five_wicket_innings, 0)   AS five_wicket_innings,
+                COALESCE(bowl.maidens, 0)               AS maidens,
+                COALESCE(bowl.best_bowling_wickets, 0)  AS best_bowling_wickets,
+                COALESCE(bowl.wides, 0)                 AS wides,
+                COALESCE(bowl.no_balls, 0)              AS no_balls,
+                COALESCE(field.catches, 0)              AS catches,
+                COALESCE(field.run_outs, 0)             AS run_outs,
+                COALESCE(field.stumpings, 0)            AS stumpings
+            FROM appear
+            FULL OUTER JOIN bat   ON bat.player_id   = appear.player_id   AND bat.grade_name   = appear.grade_name
+            FULL OUTER JOIN bowl  ON bowl.player_id  = COALESCE(appear.player_id, bat.player_id)
+                                 AND bowl.grade_name  = COALESCE(appear.grade_name, bat.grade_name)
+            FULL OUTER JOIN field ON field.player_id = COALESCE(appear.player_id, bat.player_id, bowl.player_id)
+                                 AND field.grade_name = COALESCE(appear.grade_name, bat.grade_name, bowl.grade_name)
+        ),
+        agg AS (
+            SELECT
+                f.id::text                                                                      AS family_id,
+                f.name                                                                          AS family_name,
+                pp.grade_name,
+                pp.display_grade_name,
+                COUNT(DISTINCT p.id)                                                            AS member_count,
+                STRING_AGG(DISTINCT COALESCE(p.display_name_override, p.name), ', '
+                           ORDER BY COALESCE(p.display_name_override, p.name))                  AS members,
+                1                                                                               AS seasons_played,
+                COALESCE(SUM(pp.matches), 0)                                                    AS matches,
+                COALESCE(SUM(pp.batting_innings), 0)                                            AS batting_innings,
+                COALESCE(SUM(pp.runs), 0)                                                       AS runs,
+                COALESCE(SUM(pp.not_outs), 0)                                                   AS not_outs,
+                COALESCE(SUM(pp.balls_faced), 0)                                                AS balls_faced,
+                ROUND(SUM(pp.runs)::numeric / NULLIF(SUM(pp.batting_innings) - SUM(pp.not_outs), 0), 2) AS batting_average,
+                ROUND(SUM(pp.runs)::numeric / NULLIF(SUM(pp.balls_faced), 0) * 100, 2)          AS batting_strike_rate,
+                MAX(pp.high_score)                                                              AS high_score,
+                COALESCE(SUM(pp.fifties), 0)                                                    AS fifties,
+                COALESCE(SUM(pp.hundreds), 0)                                                   AS hundreds,
+                COALESCE(SUM(pp.ducks), 0)                                                      AS ducks,
+                COALESCE(SUM(pp.fours), 0)                                                      AS fours,
+                COALESCE(SUM(pp.sixes), 0)                                                      AS sixes,
+                COALESCE(SUM(pp.bowling_innings), 0)                                            AS bowling_innings,
+                COALESCE(SUM(pp.wickets), 0)                                                    AS wickets,
+                COALESCE(SUM(pp.overs), 0)                                                      AS overs,
+                COALESCE(SUM(pp.runs_conceded), 0)                                              AS runs_conceded,
+                ROUND(SUM(pp.runs_conceded)::numeric / NULLIF(SUM(pp.wickets), 0), 2)           AS bowling_average,
+                ROUND(SUM(pp.runs_conceded)::numeric / NULLIF(SUM(pp.overs * 6), 0) * 6, 2)     AS bowling_economy,
+                ROUND(SUM(pp.overs)::numeric * 6 / NULLIF(SUM(pp.wickets), 0), 2)               AS bowling_strike_rate,
+                COALESCE(SUM(pp.five_wicket_innings), 0)                                        AS five_wicket_innings,
+                COALESCE(SUM(pp.maidens), 0)                                                    AS maidens,
+                MAX(pp.best_bowling_wickets)                                                    AS best_bowling_wickets,
+                COALESCE(SUM(pp.wides), 0)                                                      AS wides,
+                COALESCE(SUM(pp.no_balls), 0)                                                   AS no_balls,
+                COALESCE(SUM(pp.catches), 0)                                                    AS catches,
+                COALESCE(SUM(pp.run_outs), 0)                                                   AS run_outs,
+                COALESCE(SUM(pp.stumpings), 0)                                                  AS stumpings
+            FROM per_player pp
+            JOIN players p ON p.id = pp.player_id
+            JOIN family_members fm ON fm.player_id = p.id
+            JOIN families f ON f.id = fm.family_id AND f.organisation_id = :org_id
+            GROUP BY f.id, f.name, pp.grade_name, pp.display_grade_name
+        )
+        SELECT * FROM agg
+        {where_sql}
+        ORDER BY {sort_by} {sort_dir} NULLS LAST
+        LIMIT :limit OFFSET :offset
+    """
+
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
@@ -4020,6 +4309,9 @@ TARGET_DISPATCH = {
     "player_career":    query_player_career,
     "player_season":    query_player_season,
     "player_grade":     query_player_grade,
+    "family_career":    query_family_career,
+    "family_season":    query_family_season,
+    "family_grade":     query_family_grade,
     "innings_list":     query_innings_list,
     "spell_list":       query_spell_list,
     "match_list":       query_match_list,
@@ -4073,7 +4365,7 @@ async def run_derived(
 
 METRIC_CATEGORIES: list[dict] = [
     {"key": "participation", "label": "Participation",
-     "fields": ["matches", "seasons_played", "batting_innings", "bowling_innings"]},
+     "fields": ["matches", "seasons_played", "batting_innings", "bowling_innings", "member_count"]},
     {"key": "batting", "label": "Batting",
      "fields": ["runs", "not_outs", "batting_average", "batting_strike_rate", "high_score",
                 "fifties", "hundreds", "ducks", "fours", "sixes", "balls_faced", "balls",

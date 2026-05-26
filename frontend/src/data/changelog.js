@@ -4,7 +4,7 @@
 
 export const CHANGELOG = [
   {
-    version: 'v7.15.1',
+    version: 'v7.17.1',
     date: '2026-05-26',
     title: 'StatLab: multi-select Season and Grade filters',
     items: [
@@ -15,12 +15,52 @@ export const CHANGELOG = [
     ],
   },
   {
+    version: 'v7.17.0',
+    date: '2026-05-26',
+    title: 'StatLab: family-aggregate reports',
+    items: [
+      'Three new report types: Family Career, Family By Season, Family By Grade. Each row is one family with stats summed across every member — total matches, runs, wickets, catches, etc. Family-level averages (batting average, bowling average, strike rate, economy) treat the whole family as one big career.',
+      'New "Families" preset group in the report picker with one-click leaderboards for runs / wickets / matches / catches by family.',
+      'Players not in any family don\'t appear in family reports. Existing per-player reports are unchanged.',
+      'The "In family" dropdown filter (which restricts a player report to one family\'s members) is hidden on the new family reports — every row is already a different family there.',
+    ],
+  },
+  {
+    version: 'v7.16.0.2',
+    date: '2026-05-26',
+    title: 'Fix: Admin → Families autocomplete clipped + page reload on every edit',
+    items: [
+      'Player-search dropdown in the "Add member" row is no longer clipped to a couple of pixels — the family card was wrapped in overflow-hidden which hid the absolute-positioned suggestions list.',
+      'Editing a member (add / remove / rename family / save relationship) no longer unmounts and reloads the entire page. The "Loading…" spinner now only shows on the initial load; subsequent refreshes happen in the background so expanded cards and in-progress edits survive.',
+      'Removed an unstable dependency (the toast helper) from the data-fetching effect that was retriggering reloads whenever any toast appeared anywhere in the app.',
+    ],
+  },
+  {
+    version: 'v7.16.0.1',
+    date: '2026-05-26',
+    title: 'Fix: backend crash loop from duplicate Alembic revision 033',
+    items: [
+      'Three migrations had shipped with the same revision id (033) — match_format, bowler_wickets columns, and families. Alembic refused to run with "Multiple head revisions", so the backend container restarted forever and every login returned a non-JSON 5xx (frontend showed the generic "Login failed"). Renumbered the latter two to 034 and 035 so the migration chain is linear again.',
+    ],
+  },
+  {
+    version: 'v7.16.0',
+    date: '2026-05-26',
+    title: 'Families: group related players and filter StatLab by family',
+    items: [
+      'New Admin → Families page. Create a family, add players to it, and tag each member\'s relationship (Father, Son, Cousin — free text with autocomplete suggestions).',
+      'Suggestions tab groups same-surname players who aren\'t already in a family and offers one-click "Create family" or "Add to existing". Dismiss a surname to never see it again.',
+      'StatLab → Player Attributes gains a "Family" dropdown. Pick a family and reports restrict to its members — works on every report and saved-query.',
+      'New MANAGE_FAMILIES capability — granted to super_admin and club_admin by default; can be granted to club members.',
+    ],
+  },
+  {
     version: 'v7.15.0.3',
     date: '2026-05-26',
     title: 'Fix: Ducks/Golden Ducks Inflicted — store opposition batter’s score',
     items: [
       'Most Ducks Inflicted and Most Golden Ducks Inflicted were returning empty because they joined bowler_wickets to batting_innings, but batting_innings only stores OUR club’s batters — our bowlers can only dismiss opposition batters, so the join never matched.',
-      'Added batter_runs / batter_balls columns to bowler_wickets (migration 033) and updated the sync to denormalise the dismissed opposition batter’s score onto the wicket row at save time.',
+      'Added batter_runs / batter_balls columns to bowler_wickets (migration 034) and updated the sync to denormalise the dismissed opposition batter’s score onto the wicket row at save time.',
       'Both reports now read these columns directly — Most Ducks Inflicted = rows where batter_runs = 0, Most Golden Ducks Inflicted = rows where batter_runs = 0 AND batter_balls IN (0, 1).',
       'Existing bowler_wickets rows have batter_runs = NULL. A Full Rebuild from Admin → Data Sync is required to backfill them (one-time cost).',
       'Top Bowler/Fielder Combinations: query is structurally correct (joins bowler_wickets where fielder_id is set) but description now notes that data quality depends on the catcher’s name in dismissalText resolving to a known player — substitute fielders or unrecognised names fall through. No SQL change.',

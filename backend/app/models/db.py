@@ -193,6 +193,7 @@ class Game(Base):
     is_final = Column(Boolean, default=False, nullable=False, server_default='false')
     raw_payload = Column(JSON)
     venue = Column(Text)
+    match_format = Column(Text, nullable=True)
 
     grade = relationship("Grade", back_populates="games")
     batting_innings = relationship("BattingInnings", back_populates="game")
@@ -513,3 +514,35 @@ class PhqIdSuggestion(Base):
 
     org = relationship("Organisation")
     player = relationship("Player", foreign_keys=[player_id])
+
+
+class Family(Base):
+    __tablename__ = "families"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_families_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    members = relationship("FamilyMember", back_populates="family", cascade="all, delete-orphan")
+
+
+class FamilyMember(Base):
+    __tablename__ = "family_members"
+    __table_args__ = (
+        UniqueConstraint("family_id", "player_id", name="uq_family_member_player"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    family_id = Column(UUID(as_uuid=True), ForeignKey("families.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    relationship_label = Column("relationship", Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    family = relationship("Family", back_populates="members")
+    player = relationship("Player")
