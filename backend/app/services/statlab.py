@@ -2160,7 +2160,8 @@ async def derived_most_run_outs_in_match(session, *, org_id, limit, offset=0, co
 async def derived_golden_ducks(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Out for 0 off exactly 1 ball (golden duck) — count per player."""
+    """Out for 0 off the first ball (golden duck) — count per player.
+    Requires balls = 1; balls = 0 is the API's 'not tracked' default."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -3247,8 +3248,8 @@ async def derived_ducks_inflicted(
 async def derived_golden_ducks_inflicted(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Same as ducks_inflicted but only innings where batter faced exactly 1 ball.
-    Reads denormalised batter_runs / batter_balls on bowler_wickets."""
+    """Same as ducks_inflicted but only first-ball dismissals (golden ducks).
+    Requires batter_balls = 1; batter_balls = 0 is the API's 'not tracked' default."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
