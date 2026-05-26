@@ -196,7 +196,7 @@ function FamilyCard({ family, players, orgId, onChanged, onDeleted }) {
   }
 
   return (
-    <div className="pb-card overflow-hidden">
+    <div className="pb-card">
       <button
         onClick={() => setExpanded(x => !x)}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-pb-surface2 transition"
@@ -468,7 +468,7 @@ export default function AdminFamilies() {
   const [families, setFamilies] = useState([])
   const [players, setPlayers] = useState([])
   const [suggestions, setSuggestions] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [newName, setNewName] = useState('')
@@ -482,20 +482,23 @@ export default function AdminFamilies() {
 
   useEffect(() => {
     if (!orgId) return
-    setLoading(true)
+    let cancelled = false
     Promise.all([
       api.listFamilies(orgId),
       api.adminListPlayers(),
       api.getFamilySuggestions(orgId),
     ])
       .then(([fams, pls, sugg]) => {
+        if (cancelled) return
         setFamilies(fams || [])
         setPlayers(pls || [])
         setSuggestions(sugg || [])
       })
-      .catch(e => toast.error(e.message))
-      .finally(() => setLoading(false))
-  }, [orgId, refreshKey, toast])
+      .catch(e => { if (!cancelled) toast.error(e.message) })
+      .finally(() => { if (!cancelled) setInitialLoading(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, refreshKey])
 
   const refresh = () => setRefreshKey(k => k + 1)
 
@@ -546,9 +549,9 @@ export default function AdminFamilies() {
           </button>
         </div>
 
-        {loading && <div className="font-mono text-[11px] text-pb-faint">Loading…</div>}
+        {initialLoading && <div className="font-mono text-[11px] text-pb-faint">Loading…</div>}
 
-        {!loading && tab === 'families' && (
+        {!initialLoading && tab === 'families' && (
           <div className="space-y-3">
             {showCreate ? (
               <div className="pb-card p-4">
@@ -612,7 +615,7 @@ export default function AdminFamilies() {
           </div>
         )}
 
-        {!loading && tab === 'suggestions' && (
+        {!initialLoading && tab === 'suggestions' && (
           <div className="space-y-3">
             {suggestions.length === 0 ? (
               <div className="font-mono text-[11px] text-pb-faint">
