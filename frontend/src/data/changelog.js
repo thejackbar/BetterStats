@@ -4,6 +4,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.14.1.1',
+    date: '2026-05-26',
+    title: 'StatLab: golden duck fix',
+    items: [
+      'Golden ducks (batter and inflicted) now correctly require exactly 1 ball faced — dismissals recorded with 0 balls are excluded',
+    ],
+  },
+  {
     version: 'v7.14.1',
     date: '2026-05-26',
     title: 'StatLab: pagination for all reports',
