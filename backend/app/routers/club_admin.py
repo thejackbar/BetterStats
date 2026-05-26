@@ -61,6 +61,8 @@ async def list_players(
             "gender": p.gender,
             "is_player": p.is_player,
             "player_role": p.player_role,
+            "is_overseas": p.is_overseas,
+            "overseas_country": p.overseas_country,
         }
         for p in players
     ]
@@ -72,6 +74,8 @@ class PlayerPatch(BaseModel):
     gender: Optional[str] = None
     is_player: Optional[bool] = None
     player_role: Optional[str] = None
+    is_overseas: Optional[bool] = None
+    overseas_country: Optional[str] = None
 
 
 @router.patch("/players/{player_id}")
@@ -108,6 +112,10 @@ async def patch_player(
         player.is_player = data.is_player
     if data.player_role is not None:
         player.player_role = data.player_role.strip() or None
+    if data.is_overseas is not None:
+        player.is_overseas = data.is_overseas
+    if data.overseas_country is not None:
+        player.overseas_country = data.overseas_country.strip() or None
     await db.commit()
     return {
         "id": str(player.id),
@@ -117,6 +125,8 @@ async def patch_player(
         "gender": player.gender,
         "is_player": player.is_player,
         "player_role": player.player_role,
+        "is_overseas": player.is_overseas,
+        "overseas_country": player.overseas_country,
     }
 
 

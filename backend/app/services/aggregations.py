@@ -386,6 +386,7 @@ async def get_fielding_leaderboard(
     finals_only: Optional[bool] = None,
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
+    overseas: Optional[str] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {"total_catches", "total_catches_non_wk", "total_catches_wk", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
     if sort_by not in ALLOWED_SORTS:
@@ -396,6 +397,12 @@ async def get_fielding_leaderboard(
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     captain_join = (" JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE" if captain_only else "")
     gender_clause = f" AND p.gender = :gender" if gender else ""
+    if overseas == "only":
+        overseas_clause = " AND p.is_overseas = TRUE"
+    elif overseas == "exclude":
+        overseas_clause = " AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)"
+    else:
+        overseas_clause = ""
     params: dict = {"org_id": org_id, "limit": limit}
     if gender:
         params["gender"] = gender
@@ -418,7 +425,7 @@ async def get_fielding_leaderboard(
             FROM fielding_stats fs
             JOIN games g ON g.id = fs.game_id{captain_join}
             JOIN players p ON p.id = fs.player_id
-            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}
+            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -444,7 +451,7 @@ async def get_fielding_leaderboard(
             JOIN grades gr ON gr.id = g.grade_id{captain_join}
             JOIN players p ON p.id = fs.player_id
             WHERE {_GRADE_MATCH}{season_clause}
-              AND p.organisation_id = :org_id{finals_clause}{gender_clause}
+              AND p.organisation_id = :org_id{finals_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -471,7 +478,7 @@ async def get_fielding_leaderboard(
             JOIN seasons s ON s.id = gr.season_id{captain_join}
             JOIN players p ON p.id = fs.player_id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
-              AND g.is_final = TRUE{season_clause}{gender_clause}
+              AND g.is_final = TRUE{season_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -497,7 +504,7 @@ async def get_fielding_leaderboard(
             JOIN seasons s ON s.id = gr.season_id
             JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE
             JOIN players p ON p.id = fs.player_id
-            WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{gender_clause}
+            WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -524,6 +531,10 @@ async def get_fielding_leaderboard(
         base += " AND pss.season_id = ANY(:season_ids)"
     if gender:
         base += " AND p.gender = :gender"
+    if overseas == "only":
+        base += " AND p.is_overseas = TRUE"
+    elif overseas == "exclude":
+        base += " AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)"
     base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
@@ -1503,6 +1514,7 @@ async def get_batting_leaderboard_extended(
     finals_only: Optional[bool] = None,
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
+    overseas: Optional[str] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_runs", "average", "strike_rate", "total_sixes",
@@ -1516,6 +1528,12 @@ async def get_batting_leaderboard_extended(
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     captain_join = (" JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE" if captain_only else "")
     gender_clause = f" AND p.gender = :gender" if gender else ""
+    if overseas == "only":
+        overseas_clause = " AND p.is_overseas = TRUE"
+    elif overseas == "exclude":
+        overseas_clause = " AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)"
+    else:
+        overseas_clause = ""
     params: dict = {"org_id": org_id, "limit": limit}
     if gender:
         params["gender"] = gender
@@ -1549,7 +1567,7 @@ async def get_batting_leaderboard_extended(
                 COALESCE(SUM(q.sixes), 0) AS total_sixes
             FROM qualifying q
             JOIN players p ON p.id = q.player_id
-            WHERE p.organisation_id = :org_id{gender_clause}
+            WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """
         if min_runs > 0:
@@ -1588,7 +1606,7 @@ async def get_batting_leaderboard_extended(
                 COALESCE(SUM(q.sixes), 0) AS total_sixes
             FROM qualifying q
             JOIN players p ON p.id = q.player_id
-            WHERE p.organisation_id = :org_id{gender_clause}
+            WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """
         if min_runs > 0:
@@ -1629,7 +1647,7 @@ async def get_batting_leaderboard_extended(
                 COALESCE(SUM(q.sixes), 0) AS total_sixes
             FROM qualifying q
             JOIN players p ON p.id = q.player_id
-            WHERE p.organisation_id = :org_id{gender_clause}
+            WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """
         if min_runs > 0:
@@ -1669,7 +1687,7 @@ async def get_batting_leaderboard_extended(
                 COALESCE(SUM(q.sixes), 0) AS total_sixes
             FROM qualifying q
             JOIN players p ON p.id = q.player_id
-            WHERE p.organisation_id = :org_id{gender_clause}
+            WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """
         if min_runs > 0:
@@ -1703,6 +1721,10 @@ async def get_batting_leaderboard_extended(
         base += " AND pss.season_id = ANY(:season_ids)"
     if gender:
         base += " AND p.gender = :gender"
+    if overseas == "only":
+        base += " AND p.is_overseas = TRUE"
+    elif overseas == "exclude":
+        base += " AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)"
     base += " GROUP BY p.id, COALESCE(p.display_name_override, p.name)"
     if min_runs > 0:
         base += " HAVING SUM(pss.runs) >= :min_runs"
@@ -1726,6 +1748,7 @@ async def get_bowling_leaderboard_extended(
     finals_only: Optional[bool] = None,
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
+    overseas: Optional[str] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_wickets", "average", "economy", "best_figures_wickets",
@@ -1739,6 +1762,12 @@ async def get_bowling_leaderboard_extended(
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     captain_join = (" JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE" if captain_only else "")
     gender_clause = f" AND p.gender = :gender" if gender else ""
+    if overseas == "only":
+        overseas_clause = " AND p.is_overseas = TRUE"
+    elif overseas == "exclude":
+        overseas_clause = " AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)"
+    else:
+        overseas_clause = ""
     params: dict = {"org_id": org_id, "limit": limit}
     if gender:
         params["gender"] = gender
@@ -1775,7 +1804,7 @@ async def get_bowling_leaderboard_extended(
             JOIN games g ON g.id = bs.game_id{captain_join}
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}
+            WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """
         having_clauses = []
@@ -1824,7 +1853,7 @@ async def get_bowling_leaderboard_extended(
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
-              AND p.organisation_id = :org_id{gender_clause}
+              AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """
         having_clauses = []
@@ -1877,7 +1906,7 @@ async def get_bowling_leaderboard_extended(
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND g.is_final = TRUE{season_clause}
-              AND p.organisation_id = :org_id{gender_clause}
+              AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """
         having_clauses = []
@@ -1929,7 +1958,7 @@ async def get_bowling_leaderboard_extended(
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}
-              AND p.organisation_id = :org_id{gender_clause}
+              AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
         """
         having_clauses = []
@@ -1967,6 +1996,10 @@ async def get_bowling_leaderboard_extended(
         base += " AND pss.season_id = ANY(:season_ids)"
     if gender:
         base += " AND p.gender = :gender"
+    if overseas == "only":
+        base += " AND p.is_overseas = TRUE"
+    elif overseas == "exclude":
+        base += " AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)"
     base += " GROUP BY p.id, COALESCE(p.display_name_override, p.name)"
     having_clauses = []
     if min_overs > 0:
@@ -2411,10 +2444,12 @@ async def get_sirs_batting(
     limit: int = 200,
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
+    overseas: Optional[str] = None,
 ) -> list[dict]:
     params: dict = {"org_id": org_id, "limit": limit}
     season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bi')
     gender_clause = f" AND p.gender = :gender" if gender else ""
+    overseas_clause = " AND p.is_overseas = TRUE" if overseas == "only" else (" AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)" if overseas == "exclude" else "")
     if gender:
         params["gender"] = gender
     result = await session.execute(text(f"""
@@ -2439,7 +2474,7 @@ async def get_sirs_batting(
           AND s.organisation_id = CAST(:org_id AS UUID)
           AND bi.runs >= 100
           AND NOT COALESCE(bi.did_not_bat, FALSE)
-          AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){season_clause}{finals_clause}{grade_clause}{gender_clause}
+          AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
         GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         ORDER BY century_count DESC NULLS LAST
         LIMIT :limit
@@ -2456,10 +2491,12 @@ async def get_sirs_bowling_innings(
     limit: int = 200,
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
+    overseas: Optional[str] = None,
 ) -> list[dict]:
     params: dict = {"org_id": org_id, "limit": limit}
     season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bs')
     gender_clause = f" AND p.gender = :gender" if gender else ""
+    overseas_clause = " AND p.is_overseas = TRUE" if overseas == "only" else (" AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)" if overseas == "exclude" else "")
     if gender:
         params["gender"] = gender
     result = await session.execute(text(f"""
@@ -2483,7 +2520,7 @@ async def get_sirs_bowling_innings(
         JOIN players p ON p.id = bs.player_id{captain_join}
         WHERE p.organisation_id = CAST(:org_id AS UUID)
           AND s.organisation_id = CAST(:org_id AS UUID)
-          AND bs.wickets >= 7{season_clause}{finals_clause}{grade_clause}{gender_clause}
+          AND bs.wickets >= 7{season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
         GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         ORDER BY haul_count DESC NULLS LAST
         LIMIT :limit
@@ -2500,10 +2537,12 @@ async def get_sirs_bowling_match(
     limit: int = 200,
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
+    overseas: Optional[str] = None,
 ) -> list[dict]:
     params: dict = {"org_id": org_id, "limit": limit}
     season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bs')
     gender_clause = f" AND p.gender = :gender" if gender else ""
+    overseas_clause = " AND p.is_overseas = TRUE" if overseas == "only" else (" AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)" if overseas == "exclude" else "")
     if gender:
         params["gender"] = gender
     result = await session.execute(text(f"""
@@ -2519,7 +2558,7 @@ async def get_sirs_bowling_match(
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = bs.player_id{captain_join}
             WHERE p.organisation_id = CAST(:org_id AS UUID)
-              AND s.organisation_id = CAST(:org_id AS UUID){season_clause}{finals_clause}{grade_clause}{gender_clause}
+              AND s.organisation_id = CAST(:org_id AS UUID){season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
             GROUP BY bs.player_id, bs.game_id
             HAVING SUM(bs.wickets) >= 10
         )

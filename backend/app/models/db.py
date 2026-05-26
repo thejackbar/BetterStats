@@ -159,6 +159,8 @@ class Player(Base):
     gender = Column(Text, nullable=True)
     is_player = Column(Boolean, default=True, nullable=True)
     player_role = Column(Text, nullable=True)
+    is_overseas = Column(Boolean, nullable=True)
+    overseas_country = Column(Text, nullable=True)
     # claimed / user_id retained as columns but no longer used in business logic
     claimed = Column(Boolean, default=False)
     user_id = Column(UUID(as_uuid=True), nullable=True)

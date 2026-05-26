@@ -67,6 +67,8 @@ async def get_player(player_id: str, db: AsyncSession = Depends(get_db)):
         "organisation_id": str(player.organisation_id),
         "claimed": player.claimed,
         "playhq_id": player.playhq_id,
+        "is_overseas": player.is_overseas,
+        "overseas_country": player.overseas_country,
     }
 
 
