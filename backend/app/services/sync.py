@@ -789,6 +789,13 @@ _GR_DISMISSAL_SHORT = {
 }
 
 
+def _norm_name(s: str) -> str:
+    """Normalise curly/smart apostrophes to straight apostrophe so scorecard
+    dismissalText and playerShortName compare equal regardless of which
+    Unicode variant CA's API returns in each field."""
+    return s.replace("’", "'").replace("‘", "'")
+
+
 def extract_bowler_wickets(
     scorecard: dict,
     game_uuid: uuid.UUID,
@@ -814,12 +821,12 @@ def extract_bowler_wickets(
             pid = pl.get("participantId") or pl.get("id")
             name = pl.get("playerShortName") or pl.get("displayName") or pl.get("name")
             if pid and name:
-                pid_to_short_name[pid] = name
+                pid_to_short_name[pid] = _norm_name(name)
 
     def _resolve(name_to_pid: dict, name):
         if not name:
             return None
-        pid_str = name_to_pid.get(name)
+        pid_str = name_to_pid.get(_norm_name(name))
         if not pid_str:
             return None
         try:
@@ -846,7 +853,7 @@ def extract_bowler_wickets(
                 continue
             name = r.get("playerShortName") or pid_to_short_name.get(pid_s)
             if name:
-                bowl_name_to_pid.setdefault(name, pid_s)
+                bowl_name_to_pid.setdefault(_norm_name(name), pid_s)
 
         field_name_to_pid: dict[str, str] = {}
         for r in fielding_rows:
@@ -855,15 +862,17 @@ def extract_bowler_wickets(
                 continue
             name = r.get("playerShortName") or pid_to_short_name.get(pid_s)
             if name:
-                field_name_to_pid.setdefault(name, pid_s)
+                field_name_to_pid.setdefault(_norm_name(name), pid_s)
         # Stumpers are fielders (the keeper) but may not appear in
         # fielding_rows if their only contribution was a stumping; the
         # bowling-side roster covers them too via pid_to_short_name.
         for r in bowling_rows:
             pid_s = r.get("participantId")
             name = r.get("playerShortName") or pid_to_short_name.get(pid_s) if pid_s else None
-            if name and name not in field_name_to_pid:
-                field_name_to_pid[name] = pid_s
+            if name:
+                norm = _norm_name(name)
+                if norm not in field_name_to_pid:
+                    field_name_to_pid[norm] = pid_s
 
         for row in batting_rows:
             dt_long = row.get("dismissalType") or ""
@@ -882,10 +891,6 @@ def extract_bowler_wickets(
                 fielder_id=fielder_pid,
                 batter_name=row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or ""),
                 batter_position=row.get("batOrder"),
-                # Denormalise the dismissed batter's score so 'ducks inflicted'
-                # style reports work without an opposition batting table.
-                batter_runs=row.get("runsScored"),
-                batter_balls=row.get("ballsFaced"),
                 dismissal_type=method or None,
             ))
 
@@ -1066,58 +1071,6 @@ def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
     return result
 
 
-# Normalises a raw API format token (e.g. "TWO_DAY_PLUS", "twenty20",
-# "T20", "ONE_DAY") to the three canonical display values used everywhere
-# downstream (StatLab filters, Records, Yearbook, etc.). Unknown values
-# pass through untouched so we don't lose information — caller logs them.
-_FORMAT_ALIASES = {
-    "T20": "T20", "TWENTY20": "T20", "TWENTY_20": "T20",
-    "ONE_DAY": "One Day", "ONEDAY": "One Day", "1_DAY": "One Day", "1DAY": "One Day",
-    "TWO_DAY": "Two Day+", "TWO_DAY_PLUS": "Two Day+", "TWODAY": "Two Day+",
-    "MULTI_DAY": "Two Day+", "MULTIDAY": "Two Day+",
-}
-
-
-def _normalise_match_format(raw) -> Optional[str]:
-    if not raw or not isinstance(raw, str):
-        return None
-    key = raw.strip().upper().replace(" ", "_").replace("-", "_")
-    return _FORMAT_ALIASES.get(key, raw.strip())
-
-
-def _extract_match_format(scorecard: dict, match_listing: dict | None = None) -> Optional[str]:
-    """Defensive extractor — tries several likely paths.
-
-    Field name hasn't been pinned down on a live response yet (the proxy
-    refuses anonymous discovery), so we probe the spots that PlayHQ's docs
-    and similar sport-data APIs typically use. The first non-empty win.
-    Once we've confirmed the real path from a hard-refresh log we can prune
-    this down.
-    """
-    grade = scorecard.get("grade") or {}
-    summary = scorecard.get("matchSummary") or {}
-    config = scorecard.get("matchConfig") or scorecard.get("config") or {}
-    candidates = [
-        scorecard.get("matchType"), scorecard.get("matchFormat"),
-        scorecard.get("gameType"), scorecard.get("format"),
-        scorecard.get("cricketGameType"),
-        grade.get("type"), grade.get("matchType"), grade.get("gameType"),
-        grade.get("format"), grade.get("cricketGameType"),
-        summary.get("matchType"), summary.get("format"),
-        config.get("matchType"), config.get("format"), config.get("gameType"),
-    ]
-    if match_listing:
-        candidates.extend([
-            match_listing.get("matchType"), match_listing.get("gameType"),
-            match_listing.get("format"), match_listing.get("cricketGameType"),
-        ])
-    for c in candidates:
-        norm = _normalise_match_format(c)
-        if norm:
-            return norm
-    return None
-
-
 async def sync_grassroots_game_level_data(
     org_id_str: str,
     run_id: Optional[uuid.UUID] = None,
@@ -1203,7 +1156,6 @@ async def sync_grassroots_game_level_data(
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
     match_to_opp: dict[str, tuple[str | None, str]] = {}  # match_id → (opp_org_id, opp_club_name)
-    match_to_listing: dict[str, dict] = {}  # match_id → raw listing dict (kept for format extraction)
     for grade_id, season_id, grade_name in grades:
         stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
         try:
@@ -1224,7 +1176,6 @@ async def sync_grassroots_game_level_data(
                 continue
             seen_match_ids.add(mid)
             match_to_season[mid] = season_id
-            match_to_listing[mid] = m
             round_name = (m.get("round") or {}).get("name", "")
             match_to_is_final[mid] = "final" in round_name.lower()
             opp_team_m = next((t for t in teams if t is not our_team_m), None)
@@ -1286,10 +1237,6 @@ async def sync_grassroots_game_level_data(
             logger.info(f"GR-sync: bulk-updated opp_org_id for up to {len(opp_rows)} games")
 
     # ── PER-GAME PROCESSING ───────────────────────────────────────────────────
-    # One-shot diagnostic: log the top-level keys of the first scorecard so
-    # the real match-format field name can be confirmed from production logs
-    # without needing another investigation pass. Remove once pinned down.
-    _format_unknown_logged = False
     processed = 0
     for match_id_str in seen_match_ids:
         processed += 1
@@ -1311,30 +1258,20 @@ async def sync_grassroots_game_level_data(
                 # checked batting_innings only, which re-processed forfeits/abandons
                 # every sync — now those save with appearances but no stats rows.
                 existing = await session.execute(
-                    text("SELECT venue, match_format FROM games WHERE id=:gid LIMIT 1"),
+                    text("SELECT venue FROM games WHERE id=:gid LIMIT 1"),
                     {"gid": match_id_str},
                 )
                 existing_row = existing.fetchone()
                 if existing_row is not None:
-                    # Backfill venue + match_format on existing rows when they're
-                    # NULL. Lets the column populate during routine syncs instead
-                    # of requiring a hard refresh to take effect.
-                    backfill_sets: dict[str, str] = {}
                     if existing_row[0] is None:
+                        # Game exists but has no venue — backfill it from the scorecard.
                         venue_name = (scorecard.get("venue") or {}).get("name")
                         if venue_name:
-                            backfill_sets["venue"] = venue_name
-                    if existing_row[1] is None:
-                        mf = _extract_match_format(scorecard, match_to_listing.get(match_id_str))
-                        if mf:
-                            backfill_sets["match_format"] = mf
-                    if backfill_sets:
-                        assigns = ", ".join(f"{k}=:{k}" for k in backfill_sets)
-                        await session.execute(
-                            text(f"UPDATE games SET {assigns} WHERE id=:gid"),
-                            {**backfill_sets, "gid": match_id_str},
-                        )
-                        await session.commit()
+                            await session.execute(
+                                text("UPDATE games SET venue=:venue WHERE id=:gid"),
+                                {"venue": venue_name, "gid": match_id_str},
+                            )
+                            await session.commit()
                     stats["gr_games_skipped_done"] += 1
                     continue
 
@@ -1419,16 +1356,6 @@ async def sync_grassroots_game_level_data(
                 # Game
                 venue_name = (scorecard.get("venue") or {}).get("name")
                 _opp_id, _opp_name = match_to_opp.get(match_id_str, (None, ""))
-                match_format = _extract_match_format(scorecard, match_to_listing.get(match_id_str))
-                if not match_format and not _format_unknown_logged:
-                    listing = match_to_listing.get(match_id_str) or {}
-                    logger.info(
-                        f"GR-sync: match_format extraction failed for {match_id_str}; "
-                        f"scorecard top-level keys={sorted(scorecard.keys())} "
-                        f"grade keys={sorted((scorecard.get('grade') or {}).keys())} "
-                        f"listing keys={sorted(listing.keys())}"
-                    )
-                    _format_unknown_logged = True
                 session.add(Game(
                     id=match_uuid,
                     grade_id=grade_uuid,
@@ -1443,7 +1370,6 @@ async def sync_grassroots_game_level_data(
                     winning_team=winner_name,
                     is_final=match_to_is_final.get(match_id_str, False),
                     venue=venue_name,
-                    match_format=match_format,
                 ))
                 try:
                     await session.flush()
