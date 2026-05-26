@@ -550,6 +550,7 @@ async def query_player_career(
     limit: int,
     metric_filters: list[str] | None,
     filter_tree: dict | None,
+    offset: int = 0,
     context: dict,
 ) -> list[dict]:
     sort_by, sort_dir, limit = _validated("player_career", sort_by, sort_dir, limit)
@@ -611,7 +612,7 @@ async def query_player_career(
             SELECT * FROM agg
             {where_sql}
             ORDER BY {sort_by} {sort_dir} NULLS LAST
-            LIMIT :limit
+            LIMIT :limit OFFSET :offset
         """
     else:
         # Fast path — use pre-aggregated player_season_stats.
@@ -657,9 +658,10 @@ async def query_player_career(
             SELECT * FROM agg
             {where_sql}
             ORDER BY {sort_by} {sort_dir} NULLS LAST
-            LIMIT :limit
+            LIMIT :limit OFFSET :offset
         """
 
+    params["offset"] = offset
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
@@ -673,6 +675,7 @@ async def query_player_season(
     limit: int,
     metric_filters: list[str] | None,
     filter_tree: dict | None,
+    offset: int = 0,
     context: dict,
 ) -> list[dict]:
     """One row per (player, season). Uses pss when no context filters require
@@ -742,7 +745,7 @@ async def query_player_season(
             SELECT * FROM agg
             {where_sql}
             ORDER BY {sort_by} {sort_dir} NULLS LAST, season_year DESC
-            LIMIT :limit
+            LIMIT :limit OFFSET :offset
         """
     else:
         season_filter = ""
@@ -799,9 +802,10 @@ async def query_player_season(
             SELECT * FROM agg
             {where_sql}
             ORDER BY {sort_by} {sort_dir} NULLS LAST, season_year DESC
-            LIMIT :limit
+            LIMIT :limit OFFSET :offset
         """
 
+    params["offset"] = offset
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
@@ -815,6 +819,7 @@ async def query_player_grade(
     limit: int,
     metric_filters: list[str] | None,
     filter_tree: dict | None,
+    offset: int = 0,
     context: dict,
 ) -> list[dict]:
     """One row per (player, canonical grade name). Always uses per-innings
@@ -879,9 +884,10 @@ async def query_player_grade(
         SELECT * FROM agg
         {where_sql}
         ORDER BY {sort_by} {sort_dir} NULLS LAST
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
 
+    params["offset"] = offset
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
@@ -897,6 +903,7 @@ async def query_innings_list(
     limit: int,
     metric_filters: list[str] | None,
     filter_tree: dict | None,
+    offset: int = 0,
     context: dict,
 ) -> list[dict]:
     """One row per batting innings."""
@@ -951,9 +958,10 @@ async def query_innings_list(
         SELECT * FROM rows
         {where_sql}
         ORDER BY {sort_by} {sort_dir} NULLS LAST, played_at DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
 
+    params["offset"] = offset
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
@@ -967,6 +975,7 @@ async def query_spell_list(
     limit: int,
     metric_filters: list[str] | None,
     filter_tree: dict | None,
+    offset: int = 0,
     context: dict,
 ) -> list[dict]:
     sort_by, sort_dir, limit = _validated("spell_list", sort_by, sort_dir, limit)
@@ -1013,9 +1022,10 @@ async def query_spell_list(
         SELECT * FROM rows
         {where_sql}
         ORDER BY {sort_by} {sort_dir} NULLS LAST, played_at DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
 
+    params["offset"] = offset
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
@@ -1029,6 +1039,7 @@ async def query_match_list(
     limit: int,
     metric_filters: list[str] | None,
     filter_tree: dict | None,
+    offset: int = 0,
     context: dict,
 ) -> list[dict]:
     """One row per club match. Team / opposition runs are derived from
@@ -1096,9 +1107,10 @@ async def query_match_list(
         SELECT * FROM rows
         {where_sql}
         ORDER BY {sort_by} {sort_dir} NULLS LAST, played_at DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
 
+    params["offset"] = offset
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
@@ -1112,6 +1124,7 @@ async def query_partnership_list(
     limit: int,
     metric_filters: list[str] | None,
     filter_tree: dict | None,
+    offset: int = 0,
     context: dict,
 ) -> list[dict]:
     sort_by, sort_dir, limit = _validated("partnership_list", sort_by, sort_dir, limit)
@@ -1157,9 +1170,10 @@ async def query_partnership_list(
         SELECT * FROM rows
         {where_sql}
         ORDER BY {sort_by} {sort_dir} NULLS LAST, runs DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
 
+    params["offset"] = offset
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
@@ -1167,7 +1181,7 @@ async def query_partnership_list(
 # ─── Derived / streak queries ──────────────────────────────────────────────────
 
 async def derived_consecutive_ducks(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """For each player, find the longest run of consecutive innings (ordered by
     played_at, then innings_number) that were ducks. A duck = runs=0 AND not_out
@@ -1226,14 +1240,15 @@ async def derived_consecutive_ducks(
         SELECT * FROM best
         WHERE longest_duck_streak >= 2
         ORDER BY longest_duck_streak DESC, player_name ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_consecutive_fifties(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Longest run of consecutive innings scoring 50+."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -1278,14 +1293,15 @@ async def derived_consecutive_fifties(
         SELECT * FROM best
         WHERE longest_fifty_streak >= 2
         ORDER BY longest_fifty_streak DESC, player_name ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_best_partnership_pair(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Best partnership ever for each pair of batters (unordered).
 
@@ -1333,14 +1349,15 @@ async def derived_best_partnership_pair(
         WHERE r.rk = 1
           AND pa.organisation_id = :org_id
         ORDER BY best_partnership DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_carried_bat(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Players who carried the bat — batted at #1 or #2 and were not out when
     their team was bowled out (9+ dismissals in that innings)."""
@@ -1397,14 +1414,15 @@ async def derived_carried_bat(
         )
         SELECT * FROM agg
         ORDER BY carried_bat_count DESC, highest_score DESC NULLS LAST
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_most_runs_first_n(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Who scored the most runs in their first N career matches.
     N comes from context['first_n_matches'] (default 50)."""
@@ -1453,14 +1471,15 @@ async def derived_most_runs_first_n(
         FROM first_n_agg
         WHERE matches_played >= :first_n
         ORDER BY runs DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_milestone_runs(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Who reached a runs milestone in the fewest career matches.
     Milestone comes from context['milestone_runs'] (default 1000)."""
@@ -1516,8 +1535,9 @@ async def derived_milestone_runs(
             runs_at_crossing
         FROM crossings
         ORDER BY matches_to_milestone ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -1528,7 +1548,7 @@ async def derived_milestone_runs(
 # (player, game), order by the target metric desc.
 
 async def derived_most_runs_in_match(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Highest (player, match) batting aggregates — sums across both innings."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -1566,36 +1586,37 @@ async def derived_most_runs_in_match(
         )
         SELECT player_id::text AS player_id, * FROM per_match
         ORDER BY runs DESC, balls ASC NULLS LAST
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_most_sixes_in_match(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Most sixes by one player in a single match (across both innings)."""
-    return await _per_match_batting_metric(session, org_id=org_id, limit=limit, context=context, metric_col="sixes")
+    return await _per_match_batting_metric(session, org_id=org_id, limit=limit, offset=offset, context=context, metric_col="sixes")
 
 
 async def derived_most_fours_in_match(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Most fours by one player in a single match."""
-    return await _per_match_batting_metric(session, org_id=org_id, limit=limit, context=context, metric_col="fours")
+    return await _per_match_batting_metric(session, org_id=org_id, limit=limit, offset=offset, context=context, metric_col="fours")
 
 
 async def derived_most_boundaries_in_match(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Most boundaries (4s + 6s) by one player in a single match."""
-    return await _per_match_batting_metric(session, org_id=org_id, limit=limit, context=context,
+    return await _per_match_batting_metric(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                             metric_col="(COALESCE(bi.fours,0)+COALESCE(bi.sixes,0))", metric_label="boundaries")
 
 
 async def _per_match_batting_metric(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict, metric_col: str, metric_label: str | None = None,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict, metric_col: str, metric_label: str | None = None,
 ) -> list[dict]:
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
@@ -1631,14 +1652,15 @@ async def _per_match_batting_metric(
         )
         SELECT player_id::text AS player_id, * FROM per_match
         ORDER BY {label} DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_best_bowling_in_match(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Best bowling figures in a single match — combined wickets, total runs conceded."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -1674,21 +1696,22 @@ async def derived_best_bowling_in_match(
         )
         SELECT player_id::text AS player_id, * FROM per_match
         ORDER BY wickets DESC, runs ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_most_wickets_in_match(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Same data as best_bowling_in_match but sorted by wickets only."""
-    return await derived_best_bowling_in_match(session, org_id=org_id, limit=limit, context=context)
+    return await derived_best_bowling_in_match(session, org_id=org_id, limit=limit, offset=offset, context=context)
 
 
 async def derived_most_balls_bowled_match(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Most balls bowled by one player in a single match."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -1723,14 +1746,15 @@ async def derived_most_balls_bowled_match(
         SELECT player_id::text AS player_id, * FROM per_match
         WHERE balls_bowled > 0
         ORDER BY balls_bowled DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def _per_match_fielding_metric(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict, col: str, label: str,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict, col: str, label: str,
 ) -> list[dict]:
     """Highest single-match values of catches / run_outs / stumpings."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -1762,28 +1786,29 @@ async def _per_match_fielding_metric(
         )
         SELECT player_id::text AS player_id, * FROM per_match
         ORDER BY {label} DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
-async def derived_most_catches_in_match(session, *, org_id, limit, context):
-    return await _per_match_fielding_metric(session, org_id=org_id, limit=limit, context=context, col="catches", label="catches")
+async def derived_most_catches_in_match(session, *, org_id, limit, offset=0, context):
+    return await _per_match_fielding_metric(session, org_id=org_id, limit=limit, offset=offset, context=context, col="catches", label="catches")
 
 
-async def derived_most_stumpings_in_match(session, *, org_id, limit, context):
-    return await _per_match_fielding_metric(session, org_id=org_id, limit=limit, context=context, col="stumpings", label="stumpings")
+async def derived_most_stumpings_in_match(session, *, org_id, limit, offset=0, context):
+    return await _per_match_fielding_metric(session, org_id=org_id, limit=limit, offset=offset, context=context, col="stumpings", label="stumpings")
 
 
-async def derived_most_run_outs_in_match(session, *, org_id, limit, context):
-    return await _per_match_fielding_metric(session, org_id=org_id, limit=limit, context=context, col="run_outs", label="run_outs")
+async def derived_most_run_outs_in_match(session, *, org_id, limit, offset=0, context):
+    return await _per_match_fielding_metric(session, org_id=org_id, limit=limit, offset=offset, context=context, col="run_outs", label="run_outs")
 
 
 # ─── Duck variants ─────────────────────────────────────────────────────────────
 
 async def derived_golden_ducks(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Out for 0 off 0 balls (golden duck) — count per player."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -1814,14 +1839,15 @@ async def derived_golden_ducks(
         FROM ducks
         GROUP BY player_id, player_name
         ORDER BY golden_ducks DESC, player_name ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_duck_pairs(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Players who scored a duck in BOTH innings of the same match — count per player."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -1863,17 +1889,18 @@ async def derived_duck_pairs(
         FROM per_match_ducks
         GROUP BY player_id, player_name
         ORDER BY duck_pairs DESC, player_name ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_consecutive_no_duck(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Longest run of consecutive innings without being dismissed for a duck."""
-    return await _longest_streak(session, org_id=org_id, limit=limit, context=context,
+    return await _longest_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                   is_match_expr=(
                                       "(bi.runs > 0 OR bi.not_out = TRUE OR "
                                       "bi.dismissal_type IS NULL OR "
@@ -1885,7 +1912,7 @@ async def derived_consecutive_no_duck(
 # ─── Streak helpers ────────────────────────────────────────────────────────────
 
 async def _longest_streak(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict, is_match_expr: str, result_col: str,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict, is_match_expr: str, result_col: str,
 ) -> list[dict]:
     """Generic longest-streak-of-innings helper. is_match_expr is a SQL bool
     expression evaluated per batting_innings row inside the streak CTE."""
@@ -1929,8 +1956,9 @@ async def _longest_streak(
         SELECT * FROM best
         WHERE {result_col} >= 2
         ORDER BY {result_col} DESC, player_name ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -1939,7 +1967,7 @@ async def derived_consecutive_no_century(
     session, *, org_id, limit, context,
 ) -> list[dict]:
     """Longest streak of innings scoring under 100."""
-    return await _longest_streak(session, org_id=org_id, limit=limit, context=context,
+    return await _longest_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                   is_match_expr="bi.runs < 100", result_col="longest_no_century_streak")
 
 
@@ -1947,14 +1975,14 @@ async def derived_consecutive_hundreds(
     session, *, org_id, limit, context,
 ) -> list[dict]:
     """Longest streak of innings scoring 100+."""
-    return await _longest_streak(session, org_id=org_id, limit=limit, context=context,
+    return await _longest_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                   is_match_expr="bi.runs >= 100", result_col="longest_hundred_streak")
 
 
 # ─── Bowling streaks ───────────────────────────────────────────────────────────
 
 async def _longest_bowling_streak(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict, is_match_expr: str, result_col: str,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict, is_match_expr: str, result_col: str,
 ) -> list[dict]:
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 200), **mp, **pp}
@@ -1993,22 +2021,23 @@ async def _longest_bowling_streak(
         SELECT * FROM best
         WHERE {result_col} >= 2
         ORDER BY {result_col} DESC, player_name ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
-async def derived_consecutive_innings_with_wicket(session, *, org_id, limit, context):
+async def derived_consecutive_innings_with_wicket(session, *, org_id, limit, offset=0, context):
     """Longest streak of bowling innings (spells) where player took 1+ wicket."""
-    return await _longest_bowling_streak(session, org_id=org_id, limit=limit, context=context,
+    return await _longest_bowling_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                           is_match_expr="COALESCE(bs.wickets, 0) >= 1",
                                           result_col="longest_wicket_streak")
 
 
-async def derived_consecutive_5wi(session, *, org_id, limit, context):
+async def derived_consecutive_5wi(session, *, org_id, limit, offset=0, context):
     """Longest streak of bowling innings with 5+ wickets."""
-    return await _longest_bowling_streak(session, org_id=org_id, limit=limit, context=context,
+    return await _longest_bowling_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                           is_match_expr="COALESCE(bs.wickets, 0) >= 5",
                                           result_col="longest_5wi_streak")
 
@@ -2016,7 +2045,7 @@ async def derived_consecutive_5wi(session, *, org_id, limit, context):
 # ─── Debut performances ────────────────────────────────────────────────────────
 
 async def derived_batting_on_debut(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Best score in a player's debut match (sum across both innings of that match)."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2062,14 +2091,15 @@ async def derived_batting_on_debut(
         )
         SELECT player_id::text AS player_id, * FROM debut_runs
         ORDER BY runs DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_ducks_on_debut(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Players whose debut batting innings was a duck."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2107,14 +2137,15 @@ async def derived_ducks_on_debut(
         SELECT player_id::text AS player_id, * FROM first_inn
         WHERE runs = 0 AND not_out = FALSE
         ORDER BY played_at DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_bowling_on_debut_innings(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Best bowling figures in a player's debut spell."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2147,8 +2178,9 @@ async def derived_bowling_on_debut_innings(
         )
         SELECT player_id::text AS player_id, * FROM first_spell
         ORDER BY wickets DESC, runs ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -2156,7 +2188,7 @@ async def derived_bowling_on_debut_innings(
 # ─── Dismissal-type counts ─────────────────────────────────────────────────────
 
 async def _dismissal_count(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict, like_patterns: list[str], result_col: str,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict, like_patterns: list[str], result_col: str,
 ) -> list[dict]:
     """Generic dismissal-type counter — counts batting_innings rows where
     LOWER(dismissal_type) matches any of the LIKE patterns."""
@@ -2187,39 +2219,40 @@ async def _dismissal_count(
         SELECT * FROM counts
         WHERE {result_col} > 0
         ORDER BY {result_col} DESC, player_name ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
-async def derived_dismissal_bowled(session, *, org_id, limit, context):
-    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+async def derived_dismissal_bowled(session, *, org_id, limit, offset=0, context):
+    return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                    like_patterns=["bowled", "b %", "b. %"], result_col="bowled_count")
 
 
-async def derived_dismissal_caught(session, *, org_id, limit, context):
-    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+async def derived_dismissal_caught(session, *, org_id, limit, offset=0, context):
+    return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                    like_patterns=["caught%", "c %", "c. %", "ct%"], result_col="caught_count")
 
 
-async def derived_dismissal_lbw(session, *, org_id, limit, context):
-    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+async def derived_dismissal_lbw(session, *, org_id, limit, offset=0, context):
+    return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                    like_patterns=["lbw%"], result_col="lbw_count")
 
 
-async def derived_dismissal_run_out(session, *, org_id, limit, context):
-    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+async def derived_dismissal_run_out(session, *, org_id, limit, offset=0, context):
+    return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                    like_patterns=["run out%", "ro%"], result_col="run_out_count")
 
 
-async def derived_dismissal_stumped(session, *, org_id, limit, context):
-    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+async def derived_dismissal_stumped(session, *, org_id, limit, offset=0, context):
+    return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                    like_patterns=["stumped%", "st %", "st. %"], result_col="stumped_count")
 
 
 async def derived_unusual_dismissals(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Innings dismissed by uncommon means (hit wicket, retired hurt/out, handled, obstructing)."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2258,8 +2291,9 @@ async def derived_unusual_dismissals(
           )
           {player_extra}
         ORDER BY gu.played_at DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -2267,7 +2301,7 @@ async def derived_unusual_dismissals(
 # ─── Century / fifty derived ───────────────────────────────────────────────────
 
 async def derived_century_and_duck_same_match(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Players who scored a 100 and a duck in the same match."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2314,14 +2348,15 @@ async def derived_century_and_duck_same_match(
         )
         SELECT player_id::text AS player_id, * FROM per_match
         ORDER BY top_score DESC, played_at DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_century_each_innings(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Player scored 100+ in both innings of the same match."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2359,14 +2394,15 @@ async def derived_century_each_innings(
         )
         SELECT player_id::text AS player_id, * FROM per_match
         ORDER BY match_runs DESC, played_at DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_innings_without_century(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Players with most innings who've never scored a century, ranked by inns count."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2395,14 +2431,15 @@ async def derived_innings_without_century(
         SELECT * FROM agg
         WHERE hundreds = 0
         ORDER BY innings_played DESC, top_score DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_lowest_century_conversion(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Players with the lowest fifty→hundred conversion rate (must have 5+ fifties)."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2432,14 +2469,15 @@ async def derived_lowest_century_conversion(
         FROM agg
         WHERE (fifties + hundreds) >= 5
         ORDER BY conversion_pct ASC NULLS FIRST, fifties DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_innings_per_fifty(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Lowest innings-per-50 ratio (lower = more frequent 50s)."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2470,8 +2508,9 @@ async def derived_innings_per_fifty(
         FROM agg
         WHERE fifty_plus >= 5
         ORDER BY innings_per_fifty ASC NULLS LAST
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -2479,7 +2518,7 @@ async def derived_innings_per_fifty(
 # ─── Partnership derived ───────────────────────────────────────────────────────
 
 async def derived_top_partnerships_by_wicket(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Best partnership at each wicket position (1st wicket … 10th wicket)."""
     mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
@@ -2514,14 +2553,15 @@ async def derived_top_partnerships_by_wicket(
         )
         SELECT * FROM ranked WHERE rk = 1
         ORDER BY wicket_number ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_partnership_aggregates_pair(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Total partnership runs for each pair of batters across all their matches."""
     mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
@@ -2559,14 +2599,15 @@ async def derived_partnership_aggregates_pair(
         JOIN players pb ON pb.id = agg.player_b_id
         WHERE pa.organisation_id = :org_id
         ORDER BY agg.total_runs DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_century_partnerships_pair(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Number of 100+ partnerships per pair of batters."""
     mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
@@ -2603,8 +2644,9 @@ async def derived_century_partnerships_pair(
         JOIN players pb ON pb.id = agg.player_b_id
         WHERE pa.organisation_id = :org_id
         ORDER BY agg.century_partnerships DESC, agg.best_partnership DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -2612,7 +2654,7 @@ async def derived_century_partnerships_pair(
 # ─── Batting position ──────────────────────────────────────────────────────────
 
 async def derived_top_scores_by_position(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Top individual scores at each batting position (1-11)."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2648,8 +2690,9 @@ async def derived_top_scores_by_position(
         )
         SELECT * FROM ranked WHERE rk = 1
         ORDER BY batting_position ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -2657,7 +2700,7 @@ async def derived_top_scores_by_position(
 # ─── Opening bat & bowl same match ─────────────────────────────────────────────
 
 async def derived_opening_bat_and_bowl(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Players who batted at #1 or #2 AND took the new ball (bowled in innings #1, first spell)
     in the same match."""
@@ -2700,8 +2743,9 @@ async def derived_opening_bat_and_bowl(
         )
         SELECT * FROM per_player
         ORDER BY occurrences DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -2709,7 +2753,7 @@ async def derived_opening_bat_and_bowl(
 # ─── Top scores as % of innings total ──────────────────────────────────────────
 
 async def derived_top_scores_pct_innings(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Individual scores expressed as a % of the club innings total in which they were made."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2757,8 +2801,9 @@ async def derived_top_scores_pct_innings(
         SELECT * FROM rows
         WHERE pct_of_innings IS NOT NULL
         ORDER BY pct_of_innings DESC, runs DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -2766,7 +2811,7 @@ async def derived_top_scores_pct_innings(
 # ─── Catches + stumpings combined ──────────────────────────────────────────────
 
 async def derived_catches_stumpings(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Career catches + stumpings combined (typical wicketkeeper / fielder metric)."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2793,8 +2838,9 @@ async def derived_catches_stumpings(
         SELECT * FROM agg
         WHERE catches_stumpings > 0
         ORDER BY catches_stumpings DESC, catches DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -2802,7 +2848,7 @@ async def derived_catches_stumpings(
 # ─── Bowler-wickets driven derived ─────────────────────────────────────────────
 
 async def derived_ducks_inflicted(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Count of times each bowler dismissed a batter for 0.
     Joins bowler_wickets (which records who got the wicket) to batting_innings
@@ -2844,14 +2890,15 @@ async def derived_ducks_inflicted(
         )
         SELECT * FROM agg
         ORDER BY ducks_inflicted DESC, player_name ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_golden_ducks_inflicted(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Same as ducks_inflicted but only innings where batter faced 0 or 1 ball."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
@@ -2891,14 +2938,15 @@ async def derived_golden_ducks_inflicted(
         )
         SELECT * FROM agg
         ORDER BY golden_ducks_inflicted DESC, player_name ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_bowler_fielder_combo(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Most productive bowler+fielder partnerships — count of wickets where
     fielder caught/ran out a batter off this bowler."""
@@ -2931,14 +2979,15 @@ async def derived_bowler_fielder_combo(
         JOIN players pb ON pb.id = agg.bowler_id
         JOIN players pf ON pf.id = agg.fielder_id
         ORDER BY agg.wickets DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 async def derived_top_opening_bowlers(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Count of games where this player opened the bowling (took the new ball).
     A player is an "opener" for an innings if they have the lowest spell.id among
@@ -2973,8 +3022,9 @@ async def derived_top_opening_bowlers(
         )
         SELECT * FROM agg
         ORDER BY opening_matches DESC, opening_innings DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -2982,7 +3032,7 @@ async def derived_top_opening_bowlers(
 # ─── Hat tricks — sourced from manually-recorded achievements ─────────────────
 
 async def derived_hat_tricks(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Hat tricks from the player_achievements table (manually recorded).
     Each row in the achievements table represents one hat trick instance; group
@@ -3012,17 +3062,18 @@ async def derived_hat_tricks(
         FROM ht
         GROUP BY player_id, player_name
         ORDER BY hat_tricks DESC, player_name ASC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
 # ─── C&B dismissals — separate from generic 'caught' ──────────────────────────
 
-async def derived_caught_and_bowled(session, *, org_id, limit, context):
+async def derived_caught_and_bowled(session, *, org_id, limit, offset=0, context):
     """Count of times each batter was dismissed caught & bowled by the same player."""
-    return await _dismissal_count(session, org_id=org_id, limit=limit, context=context,
+    return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                    like_patterns=["caught and bowled%", "c & b%", "c&b%"],
                                    result_col="c_and_b_count")
 
@@ -3030,7 +3081,7 @@ async def derived_caught_and_bowled(session, *, org_id, limit, context):
 # ─── Batting collapses (fall_of_wickets-based) ────────────────────────────────
 
 async def _wicket_collapse(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict, n_wickets: int, max_run_span: int = 30,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict, n_wickets: int, max_run_span: int = 30,
 ) -> list[dict]:
     """Find matches where N consecutive wickets fell within max_run_span runs.
     Reports one row per (game, innings) where it happened, with the start/end
@@ -3084,30 +3135,31 @@ async def _wicket_collapse(
         )
         SELECT * FROM collapses
         ORDER BY run_span ASC, played_at DESC
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
 
-async def derived_5wkt_collapse(session, *, org_id, limit, context):
-    return await _wicket_collapse(session, org_id=org_id, limit=limit, context=context, n_wickets=5, max_run_span=30)
+async def derived_5wkt_collapse(session, *, org_id, limit, offset=0, context):
+    return await _wicket_collapse(session, org_id=org_id, limit=limit, offset=offset, context=context, n_wickets=5, max_run_span=30)
 
 
-async def derived_6wkt_collapse(session, *, org_id, limit, context):
-    return await _wicket_collapse(session, org_id=org_id, limit=limit, context=context, n_wickets=6, max_run_span=40)
+async def derived_6wkt_collapse(session, *, org_id, limit, offset=0, context):
+    return await _wicket_collapse(session, org_id=org_id, limit=limit, offset=offset, context=context, n_wickets=6, max_run_span=40)
 
 
-async def derived_7wkt_collapse(session, *, org_id, limit, context):
-    return await _wicket_collapse(session, org_id=org_id, limit=limit, context=context, n_wickets=7, max_run_span=50)
+async def derived_7wkt_collapse(session, *, org_id, limit, offset=0, context):
+    return await _wicket_collapse(session, org_id=org_id, limit=limit, offset=offset, context=context, n_wickets=7, max_run_span=50)
 
 
-async def derived_8wkt_collapse(session, *, org_id, limit, context):
-    return await _wicket_collapse(session, org_id=org_id, limit=limit, context=context, n_wickets=8, max_run_span=60)
+async def derived_8wkt_collapse(session, *, org_id, limit, offset=0, context):
+    return await _wicket_collapse(session, org_id=org_id, limit=limit, offset=offset, context=context, n_wickets=8, max_run_span=60)
 
 
-async def derived_9wkt_collapse(session, *, org_id, limit, context):
-    return await _wicket_collapse(session, org_id=org_id, limit=limit, context=context, n_wickets=9, max_run_span=70)
+async def derived_9wkt_collapse(session, *, org_id, limit, offset=0, context):
+    return await _wicket_collapse(session, org_id=org_id, limit=limit, offset=offset, context=context, n_wickets=9, max_run_span=70)
 
 
 # ─── Total season minutes batted ───────────────────────────────────────────────
@@ -3115,7 +3167,7 @@ async def derived_9wkt_collapse(session, *, org_id, limit, context):
 # populated, so a season-level "most minutes batted" report is possible.
 
 async def derived_most_minutes_in_season(
-    session: AsyncSession, *, org_id: str, limit: int, context: dict,
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Most batting minutes accumulated in a single season."""
     params = {"org_id": org_id, "limit": min(max(1, limit), 500)}
@@ -3143,8 +3195,9 @@ async def derived_most_minutes_in_season(
           AND COALESCE(pss.batting_minutes, 0) > 0
           {season_filter}
         ORDER BY pss.batting_minutes DESC NULLS LAST
-        LIMIT :limit
+        LIMIT :limit OFFSET :offset
     """
+    params["offset"] = offset
     result = await session.execute(text(sql), params)
     return [dict(r) for r in result.mappings()]
 
@@ -3768,32 +3821,40 @@ async def run_query(
     sort_by: str,
     sort_dir: str,
     limit: int,
+    page: int = 1,
     metric_filters: list[str] | None,
     filter_tree: dict | None,
     context: dict,
-) -> list[dict]:
+) -> dict:
     if target not in TARGET_DISPATCH:
         raise ValueError(f"Unknown query target: {target}")
+    page = max(1, page)
+    offset = (page - 1) * limit
     fn = TARGET_DISPATCH[target]
-    return await fn(
+    rows = await fn(
         session,
         org_id=org_id,
         sort_by=sort_by,
         sort_dir=sort_dir,
         limit=limit,
+        offset=offset,
         metric_filters=metric_filters,
         filter_tree=filter_tree,
         context=context,
     )
+    return {"rows": rows, "has_more": len(rows) == limit, "page": page}
 
 
 async def run_derived(
-    session: AsyncSession, *, name: str, org_id: str, limit: int, context: dict,
-) -> list[dict]:
+    session: AsyncSession, *, name: str, org_id: str, limit: int, page: int = 1, context: dict,
+) -> dict:
     if name not in DERIVED_QUERIES:
         raise ValueError(f"Unknown derived query: {name}")
+    page = max(1, page)
+    offset = (page - 1) * limit
     fn = DERIVED_QUERIES[name]["fn"]
-    return await fn(session, org_id=org_id, limit=limit, context=context)
+    rows = await fn(session, org_id=org_id, limit=limit, offset=offset, context=context)
+    return {"rows": rows, "has_more": len(rows) == limit, "page": page}
 
 
 METRIC_CATEGORIES: list[dict] = [
