@@ -69,6 +69,7 @@ const METRIC_LABELS = {
   batter1_runs: { label: 'Batter 1 Runs', short: 'B1 R', decimal: false },
   batter2_runs: { label: 'Batter 2 Runs', short: 'B2 R', decimal: false },
   member_count: { label: 'Members', short: 'Members', decimal: false },
+  played_at: { label: 'Date', short: 'Date', decimal: false },
 }
 
 const OPERATORS = [
@@ -249,6 +250,7 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'golden_ducks_inflicted',            label: 'Most golden ducks inflicted', description: 'Bowlers who dismissed batters for 0 off 0–1 balls.' },
       { type: 'derived', key: 'bowler_fielder_combo',              label: 'Top bowler/fielder combinations', description: 'Most productive bowler+catcher partnerships.' },
       { type: 'derived', key: 'top_opening_bowlers',               label: 'Top opening bowlers by match count', description: 'Players who most often take the new ball.' },
+      { type: 'derived', key: 'most_wickets_in_match',             label: 'Most wickets taken in a match', description: 'Most wickets by one bowler across both innings.' },
       { type: 'preset', label: 'On this day — bowling',            target: 'spell_list',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: { on_this_day: true } },
     ],
   },
@@ -274,12 +276,11 @@ const PRESET_GROUPS = [
       { type: 'preset', label: 'Highest team scores',      target: 'match_list', sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: {} },
       { type: 'preset', label: 'Lowest team scores',       target: 'match_list', sortBy: 'team_runs',    sortDir: 'asc',  filters: [{ field: 'team_runs', op: 'gt', value: '0' }], context: {} },
       { type: 'preset', label: 'Highest opposition scores',target: 'match_list', sortBy: 'opp_runs',     sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Lowest opposition scores', target: 'match_list', sortBy: 'opp_runs',     sortDir: 'asc',  filters: [{ field: 'opp_runs', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Lowest opposition scores', target: 'match_list', sortBy: 'opp_runs',     sortDir: 'asc',  filters: [{ field: 'opp_runs', op: 'gt', value: '0' }, { field: 'opp_wickets', op: 'gte', value: '10' }], context: {} },
       { type: 'preset', label: 'Biggest winning margins',  target: 'match_list', sortBy: 'margin_runs',  sortDir: 'desc', filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
       { type: 'preset', label: 'Closest wins',             target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
       { type: 'preset', label: 'Biggest defeats',          target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'lt', value: '0' }], context: { result: 'lost' } },
-      { type: 'derived', key: 'most_wickets_in_match',     label: 'Most wickets taken in a match', description: 'Most wickets by one bowler across both innings.' },
-      { type: 'preset', label: 'Finals',                   target: 'match_list', sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: { finals_only: true } },
+      { type: 'preset', label: 'Finals',                   target: 'match_list', sortBy: 'played_at',   sortDir: 'desc', filters: [], context: { finals_only: true } },
     ],
   },
 ]

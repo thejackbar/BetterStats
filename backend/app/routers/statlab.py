@@ -172,7 +172,10 @@ async def statlab_derived(
     if name not in svc.DERIVED_QUERIES:
         raise HTTPException(status_code=400, detail=f"Unknown derived query: {name}")
     ctx = _ctx_from_request(request)
-    result = await svc.run_derived(db, name=name, org_id=org_id, limit=limit, page=page, context=ctx)
+    try:
+        result = await svc.run_derived(db, name=name, org_id=org_id, limit=limit, page=page, context=ctx)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Derived query error: {e}")
     return {"rows": _serialise(result["rows"]), "has_more": result["has_more"], "page": result["page"]}
 
 
