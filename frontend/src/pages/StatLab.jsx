@@ -309,6 +309,7 @@ const CONTEXT_KEYS = [
   'dismissal','position_min','position_max',
   'first_n_matches','milestone_runs','on_this_day',
   'gender','player_role','award_category','award_subcategory','award_name','office_bearer',
+  'family_id',
 ]
 
 // Category groupings for the field picker. Field membership is intersected
@@ -554,6 +555,11 @@ function PickerInput({ orgId, kind, value, placeholder, onChange }) {
 function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, activeDerived, orgId }) {
   const set = (k, v) => onChange({ ...ctx, [k]: v })
   const showInningsFilters = targetShape === 'list' || targetShape === 'aggregate'
+  const [families, setFamilies] = useState([])
+  useEffect(() => {
+    if (!orgId) return
+    api.listFamilies(orgId).then(setFamilies).catch(() => setFamilies([]))
+  }, [orgId])
   return (
     <div className="flex flex-col gap-2.5">
       <div>
@@ -689,6 +695,15 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, acti
                          placeholder="e.g. President, Secretary"
                          onChange={v => set('office_bearer', v)} />
           </div>
+          {families.length > 0 && (
+            <div>
+              <Label>Family</Label>
+              <select className={selectCls + ' mt-1'} value={ctx.family_id || ''} onChange={e => set('family_id', e.target.value)}>
+                <option value="">Any family</option>
+                {families.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
       </div>
     </div>

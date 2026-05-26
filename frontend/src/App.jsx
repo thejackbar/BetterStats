@@ -31,6 +31,7 @@ import SuperUsers from './pages/admin/SuperUsers'
 import AdminAwards from './pages/admin/AdminAwards'
 import AdminAwardDefinitions from './pages/admin/AdminAwardDefinitions'
 import AdminMerge from './pages/admin/AdminMerge'
+import AdminFamilies from './pages/admin/AdminFamilies'
 import AdminGrades from './pages/admin/AdminGrades'
 import AdminSync from './pages/admin/AdminSync'
 import AdminPartnershipRecords from './pages/admin/AdminPartnershipRecords'
@@ -97,6 +98,7 @@ export default function App() {
         <Route path="/admin/awards" element={<ProtectedRoute><AdminAwards /></ProtectedRoute>} />
         <Route path="/admin/award-definitions" element={<ProtectedRoute><AdminAwardDefinitions /></ProtectedRoute>} />
         <Route path="/admin/merge" element={<ProtectedRoute><AdminMerge /></ProtectedRoute>} />
+        <Route path="/admin/families" element={<ProtectedRoute><AdminFamilies /></ProtectedRoute>} />
         <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
         <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
         <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />

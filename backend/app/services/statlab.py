@@ -186,6 +186,12 @@ PLAYER_CONTEXT_FILTERS: dict[str, dict] = {
         "sql": "p.id IN (SELECT player_id FROM player_achievements WHERE org_id = CAST(:org_id AS UUID) AND LOWER(COALESCE(category, '')) = 'office bearer' AND LOWER(COALESCE(achievement, '')) = LOWER(:ctx_office_bearer) AND player_id IS NOT NULL)",
         "value_kind": "text",
     },
+    # Family filter — restrict to players in the chosen family. The family
+    # must belong to the same org; the org_id bind is already in scope.
+    "family_id": {
+        "sql": "p.id IN (SELECT fm.player_id FROM family_members fm JOIN families f ON f.id = fm.family_id WHERE f.id = CAST(:ctx_family_id AS UUID) AND f.organisation_id = CAST(:org_id AS UUID))",
+        "value_kind": "uuid",
+    },
 }
 
 # Combined view for schema introspection.
