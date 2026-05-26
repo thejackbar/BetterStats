@@ -19,50 +19,52 @@ const TARGETS = [
   { key: 'partnership_list', label: 'Partnerships',      shape: 'list',      dim: 'partnership' },
 ]
 
-// Display label + decimal-flag for every metric we know about, keyed by metric name.
+// Display labels for every metric. `label` is the full name shown in the
+// query builder (pickers, sort menus, filter chips). `short` is an optional
+// abbreviation used in tight spots like results-table column headers.
 const METRIC_LABELS = {
-  matches: { label: 'Matches', decimal: false },
-  seasons_played: { label: 'Seasons', decimal: false },
-  batting_innings: { label: 'Inns', decimal: false },
-  runs: { label: 'Runs', decimal: false },
-  not_outs: { label: 'NO', decimal: false },
-  balls_faced: { label: 'Balls', decimal: false },
-  batting_average: { label: 'Avg', decimal: true },
-  batting_strike_rate: { label: 'SR', decimal: true },
-  high_score: { label: 'HS', decimal: false },
-  fifties: { label: '50s', decimal: false },
-  hundreds: { label: '100s', decimal: false },
-  ducks: { label: 'Ducks', decimal: false },
-  fours: { label: '4s', decimal: false },
-  sixes: { label: '6s', decimal: false },
-  bowling_innings: { label: 'Spells', decimal: false },
-  wickets: { label: 'Wkts', decimal: false },
-  overs: { label: 'Overs', decimal: true },
-  runs_conceded: { label: 'R Conc', decimal: false },
-  bowling_average: { label: 'Bowl Avg', decimal: true },
-  bowling_economy: { label: 'Econ', decimal: true },
-  bowling_strike_rate: { label: 'Bowl SR', decimal: true },
-  five_wicket_innings: { label: '5w', decimal: false },
-  maidens: { label: 'Mdns', decimal: false },
-  best_bowling_wickets: { label: 'BBW', decimal: false },
-  catches: { label: 'Ct', decimal: false },
-  run_outs: { label: 'RO', decimal: false },
-  stumpings: { label: 'St', decimal: false },
-  balls: { label: 'Balls', decimal: false },
-  strike_rate: { label: 'SR', decimal: true },
-  batting_position: { label: 'Pos', decimal: false },
-  innings_number: { label: 'Inn#', decimal: false },
-  economy: { label: 'Econ', decimal: true },
-  wides: { label: 'Wd', decimal: false },
-  no_balls: { label: 'NB', decimal: false },
-  team_runs: { label: 'For', decimal: false },
-  team_wickets: { label: 'Wkts For', decimal: false },
-  opp_runs: { label: 'Against', decimal: false },
-  opp_wickets: { label: 'Wkts Agst', decimal: false },
-  margin_runs: { label: 'Margin', decimal: false },
-  wicket_number: { label: 'Wkt #', decimal: false },
-  batter1_runs: { label: 'B1 R', decimal: false },
-  batter2_runs: { label: 'B2 R', decimal: false },
+  matches: { label: 'Matches', short: 'M', decimal: false },
+  seasons_played: { label: 'Seasons Played', short: 'Seasons', decimal: false },
+  batting_innings: { label: 'Batting Innings', short: 'Inns', decimal: false },
+  runs: { label: 'Runs', short: 'Runs', decimal: false },
+  not_outs: { label: 'Not Outs', short: 'NO', decimal: false },
+  balls_faced: { label: 'Balls Faced', short: 'Balls', decimal: false },
+  batting_average: { label: 'Batting Average', short: 'Avg', decimal: true },
+  batting_strike_rate: { label: 'Batting Strike Rate', short: 'SR', decimal: true },
+  high_score: { label: 'High Score', short: 'HS', decimal: false },
+  fifties: { label: 'Fifties', short: '50s', decimal: false },
+  hundreds: { label: 'Hundreds', short: '100s', decimal: false },
+  ducks: { label: 'Ducks', short: 'Ducks', decimal: false },
+  fours: { label: 'Fours', short: '4s', decimal: false },
+  sixes: { label: 'Sixes', short: '6s', decimal: false },
+  bowling_innings: { label: 'Bowling Spells', short: 'Spells', decimal: false },
+  wickets: { label: 'Wickets', short: 'Wkts', decimal: false },
+  overs: { label: 'Overs', short: 'Overs', decimal: true },
+  runs_conceded: { label: 'Runs Conceded', short: 'R Conc', decimal: false },
+  bowling_average: { label: 'Bowling Average', short: 'Bowl Avg', decimal: true },
+  bowling_economy: { label: 'Economy Rate', short: 'Econ', decimal: true },
+  bowling_strike_rate: { label: 'Bowling Strike Rate', short: 'Bowl SR', decimal: true },
+  five_wicket_innings: { label: 'Five-Wicket Innings', short: '5w', decimal: false },
+  maidens: { label: 'Maidens', short: 'Mdns', decimal: false },
+  best_bowling_wickets: { label: 'Best Bowling (Wickets)', short: 'BBW', decimal: false },
+  catches: { label: 'Catches', short: 'Ct', decimal: false },
+  run_outs: { label: 'Run Outs', short: 'RO', decimal: false },
+  stumpings: { label: 'Stumpings', short: 'St', decimal: false },
+  balls: { label: 'Balls Faced', short: 'Balls', decimal: false },
+  strike_rate: { label: 'Strike Rate', short: 'SR', decimal: true },
+  batting_position: { label: 'Batting Position', short: 'Pos', decimal: false },
+  innings_number: { label: 'Innings Number', short: 'Inn#', decimal: false },
+  economy: { label: 'Economy Rate', short: 'Econ', decimal: true },
+  wides: { label: 'Wides', short: 'Wd', decimal: false },
+  no_balls: { label: 'No-Balls', short: 'NB', decimal: false },
+  team_runs: { label: 'Team Runs (For)', short: 'For', decimal: false },
+  team_wickets: { label: 'Team Wickets (For)', short: 'Wkts For', decimal: false },
+  opp_runs: { label: 'Opposition Runs', short: 'Against', decimal: false },
+  opp_wickets: { label: 'Opposition Wickets', short: 'Wkts Agst', decimal: false },
+  margin_runs: { label: 'Win/Loss Margin (Runs)', short: 'Margin', decimal: false },
+  wicket_number: { label: 'Wicket Number', short: 'Wkt #', decimal: false },
+  batter1_runs: { label: 'Batter 1 Runs', short: 'B1 R', decimal: false },
+  batter2_runs: { label: 'Batter 2 Runs', short: 'B2 R', decimal: false },
 }
 
 const OPERATORS = [
@@ -301,6 +303,7 @@ const CONTEXT_KEYS = [
   'min_year','max_year','finals_only','captain_only','keeper_only','result',
   'dismissal','position_min','position_max',
   'first_n_matches','milestone_runs','on_this_day',
+  'gender','player_role','award_category','award_subcategory','award_name','office_bearer',
 ]
 
 // Category groupings for the field picker. Field membership is intersected
@@ -471,7 +474,79 @@ function csvEscape(v) {
 const inputCls = 'bg-pb-surface border border-pb-hairline2 text-pb-text text-xs rounded px-2 py-1.5 focus:outline-none focus:border-pb-accent w-full'
 const selectCls = inputCls + ' cursor-pointer'
 
-function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, activeDerived }) {
+// Searchable picker for Player Role / Award / Office Bearer attribute filters.
+// Hits /statlab/picker-values with the chosen kind and debounced search text.
+function PickerInput({ orgId, kind, value, placeholder, onChange }) {
+  const [query, setQuery] = useState(value || '')
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(false)
+  const wrapRef = useRef(null)
+
+  useEffect(() => { setQuery(value || '') }, [value])
+
+  useEffect(() => {
+    if (!open || !orgId) return
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      setLoading(true)
+      try {
+        const data = await api.statlabPickerValues(orgId, kind, query)
+        if (!cancelled) setItems(Array.isArray(data) ? data : [])
+      } catch {
+        if (!cancelled) setItems([])
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }, 180)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [open, orgId, kind, query])
+
+  useEffect(() => {
+    const onClick = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [])
+
+  const pick = (v) => { onChange(v); setQuery(v); setOpen(false) }
+  const clear = () => { onChange(''); setQuery(''); setOpen(false) }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="flex gap-1">
+        <input
+          className={inputCls}
+          placeholder={placeholder || 'Search…'}
+          value={query}
+          onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+        />
+        {value && (
+          <button onClick={clear} className="text-pb-faint hover:text-pb-red text-xs px-1" title="Clear">×</button>
+        )}
+      </div>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-pb-bg pb-card shadow-xl max-h-52 overflow-auto pb-scroll">
+          {loading && <div className="text-pb-faintest font-mono text-[10px] px-3 py-2">Loading…</div>}
+          {!loading && items.length === 0 && (
+            <div className="text-pb-faintest font-mono text-[10px] px-3 py-2">No matches.</div>
+          )}
+          {items.map(it => (
+            <button
+              key={it.value}
+              onMouseDown={(e) => { e.preventDefault(); pick(it.value) }}
+              className="block w-full text-left px-3 py-1.5 text-xs text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
+            >
+              {it.value}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, activeDerived, orgId }) {
   const set = (k, v) => onChange({ ...ctx, [k]: v })
   const showInningsFilters = targetShape === 'list' || targetShape === 'aggregate'
   return (
@@ -543,11 +618,11 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, acti
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             <div>
-              <Label>Position ≥</Label>
+              <Label>Position (min)</Label>
               <input type="number" min="1" max="11" className={inputCls + ' mt-1'} value={ctx.position_min || ''} placeholder="1" onChange={e => set('position_min', e.target.value)} />
             </div>
             <div>
-              <Label>Position ≤</Label>
+              <Label>Position (max)</Label>
               <input type="number" min="1" max="11" className={inputCls + ' mt-1'} value={ctx.position_max || ''} placeholder="11" onChange={e => set('position_max', e.target.value)} />
             </div>
           </div>
@@ -571,6 +646,46 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, acti
           </select>
         </div>
       )}
+
+      {/* Player attribute filters — restrict the result set to players matching
+          a profile attribute (gender, player role) or an Admin → Awards entry. */}
+      <div className="pt-2 mt-1 pb-hairline-t">
+        <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">PLAYER ATTRIBUTES</div>
+        <div className="flex flex-col gap-2">
+          <div>
+            <Label>Gender</Label>
+            <select className={selectCls + ' mt-1'} value={ctx.gender || ''} onChange={e => set('gender', e.target.value)}>
+              <option value="">Any gender</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
+          </div>
+          <div>
+            <Label>Player role</Label>
+            <PickerInput orgId={orgId} kind="player_role" value={ctx.player_role || ''}
+                         placeholder="e.g. Batter, Bowler, Wicket-keeper"
+                         onChange={v => set('player_role', v)} />
+          </div>
+          <div>
+            <Label>Has award (category)</Label>
+            <PickerInput orgId={orgId} kind="award_category" value={ctx.award_category || ''}
+                         placeholder="e.g. Hall of Fame, Premiership"
+                         onChange={v => set('award_category', v)} />
+          </div>
+          <div>
+            <Label>Has award (name)</Label>
+            <PickerInput orgId={orgId} kind="award_name" value={ctx.award_name || ''}
+                         placeholder="e.g. Best & Fairest"
+                         onChange={v => set('award_name', v)} />
+          </div>
+          <div>
+            <Label>Office bearer</Label>
+            <PickerInput orgId={orgId} kind="office_bearer" value={ctx.office_bearer || ''}
+                         placeholder="e.g. President, Secretary"
+                         onChange={v => set('office_bearer', v)} />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -598,7 +713,7 @@ function FieldPicker({ open, onClose, onPick, categories, anchorRect }) {
     <>
       <div className="fixed inset-0 z-30" onClick={onClose} />
       <div
-        className="absolute z-40 mt-1 bg-pb-bg pb-card shadow-xl w-[300px] max-h-[420px] overflow-auto pb-scroll"
+        className="absolute z-40 mt-1 bg-pb-bg pb-card shadow-xl w-[340px] max-h-[420px] overflow-auto pb-scroll"
         style={{ top: anchorRect?.bottom ? `${anchorRect.bottom + window.scrollY}px` : undefined, left: anchorRect?.left ? `${anchorRect.left + window.scrollX}px` : undefined }}
       >
         <div className="sticky top-0 bg-pb-bg pb-hairline-b p-2">
@@ -615,12 +730,13 @@ function FieldPicker({ open, onClose, onPick, categories, anchorRect }) {
           {filtered.map(c => (
             <div key={c.key} className="px-2 py-1.5">
               <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest px-1 mb-1">{c.label.toUpperCase()}</div>
-              <div className="grid grid-cols-2 gap-1">
+              <div className="flex flex-col gap-0.5">
                 {c.fields.map(f => (
                   <button
                     key={f}
                     onClick={() => { onPick(f); onClose() }}
-                    className="text-left px-2 py-1.5 rounded hover:bg-pb-surface2 font-mono text-[11px] text-pb-dim hover:text-pb-text transition truncate"
+                    title={METRIC_LABELS[f]?.label || f}
+                    className="text-left px-2 py-1.5 rounded hover:bg-pb-surface2 text-[12px] text-pb-dim hover:text-pb-text transition"
                   >
                     {METRIC_LABELS[f]?.label || f}
                   </button>
@@ -649,20 +765,20 @@ function FilterLeaf({ leaf, categories, onChange, onRemove }) {
       <button
         ref={fieldBtnRef}
         onClick={openPicker}
-        className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-pb-surface2 transition min-w-[140px] text-left"
+        className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-pb-surface2 transition min-w-[180px] text-left"
       >
         {cat && <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">{cat.label}</span>}
         <span className="text-pb-text font-medium text-xs truncate">{fieldLabel}</span>
         <span className="text-pb-faint text-[10px]">▾</span>
       </button>
       <select
-        className={selectCls + ' w-14 text-center'}
+        className={selectCls + ' w-28'}
         value={leaf.op}
         onChange={e => onChange({ ...leaf, op: e.target.value })}
         title="Operator"
       >
         {OPERATORS.map(o => (
-          <option key={o.key} value={o.key}>{OPERATOR_SYMBOLS[o.key] || o.key}</option>
+          <option key={o.key} value={o.key}>{o.label}</option>
         ))}
       </select>
       <input
@@ -1286,6 +1402,7 @@ export default function StatLab() {
                         grades={grades}
                         targetShape={targetMeta.shape}
                         activeDerived={activeDerived}
+                        orgId={orgId}
                       />
                     </div>
                   </div>
@@ -1442,7 +1559,7 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
                 className="py-3 text-right font-medium cursor-pointer hover:text-pb-text pr-3 select-none"
                 style={{ color: (clientSort.col === col.key || sortBy === col.key) ? 'var(--pb-accent)' : undefined }}
               >
-                {col.label}{clientSort.col === col.key ? (clientSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                {col.short || col.label}{clientSort.col === col.key ? (clientSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
               </th>
             ))}
           </tr>

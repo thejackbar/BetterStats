@@ -165,6 +165,27 @@ INNINGS_CONTEXT_FILTERS: dict[str, dict] = {
 PLAYER_CONTEXT_FILTERS: dict[str, dict] = {
     "captain_only": {"sql": "gap.is_captain = TRUE",        "value_kind": "flag"},
     "keeper_only":  {"sql": "gap.is_wicket_keeper = TRUE",  "value_kind": "flag"},
+    "gender":       {"sql": "LOWER(COALESCE(p.gender, '')) = LOWER(:ctx_gender)",            "value_kind": "text"},
+    "player_role":  {"sql": "LOWER(COALESCE(p.player_role, '')) = LOWER(:ctx_player_role)",  "value_kind": "text"},
+    # Achievement-driven filters — restrict results to players who have a
+    # recorded entry in player_achievements matching the criterion. Subselect
+    # is keyed by org_id, which is already bound at the outer query level.
+    "award_category": {
+        "sql": "p.id IN (SELECT player_id FROM player_achievements WHERE org_id = CAST(:org_id AS UUID) AND LOWER(COALESCE(category, '')) = LOWER(:ctx_award_category) AND player_id IS NOT NULL)",
+        "value_kind": "text",
+    },
+    "award_subcategory": {
+        "sql": "p.id IN (SELECT player_id FROM player_achievements WHERE org_id = CAST(:org_id AS UUID) AND LOWER(COALESCE(subcategory, '')) = LOWER(:ctx_award_subcategory) AND player_id IS NOT NULL)",
+        "value_kind": "text",
+    },
+    "award_name": {
+        "sql": "p.id IN (SELECT player_id FROM player_achievements WHERE org_id = CAST(:org_id AS UUID) AND LOWER(COALESCE(achievement, '')) = LOWER(:ctx_award_name) AND player_id IS NOT NULL)",
+        "value_kind": "text",
+    },
+    "office_bearer": {
+        "sql": "p.id IN (SELECT player_id FROM player_achievements WHERE org_id = CAST(:org_id AS UUID) AND LOWER(COALESCE(category, '')) = 'office bearer' AND LOWER(COALESCE(achievement, '')) = LOWER(:ctx_office_bearer) AND player_id IS NOT NULL)",
+        "value_kind": "text",
+    },
 }
 
 # Combined view for schema introspection.
