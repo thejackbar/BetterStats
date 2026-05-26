@@ -157,7 +157,7 @@ const PRESET_GROUPS = [
       // Other
       { type: 'preset', label: 'Top all-rounders',             target: 'player_career', sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '500' }, { field: 'wickets', op: 'gte', value: '50' }], context: {} },
       { type: 'derived', key: 'opening_bat_and_bowl',          label: 'Opening batting and bowling in the same match', description: 'Opened batting AND bowled in innings 1.' },
-      { type: 'derived', key: 'batting_on_debut',              label: 'Top batting on debut',      description: 'Best score in a player’s first match.' },
+      { type: 'derived', key: 'batting_on_debut',              label: 'Top batting on debut',      description: 'Best score in a player\'s first match.' },
       { type: 'preset', label: 'Most balls faced in an innings', target: 'innings_list', sortBy: 'balls',              sortDir: 'desc', filters: [], context: {} },
       { type: 'preset', label: 'Most balls faced for a duck',  target: 'innings_list',  sortBy: 'balls',               sortDir: 'desc', filters: [{ field: 'runs', op: 'eq', value: '0' }], context: { dismissal: '' } },
       { type: 'derived', key: 'carried_bat',                   label: 'Carrying the bat',           description: 'Openers not out when team was bowled out.' },
@@ -215,7 +215,7 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'consecutive_5wi',                   label: 'Most consecutive 5-wicket innings', description: 'Longest run of bowling spells with 5+ wickets.' },
       { type: 'derived', key: 'consecutive_innings_with_wicket',   label: 'Most consecutive innings taking a wicket', description: 'Longest bowling streak with 1+ wicket.' },
       // Debut
-      { type: 'derived', key: 'bowling_on_debut',                  label: 'Best bowling on debut',     description: 'Best figures in a player’s first spell.' },
+      { type: 'derived', key: 'bowling_on_debut',                  label: 'Best bowling on debut',     description: 'Best figures in a player\'s first spell.' },
       // Spells
       { type: 'preset', label: 'Most expensive bowling in an innings', target: 'spell_list', sortBy: 'runs',               sortDir: 'desc', filters: [{ field: 'overs', op: 'gte', value: '3' }], context: {} },
       { type: 'preset', label: 'Least expensive bowling in an innings', target: 'spell_list', sortBy: 'runs',              sortDir: 'asc',  filters: [{ field: 'overs', op: 'gte', value: '5' }], context: {} },
