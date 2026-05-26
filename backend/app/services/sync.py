@@ -884,6 +884,8 @@ def extract_bowler_wickets(
             if bowler_pid is None:
                 continue
             fielder_pid = _resolve(field_name_to_pid, fielder_name) if fielder_name else None
+            b_runs = row.get("runsScored")
+            b_balls = row.get("ballsFaced")
             out.append(BowlerWicket(
                 game_id=game_uuid,
                 innings_number=inn_num,
@@ -892,6 +894,8 @@ def extract_bowler_wickets(
                 batter_name=row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or ""),
                 batter_position=row.get("batOrder"),
                 dismissal_type=method or None,
+                batter_runs=int(b_runs) if b_runs is not None else None,
+                batter_balls=int(b_balls) if b_balls is not None else None,
             ))
 
     return out
