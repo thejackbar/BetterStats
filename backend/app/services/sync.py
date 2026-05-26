@@ -789,6 +789,13 @@ _GR_DISMISSAL_SHORT = {
 }
 
 
+def _norm_name(s: str) -> str:
+    """Normalise curly/smart apostrophes to straight apostrophe so scorecard
+    dismissalText and playerShortName compare equal regardless of which
+    Unicode variant CA's API returns in each field."""
+    return s.replace("’", "'").replace("‘", "'")
+
+
 def extract_bowler_wickets(
     scorecard: dict,
     game_uuid: uuid.UUID,
@@ -814,12 +821,12 @@ def extract_bowler_wickets(
             pid = pl.get("participantId") or pl.get("id")
             name = pl.get("playerShortName") or pl.get("displayName") or pl.get("name")
             if pid and name:
-                pid_to_short_name[pid] = name
+                pid_to_short_name[pid] = _norm_name(name)
 
     def _resolve(name_to_pid: dict, name):
         if not name:
             return None
-        pid_str = name_to_pid.get(name)
+        pid_str = name_to_pid.get(_norm_name(name))
         if not pid_str:
             return None
         try:
@@ -846,7 +853,7 @@ def extract_bowler_wickets(
                 continue
             name = r.get("playerShortName") or pid_to_short_name.get(pid_s)
             if name:
-                bowl_name_to_pid.setdefault(name, pid_s)
+                bowl_name_to_pid.setdefault(_norm_name(name), pid_s)
 
         field_name_to_pid: dict[str, str] = {}
         for r in fielding_rows:
@@ -855,15 +862,17 @@ def extract_bowler_wickets(
                 continue
             name = r.get("playerShortName") or pid_to_short_name.get(pid_s)
             if name:
-                field_name_to_pid.setdefault(name, pid_s)
+                field_name_to_pid.setdefault(_norm_name(name), pid_s)
         # Stumpers are fielders (the keeper) but may not appear in
         # fielding_rows if their only contribution was a stumping; the
         # bowling-side roster covers them too via pid_to_short_name.
         for r in bowling_rows:
             pid_s = r.get("participantId")
             name = r.get("playerShortName") or pid_to_short_name.get(pid_s) if pid_s else None
-            if name and name not in field_name_to_pid:
-                field_name_to_pid[name] = pid_s
+            if name:
+                norm = _norm_name(name)
+                if norm not in field_name_to_pid:
+                    field_name_to_pid[norm] = pid_s
 
         for row in batting_rows:
             dt_long = row.get("dismissalType") or ""
