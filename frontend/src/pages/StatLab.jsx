@@ -341,8 +341,10 @@ const PAIR_DERIVED = new Set([
   'partnership_aggregates_pair',
   'century_partnerships_pair',
   'top_partnerships_by_wicket',
-  'bowler_fielder_combo',
 ])
+// Derived reports that render as two separate named-role columns (BOWLER / FIELDER)
+// rather than the combined "A & B" pair format.
+const DUO_DERIVED = new Set(['bowler_fielder_combo'])
 
 let _treeIdCounter = 1000
 const newTreeId = () => ++_treeIdCounter
@@ -1575,9 +1577,11 @@ function entityHeader(target, activeDerived) {
 
 function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort, sortBy, clubSlug, rowOffset = 0 }) {
   const dimCols = activeDerived
-    ? (PAIR_DERIVED.has(activeDerived)
-        ? [{ key: 'pair', label: 'PAIR' }]
-        : [{ key: 'player_name', label: 'PLAYER' }])
+    ? (DUO_DERIVED.has(activeDerived)
+        ? [{ key: 'player_a_name', label: 'BOWLER' }, { key: 'player_b_name', label: 'FIELDER' }]
+        : PAIR_DERIVED.has(activeDerived)
+            ? [{ key: 'pair', label: 'PAIR' }]
+            : [{ key: 'player_name', label: 'PLAYER' }])
     : entityHeader(target, null)
   return (
     <div className="overflow-x-auto pb-scroll">
@@ -1633,6 +1637,18 @@ function formatCell(v, col) {
 }
 
 function renderDimCell(key, row, clubSlug) {
+  if (key === 'player_a_name') {
+    const name = row.player_a_name || '—'
+    return row.player_a_id
+      ? <Link to={`/players/${row.player_a_id}`} className="text-pb-text hover:text-pb-accent">{name}</Link>
+      : name
+  }
+  if (key === 'player_b_name') {
+    const name = row.player_b_name || '—'
+    return row.player_b_id
+      ? <Link to={`/players/${row.player_b_id}`} className="text-pb-text hover:text-pb-accent">{name}</Link>
+      : name
+  }
   if (key === 'pair') {
     const a = row.player_a_name || row.batter1_name
     const b = row.player_b_name || row.batter2_name

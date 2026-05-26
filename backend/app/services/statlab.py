@@ -114,10 +114,20 @@ PARTNERSHIP_METRICS: dict[str, str] = {
     "batter2_runs": "batter2_runs",
 }
 
+# Family targets reuse every PLAYER_AGG_METRICS dimension (sums across all
+# family members) and add a family-specific member_count column.
+FAMILY_AGG_METRICS: dict[str, str] = {
+    "member_count": "member_count",
+    **PLAYER_AGG_METRICS,
+}
+
 TARGETS: dict[str, dict] = {
     "player_career":    {"metrics": PLAYER_AGG_METRICS,  "default_sort": "runs"},
     "player_season":    {"metrics": PLAYER_AGG_METRICS,  "default_sort": "runs"},
     "player_grade":     {"metrics": PLAYER_AGG_METRICS,  "default_sort": "runs"},
+    "family_career":    {"metrics": FAMILY_AGG_METRICS,  "default_sort": "runs"},
+    "family_season":    {"metrics": FAMILY_AGG_METRICS,  "default_sort": "runs"},
+    "family_grade":     {"metrics": FAMILY_AGG_METRICS,  "default_sort": "runs"},
     "innings_list":     {"metrics": INNINGS_METRICS,     "default_sort": "runs"},
     "spell_list":       {"metrics": SPELL_METRICS,       "default_sort": "wickets"},
     "match_list":       {"metrics": MATCH_METRICS,       "default_sort": "team_runs"},
@@ -185,6 +195,12 @@ PLAYER_CONTEXT_FILTERS: dict[str, dict] = {
     "office_bearer": {
         "sql": "p.id IN (SELECT player_id FROM player_achievements WHERE org_id = CAST(:org_id AS UUID) AND LOWER(COALESCE(category, '')) = 'office bearer' AND LOWER(COALESCE(achievement, '')) = LOWER(:ctx_office_bearer) AND player_id IS NOT NULL)",
         "value_kind": "text",
+    },
+    # Family filter — restrict to players in the chosen family. The family
+    # must belong to the same org; the org_id bind is already in scope.
+    "family_id": {
+        "sql": "p.id IN (SELECT fm.player_id FROM family_members fm JOIN families f ON f.id = fm.family_id WHERE f.id = CAST(:ctx_family_id AS UUID) AND f.organisation_id = CAST(:org_id AS UUID))",
+        "value_kind": "uuid",
     },
 }
 
@@ -338,6 +354,47 @@ def _build_filter_block(ctx: dict, spec_dict: dict) -> tuple[list[str], dict, bo
     return clauses, params, used
 
 
+def _build_match_list_filters(ctx: dict) -> tuple[list[str], dict]:
+    """Multi-select MATCH-scope filters (season_ids, grade_ids).
+    These don't fit the per-value spec dict because their SQL clause grows
+    with the number of selected IDs. Expanded inline as
+    ``IN (:p_0, :p_1, …)`` with one bound param per ID.
+
+    Accepts either a list (canonical) or a comma-separated string (back-compat
+    when the API receives a single repeated query param)."""
+
+    def _normalise(v):
+        if v is None or v == "":
+            return []
+        if isinstance(v, (list, tuple, set)):
+            return [str(x) for x in v if x not in (None, "")]
+        return [s.strip() for s in str(v).split(",") if s.strip()]
+
+    clauses: list[str] = []
+    params: dict = {}
+
+    season_ids = _normalise(ctx.get("season_ids"))
+    if season_ids:
+        ph = ", ".join(f"CAST(:ctx_season_ids_{i} AS UUID)" for i in range(len(season_ids)))
+        # Match canonical seasons OR any alias mapped to one of them so a
+        # user who selects a canonical season still sees alias-tagged stats.
+        clauses.append(
+            f"(s.id IN ({ph}) OR s.id IN (SELECT alias_season_id FROM season_aliases "
+            f"WHERE canonical_season_id IN ({ph}) AND undone_at IS NULL))"
+        )
+        for i, v in enumerate(season_ids):
+            params[f"ctx_season_ids_{i}"] = v
+
+    grade_ids = _normalise(ctx.get("grade_ids"))
+    if grade_ids:
+        ph = ", ".join(f"CAST(:ctx_grade_ids_{i} AS UUID)" for i in range(len(grade_ids)))
+        clauses.append(f"gr.id IN ({ph})")
+        for i, v in enumerate(grade_ids):
+            params[f"ctx_grade_ids_{i}"] = v
+
+    return clauses, params
+
+
 def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict, list[str], dict, bool]:
     """Returns (match_clauses, match_params, innings_clauses, innings_params,
     player_clauses, player_params, any_match_used).
@@ -346,6 +403,12 @@ def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict,
     via a gap LEFT JOIN that callers must provide.
     """
     mc, mp, mu = _build_filter_block(ctx, MATCH_CONTEXT_FILTERS)
+    # Merge in multi-select MATCH filters (season_ids, grade_ids).
+    list_clauses, list_params = _build_match_list_filters(ctx)
+    if list_clauses:
+        mc = mc + list_clauses
+        mp = {**mp, **list_params}
+        mu = True
     ic, ip, _iu = _build_filter_block(ctx, INNINGS_CONTEXT_FILTERS)
     pc, pp, _pu = _build_filter_block(ctx, PLAYER_CONTEXT_FILTERS)
     return mc, mp, ic, ip, pc, pp, mu
@@ -749,7 +812,20 @@ async def query_player_season(
         """
     else:
         season_filter = ""
-        if context.get("season_id"):
+        # Multi-select season_ids takes precedence over the legacy single key.
+        season_ids = context.get("season_ids")
+        if isinstance(season_ids, str):
+            season_ids = [s.strip() for s in season_ids.split(",") if s.strip()]
+        if season_ids:
+            ph = ", ".join(f"CAST(:ctx_pss_season_ids_{i} AS UUID)" for i in range(len(season_ids)))
+            season_filter = (
+                f"AND (s.id IN ({ph}) "
+                f"OR s.id IN (SELECT alias_season_id FROM season_aliases "
+                f"WHERE canonical_season_id IN ({ph}) AND undone_at IS NULL))"
+            )
+            for i, v in enumerate(season_ids):
+                params[f"ctx_pss_season_ids_{i}"] = v
+        elif context.get("season_id"):
             season_filter = (
                 "AND (s.id = CAST(:ctx_season_id AS UUID) "
                 "OR s.id IN (SELECT alias_season_id FROM season_aliases "
@@ -888,6 +964,279 @@ async def query_player_grade(
     """
 
     params["offset"] = offset
+    result = await session.execute(text(_inline_helpers(sql)), params)
+    return [dict(r) for r in result.mappings()]
+
+
+# ─── Family-aggregate queries ──────────────────────────────────────────────────
+# One row per family (or per family+season / family+grade). Stats are summed
+# across every member of the family; averages and rate stats are re-derived
+# from the family-level sums so e.g. "Family batting average" treats the whole
+# family as one combined career, which is what users intuitively expect.
+#
+# Players that aren't in any family don't appear in these reports (the JOIN is
+# inner). The family_id context filter is ignored here — every row is a
+# different family by construction, so filtering to one family would just
+# return that one row, which the existing player_career + family_id filter
+# already covers.
+#
+# member_count and members are family-shaped columns that aren't in
+# PLAYER_AGG_METRICS; they always come through regardless of metric filters.
+
+# Family-aggregate SUM/derivation SQL shared by all three targets. Takes the
+# group_cols / select_extra / join_extra / order_extra placeholders that
+# differentiate career / season / grade.
+def _family_agg_select_cols() -> str:
+    return """
+        f.id::text                                                                              AS family_id,
+        f.name                                                                                  AS family_name,
+        COUNT(DISTINCT p.id)                                                                    AS member_count,
+        STRING_AGG(DISTINCT COALESCE(p.display_name_override, p.name), ', '
+                   ORDER BY COALESCE(p.display_name_override, p.name))                          AS members,
+        COUNT(DISTINCT pss.season_id)                                                           AS seasons_played,
+        COALESCE(SUM(pss.matches), 0)                                                           AS matches,
+        COALESCE(SUM(pss.batting_innings), 0)                                                   AS batting_innings,
+        COALESCE(SUM(pss.runs), 0)                                                              AS runs,
+        COALESCE(SUM(pss.not_outs), 0)                                                          AS not_outs,
+        COALESCE(SUM(pss.balls_faced), 0)                                                       AS balls_faced,
+        ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS batting_average,
+        ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)                AS batting_strike_rate,
+        MAX(pss.high_score)                                                                     AS high_score,
+        COALESCE(SUM(pss.fifties), 0)                                                           AS fifties,
+        COALESCE(SUM(pss.hundreds), 0)                                                          AS hundreds,
+        COALESCE(SUM(pss.ducks), 0)                                                             AS ducks,
+        COALESCE(SUM(pss.fours), 0)                                                             AS fours,
+        COALESCE(SUM(pss.sixes), 0)                                                             AS sixes,
+        COALESCE(SUM(pss.bowling_innings), 0)                                                   AS bowling_innings,
+        COALESCE(SUM(pss.wickets), 0)                                                           AS wickets,
+        COALESCE(SUM(pss.overs), 0)                                                             AS overs,
+        COALESCE(SUM(pss.runs_conceded), 0)                                                     AS runs_conceded,
+        ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2)                 AS bowling_average,
+        ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2)       AS bowling_economy,
+        ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2)                 AS bowling_strike_rate,
+        COALESCE(SUM(pss.five_wicket_innings), 0)                                               AS five_wicket_innings,
+        COALESCE(SUM(pss.maidens), 0)                                                           AS maidens,
+        MAX(pss.best_bowling_wickets)                                                           AS best_bowling_wickets,
+        COALESCE(SUM(pss.wides), 0)                                                             AS wides,
+        COALESCE(SUM(pss.no_balls), 0)                                                          AS no_balls,
+        COALESCE(SUM(pss.catches), 0)                                                           AS catches,
+        COALESCE(SUM(pss.run_outs), 0)                                                          AS run_outs,
+        COALESCE(SUM(pss.stumpings), 0)                                                         AS stumpings
+    """
+
+
+async def query_family_career(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    sort_by: str,
+    sort_dir: str,
+    limit: int,
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
+    offset: int = 0,
+    context: dict,
+) -> list[dict]:
+    """One row per family — sums of every member's career stats."""
+    sort_by, sort_dir, limit = _validated("family_career", sort_by, sort_dir, limit)
+
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, FAMILY_AGG_METRICS)
+    params = {"org_id": org_id, "limit": limit, "offset": offset, **metric_params}
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+
+    select_cols = _family_agg_select_cols()
+    sql = f"""
+        WITH agg AS (
+            SELECT {select_cols}
+            FROM families f
+            JOIN family_members fm ON fm.family_id = f.id
+            JOIN players p ON p.id = fm.player_id
+            LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE f.organisation_id = :org_id
+            GROUP BY f.id, f.name
+        )
+        SELECT * FROM agg
+        {where_sql}
+        ORDER BY {sort_by} {sort_dir} NULLS LAST
+        LIMIT :limit OFFSET :offset
+    """
+
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def query_family_season(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    sort_by: str,
+    sort_dir: str,
+    limit: int,
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
+    offset: int = 0,
+    context: dict,
+) -> list[dict]:
+    """One row per (family, season). INNER JOIN to pss so a season the family
+    didn't play doesn't appear (member_count would be 0 anyway)."""
+    sort_by, sort_dir, limit = _validated("family_season", sort_by, sort_dir, limit)
+
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, FAMILY_AGG_METRICS)
+    params = {"org_id": org_id, "limit": limit, "offset": offset, **metric_params}
+
+    season_filter = ""
+    if context.get("season_id"):
+        season_filter = (
+            "AND (s.id = CAST(:ctx_season_id AS UUID) "
+            "OR s.id IN (SELECT alias_season_id FROM season_aliases "
+            "WHERE canonical_season_id = CAST(:ctx_season_id AS UUID) "
+            "AND undone_at IS NULL))"
+        )
+        params["ctx_season_id"] = context["season_id"]
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+
+    select_cols = _family_agg_select_cols()
+    sql = f"""
+        WITH agg AS (
+            SELECT {select_cols},
+                   s.id::text                AS season_id,
+                   s.name                    AS season_name,
+                   COALESCE(s.year, 0)       AS season_year
+            FROM families f
+            JOIN family_members fm ON fm.family_id = f.id
+            JOIN players p ON p.id = fm.player_id
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN seasons s ON s.id = pss.season_id
+            WHERE f.organisation_id = :org_id {season_filter}
+            GROUP BY f.id, f.name, s.id, s.name, s.year
+        )
+        SELECT * FROM agg
+        {where_sql}
+        ORDER BY {sort_by} {sort_dir} NULLS LAST, season_year DESC
+        LIMIT :limit OFFSET :offset
+    """
+
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def query_family_grade(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    sort_by: str,
+    sort_dir: str,
+    limit: int,
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
+    offset: int = 0,
+    context: dict,
+) -> list[dict]:
+    """One row per (family, canonical grade). Lives off the same per-innings
+    CTEs as player_grade — pss has no grade dimension. Heavier than the other
+    two family queries; that's intrinsic to the per-grade breakdown."""
+    sort_by, sort_dir, limit = _validated("family_grade", sort_by, sort_dir, limit)
+
+    mc, mp, ic, ip, pc, pp, _ = _build_context_filters(context)
+    metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, FAMILY_AGG_METRICS)
+    params = {"org_id": org_id, "limit": limit, "offset": offset, **mp, **ip, **pp, **metric_params}
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+
+    # Reuse the per-player innings CTEs and aggregate them up to family level
+    # in an outer GROUP BY. The CTE groups by (player_id, grade_name); we then
+    # join to family_members and re-group by (family_id, grade_name).
+    cte = _player_agg_innings_cte(
+        mc, ic, pc,
+        group_cols="p.id, gu.canonical_grade_name, gu.display_grade_name",
+        select_cols="p.id AS player_id, gu.canonical_grade_name AS grade_name, gu.display_grade_name,",
+    )
+    sql = f"""
+        {cte},
+        per_player AS (
+            SELECT
+                COALESCE(appear.player_id, bat.player_id, bowl.player_id, field.player_id) AS player_id,
+                COALESCE(appear.grade_name, bat.grade_name, bowl.grade_name, field.grade_name) AS grade_name,
+                COALESCE(appear.display_grade_name, bat.display_grade_name, bowl.display_grade_name, field.display_grade_name) AS display_grade_name,
+                COALESCE(appear.matches, 0)             AS matches,
+                COALESCE(bat.batting_innings, 0)        AS batting_innings,
+                COALESCE(bat.runs, 0)                   AS runs,
+                COALESCE(bat.not_outs, 0)               AS not_outs,
+                COALESCE(bat.balls_faced, 0)            AS balls_faced,
+                COALESCE(bat.high_score, 0)             AS high_score,
+                COALESCE(bat.fifties, 0)                AS fifties,
+                COALESCE(bat.hundreds, 0)               AS hundreds,
+                COALESCE(bat.ducks, 0)                  AS ducks,
+                COALESCE(bat.fours, 0)                  AS fours,
+                COALESCE(bat.sixes, 0)                  AS sixes,
+                COALESCE(bowl.bowling_innings, 0)       AS bowling_innings,
+                COALESCE(bowl.wickets, 0)               AS wickets,
+                COALESCE(bowl.overs, 0)                 AS overs,
+                COALESCE(bowl.runs_conceded, 0)         AS runs_conceded,
+                COALESCE(bowl.five_wicket_innings, 0)   AS five_wicket_innings,
+                COALESCE(bowl.maidens, 0)               AS maidens,
+                COALESCE(bowl.best_bowling_wickets, 0)  AS best_bowling_wickets,
+                COALESCE(bowl.wides, 0)                 AS wides,
+                COALESCE(bowl.no_balls, 0)              AS no_balls,
+                COALESCE(field.catches, 0)              AS catches,
+                COALESCE(field.run_outs, 0)             AS run_outs,
+                COALESCE(field.stumpings, 0)            AS stumpings
+            FROM appear
+            FULL OUTER JOIN bat   ON bat.player_id   = appear.player_id   AND bat.grade_name   = appear.grade_name
+            FULL OUTER JOIN bowl  ON bowl.player_id  = COALESCE(appear.player_id, bat.player_id)
+                                 AND bowl.grade_name  = COALESCE(appear.grade_name, bat.grade_name)
+            FULL OUTER JOIN field ON field.player_id = COALESCE(appear.player_id, bat.player_id, bowl.player_id)
+                                 AND field.grade_name = COALESCE(appear.grade_name, bat.grade_name, bowl.grade_name)
+        ),
+        agg AS (
+            SELECT
+                f.id::text                                                                      AS family_id,
+                f.name                                                                          AS family_name,
+                pp.grade_name,
+                pp.display_grade_name,
+                COUNT(DISTINCT p.id)                                                            AS member_count,
+                STRING_AGG(DISTINCT COALESCE(p.display_name_override, p.name), ', '
+                           ORDER BY COALESCE(p.display_name_override, p.name))                  AS members,
+                1                                                                               AS seasons_played,
+                COALESCE(SUM(pp.matches), 0)                                                    AS matches,
+                COALESCE(SUM(pp.batting_innings), 0)                                            AS batting_innings,
+                COALESCE(SUM(pp.runs), 0)                                                       AS runs,
+                COALESCE(SUM(pp.not_outs), 0)                                                   AS not_outs,
+                COALESCE(SUM(pp.balls_faced), 0)                                                AS balls_faced,
+                ROUND(SUM(pp.runs)::numeric / NULLIF(SUM(pp.batting_innings) - SUM(pp.not_outs), 0), 2) AS batting_average,
+                ROUND(SUM(pp.runs)::numeric / NULLIF(SUM(pp.balls_faced), 0) * 100, 2)          AS batting_strike_rate,
+                MAX(pp.high_score)                                                              AS high_score,
+                COALESCE(SUM(pp.fifties), 0)                                                    AS fifties,
+                COALESCE(SUM(pp.hundreds), 0)                                                   AS hundreds,
+                COALESCE(SUM(pp.ducks), 0)                                                      AS ducks,
+                COALESCE(SUM(pp.fours), 0)                                                      AS fours,
+                COALESCE(SUM(pp.sixes), 0)                                                      AS sixes,
+                COALESCE(SUM(pp.bowling_innings), 0)                                            AS bowling_innings,
+                COALESCE(SUM(pp.wickets), 0)                                                    AS wickets,
+                COALESCE(SUM(pp.overs), 0)                                                      AS overs,
+                COALESCE(SUM(pp.runs_conceded), 0)                                              AS runs_conceded,
+                ROUND(SUM(pp.runs_conceded)::numeric / NULLIF(SUM(pp.wickets), 0), 2)           AS bowling_average,
+                ROUND(SUM(pp.runs_conceded)::numeric / NULLIF(SUM(pp.overs * 6), 0) * 6, 2)     AS bowling_economy,
+                ROUND(SUM(pp.overs)::numeric * 6 / NULLIF(SUM(pp.wickets), 0), 2)               AS bowling_strike_rate,
+                COALESCE(SUM(pp.five_wicket_innings), 0)                                        AS five_wicket_innings,
+                COALESCE(SUM(pp.maidens), 0)                                                    AS maidens,
+                MAX(pp.best_bowling_wickets)                                                    AS best_bowling_wickets,
+                COALESCE(SUM(pp.wides), 0)                                                      AS wides,
+                COALESCE(SUM(pp.no_balls), 0)                                                   AS no_balls,
+                COALESCE(SUM(pp.catches), 0)                                                    AS catches,
+                COALESCE(SUM(pp.run_outs), 0)                                                   AS run_outs,
+                COALESCE(SUM(pp.stumpings), 0)                                                  AS stumpings
+            FROM per_player pp
+            JOIN players p ON p.id = pp.player_id
+            JOIN family_members fm ON fm.player_id = p.id
+            JOIN families f ON f.id = fm.family_id AND f.organisation_id = :org_id
+            GROUP BY f.id, f.name, pp.grade_name, pp.display_grade_name
+        )
+        SELECT * FROM agg
+        {where_sql}
+        ORDER BY {sort_by} {sort_dir} NULLS LAST
+        LIMIT :limit OFFSET :offset
+    """
+
     result = await session.execute(text(_inline_helpers(sql)), params)
     return [dict(r) for r in result.mappings()]
 
@@ -1964,7 +2313,7 @@ async def _longest_streak(
 
 
 async def derived_consecutive_no_century(
-    session, *, org_id, limit, context,
+    session, *, org_id, limit, offset=0, context,
 ) -> list[dict]:
     """Longest streak of innings scoring under 100."""
     return await _longest_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
@@ -1972,7 +2321,7 @@ async def derived_consecutive_no_century(
 
 
 async def derived_consecutive_hundreds(
-    session, *, org_id, limit, context,
+    session, *, org_id, limit, offset=0, context,
 ) -> list[dict]:
     """Longest streak of innings scoring 100+."""
     return await _longest_streak(session, org_id=org_id, limit=limit, offset=offset, context=context,
@@ -2226,35 +2575,43 @@ async def _dismissal_count(
     return [dict(r) for r in result.mappings()]
 
 
+# Dismissal-type patterns must match what's actually stored. Grassroots sync
+# canonicalises dismissal_type to bare short forms ('b', 'c', 'st', 'lbw',
+# 'run out', etc.) via _GR_DISMISSAL_SHORT in sync.py — so each pattern set
+# includes both the bare short form and the long form for resilience against
+# any older / non-GR rows. See aggregations.py:_dismissal_breakdown for the
+# canonical matcher used elsewhere.
+
 async def derived_dismissal_bowled(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["bowled", "b %", "b. %"], result_col="bowled_count")
+                                   like_patterns=["b", "b %", "b. %", "bowled", "bowled%"], result_col="bowled_count")
 
 
 async def derived_dismissal_caught(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["caught%", "c %", "c. %", "ct%"], result_col="caught_count")
+                                   like_patterns=["c", "c %", "c. %", "ct%", "caught", "caught%"], result_col="caught_count")
 
 
 async def derived_dismissal_lbw(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["lbw%"], result_col="lbw_count")
+                                   like_patterns=["lbw", "lbw %", "lbw%", "leg before wicket%"], result_col="lbw_count")
 
 
 async def derived_dismissal_run_out(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["run out%", "ro%"], result_col="run_out_count")
+                                   like_patterns=["run out", "run out%", "ro", "ro%"], result_col="run_out_count")
 
 
 async def derived_dismissal_stumped(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["stumped%", "st %", "st. %"], result_col="stumped_count")
+                                   like_patterns=["st", "st %", "st. %", "stumped", "stumped%"], result_col="stumped_count")
 
 
 async def derived_unusual_dismissals(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Innings dismissed by uncommon means (hit wicket, retired hurt/out, handled, obstructing)."""
+    """Innings dismissed by uncommon means (hit wicket, retired hurt, handled, obstructing).
+    'Retired not out' is excluded — it's a routine voluntary retirement, not unusual."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -2283,12 +2640,14 @@ async def derived_unusual_dismissals(
           AND bi.dismissal_type IS NOT NULL
           AND (
             LOWER(bi.dismissal_type) LIKE 'hit wicket%'
-            OR LOWER(bi.dismissal_type) LIKE 'retired%'
+            OR LOWER(bi.dismissal_type) LIKE 'retired hurt%'
+            OR LOWER(bi.dismissal_type) LIKE 'retired out%'
             OR LOWER(bi.dismissal_type) LIKE 'handled%'
             OR LOWER(bi.dismissal_type) LIKE 'obstruct%'
             OR LOWER(bi.dismissal_type) LIKE 'timed out%'
             OR LOWER(bi.dismissal_type) LIKE 'hit ball twice%'
           )
+          AND LOWER(bi.dismissal_type) NOT LIKE 'retired not out%'
           {player_extra}
         ORDER BY gu.played_at DESC
         LIMIT :limit OFFSET :offset
@@ -2851,44 +3210,31 @@ async def derived_ducks_inflicted(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
     """Count of times each bowler dismissed a batter for 0.
-    Joins bowler_wickets (which records who got the wicket) to batting_innings
-    (which records the batter's actual score) by (game_id, innings_number, batter_name)."""
+
+    Reads from bowler_wickets.batter_runs (denormalised during sync) so we
+    can count opposition batters' scores — we don't store opposition
+    batting in batting_innings. Rows synced before migration 033 have
+    batter_runs = NULL and are excluded until the next Full Rebuild
+    repopulates them."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
     player_extra = (" AND " + " AND ".join(pc).replace("gap.", "gap_b.")) if pc else ""
     sql = f"""
-        WITH {universe},
-        wkts AS (
-            SELECT
-                bw.bowler_id,
-                COALESCE(p.display_name_override, p.name) AS player_name,
-                bw.game_id, bw.innings_number, bw.batter_name
-            FROM game_universe gu
-            JOIN bowler_wickets bw ON bw.game_id = gu.game_id
-            JOIN players p ON p.id = bw.bowler_id
-            LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
-            WHERE p.organisation_id = :org_id {player_extra}
-        ),
-        agg AS (
-            SELECT
-                wkts.bowler_id::text AS player_id,
-                wkts.player_name,
-                COUNT(*)::int AS ducks_inflicted
-            FROM wkts
-            JOIN batting_innings bi
-              ON bi.game_id = wkts.game_id
-             AND bi.innings_number = wkts.innings_number
-             AND LOWER(TRIM(bi.player_id::text)) <> LOWER(TRIM(wkts.bowler_id::text))
-            JOIN players bp ON bp.id = bi.player_id
-            WHERE LOWER(COALESCE(bp.display_name_override, bp.name)) = LOWER(TRIM(wkts.batter_name))
-              AND bi.runs = 0
-              AND bi.not_out = FALSE
-              AND bi.did_not_bat IS NOT TRUE
-              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
-            GROUP BY wkts.bowler_id, wkts.player_name
-        )
-        SELECT * FROM agg
+        WITH {universe}
+        SELECT
+            bw.bowler_id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            COUNT(*)::int AS ducks_inflicted
+        FROM game_universe gu
+        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN players p ON p.id = bw.bowler_id
+        LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND bw.batter_runs = 0
+          {player_extra}
+        GROUP BY bw.bowler_id, COALESCE(p.display_name_override, p.name)
+        HAVING COUNT(*) > 0
         ORDER BY ducks_inflicted DESC, player_name ASC
         LIMIT :limit OFFSET :offset
     """
@@ -2900,43 +3246,28 @@ async def derived_ducks_inflicted(
 async def derived_golden_ducks_inflicted(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Same as ducks_inflicted but only innings where batter faced exactly 1 ball."""
+    """Same as ducks_inflicted but only innings where batter faced exactly 1 ball.
+    Reads denormalised batter_runs / batter_balls on bowler_wickets."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
     player_extra = (" AND " + " AND ".join(pc).replace("gap.", "gap_b.")) if pc else ""
     sql = f"""
-        WITH {universe},
-        wkts AS (
-            SELECT
-                bw.bowler_id,
-                COALESCE(p.display_name_override, p.name) AS player_name,
-                bw.game_id, bw.innings_number, bw.batter_name
-            FROM game_universe gu
-            JOIN bowler_wickets bw ON bw.game_id = gu.game_id
-            JOIN players p ON p.id = bw.bowler_id
-            LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
-            WHERE p.organisation_id = :org_id {player_extra}
-        ),
-        agg AS (
-            SELECT
-                wkts.bowler_id::text AS player_id,
-                wkts.player_name,
-                COUNT(*)::int AS golden_ducks_inflicted
-            FROM wkts
-            JOIN batting_innings bi
-              ON bi.game_id = wkts.game_id
-             AND bi.innings_number = wkts.innings_number
-            JOIN players bp ON bp.id = bi.player_id
-            WHERE LOWER(COALESCE(bp.display_name_override, bp.name)) = LOWER(TRIM(wkts.batter_name))
-              AND bi.runs = 0
-              AND bi.balls = 1
-              AND bi.not_out = FALSE
-              AND bi.did_not_bat IS NOT TRUE
-              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
-            GROUP BY wkts.bowler_id, wkts.player_name
-        )
-        SELECT * FROM agg
+        WITH {universe}
+        SELECT
+            bw.bowler_id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            COUNT(*)::int AS golden_ducks_inflicted
+        FROM game_universe gu
+        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN players p ON p.id = bw.bowler_id
+        LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND bw.batter_runs = 0
+          AND bw.batter_balls = 1
+          {player_extra}
+        GROUP BY bw.bowler_id, COALESCE(p.display_name_override, p.name)
+        HAVING COUNT(*) > 0
         ORDER BY golden_ducks_inflicted DESC, player_name ASC
         LIMIT :limit OFFSET :offset
     """
@@ -2948,8 +3279,10 @@ async def derived_golden_ducks_inflicted(
 async def derived_bowler_fielder_combo(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Most productive bowler+fielder partnerships — count of wickets where
-    fielder caught/ran out a batter off this bowler."""
+    """Most productive bowler+catcher partnerships — count of caught dismissals
+    (WK catches included) where a fielder took a catch off this bowler.
+    Only counts caught dismissals; stumpings and run-outs are excluded.
+    Data depends on fielder name in dismissalText resolving to a known player."""
     mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -2963,9 +3296,10 @@ async def derived_bowler_fielder_combo(
             WHERE pb.organisation_id = :org_id
               AND bw.fielder_id IS NOT NULL
               AND bw.fielder_id <> bw.bowler_id
+              AND bw.dismissal_type = 'caught'
         ),
         agg AS (
-            SELECT bowler_id, fielder_id, COUNT(*)::int AS wickets
+            SELECT bowler_id, fielder_id, COUNT(*)::int AS catches
             FROM wkts
             GROUP BY bowler_id, fielder_id
         )
@@ -2974,11 +3308,11 @@ async def derived_bowler_fielder_combo(
             COALESCE(pb.display_name_override, pb.name) AS player_a_name,
             agg.fielder_id::text AS player_b_id,
             COALESCE(pf.display_name_override, pf.name) AS player_b_name,
-            agg.wickets
+            agg.catches
         FROM agg
         JOIN players pb ON pb.id = agg.bowler_id
         JOIN players pf ON pf.id = agg.fielder_id
-        ORDER BY agg.wickets DESC
+        ORDER BY agg.catches DESC
         LIMIT :limit OFFSET :offset
     """
     params["offset"] = offset
@@ -3070,12 +3404,81 @@ async def derived_hat_tricks(
 
 
 # ─── C&B dismissals — separate from generic 'caught' ──────────────────────────
+# batting_innings.dismissal_type for a c&b is just 'c' (same as a normal
+# catch), so we can't tell c&b apart by querying batting_innings alone.
+# bowler_wickets DOES tag c&b canonically as 'caught and bowled', so the
+# batter view joins through that table and groups by the dismissed batter.
 
-async def derived_caught_and_bowled(session, *, org_id, limit, offset=0, context):
-    """Count of times each batter was dismissed caught & bowled by the same player."""
-    return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
-                                   like_patterns=["caught and bowled%", "c & b%", "c&b%"],
-                                   result_col="c_and_b_count")
+async def derived_caught_and_bowled(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+) -> list[dict]:
+    """Count of times each batter was dismissed caught & bowled (batter view)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe}
+        SELECT
+            bi.player_id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            COUNT(DISTINCT (bi.game_id, bi.innings_number, bi.player_id))::int AS c_and_b_count
+        FROM game_universe gu
+        JOIN batting_innings bi ON bi.game_id = gu.game_id
+        JOIN players p ON p.id = bi.player_id
+        JOIN bowler_wickets bw
+          ON bw.game_id = bi.game_id
+         AND bw.innings_number = bi.innings_number
+         AND LOWER(bw.dismissal_type) IN ('caught and bowled', 'c&b', 'c & b')
+         AND (
+           (bw.batter_position IS NOT NULL AND bi.batting_position = bw.batter_position)
+           OR (bw.batter_position IS NULL
+               AND LOWER(TRIM(COALESCE(p.display_name_override, p.name))) = LOWER(TRIM(bw.batter_name)))
+         )
+        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND bi.did_not_bat IS NOT TRUE
+          {player_extra}
+        GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name)
+        HAVING COUNT(*) > 0
+        ORDER BY c_and_b_count DESC, player_name ASC
+        LIMIT :limit OFFSET :offset
+    """
+    params["offset"] = offset
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_caught_and_bowled_bowler(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+) -> list[dict]:
+    """Count of caught-and-bowled wickets taken by each bowler (bowler view).
+    Uses the bowler_wickets table where dismissal_type was canonicalised to
+    'caught and bowled' during sync."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe}
+        SELECT
+            bw.bowler_id::text                        AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            COUNT(*)::int                             AS c_and_b_count
+        FROM game_universe gu
+        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN players p ON p.id = bw.bowler_id
+        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND LOWER(bw.dismissal_type) IN ('caught and bowled', 'c&b', 'c & b')
+          {player_extra}
+        GROUP BY bw.bowler_id, COALESCE(p.display_name_override, p.name)
+        ORDER BY c_and_b_count DESC, player_name ASC
+        LIMIT :limit OFFSET :offset
+    """
+    params["offset"] = offset
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
 
 
 # ─── Batting collapses (fall_of_wickets-based) ────────────────────────────────
@@ -3085,7 +3488,13 @@ async def _wicket_collapse(
 ) -> list[dict]:
     """Find matches where N consecutive wickets fell within max_run_span runs.
     Reports one row per (game, innings) where it happened, with the start/end
-    wicket numbers and run span."""
+    wicket numbers and run span.
+
+    Only considers (game, innings) where the fall-of-wicket data is *complete*
+    — i.e. the FOW rows form a contiguous run from wicket 1 to max(wicket_number)
+    with no gaps. Sparse FOW data would produce false-positive collapses
+    (e.g. wickets 1, 5, 6, 7 only would falsely report a 4-wicket collapse from
+    1→5 simply because wickets 2, 3, 4 weren't recorded)."""
     mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
     params = {
         "org_id": org_id,
@@ -3097,6 +3506,21 @@ async def _wicket_collapse(
     universe = _game_universe_sql(mc)
     sql = f"""
         WITH {universe},
+        innings_fow_quality AS (
+            -- Treat (game, innings) FOW as "full" when rows are contiguous
+            -- from wicket 1 with no gaps (count = max wicket number).
+            SELECT
+                fw.game_id, fw.innings_number,
+                COUNT(*)                       AS rows_recorded,
+                MAX(fw.wicket_number)          AS max_wkt,
+                MIN(fw.wicket_number)          AS min_wkt
+            FROM game_universe gu
+            JOIN fall_of_wickets fw ON fw.game_id = gu.game_id
+            GROUP BY fw.game_id, fw.innings_number
+            HAVING MIN(fw.wicket_number) = 1
+               AND COUNT(*) = MAX(fw.wicket_number)
+               AND MAX(fw.wicket_number) >= :n_wkts
+        ),
         fow AS (
             SELECT
                 fw.game_id, fw.innings_number, fw.wicket_number,
@@ -3109,6 +3533,8 @@ async def _wicket_collapse(
                 ) AS end_wicket
             FROM game_universe gu
             JOIN fall_of_wickets fw ON fw.game_id = gu.game_id
+            JOIN innings_fow_quality q
+              ON q.game_id = fw.game_id AND q.innings_number = fw.innings_number
         ),
         collapses AS (
             SELECT
@@ -3162,6 +3588,55 @@ async def derived_9wkt_collapse(session, *, org_id, limit, offset=0, context):
     return await _wicket_collapse(session, org_id=org_id, limit=limit, offset=offset, context=context, n_wickets=9, max_run_span=70)
 
 
+# ─── Score-range counts (most 40s, most 90s, etc.) ─────────────────────────────
+
+async def _score_range_count(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+    min_runs: int, max_runs: int, result_col: str,
+) -> list[dict]:
+    """Per-player count of innings where runs fell within [min_runs, max_runs)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {
+        "org_id": org_id, "limit": min(max(1, limit), 500),
+        "min_runs": min_runs, "max_runs": max_runs,
+        **mp, **pp,
+    }
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe}
+        SELECT
+            bi.player_id::text AS player_id,
+            COALESCE(p.display_name_override, p.name) AS player_name,
+            COUNT(*)::int AS {result_col}
+        FROM game_universe gu
+        JOIN batting_innings bi ON bi.game_id = gu.game_id
+        JOIN players p ON p.id = bi.player_id
+        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        WHERE p.organisation_id = :org_id
+          AND bi.did_not_bat IS NOT TRUE
+          AND bi.runs >= :min_runs
+          AND bi.runs < :max_runs
+          {player_extra}
+        GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name)
+        ORDER BY {result_col} DESC, player_name ASC
+        LIMIT :limit OFFSET :offset
+    """
+    params["offset"] = offset
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_most_90s(session, *, org_id, limit, offset=0, context):
+    return await _score_range_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
+                                     min_runs=90, max_runs=100, result_col="scores_in_90s")
+
+
+async def derived_most_40s(session, *, org_id, limit, offset=0, context):
+    return await _score_range_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
+                                     min_runs=40, max_runs=50, result_col="scores_in_40s")
+
+
 # ─── Total season minutes batted ───────────────────────────────────────────────
 # We don't have per-innings minutes, but player_season_stats.batting_minutes is
 # populated, so a season-level "most minutes batted" report is possible.
@@ -3172,7 +3647,19 @@ async def derived_most_minutes_in_season(
     """Most batting minutes accumulated in a single season."""
     params = {"org_id": org_id, "limit": min(max(1, limit), 500)}
     season_filter = ""
-    if context.get("season_id"):
+    season_ids = context.get("season_ids")
+    if isinstance(season_ids, str):
+        season_ids = [s.strip() for s in season_ids.split(",") if s.strip()]
+    if season_ids:
+        ph = ", ".join(f"CAST(:ctx_mm_season_ids_{i} AS UUID)" for i in range(len(season_ids)))
+        season_filter = (
+            f"AND (s.id IN ({ph}) "
+            f"OR s.id IN (SELECT alias_season_id FROM season_aliases "
+            f"WHERE canonical_season_id IN ({ph}) AND undone_at IS NULL))"
+        )
+        for i, v in enumerate(season_ids):
+            params[f"ctx_mm_season_ids_{i}"] = v
+    elif context.get("season_id"):
         season_filter = (
             "AND (s.id = CAST(:ctx_season_id AS UUID) "
             "OR s.id IN (SELECT alias_season_id FROM season_aliases "
@@ -3319,7 +3806,7 @@ DERIVED_QUERIES: dict[str, dict] = {
         "columns": [
             {"key": "wickets", "label": "W", "decimal": False},
             {"key": "runs", "label": "R", "decimal": False},
-            {"key": "overs", "label": "OV", "decimal": True},
+            {"key": "overs", "label": "OV", "kind": "overs"},
             {"key": "opposition", "label": "VS"},
             {"key": "grade_name", "label": "GRADE"},
             {"key": "played_at", "label": "DATE"},
@@ -3332,7 +3819,7 @@ DERIVED_QUERIES: dict[str, dict] = {
         "columns": [
             {"key": "wickets", "label": "W", "decimal": False},
             {"key": "runs", "label": "R", "decimal": False},
-            {"key": "overs", "label": "OV", "decimal": True},
+            {"key": "overs", "label": "OV", "kind": "overs"},
             {"key": "opposition", "label": "VS"},
             {"key": "grade_name", "label": "GRADE"},
             {"key": "played_at", "label": "DATE"},
@@ -3340,11 +3827,10 @@ DERIVED_QUERIES: dict[str, dict] = {
     },
     "most_balls_bowled_match": {
         "label": "Most balls bowled in a match",
-        "description": "Most deliveries bowled by one player in a single match.",
+        "description": "Most deliveries bowled by one player in a single match (sum across both innings).",
         "fn": derived_most_balls_bowled_match,
         "columns": [
             {"key": "balls_bowled", "label": "BALLS", "decimal": False},
-            {"key": "overs", "label": "OV", "decimal": True},
             {"key": "opposition", "label": "VS"},
             {"key": "grade_name", "label": "GRADE"},
             {"key": "played_at", "label": "DATE"},
@@ -3529,7 +4015,7 @@ DERIVED_QUERIES: dict[str, dict] = {
         "columns": [
             {"key": "wickets", "label": "W", "decimal": False},
             {"key": "runs", "label": "R", "decimal": False},
-            {"key": "overs", "label": "OV", "decimal": True},
+            {"key": "overs", "label": "OV", "kind": "overs"},
             {"key": "opposition", "label": "VS"},
             {"key": "grade_name", "label": "GRADE"},
             {"key": "played_at", "label": "DATE"},
@@ -3669,17 +4155,37 @@ DERIVED_QUERIES: dict[str, dict] = {
             {"key": "seasons", "label": "SEASONS"},
         ],
     },
-    # C&B — caught and bowled by same player
+    # C&B — caught and bowled (batter view: dismissals)
     "caught_and_bowled": {
-        "label": "Highest caught & bowled count",
-        "description": "Players most often dismissed caught & bowled by the same bowler.",
+        "label": "Highest C&B count (batter)",
+        "description": "Batters most often dismissed caught & bowled.",
         "fn": derived_caught_and_bowled,
         "columns": [{"key": "c_and_b_count", "label": "C&B", "decimal": False}],
+    },
+    # C&B — caught and bowled (bowler view: wickets taken)
+    "caught_and_bowled_bowler": {
+        "label": "Highest C&B count (bowler)",
+        "description": "Bowlers ranked by caught-and-bowled wickets taken.",
+        "fn": derived_caught_and_bowled_bowler,
+        "columns": [{"key": "c_and_b_count", "label": "C&B", "decimal": False}],
+    },
+    # Score-range counts (renamed from list presets in the UI)
+    "most_90s": {
+        "label": "Most 90s",
+        "description": "Per-player count of innings scored in the 90s (90-99 inclusive).",
+        "fn": derived_most_90s,
+        "columns": [{"key": "scores_in_90s", "label": "90s", "decimal": False}],
+    },
+    "most_40s": {
+        "label": "Most 40s",
+        "description": "Per-player count of innings scored in the 40s (40-49 inclusive).",
+        "fn": derived_most_40s,
+        "columns": [{"key": "scores_in_40s", "label": "40s", "decimal": False}],
     },
     # Ducks inflicted — bowler caused a batter's 0
     "ducks_inflicted": {
         "label": "Most ducks inflicted",
-        "description": "Bowlers ranked by how often they dismissed a batter for 0.",
+        "description": "Bowlers ranked by how often they dismissed a batter for 0. Requires a Full Rebuild post-v7.15.0.3 to backfill opposition batting scores.",
         "fn": derived_ducks_inflicted,
         "columns": [
             {"key": "ducks_inflicted", "label": "DUCKS", "decimal": False},
@@ -3687,7 +4193,7 @@ DERIVED_QUERIES: dict[str, dict] = {
     },
     "golden_ducks_inflicted": {
         "label": "Most golden ducks inflicted",
-        "description": "Bowlers ranked by golden ducks (0 off 1 ball) they caused.",
+        "description": "Bowlers ranked by golden ducks (0 off exactly 1 ball) they caused. Requires a Full Rebuild post-v7.15.0.3 to backfill opposition batting scores.",
         "fn": derived_golden_ducks_inflicted,
         "columns": [
             {"key": "golden_ducks_inflicted", "label": "GOLDEN", "decimal": False},
@@ -3696,12 +4202,12 @@ DERIVED_QUERIES: dict[str, dict] = {
     # Bowler+fielder combos
     "bowler_fielder_combo": {
         "label": "Top bowler/fielder combinations",
-        "description": "Bowler+fielder pairs ranked by wickets they took together.",
+        "description": "Bowler+catcher pairs ranked by caught dismissals taken together (WK and outfield catches; stumpings excluded). Count is limited to matches where the dismissal text names the catcher — historical matches without structured scorecard text will be under-counted.",
         "fn": derived_bowler_fielder_combo,
         "columns": [
             {"key": "player_a_id", "label": "BOWLER", "kind": "player_a"},
             {"key": "player_b_id", "label": "FIELDER", "kind": "player_b"},
-            {"key": "wickets", "label": "WKTS", "decimal": False},
+            {"key": "catches", "label": "CT", "decimal": False},
         ],
     },
     # Top opening bowlers
@@ -3806,6 +4312,9 @@ TARGET_DISPATCH = {
     "player_career":    query_player_career,
     "player_season":    query_player_season,
     "player_grade":     query_player_grade,
+    "family_career":    query_family_career,
+    "family_season":    query_family_season,
+    "family_grade":     query_family_grade,
     "innings_list":     query_innings_list,
     "spell_list":       query_spell_list,
     "match_list":       query_match_list,
@@ -3859,7 +4368,7 @@ async def run_derived(
 
 METRIC_CATEGORIES: list[dict] = [
     {"key": "participation", "label": "Participation",
-     "fields": ["matches", "seasons_played", "batting_innings", "bowling_innings"]},
+     "fields": ["matches", "seasons_played", "batting_innings", "bowling_innings", "member_count"]},
     {"key": "batting", "label": "Batting",
      "fields": ["runs", "not_outs", "batting_average", "batting_strike_rate", "high_score",
                 "fifties", "hundreds", "ducks", "fours", "sixes", "balls_faced", "balls",

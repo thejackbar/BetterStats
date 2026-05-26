@@ -4,11 +4,123 @@
 
 export const CHANGELOG = [
   {
-    version: 'v7.14.1.1',
+    version: 'v7.17.1.2',
     date: '2026-05-26',
-    title: 'StatLab: golden duck fix',
+    title: 'StatLab: golden duck + bowler/fielder fixes',
     items: [
-      'Golden ducks (batter and inflicted) now correctly require exactly 1 ball faced — dismissals recorded with 0 balls are excluded',
+      'Golden ducks now require exactly 1 ball faced (0-ball dismissals excluded) — both batter and bowler-inflicted reports',
+      'Bowler/fielder combinations now shows BOWLER and FIELDER as separate columns (was a combined "A & B" pair)',
+      'Report renamed to "Top bowler/catcher combinations" — counts only caught dismissals (WK and outfield); stumpings and C&B excluded',
+    ],
+  },
+  {
+    version: 'v7.17.1.1',
+    date: '2026-05-26',
+    title: 'Admin → Families: toggle individual players on a suggestion',
+    items: [
+      'Each name chip on a "Possible family" suggestion is now a toggle. Click to exclude a player from the family you\'re about to create — handy when a same-surname group is actually two unrelated families (e.g. six Matthews split into two households).',
+      '"Select all" / "Select none" shortcuts above the buttons. The Create / Add buttons show the live count and are disabled at zero.',
+      'Deselected players stay in the suggestion list and come back on the next refresh, so you can build one family at a time without losing the rest.',
+    ],
+  },
+  {
+    version: 'v7.17.1',
+    date: '2026-05-26',
+    title: 'StatLab: multi-select Season and Grade filters',
+    items: [
+      'Season and Grade in the Customise Query → Context panel are now multi-select checkbox pickers. Pick any combination of seasons (e.g. 2022/23, 2023/24, 2024/25) plus any combination of grades (e.g. 2nd and 3rd grade) and every StatLab report respects the union.',
+      'Each picker shows the selected count, a search box (handy for clubs with 50+ seasons), and a Clear button.',
+      'URL encoding: selections are saved as ?c_season_ids=a,b,c&c_grade_ids=x,y — saved-report URLs round-trip cleanly. Old URLs using the legacy single-select ?c_season_id= / ?c_grade_id= still work; the picker pre-fills from them on load and switches to multi-select the moment you touch it.',
+      'Backend: new season_ids / grade_ids context keys with IN-list SQL expansion. Season multi-select still expands aliases (e.g. selecting "Summer 23/24" also picks up any alias seasons mapped to it).',
+    ],
+  },
+  {
+    version: 'v7.17.0',
+    date: '2026-05-26',
+    title: 'StatLab: family-aggregate reports',
+    items: [
+      'Three new report types: Family Career, Family By Season, Family By Grade. Each row is one family with stats summed across every member — total matches, runs, wickets, catches, etc. Family-level averages (batting average, bowling average, strike rate, economy) treat the whole family as one big career.',
+      'New "Families" preset group in the report picker with one-click leaderboards for runs / wickets / matches / catches by family.',
+      'Players not in any family don\'t appear in family reports. Existing per-player reports are unchanged.',
+      'The "In family" dropdown filter (which restricts a player report to one family\'s members) is hidden on the new family reports — every row is already a different family there.',
+    ],
+  },
+  {
+    version: 'v7.16.0.2',
+    date: '2026-05-26',
+    title: 'Fix: Admin → Families autocomplete clipped + page reload on every edit',
+    items: [
+      'Player-search dropdown in the "Add member" row is no longer clipped to a couple of pixels — the family card was wrapped in overflow-hidden which hid the absolute-positioned suggestions list.',
+      'Editing a member (add / remove / rename family / save relationship) no longer unmounts and reloads the entire page. The "Loading…" spinner now only shows on the initial load; subsequent refreshes happen in the background so expanded cards and in-progress edits survive.',
+      'Removed an unstable dependency (the toast helper) from the data-fetching effect that was retriggering reloads whenever any toast appeared anywhere in the app.',
+    ],
+  },
+  {
+    version: 'v7.16.0.1',
+    date: '2026-05-26',
+    title: 'Fix: backend crash loop from duplicate Alembic revision 033',
+    items: [
+      'Three migrations had shipped with the same revision id (033) — match_format, bowler_wickets columns, and families. Alembic refused to run with "Multiple head revisions", so the backend container restarted forever and every login returned a non-JSON 5xx (frontend showed the generic "Login failed"). Renumbered the latter two to 034 and 035 so the migration chain is linear again.',
+    ],
+  },
+  {
+    version: 'v7.16.0',
+    date: '2026-05-26',
+    title: 'Families: group related players and filter StatLab by family',
+    items: [
+      'New Admin → Families page. Create a family, add players to it, and tag each member\'s relationship (Father, Son, Cousin — free text with autocomplete suggestions).',
+      'Suggestions tab groups same-surname players who aren\'t already in a family and offers one-click "Create family" or "Add to existing". Dismiss a surname to never see it again.',
+      'StatLab → Player Attributes gains a "Family" dropdown. Pick a family and reports restrict to its members — works on every report and saved-query.',
+      'New MANAGE_FAMILIES capability — granted to super_admin and club_admin by default; can be granted to club members.',
+    ],
+  },
+  {
+    version: 'v7.15.0.3',
+    date: '2026-05-26',
+    title: 'Fix: Ducks/Golden Ducks Inflicted — store opposition batter’s score',
+    items: [
+      'Most Ducks Inflicted and Most Golden Ducks Inflicted were returning empty because they joined bowler_wickets to batting_innings, but batting_innings only stores OUR club’s batters — our bowlers can only dismiss opposition batters, so the join never matched.',
+      'Added batter_runs / batter_balls columns to bowler_wickets (migration 034) and updated the sync to denormalise the dismissed opposition batter’s score onto the wicket row at save time.',
+      'Both reports now read these columns directly — Most Ducks Inflicted = rows where batter_runs = 0, Most Golden Ducks Inflicted = rows where batter_runs = 0 AND batter_balls IN (0, 1).',
+      'Existing bowler_wickets rows have batter_runs = NULL. A Full Rebuild from Admin → Data Sync is required to backfill them (one-time cost).',
+      'Top Bowler/Fielder Combinations: query is structurally correct (joins bowler_wickets where fielder_id is set) but description now notes that data quality depends on the catcher’s name in dismissalText resolving to a known player — substitute fielders or unrecognised names fall through. No SQL change.',
+    ],
+  },
+  {
+    version: 'v7.15.0.2',
+    date: '2026-05-26',
+    title: 'Fix: Highest Bowled / Caught / C&B / Stumped reports returning empty',
+    items: [
+      'Highest Bowled, Caught, Stumped count reports were returning no rows because their LIKE patterns expected long forms ("bowled", "caught%") but Grassroots sync stores dismissal_type as bare short forms ("b", "c", "st"). Patterns updated to match both — same approach already used in the per-player dismissal breakdown chart.',
+      'Highest C&B count (batter): rewritten to join batting_innings → bowler_wickets on (game, innings, batting_position). The batter\'s own dismissal_type is just "c" so c&b can\'t be told apart from a normal catch without consulting the bowler-wickets table.',
+    ],
+  },
+  {
+    version: 'v7.15.0.1',
+    date: '2026-05-26',
+    title: 'Fix: Most Consecutive Hundreds 500',
+    items: [
+      'Most Consecutive Hundreds and Most Consecutive Scores Without a Century were returning Internal Server Error — their signatures were missing the `offset` pagination parameter so the body threw NameError. Both signatures fixed.',
+    ],
+  },
+  {
+    version: 'v7.15.0',
+    date: '2026-05-26',
+    title: 'StatLab: report fixes, customise drawer, admin-approved saved reports',
+    items: [
+      'Wicket collapse reports (5/6/7/8/9-wkt) now only show games with complete fall-of-wickets data — no more false positives from sparse FOW records',
+      'Unusual dismissals no longer include "Retired Not Out" (still includes hit wicket, retired hurt, handled, obstructed, timed out)',
+      'Highest C&B count: now two reports — batter view ("dismissed C&B") and bowler view ("C&B wickets taken") for clarity',
+      'Most Ducks Inflicted / Most Golden Ducks Inflicted: re-joined on (game, innings, batting position) so batters aren\'t silently dropped when their name spelling differs between the bowler and batting tables',
+      'Overs now display to 1 decimal place (e.g. "5.3" not "5.30") consistently across StatLab',
+      'Most Balls Bowled in a Match: drops the Overs column, shows balls only across both innings of the match',
+      'Most Wickets in a Match: moved from Match to Bowling category where it belongs',
+      'Most 90s / Most 40s: split into a count-per-player report and a separate "Scores in the 90s/40s" individual-scores list',
+      'Customise Query drawer: renamed from "+ Build custom query", with helper text clarifying you\'re tweaking the current report\'s sort/filters/context',
+      'Customise Query: highlights active fields with an accent dot and ring so you can see at a glance what\'s been modified from the report\'s defaults',
+      'Saved Reports approval: club-visibility saves now go to an admin approval queue first — admins review them under Admin → Saved Reports, then they appear publicly. Private reports skip the queue.',
+      'New MANAGE_REPORTS capability — granted to super_admin and club_admin by default; can be granted to club members for distributed approval',
+      'Notification bell counts pending report approvals for admins',
     ],
   },
   {
