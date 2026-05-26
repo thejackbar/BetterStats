@@ -61,7 +61,7 @@ def _serialise(rows: list[dict]) -> list[dict]:
 _CTX_KEYS_TEXT = {
     "season_id", "grade_id", "grade_name", "opposition", "date_from", "date_to",
     "result", "dismissal",
-    "gender", "player_role",
+    "gender", "player_role", "overseas",
     "award_category", "award_subcategory", "award_name", "office_bearer",
     "family_id",
 }

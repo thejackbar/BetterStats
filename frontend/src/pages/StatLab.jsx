@@ -323,7 +323,7 @@ const CONTEXT_KEYS = [
   'min_year','max_year','finals_only','captain_only','keeper_only','result',
   'dismissal','position_min','position_max',
   'first_n_matches','milestone_runs','on_this_day',
-  'gender','player_role','award_category','award_subcategory','award_name','office_bearer',
+  'gender','overseas','player_role','award_category','award_subcategory','award_name','office_bearer',
   'family_id',
 ]
 
@@ -689,6 +689,14 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
               <option value="">Any gender</option>
               <option value="Male">Male</option>
               <option value="Female">Female</option>
+            </select>
+          </div>
+          <div>
+            <Label>Overseas</Label>
+            <select className={selectCls + ' mt-1'} value={ctx.overseas || ''} onChange={e => set('overseas', e.target.value)}>
+              <option value="">All players</option>
+              <option value="only">Overseas only</option>
+              <option value="exclude">Local only</option>
             </select>
           </div>
           <div>

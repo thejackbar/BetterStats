@@ -178,6 +178,12 @@ PLAYER_CONTEXT_FILTERS: dict[str, dict] = {
     "keeper_only":  {"sql": "gap.is_wicket_keeper = TRUE",  "value_kind": "flag"},
     "gender":       {"sql": "LOWER(COALESCE(p.gender, '')) = LOWER(:ctx_gender)",            "value_kind": "text"},
     "player_role":  {"sql": "LOWER(COALESCE(p.player_role, '')) = LOWER(:ctx_player_role)",  "value_kind": "text"},
+    "overseas":     {"sql": "("
+                             "(:ctx_overseas = 'only' AND p.is_overseas = TRUE)"
+                             " OR "
+                             "(:ctx_overseas = 'exclude' AND (p.is_overseas IS NULL OR p.is_overseas = FALSE))"
+                             ")",
+                     "value_kind": "text"},
     # Achievement-driven filters — restrict results to players who have a
     # recorded entry in player_achievements matching the criterion. Subselect
     # is keyed by org_id, which is already bound at the outer query level.
