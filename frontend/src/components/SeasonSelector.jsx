@@ -11,6 +11,9 @@ export default function SeasonSelector({
   setCaptainOnly = () => {},
   gender = null,
   setGender = () => {},
+  overseas = null,
+  setOverseas = () => {},
+  showOverseasFilter = false,
 }) {
   return (
     <div className="flex flex-wrap gap-2 items-center">
@@ -89,6 +92,32 @@ export default function SeasonSelector({
                 onClick={() => setFinalsOnly(opt.value)}
                 className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
                   finalsOnly === opt.value
+                    ? 'bg-pb-accent/15 text-pb-accent'
+                    : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Overseas filter - pill toggle */}
+      {showOverseasFilter && seasons.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Overseas</label>
+          <div className="flex items-center border pb-hairline rounded overflow-hidden">
+            {[
+              { value: null, label: 'All' },
+              { value: 'exclude', label: 'Local' },
+              { value: 'only', label: 'Overseas' },
+            ].map(opt => (
+              <button
+                key={opt.label}
+                onClick={() => setOverseas(opt.value)}
+                className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+                  overseas === opt.value
                     ? 'bg-pb-accent/15 text-pb-accent'
                     : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
                 }`}

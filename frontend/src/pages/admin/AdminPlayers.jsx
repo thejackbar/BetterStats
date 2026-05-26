@@ -16,6 +16,8 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
     is_player: player.is_player !== false, // default true
     player_role: player.player_role || '',
     playhq_id: player.playhq_id || '',
+    is_overseas: player.is_overseas || false,
+    overseas_country: player.overseas_country || '',
   })
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
@@ -52,6 +54,8 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
         is_player: form.is_player,
         player_role: form.player_role,
         playhq_id: form.playhq_id,
+        is_overseas: form.is_overseas,
+        overseas_country: form.overseas_country,
       }
       const updated = await api.adminPatchPlayer(player.id, payload)
       onSaved({ ...player, ...updated, photo_url: photoUrl })
@@ -176,6 +180,35 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
               <option value="Wicketkeeper">Wicketkeeper</option>
               <option value="All Rounder">All Rounder</option>
             </select>
+          </div>
+
+          {/* Overseas */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Overseas Player</label>
+              <label className="flex items-center gap-2 cursor-pointer mt-1.5">
+                <input
+                  type="checkbox"
+                  checked={form.is_overseas}
+                  onChange={e => setForm(f => ({ ...f, is_overseas: e.target.checked }))}
+                  className="accent-pb-accent"
+                />
+                <span className="font-mono text-[10px] text-pb-text">
+                  {form.is_overseas ? 'Overseas player' : 'Local player'}
+                </span>
+              </label>
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Country</label>
+              <input
+                type="text"
+                value={form.overseas_country}
+                onChange={e => setForm(f => ({ ...f, overseas_country: e.target.value }))}
+                placeholder={form.is_overseas ? 'e.g. England' : ''}
+                disabled={!form.is_overseas}
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent disabled:opacity-40"
+              />
+            </div>
           </div>
 
           {/* PlayHQ ID */}
@@ -501,6 +534,11 @@ export default function AdminPlayers() {
                     )}
                     {p.is_player === false && (
                       <span className="font-mono text-[10px] text-pb-faintest italic">non-player</span>
+                    )}
+                    {p.is_overseas && (
+                      <span className="font-mono text-[10px] text-pb-amber/80">
+                        {p.overseas_country ? `Overseas · ${p.overseas_country}` : 'Overseas'}
+                      </span>
                     )}
                   </div>
                 </div>

@@ -576,7 +576,7 @@ export const api = {
   },
 
   // Leaderboard
-  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, finalsOnly, captainOnly, gender } = {}) => {
+  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, finalsOnly, captainOnly, gender, overseas } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -587,9 +587,10 @@ export const api = {
     if (finalsOnly) params.set('finals_only', 'true')
     if (captainOnly) params.set('captain_only', 'true')
     if (gender) params.set('gender', gender)
+    if (overseas) params.set('overseas', overseas)
     return request(`/leaderboard/batting?${params}`)
   },
-  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, finalsOnly, captainOnly, gender } = {}) => {
+  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, finalsOnly, captainOnly, gender, overseas } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -601,9 +602,10 @@ export const api = {
     if (finalsOnly) params.set('finals_only', 'true')
     if (captainOnly) params.set('captain_only', 'true')
     if (gender) params.set('gender', gender)
+    if (overseas) params.set('overseas', overseas)
     return request(`/leaderboard/bowling?${params}`)
   },
-  fieldingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, finalsOnly, captainOnly, gender } = {}) => {
+  fieldingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, finalsOnly, captainOnly, gender, overseas } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -613,9 +615,10 @@ export const api = {
     if (finalsOnly) params.set('finals_only', 'true')
     if (captainOnly) params.set('captain_only', 'true')
     if (gender) params.set('gender', gender)
+    if (overseas) params.set('overseas', overseas)
     return request(`/leaderboard/fielding?${params}`)
   },
-  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, captainOnly, limit, gender } = {}) => {
+  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, captainOnly, limit, gender, overseas } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeName) params.set('grade_name', gradeName)
@@ -623,6 +626,7 @@ export const api = {
     if (captainOnly) params.set('captain_only', 'true')
     if (limit) params.set('limit', limit)
     if (gender) params.set('gender', gender)
+    if (overseas) params.set('overseas', overseas)
     return request(`/leaderboard/sirs/${type}?${params}`)
   },
   getPlayerCaptainStats: (playerId) => request(`/players/${playerId}/captain-stats`),

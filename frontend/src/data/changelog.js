@@ -4,6 +4,16 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.17.3',
+    date: '2026-05-26',
+    title: 'Overseas player support',
+    items: [
+      'Admin can now mark any player as an overseas player and record their country of origin.',
+      'Leaderboard has a new Overseas filter — show all players, local only, or overseas only.',
+      'Overseas players are highlighted with a badge on their profile page and in the admin player list.',
+    ],
+  },
+  {
     version: 'v7.17.2.1',
     date: '2026-05-26',
     title: 'StatLab: golden duck ball filter confirmed correct',

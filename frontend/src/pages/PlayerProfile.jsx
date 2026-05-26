@@ -2244,7 +2244,15 @@ export default function PlayerProfile() {
         {/* Hero */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-6 mb-6 items-end">
           <div>
-            <Label>{org?.name || ''} · {player.role || 'PLAYER'}</Label>
+            <Label>
+              {org?.name || ''} · {player.role || 'PLAYER'}
+              {player.is_overseas && (
+                <span className="ml-2 font-mono text-[10px] tracking-wide2 px-2 py-0.5 rounded-sm border"
+                  style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 40%, transparent)', color: 'var(--pb-amber)', background: 'color-mix(in srgb, var(--pb-amber) 10%, transparent)' }}>
+                  {player.overseas_country ? `Overseas · ${player.overseas_country}` : 'Overseas'}
+                </span>
+              )}
+            </Label>
             <h1 className="font-display text-[48px] sm:text-[72px] font-bold tracking-tight leading-[0.92] mt-1.5 text-pb-text">
               {fmtName(player.display_name)}
             </h1>
