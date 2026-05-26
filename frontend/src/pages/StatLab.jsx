@@ -13,9 +13,6 @@ const TARGETS = [
   { key: 'player_career',    label: 'Player career',     shape: 'aggregate', dim: 'player' },
   { key: 'player_season',    label: 'Player season',     shape: 'aggregate', dim: 'player_season' },
   { key: 'player_grade',     label: 'Player by grade',   shape: 'aggregate', dim: 'player_grade' },
-  { key: 'family_career',    label: 'Family career',     shape: 'aggregate', dim: 'family' },
-  { key: 'family_season',    label: 'Family by season',  shape: 'aggregate', dim: 'family_season' },
-  { key: 'family_grade',     label: 'Family by grade',   shape: 'aggregate', dim: 'family_grade' },
   { key: 'innings_list',     label: 'Innings list',      shape: 'list',      dim: 'innings' },
   { key: 'spell_list',       label: 'Bowling spells',    shape: 'list',      dim: 'spell' },
   { key: 'match_list',       label: 'Match list',        shape: 'list',      dim: 'match' },
@@ -42,7 +39,7 @@ const METRIC_LABELS = {
   sixes: { label: 'Sixes', short: '6s', decimal: false },
   bowling_innings: { label: 'Bowling Spells', short: 'Spells', decimal: false },
   wickets: { label: 'Wickets', short: 'Wkts', decimal: false },
-  overs: { label: 'Overs', short: 'Overs', decimal: false },
+  overs: { label: 'Overs', short: 'Overs', decimal: true },
   runs_conceded: { label: 'Runs Conceded', short: 'R Conc', decimal: false },
   bowling_average: { label: 'Bowling Average', short: 'Bowl Avg', decimal: true },
   bowling_economy: { label: 'Economy Rate', short: 'Econ', decimal: true },
@@ -68,7 +65,6 @@ const METRIC_LABELS = {
   wicket_number: { label: 'Wicket Number', short: 'Wkt #', decimal: false },
   batter1_runs: { label: 'Batter 1 Runs', short: 'B1 R', decimal: false },
   batter2_runs: { label: 'Batter 2 Runs', short: 'B2 R', decimal: false },
-  member_count: { label: 'Members', short: 'Members', decimal: false },
 }
 
 const OPERATORS = [
@@ -110,18 +106,6 @@ const PRESET_GROUPS = [
     ],
   },
   {
-    key: 'families', label: 'Families', defaultOpen: false,
-    items: [
-      { type: 'preset', label: 'Most runs by family (career)',      target: 'family_career', sortBy: 'runs',     sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Most wickets by family (career)',   target: 'family_career', sortBy: 'wickets',  sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Most matches by family (career)',   target: 'family_career', sortBy: 'matches',  sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Most catches by family (career)',   target: 'family_career', sortBy: 'catches',  sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Family runs by season',             target: 'family_season', sortBy: 'runs',     sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Family wickets by season',          target: 'family_season', sortBy: 'wickets',  sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Family matches by season',          target: 'family_season', sortBy: 'matches',  sortDir: 'desc', filters: [], context: {} },
-    ],
-  },
-  {
     key: 'batting', label: 'Batting', defaultOpen: false,
     items: [
       // Aggregates
@@ -152,12 +136,8 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'golden_ducks',                  label: 'Most golden ducks',         description: 'Out for 0 off 0 or 1 ball.' },
       { type: 'derived', key: 'duck_pairs',                    label: 'Duck pairs',                description: 'Ducks in both innings of the same match.' },
       // Scores ranges
-      // Most 90s/40s — count per player (the "leaderboard" view)
-      { type: 'derived', key: 'most_90s',                      label: 'Most 90s',                  description: 'Count per player of innings scored in the 90s.' },
-      { type: 'derived', key: 'most_40s',                      label: 'Most 40s',                  description: 'Count per player of innings scored in the 40s.' },
-      // The individual-scores list (preserved under a clearer name)
-      { type: 'preset', label: 'Scores in the 90s',            target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '90' }, { field: 'runs', op: 'lt', value: '100' }], context: {} },
-      { type: 'preset', label: 'Scores in the 40s',            target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '40' }, { field: 'runs', op: 'lt', value: '50' }], context: {} },
+      { type: 'preset', label: 'Most 90s',                     target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '90' }, { field: 'runs', op: 'lt', value: '100' }], context: {} },
+      { type: 'preset', label: 'Most 40s',                     target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '40' }, { field: 'runs', op: 'lt', value: '50' }], context: {} },
       // Hundreds
       { type: 'preset', label: 'Most hundreds (career)',       target: 'player_career', sortBy: 'hundreds',            sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
       { type: 'preset', label: 'Most hundreds in a season',    target: 'player_season', sortBy: 'hundreds',            sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
@@ -193,8 +173,8 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'dismissal_lbw',                 label: 'Highest LBW count',          description: 'Players most often dismissed LBW.' },
       { type: 'derived', key: 'dismissal_run_out',             label: 'Highest run-out count',      description: 'Players most often run out.' },
       { type: 'derived', key: 'dismissal_stumped',             label: 'Highest stumped count',      description: 'Players most often stumped.' },
-      { type: 'derived', key: 'unusual_dismissals',            label: 'Unusual dismissals',         description: 'Rare dismissals (hit wicket, retired hurt, handled, etc.).' },
-      { type: 'derived', key: 'caught_and_bowled',             label: 'Highest C&B count (batter)', description: 'Batters most often dismissed caught & bowled.' },
+      { type: 'derived', key: 'unusual_dismissals',            label: 'Unusual dismissals',         description: 'Rare dismissals (hit wicket, retired, handled, etc.).' },
+      { type: 'derived', key: 'caught_and_bowled',             label: 'Highest C&B count',          description: 'Most often caught & bowled by the same bowler.' },
       { type: 'derived', key: 'most_minutes_in_season',        label: 'Most batting minutes in a season', description: 'Most minutes at the crease over one season.' },
       // Collapses
       { type: 'derived', key: 'collapse_5w',                   label: '5-wicket batting collapses', description: '5 wickets fell within 30 runs.' },
@@ -251,8 +231,6 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'hat_tricks',                        label: 'Hat tricks',                description: 'From Admin → Awards (manually recorded).' },
       { type: 'derived', key: 'ducks_inflicted',                   label: 'Most ducks inflicted',      description: 'Bowlers who dismissed batters for 0 most often.' },
       { type: 'derived', key: 'golden_ducks_inflicted',            label: 'Most golden ducks inflicted', description: 'Bowlers who dismissed batters for 0 off 0–1 balls.' },
-      { type: 'derived', key: 'caught_and_bowled_bowler',          label: 'Highest C&B count (bowler)', description: 'Bowlers ranked by caught-and-bowled wickets taken.' },
-      { type: 'derived', key: 'most_wickets_in_match',             label: 'Most wickets in a match',   description: 'Most wickets by one bowler across both innings.' },
       { type: 'derived', key: 'bowler_fielder_combo',              label: 'Top bowler/fielder combinations', description: 'Most productive bowler+catcher partnerships.' },
       { type: 'derived', key: 'top_opening_bowlers',               label: 'Top opening bowlers by match count', description: 'Players who most often take the new ball.' },
       { type: 'preset', label: 'On this day — bowling',            target: 'spell_list',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: { on_this_day: true } },
@@ -284,6 +262,7 @@ const PRESET_GROUPS = [
       { type: 'preset', label: 'Biggest winning margins',  target: 'match_list', sortBy: 'margin_runs',  sortDir: 'desc', filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
       { type: 'preset', label: 'Closest wins',             target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
       { type: 'preset', label: 'Biggest defeats',          target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'lt', value: '0' }], context: { result: 'lost' } },
+      { type: 'derived', key: 'most_wickets_in_match',     label: 'Most wickets taken in a match', description: 'Most wickets by one bowler across both innings.' },
       { type: 'preset', label: 'Finals',                   target: 'match_list', sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: { finals_only: true } },
     ],
   },
@@ -313,9 +292,6 @@ const COLUMN_SETS = {
   player_career:    ['matches','batting_innings','runs','not_outs','batting_average','high_score','hundreds','fifties','ducks','wickets','bowling_average','bowling_economy','five_wicket_innings','catches','run_outs','stumpings'],
   player_season:    ['matches','batting_innings','runs','batting_average','high_score','hundreds','fifties','wickets','bowling_average','catches'],
   player_grade:     ['matches','batting_innings','runs','batting_average','high_score','hundreds','wickets','bowling_average','catches'],
-  family_career:    ['member_count','matches','batting_innings','runs','batting_average','high_score','hundreds','fifties','ducks','wickets','bowling_average','five_wicket_innings','catches','run_outs','stumpings'],
-  family_season:    ['member_count','matches','batting_innings','runs','batting_average','high_score','hundreds','wickets','bowling_average','catches'],
-  family_grade:     ['member_count','matches','batting_innings','runs','batting_average','high_score','wickets','bowling_average','catches'],
   innings_list:     ['runs','balls','fours','sixes','strike_rate','batting_position'],
   spell_list:       ['overs','maidens','runs','wickets','economy'],
   match_list:       ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs'],
@@ -328,19 +304,14 @@ const CONTEXT_KEYS = [
   'dismissal','position_min','position_max',
   'first_n_matches','milestone_runs','on_this_day',
   'gender','player_role','award_category','award_subcategory','award_name','office_bearer',
-  'family_id',
 ]
-// Context keys that carry an array of IDs (multi-select). Encoded in the URL
-// as a single comma-separated value (c_season_ids=a,b,c) for compact links,
-// and sent to the API the same way (the backend accepts either form).
-const CONTEXT_LIST_KEYS = ['season_ids', 'grade_ids']
 
 // Category groupings for the field picker. Field membership is intersected
 // with each target's allowed metrics on render — categories with no eligible
 // fields hide automatically. Kept in sync with backend METRIC_CATEGORIES.
 const FILTER_CATEGORIES = [
   { key: 'participation', label: 'Participation',
-    fields: ['matches','seasons_played','batting_innings','bowling_innings','member_count'] },
+    fields: ['matches','seasons_played','batting_innings','bowling_innings'] },
   { key: 'batting', label: 'Batting',
     fields: ['runs','not_outs','batting_average','batting_strike_rate','high_score',
              'fifties','hundreds','ducks','fours','sixes','balls_faced','balls',
@@ -370,8 +341,10 @@ const PAIR_DERIVED = new Set([
   'partnership_aggregates_pair',
   'century_partnerships_pair',
   'top_partnerships_by_wicket',
-  'bowler_fielder_combo',
 ])
+// Derived reports that render as two separate named-role columns (BOWLER / FIELDER)
+// rather than the combined "A & B" pair format.
+const DUO_DERIVED = new Set(['bowler_fielder_combo'])
 
 let _treeIdCounter = 1000
 const newTreeId = () => ++_treeIdCounter
@@ -455,12 +428,6 @@ function encodeQueryToParams(q) {
   if (cleaned) p.set('ft', JSON.stringify(cleaned))
   Object.entries(q.context || {}).forEach(([k, v]) => {
     if (v === undefined || v === null || v === '' || v === false) return
-    if (Array.isArray(v)) {
-      // Multi-select lists encoded as one comma-separated value.
-      const joined = v.filter(x => x !== '' && x != null).join(',')
-      if (joined) p.set(`c_${k}`, joined)
-      return
-    }
     p.set(`c_${k}`, v === true ? '1' : String(v))
   })
   return p
@@ -493,12 +460,6 @@ function decodeParamsToQuery(params) {
     } else {
       context[k] = v
     }
-  })
-  CONTEXT_LIST_KEYS.forEach(k => {
-    const v = params.get(`c_${k}`)
-    if (!v) return
-    const arr = v.split(',').map(s => s.trim()).filter(Boolean)
-    if (arr.length) context[k] = arr
   })
   return { target, sortBy, sortDir, limit, filterTree, context }
 }
@@ -587,171 +548,24 @@ function PickerInput({ orgId, kind, value, placeholder, onChange }) {
   )
 }
 
-// Compact multi-select checkbox panel. Renders selected count + opens a
-// drop-down with a search box and a checkbox per option. Used for the
-// Season and Grade context filters so users can combine selections (e.g.
-// "2nd grade AND 3rd grade across 2022-2024 inclusive").
-function MultiCheckPicker({ label, allLabel, options, value, onChange, searchPlaceholder }) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const wrapRef = useRef(null)
-  const selected = Array.isArray(value) ? value : []
-  const selectedSet = new Set(selected)
-
-  useEffect(() => {
-    const onClick = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
-  }, [])
-
-  const toggle = (id) => {
-    const next = selectedSet.has(id)
-      ? selected.filter(x => x !== id)
-      : [...selected, id]
-    onChange(next)
-  }
-  const clearAll = () => onChange([])
-
-  const term = search.trim().toLowerCase()
-  const filtered = term
-    ? options.filter(o => (o.label || '').toLowerCase().includes(term))
-    : options
-
-  const summary = selected.length === 0
-    ? allLabel
-    : selected.length === 1
-      ? (options.find(o => o.id === selected[0])?.label || '1 selected')
-      : `${selected.length} selected`
-
-  return (
-    <div ref={wrapRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className={selectCls + ' mt-1 flex items-center justify-between text-left'}
-      >
-        <span className={selected.length ? 'text-pb-text' : 'text-pb-faint'}>{summary}</span>
-        <span className="font-mono text-[10px] text-pb-faintest ml-1">▾</span>
-      </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full bg-pb-bg pb-card shadow-xl max-h-72 overflow-hidden flex flex-col">
-          <div className="p-2 pb-hairline-b">
-            <input
-              autoFocus
-              className={inputCls}
-              placeholder={searchPlaceholder || `Search ${label.toLowerCase()}…`}
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-          </div>
-          <div className="flex-1 overflow-auto pb-scroll py-1">
-            {filtered.length === 0 && (
-              <p className="text-pb-faintest font-mono text-[10px] px-3 py-2">No matches.</p>
-            )}
-            {filtered.map(o => {
-              const checked = selectedSet.has(o.id)
-              return (
-                <label
-                  key={o.id}
-                  className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-pb-surface2 select-none"
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggle(o.id)}
-                    className="accent-pb-accent"
-                  />
-                  <span className={`text-xs ${checked ? 'text-pb-text' : 'text-pb-dim'}`}>{o.label}</span>
-                </label>
-              )
-            })}
-          </div>
-          <div className="flex items-center justify-between px-2 py-1.5 pb-hairline-t bg-pb-surface2/40">
-            <span className="font-mono text-[10px] text-pb-faintest">
-              {selected.length} of {options.length} selected
-            </span>
-            <div className="flex gap-2">
-              {selected.length > 0 && (
-                <button
-                  type="button"
-                  onClick={clearAll}
-                  className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text"
-                >
-                  Clear
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, target, activeDerived, orgId }) {
+function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, activeDerived, orgId }) {
   const set = (k, v) => onChange({ ...ctx, [k]: v })
   const showInningsFilters = targetShape === 'list' || targetShape === 'aggregate'
-  // Family targets are themselves family-aggregations, so a "filter to one
-  // family" dropdown is redundant (you'd just see one row). Hide it there.
-  const isFamilyTarget = typeof target === 'string' && target.startsWith('family_')
-  const [families, setFamilies] = useState([])
-  useEffect(() => {
-    if (!orgId) return
-    api.listFamilies(orgId).then(setFamilies).catch(() => setFamilies([]))
-  }, [orgId])
-
-  // Normalise legacy single-select context (season_id / grade_id) into the
-  // new multi-select arrays so a saved-report URL from before multi-select
-  // still pre-fills the picker. The single-select keys are kept on the ctx
-  // unchanged until the user touches the picker (back-compat for the API).
-  const seasonIds = Array.isArray(ctx.season_ids)
-    ? ctx.season_ids
-    : (ctx.season_id ? [ctx.season_id] : [])
-  const gradeIds = Array.isArray(ctx.grade_ids)
-    ? ctx.grade_ids
-    : (ctx.grade_id ? [ctx.grade_id] : [])
-
-  const setSeasonIds = (ids) => {
-    const next = { ...ctx, season_ids: ids }
-    // Once the user touches the multi-select picker we drop the legacy single
-    // key so the two don't fight each other.
-    delete next.season_id
-    onChange(next)
-  }
-  const setGradeIds = (ids) => {
-    const next = { ...ctx, grade_ids: ids }
-    delete next.grade_id
-    onChange(next)
-  }
-
   return (
     <div className="flex flex-col gap-2.5">
       <div>
-        <Label>Seasons</Label>
-        <MultiCheckPicker
-          label="Seasons"
-          allLabel="All seasons"
-          options={(seasons || []).map(s => ({ id: s.id, label: s.name }))}
-          value={seasonIds}
-          onChange={setSeasonIds}
-        />
+        <Label>Season</Label>
+        <select className={selectCls + ' mt-1'} value={ctx.season_id || ''} onChange={e => set('season_id', e.target.value)}>
+          <option value="">All seasons</option>
+          {(seasons || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
       </div>
       <div>
-        <Label>Grades</Label>
-        <MultiCheckPicker
-          label="Grades"
-          allLabel="All grades"
-          options={(grades || []).map(g => ({ id: g.id, label: g.display_name || g.name }))}
-          value={gradeIds}
-          onChange={setGradeIds}
-        />
+        <Label>Grade</Label>
+        <select className={selectCls + ' mt-1'} value={ctx.grade_id || ''} onChange={e => set('grade_id', e.target.value)}>
+          <option value="">All grades</option>
+          {(grades || []).map(g => <option key={g.id} value={g.id}>{g.display_name || g.name}</option>)}
+        </select>
       </div>
       <div className="grid grid-cols-2 gap-1.5">
         <div>
@@ -872,15 +686,6 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
                          placeholder="e.g. President, Secretary"
                          onChange={v => set('office_bearer', v)} />
           </div>
-          {families.length > 0 && !isFamilyTarget && (
-            <div>
-              <Label>In family</Label>
-              <select className={selectCls + ' mt-1'} value={ctx.family_id || ''} onChange={e => set('family_id', e.target.value)}>
-                <option value="">Any family</option>
-                {families.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -1143,11 +948,7 @@ function SaveReportModal({ open, onClose, onSave, defaultTitle, initial }) {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-pb-faintest mt-1">
-              {visibility === 'club'
-                ? 'Sent to your club admin for approval. Once approved, it will appear in the Saved Reports list for everyone at your club.'
-                : 'Only you (when logged in) will see this report in the list.'}
-            </p>
+            <p className="text-[10px] text-pb-faintest mt-1">{visibility === 'club' ? 'Anyone visiting this club can view this report.' : 'Only you (when logged in) will see this report in the list.'}</p>
           </div>
           {error && <p className="text-pb-red text-sm">{error}</p>}
           <div className="flex gap-2 justify-end pt-2">
@@ -1398,7 +1199,6 @@ export default function StatLab() {
     URL.revokeObjectURL(url)
   }
 
-  const [saveFlash, setSaveFlash] = useState(null)
   const saveReport = useCallback(async (payload) => {
     const q = queryRef.current
     const cleanedTree = cleanTree(q.filterTree)
@@ -1411,26 +1211,14 @@ export default function StatLab() {
       context: q.context || {},
       derived: activeDerived || null,
     }
-    let saved
     if (editingReport) {
-      saved = await api.statlabPatchReport(editingReport.id, { ...payload, query_json: queryJson })
+      await api.statlabPatchReport(editingReport.id, { ...payload, query_json: queryJson })
     } else {
-      saved = await api.statlabCreateReport({ ...payload, query_json: queryJson })
+      await api.statlabCreateReport({ ...payload, query_json: queryJson })
     }
     setSaveOpen(false)
     setEditingReport(null)
     refreshReports()
-    if (saved?.status === 'pending') {
-      setSaveFlash({
-        kind: 'pending',
-        message: 'Sent to your club admin for approval. Once approved, it will appear in the Saved Reports list for everyone at your club.',
-      })
-    } else if (saved?.visibility === 'private') {
-      setSaveFlash({ kind: 'ok', message: 'Saved as a private report. Only you will see it.' })
-    } else {
-      setSaveFlash({ kind: 'ok', message: 'Report saved and published to your club.' })
-    }
-    setTimeout(() => setSaveFlash(null), 8000)
   }, [editingReport, activeDerived, refreshReports])
 
   const deleteReport = useCallback(async (r) => {
@@ -1446,15 +1234,6 @@ export default function StatLab() {
   if (clubLoading || !schema) return <PbSpinner message="Loading…" />
 
   const canSave = !!user && user.club_id === orgId
-
-  // Indicators for the Customise drawer — show how many fields are "active"
-  // relative to defaults so users can see at a glance what's been tweaked.
-  const filterCount = treeLeafCount(query.filterTree)
-  const contextCount = countActiveContext(query.context)
-  // The sort is "active" when it's set (any value) and we're not currently
-  // viewing a derived report (derived reports manage their own sort).
-  const sortIsActive = !activeDerived && !!query.sortBy
-  const activeFieldCount = filterCount + contextCount + (sortIsActive ? 1 : 0)
 
   // ─── Layout ────────────────────────────────────────────────────────────────
   return (
@@ -1570,47 +1349,29 @@ export default function StatLab() {
 
           {/* Right panel: customise drawer + results */}
           <div className="space-y-4">
-            {/* Customise drawer — modify the current report's sort, filters, context */}
+            {/* Customise drawer — secondary, collapsed by default */}
             <div className="pb-card">
               <button
                 onClick={() => setShowCustomise(v => !v)}
                 className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-pb-surface2/60 transition text-left select-none"
               >
-                <div className="flex-1 min-w-0">
-                  <span className="font-mono text-[10.5px] font-semibold tracking-wide3 text-pb-dim block">
-                    CUSTOMISE QUERY
+                <span className="font-mono text-[10.5px] font-semibold tracking-wide3 flex-1 text-pb-dim">
+                  {showCustomise ? 'CUSTOMISE QUERY' : '+ BUILD CUSTOM QUERY'}
+                </span>
+                {activeDerived || hasQueried ? (
+                  <span className="font-mono text-[9px] text-pb-faintest">
+                    {treeLeafCount(query.filterTree) > 0 && `${treeLeafCount(query.filterTree)} filter${treeLeafCount(query.filterTree) === 1 ? '' : 's'}`}
                   </span>
-                  <span className="font-sans text-[10.5px] text-pb-faintest mt-0.5 block normal-case tracking-normal">
-                    Tweak sort, filters and context for the current report.
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {!showCustomise && activeFieldCount > 0 && (
-                    <span
-                      className="font-mono text-[9px] tracking-wide2 px-1.5 py-0.5 rounded"
-                      style={{ background: 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: 'var(--pb-accent)' }}
-                    >
-                      {activeFieldCount} ACTIVE
-                    </span>
-                  )}
-                  <span className={`font-mono text-[11px] text-pb-faintest transition-transform duration-150 inline-block ${showCustomise ? 'rotate-90' : ''}`}>›</span>
-                </div>
+                ) : null}
+                <span className={`font-mono text-[11px] text-pb-faintest transition-transform duration-150 inline-block ${showCustomise ? 'rotate-90' : ''}`}>›</span>
               </button>
               {showCustomise && (
                 <div className="px-4 pb-4 pt-3 pb-hairline-t space-y-3">
                   {/* Sort + Direction + Limit on one row */}
                   <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2 items-end">
                     <div>
-                      <Label>
-                        Sort by
-                        {sortIsActive && <ActiveDot />}
-                      </Label>
-                      <select
-                        className={selectCls + ' mt-1' + (sortIsActive ? ' border-pb-accent' : '')}
-                        value={query.sortBy}
-                        onChange={e => setQuery(q => ({ ...q, sortBy: e.target.value }))}
-                        disabled={!!activeDerived}
-                      >
+                      <Label>Sort by</Label>
+                      <select className={selectCls + ' mt-1'} value={query.sortBy} onChange={e => setQuery(q => ({ ...q, sortBy: e.target.value }))}>
                         {targetMetrics.map(m => <option key={m} value={m}>{METRIC_LABELS[m]?.label || m}</option>)}
                       </select>
                     </div>
@@ -1619,8 +1380,7 @@ export default function StatLab() {
                       <div className="flex gap-1 mt-1">
                         {['desc','asc'].map(d => (
                           <button key={d} onClick={() => setQuery(q => ({ ...q, sortDir: d }))}
-                            disabled={!!activeDerived}
-                            className={`px-2.5 py-1.5 font-mono text-[10px] tracking-wide2 rounded border transition ${query.sortDir === d ? 'text-pb-text bg-pb-surface2 border-pb-hairline2' : 'text-pb-faint border-pb-hairline hover:border-pb-hairline2'} ${activeDerived ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                            className={`px-2.5 py-1.5 font-mono text-[10px] tracking-wide2 rounded border transition ${query.sortDir === d ? 'text-pb-text bg-pb-surface2 border-pb-hairline2' : 'text-pb-faint border-pb-hairline hover:border-pb-hairline2'}`}>
                             {d === 'desc' ? '↓' : '↑'}
                           </button>
                         ))}
@@ -1635,29 +1395,23 @@ export default function StatLab() {
                   </div>
 
                   {/* Filter bar — categorised picker, nested AND/OR */}
-                  <div className={filterCount > 0 ? 'ring-1 ring-pb-accent/40 rounded-md' : ''}>
-                    <FilterBar
-                      tree={query.filterTree}
-                      categories={categoriesForTarget(targetMetrics)}
-                      onChange={(tree) => setQuery(q => ({ ...q, filterTree: tree }))}
-                      onClear={() => setQuery(q => ({ ...q, filterTree: emptyTree() }))}
-                    />
-                  </div>
+                  <FilterBar
+                    tree={query.filterTree}
+                    categories={categoriesForTarget(targetMetrics)}
+                    onChange={(tree) => setQuery(q => ({ ...q, filterTree: tree }))}
+                    onClear={() => setQuery(q => ({ ...q, filterTree: emptyTree() }))}
+                  />
 
                   {/* Context filters */}
                   <div>
-                    <Label>
-                      Context
-                      {contextCount > 0 && <ActiveDot />}
-                    </Label>
-                    <div className={`mt-1 p-3 pb-card ${contextCount > 0 ? 'border-pb-accent/40' : ''}`}>
+                    <Label>Context</Label>
+                    <div className="mt-1 p-3 pb-card">
                       <ContextFiltersPanel
                         ctx={query.context || {}}
                         onChange={ctx => setQuery(q => ({ ...q, context: ctx }))}
                         seasons={seasons}
                         grades={grades}
                         targetShape={targetMeta.shape}
-                        target={query.target}
                         activeDerived={activeDerived}
                         orgId={orgId}
                       />
@@ -1678,28 +1432,6 @@ export default function StatLab() {
               )}
             </div>
 
-            {/* Save flash — surfaces approval-pending notice or save confirmation */}
-            {saveFlash && (
-              <div
-                className={`pb-card p-3 ${saveFlash.kind === 'pending' ? 'border-pb-accent/40' : ''}`}
-                style={saveFlash.kind === 'pending' ? { borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' } : undefined}
-              >
-                <div className="flex items-start gap-2">
-                  <span
-                    className="font-mono text-[10px] tracking-wide3 px-1.5 py-0.5 rounded mt-0.5"
-                    style={{ background: 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: 'var(--pb-accent)' }}
-                  >
-                    {saveFlash.kind === 'pending' ? 'PENDING' : 'SAVED'}
-                  </span>
-                  <p className="text-pb-text text-sm flex-1">{saveFlash.message}</p>
-                  <button
-                    onClick={() => setSaveFlash(null)}
-                    className="text-pb-faint hover:text-pb-text font-mono text-base leading-none px-1"
-                  >×</button>
-                </div>
-              </div>
-            )}
-
             {/* Results */}
             {!hasQueried && !loading && (
               <div className="pb-card p-8 flex flex-col items-center justify-center text-center gap-3" style={{ minHeight: 320 }}>
@@ -1707,7 +1439,7 @@ export default function StatLab() {
                 <p className="text-pb-dim text-[15px]">
                   Pick a report from the <span className="text-pb-text font-semibold">REPORTS</span> panel
                   {' '}<span className="hidden xl:inline">on the left</span><span className="xl:hidden">above</span>,
-                  {' '}then open <span className="text-pb-text font-semibold">Customise Query</span> to tweak its sort, filters or context.
+                  {' '}or click <span className="text-pb-text font-semibold">+ Build custom query</span> to build your own.
                 </p>
               </div>
             )}
@@ -1809,12 +1541,6 @@ function entityHeader(target, activeDerived) {
       return [{ key: 'player_name', label: 'PLAYER' }, { key: 'season_name', label: 'SEASON' }]
     case 'player_grade':
       return [{ key: 'player_name', label: 'PLAYER' }, { key: 'display_grade_name', label: 'GRADE' }]
-    case 'family_career':
-      return [{ key: 'family_name', label: 'FAMILY' }, { key: 'members', label: 'MEMBERS' }]
-    case 'family_season':
-      return [{ key: 'family_name', label: 'FAMILY' }, { key: 'season_name', label: 'SEASON' }, { key: 'members', label: 'MEMBERS' }]
-    case 'family_grade':
-      return [{ key: 'family_name', label: 'FAMILY' }, { key: 'display_grade_name', label: 'GRADE' }, { key: 'members', label: 'MEMBERS' }]
     case 'innings_list':
       return [
         { key: 'player_name', label: 'PLAYER' },
@@ -1851,9 +1577,11 @@ function entityHeader(target, activeDerived) {
 
 function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort, sortBy, clubSlug, rowOffset = 0 }) {
   const dimCols = activeDerived
-    ? (PAIR_DERIVED.has(activeDerived)
-        ? [{ key: 'pair', label: 'PAIR' }]
-        : [{ key: 'player_name', label: 'PLAYER' }])
+    ? (DUO_DERIVED.has(activeDerived)
+        ? [{ key: 'player_a_name', label: 'BOWLER' }, { key: 'player_b_name', label: 'FIELDER' }]
+        : PAIR_DERIVED.has(activeDerived)
+            ? [{ key: 'pair', label: 'PAIR' }]
+            : [{ key: 'player_name', label: 'PLAYER' }])
     : entityHeader(target, null)
   return (
     <div className="overflow-x-auto pb-scroll">
@@ -1901,12 +1629,6 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
 
 function formatCell(v, col) {
   if (v == null || v === '') return '—'
-  // Overs are stored as Numeric(5,1) — display X.Y where Y is 0-5 (balls).
-  // Use 1 decimal place; never round to .6 etc. (the DB already enforces 0-5).
-  if (col?.kind === 'overs' || col?.key === 'overs') {
-    const n = Number(v)
-    return isFinite(n) ? n.toFixed(1) : v
-  }
   if (col?.decimal) return Number(v).toFixed(2)
   if (col?.key === 'played_at' && typeof v === 'string') {
     try { return new Date(v).toISOString().slice(0, 10) } catch { return v }
@@ -1915,6 +1637,18 @@ function formatCell(v, col) {
 }
 
 function renderDimCell(key, row, clubSlug) {
+  if (key === 'player_a_name') {
+    const name = row.player_a_name || '—'
+    return row.player_a_id
+      ? <Link to={`/players/${row.player_a_id}`} className="text-pb-text hover:text-pb-accent">{name}</Link>
+      : name
+  }
+  if (key === 'player_b_name') {
+    const name = row.player_b_name || '—'
+    return row.player_b_id
+      ? <Link to={`/players/${row.player_b_id}`} className="text-pb-text hover:text-pb-accent">{name}</Link>
+      : name
+  }
   if (key === 'pair') {
     const a = row.player_a_name || row.batter1_name
     const b = row.player_b_name || row.batter2_name
@@ -1931,12 +1665,6 @@ function renderDimCell(key, row, clubSlug) {
   if (key === 'player_name' && row.player_id) {
     return <Link to={`/players/${row.player_id}`} className="text-pb-text hover:text-pb-accent">{row.player_name || row.name}</Link>
   }
-  if (key === 'family_name') {
-    return <span className="text-pb-text">{row.family_name || '—'}</span>
-  }
-  if (key === 'members') {
-    return <span className="text-pb-faint text-xs">{row.members || '—'}</span>
-  }
   if (key === 'result') {
     const r = row.result
     if (r === 'won') return <span className="text-pb-green">Won</span>
@@ -1947,27 +1675,6 @@ function renderDimCell(key, row, clubSlug) {
     try { return new Date(row.played_at).toISOString().slice(0, 10) } catch { return row.played_at }
   }
   return row[key] || '—'
-}
-
-// Small inline indicator placed next to a section label when the user has
-// changed it from the preset's defaults. Keeps the customise drawer scannable.
-function ActiveDot() {
-  return (
-    <span
-      className="inline-block w-1.5 h-1.5 rounded-full ml-1.5 align-middle"
-      style={{ background: 'var(--pb-accent)' }}
-      title="Active — modified from the report's defaults"
-    />
-  )
-}
-
-function countActiveContext(ctx) {
-  if (!ctx || typeof ctx !== 'object') return 0
-  return Object.entries(ctx).filter(([, v]) => {
-    if (v === '' || v == null || v === false) return false
-    if (Array.isArray(v)) return v.length > 0
-    return true
-  }).length
 }
 
 function defaultTitleFor(q, activeDerived, schema) {

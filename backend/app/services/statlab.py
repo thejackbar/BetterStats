@@ -2159,7 +2159,7 @@ async def derived_most_run_outs_in_match(session, *, org_id, limit, offset=0, co
 async def derived_golden_ducks(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Out for 0 off 0 balls (golden duck) — count per player."""
+    """Out for 0 off exactly 1 ball (golden duck) — count per player."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -2176,7 +2176,7 @@ async def derived_golden_ducks(
               AND bi.runs = 0
               AND bi.not_out = FALSE
               AND bi.did_not_bat IS NOT TRUE
-              AND COALESCE(bi.balls, 0) IN (0, 1)
+              AND bi.balls = 1
               AND bi.dismissal_type IS NOT NULL
               AND LOWER(bi.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')
               {player_extra}
@@ -3246,7 +3246,7 @@ async def derived_ducks_inflicted(
 async def derived_golden_ducks_inflicted(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Same as ducks_inflicted but only innings where batter faced 0 or 1 ball.
+    """Same as ducks_inflicted but only innings where batter faced exactly 1 ball.
     Reads denormalised batter_runs / batter_balls on bowler_wickets."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
@@ -3264,7 +3264,7 @@ async def derived_golden_ducks_inflicted(
         LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
         WHERE p.organisation_id = :org_id
           AND bw.batter_runs = 0
-          AND COALESCE(bw.batter_balls, 0) IN (0, 1)
+          AND bw.batter_balls = 1
           {player_extra}
         GROUP BY bw.bowler_id, COALESCE(p.display_name_override, p.name)
         HAVING COUNT(*) > 0
@@ -3279,8 +3279,10 @@ async def derived_golden_ducks_inflicted(
 async def derived_bowler_fielder_combo(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Most productive bowler+fielder partnerships — count of wickets where
-    fielder caught/ran out a batter off this bowler."""
+    """Most productive bowler+catcher partnerships — count of caught dismissals
+    (WK catches included) where a fielder took a catch off this bowler.
+    Only counts caught dismissals; stumpings and run-outs are excluded.
+    Data depends on fielder name in dismissalText resolving to a known player."""
     mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -3294,9 +3296,10 @@ async def derived_bowler_fielder_combo(
             WHERE pb.organisation_id = :org_id
               AND bw.fielder_id IS NOT NULL
               AND bw.fielder_id <> bw.bowler_id
+              AND bw.dismissal_type = 'caught'
         ),
         agg AS (
-            SELECT bowler_id, fielder_id, COUNT(*)::int AS wickets
+            SELECT bowler_id, fielder_id, COUNT(*)::int AS catches
             FROM wkts
             GROUP BY bowler_id, fielder_id
         )
@@ -3305,11 +3308,11 @@ async def derived_bowler_fielder_combo(
             COALESCE(pb.display_name_override, pb.name) AS player_a_name,
             agg.fielder_id::text AS player_b_id,
             COALESCE(pf.display_name_override, pf.name) AS player_b_name,
-            agg.wickets
+            agg.catches
         FROM agg
         JOIN players pb ON pb.id = agg.bowler_id
         JOIN players pf ON pf.id = agg.fielder_id
-        ORDER BY agg.wickets DESC
+        ORDER BY agg.catches DESC
         LIMIT :limit OFFSET :offset
     """
     params["offset"] = offset
@@ -3869,7 +3872,7 @@ DERIVED_QUERIES: dict[str, dict] = {
     # Duck variants
     "golden_ducks": {
         "label": "Most golden ducks",
-        "description": "Out for 0 off 0 or 1 ball — count per player.",
+        "description": "Out for 0 off exactly 1 ball — count per player.",
         "fn": derived_golden_ducks,
         "columns": [
             {"key": "golden_ducks", "label": "GOLDEN", "decimal": False},
@@ -4190,7 +4193,7 @@ DERIVED_QUERIES: dict[str, dict] = {
     },
     "golden_ducks_inflicted": {
         "label": "Most golden ducks inflicted",
-        "description": "Bowlers ranked by golden ducks (0 off 0–1 balls) they caused. Requires a Full Rebuild post-v7.15.0.3 to backfill opposition batting scores.",
+        "description": "Bowlers ranked by golden ducks (0 off exactly 1 ball) they caused. Requires a Full Rebuild post-v7.15.0.3 to backfill opposition batting scores.",
         "fn": derived_golden_ducks_inflicted,
         "columns": [
             {"key": "golden_ducks_inflicted", "label": "GOLDEN", "decimal": False},
@@ -4199,12 +4202,12 @@ DERIVED_QUERIES: dict[str, dict] = {
     # Bowler+fielder combos
     "bowler_fielder_combo": {
         "label": "Top bowler/fielder combinations",
-        "description": "Bowler+fielder pairs ranked by catches and stumpings they took together. Depends on the catcher's name in the scorecard's dismissalText resolving to a known player — substitute fielders or unrecognised names fall through.",
+        "description": "Bowler+catcher pairs ranked by caught dismissals taken together (WK and outfield catches; stumpings excluded). Count is limited to matches where the dismissal text names the catcher — historical matches without structured scorecard text will be under-counted.",
         "fn": derived_bowler_fielder_combo,
         "columns": [
             {"key": "player_a_id", "label": "BOWLER", "kind": "player_a"},
             {"key": "player_b_id", "label": "FIELDER", "kind": "player_b"},
-            {"key": "wickets", "label": "WKTS", "decimal": False},
+            {"key": "catches", "label": "CT", "decimal": False},
         ],
     },
     # Top opening bowlers
