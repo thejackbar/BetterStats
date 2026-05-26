@@ -121,7 +121,7 @@ function UpcomingMilestoneRow({ milestone }) {
   )
 }
 
-export default function NotificationModal({ isOpen, summary, onClose }) {
+export default function NotificationModal({ isOpen, summary, error, onClose }) {
   useEffect(() => {
     if (!isOpen) return
     const handler = e => { if (e.key === 'Escape') onClose() }
@@ -131,6 +131,7 @@ export default function NotificationModal({ isOpen, summary, onClose }) {
 
   if (!isOpen) return null
 
+  const loading = !summary && !error
   const newEntries = getNewEntries(summary?.last_seen_version)
   const syncRuns = summary?.sync_runs || []
   const newMilestones = summary?.new_milestones || []
@@ -167,6 +168,19 @@ export default function NotificationModal({ isOpen, summary, onClose }) {
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+
+          {loading && (
+            <p className="text-sm text-pb-faint text-center py-6">Loading…</p>
+          )}
+
+          {error && (
+            <div
+              className="px-3 py-2.5 rounded-lg border text-sm"
+              style={{ borderColor: 'var(--pb-negative)', color: 'var(--pb-negative)', background: 'color-mix(in srgb, var(--pb-negative) 8%, transparent)' }}
+            >
+              Couldn't load notifications: {error}
+            </div>
+          )}
 
           {/* Sync Failures — top callout when scheduled syncs have errored */}
           {failedSyncs.length > 0 && (
@@ -268,7 +282,7 @@ export default function NotificationModal({ isOpen, summary, onClose }) {
             </section>
           )}
 
-          {!hasAnything && (
+          {!loading && !error && !hasAnything && (
             <p className="text-sm text-pb-faint text-center py-6">
               Nothing new since your last visit.
             </p>
@@ -276,10 +290,17 @@ export default function NotificationModal({ isOpen, summary, onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 px-5 py-3 border-t pb-hairline-t">
+        <div className="shrink-0 px-5 py-3 border-t pb-hairline-t flex items-center gap-2">
+          <Link
+            to="/admin/changelog"
+            onClick={onClose}
+            className="flex-1 text-center font-mono text-[11px] tracking-wide2 text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-2 hover:bg-pb-surface2 transition"
+          >
+            ALL UPDATES
+          </Link>
           <button
             onClick={onClose}
-            className="w-full font-mono text-[11px] tracking-wide2 text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-2 hover:bg-pb-surface2 transition"
+            className="flex-1 font-mono text-[11px] tracking-wide2 text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-2 hover:bg-pb-surface2 transition"
           >
             DISMISS
           </button>

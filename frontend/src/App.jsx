@@ -37,6 +37,7 @@ import AdminSync from './pages/admin/AdminSync'
 import AdminPartnershipRecords from './pages/admin/AdminPartnershipRecords'
 import AdminMilestones from './pages/admin/AdminMilestones'
 import AdminActivityLog from './pages/admin/AdminActivityLog'
+import AdminChangelog from './pages/admin/AdminChangelog'
 import AdminUsers from './pages/admin/AdminUsers'
 import AdminReports from './pages/admin/AdminReports'
 
@@ -104,6 +105,7 @@ export default function App() {
         <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
         <Route path="/admin/milestones" element={<ProtectedRoute><AdminMilestones /></ProtectedRoute>} />
         <Route path="/admin/activity" element={<ProtectedRoute><AdminActivityLog /></ProtectedRoute>} />
+        <Route path="/admin/changelog" element={<ProtectedRoute><AdminChangelog /></ProtectedRoute>} />
         <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
         <Route path="/admin/reports" element={<ProtectedRoute><AdminReports /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
