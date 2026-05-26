@@ -4,6 +4,17 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.17.1',
+    date: '2026-05-26',
+    title: 'StatLab: multi-select Season and Grade filters',
+    items: [
+      'Season and Grade in the Customise Query → Context panel are now multi-select checkbox pickers. Pick any combination of seasons (e.g. 2022/23, 2023/24, 2024/25) plus any combination of grades (e.g. 2nd and 3rd grade) and every StatLab report respects the union.',
+      'Each picker shows the selected count, a search box (handy for clubs with 50+ seasons), and a Clear button.',
+      'URL encoding: selections are saved as ?c_season_ids=a,b,c&c_grade_ids=x,y — saved-report URLs round-trip cleanly. Old URLs using the legacy single-select ?c_season_id= / ?c_grade_id= still work; the picker pre-fills from them on load and switches to multi-select the moment you touch it.',
+      'Backend: new season_ids / grade_ids context keys with IN-list SQL expansion. Season multi-select still expands aliases (e.g. selecting "Summer 23/24" also picks up any alias seasons mapped to it).',
+    ],
+  },
+  {
     version: 'v7.17.0',
     date: '2026-05-26',
     title: 'StatLab: family-aggregate reports',
@@ -41,6 +52,18 @@ export const CHANGELOG = [
       'Suggestions tab groups same-surname players who aren\'t already in a family and offers one-click "Create family" or "Add to existing". Dismiss a surname to never see it again.',
       'StatLab → Player Attributes gains a "Family" dropdown. Pick a family and reports restrict to its members — works on every report and saved-query.',
       'New MANAGE_FAMILIES capability — granted to super_admin and club_admin by default; can be granted to club members.',
+    ],
+  },
+  {
+    version: 'v7.15.0.3',
+    date: '2026-05-26',
+    title: 'Fix: Ducks/Golden Ducks Inflicted — store opposition batter’s score',
+    items: [
+      'Most Ducks Inflicted and Most Golden Ducks Inflicted were returning empty because they joined bowler_wickets to batting_innings, but batting_innings only stores OUR club’s batters — our bowlers can only dismiss opposition batters, so the join never matched.',
+      'Added batter_runs / batter_balls columns to bowler_wickets (migration 034) and updated the sync to denormalise the dismissed opposition batter’s score onto the wicket row at save time.',
+      'Both reports now read these columns directly — Most Ducks Inflicted = rows where batter_runs = 0, Most Golden Ducks Inflicted = rows where batter_runs = 0 AND batter_balls IN (0, 1).',
+      'Existing bowler_wickets rows have batter_runs = NULL. A Full Rebuild from Admin → Data Sync is required to backfill them (one-time cost).',
+      'Top Bowler/Fielder Combinations: query is structurally correct (joins bowler_wickets where fielder_id is set) but description now notes that data quality depends on the catcher’s name in dismissalText resolving to a known player — substitute fielders or unrecognised names fall through. No SQL change.',
     ],
   },
   {

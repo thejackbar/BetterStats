@@ -330,6 +330,10 @@ const CONTEXT_KEYS = [
   'gender','player_role','award_category','award_subcategory','award_name','office_bearer',
   'family_id',
 ]
+// Context keys that carry an array of IDs (multi-select). Encoded in the URL
+// as a single comma-separated value (c_season_ids=a,b,c) for compact links,
+// and sent to the API the same way (the backend accepts either form).
+const CONTEXT_LIST_KEYS = ['season_ids', 'grade_ids']
 
 // Category groupings for the field picker. Field membership is intersected
 // with each target's allowed metrics on render — categories with no eligible
@@ -451,6 +455,12 @@ function encodeQueryToParams(q) {
   if (cleaned) p.set('ft', JSON.stringify(cleaned))
   Object.entries(q.context || {}).forEach(([k, v]) => {
     if (v === undefined || v === null || v === '' || v === false) return
+    if (Array.isArray(v)) {
+      // Multi-select lists encoded as one comma-separated value.
+      const joined = v.filter(x => x !== '' && x != null).join(',')
+      if (joined) p.set(`c_${k}`, joined)
+      return
+    }
     p.set(`c_${k}`, v === true ? '1' : String(v))
   })
   return p
@@ -483,6 +493,12 @@ function decodeParamsToQuery(params) {
     } else {
       context[k] = v
     }
+  })
+  CONTEXT_LIST_KEYS.forEach(k => {
+    const v = params.get(`c_${k}`)
+    if (!v) return
+    const arr = v.split(',').map(s => s.trim()).filter(Boolean)
+    if (arr.length) context[k] = arr
   })
   return { target, sortBy, sortDir, limit, filterTree, context }
 }
@@ -571,6 +587,114 @@ function PickerInput({ orgId, kind, value, placeholder, onChange }) {
   )
 }
 
+// Compact multi-select checkbox panel. Renders selected count + opens a
+// drop-down with a search box and a checkbox per option. Used for the
+// Season and Grade context filters so users can combine selections (e.g.
+// "2nd grade AND 3rd grade across 2022-2024 inclusive").
+function MultiCheckPicker({ label, allLabel, options, value, onChange, searchPlaceholder }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const wrapRef = useRef(null)
+  const selected = Array.isArray(value) ? value : []
+  const selectedSet = new Set(selected)
+
+  useEffect(() => {
+    const onClick = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [])
+
+  const toggle = (id) => {
+    const next = selectedSet.has(id)
+      ? selected.filter(x => x !== id)
+      : [...selected, id]
+    onChange(next)
+  }
+  const clearAll = () => onChange([])
+
+  const term = search.trim().toLowerCase()
+  const filtered = term
+    ? options.filter(o => (o.label || '').toLowerCase().includes(term))
+    : options
+
+  const summary = selected.length === 0
+    ? allLabel
+    : selected.length === 1
+      ? (options.find(o => o.id === selected[0])?.label || '1 selected')
+      : `${selected.length} selected`
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className={selectCls + ' mt-1 flex items-center justify-between text-left'}
+      >
+        <span className={selected.length ? 'text-pb-text' : 'text-pb-faint'}>{summary}</span>
+        <span className="font-mono text-[10px] text-pb-faintest ml-1">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-pb-bg pb-card shadow-xl max-h-72 overflow-hidden flex flex-col">
+          <div className="p-2 pb-hairline-b">
+            <input
+              autoFocus
+              className={inputCls}
+              placeholder={searchPlaceholder || `Search ${label.toLowerCase()}…`}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="flex-1 overflow-auto pb-scroll py-1">
+            {filtered.length === 0 && (
+              <p className="text-pb-faintest font-mono text-[10px] px-3 py-2">No matches.</p>
+            )}
+            {filtered.map(o => {
+              const checked = selectedSet.has(o.id)
+              return (
+                <label
+                  key={o.id}
+                  className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-pb-surface2 select-none"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(o.id)}
+                    className="accent-pb-accent"
+                  />
+                  <span className={`text-xs ${checked ? 'text-pb-text' : 'text-pb-dim'}`}>{o.label}</span>
+                </label>
+              )
+            })}
+          </div>
+          <div className="flex items-center justify-between px-2 py-1.5 pb-hairline-t bg-pb-surface2/40">
+            <span className="font-mono text-[10px] text-pb-faintest">
+              {selected.length} of {options.length} selected
+            </span>
+            <div className="flex gap-2">
+              {selected.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text"
+                >
+                  Clear
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, target, activeDerived, orgId }) {
   const set = (k, v) => onChange({ ...ctx, [k]: v })
   const showInningsFilters = targetShape === 'list' || targetShape === 'aggregate'
@@ -582,21 +706,52 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
     if (!orgId) return
     api.listFamilies(orgId).then(setFamilies).catch(() => setFamilies([]))
   }, [orgId])
+
+  // Normalise legacy single-select context (season_id / grade_id) into the
+  // new multi-select arrays so a saved-report URL from before multi-select
+  // still pre-fills the picker. The single-select keys are kept on the ctx
+  // unchanged until the user touches the picker (back-compat for the API).
+  const seasonIds = Array.isArray(ctx.season_ids)
+    ? ctx.season_ids
+    : (ctx.season_id ? [ctx.season_id] : [])
+  const gradeIds = Array.isArray(ctx.grade_ids)
+    ? ctx.grade_ids
+    : (ctx.grade_id ? [ctx.grade_id] : [])
+
+  const setSeasonIds = (ids) => {
+    const next = { ...ctx, season_ids: ids }
+    // Once the user touches the multi-select picker we drop the legacy single
+    // key so the two don't fight each other.
+    delete next.season_id
+    onChange(next)
+  }
+  const setGradeIds = (ids) => {
+    const next = { ...ctx, grade_ids: ids }
+    delete next.grade_id
+    onChange(next)
+  }
+
   return (
     <div className="flex flex-col gap-2.5">
       <div>
-        <Label>Season</Label>
-        <select className={selectCls + ' mt-1'} value={ctx.season_id || ''} onChange={e => set('season_id', e.target.value)}>
-          <option value="">All seasons</option>
-          {(seasons || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
+        <Label>Seasons</Label>
+        <MultiCheckPicker
+          label="Seasons"
+          allLabel="All seasons"
+          options={(seasons || []).map(s => ({ id: s.id, label: s.name }))}
+          value={seasonIds}
+          onChange={setSeasonIds}
+        />
       </div>
       <div>
-        <Label>Grade</Label>
-        <select className={selectCls + ' mt-1'} value={ctx.grade_id || ''} onChange={e => set('grade_id', e.target.value)}>
-          <option value="">All grades</option>
-          {(grades || []).map(g => <option key={g.id} value={g.id}>{g.display_name || g.name}</option>)}
-        </select>
+        <Label>Grades</Label>
+        <MultiCheckPicker
+          label="Grades"
+          allLabel="All grades"
+          options={(grades || []).map(g => ({ id: g.id, label: g.display_name || g.name }))}
+          value={gradeIds}
+          onChange={setGradeIds}
+        />
       </div>
       <div className="grid grid-cols-2 gap-1.5">
         <div>
@@ -1808,7 +1963,11 @@ function ActiveDot() {
 
 function countActiveContext(ctx) {
   if (!ctx || typeof ctx !== 'object') return 0
-  return Object.entries(ctx).filter(([, v]) => v !== '' && v != null && v !== false).length
+  return Object.entries(ctx).filter(([, v]) => {
+    if (v === '' || v == null || v === false) return false
+    if (Array.isArray(v)) return v.length > 0
+    return true
+  }).length
 }
 
 function defaultTitleFor(q, activeDerived, schema) {

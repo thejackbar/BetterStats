@@ -13,6 +13,24 @@ async function request(path, options = {}) {
   return res.json()
 }
 
+// Encode a StatLab context dict into URLSearchParams. Arrays are repeated
+// (?key=a&key=b) so the backend's `qp.getlist(k)` reads them as a list.
+// Scalars (string / number / true) become a single value; null / undefined /
+// '' / false are dropped.
+function _appendContext(params, context) {
+  Object.entries(context || {}).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === '' || v === false) return
+    if (Array.isArray(v)) {
+      v.forEach(item => {
+        if (item === undefined || item === null || item === '') return
+        params.append(k, String(item))
+      })
+      return
+    }
+    params.set(k, v === true ? 'true' : String(v))
+  })
+}
+
 export const api = {
   // Clubs (slug-based)
   getClubBySlug: (slug) => request(`/clubs/${slug}`),
@@ -481,20 +499,14 @@ export const api = {
     } else {
       filters.forEach(f => params.append('filters', f))
     }
-    Object.entries(context).forEach(([k, v]) => {
-      if (v === undefined || v === null || v === '' || v === false) return
-      params.set(k, v === true ? 'true' : String(v))
-    })
+    _appendContext(params, context)
     return request(`/statlab/query?${params}`)
   },
 
   // StatLab — derived (streak-style) queries
   statlabDerived: (orgId, name, { limit = 100, page = 1, context = {} } = {}) => {
     const params = new URLSearchParams({ org_id: orgId, limit, page })
-    Object.entries(context).forEach(([k, v]) => {
-      if (v === undefined || v === null || v === '' || v === false) return
-      params.set(k, v === true ? 'true' : String(v))
-    })
+    _appendContext(params, context)
     return request(`/statlab/derived/${name}?${params}`)
   },
 
