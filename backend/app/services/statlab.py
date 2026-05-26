@@ -104,6 +104,7 @@ MATCH_METRICS: dict[str, str] = {
     "opp_runs": "opp_runs",
     "opp_wickets": "opp_wickets",
     "margin_runs": "margin_runs",
+    "played_at": "played_at",
 }
 
 PARTNERSHIP_METRICS: dict[str, str] = {
@@ -3289,12 +3290,14 @@ async def derived_bowler_fielder_combo(
     sql = f"""
         WITH {universe},
         merge_map AS (
-            SELECT removed_player_id,
+            SELECT DISTINCT ON (removed_player_id)
+                   removed_player_id,
                    COALESCE(m2.keep_player_id, m1.keep_player_id) AS canonical_id
             FROM merge_logs m1
             LEFT JOIN merge_logs m2
                    ON m2.removed_player_id = m1.keep_player_id AND m2.undone_at IS NULL
             WHERE m1.undone_at IS NULL
+            ORDER BY removed_player_id, m2.keep_player_id NULLS LAST
         ),
         wkts AS (
             SELECT

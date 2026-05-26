@@ -4,6 +4,27 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.17.1.9',
+    date: '2026-05-26',
+    title: 'StatLab: four report fixes',
+    items: [
+      'Top Bowler/Fielder report no longer returns a server error (unhandled exception now surfaces a proper error message)',
+      'Finals report now sorts by date (newest first) with a Date column; you can flip to oldest-first by clicking the column header',
+      '"Most wickets taken in a match" moved from Match group to Bowling group',
+      'Lowest Opposition Scores preset now filters out incomplete second innings of draws (requires 10 opposition wickets)',
+    ],
+  },
+  {
+    version: 'v7.17.1.8',
+    date: '2026-05-26',
+    title: 'StatLab: restore Families reports group',
+    items: [
+      'Families preset group is back in StatLab — Most runs/wickets/matches/catches by family (career) and by season',
+      'Family target types (family_career, family_season, family_grade) restored to the target schema and column sets',
+      '"In family" context filter re-added so any player-level report can be scoped to a single family',
+    ],
+  },
+  {
     version: 'v7.17.1.7',
     date: '2026-05-26',
     title: 'Fix: notifications 500 (column typo) + saved-report alerts',
