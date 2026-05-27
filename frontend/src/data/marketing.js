@@ -7,7 +7,7 @@ export const SUPPORT_EMAIL = 'betterstatsau@gmail.com'
 // ── Formspree ────────────────────────────────────────────────────────────────
 // Sign up at https://formspree.io, create a form pointed at betterstatsau@gmail.com,
 // then replace YOUR_FORM_ID below with the 8-char ID from your form's endpoint URL.
-export const FORMSPREE_ID = 'YOUR_FORM_ID'
+export const FORMSPREE_ID = 'xykvbqpr'
 
 // ============================================================
 // FEATURES — 6 high-impact cards for the landing & top of features
