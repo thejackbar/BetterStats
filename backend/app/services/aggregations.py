@@ -1783,6 +1783,12 @@ async def get_bowling_leaderboard_extended(
     if season_ids:
         params["season_ids"] = season_ids
     sort_dir = "ASC" if sort_by in ("economy", "average") else "DESC"
+    # When sorting by best figures (wickets DESC), break ties on runs ASC —
+    # 9/21 ranks above 9/28 because fewer runs conceded is better.
+    if sort_by == "best_figures_wickets":
+        order_clause = f"ORDER BY best_figures_wickets {sort_dir} NULLS LAST, best_figures_runs ASC NULLS LAST"
+    else:
+        order_clause = f"ORDER BY {sort_by} {sort_dir} NULLS LAST"
 
     if grade_id:
         params["grade_id"] = grade_id
@@ -1791,6 +1797,7 @@ async def get_bowling_leaderboard_extended(
                 SELECT DISTINCT ON (bs.player_id)
                     bs.player_id,
                     bs.wickets AS best_figures_wickets,
+                    bs.runs AS best_figures_runs,
                     bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
                 FROM bowling_spells bs
                 JOIN games g ON g.id = bs.game_id{captain_join}
@@ -1805,6 +1812,7 @@ async def get_bowling_leaderboard_extended(
                 ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
                 ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy,
                 bsf.best_figures_wickets,
+                bsf.best_figures_runs,
                 bsf.best_bowling_figures,
                 COALESCE(SUM(bs.maidens), 0) AS total_maidens,
                 COALESCE(SUM(bs.overs), 0) AS total_overs,
@@ -1814,7 +1822,7 @@ async def get_bowling_leaderboard_extended(
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}{overseas_clause}
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_figures_runs, bsf.best_bowling_figures
         """
         having_clauses = []
         if min_overs > 0:
@@ -1825,7 +1833,7 @@ async def get_bowling_leaderboard_extended(
             params["min_wickets"] = min_wickets
         if having_clauses:
             base += " HAVING " + " AND ".join(having_clauses)
-        base += f" ORDER BY {sort_by} {sort_dir} NULLS LAST LIMIT :limit"
+        base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
         return [dict(r) for r in result.mappings()]
 
@@ -1837,6 +1845,7 @@ async def get_bowling_leaderboard_extended(
                 SELECT DISTINCT ON (bs.player_id)
                     bs.player_id,
                     bs.wickets AS best_figures_wickets,
+                    bs.runs AS best_figures_runs,
                     bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
                 FROM bowling_spells bs
                 JOIN games g ON g.id = bs.game_id
@@ -1852,6 +1861,7 @@ async def get_bowling_leaderboard_extended(
                 ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
                 ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy,
                 bsf.best_figures_wickets,
+                bsf.best_figures_runs,
                 bsf.best_bowling_figures,
                 COALESCE(SUM(bs.maidens), 0) AS total_maidens,
                 COALESCE(SUM(bs.overs), 0) AS total_overs,
@@ -1863,7 +1873,7 @@ async def get_bowling_leaderboard_extended(
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
               AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_figures_runs, bsf.best_bowling_figures
         """
         having_clauses = []
         if min_overs > 0:
@@ -1874,7 +1884,7 @@ async def get_bowling_leaderboard_extended(
             params["min_wickets"] = min_wickets
         if having_clauses:
             base += " HAVING " + " AND ".join(having_clauses)
-        base += f" ORDER BY {sort_by} {sort_dir} NULLS LAST LIMIT :limit"
+        base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
         return [dict(r) for r in result.mappings()]
 
@@ -1886,6 +1896,7 @@ async def get_bowling_leaderboard_extended(
                 SELECT DISTINCT ON (bs.player_id)
                     bs.player_id,
                     bs.wickets AS best_figures_wickets,
+                    bs.runs AS best_figures_runs,
                     bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
                 FROM bowling_spells bs
                 JOIN games g ON g.id = bs.game_id
@@ -1903,6 +1914,7 @@ async def get_bowling_leaderboard_extended(
                 ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
                 ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy,
                 bsf.best_figures_wickets,
+                bsf.best_figures_runs,
                 bsf.best_bowling_figures,
                 COALESCE(SUM(bs.maidens), 0) AS total_maidens,
                 COALESCE(SUM(bs.overs), 0) AS total_overs,
@@ -1916,7 +1928,7 @@ async def get_bowling_leaderboard_extended(
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND g.is_final = TRUE{season_clause}
               AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_figures_runs, bsf.best_bowling_figures
         """
         having_clauses = []
         if min_overs > 0:
@@ -1927,7 +1939,7 @@ async def get_bowling_leaderboard_extended(
             params["min_wickets"] = min_wickets
         if having_clauses:
             base += " HAVING " + " AND ".join(having_clauses)
-        base += f" ORDER BY {sort_by} {sort_dir} NULLS LAST LIMIT :limit"
+        base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
         return [dict(r) for r in result.mappings()]
 
@@ -1938,6 +1950,7 @@ async def get_bowling_leaderboard_extended(
                 SELECT DISTINCT ON (bs.player_id)
                     bs.player_id,
                     bs.wickets AS best_figures_wickets,
+                    bs.runs AS best_figures_runs,
                     bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
                 FROM bowling_spells bs
                 JOIN games g ON g.id = bs.game_id
@@ -1955,6 +1968,7 @@ async def get_bowling_leaderboard_extended(
                 ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
                 ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy,
                 bsf.best_figures_wickets,
+                bsf.best_figures_runs,
                 bsf.best_bowling_figures,
                 COALESCE(SUM(bs.maidens), 0) AS total_maidens,
                 COALESCE(SUM(bs.overs), 0) AS total_overs,
@@ -1968,7 +1982,7 @@ async def get_bowling_leaderboard_extended(
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}
               AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_bowling_figures
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_figures_runs, bsf.best_bowling_figures
         """
         having_clauses = []
         if min_overs > 0:
@@ -1979,7 +1993,7 @@ async def get_bowling_leaderboard_extended(
             params["min_wickets"] = min_wickets
         if having_clauses:
             base += " HAVING " + " AND ".join(having_clauses)
-        base += f" ORDER BY {sort_by} {sort_dir} NULLS LAST LIMIT :limit"
+        base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
         return [dict(r) for r in result.mappings()]
 
@@ -1996,6 +2010,10 @@ async def get_bowling_leaderboard_extended(
                 ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                          NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
              ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_bowling_figures,
+            (ARRAY_AGG(NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer
+                ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
+                         NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
+             ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_figures_runs,
             SUM(pss.maidens) AS total_maidens,
             SUM(pss.overs) AS total_overs,
             COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors
@@ -2022,7 +2040,7 @@ async def get_bowling_leaderboard_extended(
         params["min_wickets"] = min_wickets
     if having_clauses:
         base += " HAVING " + " AND ".join(having_clauses)
-    base += f" ORDER BY {sort_by} {sort_dir} NULLS LAST LIMIT :limit"
+    base += f" {order_clause} LIMIT :limit"
 
     result = await session.execute(text(base), params)
     return [dict(r) for r in result.mappings()]
