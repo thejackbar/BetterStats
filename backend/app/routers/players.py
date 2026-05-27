@@ -333,7 +333,7 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             SUM(CASE WHEN g.result = 'LOSS' THEN 1 ELSE 0 END) AS losses,
             SUM(CASE WHEN g.result IS NULL OR g.result NOT IN ('WIN', 'LOSS') THEN 1 ELSE 0 END) AS draws
         FROM game_appearances ga
-        JOIN games g ON g.id = ga.game_id
+        JOIN v_effective_games g ON g.id = ga.game_id
         WHERE ga.player_id = :pid AND ga.is_captain = TRUE
     """), {"pid": pid})
     summary = dict(summary_res.mappings().first() or {})
@@ -346,7 +346,7 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             ROUND(SUM(bi.runs)::numeric / NULLIF(COUNT(*) - SUM(bi.not_out::int), 0), 2) AS average,
             SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END) AS fifties,
             SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds
-        FROM batting_innings bi
+        FROM v_effective_batting_innings bi
         JOIN game_appearances ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
         WHERE bi.player_id = :pid
           AND NOT COALESCE(bi.did_not_bat, FALSE)
@@ -362,7 +362,7 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             ROUND(SUM(bi.runs)::numeric / NULLIF(COUNT(*) - SUM(bi.not_out::int), 0), 2) AS average,
             SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END) AS fifties,
             SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds
-        FROM batting_innings bi
+        FROM v_effective_batting_innings bi
         LEFT JOIN game_appearances ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
         WHERE bi.player_id = :pid
           AND NOT COALESCE(bi.did_not_bat, FALSE)
@@ -377,7 +377,7 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             COALESCE(SUM(bs.wickets), 0) AS wickets,
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy
-        FROM bowling_spells bs
+        FROM v_effective_bowling_spells bs
         JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
         WHERE bs.player_id = :pid
     """), {"pid": pid})
@@ -389,7 +389,7 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             COALESCE(SUM(bs.wickets), 0) AS wickets,
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy
-        FROM bowling_spells bs
+        FROM v_effective_bowling_spells bs
         LEFT JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
         WHERE bs.player_id = :pid
           AND ga.game_id IS NULL
@@ -400,7 +400,7 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
         WITH captain_games AS (
             SELECT ga.game_id, g.result, s.name AS season_name, s.year AS season_year
             FROM game_appearances ga
-            JOIN games g ON g.id = ga.game_id
+            JOIN v_effective_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             WHERE ga.player_id = :pid AND ga.is_captain = TRUE
@@ -408,7 +408,7 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
         bat_per_game AS (
             SELECT bi.game_id, SUM(bi.runs) AS runs, COUNT(*) AS innings,
                    SUM(bi.not_out::int) AS not_outs
-            FROM batting_innings bi
+            FROM v_effective_batting_innings bi
             WHERE bi.player_id = :pid
               AND bi.game_id IN (SELECT game_id FROM captain_games)
               AND NOT COALESCE(bi.did_not_bat, FALSE)
@@ -417,7 +417,7 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
         ),
         bowl_per_game AS (
             SELECT bs.game_id, SUM(bs.wickets) AS wickets, SUM(bs.runs) AS bowl_runs
-            FROM bowling_spells bs
+            FROM v_effective_bowling_spells bs
             WHERE bs.player_id = :pid
               AND bs.game_id IN (SELECT game_id FROM captain_games)
             GROUP BY bs.game_id

@@ -374,7 +374,7 @@ async def get_org_results(
                COALESCE(gr.display_name_override, gr.name) AS grade_name,
                gr.id AS grade_id,
                s.id AS season_id, s.name AS season_name
-        FROM games g
+        FROM v_effective_games g
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
         WHERE s.organisation_id = :org_id

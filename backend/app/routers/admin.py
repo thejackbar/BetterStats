@@ -309,8 +309,8 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
                 COALESCE(SUM(bi.runs), 0) AS runs
             FROM grades gr
             JOIN seasons s ON s.id = gr.season_id
-            LEFT JOIN games g ON g.grade_id = gr.id
-            LEFT JOIN batting_innings bi ON bi.game_id = g.id
+            LEFT JOIN v_effective_games g ON g.grade_id = gr.id
+            LEFT JOIN v_effective_batting_innings bi ON bi.game_id = g.id
             WHERE s.organisation_id = :org_id
             GROUP BY gr.name
             ORDER BY gr.name

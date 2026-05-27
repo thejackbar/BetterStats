@@ -178,17 +178,17 @@ async def get_records(
         game_grade_clause  = f" AND {_grade_match}"
         pairs_grade_clause = f" AND {_grade_match}"
         pairs_game_join = (
-            " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = ANY(:season_ids)"
+            " JOIN v_effective_games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = ANY(:season_ids)"
             if season_ids else
-            " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
+            " JOIN v_effective_games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
         )
     else:
         game_grade_clause  = " AND g.grade_id = :grade_id" if grade_id else ""
         pairs_grade_clause = " AND g.grade_id = :grade_id" if grade_id else ""
         pairs_game_join = (
-            " JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = ANY(:season_ids)"
+            " JOIN v_effective_games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = ANY(:season_ids)"
             if season_ids else
-            (" JOIN games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
+            (" JOIN v_effective_games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
              if (grade_id or finals_only) else "")
         )
 
@@ -209,8 +209,8 @@ async def get_records(
         if captain_only else ""
     )
     _bat_join = (
-        "JOIN batting_innings bi ON bi.player_id = p.id"
-        " JOIN games g ON g.id = bi.game_id"
+        "JOIN v_effective_batting_innings bi ON bi.player_id = p.id"
+        " JOIN v_effective_games g ON g.id = bi.game_id"
         " JOIN grades gr ON gr.id = g.grade_id"
         " JOIN seasons s ON s.id = gr.season_id"
     ) + captain_bat_join
@@ -223,8 +223,8 @@ async def get_records(
         " AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')"
     )
     _bowl_join = (
-        "JOIN bowling_spells bs ON bs.player_id = p.id"
-        " JOIN games g ON g.id = bs.game_id"
+        "JOIN v_effective_bowling_spells bs ON bs.player_id = p.id"
+        " JOIN v_effective_games g ON g.id = bs.game_id"
         " JOIN grades gr ON gr.id = g.grade_id"
         " JOIN seasons s ON s.id = gr.season_id"
     ) + captain_bowl_join
@@ -247,8 +247,8 @@ async def get_records(
     # For the no-grade-name + finals_only path: same joins as grade_name but without grade filter
     if (finals_only or captain_only) and not grade_name:
         _bat_join_ng = (
-            "JOIN batting_innings bi ON bi.player_id = p.id"
-            " JOIN games g ON g.id = bi.game_id"
+            "JOIN v_effective_batting_innings bi ON bi.player_id = p.id"
+            " JOIN v_effective_games g ON g.id = bi.game_id"
             " JOIN grades gr ON gr.id = g.grade_id"
             " JOIN seasons s ON s.id = gr.season_id"
         ) + captain_bat_join
@@ -261,8 +261,8 @@ async def get_records(
             + " AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')"
         )
         _bowl_join_ng = (
-            "JOIN bowling_spells bs ON bs.player_id = p.id"
-            " JOIN games g ON g.id = bs.game_id"
+            "JOIN v_effective_bowling_spells bs ON bs.player_id = p.id"
+            " JOIN v_effective_games g ON g.id = bs.game_id"
             " JOIN grades gr ON gr.id = g.grade_id"
             " JOIN seasons s ON s.id = gr.season_id"
         ) + captain_bowl_join
@@ -676,7 +676,7 @@ async def get_records(
             EXTRACT(YEAR FROM g.played_at)::int AS season_year,
             false AS is_manual
         FROM partnerships pt
-        JOIN games g ON g.id = pt.game_id
+        JOIN v_effective_games g ON g.id = pt.game_id
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
         LEFT JOIN LATERAL (
@@ -717,7 +717,7 @@ async def get_records(
             false AS is_manual,
             ROW_NUMBER() OVER (PARTITION BY pt.wicket_number ORDER BY pt.runs DESC) AS rn
         FROM partnerships pt
-        JOIN games g ON g.id = pt.game_id
+        JOIN v_effective_games g ON g.id = pt.game_id
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
         LEFT JOIN LATERAL (
@@ -769,7 +769,7 @@ async def get_records(
                     ORDER BY pt.runs DESC
                 ) AS rn
             FROM partnerships pt
-            JOIN games g ON g.id = pt.game_id
+            JOIN v_effective_games g ON g.id = pt.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             LEFT JOIN LATERAL (
@@ -874,7 +874,7 @@ async def get_records(
                    COUNT(DISTINCT ga.game_id) AS matches,
                    COUNT(DISTINCT gr.season_id) AS seasons
             FROM game_appearances ga
-            JOIN games g ON g.id = ga.game_id
+            JOIN v_effective_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = ga.player_id
@@ -910,8 +910,8 @@ async def get_records(
         most_matches = await q(f"""
             WITH appearances AS (
                 SELECT bi.player_id, bi.game_id, gr.season_id
-                FROM batting_innings bi
-                JOIN games g ON g.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
@@ -920,8 +920,8 @@ async def get_records(
                   {finals_clause}
                 UNION
                 SELECT bs.player_id, bs.game_id, gr.season_id
-                FROM bowling_spells bs
-                JOIN games g ON g.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
@@ -930,8 +930,8 @@ async def get_records(
                   {finals_clause}
                 UNION
                 SELECT fs.player_id, fs.game_id, gr.season_id
-                FROM fielding_stats fs
-                JOIN games g ON g.id = fs.game_id
+                FROM v_effective_fielding_stats fs
+                JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
@@ -969,7 +969,7 @@ async def get_records(
                    COUNT(DISTINCT gr.season_id) AS seasons,
                    COUNT(DISTINCT ga.game_id) AS matches
             FROM game_appearances ga
-            JOIN games g ON g.id = ga.game_id
+            JOIN v_effective_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = ga.player_id
@@ -1005,8 +1005,8 @@ async def get_records(
         most_seasons = await q(f"""
             WITH appearances AS (
                 SELECT bi.player_id, gr.season_id
-                FROM batting_innings bi
-                JOIN games g ON g.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
@@ -1015,8 +1015,8 @@ async def get_records(
                   {finals_clause}
                 UNION
                 SELECT bs.player_id, gr.season_id
-                FROM bowling_spells bs
-                JOIN games g ON g.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
@@ -1025,8 +1025,8 @@ async def get_records(
                   {finals_clause}
                 UNION
                 SELECT fs.player_id, gr.season_id
-                FROM fielding_stats fs
-                JOIN games g ON g.id = fs.game_id
+                FROM v_effective_fielding_stats fs
+                JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
@@ -1066,8 +1066,8 @@ async def get_records(
                        COUNT(*) AS innings,
                        COUNT(*) FILTER (WHERE bi.not_out) AS not_outs,
                        COUNT(DISTINCT bi.game_id) AS games
-                FROM batting_innings bi
-                JOIN games g ON g.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
@@ -1083,8 +1083,8 @@ async def get_records(
                        COALESCE(SUM(bs.wickets), 0) AS wickets,
                        COALESCE(SUM(bs.runs), 0) AS runs_conceded,
                        COUNT(DISTINCT bs.game_id) AS games
-                FROM bowling_spells bs
-                JOIN games g ON g.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE s.organisation_id = CAST(:org_id AS UUID)

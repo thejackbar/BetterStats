@@ -7,7 +7,7 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, get_db
+from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, get_db
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services import playhq_partner_client
 
@@ -60,6 +60,44 @@ def _filter_by_season(games: list, season_obj) -> list:
     return []
 
 
+async def _fetch_manual_games_as_list(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    season_id: Optional[str],
+    grade_id: Optional[str],
+    finals_only: Optional[bool],
+) -> list[dict]:
+    """Return manual_games for this org shaped like the API game-list entries."""
+    q = (
+        select(ManualGame, Grade, Season)
+        .join(Season, Season.id == ManualGame.season_id)
+        .outerjoin(Grade, Grade.id == ManualGame.grade_id)
+        .where(ManualGame.organisation_id == org_id)
+    )
+    if season_id:
+        q = q.where(ManualGame.season_id == uuid.UUID(season_id))
+    if grade_id:
+        q = q.where(ManualGame.grade_id == uuid.UUID(grade_id))
+    if finals_only:
+        q = q.where(ManualGame.is_final.is_(True))
+    rows = await db.execute(q)
+    out = []
+    for game, grade, season in rows.all():
+        out.append({
+            "id": str(game.id),
+            "played_at": game.played_at.isoformat() if game.played_at else None,
+            "home_team": game.home_team,
+            "away_team": game.away_team,
+            "result": game.result,
+            "winning_team": game.winning_team,
+            "grade": ({"id": str(grade.id), "name": grade.display_name, "raw_name": grade.name}
+                      if grade else {"id": None, "name": "(manual)", "raw_name": "(manual)"}),
+            "season": {"id": str(season.id), "name": season.name, "year": season.year},
+            "is_manual": True,
+        })
+    return out
+
+
 @router.get("")
 async def list_games(
     org_id: str,
@@ -70,6 +108,9 @@ async def list_games(
     db: AsyncSession = Depends(get_db),
 ):
     org = await db.get(Organisation, uuid.UUID(org_id))
+    manual_games = await _fetch_manual_games_as_list(
+        db, uuid.UUID(org_id), season_id, grade_id, finals_only,
+    )
     if org and org.playhq_id:
         db_seasons_res = await db.execute(
             select(Season).where(Season.organisation_id == uuid.UUID(org_id))
@@ -87,7 +128,8 @@ async def list_games(
                 recent = [g for g in recent if (g.get("grade") or {}).get("name", "").strip().lower() == grade_obj.name.strip().lower()]
         if finals_only:
             recent = [g for g in recent if "final" in (g.get("round") or {}).get("name", "").lower()]
-        recent.sort(key=lambda x: x["played_at"], reverse=True)
+        recent.extend(manual_games)
+        recent.sort(key=lambda x: x.get("played_at") or "", reverse=True)
         return recent[:limit]
 
     # Fallback: DB query (empty for most installs until games are synced)
@@ -105,7 +147,7 @@ async def list_games(
         query = query.where(Game.is_final == True)
     query = query.order_by(Game.played_at.desc()).limit(limit)
     result = await db.execute(query)
-    return [
+    api_games = [
         {
             "id": str(game.id),
             "played_at": game.played_at.isoformat() if game.played_at else None,
@@ -118,6 +160,9 @@ async def list_games(
         }
         for game, grade, season in result.all()
     ]
+    combined = api_games + manual_games
+    combined.sort(key=lambda x: x.get("played_at") or "", reverse=True)
+    return combined[:limit]
 
 
 @router.get("/playhq/{playhq_game_id}")
@@ -321,35 +366,44 @@ async def get_scorecard(
     db: AsyncSession = Depends(get_db),
 ):
     game = await db.get(Game, uuid.UUID(game_id))
+    is_manual = False
     if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
+        manual = await db.get(ManualGame, uuid.UUID(game_id))
+        if not manual:
+            raise HTTPException(status_code=404, detail="Game not found")
+        game = manual
+        is_manual = True
 
     grade = await db.get(Grade, game.grade_id) if game.grade_id else None
     season = await db.get(Season, grade.season_id) if grade else None
 
-    # Batting with player names via join
+    # Manual and synced child models share the same field names, so we just
+    # pick which model to query against based on the game's provenance.
+    BI = ManualBattingInnings if is_manual else BattingInnings
+    BS = ManualBowlingSpell if is_manual else BowlingSpell
+    FS = ManualFieldingStat if is_manual else FieldingStat
+    game_fk = BI.manual_game_id if is_manual else BI.game_id
+
     batting_res = await db.execute(
-        select(BattingInnings, Player)
-        .outerjoin(Player, Player.id == BattingInnings.player_id)
-        .where(BattingInnings.game_id == game.id)
-        .order_by(BattingInnings.innings_number, BattingInnings.batting_position)
+        select(BI, Player)
+        .outerjoin(Player, Player.id == BI.player_id)
+        .where(game_fk == game.id)
+        .order_by(BI.innings_number, BI.batting_position)
     )
     batting_rows = batting_res.all()
 
-    # Bowling with player names via join
     bowling_res = await db.execute(
-        select(BowlingSpell, Player)
-        .outerjoin(Player, Player.id == BowlingSpell.player_id)
-        .where(BowlingSpell.game_id == game.id)
-        .order_by(BowlingSpell.innings_number)
+        select(BS, Player)
+        .outerjoin(Player, Player.id == BS.player_id)
+        .where((BS.manual_game_id if is_manual else BS.game_id) == game.id)
+        .order_by(BS.innings_number)
     )
     bowling_rows = bowling_res.all()
 
-    # Fielding with player names via join
     fielding_res = await db.execute(
-        select(FieldingStat, Player)
-        .outerjoin(Player, Player.id == FieldingStat.player_id)
-        .where(FieldingStat.game_id == game.id)
+        select(FS, Player)
+        .outerjoin(Player, Player.id == FS.player_id)
+        .where((FS.manual_game_id if is_manual else FS.game_id) == game.id)
     )
     fielding_rows = fielding_res.all()
 
@@ -426,16 +480,23 @@ async def get_scorecard(
         innings_totals[n].setdefault("extras", 0)
         innings_totals[n]["extras"] += (row["wides"] or 0) + (row["no_balls"] or 0)
 
-    fow = await get_game_fall_of_wickets(db, game.id)
-    partnerships = await get_game_partnerships(db, game.id)
+    if is_manual:
+        # Manual games have no FOW / partnerships / GR opposition feed.
+        fow, partnerships = [], []
+    else:
+        fow = await get_game_fall_of_wickets(db, game.id)
+        partnerships = await get_game_partnerships(db, game.id)
 
     # Live-fetch opposition data from GR API (not stored in DB).
-    # game.id IS the GR match UUID, so we can call directly.
+    # game.id IS the GR match UUID, so we can call directly. Skip for
+    # manual games — their IDs aren't in GR's namespace.
     opp_batting: list[dict] = []
     opp_bowling: list[dict] = []
     opp_extras: dict[int, int] = {}
 
     try:
+        if is_manual:
+            raise RuntimeError("skip-gr-fetch-for-manual-game")
         from app.services.grassroots_scores_client import get_match_scorecard
         import re as _re
         gr_data = await get_match_scorecard(str(game.id))

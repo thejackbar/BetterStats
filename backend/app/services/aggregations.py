@@ -134,15 +134,15 @@ def _build_recent_games_cte(player_id_param: str, n_param: str) -> str:
     return f"""recent_games AS (
         SELECT g.id AS game_id
         FROM (
-            SELECT bi.game_id FROM batting_innings bi WHERE bi.player_id = CAST(:{player_id_param} AS UUID)
+            SELECT bi.game_id FROM v_effective_batting_innings bi WHERE bi.player_id = CAST(:{player_id_param} AS UUID)
             UNION
-            SELECT bs.game_id FROM bowling_spells bs WHERE bs.player_id = CAST(:{player_id_param} AS UUID)
+            SELECT bs.game_id FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:{player_id_param} AS UUID)
             UNION
-            SELECT fs.game_id FROM fielding_stats fs WHERE fs.player_id = CAST(:{player_id_param} AS UUID)
+            SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:{player_id_param} AS UUID)
             UNION
             SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:{player_id_param} AS UUID)
         ) ap
-        JOIN games g ON g.id = ap.game_id
+        JOIN v_effective_games g ON g.id = ap.game_id
         ORDER BY g.played_at DESC NULLS LAST
         LIMIT :{n_param}
     )"""
@@ -176,15 +176,15 @@ def _build_date_filtered_games_cte(player_id_param: str, start_date: Optional[st
     return f"""date_filtered_games AS (
         SELECT g.id AS game_id
         FROM (
-            SELECT bi.game_id FROM batting_innings bi WHERE bi.player_id = CAST(:{player_id_param} AS UUID)
+            SELECT bi.game_id FROM v_effective_batting_innings bi WHERE bi.player_id = CAST(:{player_id_param} AS UUID)
             UNION
-            SELECT bs.game_id FROM bowling_spells bs WHERE bs.player_id = CAST(:{player_id_param} AS UUID)
+            SELECT bs.game_id FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:{player_id_param} AS UUID)
             UNION
-            SELECT fs.game_id FROM fielding_stats fs WHERE fs.player_id = CAST(:{player_id_param} AS UUID)
+            SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:{player_id_param} AS UUID)
             UNION
             SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:{player_id_param} AS UUID)
         ) ap
-        JOIN games g ON g.id = ap.game_id
+        JOIN v_effective_games g ON g.id = ap.game_id
         LEFT JOIN grades gr ON gr.id = g.grade_id
         LEFT JOIN seasons s ON s.id = gr.season_id
         {where_clause}
@@ -216,8 +216,8 @@ async def get_career_batting_from_innings(
 
     ctes.append(f"""qualifying AS (
         SELECT bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out, bi.game_id
-        FROM batting_innings bi
-        JOIN games g ON g.id = bi.game_id
+        FROM v_effective_batting_innings bi
+        JOIN v_effective_games g ON g.id = bi.game_id
         WHERE bi.player_id = CAST(:pid AS UUID)
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -274,8 +274,8 @@ async def get_career_bowling_from_spells(
 
     ctes.append(f"""qualifying AS (
         SELECT bs.wickets, bs.runs, bs.maidens, bs.overs, bs.game_id
-        FROM bowling_spells bs
-        JOIN games g ON g.id = bs.game_id
+        FROM v_effective_bowling_spells bs
+        JOIN v_effective_games g ON g.id = bs.game_id
         WHERE bs.player_id = CAST(:pid AS UUID)
           {game_filter}
     )""")
@@ -329,8 +329,8 @@ async def get_career_fielding_from_stats(
 
     ctes.append(f"""qualifying AS (
         SELECT fs.catches, fs.catches_wk, fs.run_outs, fs.stumpings, fs.game_id
-        FROM fielding_stats fs
-        JOIN games g ON g.id = fs.game_id
+        FROM v_effective_fielding_stats fs
+        JOIN v_effective_games g ON g.id = fs.game_id
         WHERE fs.player_id = CAST(:pid AS UUID)
           {game_filter}
     )""")
@@ -425,8 +425,8 @@ async def get_fielding_leaderboard(
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
-            FROM fielding_stats fs
-            JOIN games g ON g.id = fs.game_id{captain_join}
+            FROM v_effective_fielding_stats fs
+            JOIN v_effective_games g ON g.id = fs.game_id{captain_join}
             JOIN players p ON p.id = fs.player_id
             WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -449,8 +449,8 @@ async def get_fielding_leaderboard(
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
-            FROM fielding_stats fs
-            JOIN games g ON g.id = fs.game_id
+            FROM v_effective_fielding_stats fs
+            JOIN v_effective_games g ON g.id = fs.game_id
             JOIN grades gr ON gr.id = g.grade_id{captain_join}
             JOIN players p ON p.id = fs.player_id
             WHERE {_GRADE_MATCH}{season_clause}
@@ -475,8 +475,8 @@ async def get_fielding_leaderboard(
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
-            FROM fielding_stats fs
-            JOIN games g ON g.id = fs.game_id
+            FROM v_effective_fielding_stats fs
+            JOIN v_effective_games g ON g.id = fs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id{captain_join}
             JOIN players p ON p.id = fs.player_id
@@ -501,8 +501,8 @@ async def get_fielding_leaderboard(
                 COALESCE(SUM(fs.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(fs.catches + fs.run_outs + fs.stumpings), 0) AS total_dismissals
-            FROM fielding_stats fs
-            JOIN games g ON g.id = fs.game_id
+            FROM v_effective_fielding_stats fs
+            JOIN v_effective_games g ON g.id = fs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE
@@ -580,8 +580,8 @@ async def get_player_batting_innings(
                 COALESCE(gr.display_name_override, gr.name) AS grade_name,
                 s.name AS season_name,
                 s.year AS season_year
-            FROM batting_innings bi
-            JOIN games g ON g.id = bi.game_id
+            FROM v_effective_batting_innings bi
+            JOIN v_effective_games g ON g.id = bi.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             WHERE {where}
@@ -628,8 +628,8 @@ async def get_player_bowling_spells(
                 COALESCE(gr.display_name_override, gr.name) AS grade_name,
                 s.name AS season_name,
                 s.year AS season_year
-            FROM bowling_spells bs
-            JOIN games g ON g.id = bs.game_id
+            FROM v_effective_bowling_spells bs
+            JOIN v_effective_games g ON g.id = bs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             WHERE {where}
@@ -659,7 +659,7 @@ async def get_dismissal_breakdown(session: AsyncSession, player_id: str) -> list
                     ELSE bi.dismissal_type
                 END AS dismissal_type,
                 COUNT(*) AS count
-            FROM batting_innings bi
+            FROM v_effective_batting_innings bi
             WHERE bi.player_id = :pid
               AND bi.runs IS NOT NULL
               AND (bi.did_not_bat IS NOT TRUE)
@@ -735,7 +735,7 @@ async def get_batting_by_position(session: AsyncSession, player_id: str) -> list
                 ) AS average,
                 MAX(bi.runs) AS high_score,
                 ROUND(AVG(bi.strike_rate), 1) AS avg_strike_rate
-            FROM batting_innings bi
+            FROM v_effective_batting_innings bi
             WHERE bi.player_id = :pid
               AND bi.batting_position IS NOT NULL
               AND bi.runs IS NOT NULL
@@ -761,8 +761,8 @@ async def get_batting_by_grade(session: AsyncSession, player_id: str, org_id: Op
                     2
                 ) AS average,
                 MAX(bi.runs) AS high_score
-            FROM batting_innings bi
-            JOIN games g ON g.id = bi.game_id
+            FROM v_effective_batting_innings bi
+            JOIN v_effective_games g ON g.id = bi.game_id
             JOIN grades gr ON gr.id = g.grade_id
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
@@ -821,13 +821,13 @@ async def get_player_team_breakdown(
     summary = await session.execute(
         text(f"""
             WITH appearances AS (
-                SELECT bi.player_id, bi.game_id FROM batting_innings bi
+                SELECT bi.player_id, bi.game_id FROM v_effective_batting_innings bi
                 WHERE bi.player_id = CAST(:pid AS UUID)
                 UNION
-                SELECT bs.player_id, bs.game_id FROM bowling_spells bs
+                SELECT bs.player_id, bs.game_id FROM v_effective_bowling_spells bs
                 WHERE bs.player_id = CAST(:pid AS UUID)
                 UNION
-                SELECT fs.player_id, fs.game_id FROM fielding_stats fs
+                SELECT fs.player_id, fs.game_id FROM v_effective_fielding_stats fs
                 WHERE fs.player_id = CAST(:pid AS UUID)
                 UNION
                 SELECT ga.player_id, ga.game_id FROM game_appearances ga
@@ -841,7 +841,7 @@ async def get_player_team_breakdown(
                 COUNT(*) FILTER (WHERE g.result = 'LOSS') AS lost,
                 COUNT(*) FILTER (WHERE g.result IN ('DRAW', 'TIE')) AS drawn
             FROM appearances ap
-            JOIN games g  ON g.id = ap.game_id
+            JOIN v_effective_games g  ON g.id = ap.game_id
             JOIN grades gr ON gr.id = g.grade_id
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
@@ -891,11 +891,11 @@ async def get_player_team_breakdown(
     per_season_grade = await session.execute(
         text(f"""
             WITH appearances AS (
-                SELECT bi.game_id FROM batting_innings bi WHERE bi.player_id = CAST(:pid AS UUID)
+                SELECT bi.game_id FROM v_effective_batting_innings bi WHERE bi.player_id = CAST(:pid AS UUID)
                 UNION
-                SELECT bs.game_id FROM bowling_spells bs WHERE bs.player_id = CAST(:pid AS UUID)
+                SELECT bs.game_id FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:pid AS UUID)
                 UNION
-                SELECT fs.game_id FROM fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
+                SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
                 UNION
                 SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
             )
@@ -904,7 +904,7 @@ async def get_player_team_breakdown(
                 COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
                 COUNT(DISTINCT ap.game_id) AS games
             FROM appearances ap
-            JOIN games g  ON g.id = ap.game_id
+            JOIN v_effective_games g  ON g.id = ap.game_id
             JOIN grades gr ON gr.id = g.grade_id
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
@@ -1160,7 +1160,7 @@ async def get_player_partnerships(session: AsyncSession, player_id: str) -> list
                 MAX(pt.runs) AS best_runs,
                 MAX(g.played_at)::text AS last_played
             FROM partnerships pt
-            JOIN games g ON g.id = pt.game_id
+            JOIN v_effective_games g ON g.id = pt.game_id
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE (pt.batter1_id = :pid OR pt.batter2_id = :pid)
@@ -1554,8 +1554,8 @@ async def get_batting_leaderboard_extended(
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
-                FROM batting_innings bi
-                JOIN games g ON g.id = bi.game_id{captain_join}
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id{captain_join}
                 WHERE g.grade_id = :grade_id
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){finals_clause}
@@ -1592,8 +1592,8 @@ async def get_batting_leaderboard_extended(
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
-                FROM batting_innings bi
-                JOIN games g ON g.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id{captain_join}
                 WHERE {_GRADE_MATCH}{season_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
@@ -1631,8 +1631,8 @@ async def get_batting_leaderboard_extended(
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
-                FROM batting_innings bi
-                JOIN games g ON g.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id{captain_join}
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
@@ -1671,8 +1671,8 @@ async def get_batting_leaderboard_extended(
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
-                FROM batting_innings bi
-                JOIN games g ON g.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE
@@ -1799,8 +1799,8 @@ async def get_bowling_leaderboard_extended(
                     bs.wickets AS best_figures_wickets,
                     bs.runs AS best_figures_runs,
                     bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
-                FROM bowling_spells bs
-                JOIN games g ON g.id = bs.game_id{captain_join}
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id{captain_join}
                 WHERE g.grade_id = :grade_id{finals_clause}
                 ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
             )
@@ -1817,8 +1817,8 @@ async def get_bowling_leaderboard_extended(
                 COALESCE(SUM(bs.maidens), 0) AS total_maidens,
                 COALESCE(SUM(bs.overs), 0) AS total_overs,
                 COALESCE(SUM(CASE WHEN bs.wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors
-            FROM bowling_spells bs
-            JOIN games g ON g.id = bs.game_id{captain_join}
+            FROM v_effective_bowling_spells bs
+            JOIN v_effective_games g ON g.id = bs.game_id{captain_join}
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE g.grade_id = :grade_id AND p.organisation_id = :org_id{finals_clause}{gender_clause}{overseas_clause}
@@ -1847,8 +1847,8 @@ async def get_bowling_leaderboard_extended(
                     bs.wickets AS best_figures_wickets,
                     bs.runs AS best_figures_runs,
                     bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
-                FROM bowling_spells bs
-                JOIN games g ON g.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id{captain_join}
                 WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
                 ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
@@ -1866,8 +1866,8 @@ async def get_bowling_leaderboard_extended(
                 COALESCE(SUM(bs.maidens), 0) AS total_maidens,
                 COALESCE(SUM(bs.overs), 0) AS total_overs,
                 COALESCE(SUM(CASE WHEN bs.wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors
-            FROM bowling_spells bs
-            JOIN games g ON g.id = bs.game_id
+            FROM v_effective_bowling_spells bs
+            JOIN v_effective_games g ON g.id = bs.game_id
             JOIN grades gr ON gr.id = g.grade_id{captain_join}
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
@@ -1898,8 +1898,8 @@ async def get_bowling_leaderboard_extended(
                     bs.wickets AS best_figures_wickets,
                     bs.runs AS best_figures_runs,
                     bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
-                FROM bowling_spells bs
-                JOIN games g ON g.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id{captain_join}
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
@@ -1919,8 +1919,8 @@ async def get_bowling_leaderboard_extended(
                 COALESCE(SUM(bs.maidens), 0) AS total_maidens,
                 COALESCE(SUM(bs.overs), 0) AS total_overs,
                 COALESCE(SUM(CASE WHEN bs.wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors
-            FROM bowling_spells bs
-            JOIN games g ON g.id = bs.game_id
+            FROM v_effective_bowling_spells bs
+            JOIN v_effective_games g ON g.id = bs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id{captain_join}
             JOIN players p ON p.id = bs.player_id
@@ -1952,8 +1952,8 @@ async def get_bowling_leaderboard_extended(
                     bs.wickets AS best_figures_wickets,
                     bs.runs AS best_figures_runs,
                     bs.wickets::text || '/' || bs.runs::text AS best_bowling_figures
-                FROM bowling_spells bs
-                JOIN games g ON g.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE
@@ -1973,8 +1973,8 @@ async def get_bowling_leaderboard_extended(
                 COALESCE(SUM(bs.maidens), 0) AS total_maidens,
                 COALESCE(SUM(bs.overs), 0) AS total_overs,
                 COALESCE(SUM(CASE WHEN bs.wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors
-            FROM bowling_spells bs
-            JOIN games g ON g.id = bs.game_id
+            FROM v_effective_bowling_spells bs
+            JOIN v_effective_games g ON g.id = bs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE
@@ -2056,8 +2056,8 @@ async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Op
                     bs.runs,
                     bs.overs,
                     bs.maidens
-                FROM bowling_spells bs
-                JOIN games g ON g.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 LEFT JOIN LATERAL (
                     SELECT canonical_name FROM grade_merge_logs gml
@@ -2133,7 +2133,7 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                     ) AS opp_name,
                     g.result
                 FROM game_appearances ga
-                JOIN games g ON g.id = ga.game_id
+                JOIN v_effective_games g ON g.id = ga.game_id
                 WHERE ga.player_id = CAST(:pid AS UUID)
             ),
             opp_display AS (
@@ -2162,7 +2162,7 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                     COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
                     MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
                     COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS dismissals
-                FROM batting_innings bi
+                FROM v_effective_batting_innings bi
                 JOIN player_games pg ON pg.game_id = bi.game_id
                 WHERE bi.player_id = CAST(:pid AS UUID)
                   AND pg.opp_key IS NOT NULL
@@ -2174,7 +2174,7 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                     COALESCE(SUM(bs.wickets), 0) AS wickets,
                     COALESCE(SUM(bs.runs), 0) AS bowling_runs,
                     COALESCE(SUM(bs.overs), 0) AS bowling_overs
-                FROM bowling_spells bs
+                FROM v_effective_bowling_spells bs
                 JOIN player_games pg ON pg.game_id = bs.game_id
                 WHERE bs.player_id = CAST(:pid AS UUID)
                   AND pg.opp_key IS NOT NULL
@@ -2186,7 +2186,7 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                     COALESCE(SUM(fs.catches), 0) AS catches,
                     COALESCE(SUM(fs.catches_wk), 0) AS catches_wk,
                     COALESCE(SUM(fs.stumpings), 0) AS stumpings
-                FROM fielding_stats fs
+                FROM v_effective_fielding_stats fs
                 JOIN player_games pg ON pg.game_id = fs.game_id
                 WHERE fs.player_id = CAST(:pid AS UUID)
                   AND pg.opp_key IS NOT NULL
@@ -2230,7 +2230,7 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
                     COUNT(*) FILTER (WHERE g.result = 'WIN') AS wins,
                     COUNT(*) FILTER (WHERE g.result = 'LOSS') AS losses
                 FROM game_appearances ga
-                JOIN games g ON g.id = ga.game_id
+                JOIN v_effective_games g ON g.id = ga.game_id
                 WHERE ga.player_id = CAST(:pid AS UUID)
                   AND g.venue IS NOT NULL
                 GROUP BY g.venue
@@ -2242,8 +2242,8 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
                     COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
                     MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
                     COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS dismissals
-                FROM batting_innings bi
-                JOIN games g ON g.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
                 WHERE bi.player_id = CAST(:pid AS UUID)
                   AND g.venue IS NOT NULL
                 GROUP BY g.venue
@@ -2254,8 +2254,8 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
                     COALESCE(SUM(bs.wickets), 0) AS wickets,
                     COALESCE(SUM(bs.runs), 0) AS bowling_runs,
                     COALESCE(SUM(bs.overs), 0) AS bowling_overs
-                FROM bowling_spells bs
-                JOIN games g ON g.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
                 WHERE bs.player_id = CAST(:pid AS UUID)
                   AND g.venue IS NOT NULL
                 GROUP BY g.venue
@@ -2266,8 +2266,8 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
                     COALESCE(SUM(fs.catches), 0) AS catches,
                     COALESCE(SUM(fs.catches_wk), 0) AS catches_wk,
                     COALESCE(SUM(fs.stumpings), 0) AS stumpings
-                FROM fielding_stats fs
-                JOIN games g ON g.id = fs.game_id
+                FROM v_effective_fielding_stats fs
+                JOIN v_effective_games g ON g.id = fs.game_id
                 WHERE fs.player_id = CAST(:pid AS UUID)
                   AND g.venue IS NOT NULL
                 GROUP BY g.venue
@@ -2495,8 +2495,8 @@ async def get_sirs_batting(
                 'season', s.name,
                 'date', g.played_at
             ) ORDER BY bi.runs DESC) AS performances
-        FROM batting_innings bi
-        JOIN games g ON g.id = bi.game_id
+        FROM v_effective_batting_innings bi
+        JOIN v_effective_games g ON g.id = bi.game_id
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
         JOIN players p ON p.id = bi.player_id{captain_join}
@@ -2543,8 +2543,8 @@ async def get_sirs_bowling_innings(
                 'season', s.name,
                 'date', g.played_at
             ) ORDER BY bs.wickets DESC, bs.runs ASC) AS performances
-        FROM bowling_spells bs
-        JOIN games g ON g.id = bs.game_id
+        FROM v_effective_bowling_spells bs
+        JOIN v_effective_games g ON g.id = bs.game_id
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
         JOIN players p ON p.id = bs.player_id{captain_join}
@@ -2582,8 +2582,8 @@ async def get_sirs_bowling_match(
                 bs.game_id,
                 SUM(bs.wickets) AS total_wickets,
                 SUM(bs.runs)    AS total_runs
-            FROM bowling_spells bs
-            JOIN games g ON g.id = bs.game_id
+            FROM v_effective_bowling_spells bs
+            JOIN v_effective_games g ON g.id = bs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = bs.player_id{captain_join}
@@ -2606,7 +2606,7 @@ async def get_sirs_bowling_match(
             ) ORDER BY mt.total_wickets DESC, mt.total_runs ASC) AS performances
         FROM match_totals mt
         JOIN players p ON p.id = mt.player_id
-        JOIN games g ON g.id = mt.game_id
+        JOIN v_effective_games g ON g.id = mt.game_id
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
         GROUP BY p.id, COALESCE(p.display_name_override, p.name)
