@@ -402,6 +402,49 @@ function treeLeafCount(node) {
   return (node.clauses || []).reduce((n, c) => n + treeLeafCount(c), 0)
 }
 
+// Active-context summary used to render filter chips above results, so the user
+// sees what's currently scoping their query (e.g. "Finals only" was the source of
+// confusion when "Top batting on debut" returned a player's first FINALS innings
+// rather than their actual debut).
+function summarizeContextChips(ctx, seasons, grades) {
+  if (!ctx) return []
+  const out = []
+  const push = (key, label) => out.push({ key, label })
+  if (ctx.season_id) {
+    const s = (seasons || []).find(x => x.id === ctx.season_id)
+    push('season_id', `Season: ${s?.name || ctx.season_id}`)
+  }
+  if (ctx.grade_id) {
+    const g = (grades || []).find(x => x.id === ctx.grade_id)
+    push('grade_id', `Grade: ${g?.display_name || g?.name || ctx.grade_id}`)
+  }
+  if (ctx.grade_name) push('grade_name', `Grade: ${ctx.grade_name}`)
+  if (ctx.opposition) push('opposition', `Vs: ${ctx.opposition}`)
+  if (ctx.date_from)  push('date_from', `From: ${ctx.date_from}`)
+  if (ctx.date_to)    push('date_to', `To: ${ctx.date_to}`)
+  if (ctx.min_year)   push('min_year', `Min year: ${ctx.min_year}`)
+  if (ctx.max_year)   push('max_year', `Max year: ${ctx.max_year}`)
+  if (ctx.finals_only)  push('finals_only', 'Finals only')
+  if (ctx.captain_only) push('captain_only', 'As captain')
+  if (ctx.keeper_only)  push('keeper_only', 'As keeper')
+  if (ctx.on_this_day)  push('on_this_day', 'On this day')
+  if (ctx.result)     push('result', `Result: ${ctx.result}`)
+  if (ctx.dismissal)  push('dismissal', `Dismissal: ${ctx.dismissal}`)
+  if (ctx.position_min) push('position_min', `Position ≥ ${ctx.position_min}`)
+  if (ctx.position_max) push('position_max', `Position ≤ ${ctx.position_max}`)
+  if (ctx.first_n_matches) push('first_n_matches', `First ${ctx.first_n_matches} matches`)
+  if (ctx.milestone_runs)  push('milestone_runs', `Milestone: ${ctx.milestone_runs} runs`)
+  if (ctx.gender)        push('gender', `Gender: ${ctx.gender}`)
+  if (ctx.overseas)      push('overseas', `Overseas: ${ctx.overseas}`)
+  if (ctx.player_role)   push('player_role', `Role: ${ctx.player_role}`)
+  if (ctx.award_category) push('award_category', `Award: ${ctx.award_category}`)
+  if (ctx.award_subcategory) push('award_subcategory', `Award sub: ${ctx.award_subcategory}`)
+  if (ctx.award_name)    push('award_name', `Award: ${ctx.award_name}`)
+  if (ctx.office_bearer) push('office_bearer', `Office bearer: ${ctx.office_bearer}`)
+  if (ctx.family_id)     push('family_id', 'Family')
+  return out
+}
+
 function treeFields(node) {
   const out = new Set()
   const walk = (n) => {
@@ -1292,15 +1335,28 @@ export default function StatLab() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1500px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
-          eyebrow={openReport ? 'SAVED REPORT' : 'STAT LAB · CUSTOM QUERY'}
-          title={openReport ? openReport.title : 'Build your own table.'}
+          eyebrow={openReport
+            ? 'SAVED REPORT'
+            : (activeDerived ? 'STAT LAB · REPORT' : 'STAT LAB · CUSTOM QUERY')}
+          title={openReport
+            ? openReport.title
+            : (activeDerived && schema?.derived?.[activeDerived]?.label
+                ? schema.derived[activeDerived].label
+                : 'Build your own table.')}
           meta={openReport
             ? [
                 <span key="d">{openReport.description || `${org?.name || ''} · saved report`}</span>,
                 openReport.owner_name ? <span key="o">by {openReport.owner_name}</span> : null,
                 <span key="v">{openReport.view_count || 0} view{(openReport.view_count || 0) === 1 ? '' : 's'}</span>,
               ].filter(Boolean)
-            : [<span key="s">{org?.name || ''} · Filter, sort, discover, share.</span>]
+            : (activeDerived && schema?.derived?.[activeDerived]
+                ? [
+                    schema.derived[activeDerived].description
+                      ? <span key="d">{schema.derived[activeDerived].description}</span>
+                      : null,
+                    <span key="o">{org?.name || ''}</span>,
+                  ].filter(Boolean)
+                : [<span key="s">{org?.name || ''} · Filter, sort, discover, share.</span>])
           }
           actions={openReport && canSave ? (
             <div className="flex gap-2">
@@ -1403,20 +1459,37 @@ export default function StatLab() {
           <div className="space-y-4">
             {/* Customise drawer — secondary, collapsed by default */}
             <div className="pb-card">
-              <button
-                onClick={() => setShowCustomise(v => !v)}
-                className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-pb-surface2/60 transition text-left select-none"
-              >
-                <span className="font-mono text-[10.5px] font-semibold tracking-wide3 flex-1 text-pb-dim">
-                  {showCustomise ? 'CUSTOMISE QUERY' : '+ BUILD CUSTOM QUERY'}
-                </span>
-                {activeDerived || hasQueried ? (
-                  <span className="font-mono text-[9px] text-pb-faintest">
-                    {treeLeafCount(query.filterTree) > 0 && `${treeLeafCount(query.filterTree)} filter${treeLeafCount(query.filterTree) === 1 ? '' : 's'}`}
+              <div className="w-full flex items-stretch">
+                <button
+                  onClick={() => setShowCustomise(v => !v)}
+                  className="flex-1 flex items-center gap-2 px-4 py-2.5 hover:bg-pb-surface2/60 transition text-left select-none"
+                >
+                  <span className="font-mono text-[10.5px] font-semibold tracking-wide3 flex-1 text-pb-dim">
+                    {showCustomise ? 'CUSTOMISE QUERY' : '+ BUILD CUSTOM QUERY'}
                   </span>
-                ) : null}
-                <span className={`font-mono text-[11px] text-pb-faintest transition-transform duration-150 inline-block ${showCustomise ? 'rotate-90' : ''}`}>›</span>
-              </button>
+                  {(() => {
+                    const fc = treeLeafCount(query.filterTree)
+                    const cc = summarizeContextChips(query.context, seasons, grades).length
+                    const total = fc + cc
+                    if (!total) return null
+                    return (
+                      <span className="font-mono text-[9px] text-pb-faintest">
+                        {total} filter{total === 1 ? '' : 's'}
+                      </span>
+                    )
+                  })()}
+                  <span className={`font-mono text-[11px] text-pb-faintest transition-transform duration-150 inline-block ${showCustomise ? 'rotate-90' : ''}`}>›</span>
+                </button>
+                {(activeDerived || treeLeafCount(query.filterTree) > 0 || summarizeContextChips(query.context, seasons, grades).length > 0) && (
+                  <button
+                    onClick={resetAll}
+                    title="Reset report, filters and context"
+                    className="px-3 font-mono text-[10.5px] tracking-wide2 text-pb-faint hover:text-pb-text border-l border-pb-hairline hover:bg-pb-surface2/60 transition"
+                  >
+                    RESET
+                  </button>
+                )}
+              </div>
               {showCustomise && (
                 <div className="px-4 pb-4 pt-3 pb-hairline-t space-y-3">
                   {/* Sort + Direction + Limit on one row */}
@@ -1534,6 +1607,55 @@ export default function StatLab() {
                     </button>
                   </div>
                 </div>
+                {(() => {
+                  const ctxChips = summarizeContextChips(query.context, seasons, grades)
+                  const fc = treeLeafCount(query.filterTree)
+                  if (ctxChips.length === 0 && fc === 0) return null
+                  return (
+                    <div className="px-5 sm:px-6 py-3 pb-hairline-b bg-pb-surface2/20">
+                      <div className="flex items-start gap-2 flex-wrap">
+                        <span className="font-mono text-[10px] tracking-wide3 text-pb-faintest mt-1 shrink-0">FILTERS ·</span>
+                        {ctxChips.map(chip => (
+                          <button
+                            key={chip.key}
+                            onClick={() => {
+                              const isBool = chip.key === 'finals_only' || chip.key === 'captain_only' || chip.key === 'keeper_only' || chip.key === 'on_this_day'
+                              const nextCtx = { ...(query.context || {}), [chip.key]: isBool ? false : '' }
+                              const nextQ = { ...query, context: nextCtx }
+                              setQuery(nextQ)
+                              runQuery(nextQ)
+                            }}
+                            title="Remove this filter"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-pb-hairline2 bg-pb-surface2/60 font-mono text-[10.5px] text-pb-text hover:bg-pb-surface2 transition"
+                          >
+                            {chip.label}
+                            <span className="text-pb-faintest">×</span>
+                          </button>
+                        ))}
+                        {fc > 0 && (
+                          <button
+                            onClick={() => {
+                              const nextQ = { ...query, filterTree: emptyTree() }
+                              setQuery(nextQ)
+                              runQuery(nextQ)
+                            }}
+                            title="Clear metric filters"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-pb-hairline2 bg-pb-surface2/60 font-mono text-[10.5px] text-pb-text hover:bg-pb-surface2 transition"
+                          >
+                            {fc} metric filter{fc === 1 ? '' : 's'}
+                            <span className="text-pb-faintest">×</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={resetAll}
+                          className="ml-auto font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text px-2 py-0.5 rounded transition"
+                        >
+                          RESET ALL
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })()}
                 <ResultsTable
                   rows={sortedRows}
                   columns={tableColumns}
