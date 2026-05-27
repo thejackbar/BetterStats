@@ -14,12 +14,15 @@ Each entry path enforces:
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as date_cls
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -971,6 +974,26 @@ async def undo_edit(
                 await db.delete(row)
         else:
             raise HTTPException(status_code=400, detail=f"Cannot undo create on {table}")
+    elif action == "import":
+        # Undo bulk import → delete every row the import created.
+        # Updates inside the same import aren't restored: we don't snapshot
+        # the prior values per row, so the safer thing is to leave updates
+        # in place and just remove the newly-created rows.
+        after = log.after_json or {}
+        if table == "manual_season_adjustments":
+            ids = after.get("created_ids") or []
+            for rid in ids:
+                row = await db.get(ManualSeasonAdjustment, int(rid))
+                if row and row.organisation_id == club.id:
+                    await db.delete(row)
+        elif table == "manual_games":
+            ids = after.get("created_game_ids") or []
+            for rid in ids:
+                row = await db.get(ManualGame, _to_uuid(rid, "manual game"))
+                if row and row.organisation_id == club.id:
+                    await db.delete(row)
+        else:
+            raise HTTPException(status_code=400, detail=f"Cannot undo import on {table}")
     elif action == "delete":
         # Undo delete → re-insert from before snapshot
         if not log.before_json:
@@ -1056,3 +1079,441 @@ async def undo_edit(
     log.undone_by_user_id = current_user.id
     await db.commit()
     return {"undone": True}
+
+
+# ─── CSV bulk import: per-season aggregates ──────────────────────────────────
+
+
+SEASON_CSV_COLUMNS = [
+    "player_name", "season_name", "grade_name",
+    "games_played",
+    "batting_innings", "batting_runs", "batting_not_outs", "batting_balls",
+    "batting_fours", "batting_sixes", "batting_fifties", "batting_hundreds",
+    "batting_ducks", "batting_high_score", "batting_high_score_not_out",
+    "bowling_innings", "bowling_overs", "bowling_balls", "bowling_maidens",
+    "bowling_runs", "bowling_wickets", "bowling_wides", "bowling_no_balls",
+    "bowling_five_wicket_innings", "bowling_best_wickets", "bowling_best_figures",
+    "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
+    "notes",
+]
+
+INT_COLS_SEASON = {
+    "games_played", "batting_innings", "batting_runs", "batting_not_outs", "batting_balls",
+    "batting_fours", "batting_sixes", "batting_fifties", "batting_hundreds", "batting_ducks",
+    "batting_high_score", "bowling_innings", "bowling_balls", "bowling_maidens",
+    "bowling_runs", "bowling_wickets", "bowling_wides", "bowling_no_balls",
+    "bowling_five_wicket_innings", "bowling_best_wickets",
+    "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
+}
+FLOAT_COLS_SEASON = {"bowling_overs"}
+BOOL_COLS_SEASON = {"batting_high_score_not_out"}
+NULLABLE_INT_COLS_SEASON = {"batting_high_score", "bowling_best_wickets"}
+
+
+def _parse_int(v, *, nullable=False) -> Optional[int]:
+    if v is None or v == "":
+        return None if nullable else 0
+    return int(float(str(v).strip()))
+
+
+def _parse_float(v) -> float:
+    if v is None or v == "":
+        return 0.0
+    return float(str(v).strip())
+
+
+def _parse_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    if v is None or v == "":
+        return False
+    return str(v).strip().lower() in {"1", "true", "yes", "y", "t"}
+
+
+@router.get("/season-adjustments/template.csv")
+async def season_adjustments_template(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(SEASON_CSV_COLUMNS)
+    # One example row so the format is obvious
+    w.writerow([
+        "Smith, John", "Summer 2010/11", "1st Grade",
+        10, 9, 250, 1, 180, 30, 5, 2, 0, 1, 75, "false",
+        8, "40.0", 240, 4, 150, 12, 2, 0, 0, 4, "4-25",
+        5, 0, 2, 0, "Source: club yearbook 2011",
+    ])
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8-sig")),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="season_adjustments_template.csv"'},
+    )
+
+
+def _build_player_lookup(players: list[Player]) -> dict[str, Player]:
+    """Lower-cased name → Player, with simple ', ' variant matching."""
+    out: dict[str, Player] = {}
+    for p in players:
+        name = (p.display_name_override or p.name or "").strip()
+        if not name:
+            continue
+        out[name.lower()] = p
+        # "Smith, John" ↔ "John Smith" — both find the same player
+        if "," in name:
+            last, first = [x.strip() for x in name.split(",", 1)]
+            out[f"{first} {last}".lower()] = p
+        else:
+            parts = name.split()
+            if len(parts) >= 2:
+                out[f"{parts[-1]}, {' '.join(parts[:-1])}".lower()] = p
+    return out
+
+
+def _build_season_lookup(seasons: list[Season]) -> dict[str, Season]:
+    return {(s.name or "").strip().lower(): s for s in seasons}
+
+
+def _build_grade_lookup(grades: list[Grade]) -> dict[tuple[uuid.UUID, str], Grade]:
+    """(season_id, grade-name-lowercased) → Grade, including display overrides."""
+    out: dict[tuple[uuid.UUID, str], Grade] = {}
+    for g in grades:
+        if g.name:
+            out[(g.season_id, g.name.strip().lower())] = g
+        if g.display_name_override:
+            out[(g.season_id, g.display_name_override.strip().lower())] = g
+    return out
+
+
+@router.post("/season-adjustments/import")
+async def import_season_adjustments(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    content = (await file.read()).decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(content))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV is empty or missing a header row")
+
+    # Pre-fetch lookups so we don't re-query per row
+    players = (await db.execute(select(Player).where(Player.organisation_id == club.id))).scalars().all()
+    seasons = (await db.execute(select(Season).where(Season.organisation_id == club.id))).scalars().all()
+    grades = (await db.execute(
+        select(Grade).join(Season, Season.id == Grade.season_id).where(Season.organisation_id == club.id)
+    )).scalars().all()
+    player_lookup = _build_player_lookup(players)
+    season_lookup = _build_season_lookup(seasons)
+    grade_lookup = _build_grade_lookup(grades)
+
+    errors: list[dict] = []
+    created_ids: list[int] = []
+    updated_ids: list[int] = []
+
+    for row_num, raw in enumerate(reader, start=2):  # row 1 = header
+        try:
+            pname = (raw.get("player_name") or "").strip()
+            sname = (raw.get("season_name") or "").strip()
+            gname = (raw.get("grade_name") or "").strip()
+            if not pname or not sname:
+                raise ValueError("player_name and season_name are required")
+
+            player = player_lookup.get(pname.lower())
+            if not player:
+                raise ValueError(f"Player not found: '{pname}'")
+            season = season_lookup.get(sname.lower())
+            if not season:
+                raise ValueError(f"Season not found: '{sname}'")
+            grade = None
+            if gname:
+                grade = grade_lookup.get((season.id, gname.lower()))
+                if not grade:
+                    raise ValueError(f"Grade '{gname}' not found in season '{sname}'")
+
+            fields: dict = {}
+            for col in SEASON_CSV_COLUMNS:
+                if col in ("player_name", "season_name", "grade_name"):
+                    continue
+                val = raw.get(col)
+                if col in INT_COLS_SEASON:
+                    fields[col] = _parse_int(val, nullable=(col in NULLABLE_INT_COLS_SEASON))
+                elif col in FLOAT_COLS_SEASON:
+                    fields[col] = _parse_float(val)
+                elif col in BOOL_COLS_SEASON:
+                    fields[col] = _parse_bool(val)
+                else:  # text fields: notes, bowling_best_figures
+                    fields[col] = (val or "").strip() or None
+
+            # Upsert on the UNIQUE (player_id, season_id, grade_id) constraint
+            existing_q = await db.execute(
+                select(ManualSeasonAdjustment).where(
+                    ManualSeasonAdjustment.player_id == player.id,
+                    ManualSeasonAdjustment.season_id == season.id,
+                    ManualSeasonAdjustment.grade_id.is_(None) if grade is None else ManualSeasonAdjustment.grade_id == grade.id,
+                )
+            )
+            existing = existing_q.scalar_one_or_none()
+            if existing:
+                for k, v in fields.items():
+                    setattr(existing, k, v)
+                existing.updated_at = datetime.now(timezone.utc)
+                updated_ids.append(existing.id)
+            else:
+                row = ManualSeasonAdjustment(
+                    organisation_id=club.id,
+                    player_id=player.id,
+                    season_id=season.id,
+                    grade_id=grade.id if grade else None,
+                    created_by_user_id=current_user.id,
+                    **fields,
+                )
+                db.add(row)
+                await db.flush()
+                created_ids.append(row.id)
+        except Exception as e:
+            errors.append({"row": row_num, "error": str(e), "data": raw})
+
+    summary = {
+        "created": len(created_ids),
+        "updated": len(updated_ids),
+        "errors": len(errors),
+        "errors_detail": errors[:50],  # first 50 errors only — protect against thousands
+    }
+    if created_ids or updated_ids:
+        await _log_edit(
+            db,
+            org_id=club.id,
+            user_id=current_user.id,
+            action="import",
+            target_table="manual_season_adjustments",
+            target_id=f"bulk:{len(created_ids)}created+{len(updated_ids)}updated",
+            summary=f"CSV import — season adjustments: {len(created_ids)} created, {len(updated_ids)} updated, {len(errors)} errors",
+            before=None,
+            after={"created_ids": created_ids, "updated_ids": updated_ids, "errors": errors[:20]},
+        )
+        await db.commit()
+    return summary
+
+
+# ─── CSV bulk import: per-game scorecards ────────────────────────────────────
+
+
+GAME_CSV_COLUMNS = [
+    "game_key", "played_at", "opposition", "venue", "season_name", "grade_name",
+    "is_final", "match_format", "home_team", "away_team", "winning_team", "result",
+    "player_name", "innings_number", "batting_position",
+    "batting_runs", "batting_balls", "batting_fours", "batting_sixes",
+    "batting_not_out", "did_not_bat", "dismissal_type",
+    "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
+    "bowling_wides", "bowling_no_balls",
+    "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
+]
+
+
+@router.get("/games/template.csv")
+async def games_template(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(GAME_CSV_COLUMNS)
+    # Example: one game with two players. Rows with the same game_key roll up
+    # into a single manual_game record; game-level fields are read from the
+    # FIRST row encountered for that key.
+    w.writerow([
+        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
+        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
+        "Smith, John", 1, 1, 45, 60, 5, 1, "false", "false", "c Brown b Jones",
+        "8.2", 2, 25, 3, 0, 0, 1, 0, 0, 0,
+    ])
+    w.writerow([
+        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
+        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
+        "Brown, Tom", 1, 2, 12, 20, 1, 0, "false", "false", "b Jones",
+        "", "", "", "", "", "", "", "", "", "",
+    ])
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8-sig")),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="manual_games_template.csv"'},
+    )
+
+
+def _has_any_value(*vals) -> bool:
+    return any(v not in (None, "", "0", 0) for v in vals)
+
+
+@router.post("/games/import")
+async def import_manual_games(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    content = (await file.read()).decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(content))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV is empty or missing a header row")
+
+    players = (await db.execute(select(Player).where(Player.organisation_id == club.id))).scalars().all()
+    seasons = (await db.execute(select(Season).where(Season.organisation_id == club.id))).scalars().all()
+    grades = (await db.execute(
+        select(Grade).join(Season, Season.id == Grade.season_id).where(Season.organisation_id == club.id)
+    )).scalars().all()
+    player_lookup = _build_player_lookup(players)
+    season_lookup = _build_season_lookup(seasons)
+    grade_lookup = _build_grade_lookup(grades)
+
+    # Group rows by game_key first so all rows of one game become one manual_game.
+    rows = list(reader)
+    by_game: dict[str, list[tuple[int, dict]]] = {}
+    errors: list[dict] = []
+    for row_num, raw in enumerate(rows, start=2):
+        gk = (raw.get("game_key") or "").strip()
+        if not gk:
+            errors.append({"row": row_num, "error": "Missing game_key", "data": raw})
+            continue
+        by_game.setdefault(gk, []).append((row_num, raw))
+
+    created_game_ids: list[str] = []
+
+    for game_key, group in by_game.items():
+        first_row_num, first = group[0]
+        try:
+            sname = (first.get("season_name") or "").strip()
+            if not sname:
+                raise ValueError("season_name is required (on the first row for this game_key)")
+            season = season_lookup.get(sname.lower())
+            if not season:
+                raise ValueError(f"Season not found: '{sname}'")
+            gname = (first.get("grade_name") or "").strip()
+            grade = None
+            if gname:
+                grade = grade_lookup.get((season.id, gname.lower()))
+                if not grade:
+                    raise ValueError(f"Grade '{gname}' not found in season '{sname}'")
+            played_at = None
+            if first.get("played_at"):
+                try:
+                    played_at = date_cls.fromisoformat(first["played_at"].strip())
+                except Exception:
+                    raise ValueError(f"Invalid played_at date: {first['played_at']!r}")
+
+            game = ManualGame(
+                organisation_id=club.id,
+                season_id=season.id,
+                grade_id=grade.id if grade else None,
+                played_at=played_at,
+                home_team=(first.get("home_team") or "").strip() or None,
+                away_team=(first.get("away_team") or "").strip() or None,
+                opposition=(first.get("opposition") or "").strip() or None,
+                venue=(first.get("venue") or "").strip() or None,
+                result=(first.get("result") or "").strip() or None,
+                winning_team=(first.get("winning_team") or "").strip() or None,
+                is_final=_parse_bool(first.get("is_final")),
+                match_format=(first.get("match_format") or "").strip() or None,
+                notes=None,
+                created_by_user_id=current_user.id,
+            )
+            db.add(game)
+            await db.flush()
+        except Exception as e:
+            errors.append({"row": first_row_num, "error": f"Game '{game_key}': {e}", "data": first})
+            continue
+
+        # Children
+        game_had_error = False
+        for row_num, raw in group:
+            try:
+                pname = (raw.get("player_name") or "").strip()
+                if not pname:
+                    continue  # blank player rows are silently ignored
+                player = player_lookup.get(pname.lower())
+                if not player:
+                    raise ValueError(f"Player not found: '{pname}'")
+                innings_number = _parse_int(raw.get("innings_number")) or 1
+
+                bruns = raw.get("batting_runs")
+                bballs = raw.get("batting_balls")
+                if _has_any_value(bruns, bballs, raw.get("dismissal_type"), raw.get("did_not_bat"), raw.get("batting_not_out")):
+                    db.add(ManualBattingInnings(
+                        manual_game_id=game.id,
+                        player_id=player.id,
+                        innings_number=innings_number,
+                        batting_position=_parse_int(raw.get("batting_position"), nullable=True),
+                        runs=_parse_int(bruns),
+                        balls=_parse_int(bballs, nullable=True),
+                        fours=_parse_int(raw.get("batting_fours")),
+                        sixes=_parse_int(raw.get("batting_sixes")),
+                        dismissal_type=(raw.get("dismissal_type") or "").strip() or None,
+                        not_out=_parse_bool(raw.get("batting_not_out")),
+                        did_not_bat=_parse_bool(raw.get("did_not_bat")),
+                    ))
+
+                bovers = raw.get("bowling_overs")
+                bwkts = raw.get("bowling_wickets")
+                bownruns = raw.get("bowling_runs")
+                if _has_any_value(bovers, bwkts, bownruns):
+                    db.add(ManualBowlingSpell(
+                        manual_game_id=game.id,
+                        player_id=player.id,
+                        innings_number=innings_number,
+                        overs=_parse_float(bovers) if bovers not in (None, "") else None,
+                        maidens=_parse_int(raw.get("bowling_maidens")),
+                        runs=_parse_int(bownruns),
+                        wickets=_parse_int(bwkts),
+                        wides=_parse_int(raw.get("bowling_wides")),
+                        no_balls=_parse_int(raw.get("bowling_no_balls")),
+                    ))
+
+                fcatch = raw.get("fielding_catches")
+                fro = raw.get("fielding_run_outs")
+                fstump = raw.get("fielding_stumpings")
+                fwk = raw.get("fielding_catches_wk")
+                if _has_any_value(fcatch, fro, fstump, fwk):
+                    db.add(ManualFieldingStat(
+                        manual_game_id=game.id,
+                        player_id=player.id,
+                        catches=_parse_int(fcatch),
+                        catches_wk=_parse_int(fwk),
+                        run_outs=_parse_int(fro),
+                        stumpings=_parse_int(fstump),
+                    ))
+            except Exception as e:
+                errors.append({"row": row_num, "error": f"Game '{game_key}', player '{raw.get('player_name')}': {e}", "data": raw})
+                game_had_error = True
+
+        if game_had_error:
+            # Roll back the game if any of its child rows errored, so partial
+            # scorecards don't sneak in. The whole game_key needs to be fixed
+            # and re-uploaded.
+            await db.execute(sa_delete(ManualBattingInnings).where(ManualBattingInnings.manual_game_id == game.id))
+            await db.execute(sa_delete(ManualBowlingSpell).where(ManualBowlingSpell.manual_game_id == game.id))
+            await db.execute(sa_delete(ManualFieldingStat).where(ManualFieldingStat.manual_game_id == game.id))
+            await db.delete(game)
+            await db.flush()
+        else:
+            created_game_ids.append(str(game.id))
+
+    summary = {
+        "games_created": len(created_game_ids),
+        "errors": len(errors),
+        "errors_detail": errors[:50],
+    }
+    if created_game_ids:
+        await _log_edit(
+            db,
+            org_id=club.id,
+            user_id=current_user.id,
+            action="import",
+            target_table="manual_games",
+            target_id=f"bulk:{len(created_game_ids)}games",
+            summary=f"CSV import — manual games: {len(created_game_ids)} games created, {len(errors)} row errors",
+            before=None,
+            after={"created_game_ids": created_game_ids, "errors": errors[:20]},
+        )
+        await db.commit()
+    return summary
