@@ -192,7 +192,7 @@ function Showcase() {
     },
     {
       id: 'profile',
-      label: 'Player profiles',
+      label: 'Profiles',
       headline: 'A full career, on one page.',
       body: 'Timeline charts. Batting curves. Partnership records. Milestone tracking. Per-format breakdowns.',
       features: ['Career timeline charts', 'Partnership records', 'Milestone tracking', 'Head-to-head splits'],
@@ -201,12 +201,30 @@ function Showcase() {
     },
     {
       id: 'yearbook',
-      label: 'Season yearbook',
+      label: 'Yearbook',
       headline: 'The annual that writes itself.',
       body: 'A shareable publication, auto-populated each season — honours, top performers, biggest moments. Permanent URL.',
       features: ['Auto-populated each season', 'Honours & awards', 'Print-ready PDF', 'Permanent URL per year'],
       src: SCREENSHOT_PATHS.showcaseYearbook,
       mock: <div className="max-w-md mx-auto"><MockYearbook /></div>,
+    },
+    {
+      id: 'scorecard',
+      label: 'Scorecards',
+      headline: 'Every ball. Every wicket. Going back decades.',
+      body: 'Full scorecards for every match — batting lineups, dismissals, fall of wickets, and partnerships. Linked from player profiles and yearbooks.',
+      features: ['Batting & bowling per match', 'Fall of wickets by innings', 'Partnership records per game', 'Linked from player profiles'],
+      src: SCREENSHOT_PATHS.showcaseScorecard,
+      mock: <MockLeaderboard />,
+    },
+    {
+      id: 'analysis',
+      label: 'Analysis',
+      headline: 'Deeper stats for the curious.',
+      body: 'Dismissal breakdowns, runs by grade, bowling analysis by wicket position, opposition stats, and StatLab — a custom query builder for any question your statistician can dream up.',
+      features: ['Dismissal type breakdown charts', 'Runs & wickets by grade', 'Opposition analysis per player', 'StatLab custom query builder'],
+      src: SCREENSHOT_PATHS.showcaseAnalysis,
+      mock: <MockLeaderboard />,
     },
   ]
   const [tab, setTab] = useState(tabs[0].id)
@@ -223,13 +241,13 @@ function Showcase() {
               <span className="gradient-text">Nothing it doesn't.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              Three core surfaces. One nightly sync from PlayHQ.
+              Five surfaces. One nightly sync from PlayHQ.
             </p>
           </div>
         </Reveal>
 
-        <div className="flex justify-center mb-10">
-          <div className="tabbar">
+        <div className="flex justify-center mb-10 overflow-x-auto pb-1">
+          <div className="tabbar flex-shrink-0">
             {tabs.map((t) => (
               <button key={t.id} onClick={() => setTab(t.id)} className={tab === t.id ? 'active' : ''}>
                 {t.label}

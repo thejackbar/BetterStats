@@ -153,15 +153,27 @@ export const COMPARISON_3WAY = [
 // Each path is a fallback that pages check for; mocks display until present.
 // ============================================================
 export const SCREENSHOT_PATHS = {
+  // Landing hero
   landingHeroCard:        '/marketing/hero-career-card.jpg',
+  // Landing showcase tabs
   showcaseLeaderboard:    '/marketing/leaderboard.jpg',
   showcaseProfile:        '/marketing/player-profile.jpg',
   showcaseYearbook:       '/marketing/yearbook.jpg',
+  showcaseScorecard:      '/marketing/showcase-scorecard.jpg',
+  showcaseAnalysis:       '/marketing/showcase-analysis.jpg',
+  // Features hero blocks
   featuresProfile:        '/marketing/feature-profile.jpg',
   featuresLeaderboard:    '/marketing/feature-leaderboard.jpg',
   featuresYearbook:       '/marketing/feature-yearbook.jpg',
   featuresMatch:          '/marketing/feature-match.jpg',
   featuresHonours:        '/marketing/feature-honours.jpg',
   featuresCards:          '/marketing/feature-cards.jpg',
+  // Features short-section card thumbnails
+  shortScorecard:         '/marketing/short-scorecard.jpg',
+  shortStatlab:           '/marketing/short-statlab.jpg',
+  shortCompare:           '/marketing/short-compare.jpg',
+  shortAwards:            '/marketing/short-awards.jpg',
+  shortAdmin:             '/marketing/short-admin.jpg',
+  // About page
   aboutFounder:           '/marketing/founder.jpg',
 }

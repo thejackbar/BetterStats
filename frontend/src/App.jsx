@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider } from './contexts/ToastContext'
@@ -8,6 +8,15 @@ import ProtectedRoute from './components/ProtectedRoute'
 import LoadingSpinner from './components/LoadingSpinner'
 import Navbar from './components/Navbar'
 import SponsorFooter from './components/SponsorFooter'
+import ScrollToTop from './components/ScrollToTop'
+
+// Marketing pages have their own MarketingNav — suppress the global Navbar on those routes
+const MARKETING_PATHS = ['/', '/features', '/pricing', '/about', '/contact', '/faq', '/terms', '/privacy', '/blog']
+function ConditionalNavbar() {
+  const { pathname } = useLocation()
+  const isMarketing = MARKETING_PATHS.includes(pathname) || pathname.startsWith('/blog/')
+  return isMarketing ? null : <Navbar />
+}
 
 // Marketing — kept synchronous for instant first paint
 import Landing from './pages/marketing/Landing'
@@ -79,7 +88,8 @@ export default function App() {
       <ToastProvider>
       <ErrorBoundary>
       <div className="min-h-screen bg-pb-bg">
-        <Navbar />
+        <ScrollToTop />
+        <ConditionalNavbar />
         <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* Marketing site */}
