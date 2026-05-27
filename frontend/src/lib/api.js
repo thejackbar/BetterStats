@@ -316,6 +316,8 @@ export const api = {
     request('/club-admin/hard-refresh', { method: 'POST' }),
   adminBackfillAggregates: () =>
     request('/club-admin/backfill-aggregates', { method: 'POST' }),
+  adminCleanupOppositionStats: () =>
+    request('/club-admin/cleanup-opposition-stats', { method: 'POST' }),
   adminListSyncRuns: (limit = 30) =>
     request(`/club-admin/sync-runs?limit=${limit}`),
   adminGetSyncRun: (runId) => request(`/club-admin/sync-runs/${runId}`),
