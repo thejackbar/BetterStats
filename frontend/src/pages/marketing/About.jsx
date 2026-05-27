@@ -3,46 +3,21 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import CountUp from '../../components/marketing/CountUp'
-import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
-import { SCREENSHOT_PATHS, SUPPORT_EMAIL } from '../../data/marketing'
+import { SUPPORT_EMAIL } from '../../data/marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
-
-// Founder photo placeholder — keep a tasteful mock until the real photo is dropped in /public/marketing/.
-function FounderMock() {
-  return (
-    <div className="w-full aspect-[4/5] rounded-2xl border pb-hairline bg-gradient-to-br from-pb-surface to-pb-bg flex items-center justify-center">
-      <div className="text-center">
-        <div className="w-24 h-24 rounded-full bg-pb-surface2 border pb-hairline mx-auto mb-4 flex items-center justify-center">
-          <span className="text-4xl">🏏</span>
-        </div>
-        <p className="text-xs font-mono uppercase tracking-wide3 text-pb-faint mb-1">Founder photo</p>
-        <p className="text-xs text-pb-dim max-w-[200px] mx-auto">Drop a JPG at <br /><code className="text-accent">/public/marketing/founder.png</code></p>
-      </div>
-    </div>
-  )
-}
 
 function Hero() {
   return (
     <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
-      <div className="max-w-[1100px] mx-auto relative">
-        <div className="grid grid-cols-12 gap-10 items-center">
-          <div className="col-span-12 lg:col-span-7">
-            <p className="pill mb-6 inline-flex"><span className="dot" />Made for cricket · by cricketers</p>
-            <h1 className="font-display font-bold text-[40px] sm:text-[56px] lg:text-[72px] tracking-tight leading-[0.95] mb-6">
-              The cricket stats platform <span className="gradient-text">your club deserves.</span>
-            </h1>
-            <p className="text-lg lg:text-xl text-pb-dim leading-relaxed">
-              BetterStats was built to do one thing well — turn the data your club already produces into a public website your members will actually open.
-            </p>
-          </div>
-          <div className="col-span-12 lg:col-span-5">
-            <div className="relative product-shadow rounded-2xl">
-              <ScreenshotOrMock src={SCREENSHOT_PATHS.aboutFounder} alt="BetterStats founder" fallback={<FounderMock />} />
-            </div>
-          </div>
-        </div>
+      <div className="max-w-[900px] mx-auto relative text-center">
+        <p className="pill mb-6 inline-flex"><span className="dot" />Made for cricket · by cricketers</p>
+        <h1 className="font-display font-bold text-[40px] sm:text-[56px] lg:text-[72px] tracking-tight leading-[0.95] mb-6">
+          The cricket stats platform <span className="gradient-text">your club deserves.</span>
+        </h1>
+        <p className="text-lg lg:text-xl text-pb-dim leading-relaxed max-w-2xl mx-auto">
+          BetterStats was built to do one thing well — turn the data your club already produces into a public website your members will actually open.
+        </p>
       </div>
     </section>
   )

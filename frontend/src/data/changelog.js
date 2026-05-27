@@ -4,7 +4,7 @@
 
 export const CHANGELOG = [
   {
-    version: 'v7.19.2',
+    version: 'v7.19.3',
     date: '2026-05-27',
     title: 'StatLab: preset reports now show in the header too',
     items: [
@@ -13,6 +13,25 @@ export const CHANGELOG = [
       'Active context filter inputs (Season, Grade, Min/Max year, Opposition, Result, Finals only, As captain, etc.) are now outlined and tinted in the brand accent colour, so the filters that are actually doing something are visually obvious.',
       'Selected preset reports are now highlighted in the REPORTS panel on the left, matching the existing behaviour for derived reports.',
       'The results header now shows the report description directly under the row count, not just in the page title.',
+    ],
+  },
+  {
+    version: 'v7.19.2',
+    date: '2026-05-27',
+    title: 'Fix: doubled logo on marketing pages, scroll-to-top on nav',
+    items: [
+      'Marketing pages were rendering both the global Navbar and MarketingNav simultaneously, causing doubled logos. Global Navbar is now suppressed on all marketing routes.',
+      'Navigating to a new page via the nav now always scrolls to the top of the page. Hash anchor links (e.g. /features#compare) are excluded and continue to scroll to their target section.',
+      'About page hero is now full-width — removed the founder photo placeholder.',
+    ],
+  },
+  {
+    version: 'v7.19.1.1',
+    date: '2026-05-27',
+    title: 'Marketing site — more screenshots',
+    items: [
+      'Landing page showcase gains two new tabs: Scorecards (full match scorecard) and Analysis (batting dismissal charts, runs by grade).',
+      'Features page "And the rest" section now shows screenshot thumbnails on each card: Match Scorecards, StatLab, Player Comparison, Awards & Honours, Admin Tools.',
     ],
   },
   {
