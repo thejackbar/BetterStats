@@ -41,7 +41,7 @@ def upgrade() -> None:
             NULL::text AS opp_org_id,
             opposition AS opp_club_name,
             result, winning_team, is_final,
-            NULL::json AS raw_payload,
+            NULL::jsonb AS raw_payload,
             venue, match_format,
             'manual'::text AS source
         FROM manual_games
