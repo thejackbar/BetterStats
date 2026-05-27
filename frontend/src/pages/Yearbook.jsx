@@ -5,6 +5,7 @@ import { PbSpinner, TabBar, Label, AnimatedNum } from '../lib/presskit'
 import { resolveAwardLabel } from '../lib/achievementOptions'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { useAuth } from '../contexts/AuthContext'
+import { usePageMeta } from '../hooks/usePageMeta'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
   AreaChart, Area, CartesianGrid,
@@ -1414,6 +1415,13 @@ export default function Yearbook() {
 
   const { user } = useAuth()
   useClubTheme(club)
+
+  usePageMeta(club && yearbook?.season ? {
+    title: `${club.name} — ${yearbook.season.name} Yearbook | BetterStats`,
+    description: `${yearbook.season.name} season yearbook for ${club.name} — stats, honours, results and records.`,
+    image: club.logo_url || 'https://betterstats.cricket/og-image.png',
+    url: `https://betterstats.cricket/${clubSlug}/yearbook/${seasonSlug || ''}`,
+  } : {})
 
   // Load club
   useEffect(() => {
