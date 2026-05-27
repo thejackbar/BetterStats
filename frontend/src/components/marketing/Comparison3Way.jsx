@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import Reveal from './Reveal'
 import { COMPARISON_3WAY, COMPETITORS, FORM_URL } from '../../data/marketing'
 
@@ -157,7 +158,7 @@ export default function Comparison3Way({ id = 'compare', heading, sub, showCTA =
               <p className="text-base text-pb-dim mb-5 max-w-2xl mx-auto">
                 You don't have to pick one — BetterStats syncs <span className="text-pb-text">on top of</span> PlayHQ. Keep scoring there. Just give your club somewhere worth showing it off.
               </p>
-              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Get your club on BetterStats →</a>
+              <Link to="/contact" className="cta-primary">Get your club on BetterStats →</Link>
             </div>
           </Reveal>
         )}
