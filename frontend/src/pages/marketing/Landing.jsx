@@ -1,16 +1,469 @@
 import { Link } from 'react-router-dom'
+import { useState } from 'react'
 import MarketingNav from '../../components/MarketingNav'
+import MarketingFooter from '../../components/marketing/MarketingFooter'
+import Reveal from '../../components/marketing/Reveal'
+import CountUp from '../../components/marketing/CountUp'
+import Comparison3Way from '../../components/marketing/Comparison3Way'
+import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
+import {
+  MockHeritageCard,
+  MockLeaderboard,
+  MockPlayerProfile,
+  MockYearbook,
+} from '../../components/marketing/Mockups'
+import {
+  LANDING_FEATURES,
+  TESTIMONIALS,
+  HOW_IT_WORKS,
+  FORM_URL,
+  SCREENSHOT_PATHS,
+} from '../../data/marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
-const FEATURES = [
-  { title: 'Live Stats', desc: 'Player batting, bowling and fielding averages updated after every game via PlayHQ sync.' },
-  { title: 'Leaderboards', desc: 'Season and career leaderboards — runs, wickets, economy, strike rate, catches and more.' },
-  { title: 'Player Profiles', desc: 'Rich individual profiles with career trends, partnership data, and milestone tracking.' },
-  { title: 'Season Records', desc: 'Club and grade records updated automatically — best innings, best figures, partnerships.' },
-  { title: 'Awards & Honours', desc: 'Log every club award, association honour, hall of fame inductee, and office bearer.' },
-  { title: 'Season Yearbook', desc: 'A shareable, web-based season publication auto-populated with stats, honours, photos, and editorial content.' },
-]
+// ─── Hero ────────────────────────────────────────────────────────────────
+function Hero() {
+  return (
+    <section className="relative pt-32 pb-20 px-4 sm:px-6 lg:px-10 overflow-hidden">
+      <div className="absolute inset-0 hero-glow pointer-events-none" />
 
+      <div className="max-w-[1280px] mx-auto relative grid grid-cols-12 gap-10 items-center">
+        <div className="col-span-12 lg:col-span-6">
+          <div className="pill mb-7 inline-flex">
+            <span className="dot" />
+            For Australian cricket clubs · Since 2024
+          </div>
+          <h1 className="font-display font-bold text-[52px] sm:text-[68px] lg:text-[88px] tracking-tight leading-[0.92] mb-7">
+            Every player.<br />
+            Every season.<br />
+            <span className="gradient-text">Kept forever.</span>
+          </h1>
+          <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">
+            BetterStats digs up every scorecard PlayHQ and MyCricket have on your club, then builds you a public site that finally does that history justice.
+          </p>
+
+          <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-7">
+            <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">
+              Get your club on BetterStats →
+            </a>
+            <a href="#showcase" className="cta-secondary">See it in action</a>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-pb-faint">
+            <span className="flex items-center gap-2"><span className="tick">✓</span>Live in under an hour</span>
+            <span className="flex items-center gap-2"><span className="tick">✓</span>Onboarding included</span>
+            <span className="flex items-center gap-2"><span className="tick">✓</span>$400/year, cancel anytime</span>
+          </div>
+        </div>
+
+        <Reveal className="col-span-12 lg:col-span-6">
+          <div className="relative">
+            <div className="absolute -inset-5 bg-accent/8 blur-[60px] rounded-full" />
+            <div className="relative product-shadow rounded-2xl">
+              <ScreenshotOrMock
+                src={SCREENSHOT_PATHS.landingHeroCard}
+                alt="A 22-season career profile on BetterStats"
+                fallback={<MockHeritageCard />}
+              />
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  )
+}
+
+// ─── Logo strip ──────────────────────────────────────────────────────────
+function Logos() {
+  // Currently text-only placeholders — swap for real logo SVGs when ready.
+  const clubs = ['Applecross CC', 'Booragoon DCC', 'Mosman Park', 'Fremantle CC', 'Subiaco-Floreat', 'South Perth']
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-12 border-y pb-hairline bg-black/20">
+      <div className="max-w-[1200px] mx-auto flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+        <p className="text-xs text-pb-faint uppercase tracking-wide3 font-medium">Trusted by clubs at</p>
+        {clubs.map((c) => (
+          <span key={c} className="flex items-center gap-2 text-sm font-medium text-pb-dim opacity-70 hover:opacity-100 transition-opacity">
+            <span className="w-5 h-5 rounded-full border pb-hairline flex items-center justify-center text-[8px] font-bold">
+              {c.split(' ').map(p => p[0]).join('').slice(0, 2)}
+            </span>
+            {c}
+          </span>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ─── Value props (three audiences) ───────────────────────────────────────
+function ValueProps() {
+  const cards = [
+    {
+      eyebrow: '01 · For the Committee',
+      title: 'Replace your club site, honour board, and history project — in one weekend.',
+      desc: 'A public, branded club website that updates itself. Stop wrangling WordPress. Stop nagging the captain for scorecards.',
+      stat: 'Under 1 hour to set up',
+    },
+    {
+      eyebrow: '02 · For the Statistician',
+      title: 'Every ball, every wicket, every catch — as far back as your data goes.',
+      desc: 'We pull MyCricket archives PlayHQ never imported. Career, season, all-time. Filter, sort, export. 30+ stat columns.',
+      stat: '100,000+ innings indexed',
+    },
+    {
+      eyebrow: '03 · For the Players',
+      title: 'A career page worth bragging about.',
+      desc: 'Real profiles. Form charts. Milestone alerts. One-tap stat cards your players will actually repost.',
+      stat: 'Per-player profile pages',
+    },
+  ]
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-24">
+      <div className="max-w-[1200px] mx-auto">
+        <Reveal>
+          <div className="text-center mb-14">
+            <p className="pill-neutral inline-flex mb-5">Why clubs sign up</p>
+            <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
+              One platform. <span className="gradient-text">Three audiences.</span>
+            </h2>
+            <p className="text-lg text-pb-dim max-w-2xl mx-auto">
+              Built so the committee, the statistician and the players all open it every week.
+            </p>
+          </div>
+        </Reveal>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {cards.map((c, i) => (
+            <Reveal key={c.eyebrow} delay={i * 100}>
+              <div className="surface p-7 h-full hover:border-accent/30 transition-colors group">
+                <p className="text-xs font-mono uppercase tracking-wide3 text-accent mb-5">{c.eyebrow}</p>
+                <h3 className="text-2xl font-bold leading-tight mb-3 group-hover:text-accent transition-colors">{c.title}</h3>
+                <p className="text-sm text-pb-dim leading-relaxed mb-6">{c.desc}</p>
+                <div className="pt-5 border-t pb-hairline flex items-center justify-between">
+                  <span className="text-xs font-medium text-accent">{c.stat}</span>
+                  <span className="text-accent opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+                </div>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── Stat banner ─────────────────────────────────────────────────────────
+function StatBanner() {
+  const stats = [
+    { v: 52, suffix: '', label: 'seasons archived' },
+    { v: 100000, suffix: '+', label: 'innings parsed' },
+    { v: 30, suffix: '+', label: 'sortable stat columns' },
+    { v: 100, suffix: '%', label: 'automated sync' },
+  ]
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-16 border-y pb-hairline relative overflow-hidden bg-black/20">
+      <div className="absolute inset-0 dot-grid opacity-30" />
+      <div className="max-w-[1200px] mx-auto relative grid grid-cols-2 md:grid-cols-4 gap-6">
+        {stats.map((s, i) => (
+          <Reveal key={s.label} delay={i * 80}>
+            <div className="text-center md:text-left">
+              <p className="text-4xl md:text-5xl lg:text-6xl font-bold tabular-nums gradient-text">
+                <CountUp to={s.v} />{s.suffix}
+              </p>
+              <p className="text-sm text-pb-dim mt-1">{s.label}</p>
+            </div>
+          </Reveal>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ─── Showcase with tabs ──────────────────────────────────────────────────
+function Showcase() {
+  const tabs = [
+    {
+      id: 'leaderboard',
+      label: 'Leaderboards',
+      headline: 'Every stat your club has ever produced.',
+      body: 'Career, season and all-time leaderboards. 30+ sortable columns. Filter by grade, format, opponent, decade.',
+      features: ['30+ sortable columns', 'Career + season views', 'Side-by-side compare', 'CSV + print export'],
+      src: SCREENSHOT_PATHS.showcaseLeaderboard,
+      mock: <MockLeaderboard />,
+    },
+    {
+      id: 'profile',
+      label: 'Player profiles',
+      headline: 'A full career, on one page.',
+      body: 'Timeline charts. Batting curves. Partnership records. Milestone tracking. Per-format breakdowns.',
+      features: ['Career timeline charts', 'Partnership records', 'Milestone tracking', 'Head-to-head splits'],
+      src: SCREENSHOT_PATHS.showcaseProfile,
+      mock: <MockPlayerProfile />,
+    },
+    {
+      id: 'yearbook',
+      label: 'Season yearbook',
+      headline: 'The annual that writes itself.',
+      body: 'A shareable publication, auto-populated each season — honours, top performers, biggest moments. Permanent URL.',
+      features: ['Auto-populated each season', 'Honours & awards', 'Print-ready PDF', 'Permanent URL per year'],
+      src: SCREENSHOT_PATHS.showcaseYearbook,
+      mock: <div className="max-w-md mx-auto"><MockYearbook /></div>,
+    },
+  ]
+  const [tab, setTab] = useState(tabs[0].id)
+  const current = tabs.find(t => t.id === tab)
+
+  return (
+    <section id="showcase" className="px-4 sm:px-6 lg:px-10 py-24">
+      <div className="max-w-[1280px] mx-auto">
+        <Reveal>
+          <div className="text-center mb-12">
+            <p className="pill-neutral inline-flex mb-5">The product</p>
+            <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
+              Everything your club needs.<br />
+              <span className="gradient-text">Nothing it doesn't.</span>
+            </h2>
+            <p className="text-lg text-pb-dim max-w-2xl mx-auto">
+              Three core surfaces. One nightly sync from PlayHQ.
+            </p>
+          </div>
+        </Reveal>
+
+        <div className="flex justify-center mb-10">
+          <div className="tabbar">
+            {tabs.map((t) => (
+              <button key={t.id} onClick={() => setTab(t.id)} className={tab === t.id ? 'active' : ''}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-12 gap-8 items-start" key={tab}>
+          <Reveal className="col-span-12 lg:col-span-5">
+            <div className="lg:sticky lg:top-24">
+              <h3 className="text-3xl lg:text-4xl font-bold leading-tight mb-4">{current.headline}</h3>
+              <p className="text-pb-dim leading-relaxed mb-6">{current.body}</p>
+              <ul className="space-y-2.5 mb-7">
+                {current.features.map((f) => (
+                  <li key={f} className="flex items-center gap-3 text-sm"><span className="tick">✓</span>{f}</li>
+                ))}
+              </ul>
+              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Try on your club →</a>
+            </div>
+          </Reveal>
+          <Reveal className="col-span-12 lg:col-span-7">
+            <div className="product-shadow rounded-2xl">
+              <ScreenshotOrMock src={current.src} alt={current.label} fallback={current.mock} />
+            </div>
+          </Reveal>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── Feature grid (6 high-impact cards) ──────────────────────────────────
+function Features() {
+  return (
+    <section id="features" className="px-4 sm:px-6 lg:px-10 py-24 border-t pb-hairline bg-black/20">
+      <div className="max-w-[1200px] mx-auto">
+        <Reveal>
+          <div className="text-center mb-14">
+            <p className="pill-neutral inline-flex mb-5">Everything included</p>
+            <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
+              No tiers. No upsells. <span className="gradient-text">Everything in.</span>
+            </h2>
+          </div>
+        </Reveal>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {LANDING_FEATURES.map((f, i) => (
+            <Reveal key={f.n} delay={(i % 3) * 80}>
+              <div className="surface p-6 h-full hover:border-accent/30 transition-colors group">
+                <div className="icon-tile mb-5">{f.n}</div>
+                <h3 className="text-lg font-semibold mb-2 group-hover:text-accent transition-colors">{f.title}</h3>
+                <p className="text-sm text-pb-dim leading-relaxed mb-4">{f.desc}</p>
+                <p className="text-xs font-medium text-accent">{f.stat}</p>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+        <div className="text-center mt-10">
+          <Link to="/features" className="cta-secondary">See all features →</Link>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── Testimonials ────────────────────────────────────────────────────────
+function Testimonials() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-24">
+      <div className="max-w-[1100px] mx-auto">
+        <Reveal>
+          <div className="grid grid-cols-12 gap-8 mb-12 items-end">
+            <div className="col-span-12 md:col-span-7">
+              <p className="pill-neutral inline-flex mb-5">Loved by clubs</p>
+              <h2 className="font-display font-bold text-4xl md:text-6xl tracking-tight leading-[1.05]">What clubs are saying.</h2>
+            </div>
+            <div className="col-span-12 md:col-span-5">
+              <p className="text-lg text-pb-dim">Real notes from real committee members, captains and statisticians who have run BetterStats since launch.</p>
+            </div>
+          </div>
+        </Reveal>
+
+        <Reveal>
+          <figure className="surface p-8 lg:p-12 mb-5">
+            <div className="flex gap-1 mb-5 text-accent text-lg">★★★★★</div>
+            <blockquote className="text-2xl md:text-3xl font-semibold leading-snug mb-7 max-w-3xl">&ldquo;{TESTIMONIALS[0].quote}&rdquo;</blockquote>
+            <figcaption className="flex items-center gap-4 pt-6 border-t pb-hairline">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500/40 to-emerald-700/20 border border-accent/30 flex items-center justify-center font-bold">
+                {TESTIMONIALS[0].name.split(' ').map(p => p[0]).join('')}
+              </div>
+              <div>
+                <p className="font-semibold">{TESTIMONIALS[0].name}</p>
+                <p className="text-sm text-pb-dim">{TESTIMONIALS[0].role} · {TESTIMONIALS[0].yrs}</p>
+              </div>
+            </figcaption>
+          </figure>
+        </Reveal>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {TESTIMONIALS.slice(1).map((t, i) => (
+            <Reveal key={t.name} delay={i * 100}>
+              <figure className="surface p-7 h-full">
+                <div className="flex gap-0.5 mb-4 text-accent">{'★★★★★'}</div>
+                <blockquote className="text-base text-pb-text leading-relaxed mb-6">&ldquo;{t.quote}&rdquo;</blockquote>
+                <figcaption className="flex items-center gap-3 pt-4 border-t pb-hairline">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500/40 to-emerald-700/20 border border-accent/30 flex items-center justify-center font-bold text-sm">
+                    {t.name.split(' ').map(p => p[0]).join('')}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">{t.name}</p>
+                    <p className="text-xs text-pb-faint">{t.role}</p>
+                  </div>
+                </figcaption>
+              </figure>
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── How it works ────────────────────────────────────────────────────────
+function HowItWorks() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-24 border-t pb-hairline">
+      <div className="max-w-[1200px] mx-auto">
+        <Reveal>
+          <div className="text-center mb-14">
+            <p className="pill-neutral inline-flex mb-5">How it works</p>
+            <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
+              Live in under an hour. <span className="gradient-text">No data entry.</span>
+            </h2>
+          </div>
+        </Reveal>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 relative">
+          <div className="hidden md:block absolute top-12 left-[12%] right-[12%] h-px bg-gradient-to-r from-transparent via-accent/30 to-transparent" />
+          {HOW_IT_WORKS.map((s, i) => (
+            <Reveal key={s.n} delay={i * 120}>
+              <div className="relative surface p-7 h-full">
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-10 h-10 rounded-xl bg-accent/15 border border-accent/40 flex items-center justify-center text-accent font-bold">{s.n}</div>
+                  <span className="text-xs font-mono text-pb-faint">{s.mins}</span>
+                </div>
+                <h3 className="text-xl font-semibold mb-2">{s.title}</h3>
+                <p className="text-sm text-pb-dim leading-relaxed">{s.desc}</p>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── Promise (player-first + Aussie-only) ────────────────────────────────
+function Promise_() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
+      <div className="max-w-[1100px] mx-auto">
+        <div className="grid grid-cols-12 gap-8 items-stretch">
+          <Reveal className="col-span-12 md:col-span-7">
+            <div className="surface p-8 lg:p-10 h-full border-accent/30 bg-gradient-to-b from-accent/[0.05] to-transparent">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="icon-tile">★</div>
+                <p className="text-sm font-mono uppercase tracking-wide3 text-accent">Our commitment</p>
+              </div>
+              <h2 className="text-3xl lg:text-4xl font-bold leading-tight mb-4 tracking-tight">
+                Player-first. <span className="gradient-text">Built by cricketers.</span>
+              </h2>
+              <p className="text-pb-dim leading-relaxed mb-5">
+                BetterStats is built by people who play. We listen to the captains, the committee members, the statisticians and the kids who just want to see their own century on a profile page.
+              </p>
+              <p className="text-pb-text font-medium mb-5">
+                If something is missing — tell us. If it's important to you, it's important to us.
+              </p>
+              <Link to="/contact" className="inline-flex items-center gap-2 text-accent text-sm font-medium hover:underline">
+                Send us a feature request →
+              </Link>
+            </div>
+          </Reveal>
+
+          <Reveal delay={120} className="col-span-12 md:col-span-5">
+            <div className="surface p-8 h-full">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="icon-tile">🇦🇺</div>
+                <p className="text-sm font-mono uppercase tracking-wide3 text-pb-faint">Where we're at</p>
+              </div>
+              <h3 className="text-xl font-bold mb-3 tracking-tight">
+                Australian clubs, for now.
+              </h3>
+              <p className="text-sm text-pb-dim leading-relaxed mb-4">
+                BetterStats syncs from PlayHQ — the official Australian cricket data feed. That means we currently only support clubs playing in the Australian PlayHQ ecosystem.
+              </p>
+              <p className="text-sm text-pb-dim leading-relaxed">
+                Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link> — international support is on the roadmap.
+              </p>
+            </div>
+          </Reveal>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── Final CTA ───────────────────────────────────────────────────────────
+function FinalCTA() {
+  return (
+    <section id="cta" className="px-4 sm:px-6 lg:px-10 py-24 relative overflow-hidden">
+      <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
+      <div className="max-w-[900px] mx-auto relative">
+        <div className="surface-strong p-10 lg:p-14 text-center relative overflow-hidden">
+          <div className="absolute inset-0 dot-grid opacity-30 pointer-events-none" />
+          <div className="relative">
+            <p className="pill mb-6 mx-auto"><span className="dot" />Limited onboarding spots</p>
+            <h2 className="font-display font-bold text-4xl md:text-6xl mb-5 tracking-tight leading-[1.05]">
+              Your club's history is <br className="hidden md:block" /><span className="gradient-text">waiting to be told.</span>
+            </h2>
+            <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">
+              Tell us your PlayHQ club ID. We'll get your site live, fast.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-5">
+              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
+              <Link to="/pricing" className="cta-secondary">See pricing</Link>
+            </div>
+            <p className="text-xs text-pb-faint">$400/yr · No credit card to start · Onboarding included</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────
 export default function Landing() {
   usePageMeta({
     title: 'BetterStats — Cricket Stats Platform for Australian Clubs',
@@ -21,83 +474,20 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
-
       <div id="main-content" tabIndex="-1">
-      {/* Hero */}
-      <section className="max-w-5xl mx-auto px-4 pt-24 pb-20 text-center">
-        <div className="inline-block border pb-hairline font-mono text-[10px] tracking-wide3 text-pb-faint px-3 py-1 rounded-full mb-8 uppercase">
-          Built for Australian cricket clubs
-        </div>
-        <h1 className="font-display font-bold text-[52px] sm:text-[72px] md:text-[88px] tracking-tight leading-[0.9] text-pb-text mb-8">
-          Your club's stats,<br />
-          <span style={{ color: 'var(--pb-accent)' }}>done properly.</span>
-        </h1>
-        <p className="text-pb-dim text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
-          BetterStats turns your PlayHQ data into a beautiful, public stats page your club members will actually use — with player profiles, leaderboards, records, and awards.
-        </p>
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <a
-            href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform?usp=header"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Request access for your club (opens in new tab)"
-            className="px-8 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
-            style={{ background: 'var(--pb-accent)' }}
-          >
-            REQUEST ACCESS
-          </a>
-          <Link to="/features" className="px-8 py-3 border pb-hairline rounded font-mono text-[11px] tracking-wide3 font-semibold text-pb-dim hover:text-pb-text transition-colors">
-            SEE FEATURES →
-          </Link>
-        </div>
-      </section>
-
-      {/* Feature grid */}
-      <section className="max-w-5xl mx-auto px-4 pb-24">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {FEATURES.map(f => (
-            <div key={f.title} className="pb-card p-5">
-              <p className="font-mono text-[10px] tracking-wide3 mb-2" style={{ color: 'var(--pb-accent)' }}>{f.title.toUpperCase()}</p>
-              <p className="text-pb-dim text-sm leading-relaxed">{f.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="pb-hairline-t py-20 text-center">
-        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4">READY TO UPGRADE?</p>
-        <h2 className="font-display font-bold text-4xl text-pb-text mb-3 tracking-tight">Your club deserves better stats.</h2>
-        <p className="text-pb-faint font-mono text-[11px] tracking-wide2 mb-8">$250/year. Setup included. No lock-in.</p>
-        <a
-          href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform?usp=header"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Get started with BetterStats (opens in new tab)"
-          className="inline-block px-10 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
-          style={{ background: 'var(--pb-accent)' }}
-        >
-          GET STARTED
-        </a>
-      </section>
-
-      <footer className="pb-hairline-t py-8 text-center">
-        <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 mb-3">
-          <Link to="/features" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">FEATURES</Link>
-          <Link to="/pricing" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">PRICING</Link>
-          <Link to="/faq" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">FAQ</Link>
-          <Link to="/about" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">ABOUT</Link>
-          <Link to="/contact" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">CONTACT</Link>
-          <Link to="/terms" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">TERMS</Link>
-          <Link to="/privacy" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">PRIVACY</Link>
-        </div>
-        <div className="flex items-center justify-center gap-4 mb-3">
-          <a href="https://x.com/betterstatsau" target="_blank" rel="noopener noreferrer me" aria-label="BetterStats on X / Twitter (opens in new tab)" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">X / TWITTER</a>
-          <a href="https://www.facebook.com/profile.php?id=61590372751599" target="_blank" rel="noopener noreferrer me" aria-label="BetterStats on Facebook (opens in new tab)" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">FACEBOOK</a>
-        </div>
-        <p className="font-mono text-[10px] text-pb-faintest">© {new Date().getFullYear()} BETTERSTATS</p>
-      </footer>
+        <Hero />
+        <Logos />
+        <ValueProps />
+        <StatBanner />
+        <Showcase />
+        <Features />
+        <Comparison3Way />
+        <Testimonials />
+        <HowItWorks />
+        <Promise_ />
+        <FinalCTA />
       </div>
+      <MarketingFooter />
     </div>
   )
 }
