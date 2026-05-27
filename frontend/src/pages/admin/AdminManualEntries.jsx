@@ -191,6 +191,312 @@ function AggregateFieldGrid({ form, setForm, includeWidesNoBalls = false }) {
   )
 }
 
+// ─── Inline spreadsheet (season aggregates, single season at a time) ───────
+
+const SPREADSHEET_COLS = [
+  { key: 'games_played', label: 'M' },
+  { key: 'batting_innings', label: 'I' },
+  { key: 'batting_runs', label: 'Runs' },
+  { key: 'batting_not_outs', label: 'NO' },
+  { key: 'batting_high_score', label: 'HS', nullable: true },
+  { key: 'batting_fifties', label: '50s' },
+  { key: 'batting_hundreds', label: '100s' },
+  { key: 'batting_ducks', label: 'Ducks' },
+  { key: 'bowling_innings', label: 'BowlI' },
+  { key: 'bowling_overs', label: 'Overs', decimal: true },
+  { key: 'bowling_wickets', label: 'Wkts' },
+  { key: 'bowling_runs', label: 'BowlRuns' },
+  { key: 'bowling_maidens', label: 'Mdns' },
+  { key: 'bowling_best_figures', label: 'Best', text: true },
+  { key: 'fielding_catches', label: 'C' },
+  { key: 'fielding_run_outs', label: 'RO' },
+  { key: 'fielding_stumpings', label: 'St' },
+]
+
+function emptySpreadsheetRow() {
+  const r = { player_id: '' }
+  SPREADSHEET_COLS.forEach(c => { r[c.key] = c.text ? '' : 0 })
+  return r
+}
+
+function InlineSpreadsheet({ players, seasons, grades, onImported, onPending }) {
+  const [seasonId, setSeasonId] = useState('')
+  const [gradeId, setGradeId] = useState('')
+  const [rows, setRows] = useState([emptySpreadsheetRow(), emptySpreadsheetRow(), emptySpreadsheetRow()])
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const seasonGrades = useMemo(() => (grades || []).filter(g => g.season_id === seasonId), [grades, seasonId])
+  const season = seasons.find(s => s.id === seasonId)
+  const grade = (grades || []).find(g => g.id === gradeId)
+
+  const updateCell = (rowIdx, key, value) => {
+    const next = [...rows]
+    next[rowIdx] = { ...next[rowIdx], [key]: value }
+    setRows(next)
+  }
+
+  // Paste handler — split clipboard text on tab/newline, fill cells starting
+  // from the targeted row+column. Lets the user copy a range out of Excel
+  // and paste it straight in.
+  const handlePaste = (e, rowIdx, colIdx) => {
+    const text = e.clipboardData?.getData('text/plain')
+    if (!text || (!text.includes('\t') && !text.includes('\n'))) return  // single value — let the default paste happen
+    e.preventDefault()
+    const lines = text.replace(/\r/g, '').split('\n').filter(l => l.length > 0)
+    const next = [...rows]
+    lines.forEach((line, i) => {
+      const cells = line.split('\t')
+      const targetRow = rowIdx + i
+      while (next.length <= targetRow) next.push(emptySpreadsheetRow())
+      cells.forEach((raw, j) => {
+        const target = SPREADSHEET_COLS[colIdx + j]
+        if (!target) return
+        let v = raw.trim()
+        if (target.text) {
+          next[targetRow] = { ...next[targetRow], [target.key]: v }
+        } else if (v === '') {
+          next[targetRow] = { ...next[targetRow], [target.key]: target.nullable ? '' : 0 }
+        } else {
+          const num = target.decimal ? parseFloat(v) : parseInt(v, 10)
+          if (!Number.isNaN(num)) next[targetRow] = { ...next[targetRow], [target.key]: num }
+        }
+      })
+    })
+    setRows(next)
+  }
+
+  const handleSubmit = () => {
+    setErr(null); setResult(null)
+    if (!seasonId) return setErr('Choose a season at the top')
+    const validRows = rows.filter(r => r.player_id)
+    if (validRows.length === 0) return setErr('Add at least one row with a player selected')
+
+    const playerById = new Map((players || []).map(p => [p.id, p.display_name]))
+    onPending({
+      title: `Save ${validRows.length} adjustment${validRows.length === 1 ? '' : 's'}?`,
+      body: `Season: ${season?.name}${grade ? ` · ${grade.name}` : ''}\nPlayers: ${validRows.map(r => playerById.get(r.player_id) || '?').join(', ')}\n\nAll changes are reversible from the Audit tab.`,
+      confirmLabel: 'Save all',
+      action: async () => {
+        setBusy(true)
+        try {
+          // Build a CSV in memory and POST through the import endpoint —
+          // same upsert semantics, same audit log entry as a CSV upload.
+          const headerCols = [
+            'player_name', 'season_name', 'grade_name',
+            ...SPREADSHEET_COLS.map(c => c.key),
+          ]
+          const out = [headerCols.join(',')]
+          validRows.forEach(r => {
+            const name = playerById.get(r.player_id) || ''
+            const cells = [csvEscape(name), csvEscape(season?.name || ''), csvEscape(grade?.name || '')]
+            SPREADSHEET_COLS.forEach(c => { cells.push(csvEscape(r[c.key] ?? '')) })
+            out.push(cells.join(','))
+          })
+          const blob = new Blob([out.join('\n')], { type: 'text/csv' })
+          const file = new File([blob], 'inline.csv', { type: 'text/csv' })
+          const res = await api.adminImportSeasonAdjustments(file)
+          setResult(res)
+          if (!res.errors) {
+            setRows([emptySpreadsheetRow(), emptySpreadsheetRow(), emptySpreadsheetRow()])
+          }
+          onImported && onImported(res)
+        } catch (e) {
+          setErr(e.message)
+        } finally {
+          setBusy(false)
+        }
+      },
+    })
+  }
+
+  return (
+    <div className="bg-pb-surface border pb-hairline rounded-lg p-4 mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+        <div>
+          <h4 className="text-sm font-semibold text-pb-text">Spreadsheet mode — bulk add for one season</h4>
+          <p className="text-[11px] text-pb-faintest">Choose a season + grade once, then one row per player. Paste a range from Excel into any cell to fill multiple rows at once.</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+        <div>
+          <label className={LABEL_CLS}>Season</label>
+          <select className={INPUT_CLS} value={seasonId} onChange={e => { setSeasonId(e.target.value); setGradeId('') }}>
+            <option value="">— Choose a season —</option>
+            {seasons.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}
+          </select>
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Grade (optional)</label>
+          <select className={INPUT_CLS} value={gradeId} onChange={e => setGradeId(e.target.value)} disabled={!seasonId}>
+            <option value="">All grades (any)</option>
+            {seasonGrades.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
+          </select>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="text-xs border-collapse">
+          <thead>
+            <tr>
+              <th className="text-left p-1 font-mono text-[10px] text-pb-faint">Player</th>
+              {SPREADSHEET_COLS.map(c => (
+                <th key={c.key} className="text-left p-1 font-mono text-[10px] text-pb-faint">{c.label}</th>
+              ))}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIdx) => (
+              <tr key={rowIdx}>
+                <td className="p-0.5 min-w-[180px]">
+                  <PlayerPicker players={players} value={row.player_id} onChange={v => updateCell(rowIdx, 'player_id', v)} placeholder="Player…" />
+                </td>
+                {SPREADSHEET_COLS.map((c, colIdx) => (
+                  <td key={c.key} className="p-0.5">
+                    <input
+                      type={c.text ? 'text' : 'number'}
+                      step={c.decimal ? '0.1' : 1}
+                      value={row[c.key] === null || row[c.key] === undefined ? '' : row[c.key]}
+                      onChange={e => {
+                        const v = e.target.value
+                        if (c.text) return updateCell(rowIdx, c.key, v)
+                        if (v === '') return updateCell(rowIdx, c.key, c.nullable ? '' : 0)
+                        updateCell(rowIdx, c.key, c.decimal ? parseFloat(v) : parseInt(v, 10))
+                      }}
+                      onPaste={e => handlePaste(e, rowIdx, colIdx)}
+                      className="w-16 bg-pb-surface2 border pb-hairline text-pb-text text-xs rounded px-1 py-1 focus:outline-none focus:border-pb-accent"
+                    />
+                  </td>
+                ))}
+                <td className="p-0.5">
+                  <button className="text-red-300 text-[10px] hover:underline" onClick={() => setRows(rows.filter((_, i) => i !== rowIdx))}>×</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center gap-2 mt-2">
+        <button className={BTN_SECONDARY} onClick={() => setRows([...rows, emptySpreadsheetRow()])}>+ Add row</button>
+        <button className={BTN_PRIMARY} onClick={handleSubmit} disabled={busy}>
+          {busy ? 'Saving…' : `Save ${rows.filter(r => r.player_id).length} row${rows.filter(r => r.player_id).length === 1 ? '' : 's'}`}
+        </button>
+      </div>
+
+      {err && <p className="text-sm text-red-400 mt-2">{err}</p>}
+      {result && (
+        <div className="mt-3 text-xs text-pb-text font-mono">
+          created: <b>{result.created || 0}</b> · updated: <b>{result.updated || 0}</b>
+          {result.errors > 0 && <span className="text-red-300"> · errors: <b>{result.errors}</b></span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function csvEscape(v) {
+  if (v === null || v === undefined) return ''
+  const s = String(v)
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"'
+  }
+  return s
+}
+
+// ─── Bulk CSV import panel (reusable) ───────────────────────────────────────
+
+function ImportPanel({ kind, downloadFn, importFn, onImported }) {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const [err, setErr] = useState(null)
+
+  const handleTemplate = async () => {
+    try {
+      const res = await downloadFn()
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${kind}_template.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) { setErr(e.message) }
+  }
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setErr('Please upload a .csv file. (Export from Excel via Save As → CSV.)')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErr(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — must be 5 MB or smaller.`)
+      return
+    }
+    setBusy(true); setErr(null); setResult(null)
+    try {
+      const r = await importFn(file)
+      if (r.detail) throw new Error(typeof r.detail === 'string' ? r.detail : JSON.stringify(r.detail))
+      setResult(r)
+      onImported && onImported(r)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="bg-pb-surface border pb-hairline rounded-lg p-4 mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h4 className="text-sm font-semibold text-pb-text">Bulk CSV import</h4>
+          <p className="text-[11px] text-pb-faintest">
+            Download the template, fill it in (Excel / Sheets), save as CSV, then upload here.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className={BTN_SECONDARY} onClick={handleTemplate}>Download template</button>
+          <label className={BTN_PRIMARY + ' cursor-pointer'}>
+            {busy ? 'Uploading…' : 'Upload CSV'}
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} disabled={busy} />
+          </label>
+        </div>
+      </div>
+      {err && <p className="text-sm text-red-400 mt-2">{err}</p>}
+      {result && (
+        <div className="mt-3 text-xs text-pb-text">
+          <div className="font-mono">
+            {result.created !== undefined && <span className="mr-3">created: <b>{result.created}</b></span>}
+            {result.updated !== undefined && <span className="mr-3">updated: <b>{result.updated}</b></span>}
+            {result.games_created !== undefined && <span className="mr-3">games created: <b>{result.games_created}</b></span>}
+            {result.errors > 0
+              ? <span className="text-red-300">errors: <b>{result.errors}</b></span>
+              : <span className="text-pb-faint">no errors</span>}
+          </div>
+          {result.errors_detail && result.errors_detail.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-red-300">Show error details ({result.errors_detail.length}{result.errors > result.errors_detail.length ? ` of ${result.errors}` : ''})</summary>
+              <ul className="mt-1 list-disc pl-5 text-pb-faint font-mono text-[10px] max-h-64 overflow-y-auto">
+                {result.errors_detail.map((er, i) => (
+                  <li key={i}>row {er.row}: {er.error}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+          <p className="text-pb-faintest text-[10px] mt-1">
+            All imports are reversible from the Audit tab (look for the "import" entry).
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Fields that map to Optional[str] on the backend — empty form value must go as null, not 0.
 const STRING_FIELDS = new Set(['notes', 'bowling_best_figures'])
 // Fields that map to Optional[int] — empty form value must go as null.
@@ -283,6 +589,21 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
 
   return (
     <div className="space-y-6">
+      <ImportPanel
+        kind="season_adjustments"
+        downloadFn={api.adminDownloadSeasonAdjustmentTemplate}
+        importFn={api.adminImportSeasonAdjustments}
+        onImported={() => { refresh(); refreshAll() }}
+      />
+
+      <InlineSpreadsheet
+        players={players}
+        seasons={seasons}
+        grades={grades}
+        onImported={() => { refresh(); refreshAll() }}
+        onPending={onPending}
+      />
+
       <div className="bg-pb-surface border pb-hairline rounded-lg p-4">
         <h3 className="text-base font-semibold text-pb-text mb-3">
           {editingId ? 'Edit season adjustment' : 'New season adjustment'}
@@ -617,6 +938,13 @@ function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
 
   return (
     <div className="space-y-6">
+      <ImportPanel
+        kind="manual_games"
+        downloadFn={api.adminDownloadManualGamesTemplate}
+        importFn={api.adminImportManualGames}
+        onImported={() => { refresh(); refreshAll() }}
+      />
+
       <div className="bg-pb-surface border pb-hairline rounded-lg p-4">
         <h3 className="text-base font-semibold text-pb-text mb-3">
           {editingId ? 'Edit manual game' : 'New manual game'}

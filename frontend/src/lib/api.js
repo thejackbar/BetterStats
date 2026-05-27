@@ -359,6 +359,33 @@ export const api = {
     request(`/club-admin/manual-entries/audit/${logId}/undo`, { method: 'POST' }),
   adminListGradesBySeason: () => request('/club-admin/manual-entries/grades'),
 
+  adminDownloadSeasonAdjustmentTemplate: () =>
+    fetch(`${BASE}/club-admin/manual-entries/season-adjustments/template.csv`, { credentials: 'include' }),
+  adminImportSeasonAdjustments: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/club-admin/manual-entries/season-adjustments/import`, {
+      method: 'POST', body: form, credentials: 'include',
+    }).then(async r => {
+      const text = await r.text()
+      try { return JSON.parse(text) }
+      catch { throw new Error(`Server error (${r.status}): ${text.slice(0, 160)}`) }
+    })
+  },
+  adminDownloadManualGamesTemplate: () =>
+    fetch(`${BASE}/club-admin/manual-entries/games/template.csv`, { credentials: 'include' }),
+  adminImportManualGames: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/club-admin/manual-entries/games/import`, {
+      method: 'POST', body: form, credentials: 'include',
+    }).then(async r => {
+      const text = await r.text()
+      try { return JSON.parse(text) }
+      catch { throw new Error(`Server error (${r.status}): ${text.slice(0, 160)}`) }
+    })
+  },
+
   // Super admin
   superListClubs: () => request('/club-admin/super/clubs'),
   superCreateClub: (data) =>
