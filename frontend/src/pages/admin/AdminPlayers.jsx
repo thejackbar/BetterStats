@@ -4,7 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import { nameMatchesSearch, formatPlayerName } from '../../lib/nameFormat'
 import { validateImageFile } from '../../lib/validation'
-import { CRICKET_COUNTRIES } from '../../data/countries'
+import { CRICKET_COUNTRIES, countryFlagUrl } from '../../data/countries'
 
 // ---------------------------------------------------------------------------
 // EditPlayerModal
@@ -566,8 +566,11 @@ export default function AdminPlayers() {
                       <span className="font-mono text-[10px] text-pb-faintest italic">non-player</span>
                     )}
                     {p.is_overseas && (
-                      <span className="font-mono text-[10px] text-pb-amber/80">
-                        {p.overseas_country ? `Overseas · ${p.overseas_country}` : 'Overseas'}
+                      <span className="inline-flex items-center gap-1 font-mono text-[10px] text-pb-amber/80">
+                        {p.overseas_country && countryFlagUrl(p.overseas_country) && (
+                          <img src={countryFlagUrl(p.overseas_country)} alt="" style={{ width: 14, height: 'auto' }} />
+                        )}
+                        {p.overseas_country || 'Overseas'}
                       </span>
                     )}
                   </div>

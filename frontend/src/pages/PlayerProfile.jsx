@@ -13,7 +13,7 @@ import {
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
 import '../styles/honour-badge.css'
-import { countryFlag } from '../data/countries'
+import { countryFlagUrl } from '../data/countries'
 import {
   BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -2248,11 +2248,16 @@ export default function PlayerProfile() {
             <Label>
               {org?.name || ''} · {player.role || 'PLAYER'}
               {player.is_overseas && (
-                <span className="ml-2 font-mono text-[10px] tracking-wide2 px-2 py-0.5 rounded-sm border"
+                <span className="ml-2 inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 px-2 py-0.5 rounded-sm border"
                   style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 40%, transparent)', color: 'var(--pb-amber)', background: 'color-mix(in srgb, var(--pb-amber) 10%, transparent)' }}>
-                  {player.overseas_country
-                    ? `${countryFlag(player.overseas_country)} ${player.overseas_country}`
-                    : 'Overseas'}
+                  {player.overseas_country ? (
+                    <>
+                      {countryFlagUrl(player.overseas_country) && (
+                        <img src={countryFlagUrl(player.overseas_country)} alt="" style={{ width: 16, height: 'auto', display: 'inline', verticalAlign: 'middle' }} />
+                      )}
+                      {player.overseas_country}
+                    </>
+                  ) : 'Overseas'}
                 </span>
               )}
             </Label>
@@ -2331,10 +2336,13 @@ export default function PlayerProfile() {
                 <div className="pb-card p-4 flex items-center gap-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 30%, transparent)' }}>
                   <div>
                     <Label style={{ color: 'var(--pb-amber)' }}>OVERSEAS PLAYER</Label>
-                    <div className="font-mono text-[22px] leading-none mt-1">
-                      {countryFlag(player.overseas_country)}
+                    <div className="flex items-center gap-2 mt-1">
+                      {player.overseas_country && countryFlagUrl(player.overseas_country) && (
+                        <img src={countryFlagUrl(player.overseas_country)} alt={player.overseas_country}
+                          style={{ width: 32, height: 'auto' }} />
+                      )}
                       {player.overseas_country && (
-                        <span className="text-[15px] ml-1.5 text-pb-text font-semibold">{player.overseas_country}</span>
+                        <span className="text-[15px] text-pb-text font-semibold">{player.overseas_country}</span>
                       )}
                     </div>
                   </div>
