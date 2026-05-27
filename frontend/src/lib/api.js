@@ -357,6 +357,7 @@ export const api = {
     request(`/club-admin/manual-entries/audit?limit=${limit}`),
   adminUndoManualEntry: (logId) =>
     request(`/club-admin/manual-entries/audit/${logId}/undo`, { method: 'POST' }),
+  adminListGradesBySeason: () => request('/club-admin/manual-entries/grades'),
 
   // Super admin
   superListClubs: () => request('/club-admin/super/clubs'),
