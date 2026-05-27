@@ -308,8 +308,8 @@ async def get_overview(
         grade_filter = """
             AND pss.player_id IN (
                 SELECT DISTINCT bi.player_id
-                FROM batting_innings bi
-                JOIN games gm ON gm.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games gm ON gm.id = bi.game_id
                 WHERE gm.grade_id = :gid
             )
         """
@@ -353,7 +353,7 @@ async def get_overview(
                 COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('draw','drew','tie')) AS draws,
                 COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('draw','drew','tie')) AS ties,
                 COUNT(*) FILTER (WHERE LOWER(gm.result) NOT IN ('win','won','loss','lost','draw','drew','tie') OR gm.result IS NULL) AS other
-            FROM games gm
+            FROM v_effective_games gm
             JOIN grades g ON g.id = gm.grade_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL)
               AND g.id IN (
@@ -383,7 +383,7 @@ async def get_batting_stats(
     params: dict = {"o": org_id, "s": season_id, "min_inn": min_innings, "limit": limit}
     grade_where = ""
     if grade_id:
-        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM batting_innings bi JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
+        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM v_effective_batting_innings bi JOIN v_effective_games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
         params["gid"] = grade_id
 
     rows = await db.execute(
@@ -433,7 +433,7 @@ async def get_bowling_stats(
     params: dict = {"o": org_id, "s": season_id, "min_wkts": min_wickets, "limit": limit}
     grade_where = ""
     if grade_id:
-        grade_where = "AND pss.player_id IN (SELECT DISTINCT bs.player_id FROM bowling_spells bs JOIN games gm ON gm.id = bs.game_id WHERE gm.grade_id = :gid)"
+        grade_where = "AND pss.player_id IN (SELECT DISTINCT bs.player_id FROM v_effective_bowling_spells bs JOIN v_effective_games gm ON gm.id = bs.game_id WHERE gm.grade_id = :gid)"
         params["gid"] = grade_id
 
     rows = await db.execute(
@@ -453,7 +453,7 @@ async def get_bowling_stats(
                 (ARRAY_AGG(pss.best_bowling_figures
                     ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                              NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-                 ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_figures,
+                 ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_figures,
                 MAX(pss.best_bowling_wickets) AS best_wickets,
                 SUM(pss.five_wicket_innings) AS five_fors
             FROM player_season_stats pss
@@ -484,7 +484,7 @@ async def get_fielding_stats(
     params: dict = {"o": org_id, "s": season_id, "limit": limit}
     grade_where = ""
     if grade_id:
-        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM batting_innings bi JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
+        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM v_effective_batting_innings bi JOIN v_effective_games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
         params["gid"] = grade_id
 
     rows = await db.execute(
@@ -529,7 +529,7 @@ async def get_allrounder_stats(
     params: dict = {"o": org_id, "s": season_id, "min_runs": min_runs, "min_wkts": min_wickets, "limit": limit}
     grade_where = ""
     if grade_id:
-        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM batting_innings bi JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
+        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM v_effective_batting_innings bi JOIN v_effective_games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
         params["gid"] = grade_id
 
     rows = await db.execute(
@@ -572,8 +572,8 @@ async def get_superlatives(
     grade_filter_bs = ""
     if grade_id:
         params["gid"] = grade_id
-        grade_filter_bi = "AND bi.game_id IN (SELECT id FROM games WHERE grade_id = :gid)"
-        grade_filter_bs = "AND bs.game_id IN (SELECT id FROM games WHERE grade_id = :gid)"
+        grade_filter_bi = "AND bi.game_id IN (SELECT id FROM v_effective_games WHERE grade_id = :gid)"
+        grade_filter_bs = "AND bs.game_id IN (SELECT id FROM v_effective_games WHERE grade_id = :gid)"
 
     # Highest individual score
     hi = await db.execute(
@@ -581,9 +581,9 @@ async def get_superlatives(
             SELECT p.id AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    bi.runs, bi.not_out, gm.home_team, gm.away_team, gm.played_at,
                    s.name AS season_name
-            FROM batting_innings bi
+            FROM v_effective_batting_innings bi
             JOIN players p ON p.id = bi.player_id
-            JOIN games gm ON gm.id = bi.game_id
+            JOIN v_effective_games gm ON gm.id = bi.game_id
             JOIN grades g ON g.id = gm.grade_id
             JOIN seasons s ON s.id = g.season_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND s.organisation_id = :o
@@ -602,9 +602,9 @@ async def get_superlatives(
             SELECT p.id AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    bs.wickets, bs.runs AS runs_conceded,
                    gm.home_team, gm.away_team, gm.played_at
-            FROM bowling_spells bs
+            FROM v_effective_bowling_spells bs
             JOIN players p ON p.id = bs.player_id
-            JOIN games gm ON gm.id = bs.game_id
+            JOIN v_effective_games gm ON gm.id = bs.game_id
             JOIN grades g ON g.id = gm.grade_id
             JOIN seasons s ON s.id = g.season_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND s.organisation_id = :o
@@ -629,7 +629,7 @@ async def get_superlatives(
             FROM partnerships pt
             JOIN players p1 ON p1.id = pt.batter1_id
             JOIN players p2 ON p2.id = pt.batter2_id
-            JOIN games gm ON gm.id = pt.game_id
+            JOIN v_effective_games gm ON gm.id = pt.game_id
             JOIN grades g ON g.id = gm.grade_id
             JOIN seasons s ON s.id = g.season_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND s.organisation_id = :o
@@ -647,9 +647,9 @@ async def get_superlatives(
         text(f"""
             SELECT gm.id AS game_id, gm.home_team, gm.away_team, gm.played_at,
                    SUM(bi.runs) AS team_runs, COUNT(bi.id) AS batters
-            FROM batting_innings bi
+            FROM v_effective_batting_innings bi
             JOIN players p ON p.id = bi.player_id
-            JOIN games gm ON gm.id = bi.game_id
+            JOIN v_effective_games gm ON gm.id = bi.game_id
             JOIN grades g ON g.id = gm.grade_id
             JOIN seasons s ON s.id = g.season_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND s.organisation_id = :o
@@ -716,9 +716,9 @@ async def get_superlatives(
         text(f"""
             SELECT p.id AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(*) AS fifers
-            FROM bowling_spells bs
+            FROM v_effective_bowling_spells bs
             JOIN players p ON p.id = bs.player_id
-            JOIN games gm ON gm.id = bs.game_id
+            JOIN v_effective_games gm ON gm.id = bs.game_id
             JOIN grades g ON g.id = gm.grade_id
             JOIN seasons s ON s.id = g.season_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND s.organisation_id = :o
@@ -785,7 +785,7 @@ async def get_match_results(
                 gm.home_team, gm.away_team, gm.result, gm.winning_team,
                 gm.played_at,
                 g.id AS grade_id, COALESCE(g.display_name_override, g.name) AS grade_name
-            FROM games gm
+            FROM v_effective_games gm
             JOIN grades g ON g.id = gm.grade_id
             JOIN seasons s ON s.id = g.season_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND s.organisation_id = :o
@@ -811,7 +811,7 @@ async def get_match_results(
                 p.id AS top_batter_id,
                 bi.runs AS top_runs,
                 bi.not_out AS top_batter_no
-            FROM batting_innings bi
+            FROM v_effective_batting_innings bi
             JOIN players p ON p.id = bi.player_id
             WHERE bi.game_id IN ({id_list})
               AND p.organisation_id = :o
@@ -830,7 +830,7 @@ async def get_match_results(
                 p.id AS top_bowler_id,
                 bs.wickets AS top_wickets,
                 bs.runs AS top_bowl_runs
-            FROM bowling_spells bs
+            FROM v_effective_bowling_spells bs
             JOIN players p ON p.id = bs.player_id
             WHERE bs.game_id IN ({id_list})
               AND p.organisation_id = :o
@@ -875,7 +875,7 @@ async def get_partnership_stats(
             FROM partnerships pt
             JOIN players p1 ON p1.id = pt.batter1_id
             JOIN players p2 ON p2.id = pt.batter2_id
-            JOIN games gm ON gm.id = pt.game_id
+            JOIN v_effective_games gm ON gm.id = pt.game_id
             JOIN grades g ON g.id = gm.grade_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND p1.organisation_id = :o AND p2.organisation_id = :o
               AND pt.is_club_innings IS NOT FALSE
@@ -897,7 +897,7 @@ async def get_partnership_stats(
             FROM partnerships pt
             JOIN players p1 ON p1.id = pt.batter1_id
             JOIN players p2 ON p2.id = pt.batter2_id
-            JOIN games gm ON gm.id = pt.game_id
+            JOIN v_effective_games gm ON gm.id = pt.game_id
             JOIN grades g ON g.id = gm.grade_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND p1.organisation_id = :o AND p2.organisation_id = :o
               AND pt.is_club_innings IS NOT FALSE
@@ -923,7 +923,7 @@ async def get_season_milestones(
 ):
     # Get season date range
     s_row = await db.execute(
-        text("SELECT s.*, MIN(gm.played_at) AS first_game, MAX(gm.played_at) AS last_game FROM seasons s LEFT JOIN grades g ON g.season_id = s.id LEFT JOIN games gm ON gm.grade_id = g.id WHERE s.id = :s AND s.organisation_id = :o GROUP BY s.id"),
+        text("SELECT s.*, MIN(gm.played_at) AS first_game, MAX(gm.played_at) AS last_game FROM seasons s LEFT JOIN grades g ON g.season_id = s.id LEFT JOIN v_effective_games gm ON gm.grade_id = g.id WHERE s.id = :s AND s.organisation_id = :o GROUP BY s.id"),
         {"s": season_id, "o": org_id},
     )
     season = s_row.mappings().first()
@@ -959,7 +959,7 @@ async def get_grade_breakdown(
                 COUNT(gm.id) AS game_count
             FROM grades g
             JOIN seasons s ON s.id = g.season_id
-            LEFT JOIN games gm ON gm.grade_id = g.id
+            LEFT JOIN v_effective_games gm ON gm.grade_id = g.id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND s.organisation_id = :o
             GROUP BY g.id, g.name
             ORDER BY g.name, COUNT(gm.id) DESC
@@ -976,8 +976,8 @@ async def get_grade_breakdown(
         stats = await db.execute(
             text("""
                 SELECT COUNT(DISTINCT bi.player_id) AS players, SUM(bi.runs) AS runs
-                FROM batting_innings bi
-                JOIN games gm ON gm.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games gm ON gm.id = bi.game_id
                 JOIN players pl ON pl.id = bi.player_id
                 WHERE gm.grade_id = :gid AND pl.organisation_id = :o
             """), p)
@@ -986,8 +986,8 @@ async def get_grade_breakdown(
         wkt_row = await db.execute(
             text("""
                 SELECT SUM(bs.wickets) AS wickets
-                FROM bowling_spells bs
-                JOIN games gm ON gm.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games gm ON gm.id = bs.game_id
                 JOIN players pl ON pl.id = bs.player_id
                 WHERE gm.grade_id = :gid AND pl.organisation_id = :o
             """), p)
@@ -998,8 +998,8 @@ async def get_grade_breakdown(
                 SELECT bi.runs AS high_score, bi.not_out,
                     COALESCE(pl.display_name_override, pl.name) AS high_score_name,
                     pl.id AS high_score_player_id
-                FROM batting_innings bi
-                JOIN games gm ON gm.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games gm ON gm.id = bi.game_id
                 JOIN players pl ON pl.id = bi.player_id
                 WHERE gm.grade_id = :gid AND pl.organisation_id = :o
                 ORDER BY bi.runs DESC NULLS LAST LIMIT 1
@@ -1010,8 +1010,8 @@ async def get_grade_breakdown(
             text("""
                 SELECT COALESCE(pl.display_name_override, pl.name) AS name,
                     pl.id, SUM(bi.runs) AS runs
-                FROM batting_innings bi
-                JOIN games gm ON gm.id = bi.game_id
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games gm ON gm.id = bi.game_id
                 JOIN players pl ON pl.id = bi.player_id
                 WHERE gm.grade_id = :gid AND pl.organisation_id = :o
                 GROUP BY pl.id, pl.name, pl.display_name_override
@@ -1023,8 +1023,8 @@ async def get_grade_breakdown(
             text("""
                 SELECT COALESCE(pl.display_name_override, pl.name) AS name,
                     pl.id, SUM(bs.wickets) AS wickets
-                FROM bowling_spells bs
-                JOIN games gm ON gm.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games gm ON gm.id = bs.game_id
                 JOIN players pl ON pl.id = bs.player_id
                 WHERE gm.grade_id = :gid AND pl.organisation_id = :o
                 GROUP BY pl.id, pl.name, pl.display_name_override
@@ -1037,8 +1037,8 @@ async def get_grade_breakdown(
                 SELECT bs.wickets AS bb_wickets, bs.runs AS bb_runs,
                     COALESCE(pl.display_name_override, pl.name) AS bb_name,
                     pl.id AS bb_player_id
-                FROM bowling_spells bs
-                JOIN games gm ON gm.id = bs.game_id
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games gm ON gm.id = bs.game_id
                 JOIN players pl ON pl.id = bs.player_id
                 WHERE gm.grade_id = :gid AND pl.organisation_id = :o
                 ORDER BY bs.wickets DESC NULLS LAST, bs.runs ASC NULLS LAST LIMIT 1
@@ -1050,7 +1050,7 @@ async def get_grade_breakdown(
                 SELECT
                     COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('win','won')) AS wins,
                     COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('loss','lost')) AS losses
-                FROM games gm WHERE gm.grade_id = :gid
+                FROM v_effective_games gm WHERE gm.grade_id = :gid
             """), p)
         wl_stats = dict(wl.mappings().first() or {})
 
@@ -1096,9 +1096,9 @@ async def get_dismissal_breakdown(
             SELECT
                 COALESCE(bi.dismissal_type, 'unknown') AS dismissal_type,
                 COUNT(*) AS count
-            FROM batting_innings bi
+            FROM v_effective_batting_innings bi
             JOIN players p ON p.id = bi.player_id
-            JOIN games gm ON gm.id = bi.game_id
+            JOIN v_effective_games gm ON gm.id = bi.game_id
             JOIN grades g ON g.id = gm.grade_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND p.organisation_id = :o
               {grade_where}
@@ -1122,7 +1122,7 @@ async def get_season_players(
     params: dict = {"o": org_id, "s": season_id}
     grade_where = ""
     if grade_id:
-        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM batting_innings bi JOIN games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
+        grade_where = "AND pss.player_id IN (SELECT DISTINCT bi.player_id FROM v_effective_batting_innings bi JOIN v_effective_games gm ON gm.id = bi.game_id WHERE gm.grade_id = :gid)"
         params["gid"] = grade_id
 
     rows = await db.execute(
@@ -1695,7 +1695,7 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
             COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('win','won')) AS wins,
             COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('loss','lost')) AS losses,
             COUNT(*) FILTER (WHERE LOWER(gm.result) IN ('draw','drew','tie')) AS draws
-        FROM games gm
+        FROM v_effective_games gm
         JOIN grades g ON g.id = gm.grade_id
         WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL)
           AND g.season_id IN (SELECT id FROM seasons WHERE organisation_id = :o)
@@ -1721,7 +1721,7 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
                (ARRAY_AGG(pss.best_bowling_figures
                    ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                             NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-                ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_figures,
+                ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_figures,
                ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average
         FROM player_season_stats pss JOIN players p ON p.id = pss.player_id
         WHERE pss.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND p.organisation_id = :o
@@ -1734,16 +1734,16 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
     hs_row = await db.execute(text("""
         SELECT COALESCE(p.display_name_override, p.name) AS name, p.id AS player_id,
                bi.runs, bi.not_out
-        FROM batting_innings bi JOIN players p ON p.id = bi.player_id
-        JOIN games gm ON gm.id = bi.game_id JOIN grades g ON g.id = gm.grade_id
+        FROM v_effective_batting_innings bi JOIN players p ON p.id = bi.player_id
+        JOIN v_effective_games gm ON gm.id = bi.game_id JOIN grades g ON g.id = gm.grade_id
         WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND p.organisation_id = :o
         ORDER BY bi.runs DESC NULLS LAST LIMIT 1
     """), params)
     bb_row = await db.execute(text("""
         SELECT COALESCE(p.display_name_override, p.name) AS name, p.id AS player_id,
                bs.wickets, bs.runs AS runs_conceded
-        FROM bowling_spells bs JOIN players p ON p.id = bs.player_id
-        JOIN games gm ON gm.id = bs.game_id JOIN grades g ON g.id = gm.grade_id
+        FROM v_effective_bowling_spells bs JOIN players p ON p.id = bs.player_id
+        JOIN v_effective_games gm ON gm.id = bs.game_id JOIN grades g ON g.id = gm.grade_id
         WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND p.organisation_id = :o
         ORDER BY bs.wickets DESC NULLS LAST, bs.runs ASC NULLS LAST LIMIT 1
     """), params)
@@ -1753,7 +1753,7 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
                p1.id AS batter1_id, pt.runs, pt.wicket_number
         FROM partnerships pt
         JOIN players p1 ON p1.id = pt.batter1_id JOIN players p2 ON p2.id = pt.batter2_id
-        JOIN games gm ON gm.id = pt.game_id JOIN grades g ON g.id = gm.grade_id
+        JOIN v_effective_games gm ON gm.id = pt.game_id JOIN grades g ON g.id = gm.grade_id
         WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND p1.organisation_id = :o
         ORDER BY pt.runs DESC NULLS LAST LIMIT 1
     """), params)
@@ -1765,7 +1765,7 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
 
     s_dates = await db.execute(text("""
         SELECT MIN(gm.played_at) AS first_game, MAX(gm.played_at) AS last_game
-        FROM games gm JOIN grades g ON g.id = gm.grade_id WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL)
+        FROM v_effective_games gm JOIN grades g ON g.id = gm.grade_id WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL)
     """), {"s": season_id})
     s_d = s_dates.mappings().first() or {}
     milestones = []
