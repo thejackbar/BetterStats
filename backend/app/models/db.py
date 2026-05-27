@@ -442,6 +442,208 @@ class ManualPartnershipRecord(Base):
     batter2 = relationship("Player", foreign_keys=[batter2_id])
 
 
+# ─── Manual entry tables (historical stat backfill) ──────────────────────────
+
+
+class ManualGame(Base):
+    __tablename__ = "manual_games"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="CASCADE"), nullable=False)
+    grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
+    played_at = Column(Date, nullable=True)
+    home_team = Column(Text, nullable=True)
+    away_team = Column(Text, nullable=True)
+    opposition = Column(Text, nullable=True)
+    venue = Column(Text, nullable=True)
+    result = Column(Text, nullable=True)
+    winning_team = Column(Text, nullable=True)
+    is_final = Column(Boolean, server_default="false", nullable=False)
+    match_format = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    organisation = relationship("Organisation")
+    season = relationship("Season")
+    grade = relationship("Grade")
+    batting_innings = relationship("ManualBattingInnings", back_populates="manual_game", cascade="all, delete-orphan")
+    bowling_spells = relationship("ManualBowlingSpell", back_populates="manual_game", cascade="all, delete-orphan")
+    fielding_stats = relationship("ManualFieldingStat", back_populates="manual_game", cascade="all, delete-orphan")
+
+
+class ManualBattingInnings(Base):
+    __tablename__ = "manual_batting_innings"
+    __table_args__ = (
+        UniqueConstraint("manual_game_id", "innings_number", "player_id", name="uq_manual_batting_game_inns_player"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    manual_game_id = Column(UUID(as_uuid=True), ForeignKey("manual_games.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    innings_number = Column(Integer, server_default="1", nullable=False)
+    batting_position = Column(Integer, nullable=True)
+    runs = Column(Integer, server_default="0", nullable=False)
+    balls = Column(Integer, nullable=True)
+    fours = Column(Integer, server_default="0", nullable=False)
+    sixes = Column(Integer, server_default="0", nullable=False)
+    strike_rate = Column(Numeric(6, 2), nullable=True)
+    dismissal_type = Column(Text, nullable=True)
+    not_out = Column(Boolean, server_default="false", nullable=False)
+    did_not_bat = Column(Boolean, server_default="false", nullable=False)
+
+    manual_game = relationship("ManualGame", back_populates="batting_innings")
+    player = relationship("Player")
+
+
+class ManualBowlingSpell(Base):
+    __tablename__ = "manual_bowling_spells"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    manual_game_id = Column(UUID(as_uuid=True), ForeignKey("manual_games.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    innings_number = Column(Integer, server_default="1", nullable=False)
+    overs = Column(Numeric(4, 1), nullable=True)
+    maidens = Column(Integer, server_default="0", nullable=False)
+    runs = Column(Integer, server_default="0", nullable=False)
+    wickets = Column(Integer, server_default="0", nullable=False)
+    wides = Column(Integer, server_default="0", nullable=False)
+    no_balls = Column(Integer, server_default="0", nullable=False)
+    economy = Column(Numeric(5, 2), nullable=True)
+
+    manual_game = relationship("ManualGame", back_populates="bowling_spells")
+    player = relationship("Player")
+
+
+class ManualFieldingStat(Base):
+    __tablename__ = "manual_fielding_stats"
+    __table_args__ = (
+        UniqueConstraint("manual_game_id", "player_id", name="uq_manual_fielding_game_player"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    manual_game_id = Column(UUID(as_uuid=True), ForeignKey("manual_games.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    catches = Column(Integer, server_default="0", nullable=False)
+    catches_wk = Column(Integer, server_default="0", nullable=False)
+    run_outs = Column(Integer, server_default="0", nullable=False)
+    stumpings = Column(Integer, server_default="0", nullable=False)
+
+    manual_game = relationship("ManualGame", back_populates="fielding_stats")
+    player = relationship("Player")
+
+
+class ManualSeasonAdjustment(Base):
+    __tablename__ = "manual_season_adjustments"
+    __table_args__ = (
+        UniqueConstraint("player_id", "season_id", "grade_id", name="uq_manual_season_adj_player_season_grade"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="CASCADE"), nullable=False)
+    grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
+    games_played = Column(Integer, server_default="0", nullable=False)
+    batting_innings = Column(Integer, server_default="0", nullable=False)
+    batting_runs = Column(Integer, server_default="0", nullable=False)
+    batting_not_outs = Column(Integer, server_default="0", nullable=False)
+    batting_balls = Column(Integer, server_default="0", nullable=False)
+    batting_fours = Column(Integer, server_default="0", nullable=False)
+    batting_sixes = Column(Integer, server_default="0", nullable=False)
+    batting_fifties = Column(Integer, server_default="0", nullable=False)
+    batting_hundreds = Column(Integer, server_default="0", nullable=False)
+    batting_ducks = Column(Integer, server_default="0", nullable=False)
+    batting_high_score = Column(Integer, nullable=True)
+    batting_high_score_not_out = Column(Boolean, server_default="false", nullable=False)
+    bowling_innings = Column(Integer, server_default="0", nullable=False)
+    bowling_overs = Column(Numeric(8, 1), server_default="0", nullable=False)
+    bowling_balls = Column(Integer, server_default="0", nullable=False)
+    bowling_maidens = Column(Integer, server_default="0", nullable=False)
+    bowling_runs = Column(Integer, server_default="0", nullable=False)
+    bowling_wickets = Column(Integer, server_default="0", nullable=False)
+    bowling_wides = Column(Integer, server_default="0", nullable=False)
+    bowling_no_balls = Column(Integer, server_default="0", nullable=False)
+    bowling_five_wicket_innings = Column(Integer, server_default="0", nullable=False)
+    bowling_best_wickets = Column(Integer, nullable=True)
+    bowling_best_figures = Column(Text, nullable=True)
+    fielding_catches = Column(Integer, server_default="0", nullable=False)
+    fielding_catches_wk = Column(Integer, server_default="0", nullable=False)
+    fielding_run_outs = Column(Integer, server_default="0", nullable=False)
+    fielding_stumpings = Column(Integer, server_default="0", nullable=False)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    organisation = relationship("Organisation")
+    player = relationship("Player")
+    season = relationship("Season")
+    grade = relationship("Grade")
+
+
+class ManualCareerAdjustment(Base):
+    __tablename__ = "manual_career_adjustments"
+    __table_args__ = (
+        UniqueConstraint("player_id", "organisation_id", name="uq_manual_career_adj_player_org"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    games_played = Column(Integer, server_default="0", nullable=False)
+    batting_innings = Column(Integer, server_default="0", nullable=False)
+    batting_runs = Column(Integer, server_default="0", nullable=False)
+    batting_not_outs = Column(Integer, server_default="0", nullable=False)
+    batting_balls = Column(Integer, server_default="0", nullable=False)
+    batting_fours = Column(Integer, server_default="0", nullable=False)
+    batting_sixes = Column(Integer, server_default="0", nullable=False)
+    batting_fifties = Column(Integer, server_default="0", nullable=False)
+    batting_hundreds = Column(Integer, server_default="0", nullable=False)
+    batting_ducks = Column(Integer, server_default="0", nullable=False)
+    batting_high_score = Column(Integer, nullable=True)
+    batting_high_score_not_out = Column(Boolean, server_default="false", nullable=False)
+    bowling_innings = Column(Integer, server_default="0", nullable=False)
+    bowling_overs = Column(Numeric(8, 1), server_default="0", nullable=False)
+    bowling_balls = Column(Integer, server_default="0", nullable=False)
+    bowling_maidens = Column(Integer, server_default="0", nullable=False)
+    bowling_runs = Column(Integer, server_default="0", nullable=False)
+    bowling_wickets = Column(Integer, server_default="0", nullable=False)
+    bowling_five_wicket_innings = Column(Integer, server_default="0", nullable=False)
+    bowling_best_wickets = Column(Integer, nullable=True)
+    bowling_best_figures = Column(Text, nullable=True)
+    fielding_catches = Column(Integer, server_default="0", nullable=False)
+    fielding_catches_wk = Column(Integer, server_default="0", nullable=False)
+    fielding_run_outs = Column(Integer, server_default="0", nullable=False)
+    fielding_stumpings = Column(Integer, server_default="0", nullable=False)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    organisation = relationship("Organisation")
+    player = relationship("Player")
+
+
+class ManualEditLog(Base):
+    __tablename__ = "manual_edit_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action = Column(Text, nullable=False)
+    target_table = Column(Text, nullable=False)
+    target_id = Column(Text, nullable=False)
+    summary = Column(Text, nullable=True)
+    before_json = Column(JSONB, nullable=True)
+    after_json = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    undone_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    undone_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
 class PlayerSyncRequest(Base):
     __tablename__ = "player_sync_requests"
 

@@ -35,6 +35,7 @@ RUN_HARD_REFRESH = "run_hard_refresh"         # destructive full rebuild
 MANAGE_USERS = "manage_users"                 # invite/edit club members
 MANAGE_REPORTS = "manage_reports"             # approve/reject saved StatLab reports
 MANAGE_FAMILIES = "manage_families"           # create/edit player family groupings
+MANAGE_MANUAL_ENTRIES = "manage_manual_entries"  # historical manual stat entry + edit + undo
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -50,6 +51,7 @@ ALL_CAPABILITIES = (
     MANAGE_USERS,
     MANAGE_REPORTS,
     MANAGE_FAMILIES,
+    MANAGE_MANUAL_ENTRIES,
 )
 
 

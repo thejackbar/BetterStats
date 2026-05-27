@@ -326,6 +326,38 @@ export const api = {
   adminClearResolvedSyncRequests: () =>
     request('/club-admin/sync-requests/resolved', { method: 'DELETE' }),
   adminGetMilestones: () => request('/club-admin/milestones'),
+
+  // Manual stat entries — historical backfill (v1.0.0.0 Beta)
+  adminListSeasonAdjustments: () => request('/club-admin/manual-entries/season-adjustments'),
+  adminCreateSeasonAdjustment: (data) =>
+    request('/club-admin/manual-entries/season-adjustments', { method: 'POST', body: JSON.stringify(data) }),
+  adminPatchSeasonAdjustment: (id, data) =>
+    request(`/club-admin/manual-entries/season-adjustments/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adminDeleteSeasonAdjustment: (id) =>
+    request(`/club-admin/manual-entries/season-adjustments/${id}`, { method: 'DELETE' }),
+
+  adminListCareerAdjustments: () => request('/club-admin/manual-entries/career-adjustments'),
+  adminCreateCareerAdjustment: (data) =>
+    request('/club-admin/manual-entries/career-adjustments', { method: 'POST', body: JSON.stringify(data) }),
+  adminPatchCareerAdjustment: (id, data) =>
+    request(`/club-admin/manual-entries/career-adjustments/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adminDeleteCareerAdjustment: (id) =>
+    request(`/club-admin/manual-entries/career-adjustments/${id}`, { method: 'DELETE' }),
+
+  adminListManualGames: () => request('/club-admin/manual-entries/games'),
+  adminGetManualGame: (id) => request(`/club-admin/manual-entries/games/${id}`),
+  adminCreateManualGame: (data) =>
+    request('/club-admin/manual-entries/games', { method: 'POST', body: JSON.stringify(data) }),
+  adminPatchManualGame: (id, data) =>
+    request(`/club-admin/manual-entries/games/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adminDeleteManualGame: (id) =>
+    request(`/club-admin/manual-entries/games/${id}`, { method: 'DELETE' }),
+
+  adminListManualEntryAudit: (limit = 200) =>
+    request(`/club-admin/manual-entries/audit?limit=${limit}`),
+  adminUndoManualEntry: (logId) =>
+    request(`/club-admin/manual-entries/audit/${logId}/undo`, { method: 'POST' }),
+
   // Super admin
   superListClubs: () => request('/club-admin/super/clubs'),
   superCreateClub: (data) =>

@@ -48,7 +48,7 @@ async def get_career_batting(session: AsyncSession, player_id: str, season_id: O
                 COALESCE(SUM(pss.ducks), 0) AS ducks,
                 COALESCE(SUM(pss.matches), 0) AS games
             FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id{season_clause}
+            LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id{season_clause}
             WHERE p.id = :pid
             GROUP BY p.id, p.name, p.organisation_id
         """),
@@ -85,7 +85,7 @@ async def get_career_bowling(session: AsyncSession, player_id: str, season_id: O
                 COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
                 ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS bowling_strike_rate
             FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id{season_clause}
+            LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id{season_clause}
             WHERE p.id = :pid
             GROUP BY p.id, p.name, p.organisation_id
         """),
@@ -117,7 +117,7 @@ async def get_career_fielding(session: AsyncSession, player_id: str, season_id: 
                 COALESCE(SUM(pss.stumpings), 0) AS total_stumpings,
                 COALESCE(SUM(pss.catches + pss.run_outs + pss.stumpings), 0) AS total_dismissals
             FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id{season_clause}
+            LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id{season_clause}
             WHERE p.id = :pid
             GROUP BY p.id, p.name, p.organisation_id
         """),
@@ -525,7 +525,7 @@ async def get_fielding_leaderboard(
             SUM(pss.run_outs) AS total_run_outs,
             SUM(pss.stumpings) AS total_stumpings,
             SUM(pss.catches + pss.run_outs + pss.stumpings) AS total_dismissals
-        FROM player_season_stats pss
+        FROM v_effective_player_season_stats pss
         JOIN players p ON p.id = pss.player_id
         JOIN seasons s ON s.id = pss.season_id
         WHERE p.organisation_id = :org_id
@@ -936,7 +936,7 @@ async def get_player_team_breakdown(
     season_totals = await session.execute(
         text(f"""
             SELECT pss.season_id, COALESCE(pss.matches, 0) AS matches
-            FROM player_season_stats pss
+            FROM v_effective_player_season_stats pss
             WHERE pss.player_id = CAST(:pid AS UUID)
               {season_clause_pss}
         """),
@@ -1074,7 +1074,7 @@ async def get_season_by_season(session: AsyncSession, player_id: str) -> list[di
                 SELECT
                     pss.*,
                     COALESCE(sa.canonical_season_id, pss.season_id) AS canonical_season_id
-                FROM player_season_stats pss
+                FROM v_effective_player_season_stats pss
                 LEFT JOIN season_aliases sa
                   ON sa.alias_season_id = pss.season_id
                  AND sa.undone_at IS NULL
@@ -1209,7 +1209,7 @@ async def get_upcoming_milestones_for_org(
             WITH recent_seasons AS (
                 SELECT s.id
                 FROM seasons s
-                JOIN player_season_stats pss ON pss.season_id = s.id
+                JOIN v_effective_player_season_stats pss ON pss.season_id = s.id
                 JOIN players p ON p.id = pss.player_id
                 WHERE p.organisation_id = :org_id
                 GROUP BY s.id, s.year, s.name
@@ -1218,7 +1218,7 @@ async def get_upcoming_milestones_for_org(
             ),
             active_players AS (
                 SELECT DISTINCT pss.player_id
-                FROM player_season_stats pss
+                FROM v_effective_player_season_stats pss
                 WHERE pss.season_id IN (SELECT id FROM recent_seasons)
             )
             SELECT
@@ -1229,7 +1229,7 @@ async def get_upcoming_milestones_for_org(
                 COALESCE(SUM(pss.matches), 0) AS career_matches,
                 COALESCE(SUM(pss.catches), 0) AS career_catches
             FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+            LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND p.id IN (SELECT player_id FROM active_players)
             GROUP BY p.id, p.name, p.display_name_override
@@ -1308,7 +1308,7 @@ async def get_recently_achieved_milestones_for_org(
             FROM (
                 SELECT s.id, s.year, s.name
                 FROM seasons s
-                JOIN player_season_stats pss ON pss.season_id = s.id
+                JOIN v_effective_player_season_stats pss ON pss.season_id = s.id
                 JOIN players p ON p.id = pss.player_id
                 WHERE p.organisation_id = :org_id
                   AND s.name NOT ILIKE '%winter%'
@@ -1333,7 +1333,7 @@ async def get_recently_achieved_milestones_for_org(
             SELECT player_id, milestone_type, milestone_value, achieved_at
             FROM milestones
             WHERE player_id IN (
-                SELECT DISTINCT pss.player_id FROM player_season_stats pss
+                SELECT DISTINCT pss.player_id FROM v_effective_player_season_stats pss
                 WHERE pss.season_id IN ({sid_list})
             ) AND achieved_at IS NOT NULL
         """)
@@ -1347,7 +1347,7 @@ async def get_recently_achieved_milestones_for_org(
         text(f"""
             WITH active_players AS (
                 SELECT DISTINCT pss.player_id
-                FROM player_season_stats pss
+                FROM v_effective_player_season_stats pss
                 WHERE pss.season_id IN ({sid_list})
             ),
             prior_totals AS (
@@ -1359,7 +1359,7 @@ async def get_recently_achieved_milestones_for_org(
                     COALESCE(SUM(pss.matches), 0) AS prior_matches,
                     COALESCE(SUM(pss.catches), 0) AS prior_catches
                 FROM players p
-                LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+                LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
                     AND pss.season_id NOT IN ({sid_list})
                 WHERE p.organisation_id = :org_id
                   AND p.id IN (SELECT player_id FROM active_players)
@@ -1375,7 +1375,7 @@ async def get_recently_achieved_milestones_for_org(
                 COALESCE(pss.matches, 0) AS season_matches,
                 COALESCE(pss.catches, 0) AS season_catches
             FROM prior_totals pt
-            LEFT JOIN player_season_stats pss ON pss.player_id = pt.player_id
+            LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = pt.player_id
                 AND pss.season_id IN ({sid_list})
         """),
         {"org_id": org_id}
@@ -1488,7 +1488,7 @@ async def get_player_activity(session: AsyncSession, player_id: str) -> dict:
                     ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                              NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
                  ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_bowling_figures
-            FROM player_season_stats pss
+            FROM v_effective_player_season_stats pss
             WHERE pss.player_id = :pid
         """),
         {"pid": player_id}
@@ -1721,7 +1721,7 @@ async def get_batting_leaderboard_extended(
             COALESCE(SUM(pss.fours), 0) AS total_fours,
             SUM(pss.ducks) AS ducks,
             SUM(pss.matches) AS games
-        FROM player_season_stats pss
+        FROM v_effective_player_season_stats pss
         JOIN players p ON p.id = pss.player_id
         JOIN seasons s ON s.id = pss.season_id
         WHERE p.organisation_id = :org_id
@@ -2017,7 +2017,7 @@ async def get_bowling_leaderboard_extended(
             SUM(pss.maidens) AS total_maidens,
             SUM(pss.overs) AS total_overs,
             COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors
-        FROM player_season_stats pss
+        FROM v_effective_player_season_stats pss
         JOIN players p ON p.id = pss.player_id
         JOIN seasons s ON s.id = pss.season_id
         WHERE p.organisation_id = :org_id
@@ -2320,7 +2320,7 @@ async def get_club_summary(
                 SUM(pss.runs) AS total_runs,
                 SUM(pss.wickets) AS total_wickets,
                 MAX(pss.high_score) AS highest_score
-            FROM player_season_stats pss
+            FROM v_effective_player_season_stats pss
             JOIN players p ON p.id = pss.player_id
             {where}
         """),
@@ -2384,7 +2384,7 @@ async def get_player_rankings(
         text(f"""
             WITH batting_agg AS (
                 SELECT pss.player_id, SUM(pss.runs) AS total_runs
-                FROM player_season_stats pss
+                FROM v_effective_player_season_stats pss
                 JOIN players p ON p.id = pss.player_id
                 WHERE p.organisation_id = :org_id{season_clause}
                 GROUP BY pss.player_id
@@ -2396,7 +2396,7 @@ async def get_player_rankings(
             ),
             bowling_agg AS (
                 SELECT pss.player_id, SUM(pss.wickets) AS total_wickets
-                FROM player_season_stats pss
+                FROM v_effective_player_season_stats pss
                 JOIN players p ON p.id = pss.player_id
                 WHERE p.organisation_id = :org_id{season_clause}
                 GROUP BY pss.player_id
@@ -2408,7 +2408,7 @@ async def get_player_rankings(
             ),
             fielding_agg AS (
                 SELECT pss.player_id, SUM(pss.catches) AS total_catches
-                FROM player_season_stats pss
+                FROM v_effective_player_season_stats pss
                 JOIN players p ON p.id = pss.player_id
                 WHERE p.organisation_id = :org_id{season_clause}
                 GROUP BY pss.player_id

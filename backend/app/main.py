@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config.settings import settings
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -432,6 +432,7 @@ app.include_router(og_preview.router)
 app.include_router(notifications.router)
 app.include_router(seo.router)
 app.include_router(families.router)
+app.include_router(manual_entries.router)
 
 # Serve uploaded files (hero images, gallery photos)
 _upload_dir = Path("/app/uploads")
