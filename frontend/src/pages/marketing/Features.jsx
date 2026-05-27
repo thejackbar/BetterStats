@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useState } from 'react'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
@@ -125,24 +126,55 @@ const SHORT_SECTIONS = [
   {
     title: 'Match Scorecards',
     desc: 'Full scorecards for every game — batting, bowling, fall of wickets, and partnerships — linked directly from player profiles.',
+    src: SCREENSHOT_PATHS.shortScorecard,
   },
   {
     title: 'StatLab',
     desc: 'A custom query builder for power users. Build your own leaderboards with any combination of metrics, filters, and thresholds. 50+ sortable metrics, multiple filter operators, preset queries.',
+    src: SCREENSHOT_PATHS.shortStatlab,
   },
   {
     title: 'Player Comparison',
     desc: 'Head-to-head side-by-side comparison of any two players across their full careers — batting, bowling, fielding, dismissals.',
+    src: SCREENSHOT_PATHS.shortCompare,
   },
   {
     title: 'Awards & Honours',
     desc: "Your club's full honours history in one place — annual awards, hall of fame, office bearers, association honours, and premierships. CSV bulk import for back-filling.",
+    src: SCREENSHOT_PATHS.shortAwards,
   },
   {
     title: 'Admin Tools',
     desc: 'Duplicate player merge, display name overrides, grade renames, CSV import/export, manual sync trigger, multiple admin logins — everything your stats volunteers need.',
+    src: SCREENSHOT_PATHS.shortAdmin,
   },
 ]
+
+// Card with optional screenshot thumbnail at top
+function ShortCard({ s, delay }) {
+  const [imgFailed, setImgFailed] = useState(false)
+  return (
+    <Reveal delay={delay}>
+      <div className="surface h-full overflow-hidden">
+        {s.src && !imgFailed && (
+          <div className="border-b pb-hairline overflow-hidden h-44 rounded-t-[calc(1rem-1px)]">
+            <img
+              src={s.src}
+              alt={s.title}
+              className="w-full h-full object-cover object-top"
+              onError={() => setImgFailed(true)}
+              loading="lazy"
+            />
+          </div>
+        )}
+        <div className="p-6">
+          <h3 className="text-lg font-semibold mb-2">{s.title}</h3>
+          <p className="text-sm text-pb-dim leading-relaxed">{s.desc}</p>
+        </div>
+      </div>
+    </Reveal>
+  )
+}
 
 // ─── Hero ────────────────────────────────────────────────────────────────
 function Hero() {
@@ -212,12 +244,7 @@ function ShortFeatures() {
         </Reveal>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {SHORT_SECTIONS.map((s, i) => (
-            <Reveal key={s.title} delay={(i % 3) * 80}>
-              <div className="surface p-6 h-full">
-                <h3 className="text-lg font-semibold mb-2">{s.title}</h3>
-                <p className="text-sm text-pb-dim leading-relaxed">{s.desc}</p>
-              </div>
-            </Reveal>
+            <ShortCard key={s.title} s={s} delay={(i % 3) * 80} />
           ))}
         </div>
       </div>
