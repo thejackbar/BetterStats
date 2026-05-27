@@ -78,7 +78,7 @@ async def get_career_bowling(session: AsyncSession, player_id: str, season_id: O
                 (ARRAY_AGG(pss.best_bowling_figures
                     ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                              NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-                 ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_bowling_figures,
+                 ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_bowling_figures,
                 COALESCE(SUM(pss.maidens), 0) AS total_maidens,
                 COALESCE(SUM(pss.overs), 0) AS total_overs,
                 COALESCE(SUM(pss.runs_conceded), 0) AS total_runs,
@@ -1105,7 +1105,7 @@ async def get_season_by_season(session: AsyncSession, player_id: str) -> list[di
                 (ARRAY_AGG(p.best_bowling_figures
                     ORDER BY p.best_bowling_wickets DESC NULLS LAST,
                              NULLIF(SPLIT_PART(p.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-                 ) FILTER (WHERE p.best_bowling_figures IS NOT NULL AND p.best_bowling_figures LIKE '%-%'))[1] AS best_bowling_figures,
+                 ) FILTER (WHERE p.best_bowling_figures IS NOT NULL AND p.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_bowling_figures,
                 SUM(p.five_wicket_innings) AS five_fors,
                 SUM(p.maidens) AS total_maidens,
                 SUM(p.catches) AS total_catches,
@@ -1487,7 +1487,7 @@ async def get_player_activity(session: AsyncSession, player_id: str) -> dict:
                 (ARRAY_AGG(pss.best_bowling_figures
                     ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                              NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-                 ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_bowling_figures
+                 ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_bowling_figures
             FROM v_effective_player_season_stats pss
             WHERE pss.player_id = :pid
         """),
@@ -2009,11 +2009,11 @@ async def get_bowling_leaderboard_extended(
             (ARRAY_AGG(pss.best_bowling_figures
                 ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                          NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-             ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_bowling_figures,
+             ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_bowling_figures,
             (ARRAY_AGG(NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer
                 ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                          NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-             ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_figures_runs,
+             ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_figures_runs,
             SUM(pss.maidens) AS total_maidens,
             SUM(pss.overs) AS total_overs,
             COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors

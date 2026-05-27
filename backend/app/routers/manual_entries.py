@@ -17,13 +17,14 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import uuid
 from datetime import datetime, timezone, date as date_cls
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,6 +81,16 @@ class _AggregateFields(BaseModel):
     fielding_run_outs: int = 0
     fielding_stumpings: int = 0
     notes: Optional[str] = None
+
+    @field_validator("bowling_best_figures", mode="before")
+    @classmethod
+    def _validate_bowling_figures(cls, v):
+        # Reuses the same parser as the CSV import path so single-entry,
+        # spreadsheet and bulk-CSV writes all agree on what's allowed.
+        try:
+            return _parse_bowling_figures(v)
+        except ValueError as e:
+            raise ValueError(str(e))
 
 
 class SeasonAdjustmentIn(_AggregateFields):
@@ -1130,6 +1141,38 @@ def _parse_bool(v) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "t"}
 
 
+_BOWLING_FIGURES_RE = re.compile(r"^\s*(\d+)\s*[-/]\s*(\d+)\s*$")
+_EXCEL_DATE_RE = re.compile(r"^\s*(\d+)[-/](Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b", re.IGNORECASE)
+
+
+def _parse_bowling_figures(v) -> Optional[str]:
+    """Normalize 'best bowling figures' input.
+
+    Accepts '4-25' or '4/25'; returns canonical '{wkts}-{runs}'. Empty/None
+    returns None. Anything else (including Excel's silent '1-Jul' coercion
+    of '1-7') raises ValueError with a clear message so the import surfaces
+    the bad row rather than poisoning the leaderboard SQL downstream.
+    """
+    if v is None:
+        return None
+    s = str(v).strip()
+    if not s:
+        return None
+    m = _EXCEL_DATE_RE.match(s)
+    if m:
+        raise ValueError(
+            f"'{s}' looks like Excel converted bowling figures into a date. "
+            f"Re-enter as text (prefix with a single quote in Excel, e.g. '4-25) "
+            f"or use the slash form like 4/25."
+        )
+    m = _BOWLING_FIGURES_RE.match(s)
+    if not m:
+        raise ValueError(
+            f"Bowling figures must be in the form 'wkts-runs' (e.g. '4-25'), got '{s}'"
+        )
+    return f"{int(m.group(1))}-{int(m.group(2))}"
+
+
 @router.get("/season-adjustments/template.csv")
 async def season_adjustments_template(
     current_user: User = Depends(get_current_user),
@@ -1243,7 +1286,9 @@ async def import_season_adjustments(
                     fields[col] = _parse_float(val)
                 elif col in BOOL_COLS_SEASON:
                     fields[col] = _parse_bool(val)
-                else:  # text fields: notes, bowling_best_figures
+                elif col == "bowling_best_figures":
+                    fields[col] = _parse_bowling_figures(val)
+                else:  # text fields: notes
                     fields[col] = (val or "").strip() or None
 
             # Upsert on the UNIQUE (player_id, season_id, grade_id) constraint

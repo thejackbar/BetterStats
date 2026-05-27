@@ -546,7 +546,7 @@ async def get_records(
             WHERE p.organisation_id = :org_id
               """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
               AND pss.best_bowling_figures IS NOT NULL
-              AND pss.best_bowling_figures LIKE '%-%'
+              AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'
               AND pss.best_bowling_wickets > 0
             ORDER BY pss.best_bowling_wickets DESC,
                      SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer ASC

@@ -453,7 +453,7 @@ async def get_bowling_stats(
                 (ARRAY_AGG(pss.best_bowling_figures
                     ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                              NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-                 ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_figures,
+                 ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_figures,
                 MAX(pss.best_bowling_wickets) AS best_wickets,
                 SUM(pss.five_wicket_innings) AS five_fors
             FROM player_season_stats pss
@@ -1721,7 +1721,7 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
                (ARRAY_AGG(pss.best_bowling_figures
                    ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                             NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-                ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures LIKE '%-%'))[1] AS best_figures,
+                ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_figures,
                ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average
         FROM player_season_stats pss JOIN players p ON p.id = pss.player_id
         WHERE pss.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND p.organisation_id = :o
