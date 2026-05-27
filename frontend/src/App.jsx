@@ -46,6 +46,7 @@ const AdminFamilies = lazy(() => import('./pages/admin/AdminFamilies'))
 const AdminGrades = lazy(() => import('./pages/admin/AdminGrades'))
 const AdminSync = lazy(() => import('./pages/admin/AdminSync'))
 const AdminPartnershipRecords = lazy(() => import('./pages/admin/AdminPartnershipRecords'))
+const AdminManualEntries = lazy(() => import('./pages/admin/AdminManualEntries'))
 const AdminMilestones = lazy(() => import('./pages/admin/AdminMilestones'))
 const AdminActivityLog = lazy(() => import('./pages/admin/AdminActivityLog'))
 const AdminChangelog = lazy(() => import('./pages/admin/AdminChangelog'))
@@ -119,6 +120,7 @@ export default function App() {
           <Route path="/admin/grades" element={<ProtectedRoute><AdminGrades /></ProtectedRoute>} />
           <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
           <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
+          <Route path="/admin/manual-entries" element={<ProtectedRoute><AdminManualEntries /></ProtectedRoute>} />
           <Route path="/admin/milestones" element={<ProtectedRoute><AdminMilestones /></ProtectedRoute>} />
           <Route path="/admin/activity" element={<ProtectedRoute><AdminActivityLog /></ProtectedRoute>} />
           <Route path="/admin/changelog" element={<ProtectedRoute><AdminChangelog /></ProtectedRoute>} />

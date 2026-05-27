@@ -49,6 +49,7 @@ const NAV_SECTIONS = [
       { to: '/admin/sync', label: 'Data Sync', cap: CAP.RUN_SYNC },
       { to: '/admin/families', label: 'Families', cap: CAP.MANAGE_FAMILIES },
       { to: '/admin/grades', label: 'Merge Grades', cap: CAP.MANAGE_MERGES },
+      { to: '/admin/manual-entries', label: 'Manual Entries', cap: CAP.MANAGE_MANUAL_ENTRIES },
       { to: '/admin/merge', label: 'Merge Players', cap: CAP.MANAGE_MERGES },
       { to: '/admin/milestones', label: 'Milestones', cap: CAP.MANAGE_MILESTONES },
       { to: '/admin/partnerships', label: 'Partnership Rec.', cap: CAP.MANAGE_AWARDS },

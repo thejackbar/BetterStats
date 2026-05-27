@@ -14,6 +14,7 @@ export const CAP = {
   MANAGE_USERS: 'manage_users',
   MANAGE_REPORTS: 'manage_reports',
   MANAGE_FAMILIES: 'manage_families',
+  MANAGE_MANUAL_ENTRIES: 'manage_manual_entries',
 }
 
 // Display metadata for the user-management UI checkboxes.
@@ -31,4 +32,5 @@ export const CAPABILITY_INFO = [
   { key: CAP.MANAGE_USERS, label: 'Manage users', hint: 'Invite club members + assign capabilities' },
   { key: CAP.MANAGE_REPORTS, label: 'Manage saved reports', hint: 'Approve / reject saved StatLab reports' },
   { key: CAP.MANAGE_FAMILIES, label: 'Manage families', hint: 'Create and edit player family groupings' },
+  { key: CAP.MANAGE_MANUAL_ENTRIES, label: 'Manual stat entry', hint: 'Add historical games + season/career adjustments. Reversible via audit log.' },
 ]

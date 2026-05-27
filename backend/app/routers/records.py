@@ -313,7 +313,7 @@ async def get_records(
                    ROUND(SUM(pss.runs)::numeric /
                        NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -340,7 +340,7 @@ async def get_records(
                    pss.high_score AS runs,
                    pss.is_hs_not_out AS not_out,
                    s.name AS season_name
-            FROM player_season_stats pss
+            FROM v_effective_player_season_stats pss
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id
@@ -372,7 +372,7 @@ async def get_records(
                    COALESCE(SUM(pss.batting_innings), 0) AS innings,
                    COALESCE(SUM(pss.matches), 0)         AS matches
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -399,7 +399,7 @@ async def get_records(
                    COALESCE(SUM(pss.runs), 0)     AS runs,
                    COALESCE(SUM(pss.matches), 0)  AS matches
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -426,7 +426,7 @@ async def get_records(
                    COALESCE(SUM(pss.runs), 0)     AS runs,
                    COALESCE(SUM(pss.matches), 0)  AS matches
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -451,7 +451,7 @@ async def get_records(
                    COALESCE(SUM(pss.ducks), 0)          AS ducks,
                    COALESCE(SUM(pss.batting_innings), 0) AS innings
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -476,7 +476,7 @@ async def get_records(
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    pss.runs, pss.batting_innings AS innings,
                    s.name AS season_name, s.year AS season_year
-            FROM player_season_stats pss
+            FROM v_effective_player_season_stats pss
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id AND pss.runs > 0
@@ -513,7 +513,7 @@ async def get_records(
                    ROUND(SUM(pss.runs_conceded)::numeric /
                        NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -540,7 +540,7 @@ async def get_records(
                    SPLIT_PART(pss.best_bowling_figures, '-', 1)::integer AS wickets,
                    SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer AS runs,
                    s.name AS season_name
-            FROM player_season_stats pss
+            FROM v_effective_player_season_stats pss
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id
@@ -574,7 +574,7 @@ async def get_records(
                    COALESCE(SUM(pss.wickets), 0) AS wickets,
                    COALESCE(SUM(pss.matches), 0) AS matches
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -603,7 +603,7 @@ async def get_records(
                    COALESCE(SUM(pss.wickets), 0) AS wickets,
                    COALESCE(SUM(pss.overs), 0)   AS overs
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -628,7 +628,7 @@ async def get_records(
                    COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
                    COALESCE(SUM(pss.wickets), 0)             AS wickets
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -653,7 +653,7 @@ async def get_records(
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    pss.wickets, pss.bowling_innings AS innings,
                    s.name AS season_name, s.year AS season_year
-            FROM player_season_stats pss
+            FROM v_effective_player_season_stats pss
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id AND pss.wickets > 0
@@ -955,7 +955,7 @@ async def get_records(
                    COALESCE(SUM(pss.matches), 0)          AS matches,
                    COUNT(DISTINCT pss.season_id)           AS seasons
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -1050,7 +1050,7 @@ async def get_records(
                    COUNT(DISTINCT pss.season_id)           AS seasons,
                    COALESCE(SUM(pss.matches), 0)          AS matches
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -1119,7 +1119,7 @@ async def get_records(
                        NULLIF(SUM(pss.wickets), 0), 2) AS bowling_average,
                    ROUND(COALESCE(SUM(pss.runs), 0) * 1.5 + COALESCE(SUM(pss.wickets), 0) * 10, 2) AS index_score
             FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
               """ + pss_season_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
