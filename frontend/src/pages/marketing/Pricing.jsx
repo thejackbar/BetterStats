@@ -69,7 +69,7 @@ export default function Pricing() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
-      <div className="max-w-4xl mx-auto px-4 py-16">
+      <div id="main-content" tabIndex="-1" className="max-w-4xl mx-auto px-4 py-16">
         <div className="text-center mb-16">
           <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">Transparent pricing</p>
           <h1 className="font-display font-bold text-[48px] md:text-[60px] tracking-tight text-pb-text mb-4 leading-tight">Simple pricing.</h1>
@@ -96,6 +96,7 @@ export default function Pricing() {
               href={FORM_URL}
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="Request access — monthly plan (opens in new tab)"
               className="block w-full py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-text text-center border pb-hairline hover:text-pb-text"
             >
               REQUEST ACCESS
@@ -125,6 +126,7 @@ export default function Pricing() {
               href={FORM_URL}
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="Request access — annual plan (opens in new tab)"
               className="block w-full py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg text-center"
               style={{ background: 'var(--pb-accent)' }}
             >
@@ -168,6 +170,7 @@ export default function Pricing() {
               href={FORM_URL}
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="Register interest in DeepAnalytics (opens in new tab)"
               className="inline-block px-6 py-2.5 border rounded font-mono text-[11px] tracking-wide3 font-semibold text-pb-dim hover:text-pb-text transition-colors"
               style={{ borderColor: 'var(--pb-faint)' }}
             >

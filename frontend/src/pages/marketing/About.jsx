@@ -13,7 +13,7 @@ export default function About() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
-      <div className="max-w-3xl mx-auto px-4 py-16">
+      <div id="main-content" tabIndex="-1" className="max-w-3xl mx-auto px-4 py-16">
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">About</p>
         <h1 className="font-display font-bold text-[40px] md:text-[56px] leading-none tracking-tight mb-10">
           ABOUT<br />

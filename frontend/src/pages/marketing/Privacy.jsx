@@ -11,7 +11,7 @@ export default function Privacy() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
-      <div className="max-w-3xl mx-auto px-4 py-16">
+      <div id="main-content" tabIndex="-1" className="max-w-3xl mx-auto px-4 py-16">
         <div className="inline-block bg-pb-amber/10 border border-pb-amber/30 text-pb-amber font-mono text-[10px] px-3 py-1 rounded-full mb-6">
           Draft — review before launch
         </div>

@@ -17,6 +17,14 @@ export default function MarketingNav() {
 
   return (
     <nav className="bg-pb-surface border-b pb-hairline-b sticky top-0 z-50">
+      {/* Skip to main content — visible on focus for keyboard users */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[200] focus:px-4 focus:py-2 focus:rounded focus:bg-pb-surface focus:text-pb-text focus:font-mono focus:text-xs focus:border focus:pb-hairline focus:outline-none"
+      >
+        Skip to main content
+      </a>
+
       <div className="max-w-5xl mx-auto px-4 flex items-center justify-between h-16">
         <Link to="/" className="flex items-center gap-2.5 group">
           <img
@@ -38,7 +46,7 @@ export default function MarketingNav() {
               className={`px-3 py-2 rounded font-mono text-[11px] tracking-wide2 transition-colors ${
                 pathname === link.to
                   ? 'text-pb-text'
-                  : 'text-pb-faint hover:text-pb-text'
+                  : 'text-pb-dim hover:text-pb-text'
               }`}
             >
               {link.label.toUpperCase()}
@@ -55,10 +63,14 @@ export default function MarketingNav() {
 
         {/* Mobile hamburger */}
         <button
-          className="md:hidden text-pb-faint hover:text-pb-text p-2"
+          type="button"
+          className="md:hidden text-pb-dim hover:text-pb-text p-2"
           onClick={() => setOpen(o => !o)}
+          aria-label={open ? 'Close navigation' : 'Open navigation'}
+          aria-expanded={open}
+          aria-controls="mobile-nav"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             {open
               ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -68,12 +80,12 @@ export default function MarketingNav() {
       </div>
 
       {open && (
-        <div className="md:hidden border-t pb-hairline-t bg-pb-surface px-4 py-3 flex flex-col gap-1">
+        <div id="mobile-nav" className="md:hidden border-t pb-hairline-t bg-pb-surface px-4 py-3 flex flex-col gap-1">
           {LINKS.map(link => (
             <Link
               key={link.to}
               to={link.to}
-              className="font-mono text-[11px] tracking-wide2 text-pb-faint hover:text-pb-text py-2 transition-colors"
+              className="font-mono text-[11px] tracking-wide2 text-pb-dim hover:text-pb-text py-2 transition-colors"
               onClick={() => setOpen(false)}
             >
               {link.label.toUpperCase()}

@@ -12,7 +12,7 @@ export default function Contact() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
-      <div className="max-w-2xl mx-auto px-4 py-16">
+      <div id="main-content" tabIndex="-1" className="max-w-2xl mx-auto px-4 py-16">
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">Contact</p>
         <h1 className="font-display font-bold text-[40px] md:text-[56px] leading-none tracking-tight mb-6">
           GET IN<br />
@@ -32,6 +32,7 @@ export default function Contact() {
               href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform"
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="Open request form (opens in new tab)"
               className="inline-block px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
