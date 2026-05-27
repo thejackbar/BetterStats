@@ -1383,6 +1383,31 @@ async def sync_grassroots_game_level_data(
 
                 bat_count = bowl_count = field_count = part_count = fow_count = appear_count = 0
 
+                # Build the set of canonical pids on OUR team for this specific
+                # game. Used as the gate for every per-innings stat insert
+                # below: a player who's currently in known_player_ids but
+                # played AGAINST us in this game (e.g. was on another club's
+                # roster that season) would otherwise have their opposition
+                # batting/bowling/fielding picked up as ours, inflating their
+                # match count and stats.
+                our_team_pids: set[uuid.UUID] = set()
+                our_team_name = ""
+                if our_team:
+                    our_team_name = our_team.get("displayName") or our_team.get("name") or ""
+                    for roster_p in (our_team.get("players") or []):
+                        rpid_str = roster_p.get("participantId")
+                        if not rpid_str:
+                            continue
+                        try:
+                            rpid = uuid.UUID(rpid_str)
+                        except ValueError:
+                            continue
+                        if rpid not in known_player_ids:
+                            rpid = merged_away.get(rpid)
+                            if rpid is None or rpid not in known_player_ids:
+                                continue
+                        our_team_pids.add(rpid)
+
                 # Roster: insert one GameAppearance per club player listed in the
                 # team-sheet. Covers selected players who didn't bat/bowl/take a
                 # dismissal (forfeits, washouts, late-order batters who didn't
@@ -1390,7 +1415,6 @@ async def sync_grassroots_game_level_data(
                 # match-count which is based on selection, not stat lines.
                 if our_team:
                     seen_appear_pids: set[uuid.UUID] = set()
-                    our_team_name = our_team.get("displayName") or our_team.get("name") or ""
                     for roster_p in (our_team.get("players") or []):
                         rpid_str = roster_p.get("participantId")
                         if not rpid_str:
@@ -1437,9 +1461,9 @@ async def sync_grassroots_game_level_data(
                             pid = uuid.UUID(pid_str)
                         except ValueError:
                             continue
-                        if pid not in known_player_ids:
+                        if pid not in our_team_pids:
                             pid = merged_away.get(pid)
-                            if pid is None or pid not in known_player_ids:
+                            if pid is None or pid not in our_team_pids:
                                 continue
                         dt_id = row.get("dismissalTypeId") or 0
                         if dt_id == 0:
@@ -1479,9 +1503,9 @@ async def sync_grassroots_game_level_data(
                             pid = uuid.UUID(pid_str)
                         except ValueError:
                             continue
-                        if pid not in known_player_ids:
+                        if pid not in our_team_pids:
                             pid = merged_away.get(pid)
-                            if pid is None or pid not in known_player_ids:
+                            if pid is None or pid not in our_team_pids:
                                 continue
                         econ = None
                         try:
@@ -1509,9 +1533,9 @@ async def sync_grassroots_game_level_data(
                             pid = uuid.UUID(pid_str)
                         except ValueError:
                             continue
-                        if pid not in known_player_ids:
+                        if pid not in our_team_pids:
                             pid = merged_away.get(pid)
-                            if pid is None or pid not in known_player_ids:
+                            if pid is None or pid not in our_team_pids:
                                 continue
                         catches_wk = row.get("wicketKeeperCatches") or 0
                         catches_total = row.get("totalCatches")
@@ -1527,15 +1551,24 @@ async def sync_grassroots_game_level_data(
                         field_count += 1
 
                     for row in fow_rows:
+                        # Resolve player_id only when the falling batter was
+                        # on OUR team — opposition batters who happen to also
+                        # be in our players table (current club members who
+                        # played AGAINST us in this game) must not be tagged,
+                        # or their personal FOW history gets polluted.
+                        # The row itself is still inserted so the game-level
+                        # scorecard view can display both innings' wickets.
                         pid = None
                         pid_str = row.get("participantId")
                         if pid_str:
                             try:
-                                pid = uuid.UUID(pid_str)
-                                if pid not in known_player_ids:
-                                    pid = merged_away.get(pid)
-                                    if pid is not None and pid not in known_player_ids:
-                                        pid = None
+                                pid_try = uuid.UUID(pid_str)
+                                if pid_try in our_team_pids:
+                                    pid = pid_try
+                                else:
+                                    pid_try = merged_away.get(pid_try)
+                                    if pid_try is not None and pid_try in our_team_pids:
+                                        pid = pid_try
                             except ValueError:
                                 pid = None
                         wkt = row.get("order")
@@ -1578,9 +1611,9 @@ async def sync_grassroots_game_level_data(
                                 _bc = uuid.UUID(_bp)
                             except ValueError:
                                 continue
-                            if _bc not in known_player_ids:
+                            if _bc not in our_team_pids:
                                 _bc = merged_away.get(_bc)
-                            if _bc in known_player_ids:
+                            if _bc in our_team_pids:
                                 club_n += 1
                         is_club_innings = total_n > 0 and club_n * 2 > total_n
 
@@ -1591,9 +1624,9 @@ async def sync_grassroots_game_level_data(
                             if v:
                                 try:
                                     cand = uuid.UUID(v)
-                                    if cand not in known_player_ids:
+                                    if cand not in our_team_pids:
                                         cand = merged_away.get(cand)
-                                    if cand and cand in known_player_ids:
+                                    if cand and cand in our_team_pids:
                                         if dst == "b1":
                                             b1_id = cand
                                         else:
@@ -1617,7 +1650,7 @@ async def sync_grassroots_game_level_data(
                 # to one of our players. Helper builds short-name → pid maps
                 # from each innings' bowling/fielding rows and resolves through
                 # merged_away. Reused by app.scripts.rebuild_bowler_wickets.
-                for bw in extract_bowler_wickets(scorecard, match_uuid, known_player_ids, merged_away):
+                for bw in extract_bowler_wickets(scorecard, match_uuid, our_team_pids, merged_away):
                     session.add(bw)
 
                 if bat_count == 0 and bowl_count == 0 and appear_count == 0:

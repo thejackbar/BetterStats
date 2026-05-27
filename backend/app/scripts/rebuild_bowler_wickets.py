@@ -84,12 +84,36 @@ async def rebuild_for_org(org_id_str: str) -> None:
 
     inserted_total = 0
     errors = 0
+    org_id_str_lower = org_id_str.lower()
     for i, gid in enumerate(game_ids, start=1):
         try:
             scorecard = await get_match_scorecard(str(gid))
             if not scorecard:
                 continue
-            rows = extract_bowler_wickets(scorecard, gid, known_player_ids, merged_away)
+            # Restrict to bowlers on OUR team in this specific game.
+            # A current club player who bowled AGAINST us in this game would
+            # otherwise have their dismissals credited to our team.
+            our_team = next(
+                (t for t in (scorecard.get("teams") or [])
+                 if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id_str_lower),
+                None,
+            )
+            our_team_pids: set = set()
+            if our_team:
+                for roster_p in (our_team.get("players") or []):
+                    rpid_str = roster_p.get("participantId")
+                    if not rpid_str:
+                        continue
+                    try:
+                        rpid = uuid.UUID(rpid_str)
+                    except ValueError:
+                        continue
+                    if rpid not in known_player_ids:
+                        rpid = merged_away.get(rpid)
+                        if rpid is None or rpid not in known_player_ids:
+                            continue
+                    our_team_pids.add(rpid)
+            rows = extract_bowler_wickets(scorecard, gid, our_team_pids, merged_away)
             if rows:
                 async with async_session_maker() as session:
                     for r in rows:

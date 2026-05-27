@@ -1823,6 +1823,172 @@ async def backfill_aggregates(
     return {"inserted": inserted, "org_id": str(club.id)}
 
 
+@router.post("/cleanup-opposition-stats")
+async def cleanup_opposition_stats(
+    current_user: User = Depends(require_cap(RUN_HARD_REFRESH)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete per-game stat rows belonging to opposition players.
+
+    Pre-fix, the GR scorecard parser gated stat inserts on "is this pid in
+    OUR org's players table" rather than "is this pid on OUR team in THIS
+    game". So a current club member who played AGAINST us in a match (on
+    another club's roster that season) had their opposition batting /
+    bowling / fielding picked up as ours, inflating their match count and
+    career stats.
+
+    This endpoint runs a one-off cleanup: for every game where the roster
+    was captured (>= 1 game_appearance), drop per-game rows whose player
+    isn't in that game's roster. Then deletes player_season_stats rows
+    that become orphaned (no per-game backing AND no appearance) so the
+    headline match count recomputes correctly.
+
+    Safe to re-run. Only operates on games whose grade → season belongs to
+    this org. Games where the roster was never captured (older syncs) are
+    left alone defensively — we can't tell what's opposition there.
+    """
+    org_id = str(club.id)
+    org_param = {"oid": org_id}
+
+    org_games_cte = """
+        WITH org_games AS (
+            SELECT g.id
+            FROM games g
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = CAST(:oid AS UUID)
+        ),
+        roster_games AS (
+            SELECT DISTINCT game_id FROM game_appearances
+            WHERE game_id IN (SELECT id FROM org_games)
+        )
+    """
+
+    deleted = {}
+
+    for table in ("batting_innings", "bowling_spells", "fielding_stats"):
+        res = await db.execute(
+            _text(f"""
+                {org_games_cte}
+                DELETE FROM {table} t
+                WHERE t.game_id IN (SELECT game_id FROM roster_games)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM game_appearances ga
+                    WHERE ga.game_id = t.game_id AND ga.player_id = t.player_id
+                  )
+            """),
+            org_param,
+        )
+        deleted[table] = res.rowcount
+
+    # FOW: clear pid attribution only (keep the row so opposition-innings
+    # wicket falls still render on the scorecard, just without a player tag).
+    res = await db.execute(
+        _text(f"""
+            {org_games_cte}
+            UPDATE fall_of_wickets fow
+            SET player_id = NULL
+            WHERE fow.game_id IN (SELECT game_id FROM roster_games)
+              AND fow.player_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM game_appearances ga
+                WHERE ga.game_id = fow.game_id AND ga.player_id = fow.player_id
+              )
+        """),
+        org_param,
+    )
+    deleted["fall_of_wickets_pid_cleared"] = res.rowcount
+
+    # Partnerships: drop rows where neither batter is on our team in that
+    # game. (Single-batter-unknown rows are kept — at least one tagged
+    # partner means it's our innings.)
+    res = await db.execute(
+        _text(f"""
+            {org_games_cte}
+            DELETE FROM partnerships p
+            WHERE p.game_id IN (SELECT game_id FROM roster_games)
+              AND NOT EXISTS (
+                SELECT 1 FROM game_appearances ga
+                WHERE ga.game_id = p.game_id
+                  AND ga.player_id IN (p.batter1_id, p.batter2_id)
+              )
+        """),
+        org_param,
+    )
+    deleted["partnerships"] = res.rowcount
+
+    # Bowler wickets: drop rows where the bowler wasn't on our team.
+    res = await db.execute(
+        _text(f"""
+            {org_games_cte}
+            DELETE FROM bowler_wickets bw
+            WHERE bw.game_id IN (SELECT game_id FROM roster_games)
+              AND NOT EXISTS (
+                SELECT 1 FROM game_appearances ga
+                WHERE ga.game_id = bw.game_id AND ga.player_id = bw.bowler_id
+              )
+        """),
+        org_param,
+    )
+    deleted["bowler_wickets"] = res.rowcount
+
+    # Drop phantom player_season_stats rows: (player, season) pairs that
+    # now have no per-game data AND no game_appearance backing. These were
+    # synthesised by the backfill from the (now-deleted) opposition rows.
+    # Restricting the scope to "player is in our org" preserves pre-
+    # scorecard-era aggregate-only rows for players from other orgs.
+    res = await db.execute(
+        _text("""
+            DELETE FROM player_season_stats pss
+            USING players pl
+            WHERE pss.player_id = pl.id
+              AND pl.organisation_id = CAST(:oid AS UUID)
+              AND NOT EXISTS (
+                SELECT 1 FROM batting_innings bi
+                JOIN games g ON g.id = bi.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                WHERE bi.player_id = pss.player_id
+                  AND gr.season_id = pss.season_id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM bowling_spells bs
+                JOIN games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                WHERE bs.player_id = pss.player_id
+                  AND gr.season_id = pss.season_id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM fielding_stats fs
+                JOIN games g ON g.id = fs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                WHERE fs.player_id = pss.player_id
+                  AND gr.season_id = pss.season_id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM game_appearances ga
+                JOIN games g ON g.id = ga.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                WHERE ga.player_id = pss.player_id
+                  AND gr.season_id = pss.season_id
+              )
+        """),
+        org_param,
+    )
+    deleted["player_season_stats_phantom"] = res.rowcount
+
+    await db.commit()
+
+    # Re-run the per-game backfill so matches/runs/wickets are recomputed
+    # from the cleaned per-game tables for any pair that still has data
+    # but whose pss row was either deleted above or never existed.
+    from app.services.sync import _backfill_missing_season_stats
+    backfilled = await _backfill_missing_season_stats(org_id)
+    deleted["player_season_stats_backfilled"] = backfilled
+
+    return {"org_id": org_id, "deleted": deleted}
+
+
 @router.delete("/sync-runs")
 async def clear_sync_runs(
     current_user: User = Depends(get_current_user),
