@@ -3,6 +3,7 @@ export const POSTS = [
     slug: 'why-your-cricket-club-needs-a-public-stats-page',
     title: 'Why Every Cricket Club Needs a Public Stats Page',
     date: '2026-05-26',
+    image: '/marketing/blog/why-stats-page.jpg',
     description: 'Players talk about their stats. Parents follow their kids\' progress. Sponsors want to know who they\'re backing. None of them are well served by a PDF fixtures list. Here\'s what a proper public stats platform changes.',
     readTime: '5 min read',
     content: [
@@ -30,6 +31,7 @@ export const POSTS = [
     slug: 'what-your-club-lost-when-it-moved-to-playhq',
     title: 'What Your Club Lost When It Moved to PlayHQ (And How to Get It Back)',
     date: '2026-05-24',
+    image: '/marketing/blog/playhq-migration.jpg',
     description: 'When Australian cricket clubs migrated to PlayHQ, the years of rich MyCricket history didn\'t come with them. The data didn\'t disappear — but the visibility did. Here\'s what was lost and how BetterStats recovers it.',
     readTime: '5 min read',
     content: [
@@ -62,6 +64,7 @@ export const POSTS = [
     slug: 'betterstats-season-yearbook',
     title: 'The BetterStats Season Yearbook: Your Club\'s Story, Automatically Generated',
     date: '2026-05-22',
+    image: '/marketing/blog/season-yearbook.jpg',
     description: 'Every season your club plays 100+ games and generates thousands of performances. BetterStats turns that data into a proper digital yearbook — auto-populated with stats and ready for your editorial content.',
     readTime: '5 min read',
     content: [
@@ -102,6 +105,7 @@ export const POSTS = [
     slug: 'how-cricket-statistics-build-club-culture',
     title: 'How Cricket Statistics Build Club Culture',
     date: '2026-05-21',
+    image: '/marketing/blog/club-culture.jpg',
     description: 'The strongest cricket clubs share something beyond talented players: a sense of history and identity. Statistics are the raw material of that culture. Here\'s how tracking them properly changes a club.',
     readTime: '5 min read',
     content: [
@@ -129,6 +133,7 @@ export const POSTS = [
     slug: 'cricket-milestones-numbers-that-define-a-career',
     title: 'Cricket Milestones: The Numbers That Define a Career',
     date: '2026-05-23',
+    image: '/marketing/blog/milestones.jpg',
     description: 'Cricket is a sport of numbers. Runs, wickets, and games accumulate over careers spanning 20+ years. Along the way, certain thresholds become landmarks. BetterStats tracks every one of them automatically.',
     readTime: '4 min read',
     content: [
@@ -167,6 +172,7 @@ export const POSTS = [
     slug: 'what-is-a-good-batting-average-in-club-cricket',
     title: 'What Is a Good Batting Average in Club Cricket?',
     date: '2026-05-20',
+    image: '/marketing/blog/batting-average.jpg',
     description: 'A guide to understanding batting averages at club level — what numbers to aim for, how grades affect expectations, and why career averages tell a different story to season averages.',
     readTime: '5 min read',
     content: [
@@ -196,6 +202,7 @@ export const POSTS = [
     slug: '5-reasons-your-cricket-club-is-losing-its-stats-history',
     title: '5 Reasons Your Cricket Club Is Losing Its Stats History',
     date: '2026-05-15',
+    image: '/marketing/blog/stats-history.jpg',
     description: 'Most Australian cricket clubs have been running games for decades. Yet ask for career stats on a player who left five years ago, and you\'ll often get a shrug. Here\'s why club cricket history disappears.',
     readTime: '4 min read',
     content: [
@@ -223,6 +230,7 @@ export const POSTS = [
     slug: 'understanding-bowling-economy-rate-in-club-cricket',
     title: 'Understanding Bowling Economy Rate in Club Cricket',
     date: '2026-05-10',
+    image: '/marketing/blog/bowling-economy.jpg',
     description: 'Bowling economy rate is one of the most useful numbers in limited-overs selection, yet it\'s often misread at club level. Here\'s how to use it properly — including what\'s actually good by format.',
     readTime: '5 min read',
     content: [
