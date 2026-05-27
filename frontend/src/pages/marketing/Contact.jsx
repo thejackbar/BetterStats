@@ -7,24 +7,29 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 
 const FORMSPREE_URL = `https://formspree.io/f/${FORMSPREE_ID}`
 
-const AU_STATES = ['WA', 'NSW', 'VIC', 'QLD', 'SA', 'TAS', 'NT', 'ACT']
-
 const GRADES_OPTIONS = ['1–2 grades', '3–5 grades', '6–9 grades', '10+ grades']
 
-const REFERRAL_OPTIONS = [
-  'Word of mouth / referral',
-  'Social media (Instagram, Facebook, X)',
-  'Google search',
-  'Cricket association or district',
-  'Other',
+const STORAGE_OPTIONS = [
+  'Spreadsheets (Excel / Google Sheets)',
+  'MyCricket / PlayHQ only',
+  'Another stats software',
+  'Physical scorebooks only',
+  "We've largely lost our history",
+]
+
+const TIMELINE_OPTIONS = [
+  'As soon as possible',
+  'Before next season',
+  'Just exploring for now',
 ]
 
 const EMPTY_FIELDS = {
   name: '', club: '', email: '', phone: '',
-  state: '', grades: '', playhq: '', referral: '', message: '',
+  association: '', grades: '', storage: '', timeline: '',
+  playhq: '', message: '',
 }
 
-function Field({ label, id, required, optional, error, children }) {
+function Field({ label, id, required, optional, hint, error, children }) {
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium mb-1.5">
@@ -33,10 +38,34 @@ function Field({ label, id, required, optional, error, children }) {
         {optional && <span className="text-pb-faint text-xs font-normal ml-1">(optional)</span>}
       </label>
       {children}
+      {hint && !error && <p className="mt-1 text-xs text-pb-faint">{hint}</p>}
       {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
     </div>
   )
 }
+
+// Shared styles — solid dark background so typed text is always legible
+const BASE_INPUT = [
+  'w-full rounded-lg px-4 py-2.5 text-sm',
+  'text-white placeholder:text-pb-faint',       // explicit white for typed text
+  'bg-[#161b27] border border-pb-hairline',      // solid surface, no opacity
+  'focus:outline-none focus:border-accent/60 transition-colors',
+].join(' ')
+
+function inputCls(field, errors) {
+  return `${BASE_INPUT} ${errors[field] ? 'border-red-500/60' : ''}`
+}
+
+function selectCls(field, errors) {
+  return `${inputCls(field, errors)} appearance-none`
+}
+
+const ChevronIcon = () => (
+  <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pb-faint"
+    fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+  </svg>
+)
 
 function ContactForm() {
   const [fields, setFields] = useState(EMPTY_FIELDS)
@@ -47,11 +76,15 @@ function ContactForm() {
 
   function validate() {
     const e = {}
-    if (!fields.name.trim())  e.name  = 'Your name is required.'
-    if (!fields.club.trim())  e.club  = 'Club name is required.'
-    if (!fields.email.trim()) e.email = 'Email address is required.'
+    if (!fields.name.trim())        e.name        = 'Your name is required.'
+    if (!fields.club.trim())        e.club        = 'Club name is required.'
+    if (!fields.email.trim())       e.email       = 'Email address is required.'
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email)) e.email = 'Please enter a valid email.'
-    if (!fields.state)        e.state = 'Please select your state.'
+    if (!fields.phone.trim())       e.phone       = 'Phone number is required.'
+    if (!fields.association.trim()) e.association = 'Association or competition is required.'
+    if (!fields.grades)             e.grades      = 'Please select the number of grades.'
+    if (!fields.storage)            e.storage     = 'Please select your current stats setup.'
+    if (!fields.timeline)           e.timeline    = 'Please select a timeline.'
     return e
   }
 
@@ -62,21 +95,21 @@ function ContactForm() {
     setErrors({})
     setStatus('submitting')
     try {
-      const state = fields.state || '?'
       const res = await fetch(FORMSPREE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
-          name:     fields.name,
-          club:     fields.club,
-          email:    fields.email,
-          phone:    fields.phone    || '—',
-          state:    fields.state,
-          grades:   fields.grades   || '—',
-          playhq:   fields.playhq   || '—',
-          referral: fields.referral || '—',
-          message:  fields.message  || '—',
-          _subject: `BetterStats enquiry — ${fields.club} (${state})`,
+          name:        fields.name,
+          club:        fields.club,
+          email:       fields.email,
+          phone:       fields.phone,
+          association: fields.association,
+          grades:      fields.grades,
+          storage:     fields.storage,
+          timeline:    fields.timeline,
+          playhq:      fields.playhq  || '—',
+          message:     fields.message || '—',
+          _subject: `BetterStats enquiry — ${fields.club} · ${fields.association}`,
         }),
       })
       const data = await res.json()
@@ -89,12 +122,6 @@ function ContactForm() {
       setStatus('error')
     }
   }
-
-  const inputCls = (field) =>
-    `w-full bg-pb-surface2/50 border ${errors[field] ? 'border-red-500/60' : 'border-pb-hairline'} rounded-lg px-4 py-2.5 text-sm text-pb-text placeholder:text-pb-faint focus:outline-none focus:border-accent/60 transition-colors`
-
-  const selectCls = (field) =>
-    `w-full bg-pb-surface2/50 border ${errors[field] ? 'border-red-500/60' : 'border-pb-hairline'} rounded-lg px-4 py-2.5 text-sm text-pb-text focus:outline-none focus:border-accent/60 transition-colors appearance-none`
 
   if (status === 'success') {
     return (
@@ -128,107 +155,97 @@ function ContactForm() {
         {/* Name + Club */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Your name" id="name" required error={errors.name}>
-            <input
-              id="name" type="text" name="name" autoComplete="name"
+            <input id="name" type="text" name="name" autoComplete="name"
               placeholder="Jack Barendse"
               value={fields.name} onChange={set('name')}
-              className={inputCls('name')}
-            />
+              className={inputCls('name', errors)} />
           </Field>
           <Field label="Club name" id="club" required error={errors.club}>
-            <input
-              id="club" type="text" name="club"
+            <input id="club" type="text" name="club"
               placeholder="Applecross CC"
               value={fields.club} onChange={set('club')}
-              className={inputCls('club')}
-            />
+              className={inputCls('club', errors)} />
           </Field>
         </div>
 
         {/* Email + Phone */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Email address" id="email" required error={errors.email}>
-            <input
-              id="email" type="email" name="email" autoComplete="email"
+            <input id="email" type="email" name="email" autoComplete="email"
               placeholder="jack@applecrosscc.com.au"
               value={fields.email} onChange={set('email')}
-              className={inputCls('email')}
-            />
+              className={inputCls('email', errors)} />
           </Field>
-          <Field label="Phone" id="phone" optional>
-            <input
-              id="phone" type="tel" name="phone" autoComplete="tel"
+          <Field label="Phone number" id="phone" required error={errors.phone}>
+            <input id="phone" type="tel" name="phone" autoComplete="tel"
               placeholder="0400 000 000"
               value={fields.phone} onChange={set('phone')}
-              className={inputCls('phone')}
-            />
+              className={inputCls('phone', errors)} />
           </Field>
         </div>
 
-        {/* State + Number of grades */}
+        {/* Association + Grades */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="State / territory" id="state" required error={errors.state}>
-            <div className="relative">
-              <select
-                id="state" name="state"
-                value={fields.state} onChange={set('state')}
-                className={selectCls('state')}
-              >
-                <option value="" disabled>Select state…</option>
-                {AU_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pb-faint" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-            </div>
+          <Field label="Association / competition" id="association" required error={errors.association}>
+            <input id="association" type="text" name="association"
+              placeholder="e.g. WACA Sub-District, SACA"
+              value={fields.association} onChange={set('association')}
+              className={inputCls('association', errors)} />
           </Field>
-          <Field label="How many grades do you field?" id="grades" optional>
+          <Field label="How many grades do you field?" id="grades" required error={errors.grades}>
             <div className="relative">
-              <select
-                id="grades" name="grades"
+              <select id="grades" name="grades"
                 value={fields.grades} onChange={set('grades')}
-                className={selectCls('grades')}
-              >
-                <option value="">Not sure yet…</option>
+                className={selectCls('grades', errors)}>
+                <option value="" disabled>Select…</option>
                 {GRADES_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
-              <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pb-faint" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              <ChevronIcon />
             </div>
           </Field>
         </div>
 
-        {/* PlayHQ URL */}
-        <Field label="PlayHQ club URL" id="playhq" optional>
-          <input
-            id="playhq" type="url" name="playhq"
-            placeholder="e.g. play.cricket.com.au/club/..."
-            value={fields.playhq} onChange={set('playhq')}
-            className={inputCls('playhq')}
-          />
-          <p className="mt-1 text-xs text-pb-faint">Lets us pull your real data for a personalised demo.</p>
-        </Field>
-
-        {/* How did you hear */}
-        <Field label="How did you hear about BetterStats?" id="referral" optional>
+        {/* Current stats storage */}
+        <Field label="How do you currently store your historical data?" id="storage" required error={errors.storage}>
           <div className="relative">
-            <select
-              id="referral" name="referral"
-              value={fields.referral} onChange={set('referral')}
-              className={selectCls('referral')}
-            >
-              <option value="">Select one…</option>
-              {REFERRAL_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+            <select id="storage" name="storage"
+              value={fields.storage} onChange={set('storage')}
+              className={selectCls('storage', errors)}>
+              <option value="" disabled>Select…</option>
+              {STORAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pb-faint" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            <ChevronIcon />
           </div>
         </Field>
 
-        {/* Message */}
+        {/* When hoping to start */}
+        <Field label="When are you hoping to get started?" id="timeline" required error={errors.timeline}>
+          <div className="relative">
+            <select id="timeline" name="timeline"
+              value={fields.timeline} onChange={set('timeline')}
+              className={selectCls('timeline', errors)}>
+              <option value="" disabled>Select…</option>
+              {TIMELINE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <ChevronIcon />
+          </div>
+        </Field>
+
+        {/* PlayHQ URL — optional */}
+        <Field label="PlayHQ club URL" id="playhq" optional
+          hint="Lets us pull your real data for a personalised demo.">
+          <input id="playhq" type="url" name="playhq"
+            placeholder="e.g. play.cricket.com.au/club/..."
+            value={fields.playhq} onChange={set('playhq')}
+            className={inputCls('playhq', errors)} />
+        </Field>
+
+        {/* Message — optional */}
         <Field label="Anything else we should know?" id="message" optional>
-          <textarea
-            id="message" name="message" rows={3}
-            placeholder="What are you hoping to get out of BetterStats? Any context about your club's history or current setup is useful."
+          <textarea id="message" name="message" rows={3}
+            placeholder="Any extra context about your club's history, current setup, or what you're hoping to get out of BetterStats."
             value={fields.message} onChange={set('message')}
-            className={`${inputCls('message')} resize-none`}
-          />
+            className={`${inputCls('message', errors)} resize-none`} />
         </Field>
 
         {status === 'error' && (
