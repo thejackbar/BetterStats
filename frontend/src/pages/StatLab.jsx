@@ -445,6 +445,7 @@ function summarizeContextChips(ctx, seasons, grades) {
   return out
 }
 
+
 function treeFields(node) {
   const out = new Set()
   const walk = (n) => {
@@ -539,6 +540,10 @@ function csvEscape(v) {
 
 const inputCls = 'bg-pb-surface border border-pb-hairline2 text-pb-text text-xs rounded px-2 py-1.5 focus:outline-none focus:border-pb-accent w-full'
 const selectCls = inputCls + ' cursor-pointer'
+// Tint applied to a context-filter input when it carries a non-default value
+// — gives the user a visual cue of exactly which filters are scoping the query.
+const activeFieldCls = 'border-pb-accent ring-1 ring-pb-accent/40 bg-pb-accent/5'
+const isFieldActive = (v) => v !== undefined && v !== null && v !== '' && v !== false
 
 // Searchable picker for Player Role / Award / Office Bearer attribute filters.
 // Hits /statlab/picker-values with the chosen kind and debounced search text.
@@ -627,14 +632,14 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
     <div className="flex flex-col gap-2.5">
       <div>
         <Label>Season</Label>
-        <select className={selectCls + ' mt-1'} value={ctx.season_id || ''} onChange={e => set('season_id', e.target.value)}>
+        <select className={`${selectCls} mt-1 ${isFieldActive(ctx.season_id) ? activeFieldCls : ''}`} value={ctx.season_id || ''} onChange={e => set('season_id', e.target.value)}>
           <option value="">All seasons</option>
           {(seasons || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>
       <div>
         <Label>Grade</Label>
-        <select className={selectCls + ' mt-1'} value={ctx.grade_id || ''} onChange={e => set('grade_id', e.target.value)}>
+        <select className={`${selectCls} mt-1 ${isFieldActive(ctx.grade_id) ? activeFieldCls : ''}`} value={ctx.grade_id || ''} onChange={e => set('grade_id', e.target.value)}>
           <option value="">All grades</option>
           {(grades || []).map(g => <option key={g.id} value={g.id}>{g.display_name || g.name}</option>)}
         </select>
@@ -642,30 +647,30 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
       <div className="grid grid-cols-2 gap-1.5">
         <div>
           <Label>From</Label>
-          <input type="date" className={inputCls + ' mt-1'} value={ctx.date_from || ''} onChange={e => set('date_from', e.target.value)} />
+          <input type="date" className={`${inputCls} mt-1 ${isFieldActive(ctx.date_from) ? activeFieldCls : ''}`} value={ctx.date_from || ''} onChange={e => set('date_from', e.target.value)} />
         </div>
         <div>
           <Label>To</Label>
-          <input type="date" className={inputCls + ' mt-1'} value={ctx.date_to || ''} onChange={e => set('date_to', e.target.value)} />
+          <input type="date" className={`${inputCls} mt-1 ${isFieldActive(ctx.date_to) ? activeFieldCls : ''}`} value={ctx.date_to || ''} onChange={e => set('date_to', e.target.value)} />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-1.5">
         <div>
           <Label>Min year</Label>
-          <input type="number" className={inputCls + ' mt-1'} value={ctx.min_year || ''} placeholder="1996" onChange={e => set('min_year', e.target.value)} />
+          <input type="number" className={`${inputCls} mt-1 ${isFieldActive(ctx.min_year) ? activeFieldCls : ''}`} value={ctx.min_year || ''} placeholder="1996" onChange={e => set('min_year', e.target.value)} />
         </div>
         <div>
           <Label>Max year</Label>
-          <input type="number" className={inputCls + ' mt-1'} value={ctx.max_year || ''} placeholder="2026" onChange={e => set('max_year', e.target.value)} />
+          <input type="number" className={`${inputCls} mt-1 ${isFieldActive(ctx.max_year) ? activeFieldCls : ''}`} value={ctx.max_year || ''} placeholder="2026" onChange={e => set('max_year', e.target.value)} />
         </div>
       </div>
       <div>
         <Label>Opposition</Label>
-        <input className={inputCls + ' mt-1'} value={ctx.opposition || ''} placeholder="e.g. Bayswater" onChange={e => set('opposition', e.target.value)} />
+        <input className={`${inputCls} mt-1 ${isFieldActive(ctx.opposition) ? activeFieldCls : ''}`} value={ctx.opposition || ''} placeholder="e.g. Bayswater" onChange={e => set('opposition', e.target.value)} />
       </div>
       <div>
         <Label>Result</Label>
-        <select className={selectCls + ' mt-1'} value={ctx.result || ''} onChange={e => set('result', e.target.value)}>
+        <select className={`${selectCls} mt-1 ${isFieldActive(ctx.result) ? activeFieldCls : ''}`} value={ctx.result || ''} onChange={e => set('result', e.target.value)}>
           {RESULT_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
       </div>
@@ -676,7 +681,10 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
           { k: 'keeper_only',  label: 'As keeper' },
           { k: 'on_this_day',  label: 'On this day' },
         ].map(({ k, label }) => (
-          <label key={k} className="flex items-center gap-1 text-xs text-pb-dim cursor-pointer">
+          <label
+            key={k}
+            className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition cursor-pointer ${ctx[k] ? 'text-pb-accent border-pb-accent/60 bg-pb-accent/10' : 'text-pb-dim border-transparent'}`}
+          >
             <input type="checkbox" checked={!!ctx[k]} onChange={e => set(k, e.target.checked)} />
             {label}
           </label>
@@ -686,18 +694,18 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
         <>
           <div>
             <Label>Dismissal</Label>
-            <select className={selectCls + ' mt-1'} value={ctx.dismissal || ''} onChange={e => set('dismissal', e.target.value)}>
+            <select className={`${selectCls} mt-1 ${isFieldActive(ctx.dismissal) ? activeFieldCls : ''}`} value={ctx.dismissal || ''} onChange={e => set('dismissal', e.target.value)}>
               {DISMISSAL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             <div>
               <Label>Position (min)</Label>
-              <input type="number" min="1" max="11" className={inputCls + ' mt-1'} value={ctx.position_min || ''} placeholder="1" onChange={e => set('position_min', e.target.value)} />
+              <input type="number" min="1" max="11" className={`${inputCls} mt-1 ${isFieldActive(ctx.position_min) ? activeFieldCls : ''}`} value={ctx.position_min || ''} placeholder="1" onChange={e => set('position_min', e.target.value)} />
             </div>
             <div>
               <Label>Position (max)</Label>
-              <input type="number" min="1" max="11" className={inputCls + ' mt-1'} value={ctx.position_max || ''} placeholder="11" onChange={e => set('position_max', e.target.value)} />
+              <input type="number" min="1" max="11" className={`${inputCls} mt-1 ${isFieldActive(ctx.position_max) ? activeFieldCls : ''}`} value={ctx.position_max || ''} placeholder="11" onChange={e => set('position_max', e.target.value)} />
             </div>
           </div>
         </>
@@ -728,7 +736,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
         <div className="flex flex-col gap-2">
           <div>
             <Label>Gender</Label>
-            <select className={selectCls + ' mt-1'} value={ctx.gender || ''} onChange={e => set('gender', e.target.value)}>
+            <select className={`${selectCls} mt-1 ${isFieldActive(ctx.gender) ? activeFieldCls : ''}`} value={ctx.gender || ''} onChange={e => set('gender', e.target.value)}>
               <option value="">Any gender</option>
               <option value="Male">Male</option>
               <option value="Female">Female</option>
@@ -736,31 +744,31 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
           </div>
           <div>
             <Label>Overseas</Label>
-            <select className={selectCls + ' mt-1'} value={ctx.overseas || ''} onChange={e => set('overseas', e.target.value)}>
+            <select className={`${selectCls} mt-1 ${isFieldActive(ctx.overseas) ? activeFieldCls : ''}`} value={ctx.overseas || ''} onChange={e => set('overseas', e.target.value)}>
               <option value="">All players</option>
               <option value="only">Overseas only</option>
               <option value="exclude">Local only</option>
             </select>
           </div>
-          <div>
+          <div className={isFieldActive(ctx.player_role) ? 'rounded ring-1 ring-pb-accent/40' : ''}>
             <Label>Player role</Label>
             <PickerInput orgId={orgId} kind="player_role" value={ctx.player_role || ''}
                          placeholder="e.g. Batter, Bowler, Wicket-keeper"
                          onChange={v => set('player_role', v)} />
           </div>
-          <div>
+          <div className={isFieldActive(ctx.award_category) ? 'rounded ring-1 ring-pb-accent/40' : ''}>
             <Label>Has award (category)</Label>
             <PickerInput orgId={orgId} kind="award_category" value={ctx.award_category || ''}
                          placeholder="e.g. Hall of Fame, Premiership"
                          onChange={v => set('award_category', v)} />
           </div>
-          <div>
+          <div className={isFieldActive(ctx.award_name) ? 'rounded ring-1 ring-pb-accent/40' : ''}>
             <Label>Has award (name)</Label>
             <PickerInput orgId={orgId} kind="award_name" value={ctx.award_name || ''}
                          placeholder="e.g. Best & Fairest"
                          onChange={v => set('award_name', v)} />
           </div>
-          <div>
+          <div className={isFieldActive(ctx.office_bearer) ? 'rounded ring-1 ring-pb-accent/40' : ''}>
             <Label>Office bearer</Label>
             <PickerInput orgId={orgId} kind="office_bearer" value={ctx.office_bearer || ''}
                          placeholder="e.g. President, Secretary"
@@ -769,7 +777,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
           {families.length > 0 && !isFamilyTarget && (
             <div>
               <Label>In family</Label>
-              <select className={selectCls + ' mt-1'} value={ctx.family_id || ''} onChange={e => set('family_id', e.target.value)}>
+              <select className={`${selectCls} mt-1 ${isFieldActive(ctx.family_id) ? activeFieldCls : ''}`} value={ctx.family_id || ''} onChange={e => set('family_id', e.target.value)}>
                 <option value="">Any family</option>
                 {families.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
               </select>
@@ -1078,6 +1086,10 @@ export default function StatLab() {
 
   const [grades, setGrades] = useState([])
   const [activeDerived, setActiveDerived] = useState(null)
+  // activePreset tracks the label of the most recently applied preset (the
+  // non-derived buttons in REPORTS panel). Presets are stateless once applied,
+  // so without this the page title can't show "Top run aggregates" / etc.
+  const [activePreset, setActivePreset] = useState(null)
   const [openGroups, setOpenGroups] = useState(() => Object.fromEntries(PRESET_GROUPS.map(g => [g.key, g.defaultOpen])))
   const [showCustomise, setShowCustomise] = useState(false)
 
@@ -1123,6 +1135,7 @@ export default function StatLab() {
     api.statlabGetReport(reportSlug, orgId).then(r => {
       if (cancelled) return
       setOpenReport(r)
+      setActivePreset(null)
       const incoming = r.query_json || {}
       const q = { ...DEFAULT_QUERY, ...incoming }
       // Migrate legacy reports (flat filters array) and ensure tree node ids
@@ -1202,6 +1215,7 @@ export default function StatLab() {
       context: preset.context || {},
     }
     setQuery(next)
+    setActivePreset(preset.label || null)
     setOpenReport(null)
     if (reportSlug) navigate(`/${clubSlug}/statlab`, { replace: true })
     await runQuery(next, null)
@@ -1210,6 +1224,7 @@ export default function StatLab() {
   const applyDerived = useCallback(async (name) => {
     const next = { ...queryRef.current, filterTree: emptyTree() }
     setQuery(next)
+    setActivePreset(null)
     await runQuery(next, name)
   }, [runQuery])
 
@@ -1230,6 +1245,7 @@ export default function StatLab() {
   const resetAll = () => {
     setQuery(DEFAULT_QUERY)
     setRows([]); setHasQueried(false); setError(null); setActiveDerived(null)
+    setActivePreset(null)
     setCurrentPage(1); setHasMore(false)
     setOpenReport(null)
     if (reportSlug) navigate(`/${clubSlug}/statlab`, { replace: true })
@@ -1337,12 +1353,12 @@ export default function StatLab() {
         <PageHeader
           eyebrow={openReport
             ? 'SAVED REPORT'
-            : (activeDerived ? 'STAT LAB · REPORT' : 'STAT LAB · CUSTOM QUERY')}
+            : (activeDerived || activePreset ? 'STAT LAB · REPORT' : 'STAT LAB · CUSTOM QUERY')}
           title={openReport
             ? openReport.title
             : (activeDerived && schema?.derived?.[activeDerived]?.label
                 ? schema.derived[activeDerived].label
-                : 'Build your own table.')}
+                : (activePreset || 'Build your own table.'))}
           meta={openReport
             ? [
                 <span key="d">{openReport.description || `${org?.name || ''} · saved report`}</span>,
@@ -1356,7 +1372,9 @@ export default function StatLab() {
                       : null,
                     <span key="o">{org?.name || ''}</span>,
                   ].filter(Boolean)
-                : [<span key="s">{org?.name || ''} · Filter, sort, discover, share.</span>])
+                : (activePreset
+                    ? [<span key="o">{org?.name || ''} · sorted by {(METRIC_LABELS[query.sortBy]?.label || query.sortBy).toLowerCase()} {query.sortDir === 'asc' ? '↑' : '↓'}</span>]
+                    : [<span key="s">{org?.name || ''} · Filter, sort, discover, share.</span>]))
           }
           actions={openReport && canSave ? (
             <div className="flex gap-2">
@@ -1370,7 +1388,7 @@ export default function StatLab() {
         {/* Target tabs — informational on what data type results are showing */}
         <div className="flex gap-1 pb-hairline-b mb-4 overflow-x-auto pb-no-scrollbar">
           {TARGETS.map(t => (
-            <button key={t.key} onClick={() => { setQuery(q => ({ ...q, target: t.key })); setRows([]); setHasQueried(false); setActiveDerived(null); setShowCustomise(true) }}
+            <button key={t.key} onClick={() => { setQuery(q => ({ ...q, target: t.key })); setRows([]); setHasQueried(false); setActiveDerived(null); setActivePreset(null); setShowCustomise(true) }}
               className={`relative px-3.5 py-2.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition ${query.target === t.key && !activeDerived ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'}`}>
               {t.label.toUpperCase()}
               {query.target === t.key && !activeDerived && <span className="absolute left-2 right-2 -bottom-px h-[2px]" style={{ background: 'var(--pb-accent)' }} />}
@@ -1400,7 +1418,8 @@ export default function StatLab() {
                       {isOpen && (
                         <div className="px-2 pb-2">
                           {group.items.map((item, idx) => {
-                            const isActive = item.type === 'derived' && activeDerived === item.key
+                            const isActive = (item.type === 'derived' && activeDerived === item.key)
+                              || (item.type === 'preset' && activePreset === item.label && !activeDerived && !openReport)
                             const isDerived = item.type === 'derived'
                             return (
                               <button
@@ -1471,16 +1490,16 @@ export default function StatLab() {
                     const fc = treeLeafCount(query.filterTree)
                     const cc = summarizeContextChips(query.context, seasons, grades).length
                     const total = fc + cc
-                    if (!total) return null
+                    const accent = total > 0
                     return (
-                      <span className="font-mono text-[9px] text-pb-faintest">
-                        {total} filter{total === 1 ? '' : 's'}
+                      <span className={`font-mono text-[10px] tracking-wide2 px-2 py-0.5 rounded-full border ${accent ? 'text-pb-accent border-pb-accent/60 bg-pb-accent/10' : 'text-pb-faintest border-pb-hairline'}`}>
+                        {total === 0 ? 'No filters' : `${total} filter${total === 1 ? '' : 's'} active`}
                       </span>
                     )
                   })()}
                   <span className={`font-mono text-[11px] text-pb-faintest transition-transform duration-150 inline-block ${showCustomise ? 'rotate-90' : ''}`}>›</span>
                 </button>
-                {(activeDerived || treeLeafCount(query.filterTree) > 0 || summarizeContextChips(query.context, seasons, grades).length > 0) && (
+                {(activeDerived || activePreset || openReport || treeLeafCount(query.filterTree) > 0 || summarizeContextChips(query.context, seasons, grades).length > 0) && (
                   <button
                     onClick={resetAll}
                     title="Reset report, filters and context"
@@ -1582,16 +1601,43 @@ export default function StatLab() {
 
             {sortedRows.length > 0 && (
               <div className="pb-card">
-                <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 pb-hairline-b">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <Label>
-                      {`${sortedRows.length} ${activeDerived ? 'PLAYERS' : (targetMeta.shape === 'list' ? 'ROWS' : 'GROUPS')}${activeDerived ? ' · ' + schema.derived[activeDerived].label.toUpperCase() : ''}`}
-                    </Label>
-                    {(currentPage > 1 || hasMore) && (
-                      <span className="font-mono text-[10px] text-pb-faintest">PAGE {currentPage}{hasMore ? '' : ' · END'}</span>
-                    )}
+                <div className="flex items-start justify-between gap-3 px-5 sm:px-6 py-3.5 pb-hairline-b">
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <div className="flex items-center gap-3">
+                      <Label>
+                        {(() => {
+                          const unit = activeDerived ? 'PLAYERS' : (targetMeta.shape === 'list' ? 'ROWS' : 'GROUPS')
+                          const reportName = activeDerived
+                            ? schema?.derived?.[activeDerived]?.label
+                            : (openReport ? openReport.title : activePreset)
+                          return `${sortedRows.length} ${unit}${reportName ? ' · ' + String(reportName).toUpperCase() : ''}`
+                        })()}
+                      </Label>
+                      {(currentPage > 1 || hasMore) && (
+                        <span className="font-mono text-[10px] text-pb-faintest">PAGE {currentPage}{hasMore ? '' : ' · END'}</span>
+                      )}
+                    </div>
+                    {(() => {
+                      // Description line: derived has a schema description; preset shows
+                      // "sorted by X"; saved reports show stored description.
+                      let desc = ''
+                      if (activeDerived) {
+                        desc = schema?.derived?.[activeDerived]?.description || ''
+                      } else if (openReport) {
+                        desc = openReport.description || ''
+                      } else if (activePreset) {
+                        const sortLabel = (METRIC_LABELS[query.sortBy]?.label || query.sortBy).toLowerCase()
+                        desc = `Sorted by ${sortLabel} ${query.sortDir === 'asc' ? 'ascending' : 'descending'}.`
+                      }
+                      if (!desc) return null
+                      return (
+                        <p className="text-[11.5px] text-pb-faint font-sans normal-case tracking-normal max-w-2xl leading-snug">
+                          {desc}
+                        </p>
+                      )
+                    })()}
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 shrink-0">
                     <span className="font-mono text-2xs tracking-wide2 text-pb-faintest hidden sm:inline">
                       {activeDerived
                         ? ''
