@@ -153,15 +153,15 @@ export const COMPARISON_3WAY = [
 // Each path is a fallback that pages check for; mocks display until present.
 // ============================================================
 export const SCREENSHOT_PATHS = {
-  landingHeroCard:        '/marketing/hero-career-card.png',
-  showcaseLeaderboard:    '/marketing/leaderboard.png',
-  showcaseProfile:        '/marketing/player-profile.png',
-  showcaseYearbook:       '/marketing/yearbook.png',
-  featuresProfile:        '/marketing/feature-profile.png',
-  featuresLeaderboard:    '/marketing/feature-leaderboard.png',
-  featuresYearbook:       '/marketing/feature-yearbook.png',
-  featuresMatch:          '/marketing/feature-match.png',
-  featuresHonours:        '/marketing/feature-honours.png',
-  featuresCards:          '/marketing/feature-cards.png',
-  aboutFounder:           '/marketing/founder.png',
+  landingHeroCard:        '/marketing/hero-career-card.jpg',
+  showcaseLeaderboard:    '/marketing/leaderboard.jpg',
+  showcaseProfile:        '/marketing/player-profile.jpg',
+  showcaseYearbook:       '/marketing/yearbook.jpg',
+  featuresProfile:        '/marketing/feature-profile.jpg',
+  featuresLeaderboard:    '/marketing/feature-leaderboard.jpg',
+  featuresYearbook:       '/marketing/feature-yearbook.jpg',
+  featuresMatch:          '/marketing/feature-match.jpg',
+  featuresHonours:        '/marketing/feature-honours.jpg',
+  featuresCards:          '/marketing/feature-cards.jpg',
+  aboutFounder:           '/marketing/founder.jpg',
 }
