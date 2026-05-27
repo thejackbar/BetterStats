@@ -21,7 +21,7 @@ async def _user_can_manage_reports(db: AsyncSession, user: User, club: Organisat
     """True when the user has the MANAGE_REPORTS capability on this club."""
     row = await db.execute(
         select(ClubMembership)
-        .where(ClubMembership.user_id == user.id, ClubMembership.org_id == club.id)
+        .where(ClubMembership.user_id == user.id, ClubMembership.club_id == club.id)
     )
     m = row.scalar_one_or_none()
     if not m:
