@@ -18,7 +18,7 @@ export default function Blog() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
-      <div className="max-w-3xl mx-auto px-4 py-16">
+      <div id="main-content" tabIndex="-1" className="max-w-3xl mx-auto px-4 py-16">
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">Stats guides & club tips</p>
         <h1 className="font-display font-bold text-[48px] md:text-[60px] tracking-tight text-pb-text mb-4 leading-tight">Blog.</h1>
         <p className="text-pb-dim text-lg mb-12">Cricket statistics explained — for club players, captains, and committee members.</p>

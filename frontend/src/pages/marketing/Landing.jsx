@@ -22,6 +22,7 @@ export default function Landing() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
+      <div id="main-content" tabIndex="-1">
       {/* Hero */}
       <section className="max-w-5xl mx-auto px-4 pt-24 pb-20 text-center">
         <div className="inline-block border pb-hairline font-mono text-[10px] tracking-wide3 text-pb-faint px-3 py-1 rounded-full mb-8 uppercase">
@@ -39,6 +40,7 @@ export default function Landing() {
             href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform?usp=header"
             target="_blank"
             rel="noopener noreferrer"
+            aria-label="Request access for your club (opens in new tab)"
             className="px-8 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
             style={{ background: 'var(--pb-accent)' }}
           >
@@ -71,6 +73,7 @@ export default function Landing() {
           href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform?usp=header"
           target="_blank"
           rel="noopener noreferrer"
+          aria-label="Get started with BetterStats (opens in new tab)"
           className="inline-block px-10 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
           style={{ background: 'var(--pb-accent)' }}
         >
@@ -80,20 +83,21 @@ export default function Landing() {
 
       <footer className="pb-hairline-t py-8 text-center">
         <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 mb-3">
-          <Link to="/features" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">FEATURES</Link>
-          <Link to="/pricing" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">PRICING</Link>
-          <Link to="/faq" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">FAQ</Link>
-          <Link to="/about" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">ABOUT</Link>
-          <Link to="/contact" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">CONTACT</Link>
-          <Link to="/terms" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">TERMS</Link>
-          <Link to="/privacy" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">PRIVACY</Link>
+          <Link to="/features" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">FEATURES</Link>
+          <Link to="/pricing" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">PRICING</Link>
+          <Link to="/faq" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">FAQ</Link>
+          <Link to="/about" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">ABOUT</Link>
+          <Link to="/contact" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">CONTACT</Link>
+          <Link to="/terms" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">TERMS</Link>
+          <Link to="/privacy" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">PRIVACY</Link>
         </div>
         <div className="flex items-center justify-center gap-4 mb-3">
-          <a href="https://x.com/betterstatsau" target="_blank" rel="noopener noreferrer me" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">X / TWITTER</a>
-          <a href="https://www.facebook.com/profile.php?id=61590372751599" target="_blank" rel="noopener noreferrer me" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">FACEBOOK</a>
+          <a href="https://x.com/betterstatsau" target="_blank" rel="noopener noreferrer me" aria-label="BetterStats on X / Twitter (opens in new tab)" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">X / TWITTER</a>
+          <a href="https://www.facebook.com/profile.php?id=61590372751599" target="_blank" rel="noopener noreferrer me" aria-label="BetterStats on Facebook (opens in new tab)" className="font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text transition-colors">FACEBOOK</a>
         </div>
         <p className="font-mono text-[10px] text-pb-faintest">© {new Date().getFullYear()} BETTERSTATS</p>
       </footer>
+      </div>
     </div>
   )
 }

@@ -157,7 +157,7 @@ export default function Features() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
-      <div className="max-w-4xl mx-auto px-4 py-16">
+      <div id="main-content" tabIndex="-1" className="max-w-4xl mx-auto px-4 py-16">
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">What's included</p>
         <h1 className="font-display font-bold text-[48px] md:text-[60px] tracking-tight text-pb-text mb-4 leading-tight">Features.</h1>
         <p className="text-pb-dim text-lg mb-16">Everything your cricket club needs to run a proper stats platform.</p>

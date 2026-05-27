@@ -63,7 +63,7 @@ export default function BlogPost() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
-      <div className="max-w-2xl mx-auto px-4 py-16">
+      <div id="main-content" tabIndex="-1" className="max-w-2xl mx-auto px-4 py-16">
         {/* Breadcrumb */}
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-8">
           <Link to="/blog" className="hover:text-pb-text transition-colors">BLOG</Link>
@@ -98,6 +98,7 @@ export default function BlogPost() {
               href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform"
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="Request access (opens in new tab)"
               className="inline-block px-6 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
