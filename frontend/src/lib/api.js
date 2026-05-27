@@ -282,7 +282,6 @@ export const api = {
     request(`/club-admin/partnership-records/${id}`, { method: 'DELETE' }),
   adminPatchPartnershipRecord: (id, data) =>
     request(`/club-admin/partnership-records/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  adminListGrades: () => request('/club-admin/grades'),
   adminRenamePartnershipGrade: (oldName, newName) =>
     request('/club-admin/partnership-records/rename-grade', {
       method: 'POST',

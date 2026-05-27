@@ -166,7 +166,7 @@ function GradeMatchPanel({ records, onRecordsRenamed }) {
     if (!open && syncedGrades.length === 0) {
       setLoading(true)
       const grades = await api.adminListGrades().catch(() => [])
-      setSyncedGrades(grades)
+      setSyncedGrades(grades.map(g => g.display_name))
       setLoading(false)
     }
     setOpen(o => !o)
@@ -640,7 +640,7 @@ export default function AdminPartnershipRecords() {
   useEffect(() => {
     loadRecords()
     api.adminListPlayers().then(setPlayers).catch(() => {})
-    api.adminListGrades().then(setSyncedGrades).catch(() => {})
+    api.adminListGrades().then(g => setSyncedGrades(g.map(x => x.display_name))).catch(() => {})
   }, [])
 
   const setField = (key, val) => setForm(f => ({ ...f, [key]: val }))
