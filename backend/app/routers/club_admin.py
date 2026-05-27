@@ -1177,25 +1177,6 @@ async def _do_import_partnership_records(file, club, db):
     }
 
 
-@router.get("/grades")
-async def list_grades(
-    current_user: User = Depends(get_current_user),
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        _text("""
-            SELECT DISTINCT gr.name
-            FROM grades gr
-            JOIN seasons se ON se.id = gr.season_id
-            WHERE se.organisation_id = :org_id
-            ORDER BY gr.name
-        """),
-        {"org_id": str(club.id)},
-    )
-    return [r["name"] for r in result.mappings().all()]
-
-
 class PartnershipGradeRename(BaseModel):
     old_name: str
     new_name: str
