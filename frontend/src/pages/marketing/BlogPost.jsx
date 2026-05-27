@@ -1,10 +1,29 @@
+import { useState } from 'react'
 import { Link, useParams, Navigate } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
+import MarketingFooter from '../../components/marketing/MarketingFooter'
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { getPost, POSTS } from '../../data/blog'
+import { FORM_URL } from '../../data/marketing'
 
 function formatDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
+function HeroImage({ src, title }) {
+  const [failed, setFailed] = useState(false)
+  if (!src || failed) return null
+  return (
+    <div className="mb-10 rounded-xl overflow-hidden border pb-hairline h-56 sm:h-72">
+      <img
+        src={src}
+        alt={title}
+        className="w-full h-full object-cover object-top"
+        onError={() => setFailed(true)}
+        loading="eager"
+      />
+    </div>
+  )
 }
 
 function ContentBlock({ block }) {
@@ -49,7 +68,7 @@ export default function BlogPost() {
   usePageMeta(post ? {
     title: `${post.title} | BetterStats`,
     description: post.description,
-    image: 'https://betterstats.cricket/og-image.png',
+    image: post.image ? `https://betterstats.cricket${post.image}` : 'https://betterstats.cricket/og-image.png',
     url: `https://betterstats.cricket/blog/${post.slug}`,
   } : {})
 
@@ -63,7 +82,7 @@ export default function BlogPost() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <MarketingNav />
 
-      <div id="main-content" tabIndex="-1" className="max-w-2xl mx-auto px-4 py-16">
+      <div id="main-content" tabIndex="-1" className="max-w-2xl mx-auto px-4 py-16 pt-28">
         {/* Breadcrumb */}
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-8">
           <Link to="/blog" className="hover:text-pb-text transition-colors">BLOG</Link>
@@ -72,7 +91,7 @@ export default function BlogPost() {
         </p>
 
         {/* Header */}
-        <div className="mb-10">
+        <div className="mb-8">
           <div className="flex items-center gap-4 mb-4">
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{formatDate(post.date)}</p>
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faintest">{post.readTime}</p>
@@ -81,6 +100,9 @@ export default function BlogPost() {
             {post.title}
           </h1>
         </div>
+
+        {/* Hero image */}
+        <HeroImage src={post.image} title={post.title} />
 
         {/* Content */}
         <div>
@@ -95,7 +117,7 @@ export default function BlogPost() {
           <h2 className="font-display font-bold text-2xl text-pb-text mb-4 tracking-tight">Get automated stats for your cricket club.</h2>
           <div className="flex flex-col sm:flex-row gap-3">
             <a
-              href="https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform"
+              href={FORM_URL}
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Request access (opens in new tab)"
@@ -135,6 +157,8 @@ export default function BlogPost() {
           </div>
         )}
       </div>
+
+      <MarketingFooter />
     </div>
   )
 }

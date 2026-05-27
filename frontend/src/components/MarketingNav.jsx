@@ -8,6 +8,7 @@ const LINKS = [
   { to: '/pricing', label: 'Pricing' },
   { to: '/features#compare', label: 'Compare' },
   { to: '/about', label: 'About' },
+  { to: '/blog', label: 'Blog' },
   { to: '/faq', label: 'FAQ' },
   { to: '/contact', label: 'Contact' },
 ]
