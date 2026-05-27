@@ -6,6 +6,17 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['@imgly/background-removal'],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor': ['react', 'react-dom', 'react-router-dom'],
+          'charts': ['recharts'],
+          'canvas': ['html2canvas'],
+        },
+      },
+    },
+  },
   server: {
     proxy: {
       '/api': {
