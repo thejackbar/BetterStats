@@ -4,6 +4,11 @@
 export const FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform?usp=header'
 export const SUPPORT_EMAIL = 'betterstatsau@gmail.com'
 
+// ── Formspree ────────────────────────────────────────────────────────────────
+// Sign up at https://formspree.io, create a form pointed at betterstatsau@gmail.com,
+// then replace YOUR_FORM_ID below with the 8-char ID from your form's endpoint URL.
+export const FORMSPREE_ID = 'YOUR_FORM_ID'
+
 // ============================================================
 // FEATURES — 6 high-impact cards for the landing & top of features
 // (the deep 11-section list lives inside Features.jsx)
