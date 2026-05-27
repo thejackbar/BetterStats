@@ -48,11 +48,11 @@ const FAQS = [
   },
   {
     q: 'Can BetterStats publish a season yearbook?',
-    a: 'Yes. BetterStats automatically generates a publishable digital yearbook for each season, populated with results, batting/bowling/fielding/all-rounder honours, partnership records and a season-progression chart. Admins can layer on a President’s Report, Coach’s Report, Sponsor message, photo galleries, an AI-assisted season narrative, custom awards and an honour board.',
+    a: 'Yes. BetterStats automatically generates a publishable digital yearbook for each season, populated with results, batting/bowling/fielding/all-rounder honours, partnership records and a season-progression chart. Admins can layer on a President\'s Report, Coach\'s Report, Sponsor message, photo galleries, an AI-assisted season narrative, custom awards and an honour board.',
   },
   {
     q: 'How are duplicate player records handled?',
-    a: 'PlayHQ occasionally creates a new ID for an existing player, which would normally split that player’s stats in two. BetterStats has a one-click merge tool in the admin panel that combines the two records and preserves every historical innings, spell, catch and partnership.',
+    a: 'PlayHQ occasionally creates a new ID for an existing player, which would normally split that player\'s stats in two. BetterStats has a one-click merge tool in the admin panel that combines the two records and preserves every historical innings, spell, catch and partnership.',
   },
   {
     q: 'Where can I see all-time records for my cricket club?',

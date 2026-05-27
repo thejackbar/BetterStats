@@ -34,15 +34,15 @@ export default function Terms() {
             },
             {
               title: '4. Data',
-              body: 'Statistics displayed on BetterStats are sourced from PlayHQ\'s public data feed. We do not guarantee the accuracy of statistics. You retain ownership of any custom content you add (awards, descriptions, etc.). We may use aggregated, anonymised data to improve the Service.',
+              body: "Statistics displayed on BetterStats are sourced from PlayHQ's public data feed. We do not guarantee the accuracy of statistics. You retain ownership of any custom content you add (awards, descriptions, etc.). We may use aggregated, anonymised data to improve the Service.",
             },
             {
               title: '5. Acceptable use',
-              body: 'You agree not to use the Service for any unlawful purpose, to attempt to gain unauthorised access to other clubs\' data, or to interfere with the Service\'s operation.',
+              body: "You agree not to use the Service for any unlawful purpose, to attempt to gain unauthorised access to other clubs' data, or to interfere with the Service's operation.",
             },
             {
               title: '6. Service availability',
-              body: 'We aim to keep BetterStats available and up to date, but we do not guarantee uninterrupted availability. The Service may be temporarily unavailable for maintenance. We reserve the right to discontinue the Service with 30 days\' notice.',
+              body: "We aim to keep BetterStats available and up to date, but we do not guarantee uninterrupted availability. The Service may be temporarily unavailable for maintenance. We reserve the right to discontinue the Service with 30 days' notice.",
             },
             {
               title: '7. Limitation of liability',

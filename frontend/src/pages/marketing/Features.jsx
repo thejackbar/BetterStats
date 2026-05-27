@@ -65,7 +65,7 @@ const SECTIONS = [
       'Honour board: record club positions and holders (President, Captain, Treasurer…)',
       'AI-assisted season narrative generator to kick-start the write-up',
       'Awards section: pull from the awards admin or add season-specific winners',
-      'Publish/unpublish control — draft until you\'re ready',
+      "Publish/unpublish control — draft until you're ready",
     ],
   },
   {
