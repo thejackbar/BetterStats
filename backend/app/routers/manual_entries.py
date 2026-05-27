@@ -225,6 +225,34 @@ def _player_display_name(player: Player) -> str:
     return player.display_name_override or player.name
 
 
+# ─── Lookup helpers ──────────────────────────────────────────────────────────
+
+
+@router.get("/grades")
+async def list_grades_with_season(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-org grade list keyed by id, with season_id, so the admin UI can
+    populate a grade dropdown filtered by the chosen season."""
+    rows = await db.execute(
+        select(Grade, Season)
+        .join(Season, Season.id == Grade.season_id)
+        .where(Season.organisation_id == club.id)
+        .order_by(Season.name, Grade.name)
+    )
+    return [
+        {
+            "id": str(g.id),
+            "name": g.display_name_override or g.name,
+            "season_id": str(s.id),
+            "season_name": s.name,
+        }
+        for g, s in rows.all()
+    ]
+
+
 # ─── Season adjustments ──────────────────────────────────────────────────────
 
 

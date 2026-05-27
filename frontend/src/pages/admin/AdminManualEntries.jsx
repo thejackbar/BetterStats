@@ -191,9 +191,28 @@ function AggregateFieldGrid({ form, setForm, includeWidesNoBalls = false }) {
   )
 }
 
+// Fields that map to Optional[str] on the backend — empty form value must go as null, not 0.
+const STRING_FIELDS = new Set(['notes', 'bowling_best_figures'])
+// Fields that map to Optional[int] — empty form value must go as null.
+const OPTIONAL_INT_FIELDS = new Set(['batting_high_score', 'bowling_best_wickets'])
+
+function normalizeAggregatePayload(form) {
+  const out = {}
+  for (const [k, v] of Object.entries(form)) {
+    if (v === '' || v === undefined) {
+      if (STRING_FIELDS.has(k)) out[k] = null
+      else if (OPTIONAL_INT_FIELDS.has(k)) out[k] = null
+      else out[k] = 0
+    } else {
+      out[k] = v
+    }
+  }
+  return out
+}
+
 // ─── Season adjustments tab ─────────────────────────────────────────────────
 
-function SeasonAdjustmentsTab({ players, seasons, refreshAll, onPending }) {
+function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_SEASON_FORM)
@@ -212,18 +231,17 @@ function SeasonAdjustmentsTab({ players, seasons, refreshAll, onPending }) {
 
   const resetForm = () => { setForm(EMPTY_SEASON_FORM); setEditingId(null); setErr(null) }
 
+  const seasonGrades = useMemo(
+    () => (grades || []).filter(g => g.season_id === form.season_id),
+    [grades, form.season_id]
+  )
+
   const handleSubmit = () => {
     setErr(null)
     if (!form.player_id) return setErr('Choose a player')
     if (!form.season_id) return setErr('Choose a season')
-    const payload = Object.fromEntries(Object.entries(form).map(([k, v]) => {
-      if (v === '') return [k, k.includes('high_score') || k.includes('best_figures') ? null : 0]
-      return [k, v]
-    }))
+    const payload = normalizeAggregatePayload(form)
     if (!payload.grade_id) payload.grade_id = null
-    if (payload.batting_high_score === '' || payload.batting_high_score === null) payload.batting_high_score = null
-    if (payload.bowling_best_wickets === '' || payload.bowling_best_wickets === null) payload.bowling_best_wickets = null
-    if (payload.bowling_best_figures === '') payload.bowling_best_figures = null
     onPending({
       title: editingId ? 'Update season adjustment?' : 'Save season adjustment?',
       body: 'This adds to (or overrides) what BetterStats already has for this player in this season. Every change is logged and can be undone from the Audit tab.',
@@ -276,14 +294,20 @@ function SeasonAdjustmentsTab({ players, seasons, refreshAll, onPending }) {
           </div>
           <div>
             <label className={LABEL_CLS}>Season</label>
-            <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm({ ...form, season_id: e.target.value })}>
+            <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm({ ...form, season_id: e.target.value, grade_id: '' })}>
               <option value="">— Choose a season —</option>
               {seasons.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}
             </select>
           </div>
           <div>
             <label className={LABEL_CLS}>Grade (optional)</label>
-            <input type="text" value={form.grade_id || ''} onChange={e => setForm({ ...form, grade_id: e.target.value })} placeholder="Grade ID — leave blank to apply across all grades" className={INPUT_CLS} />
+            <select className={INPUT_CLS} value={form.grade_id || ''} onChange={e => setForm({ ...form, grade_id: e.target.value })} disabled={!form.season_id}>
+              <option value="">All grades (any)</option>
+              {seasonGrades.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
+            </select>
+            {form.season_id && seasonGrades.length === 0 && (
+              <p className="text-[10px] text-pb-faintest mt-1">No grades defined for this season yet.</p>
+            )}
           </div>
         </div>
 
@@ -363,10 +387,7 @@ function CareerAdjustmentsTab({ players, refreshAll, onPending }) {
   const handleSubmit = () => {
     setErr(null)
     if (!form.player_id) return setErr('Choose a player')
-    const payload = Object.fromEntries(Object.entries(form).map(([k, v]) => {
-      if (v === '') return [k, null]
-      return [k, v]
-    }))
+    const payload = normalizeAggregatePayload(form)
     onPending({
       title: editingId ? 'Update career adjustment?' : 'Save career adjustment?',
       body: 'Career adjustments apply ONLY to a player\'s career-total view (player profile lifetime totals). They don\'t affect any season leaderboard. Every change is logged and reversible from the Audit tab.',
@@ -484,12 +505,17 @@ const EMPTY_GAME_FORM = {
   batting_innings: [], bowling_spells: [], fielding_stats: [],
 }
 
-function ManualGamesTab({ players, seasons, refreshAll, onPending }) {
+function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_GAME_FORM)
   const [editingId, setEditingId] = useState(null)
   const [err, setErr] = useState(null)
+
+  const seasonGrades = useMemo(
+    () => (grades || []).filter(g => g.season_id === form.season_id),
+    [grades, form.season_id]
+  )
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -602,9 +628,16 @@ function ManualGamesTab({ players, seasons, refreshAll, onPending }) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className={LABEL_CLS}>Season *</label>
-            <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm({ ...form, season_id: e.target.value })}>
+            <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm({ ...form, season_id: e.target.value, grade_id: '' })}>
               <option value="">— Choose a season —</option>
               {seasons.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}
+            </select>
+          </div>
+          <div>
+            <label className={LABEL_CLS}>Grade (optional)</label>
+            <select className={INPUT_CLS} value={form.grade_id || ''} onChange={e => setForm({ ...form, grade_id: e.target.value })} disabled={!form.season_id}>
+              <option value="">— None —</option>
+              {seasonGrades.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
             </select>
           </div>
           <div>
@@ -866,6 +899,7 @@ export default function AdminManualEntries() {
   })
   const [players, setPlayers] = useState([])
   const [seasons, setSeasons] = useState([])
+  const [grades, setGrades] = useState([])
   const [pending, setPending] = useState(null)
   const [tick, setTick] = useState(0)
 
@@ -874,9 +908,14 @@ export default function AdminManualEntries() {
   useEffect(() => {
     ;(async () => {
       try {
-        const [p, s] = await Promise.all([api.adminListPlayers(), api.adminListSeasons()])
+        const [p, s, g] = await Promise.all([
+          api.adminListPlayers(),
+          api.adminListSeasons(),
+          api.adminListGradesBySeason(),
+        ])
         setPlayers((p || []).filter(x => x.is_player !== false))
         setSeasons(s || [])
+        setGrades(g || [])
       } catch {}
     })()
   }, [])
@@ -917,13 +956,13 @@ export default function AdminManualEntries() {
         <p className="text-xs text-pb-faintest mb-4">{TABS.find(t => t.key === activeTab)?.hint}</p>
 
         {activeTab === 'season' && (
-          <SeasonAdjustmentsTab key={tick + ':season'} players={players} seasons={seasons} refreshAll={refreshAll} onPending={onPending} />
+          <SeasonAdjustmentsTab key={tick + ':season'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} />
         )}
         {activeTab === 'career' && (
           <CareerAdjustmentsTab key={tick + ':career'} players={players} refreshAll={refreshAll} onPending={onPending} />
         )}
         {activeTab === 'game' && (
-          <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} refreshAll={refreshAll} onPending={onPending} />
+          <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} />
         )}
         {activeTab === 'audit' && (
           <AuditTab key={tick + ':audit'} refreshAll={refreshAll} onPending={onPending} />
