@@ -1044,6 +1044,9 @@ export default function StatLab() {
   const activeDerivedRef = useRef(activeDerived)
   activeDerivedRef.current = activeDerived
 
+  // Forward ref to runQuery so effects declared before it can call it.
+  const runQueryRef = useRef(null)
+
   // Load schema once
   useEffect(() => {
     let cancelled = false
@@ -1090,7 +1093,9 @@ export default function StatLab() {
       delete q.filters
       q.context = q.context || {}
       setQuery(q)
-      setHasQueried(false)
+      // Auto-run so the user sees the saved results immediately instead of
+      // landing on the "Pick a report" placeholder.
+      runQueryRef.current?.(q, q.derived || null)
     }).catch(() => setOpenReport(null))
     return () => { cancelled = true }
   }, [orgId, reportSlug])
@@ -1142,6 +1147,7 @@ export default function StatLab() {
       setError(e.message); setRows([]); setHasMore(false); setCurrentPage(1)
     } finally { setLoading(false) }
   }, [orgId])
+  runQueryRef.current = runQuery
 
   const applyPreset = useCallback(async (preset) => {
     const next = {
