@@ -4,6 +4,31 @@
 
 export const CHANGELOG = [
   {
+    version: 'v7.20.2',
+    date: '2026-05-27',
+    title: 'Contact form: refined fields, all required, text contrast fix',
+    items: [
+      'State/territory replaced with free-text "Association / competition" field (e.g. WACA Sub-District).',
+      'Added: "How do you currently store your historical data?" dropdown.',
+      'Added: "When are you hoping to get started?" dropdown — helps prioritise hot leads.',
+      'Phone is now required; all main fields required except PlayHQ URL and free-text message.',
+      'Input text colour changed to explicit white to fix the disappearing-text issue on dark backgrounds.',
+      'Email subject now includes the association: "BetterStats enquiry — Club · Association".',
+    ],
+  },
+  {
+    version: 'v7.20.1',
+    date: '2026-05-27',
+    title: 'Contact form: richer lead fields + CTA now links to contact page',
+    items: [
+      'Contact form now captures: phone (optional), state/territory, number of grades, PlayHQ club URL, and how the lead heard about BetterStats.',
+      'PlayHQ URL field includes a hint explaining it enables a personalised demo with real club data.',
+      'Message field is now optional — the structured fields cover most lead context.',
+      'Email subject now includes the club\'s state: "BetterStats enquiry — Club Name (WA)".',
+      '"Get your club on BetterStats" hero CTA on Landing and Compare table now links to /contact instead of the external Google Form.',
+    ],
+  },
+  {
     version: 'v7.20',
     date: '2026-05-27',
     title: 'Blog restored: nav link, screenshots, footer',

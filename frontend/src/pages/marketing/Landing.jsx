@@ -43,9 +43,9 @@ function Hero() {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-7">
-            <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">
+            <Link to="/contact" className="cta-primary">
               Get your club on BetterStats →
-            </a>
+            </Link>
             <a href="#showcase" className="cta-secondary">See it in action</a>
           </div>
 
