@@ -139,15 +139,15 @@ const HERO_SECTIONS = [
 const COMING_SOON = [
   {
     title: 'Social Posting',
-    desc: 'One-tap publishing of match results, player milestones and yearbook moments to the club\'s socials.',
+    desc: 'Over 150 customisable options for posting team lineups, fixtures, scorecards, milestones and more.',
   },
   {
     title: 'Smart Selection Assistance',
-    desc: 'A selection tool that surfaces recent form, history and availability to help selectors build the side.',
+    desc: 'Use your historical data, our algorithms and AI analysis to inform your selection decisions.',
   },
   {
     title: 'Availability Tracking',
-    desc: 'Players mark themselves in or out for upcoming rounds — captains and selectors see the squad at a glance.',
+    desc: 'Using our KlubPro integration you\'ll be able to track availability, select your teams and post all within one platform — supported by your data.',
   },
 ]
 

@@ -83,9 +83,12 @@ function Logos() {
           to="/applecross/dashboard"
           className="flex items-center gap-3 text-base font-semibold text-pb-text/80 hover:text-accent transition-colors"
         >
-          <span className="w-8 h-8 rounded-full border border-accent/40 bg-accent/10 flex items-center justify-center text-[10px] font-bold text-accent">
-            ACC
-          </span>
+          <img
+            src="/marketing/applecross-cc.webp"
+            alt="Applecross Cricket Club"
+            className="w-9 h-9 object-contain"
+            loading="lazy"
+          />
           Applecross Cricket Club
         </Link>
       </div>

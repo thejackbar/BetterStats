@@ -55,12 +55,15 @@ export const LANDING_FEATURES = [
 // ============================================================
 // TESTIMONIALS
 // ============================================================
+// PLACEHOLDER: real testimonial copy to come from Tristram Fletcher (Secretary,
+// Applecross CC). Lorem Ipsum left in so the section composes correctly without
+// us shipping a fabricated quote in his name. Swap before next deploy.
 export const TESTIMONIALS = [
   {
-    quote: "When PlayHQ took over from MyCricket we lost decades of club records overnight. BetterStats brought every season back — and built something modern around it.",
+    quote: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
     name: 'Tristram Fletcher',
     role: 'Secretary · Applecross Cricket Club',
-    yrs: '',
+    yrs: '[Quote pending]',
   },
 ]
 
