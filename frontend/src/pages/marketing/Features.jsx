@@ -3,7 +3,6 @@ import { useState } from 'react'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
-import Comparison3Way from '../../components/marketing/Comparison3Way'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
 import {
   MockLeaderboard,
@@ -24,9 +23,10 @@ const HERO_SECTIONS = [
     n: '01',
     eyebrow: 'Automatic Stats Sync',
     title: 'Connect once. Sync forever.',
-    desc: 'Connect your club once and BetterStats handles everything from there. Full history imported on first sync — decades of data, automatically. Stats update after every match with zero manual effort.',
+    desc: 'BetterStats syncs everything already available online and lets you fill in the gaps with simple CSV templates for the data that isn\'t. Stats update after every match — no spreadsheets to maintain.',
     bullets: [
-      'Full historical data imported on first sync — going back as far as your data does',
+      'Pulls every match available online into your club site automatically',
+      'Historical CSV imports for older data using our simple templates',
       'Batting, bowling, and fielding stats captured per player per game',
       'Season aggregates and career totals computed automatically',
       'Weekly scheduled sync runs overnight — nothing to trigger',
@@ -55,6 +55,21 @@ const HERO_SECTIONS = [
   },
   {
     n: '03',
+    eyebrow: 'Player Merge Tool',
+    title: 'One player. One profile. Stats stop splitting.',
+    desc: "Multiple PlayCricket profiles for the same player used to scatter stats across two or three records. The Player Merge Tool fixes that — and keeps it fixed.",
+    bullets: [
+      'Smart sorting suggests which profiles likely belong to the same player',
+      'One click to merge — all batting, bowling, fielding history combines',
+      'Just as easy to undo if you change your mind',
+      'Every future sync routes new matches into the merged profile',
+      'No more career averages spread across two records',
+    ],
+    src: SCREENSHOT_PATHS.featuresMatch,
+    mock: <MockPlayerProfile />,
+  },
+  {
+    n: '04',
     eyebrow: 'Leaderboards',
     title: 'Live club leaderboards. Every category.',
     desc: 'Live club leaderboards across every batting, bowling, and fielding category. Filter by season and grade to find exactly who led the club.',
@@ -66,11 +81,11 @@ const HERO_SECTIONS = [
       'Rank badges with colour coding (gold, silver, bronze)',
       'All leaderboards update automatically after each sync',
     ],
-    src: SCREENSHOT_PATHS.featuresMatch,
+    src: SCREENSHOT_PATHS.featuresLeaderboard,
     mock: <MockLeaderboard />,
   },
   {
-    n: '04',
+    n: '05',
     eyebrow: 'Season Yearbooks',
     title: 'The annual that writes itself.',
     desc: "A proper, shareable digital season publication for every year. Auto-populated with stats, honours, and results — then topped up with editorial content by your admin team.",
@@ -89,7 +104,7 @@ const HERO_SECTIONS = [
     mock: <MockYearbook />,
   },
   {
-    n: '05',
+    n: '06',
     eyebrow: 'Club Records',
     title: 'All-time records. Always current.',
     desc: 'All-time and season-best records across batting, bowling, partnerships, all-rounders, and team achievements — always current.',
@@ -105,20 +120,34 @@ const HERO_SECTIONS = [
     mock: <MockPlayerProfile />,
   },
   {
-    n: '06',
-    eyebrow: 'Shareable Player Cards',
-    title: 'Stats your players will actually repost.',
-    desc: 'Every player profile has a shareable stat card — a clean, branded snapshot that looks great on social.',
+    n: '07',
+    eyebrow: 'Player Comparison',
+    title: 'Side-by-side, head-to-head.',
+    desc: "Compare any two players over their full careers — and use the same view as a form indicator when you've got a tough selection to make.",
     bullets: [
-      'Career or season stats view selectable',
-      'Batting and bowling highlights on a single card',
-      'Club rank badges (e.g. #1 Runs, #2 Wickets)',
-      'Milestone indicators (centuries, five-fors)',
-      'Player photo or club logo fallback',
-      'Native share API support — one tap to share on mobile',
+      'Batting, bowling and fielding compared row by row',
+      'Career totals and per-season splits side by side',
+      'Recent-form view to support selection conversations',
+      'Dismissal patterns and opposition history per player',
+      'Shareable link so the whole selection panel sees the same numbers',
     ],
-    src: SCREENSHOT_PATHS.featuresCards,
+    src: SCREENSHOT_PATHS.shortCompare,
     mock: <MockPlayerProfile />,
+  },
+]
+
+const COMING_SOON = [
+  {
+    title: 'Social Posting',
+    desc: 'One-tap publishing of match results, player milestones and yearbook moments to the club\'s socials.',
+  },
+  {
+    title: 'Smart Selection Assistance',
+    desc: 'A selection tool that surfaces recent form, history and availability to help selectors build the side.',
+  },
+  {
+    title: 'Availability Tracking',
+    desc: 'Players mark themselves in or out for upcoming rounds — captains and selectors see the squad at a glance.',
   },
 ]
 
@@ -134,9 +163,9 @@ const SHORT_SECTIONS = [
     src: SCREENSHOT_PATHS.shortStatlab,
   },
   {
-    title: 'Player Comparison',
-    desc: 'Head-to-head side-by-side comparison of any two players across their full careers — batting, bowling, fielding, dismissals.',
-    src: SCREENSHOT_PATHS.shortCompare,
+    title: 'Shareable Player Cards',
+    desc: 'Every player profile has a clean, branded stat card — career or season view, club rank badges, milestone indicators, one-tap native share.',
+    src: SCREENSHOT_PATHS.featuresCards,
   },
   {
     title: 'Awards & Honours',
@@ -145,7 +174,7 @@ const SHORT_SECTIONS = [
   },
   {
     title: 'Admin Tools',
-    desc: 'Duplicate player merge, display name overrides, grade renames, CSV import/export, manual sync trigger, multiple admin logins — everything your stats volunteers need.',
+    desc: 'Display name overrides, grade renames, CSV import/export, manual sync trigger, multiple admin logins — everything your stats volunteers need.',
     src: SCREENSHOT_PATHS.shortAdmin,
   },
 ]
@@ -181,14 +210,44 @@ function Hero() {
   return (
     <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
-      <div className="max-w-[1100px] mx-auto relative text-center">
-        <p className="pill mb-6 inline-flex"><span className="dot" />All features included · One subscription</p>
+      <div className="max-w-[900px] mx-auto relative text-center">
+        <p className="pill mb-6 inline-flex"><span className="dot" />All features · One subscription</p>
         <h1 className="font-display font-bold text-[44px] sm:text-[60px] lg:text-[80px] tracking-tight leading-[0.95] mb-6">
-          Built so the committee, the captain, <br className="hidden md:block" /> and every player <span className="gradient-text">opens it every week.</span>
+          Built for <span className="gradient-text">your whole club.</span>
         </h1>
-        <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed">
-          A tour of everything BetterStats does. No tiers, no upsells. Built specifically for Australian club cricket.
+        <p className="text-lg lg:text-xl text-pb-dim max-w-xl mx-auto leading-relaxed">
+          A tour of everything BetterStats does. No tiers. No upsells.
         </p>
+      </div>
+    </section>
+  )
+}
+
+// ─── Coming Soon block ──────────────────────────────────────────────────
+function ComingSoon() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
+      <div className="max-w-[1200px] mx-auto">
+        <Reveal>
+          <div className="text-center mb-12">
+            <p className="pill-neutral inline-flex mb-5">In development</p>
+            <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">Coming soon.</h2>
+            <p className="text-pb-dim max-w-xl mx-auto">A few things we're actively building. Tell us which one would help your club most.</p>
+          </div>
+        </Reveal>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {COMING_SOON.map((s, i) => (
+            <Reveal key={s.title} delay={(i % 3) * 80}>
+              <div className="surface p-6 h-full opacity-60 border-dashed">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="pill-neutral text-[10px]">Soon</span>
+                </div>
+                <h3 className="text-lg font-semibold mb-2 text-pb-text">{s.title}</h3>
+                <p className="text-sm text-pb-dim leading-relaxed">{s.desc}</p>
+              </div>
+            </Reveal>
+          ))}
+        </div>
       </div>
     </section>
   )
@@ -291,10 +350,7 @@ export default function Features() {
           <FeatureBlock key={f.n} f={f} idx={i} />
         ))}
         <ShortFeatures />
-        <Comparison3Way
-          id="compare"
-          heading={<>Compare your options. <span className="gradient-text">Pick the right tool.</span></>}
-        />
+        <ComingSoon />
         <FeaturesCTA />
       </div>
       <MarketingFooter />

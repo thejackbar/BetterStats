@@ -31,7 +31,7 @@ function Hero() {
         <div className="col-span-12 lg:col-span-6">
           <div className="pill mb-7 inline-flex">
             <span className="dot" />
-            For Australian cricket clubs · Since 2024
+            For Australian cricket clubs · Since 2026
           </div>
           <h1 className="font-display font-bold text-[52px] sm:text-[68px] lg:text-[88px] tracking-tight leading-[0.92] mb-7">
             Every player.<br />
@@ -39,7 +39,7 @@ function Hero() {
             <span className="gradient-text">Kept forever.</span>
           </h1>
           <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">
-            BetterStats digs up every scorecard PlayHQ and MyCricket have on your club, then builds you a public site that finally does that history justice.
+            BetterStats doesn't just dig up PlayHQ or MyCricket — it also imports your spreadsheets and even old scorebooks. It keeps your stats up to date automatically and gives you a platform that does your club's history justice.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-7">
@@ -51,8 +51,8 @@ function Hero() {
 
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-pb-faint">
             <span className="flex items-center gap-2"><span className="tick">✓</span>Live in under an hour</span>
-            <span className="flex items-center gap-2"><span className="tick">✓</span>Onboarding included</span>
-            <span className="flex items-center gap-2"><span className="tick">✓</span>$400/year, cancel anytime</span>
+            <span className="flex items-center gap-2"><span className="tick">✓</span>Simple onboarding</span>
+            <span className="flex items-center gap-2"><span className="tick">✓</span>$400/year — affordable for what you get</span>
           </div>
         </div>
 
@@ -75,20 +75,19 @@ function Hero() {
 
 // ─── Logo strip ──────────────────────────────────────────────────────────
 function Logos() {
-  // Currently text-only placeholders — swap for real logo SVGs when ready.
-  const clubs = ['Applecross CC', 'Booragoon DCC', 'Mosman Park', 'Fremantle CC', 'Subiaco-Floreat', 'South Perth']
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-12 border-y pb-hairline bg-black/20">
-      <div className="max-w-[1200px] mx-auto flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+      <div className="max-w-[1200px] mx-auto flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
         <p className="text-xs text-pb-faint uppercase tracking-wide3 font-medium">Trusted by clubs at</p>
-        {clubs.map((c) => (
-          <span key={c} className="flex items-center gap-2 text-sm font-medium text-pb-dim opacity-70 hover:opacity-100 transition-opacity">
-            <span className="w-5 h-5 rounded-full border pb-hairline flex items-center justify-center text-[8px] font-bold">
-              {c.split(' ').map(p => p[0]).join('').slice(0, 2)}
-            </span>
-            {c}
+        <Link
+          to="/applecross/dashboard"
+          className="flex items-center gap-3 text-base font-semibold text-pb-text/80 hover:text-accent transition-colors"
+        >
+          <span className="w-8 h-8 rounded-full border border-accent/40 bg-accent/10 flex items-center justify-center text-[10px] font-bold text-accent">
+            ACC
           </span>
-        ))}
+          Applecross Cricket Club
+        </Link>
       </div>
     </section>
   )
@@ -107,7 +106,7 @@ function ValueProps() {
       eyebrow: '02 · For the Statistician',
       title: 'Every ball, every wicket, every catch — as far back as your data goes.',
       desc: 'We pull MyCricket archives PlayHQ never imported. Career, season, all-time. Filter, sort, export. 30+ stat columns.',
-      stat: '100,000+ innings indexed',
+      stat: 'Decades of indexed cricket data',
     },
     {
       eyebrow: '03 · For the Players',
@@ -131,14 +130,14 @@ function ValueProps() {
           </div>
         </Reveal>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
           {cards.map((c, i) => (
-            <Reveal key={c.eyebrow} delay={i * 100}>
-              <div className="surface p-7 h-full hover:border-accent/30 transition-colors group">
+            <Reveal key={c.eyebrow} delay={i * 100} className="h-full">
+              <div className="surface p-7 h-full flex flex-col hover:border-accent/30 transition-colors group">
                 <p className="text-xs font-mono uppercase tracking-wide3 text-accent mb-5">{c.eyebrow}</p>
                 <h3 className="text-2xl font-bold leading-tight mb-3 group-hover:text-accent transition-colors">{c.title}</h3>
                 <p className="text-sm text-pb-dim leading-relaxed mb-6">{c.desc}</p>
-                <div className="pt-5 border-t pb-hairline flex items-center justify-between">
+                <div className="mt-auto pt-5 border-t pb-hairline flex items-center justify-between">
                   <span className="text-xs font-medium text-accent">{c.stat}</span>
                   <span className="text-accent opacity-0 group-hover:opacity-100 transition-opacity">→</span>
                 </div>
@@ -154,10 +153,10 @@ function ValueProps() {
 // ─── Stat banner ─────────────────────────────────────────────────────────
 function StatBanner() {
   const stats = [
-    { v: 52, suffix: '', label: 'seasons archived' },
-    { v: 100000, suffix: '+', label: 'innings parsed' },
-    { v: 30, suffix: '+', label: 'sortable stat columns' },
-    { v: 100, suffix: '%', label: 'automated sync' },
+    { v: 4500, suffix: '+', label: 'Australian cricket clubs ready to set up' },
+    { v: 1000000, suffix: '+', label: 'players ready for active profiles' },
+    { v: 200, suffix: '+', label: 'pre-built reports in StatLab' },
+    { v: 100, suffix: '%', label: 'automated once you go live' },
   ]
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-16 border-y pb-hairline relative overflow-hidden bg-black/20">
@@ -315,56 +314,33 @@ function Features() {
 
 // ─── Testimonials ────────────────────────────────────────────────────────
 function Testimonials() {
+  const t = TESTIMONIALS[0]
+  if (!t) return null
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-24">
-      <div className="max-w-[1100px] mx-auto">
+      <div className="max-w-[1000px] mx-auto">
         <Reveal>
-          <div className="grid grid-cols-12 gap-8 mb-12 items-end">
-            <div className="col-span-12 md:col-span-7">
-              <p className="pill-neutral inline-flex mb-5">Loved by clubs</p>
-              <h2 className="font-display font-bold text-4xl md:text-6xl tracking-tight leading-[1.05]">What clubs are saying.</h2>
-            </div>
-            <div className="col-span-12 md:col-span-5">
-              <p className="text-lg text-pb-dim">Real notes from real committee members, captains and statisticians who have run BetterStats since launch.</p>
-            </div>
+          <div className="text-center mb-10">
+            <p className="pill-neutral inline-flex mb-5">From the clubs</p>
+            <h2 className="font-display font-bold text-4xl md:text-6xl tracking-tight leading-[1.05]">What clubs are saying.</h2>
           </div>
         </Reveal>
 
         <Reveal>
-          <figure className="surface p-8 lg:p-12 mb-5">
+          <figure className="surface p-8 lg:p-12">
             <div className="flex gap-1 mb-5 text-accent text-lg">★★★★★</div>
-            <blockquote className="text-2xl md:text-3xl font-semibold leading-snug mb-7 max-w-3xl">&ldquo;{TESTIMONIALS[0].quote}&rdquo;</blockquote>
+            <blockquote className="text-2xl md:text-3xl font-semibold leading-snug mb-7">&ldquo;{t.quote}&rdquo;</blockquote>
             <figcaption className="flex items-center gap-4 pt-6 border-t pb-hairline">
               <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500/40 to-emerald-700/20 border border-accent/30 flex items-center justify-center font-bold">
-                {TESTIMONIALS[0].name.split(' ').map(p => p[0]).join('')}
+                {t.name.split(' ').map(p => p[0]).join('')}
               </div>
               <div>
-                <p className="font-semibold">{TESTIMONIALS[0].name}</p>
-                <p className="text-sm text-pb-dim">{TESTIMONIALS[0].role} · {TESTIMONIALS[0].yrs}</p>
+                <p className="font-semibold">{t.name}</p>
+                <p className="text-sm text-pb-dim">{t.role}{t.yrs ? ` · ${t.yrs}` : ''}</p>
               </div>
             </figcaption>
           </figure>
         </Reveal>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {TESTIMONIALS.slice(1).map((t, i) => (
-            <Reveal key={t.name} delay={i * 100}>
-              <figure className="surface p-7 h-full">
-                <div className="flex gap-0.5 mb-4 text-accent">{'★★★★★'}</div>
-                <blockquote className="text-base text-pb-text leading-relaxed mb-6">&ldquo;{t.quote}&rdquo;</blockquote>
-                <figcaption className="flex items-center gap-3 pt-4 border-t pb-hairline">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500/40 to-emerald-700/20 border border-accent/30 flex items-center justify-center font-bold text-sm">
-                    {t.name.split(' ').map(p => p[0]).join('')}
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold">{t.name}</p>
-                    <p className="text-xs text-pb-faint">{t.role}</p>
-                  </div>
-                </figcaption>
-              </figure>
-            </Reveal>
-          ))}
-        </div>
       </div>
     </section>
   )
@@ -440,10 +416,10 @@ function Promise_() {
                 Australian clubs, for now.
               </h3>
               <p className="text-sm text-pb-dim leading-relaxed mb-4">
-                BetterStats syncs from PlayHQ — the official Australian cricket data feed. That means we currently only support clubs playing in the Australian PlayHQ ecosystem.
+                BetterStats currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
               </p>
               <p className="text-sm text-pb-dim leading-relaxed">
-                Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link> — international support is on the roadmap.
+                Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link> — it helps us prioritise where to head next.
               </p>
             </div>
           </Reveal>
@@ -473,7 +449,7 @@ function FinalCTA() {
               <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
               <Link to="/pricing" className="cta-secondary">See pricing</Link>
             </div>
-            <p className="text-xs text-pb-faint">$400/yr · No credit card to start · Onboarding included</p>
+            <p className="text-xs text-pb-faint">$400/yr · Simple onboarding · Responsive support</p>
           </div>
         </div>
       </div>

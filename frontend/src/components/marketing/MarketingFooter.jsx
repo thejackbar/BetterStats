@@ -28,7 +28,7 @@ export default function MarketingFooter() {
             <p className="text-sm font-semibold mb-4">Product</p>
             <ul className="space-y-2.5">
               <li><Link to="/features" className="text-sm text-pb-dim hover:text-pb-text">Features</Link></li>
-              <li><Link to="/features#compare" className="text-sm text-pb-dim hover:text-pb-text">Compare</Link></li>
+              <li><Link to="/compare" className="text-sm text-pb-dim hover:text-pb-text">Compare</Link></li>
               <li><Link to="/pricing" className="text-sm text-pb-dim hover:text-pb-text">Pricing</Link></li>
               <li><Link to="/blog" className="text-sm text-pb-dim hover:text-pb-text">Blog</Link></li>
             </ul>

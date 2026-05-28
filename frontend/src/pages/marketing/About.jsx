@@ -31,16 +31,13 @@ function Story() {
           <p className="pill-neutral inline-flex mb-6">What we do</p>
           <div className="space-y-5 text-lg text-pb-dim leading-relaxed">
             <p>
-              BetterStats started as an internal stats platform for Applecross Cricket Club in Perth, Western Australia — built by a club member tired of manually updating spreadsheets after every game. It's now being made available to other clubs who want the same thing.
+              BetterStats was built by a group of people fed up with the way club cricket history gets forgotten as platforms change hands. Every migration — MyCricket to PlayHQ, association to association — left decades of records sitting in a corner nobody could reach.
             </p>
             <p>
-              Australian cricket clubs are full of people who care about the history of their club — who hit the first century, who took the most wickets in a season, who's closing in on 100 games. <span className="text-pb-text">BetterStats makes that information beautiful, accessible, and automatic.</span>
+              Australian cricket clubs are full of people who care about that history — who hit the first century, who took the most wickets in a season, who's closing in on 100 games. <span className="text-pb-text">BetterStats makes that information beautiful, accessible, and automatic.</span>
             </p>
             <p>
-              Once your club is set up, stats come through automatically after every match — no data entry, no spreadsheets, no chasing scorers. Your full history is pulled in on first sync, and everything stays up to date from there.
-            </p>
-            <p>
-              We sit on top of PlayHQ — the official Australian cricket data feed — so the data stays accurate and current, and your scorers keep using the tools they already know.
+              We want to give clubs what they deserve: a better way to keep their history alive and a platform members will actually open every week.
             </p>
           </div>
         </Reveal>
@@ -75,9 +72,9 @@ function Numbers() {
 function Principles() {
   const principles = [
     { n: '01', title: 'Cricketers first', desc: "Every product decision asks: what would a club statistician or committee volunteer actually want here? Built by people who keep a scorebook." },
-    { n: '02', title: 'Honest with data', desc: "If a stat isn't confirmed, we say so. Old MyCricket aggregates get flagged. We don't invent runs that nobody scored." },
+    { n: '02', title: 'Honest with data', desc: "If a stat isn't confirmed, we say so. Older aggregates get flagged. We don't invent runs that nobody scored." },
     { n: '03', title: 'No tiers, no upsells', desc: "Every club gets every feature. We hate the SaaS playbook of locking 'the one feature you wanted' behind a Pro tier." },
-    { n: '04', title: 'You own the data', desc: "Full CSV export anytime. We're a lens on PlayHQ's data — not the source of truth, just the layer that makes it useful." },
+    { n: '04', title: 'You own the data', desc: "Full CSV export anytime. The data belongs to your club — we just help you visualise it." },
   ]
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-20">
@@ -138,10 +135,10 @@ function Promise_() {
                 Built for Australian clubs.
               </h3>
               <p className="text-sm text-pb-dim leading-relaxed mb-4">
-                BetterStats syncs from PlayHQ — the official Australian cricket data feed. We currently only support clubs playing in the Australian PlayHQ ecosystem.
+                BetterStats currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
               </p>
               <p className="text-sm text-pb-dim leading-relaxed">
-                Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link> — international support is on the roadmap.
+                Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link> — it helps us prioritise.
               </p>
             </div>
           </Reveal>
@@ -172,7 +169,7 @@ function ContactBlock() {
 export default function About() {
   usePageMeta({
     title: 'About — BetterStats Cricket Stats Platform',
-    description: 'BetterStats was built by a club cricketer at Applecross Cricket Club in Perth, Western Australia, who was tired of maintaining stats in spreadsheets. Now offered to any Australian cricket club.',
+    description: 'BetterStats was built by a group of people fed up with the way platform migrations leave decades of club cricket history forgotten. A modern, automated stats platform for Australian cricket clubs.',
     image: 'https://betterstats.cricket/og-image.png',
     url: 'https://betterstats.cricket/about',
   })

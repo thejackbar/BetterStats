@@ -6,7 +6,7 @@ import { FORM_URL } from '../data/marketing'
 const LINKS = [
   { to: '/features', label: 'Features' },
   { to: '/pricing', label: 'Pricing' },
-  { to: '/features#compare', label: 'Compare' },
+  { to: '/compare', label: 'Compare' },
   { to: '/about', label: 'About' },
   { to: '/blog', label: 'Blog' },
   { to: '/faq', label: 'FAQ' },

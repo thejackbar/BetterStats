@@ -60,8 +60,16 @@ function Cell({ value, accent, billing }) {
   )
 }
 
-export default function Comparison3Way({ id = 'compare', heading, sub, showCTA = true }) {
+export default function Comparison3Way({
+  id = 'compare',
+  heading,
+  sub,
+  showCTA = true,
+  showBillingToggle = false,
+  competitorKey = 'other',
+}) {
   const [billing, setBilling] = useState('annual')
+  const competitor = COMPETITORS[competitorKey] || COMPETITORS.other
   return (
     <section id={id} className="px-4 sm:px-6 lg:px-10 py-24 border-t pb-hairline-t">
       <div className="max-w-[1200px] mx-auto">
@@ -72,19 +80,21 @@ export default function Comparison3Way({ id = 'compare', heading, sub, showCTA =
               {heading || (<>You have options. <span className="gradient-text">Here's the honest version.</span></>)}
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              {sub || 'PlayHQ is the system of record. CricketStatz is the old-school stats package. BetterStats is the layer that turns both into a club site your members will use.'}
+              {sub || 'PlayHQ is the system of record. BetterStats is the layer that turns it into a club site your members will use.'}
             </p>
           </div>
         </Reveal>
 
-        <Reveal>
-          <div className="flex justify-center mb-6">
-            <div className="tabbar">
-              <button className={billing === 'monthly' ? 'active' : ''} onClick={() => setBilling('monthly')}>Monthly cost</button>
-              <button className={billing === 'annual' ? 'active' : ''} onClick={() => setBilling('annual')}>Annual cost</button>
+        {showBillingToggle && (
+          <Reveal>
+            <div className="flex justify-center mb-6">
+              <div className="tabbar">
+                <button className={billing === 'monthly' ? 'active' : ''} onClick={() => setBilling('monthly')}>Monthly cost</button>
+                <button className={billing === 'annual' ? 'active' : ''} onClick={() => setBilling('annual')}>Annual cost</button>
+              </div>
             </div>
-          </div>
-        </Reveal>
+          </Reveal>
+        )}
 
         <Reveal>
           <div className="surface overflow-hidden">
@@ -97,9 +107,9 @@ export default function Comparison3Way({ id = 'compare', heading, sub, showCTA =
                 <p className="hidden md:block text-[11px] text-pb-dim mt-0.5">{COMPETITORS.playhq.tag}</p>
               </div>
               <div className="text-center">
-                <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint mb-1">Competitor</p>
-                <p className="text-base font-bold">{COMPETITORS.cstatz.name}</p>
-                <p className="hidden md:block text-[11px] text-pb-dim mt-0.5">{COMPETITORS.cstatz.tag}</p>
+                <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint mb-1">Alternative</p>
+                <p className="text-base font-bold">{competitor.name}</p>
+                <p className="hidden md:block text-[11px] text-pb-dim mt-0.5">{competitor.tag}</p>
               </div>
               <div className="text-center bg-accent/10 -m-2 p-2 rounded-lg border border-accent/30 relative">
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-accent text-navy-950 rounded-full text-[9px] font-bold uppercase tracking-wide3 whitespace-nowrap">★ Recommended</div>
@@ -145,7 +155,7 @@ export default function Comparison3Way({ id = 'compare', heading, sub, showCTA =
               <div className="grid grid-cols-[2fr,1fr,1fr,1.1fr] md:grid-cols-[2.2fr,1fr,1fr,1.2fr] gap-2 items-center">
                 <p className="text-sm text-pb-dim">Best for</p>
                 <p className="text-xs text-center text-pb-faint">Live scoring on Saturday</p>
-                <p className="text-xs text-center text-pb-faint">Solo stats hobbyist</p>
+                <p className="text-xs text-center text-pb-faint">Stats-only tooling</p>
                 <p className="text-xs text-center text-accent font-semibold">Whole-club platform</p>
               </div>
             </div>
