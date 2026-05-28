@@ -133,7 +133,7 @@ async def top_routes(
                 COUNT(DISTINCT ip_hash) FILTER (WHERE ip_hash IS NOT NULL) AS unique_ips,
                 MAX(created_at) AS last_hit
             FROM usage_events
-            WHERE created_at >= NOW() - (:days || ' days')::interval
+            WHERE created_at >= NOW() - (:days * INTERVAL '1 day')
             {type_clause}
             GROUP BY route_key, event_type
             ORDER BY hits DESC
@@ -176,7 +176,7 @@ async def top_users(
                 MAX(ue.created_at) AS last_hit
             FROM usage_events ue
             LEFT JOIN users u ON u.id = ue.user_id
-            WHERE ue.created_at >= NOW() - (:days || ' days')::interval
+            WHERE ue.created_at >= NOW() - (:days * INTERVAL '1 day')
               AND ue.user_id IS NOT NULL
             GROUP BY ue.user_id, u.email, u.display_name
             ORDER BY hits DESC
@@ -215,7 +215,7 @@ async def summary(
                 COUNT(DISTINCT user_id) FILTER (WHERE user_id IS NOT NULL)      AS unique_users,
                 COUNT(DISTINCT ip_hash) FILTER (WHERE ip_hash IS NOT NULL)      AS unique_ips
             FROM usage_events
-            WHERE created_at >= NOW() - (:days || ' days')::interval
+            WHERE created_at >= NOW() - (:days * INTERVAL '1 day')
             """
         ),
         {"days": days},
