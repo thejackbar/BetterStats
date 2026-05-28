@@ -1,4 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import {
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  BarChart, Bar, PieChart, Pie, Cell, Legend,
+} from 'recharts'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
@@ -12,13 +16,41 @@ const WINDOW_OPTIONS = [
 const EVENT_TYPES = [
   { value: '',          label: 'All' },
   { value: 'api',       label: 'API' },
-  { value: 'page_view', label: 'Page views' },
+  { value: 'page_view', label: 'Pages' },
+]
+
+const ROLE_OPTIONS = [
+  { value: '',            label: 'Everyone' },
+  { value: 'super_admin', label: 'Super admins' },
+  { value: 'club_admin',  label: 'Club admins' },
+  { value: 'club_member', label: 'Members' },
+  { value: 'anon',        label: 'Anonymous' },
+]
+
+const ROLE_LABEL = {
+  super_admin: 'Super',
+  club_admin:  'Admin',
+  club_member: 'Member',
+  anon:        'Anon',
+}
+
+// Recharts colour palette built from existing CSS vars so light/dark themes
+// just work. Order matters for the rotating Pie cells.
+const COLOURS = [
+  'var(--pb-accent)',
+  '#3b82f6',  // blue
+  '#a855f7',  // purple
+  '#f59e0b',  // amber
+  '#ec4899',  // pink
+  '#22d3ee',  // cyan
+  '#84cc16',  // lime
+  '#ef4444',  // red
+  '#64748b',  // slate
 ]
 
 function fmtTime(iso) {
   if (!iso) return ''
-  const d = new Date(iso)
-  return d.toLocaleString('en-AU', {
+  return new Date(iso).toLocaleString('en-AU', {
     day: 'numeric', month: 'short',
     hour: 'numeric', minute: '2-digit',
   })
@@ -26,12 +58,13 @@ function fmtTime(iso) {
 
 function fmtNum(n) {
   if (n == null) return '0'
-  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
+  if (n >= 10000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
   return String(n)
 }
 
 function userLabel(row) {
-  return row.user_display_name || row.user_email || (row.user_id ? row.user_id.slice(0, 8) : 'anon')
+  return row.user_display_name || row.user_email
+    || (row.user_id ? row.user_id.slice(0, 8) : 'anon')
 }
 
 function StatusBadge({ status }) {
@@ -55,10 +88,55 @@ function TypeBadge({ type }) {
   )
 }
 
+function RoleBadge({ role }) {
+  if (!role) return null
+  const label = ROLE_LABEL[role] || role
+  const colour = role === 'super_admin' ? 'text-pb-accent'
+    : role === 'club_admin' ? 'text-pb-text'
+    : role === 'anon' ? 'text-pb-faintest'
+    : 'text-pb-faint'
+  return (
+    <span className={`font-mono text-[9px] uppercase tracking-wide ${colour}`}>
+      {label}
+    </span>
+  )
+}
+
+// Format the x-axis label for the time-series chart. Hour bucket for the
+// 24h window, day bucket otherwise.
+function fmtBucket(iso, bucket) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (bucket === 'hour') {
+    return d.toLocaleTimeString('en-AU', { hour: 'numeric' })
+  }
+  return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+}
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-pb-surface border pb-hairline rounded px-3 py-2 text-xs shadow-lg">
+      {label && <p className="font-mono text-[10px] text-pb-faint mb-1">{label}</p>}
+      {payload.map((p, i) => (
+        <p key={i} className="font-mono text-pb-text">
+          <span className="inline-block w-2 h-2 rounded-full mr-2 align-middle" style={{ background: p.color || p.fill }} />
+          {p.name}: <strong>{fmtNum(p.value)}</strong>
+        </p>
+      ))}
+    </div>
+  )
+}
+
 export default function AdminUsage() {
   const [days, setDays] = useState(7)
   const [eventType, setEventType] = useState('')
+  const [role, setRole] = useState('')
+
   const [summary, setSummary] = useState(null)
+  const [series, setSeries] = useState({ bucket: 'day', points: [] })
+  const [byFeature, setByFeature] = useState([])
+  const [byRole, setByRole] = useState([])
   const [topRoutes, setTopRoutes] = useState([])
   const [topUsers, setTopUsers] = useState([])
   const [recent, setRecent] = useState([])
@@ -68,14 +146,26 @@ export default function AdminUsage() {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    const opts = {
+      days,
+      eventType: eventType || null,
+      role: role || null,
+    }
     try {
-      const [s, r, u, e] = await Promise.all([
-        api.adminUsageSummary({ days }),
-        api.adminUsageTopRoutes({ days, limit: 25, eventType: eventType || null }),
-        api.adminUsageTopUsers({ days, limit: 25 }),
-        api.adminUsageRecent({ limit: 100, eventType: eventType || null }),
+      const [s, ts, feat, brole, r, u, e] = await Promise.all([
+        api.adminUsageSummary(opts),
+        api.adminUsageTimeseries(opts),
+        api.adminUsageByFeature(opts),
+        // by-role chart shows the overall split, so it ignores the role filter
+        api.adminUsageByRole({ days, eventType: eventType || null }),
+        api.adminUsageTopRoutes({ ...opts, limit: 20 }),
+        api.adminUsageTopUsers({ days, role: role || null, limit: 20 }),
+        api.adminUsageRecent({ ...opts, limit: 100 }),
       ])
       setSummary(s)
+      setSeries(ts)
+      setByFeature(feat)
+      setByRole(brole)
       setTopRoutes(r)
       setTopUsers(u)
       setRecent(e)
@@ -84,51 +174,83 @@ export default function AdminUsage() {
     } finally {
       setLoading(false)
     }
-  }, [days, eventType])
+  }, [days, eventType, role])
 
   useEffect(() => { load() }, [load])
 
+  const seriesData = useMemo(() => series.points.map(p => ({
+    label: fmtBucket(p.bucket, series.bucket),
+    api: p.api_hits,
+    pages: p.page_views,
+    total: p.total,
+  })), [series])
+
+  const featureData = useMemo(() => byFeature.slice(0, 10), [byFeature])
+  const roleData = useMemo(() => byRole.map((r, i) => ({
+    name: ROLE_LABEL[r.role] || r.role,
+    value: r.hits,
+    fill: COLOURS[i % COLOURS.length],
+  })), [byRole])
+
   return (
     <AdminLayout>
-      <div className="max-w-5xl">
+      <div className="max-w-6xl">
         <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Usage Breadcrumbs</h1>
         <p className="text-pb-faint text-sm mb-5 leading-relaxed">
           What people are doing inside BetterStats — API calls and page views.
-          Each row is a single hit. IPs are stored as a truncated hash, never raw.
+          IPs are stored as a truncated hash, never raw.
         </p>
 
         {/* Filters */}
-        <div className="mb-5 flex flex-wrap gap-2 items-center">
-          <span className="font-mono text-[10px] text-pb-faint uppercase tracking-wide">Window</span>
-          {WINDOW_OPTIONS.map(opt => (
+        <div className="mb-5 space-y-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="font-mono text-[10px] text-pb-faint uppercase tracking-wide w-14">Window</span>
+            {WINDOW_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setDays(opt.value)}
+                className={`font-mono text-[10px] px-2.5 py-1 rounded border pb-hairline transition ${
+                  days === opt.value ? 'bg-pb-accent text-pb-bg' : 'text-pb-faint hover:text-pb-text'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
             <button
-              key={opt.value}
-              onClick={() => setDays(opt.value)}
-              className={`font-mono text-[10px] px-2.5 py-1 rounded border pb-hairline transition ${
-                days === opt.value ? 'bg-pb-accent text-pb-bg' : 'text-pb-faint hover:text-pb-text'
-              }`}
+              onClick={load}
+              className="ml-auto font-mono text-[10px] px-2.5 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text"
             >
-              {opt.label}
+              Refresh
             </button>
-          ))}
-          <span className="ml-3 font-mono text-[10px] text-pb-faint uppercase tracking-wide">Type</span>
-          {EVENT_TYPES.map(opt => (
-            <button
-              key={opt.value || 'all'}
-              onClick={() => setEventType(opt.value)}
-              className={`font-mono text-[10px] px-2.5 py-1 rounded border pb-hairline transition ${
-                eventType === opt.value ? 'bg-pb-accent text-pb-bg' : 'text-pb-faint hover:text-pb-text'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-          <button
-            onClick={load}
-            className="ml-auto font-mono text-[10px] px-2.5 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text"
-          >
-            Refresh
-          </button>
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="font-mono text-[10px] text-pb-faint uppercase tracking-wide w-14">Type</span>
+            {EVENT_TYPES.map(opt => (
+              <button
+                key={opt.value || 'all'}
+                onClick={() => setEventType(opt.value)}
+                className={`font-mono text-[10px] px-2.5 py-1 rounded border pb-hairline transition ${
+                  eventType === opt.value ? 'bg-pb-accent text-pb-bg' : 'text-pb-faint hover:text-pb-text'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="font-mono text-[10px] text-pb-faint uppercase tracking-wide w-14">Role</span>
+            {ROLE_OPTIONS.map(opt => (
+              <button
+                key={opt.value || 'all'}
+                onClick={() => setRole(opt.value)}
+                className={`font-mono text-[10px] px-2.5 py-1 rounded border pb-hairline transition ${
+                  role === opt.value ? 'bg-pb-accent text-pb-bg' : 'text-pb-faint hover:text-pb-text'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {error && (
@@ -155,8 +277,99 @@ export default function AdminUsage() {
           </div>
         )}
 
+        {/* Time series */}
+        <div className="pb-card p-4 mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide">Activity over time</h2>
+            <span className="font-mono text-[9px] text-pb-faintest">
+              {series.bucket === 'hour' ? 'per hour' : 'per day'}
+            </span>
+          </div>
+          <div style={{ width: '100%', height: 220 }}>
+            {seriesData.length === 0 ? (
+              <div className="h-full flex items-center justify-center font-mono text-[11px] text-pb-faint">
+                {loading ? 'Loading…' : 'No data in window.'}
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={seriesData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="apiFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--pb-accent)" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="var(--pb-accent)" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="pagesFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" />
+                  <XAxis dataKey="label" tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Area type="monotone" dataKey="api"   name="API"        stroke="var(--pb-accent)" strokeWidth={2} fill="url(#apiFill)" />
+                  <Area type="monotone" dataKey="pages" name="Page views" stroke="#3b82f6"          strokeWidth={2} fill="url(#pagesFill)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+
+        {/* Feature breakdown + role donut */}
+        <div className="grid lg:grid-cols-3 gap-5 mb-6">
+          <div className="pb-card p-4 lg:col-span-2">
+            <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide mb-2">By feature</h2>
+            <div style={{ width: '100%', height: Math.max(240, featureData.length * 28) }}>
+              {featureData.length === 0 ? (
+                <div className="h-full flex items-center justify-center font-mono text-[11px] text-pb-faint">
+                  {loading ? 'Loading…' : 'No data.'}
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={featureData} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline, #1a2540)" horizontal={false} />
+                    <XAxis type="number" tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis type="category" dataKey="feature" width={140} tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--pb-surface2)', opacity: 0.4 }} />
+                    <Bar dataKey="hits" name="Hits" fill="var(--pb-accent)" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
+          <div className="pb-card p-4">
+            <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide mb-2">By role</h2>
+            <p className="font-mono text-[9px] text-pb-faintest mb-2">
+              Overall split — ignores the role filter above.
+            </p>
+            <div style={{ width: '100%', height: 240 }}>
+              {roleData.length === 0 ? (
+                <div className="h-full flex items-center justify-center font-mono text-[11px] text-pb-faint">
+                  {loading ? 'Loading…' : 'No data.'}
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={roleData} dataKey="value" nameKey="name" innerRadius={40} outerRadius={75} paddingAngle={2}>
+                      {roleData.map((entry, i) => (
+                        <Cell key={i} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<ChartTooltip />} />
+                    <Legend
+                      wrapperStyle={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--pb-faint)' }}
+                      iconSize={8}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Top routes + top users tables */}
         <div className="grid md:grid-cols-2 gap-5 mb-6">
-          {/* Top routes */}
           <div>
             <h2 className="font-display font-bold text-sm text-pb-text mb-2 uppercase tracking-wide">Top routes</h2>
             <div className="pb-card overflow-hidden">
@@ -184,7 +397,6 @@ export default function AdminUsage() {
             </div>
           </div>
 
-          {/* Top users */}
           <div>
             <h2 className="font-display font-bold text-sm text-pb-text mb-2 uppercase tracking-wide">Top users</h2>
             <div className="pb-card overflow-hidden">
@@ -200,7 +412,10 @@ export default function AdminUsage() {
                   className={`flex items-center gap-3 px-4 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="text-pb-text text-sm truncate">{userLabel(u)}</div>
+                    <div className="text-pb-text text-sm truncate flex items-center gap-2">
+                      {userLabel(u)}
+                      <RoleBadge role={u.user_role} />
+                    </div>
                     <div className="font-mono text-[9px] text-pb-faintest">
                       {u.unique_routes} routes · last {fmtTime(u.last_hit)}
                     </div>
@@ -235,8 +450,13 @@ export default function AdminUsage() {
               <span className="font-mono text-[10px] text-pb-text flex-1 min-w-0 truncate">
                 {r.path}
               </span>
-              <span className="font-mono text-[10px] text-pb-faint shrink-0 w-24 text-right truncate">
-                {r.user_id ? userLabel(r) : 'anon'}
+              <span className="font-mono text-[10px] text-pb-faint shrink-0 w-28 text-right truncate flex items-center justify-end gap-1.5">
+                {r.user_id ? (
+                  <>
+                    <span className="truncate">{userLabel(r)}</span>
+                    <RoleBadge role={r.user_role} />
+                  </>
+                ) : 'anon'}
               </span>
               <span className="font-mono text-[9px] text-pb-faintest shrink-0 w-12 text-right">
                 {r.duration_ms != null ? `${r.duration_ms}ms` : ''}
