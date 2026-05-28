@@ -52,7 +52,6 @@ function Hero() {
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-pb-faint">
             <span className="flex items-center gap-2"><span className="tick">✓</span>Live in under an hour</span>
             <span className="flex items-center gap-2"><span className="tick">✓</span>Simple onboarding</span>
-            <span className="flex items-center gap-2"><span className="tick">✓</span>$400/year — affordable for what you get</span>
           </div>
         </div>
 
