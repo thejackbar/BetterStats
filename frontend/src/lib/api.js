@@ -225,20 +225,46 @@ export const api = {
   adminListActivityLog: (limit = 100) =>
     request(`/club-admin/activity-log?limit=${limit}`),
   // Usage breadcrumbs (super-admin only)
-  adminUsageRecent: ({ limit = 200, eventType = null } = {}) => {
+  adminUsageRecent: ({ limit = 200, eventType = null, role = null } = {}) => {
     const params = new URLSearchParams({ limit: String(limit) })
     if (eventType) params.set('event_type', eventType)
+    if (role) params.set('role', role)
     return request(`/club-admin/usage/recent?${params}`)
   },
-  adminUsageTopRoutes: ({ days = 7, limit = 30, eventType = null } = {}) => {
+  adminUsageTopRoutes: ({ days = 7, limit = 30, eventType = null, role = null } = {}) => {
     const params = new URLSearchParams({ days: String(days), limit: String(limit) })
     if (eventType) params.set('event_type', eventType)
+    if (role) params.set('role', role)
     return request(`/club-admin/usage/top-routes?${params}`)
   },
-  adminUsageTopUsers: ({ days = 7, limit = 30 } = {}) =>
-    request(`/club-admin/usage/top-users?days=${days}&limit=${limit}`),
-  adminUsageSummary: ({ days = 7 } = {}) =>
-    request(`/club-admin/usage/summary?days=${days}`),
+  adminUsageTopUsers: ({ days = 7, limit = 30, role = null } = {}) => {
+    const params = new URLSearchParams({ days: String(days), limit: String(limit) })
+    if (role) params.set('role', role)
+    return request(`/club-admin/usage/top-users?${params}`)
+  },
+  adminUsageSummary: ({ days = 7, role = null, eventType = null } = {}) => {
+    const params = new URLSearchParams({ days: String(days) })
+    if (role) params.set('role', role)
+    if (eventType) params.set('event_type', eventType)
+    return request(`/club-admin/usage/summary?${params}`)
+  },
+  adminUsageTimeseries: ({ days = 7, role = null, eventType = null } = {}) => {
+    const params = new URLSearchParams({ days: String(days) })
+    if (role) params.set('role', role)
+    if (eventType) params.set('event_type', eventType)
+    return request(`/club-admin/usage/timeseries?${params}`)
+  },
+  adminUsageByFeature: ({ days = 7, role = null, eventType = null } = {}) => {
+    const params = new URLSearchParams({ days: String(days) })
+    if (role) params.set('role', role)
+    if (eventType) params.set('event_type', eventType)
+    return request(`/club-admin/usage/by-feature?${params}`)
+  },
+  adminUsageByRole: ({ days = 7, eventType = null } = {}) => {
+    const params = new URLSearchParams({ days: String(days) })
+    if (eventType) params.set('event_type', eventType)
+    return request(`/club-admin/usage/by-role?${params}`)
+  },
   // Notification centre (bell icon)
   getNotificationsCount: () => request('/club-admin/notifications/count'),
   getNotificationsSummary: () => request('/club-admin/notifications/summary'),
