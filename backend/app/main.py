@@ -174,6 +174,23 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_usage_events_route_created "
             "ON usage_events(route, created_at DESC) WHERE route IS NOT NULL"
         ))
+        # Geo enrichment columns. Country comes from Cloudflare's
+        # `cf-ipcountry` header (free on every plan); region+city are
+        # filled by an out-of-band ip-api.com lookup that runs after
+        # the row is written.
+        await conn.execute(text(
+            "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS country TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS region TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS city TEXT"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_country "
+            "ON usage_events(country) WHERE country IS NOT NULL"
+        ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS player_season_grade_stats (
                 id SERIAL PRIMARY KEY,
@@ -491,6 +508,11 @@ def _decode_user_id(request: Request) -> str | None:
 
 
 def _client_ip(request: Request) -> str | None:
+    # Cloudflare sets cf-connecting-ip to the real client IP. Prefer it
+    # when present so we don't accidentally geo-locate the CF edge.
+    cf = request.headers.get("cf-connecting-ip")
+    if cf:
+        return cf.strip()
     fwd = request.headers.get("x-forwarded-for")
     if fwd:
         return fwd.split(",")[0].strip()
@@ -500,6 +522,14 @@ def _client_ip(request: Request) -> str | None:
     if request.client:
         return request.client.host
     return None
+
+
+def _cf_country(request: Request) -> str | None:
+    """Cloudflare's per-request country header. Free on all CF plans."""
+    cc = request.headers.get("cf-ipcountry")
+    if not cc or cc == "XX":
+        return None
+    return cc.strip().upper()[:2]
 
 
 class UsageTrackingMiddleware(BaseHTTPMiddleware):
@@ -533,6 +563,7 @@ class UsageTrackingMiddleware(BaseHTTPMiddleware):
             ip=_client_ip(request),
             user_agent=request.headers.get("user-agent"),
             referer=request.headers.get("referer"),
+            country=_cf_country(request),
         )
         return response
 

@@ -19,12 +19,11 @@ const EVENT_TYPES = [
   { value: 'page_view', label: 'Pages' },
 ]
 
+// Multi-select. 'Everyone' is the sentinel for an empty selection.
 const ROLE_OPTIONS = [
-  { value: '',            label: 'Everyone' },
   { value: 'super_admin', label: 'Super admins' },
-  { value: 'club_admin',  label: 'Club admins' },
-  { value: 'club_member', label: 'Members' },
-  { value: 'anon',        label: 'Anonymous' },
+  { value: 'club_admin',  label: 'Club admins'  },
+  { value: 'anon',        label: 'Anonymous'    },
 ]
 
 const ROLE_LABEL = {
@@ -32,6 +31,18 @@ const ROLE_LABEL = {
   club_admin:  'Admin',
   club_member: 'Member',
   anon:        'Anon',
+}
+
+// ISO country code → flag emoji. Pure unicode trick: A-Z maps to regional
+// indicator symbols at U+1F1E6..U+1F1FF.
+function flagFor(cc) {
+  if (!cc || cc.length !== 2) return ''
+  const codePoints = cc.toUpperCase().split('').map(c => 0x1f1e6 + c.charCodeAt(0) - 65)
+  try {
+    return String.fromCodePoint(...codePoints)
+  } catch {
+    return ''
+  }
 }
 
 // Recharts colour palette built from existing CSS vars so light/dark themes
@@ -131,17 +142,25 @@ function ChartTooltip({ active, payload, label }) {
 export default function AdminUsage() {
   const [days, setDays] = useState(7)
   const [eventType, setEventType] = useState('')
-  const [role, setRole] = useState('')
+  const [roles, setRoles] = useState([])
 
   const [summary, setSummary] = useState(null)
   const [series, setSeries] = useState({ bucket: 'day', points: [] })
   const [byFeature, setByFeature] = useState([])
   const [byRole, setByRole] = useState([])
+  const [byLocation, setByLocation] = useState({ by_country: [], by_city: [] })
   const [topRoutes, setTopRoutes] = useState([])
   const [topUsers, setTopUsers] = useState([])
   const [recent, setRecent] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  const toggleRole = useCallback((value) => {
+    setRoles(prev => prev.includes(value)
+      ? prev.filter(r => r !== value)
+      : [...prev, value]
+    )
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -149,23 +168,25 @@ export default function AdminUsage() {
     const opts = {
       days,
       eventType: eventType || null,
-      role: role || null,
+      roles,
     }
     try {
-      const [s, ts, feat, brole, r, u, e] = await Promise.all([
+      const [s, ts, feat, brole, bloc, r, u, e] = await Promise.all([
         api.adminUsageSummary(opts),
         api.adminUsageTimeseries(opts),
         api.adminUsageByFeature(opts),
-        // by-role chart shows the overall split, so it ignores the role filter
+        // by-role chart shows the overall split, ignores the role filter
         api.adminUsageByRole({ days, eventType: eventType || null }),
+        api.adminUsageByLocation(opts),
         api.adminUsageTopRoutes({ ...opts, limit: 20 }),
-        api.adminUsageTopUsers({ days, role: role || null, limit: 20 }),
+        api.adminUsageTopUsers({ days, roles, limit: 20 }),
         api.adminUsageRecent({ ...opts, limit: 100 }),
       ])
       setSummary(s)
       setSeries(ts)
       setByFeature(feat)
       setByRole(brole)
+      setByLocation(bloc)
       setTopRoutes(r)
       setTopUsers(u)
       setRecent(e)
@@ -174,7 +195,7 @@ export default function AdminUsage() {
     } finally {
       setLoading(false)
     }
-  }, [days, eventType, role])
+  }, [days, eventType, roles])
 
   useEffect(() => { load() }, [load])
 
@@ -239,17 +260,34 @@ export default function AdminUsage() {
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             <span className="font-mono text-[10px] text-pb-faint uppercase tracking-wide w-14">Role</span>
-            {ROLE_OPTIONS.map(opt => (
-              <button
-                key={opt.value || 'all'}
-                onClick={() => setRole(opt.value)}
-                className={`font-mono text-[10px] px-2.5 py-1 rounded border pb-hairline transition ${
-                  role === opt.value ? 'bg-pb-accent text-pb-bg' : 'text-pb-faint hover:text-pb-text'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+            <button
+              onClick={() => setRoles([])}
+              className={`font-mono text-[10px] px-2.5 py-1 rounded border pb-hairline transition ${
+                roles.length === 0 ? 'bg-pb-accent text-pb-bg' : 'text-pb-faint hover:text-pb-text'
+              }`}
+            >
+              Everyone
+            </button>
+            {ROLE_OPTIONS.map(opt => {
+              const active = roles.includes(opt.value)
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => toggleRole(opt.value)}
+                  className={`font-mono text-[10px] px-2.5 py-1 rounded border pb-hairline transition flex items-center gap-1.5 ${
+                    active ? 'bg-pb-accent text-pb-bg' : 'text-pb-faint hover:text-pb-text'
+                  }`}
+                >
+                  {active && <span className="text-[9px]">✓</span>}
+                  {opt.label}
+                </button>
+              )
+            })}
+            {roles.length > 0 && (
+              <span className="font-mono text-[9px] text-pb-faintest ml-1">
+                {roles.length} selected
+              </span>
+            )}
           </div>
         </div>
 
@@ -427,6 +465,72 @@ export default function AdminUsage() {
           </div>
         </div>
 
+        {/* By location */}
+        <div className="grid md:grid-cols-2 gap-5 mb-6">
+          <div>
+            <h2 className="font-display font-bold text-sm text-pb-text mb-2 uppercase tracking-wide">By country</h2>
+            <div className="pb-card overflow-hidden">
+              {loading && !byLocation.by_country.length && (
+                <div className="p-6 text-center font-mono text-[11px] text-pb-faint">Loading…</div>
+              )}
+              {!loading && !byLocation.by_country.length && (
+                <div className="p-6 text-center font-mono text-[11px] text-pb-faint">
+                  No geo data yet. Cloudflare populates country on every request — give it a few minutes after deploy.
+                </div>
+              )}
+              {byLocation.by_country.map((row, i) => (
+                <div
+                  key={row.country || `none-${i}`}
+                  className={`flex items-center gap-3 px-4 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}
+                >
+                  <span className="text-base shrink-0 w-6">{flagFor(row.country)}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-mono text-[11px] text-pb-text truncate">
+                      {row.country || 'Unknown'}
+                    </div>
+                    <div className="font-mono text-[9px] text-pb-faintest">
+                      {row.unique_ips} unique IPs
+                    </div>
+                  </div>
+                  <div className="font-mono text-[11px] text-pb-text shrink-0">{fmtNum(row.hits)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h2 className="font-display font-bold text-sm text-pb-text mb-2 uppercase tracking-wide">By city</h2>
+            <div className="pb-card overflow-hidden">
+              {loading && !byLocation.by_city.length && (
+                <div className="p-6 text-center font-mono text-[11px] text-pb-faint">Loading…</div>
+              )}
+              {!loading && !byLocation.by_city.length && (
+                <div className="p-6 text-center font-mono text-[11px] text-pb-faint">
+                  City lookups (via ip-api.com) fill in shortly after each visit. Refresh in a minute.
+                </div>
+              )}
+              {byLocation.by_city.map((row, i) => (
+                <div
+                  key={`${row.city}-${row.region}-${row.country}-${i}`}
+                  className={`flex items-center gap-3 px-4 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}
+                >
+                  <span className="text-base shrink-0 w-6">{flagFor(row.country)}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-mono text-[11px] text-pb-text truncate">
+                      {row.city}
+                      {row.region && <span className="text-pb-faint">, {row.region}</span>}
+                    </div>
+                    <div className="font-mono text-[9px] text-pb-faintest">
+                      {row.unique_ips} unique IPs
+                    </div>
+                  </div>
+                  <div className="font-mono text-[11px] text-pb-text shrink-0">{fmtNum(row.hits)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
         {/* Recent events */}
         <h2 className="font-display font-bold text-sm text-pb-text mb-2 uppercase tracking-wide">Recent events</h2>
         <div className="pb-card overflow-hidden">
@@ -447,8 +551,43 @@ export default function AdminUsage() {
               </span>
               <StatusBadge status={r.status} />
               <span className="font-mono text-[10px] text-pb-faint shrink-0 w-12">{r.method}</span>
-              <span className="font-mono text-[10px] text-pb-text flex-1 min-w-0 truncate">
-                {r.path}
+              <div className="flex-1 min-w-0">
+                {r.target_name && r.target_url ? (
+                  <a
+                    href={r.target_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-pb-accent hover:underline text-[12px] truncate block"
+                    title={r.path}
+                  >
+                    {r.target_name}
+                  </a>
+                ) : r.event_type === 'page_view' && r.path ? (
+                  <a
+                    href={r.path}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-[10px] text-pb-text hover:text-pb-accent hover:underline truncate block"
+                  >
+                    {r.path}
+                  </a>
+                ) : (
+                  <span className="font-mono text-[10px] text-pb-text truncate block" title={r.path}>
+                    {r.path}
+                  </span>
+                )}
+              </div>
+              <span
+                className="text-xs shrink-0 w-20 text-right truncate"
+                title={[r.city, r.region, r.country].filter(Boolean).join(', ') || 'Unknown'}
+              >
+                {r.country ? (
+                  <span className="font-mono text-pb-faint">
+                    {flagFor(r.country)} {r.city || r.country}
+                  </span>
+                ) : (
+                  <span className="font-mono text-[10px] text-pb-faintest">—</span>
+                )}
               </span>
               <span className="font-mono text-[10px] text-pb-faint shrink-0 w-28 text-right truncate flex items-center justify-end gap-1.5">
                 {r.user_id ? (
