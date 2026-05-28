@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Suppress the up/down spinner arrows on number inputs marked with
+   class="no-spinner". Use on dense data-entry grids where typing is
+   faster than clicking. */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner[type="number"] {
+  -moz-appearance: textfield;
+}
+
 @layer base {
   html {
     @apply bg-pb-bg text-pb-text antialiased;

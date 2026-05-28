@@ -2109,18 +2109,30 @@ async def get_bowling_by_grade(session: AsyncSession, player_id: str, org_id: Op
 async def get_player_by_opposition(session: AsyncSession, player_id: str) -> list[dict]:
     result = await session.execute(
         text("""
-            WITH player_games AS (
+            WITH player_game_ids AS (
+                -- Synced games: player has a roster entry
+                SELECT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)
+                UNION
+                -- Manual games: player appears in any batting/bowling/fielding row
+                SELECT manual_game_id AS game_id FROM manual_batting_innings WHERE player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT manual_game_id AS game_id FROM manual_bowling_spells WHERE player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT manual_game_id AS game_id FROM manual_fielding_stats WHERE player_id = CAST(:pid AS UUID)
+            ),
+            player_games AS (
                 -- opp_key: stable org UUID when available (populated by sync),
-                -- falls back to suffix-stripped team name for pre-sync rows.
+                -- falls back to home/away team-name match for synced rows,
+                -- and to the manual_games.opposition text for manual rows.
                 SELECT
-                    ga.game_id,
+                    pgi.game_id,
                     g.played_at,
                     COALESCE(
                         g.opp_org_id,
                         CASE
                             WHEN ga.team_name = g.home_team THEN g.away_club
                             WHEN ga.team_name = g.away_team THEN g.home_club
-                            ELSE NULL
+                            ELSE g.opp_club_name
                         END
                     ) AS opp_key,
                     COALESCE(
@@ -2132,9 +2144,9 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                         END
                     ) AS opp_name,
                     g.result
-                FROM game_appearances ga
-                JOIN v_effective_games g ON g.id = ga.game_id
-                WHERE ga.player_id = CAST(:pid AS UUID)
+                FROM player_game_ids pgi
+                JOIN v_effective_games g ON g.id = pgi.game_id
+                LEFT JOIN game_appearances ga ON ga.game_id = pgi.game_id AND ga.player_id = CAST(:pid AS UUID)
             ),
             opp_display AS (
                 -- Most recently seen display name for each opp_key.
@@ -2223,16 +2235,25 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
 async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dict]:
     result = await session.execute(
         text("""
-            WITH games_by_venue AS (
+            WITH player_game_ids AS (
+                -- Same union as per-opposition: synced via appearances + manual via per-innings tables.
+                SELECT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT manual_game_id AS game_id FROM manual_batting_innings WHERE player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT manual_game_id AS game_id FROM manual_bowling_spells WHERE player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT manual_game_id AS game_id FROM manual_fielding_stats WHERE player_id = CAST(:pid AS UUID)
+            ),
+            games_by_venue AS (
                 SELECT
                     g.venue,
                     COUNT(*) AS games,
                     COUNT(*) FILTER (WHERE g.result = 'WIN') AS wins,
                     COUNT(*) FILTER (WHERE g.result = 'LOSS') AS losses
-                FROM game_appearances ga
-                JOIN v_effective_games g ON g.id = ga.game_id
-                WHERE ga.player_id = CAST(:pid AS UUID)
-                  AND g.venue IS NOT NULL
+                FROM player_game_ids pgi
+                JOIN v_effective_games g ON g.id = pgi.game_id
+                WHERE g.venue IS NOT NULL
                 GROUP BY g.venue
             ),
             batting_by_venue AS (
