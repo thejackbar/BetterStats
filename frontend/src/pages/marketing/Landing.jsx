@@ -52,7 +52,6 @@ function Hero() {
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-pb-faint">
             <span className="flex items-center gap-2"><span className="tick">✓</span>Live in under an hour</span>
             <span className="flex items-center gap-2"><span className="tick">✓</span>Simple onboarding</span>
-            <span className="flex items-center gap-2"><span className="tick">✓</span>$400/year — affordable for what you get</span>
           </div>
         </div>
 
@@ -157,19 +156,18 @@ function ValueProps() {
 function StatBanner() {
   const stats = [
     { v: 4500, suffix: '+', label: 'Australian cricket clubs ready to set up' },
-    { v: 1000000, suffix: '+', label: 'players ready for active profiles' },
+    { display: '1M', suffix: '+', label: 'players ready for active profiles' },
     { v: 200, suffix: '+', label: 'pre-built reports in StatLab' },
-    { v: 100, suffix: '%', label: 'automated once you go live' },
   ]
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-16 border-y pb-hairline relative overflow-hidden bg-black/20">
       <div className="absolute inset-0 dot-grid opacity-30" />
-      <div className="max-w-[1200px] mx-auto relative grid grid-cols-2 md:grid-cols-4 gap-6">
+      <div className="max-w-[1100px] mx-auto relative grid grid-cols-1 md:grid-cols-3 gap-10">
         {stats.map((s, i) => (
           <Reveal key={s.label} delay={i * 80}>
-            <div className="text-center md:text-left">
+            <div className="text-center">
               <p className="text-4xl md:text-5xl lg:text-6xl font-bold tabular-nums gradient-text">
-                <CountUp to={s.v} />{s.suffix}
+                {s.display ? s.display : <CountUp to={s.v} />}{s.suffix}
               </p>
               <p className="text-sm text-pb-dim mt-1">{s.label}</p>
             </div>
@@ -243,7 +241,7 @@ function Showcase() {
               <span className="gradient-text">Nothing it doesn't.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              Five surfaces. One nightly sync from PlayHQ.
+              Automated for your convenience.
             </p>
           </div>
         </Reveal>

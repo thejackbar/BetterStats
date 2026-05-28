@@ -48,18 +48,19 @@ function Story() {
 
 function Numbers() {
   const stats = [
-    { v: 100000, suffix: '+', label: 'Innings parsed' },
-    { v: 7, suffix: '', label: 'Clubs live' },
-    { v: 30, suffix: '+', label: 'Stat columns' },
-    { v: 100, suffix: '%', label: 'Automated' },
+    { v: 4500, suffix: '+', label: 'Australian cricket clubs ready to set up' },
+    { display: '1M', suffix: '+', label: 'players ready for active profiles' },
+    { v: 200, suffix: '+', label: 'pre-built reports in StatLab' },
   ]
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-16 border-y pb-hairline bg-black/20">
-      <div className="max-w-[1100px] mx-auto grid grid-cols-2 md:grid-cols-4 gap-6">
+      <div className="max-w-[1100px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-10">
         {stats.map((s, i) => (
           <Reveal key={s.label} delay={i * 80}>
-            <div className="text-center md:text-left">
-              <p className="text-4xl md:text-5xl font-bold tabular-nums gradient-text"><CountUp to={s.v} />{s.suffix}</p>
+            <div className="text-center">
+              <p className="text-4xl md:text-5xl font-bold tabular-nums gradient-text">
+                {s.display ? s.display : <CountUp to={s.v} />}{s.suffix}
+              </p>
               <p className="text-sm text-pb-dim mt-1">{s.label}</p>
             </div>
           </Reveal>
