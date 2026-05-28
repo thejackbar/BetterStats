@@ -39,6 +39,38 @@ def strip_team_suffix(name: str) -> str:
     return stripped or name
 
 
+def classify_match_result(scorecard: dict, our_org_id_str: str) -> Optional[str]:
+    """Return 'WIN' / 'LOSS' / 'DRAW' / None for our team in this match.
+
+    PlayHQ two-day matches use compound resultType strings — the prefix
+    carries the overall match outcome (WON_OUTRIGHT_*, LOST_OUTRIGHT_*,
+    DRAWN_*_FIRST_INNINGS). The suffix records the first-innings result,
+    which we don't surface as a separate bucket here.
+    """
+    teams_data = scorecard.get("teams") or []
+    our_team = next(
+        (t for t in teams_data
+         if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == our_org_id_str.lower()),
+        None,
+    )
+    if not our_team:
+        return None
+    our_team_id = (our_team.get("id") or "").lower()
+    summary_teams = (scorecard.get("matchSummary") or {}).get("teams") or []
+    for st in summary_teams:
+        if (st.get("id") or "").lower() != our_team_id:
+            continue
+        rt = (st.get("resultType") or "").upper()
+        if st.get("isWinner") or rt.startswith("WON"):
+            return "WIN"
+        if rt.startswith("LOST"):
+            return "LOSS"
+        if rt.startswith("DRAWN") or rt in ("DREW", "TIED"):
+            return "DRAW"
+        return None
+    return None
+
+
 def _parse_uuid(val: str) -> Optional[uuid.UUID]:
     try:
         return uuid.UUID(val)
@@ -1262,20 +1294,33 @@ async def sync_grassroots_game_level_data(
                 # checked batting_innings only, which re-processed forfeits/abandons
                 # every sync — now those save with appearances but no stats rows.
                 existing = await session.execute(
-                    text("SELECT venue FROM games WHERE id=:gid LIMIT 1"),
+                    text("SELECT venue, result FROM games WHERE id=:gid LIMIT 1"),
                     {"gid": match_id_str},
                 )
                 existing_row = existing.fetchone()
                 if existing_row is not None:
-                    if existing_row[0] is None:
-                        # Game exists but has no venue — backfill it from the scorecard.
+                    existing_venue, existing_result = existing_row
+                    updates: dict[str, str] = {}
+                    if existing_venue is None:
                         venue_name = (scorecard.get("venue") or {}).get("name")
                         if venue_name:
-                            await session.execute(
-                                text("UPDATE games SET venue=:venue WHERE id=:gid"),
-                                {"venue": venue_name, "gid": match_id_str},
-                            )
-                            await session.commit()
+                            updates["venue"] = venue_name
+                    if existing_result is None:
+                        # Pre-v1.0.3.1 the result parser only recognised literal
+                        # WON_ON_FIRST_INNINGS / LOST / DREW / TIED, so every
+                        # outright-loss row (and every drawn-with-FI row) landed
+                        # with result=NULL. Backfill from the scorecard now that
+                        # classify_match_result handles WON_*/LOST_*/DRAWN_*.
+                        new_result = classify_match_result(scorecard, org_id_str)
+                        if new_result:
+                            updates["result"] = new_result
+                    if updates:
+                        set_clause = ", ".join(f"{k}=:{k}" for k in updates)
+                        await session.execute(
+                            text(f"UPDATE games SET {set_clause} WHERE id=:gid"),
+                            {**updates, "gid": match_id_str},
+                        )
+                        await session.commit()
                     stats["gr_games_skipped_done"] += 1
                     continue
 
@@ -1345,17 +1390,7 @@ async def sync_grassroots_game_level_data(
                 home_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "")
                 away_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "")
                 winner_name = next((t.get("displayName") for t in (teams_data or []) + summary_teams if t.get("isWinner")), None)
-                result_text = None
-                for st in summary_teams:
-                    if ((st.get("id") or "").lower() == ((our_team or {}).get("id") or "").lower()):
-                        rt = (st.get("resultType") or "").upper()
-                        if st.get("isWinner") or rt == "WON_ON_FIRST_INNINGS":
-                            result_text = "WIN"
-                        elif rt in ("LOST_ON_FIRST_INNINGS", "LOST"):
-                            result_text = "LOSS"
-                        elif rt in ("DREW", "TIED"):
-                            result_text = "DRAW"
-                        break
+                result_text = classify_match_result(scorecard, org_id_str)
 
                 # Game
                 venue_name = (scorecard.get("venue") or {}).get("name")
