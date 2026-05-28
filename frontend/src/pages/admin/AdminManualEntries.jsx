@@ -33,6 +33,47 @@ function ConfirmModal({ open, title, body, confirmLabel = 'Save changes', danger
   )
 }
 
+function ComboInput({ value, onChange, suggestions = [], placeholder, allowNew = true }) {
+  const [open, setOpen] = useState(false)
+  const q = (value || '').toLowerCase().trim()
+  const filtered = q.length === 0
+    ? suggestions.slice(0, 12)
+    : suggestions.filter(s => s.toLowerCase().includes(q)).slice(0, 12)
+  const exactMatch = suggestions.some(s => s.toLowerCase() === q)
+  const isNew = value && value.trim().length > 0 && !exactMatch
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={value || ''}
+        onChange={e => { onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        className={INPUT_CLS}
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-30 w-full bg-pb-surface border pb-hairline rounded mt-1 shadow-lg max-h-56 overflow-y-auto">
+          {filtered.map(s => (
+            <button
+              key={s}
+              type="button"
+              onMouseDown={() => { onChange(s); setOpen(false) }}
+              className="w-full text-left px-3 py-1.5 text-sm text-pb-text hover:bg-pb-surface2"
+            >{s}</button>
+          ))}
+        </div>
+      )}
+      {isNew && allowNew && (
+        <p className="text-[10px] text-amber-300 mt-0.5">
+          ⚠ New value — not in existing data. Double-check the spelling before saving.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function PlayerPicker({ players, value, onChange, placeholder = 'Search player…' }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
@@ -896,7 +937,7 @@ const GAME_FORM_SECTIONS = [
   { key: 'fielding', label: 'Fielding' },
 ]
 
-function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
+function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onPending }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_GAME_FORM)
@@ -1063,7 +1104,12 @@ function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
           </div>
           <div>
             <label className={LABEL_CLS}>Opposition (optional)</label>
-            <input type="text" value={form.opposition || ''} onChange={e => setForm({ ...form, opposition: e.target.value })} className={INPUT_CLS} />
+            <ComboInput
+              value={form.opposition}
+              onChange={v => setForm({ ...form, opposition: v })}
+              suggestions={knownValues?.oppositions || []}
+              placeholder="Start typing…"
+            />
           </div>
           <div>
             <label className={LABEL_CLS}>Home team</label>
@@ -1075,7 +1121,12 @@ function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
           </div>
           <div>
             <label className={LABEL_CLS}>Venue</label>
-            <input type="text" value={form.venue || ''} onChange={e => setForm({ ...form, venue: e.target.value })} className={INPUT_CLS} />
+            <ComboInput
+              value={form.venue}
+              onChange={v => setForm({ ...form, venue: v })}
+              suggestions={knownValues?.venues || []}
+              placeholder="Start typing…"
+            />
           </div>
           <div>
             <label className={LABEL_CLS}>Result</label>
@@ -1318,6 +1369,7 @@ export default function AdminManualEntries() {
   const [players, setPlayers] = useState([])
   const [seasons, setSeasons] = useState([])
   const [grades, setGrades] = useState([])
+  const [knownValues, setKnownValues] = useState({ oppositions: [], venues: [] })
   const [pending, setPending] = useState(null)
   const [tick, setTick] = useState(0)
 
@@ -1326,14 +1378,16 @@ export default function AdminManualEntries() {
   useEffect(() => {
     ;(async () => {
       try {
-        const [p, s, g] = await Promise.all([
+        const [p, s, g, kv] = await Promise.all([
           api.adminListPlayers(),
           api.adminListSeasons(),
           api.adminListGradesBySeason(),
+          api.adminListManualEntryKnownValues(),
         ])
         setPlayers((p || []).filter(x => x.is_player !== false))
         setSeasons(s || [])
         setGrades(g || [])
+        setKnownValues(kv || { oppositions: [], venues: [] })
       } catch {}
     })()
   }, [])
@@ -1377,7 +1431,7 @@ export default function AdminManualEntries() {
           <SeasonAdjustmentsTab key={tick + ':season'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} />
         )}
         {activeTab === 'game' && (
-          <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} />
+          <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} knownValues={knownValues} refreshAll={refreshAll} onPending={onPending} />
         )}
         {activeTab === 'audit' && (
           <AuditTab key={tick + ':audit'} refreshAll={refreshAll} onPending={onPending} />
