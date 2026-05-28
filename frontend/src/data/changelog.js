@@ -4,6 +4,30 @@
 
 export const CHANGELOG = [
   {
+    version: 'v1.0.1.1 Beta',
+    date: '2026-05-27',
+    title: 'Manual game: typeahead autocomplete on Opposition + Venue',
+    items: [
+      'New ComboInput component on the manual-game form: as you type in Opposition or Venue, a dropdown filters to the matching values already in your club\'s history (drawn from both synced games AND past manual entries).',
+      'Pick a known value with one click to avoid typos and inconsistent spellings ("Bayswater" vs "Bayswater CC" vs "Bayswater Cricket Club" would otherwise all be different oppositions in analytics).',
+      'You can still enter a completely new value (e.g. for a defunct club not in any past data) — when you do, a small ⚠ "New value — double-check the spelling" hint appears under the field so it\'s a deliberate choice rather than a typo.',
+      'Backend endpoint /club-admin/manual-entries/known-values returns the distinct opposition + venue lists per org.',
+    ],
+  },
+  {
+    version: 'v1.0.1 Beta',
+    date: '2026-05-27',
+    title: 'Manual entries: usability round 1 — career fix, section tabs, dropdowns, WK catches',
+    items: [
+      'Fixed: career adjustments now actually apply to player profile lifetime totals. The view from PR 1 had never UNIONed them in — migration 039 extends v_effective_player_season_stats to include manual_career_adjustments (with NULL season_id so they correctly stay out of season leaderboards).',
+      'Career Adjustments tab removed. The "Adjustments" tab now handles both — leave the Season picker blank to save as a career-only adjustment. Existing career rows are listed alongside season rows ("Career (no season)" in the Season column). Edit / Delete / Undo all dispatch to the right endpoint based on which kind it is.',
+      'WK Catches column added to Spreadsheet mode (was missing).',
+      'Section tabs added to both Spreadsheet mode (All / Matches / Batting / Bowling / Fielding) AND the Manual Game form (Match Info / Batting / Bowling / Fielding) — so you don\'t have to scroll across 17 columns or down a long stacked form. Spreadsheet paste still works in section-relative cells.',
+      'Up/down spinner arrows hidden on every number input on the Manual Entries page — just type, no more clicking the tiny arrows.',
+      'Manual games now show in the player profile per-opposition and per-venue analytics. Previously these only read from game_appearances (which manual games don\'t populate) — rewritten to union batting/bowling/fielding presence so manual games show up against the opposition and venue you entered.',
+    ],
+  },
+  {
     version: 'v1.0.0.2 Beta',
     date: '2026-05-27',
     title: 'Fix: Partnership Records "Grade Match" dropdown showed "[object Object]"',

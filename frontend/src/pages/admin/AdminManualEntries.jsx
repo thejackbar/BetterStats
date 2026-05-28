@@ -9,9 +9,8 @@ const BTN_SECONDARY = 'inline-flex items-center px-3 py-1.5 border pb-hairline t
 const BTN_DANGER = 'inline-flex items-center px-3 py-1.5 border border-red-400/40 text-red-300 text-xs rounded hover:bg-red-500/10'
 
 const TABS = [
-  { key: 'season', label: 'Season Adjustments', hint: 'Add or correct a player\'s season totals' },
+  { key: 'season', label: 'Adjustments', hint: 'Add or correct a player\'s totals. Leave season blank to apply as a career-only adjustment.' },
   { key: 'game', label: 'Manual Games', hint: 'Add full or partial historical scorecards' },
-  { key: 'career', label: 'Career Adjustments', hint: 'Career-only totals when no season info is available' },
   { key: 'audit', label: 'Audit & Undo', hint: 'Reverse any previous change' },
 ]
 
@@ -30,6 +29,47 @@ function ConfirmModal({ open, title, body, confirmLabel = 'Save changes', danger
           >{confirmLabel}</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function ComboInput({ value, onChange, suggestions = [], placeholder, allowNew = true }) {
+  const [open, setOpen] = useState(false)
+  const q = (value || '').toLowerCase().trim()
+  const filtered = q.length === 0
+    ? suggestions.slice(0, 12)
+    : suggestions.filter(s => s.toLowerCase().includes(q)).slice(0, 12)
+  const exactMatch = suggestions.some(s => s.toLowerCase() === q)
+  const isNew = value && value.trim().length > 0 && !exactMatch
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={value || ''}
+        onChange={e => { onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        className={INPUT_CLS}
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-30 w-full bg-pb-surface border pb-hairline rounded mt-1 shadow-lg max-h-56 overflow-y-auto">
+          {filtered.map(s => (
+            <button
+              key={s}
+              type="button"
+              onMouseDown={() => { onChange(s); setOpen(false) }}
+              className="w-full text-left px-3 py-1.5 text-sm text-pb-text hover:bg-pb-surface2"
+            >{s}</button>
+          ))}
+        </div>
+      )}
+      {isNew && allowNew && (
+        <p className="text-[10px] text-amber-300 mt-0.5">
+          ⚠ New value — not in existing data. Double-check the spelling before saving.
+        </p>
+      )}
     </div>
   )
 }
@@ -104,7 +144,7 @@ function NumberField({ label, value, onChange, step = 1, min = 0, allowDecimal =
           if (v === '') return onChange('')
           onChange(allowDecimal ? parseFloat(v) : parseInt(v, 10))
         }}
-        className={INPUT_CLS}
+        className={INPUT_CLS + ' no-spinner'}
       />
     </div>
   )
@@ -194,23 +234,32 @@ function AggregateFieldGrid({ form, setForm, includeWidesNoBalls = false }) {
 // ─── Inline spreadsheet (season aggregates, single season at a time) ───────
 
 const SPREADSHEET_COLS = [
-  { key: 'games_played', label: 'M' },
-  { key: 'batting_innings', label: 'I' },
-  { key: 'batting_runs', label: 'Runs' },
-  { key: 'batting_not_outs', label: 'NO' },
-  { key: 'batting_high_score', label: 'HS', nullable: true },
-  { key: 'batting_fifties', label: '50s' },
-  { key: 'batting_hundreds', label: '100s' },
-  { key: 'batting_ducks', label: 'Ducks' },
-  { key: 'bowling_innings', label: 'BowlI' },
-  { key: 'bowling_overs', label: 'Overs', decimal: true },
-  { key: 'bowling_wickets', label: 'Wkts' },
-  { key: 'bowling_runs', label: 'BowlRuns' },
-  { key: 'bowling_maidens', label: 'Mdns' },
-  { key: 'bowling_best_figures', label: 'Best', text: true },
-  { key: 'fielding_catches', label: 'C' },
-  { key: 'fielding_run_outs', label: 'RO' },
-  { key: 'fielding_stumpings', label: 'St' },
+  { key: 'games_played', label: 'M', section: 'matches' },
+  { key: 'batting_innings', label: 'I', section: 'batting' },
+  { key: 'batting_runs', label: 'Runs', section: 'batting' },
+  { key: 'batting_not_outs', label: 'NO', section: 'batting' },
+  { key: 'batting_high_score', label: 'HS', nullable: true, section: 'batting' },
+  { key: 'batting_fifties', label: '50s', section: 'batting' },
+  { key: 'batting_hundreds', label: '100s', section: 'batting' },
+  { key: 'batting_ducks', label: 'Ducks', section: 'batting' },
+  { key: 'bowling_innings', label: 'BowlI', section: 'bowling' },
+  { key: 'bowling_overs', label: 'Overs', decimal: true, section: 'bowling' },
+  { key: 'bowling_wickets', label: 'Wkts', section: 'bowling' },
+  { key: 'bowling_runs', label: 'BowlRuns', section: 'bowling' },
+  { key: 'bowling_maidens', label: 'Mdns', section: 'bowling' },
+  { key: 'bowling_best_figures', label: 'Best', text: true, section: 'bowling' },
+  { key: 'fielding_catches', label: 'C', section: 'fielding' },
+  { key: 'fielding_catches_wk', label: 'WK C', section: 'fielding' },
+  { key: 'fielding_run_outs', label: 'RO', section: 'fielding' },
+  { key: 'fielding_stumpings', label: 'St', section: 'fielding' },
+]
+
+const SPREADSHEET_SECTIONS = [
+  { key: 'all', label: 'All' },
+  { key: 'matches', label: 'Matches' },
+  { key: 'batting', label: 'Batting' },
+  { key: 'bowling', label: 'Bowling' },
+  { key: 'fielding', label: 'Fielding' },
 ]
 
 function emptySpreadsheetRow() {
@@ -222,11 +271,16 @@ function emptySpreadsheetRow() {
 function InlineSpreadsheet({ players, seasons, grades, onImported, onPending }) {
   const [seasonId, setSeasonId] = useState('')
   const [gradeId, setGradeId] = useState('')
+  const [section, setSection] = useState('all')
   const [rows, setRows] = useState([emptySpreadsheetRow(), emptySpreadsheetRow(), emptySpreadsheetRow()])
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   const seasonGrades = useMemo(() => (grades || []).filter(g => g.season_id === seasonId), [grades, seasonId])
+  const visibleCols = useMemo(
+    () => section === 'all' ? SPREADSHEET_COLS : SPREADSHEET_COLS.filter(c => c.section === section),
+    [section],
+  )
   const season = seasons.find(s => s.id === seasonId)
   const grade = (grades || []).find(g => g.id === gradeId)
 
@@ -238,10 +292,11 @@ function InlineSpreadsheet({ players, seasons, grades, onImported, onPending }) 
 
   // Paste handler — split clipboard text on tab/newline, fill cells starting
   // from the targeted row+column. Lets the user copy a range out of Excel
-  // and paste it straight in.
-  const handlePaste = (e, rowIdx, colIdx) => {
+  // and paste it straight in. Column indexing is in VISIBLE-column space so
+  // pasting under the Batting section fills the batting columns in order.
+  const handlePaste = (e, rowIdx, visibleColIdx) => {
     const text = e.clipboardData?.getData('text/plain')
-    if (!text || (!text.includes('\t') && !text.includes('\n'))) return  // single value — let the default paste happen
+    if (!text || (!text.includes('\t') && !text.includes('\n'))) return
     e.preventDefault()
     const lines = text.replace(/\r/g, '').split('\n').filter(l => l.length > 0)
     const next = [...rows]
@@ -250,7 +305,7 @@ function InlineSpreadsheet({ players, seasons, grades, onImported, onPending }) 
       const targetRow = rowIdx + i
       while (next.length <= targetRow) next.push(emptySpreadsheetRow())
       cells.forEach((raw, j) => {
-        const target = SPREADSHEET_COLS[colIdx + j]
+        const target = visibleCols[visibleColIdx + j]
         if (!target) return
         let v = raw.trim()
         if (target.text) {
@@ -335,12 +390,22 @@ function InlineSpreadsheet({ players, seasons, grades, onImported, onPending }) 
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-1 mb-2 border-b pb-hairline">
+        {SPREADSHEET_SECTIONS.map(s => (
+          <button
+            key={s.key}
+            onClick={() => setSection(s.key)}
+            className={`px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors -mb-px ${section === s.key ? 'border-pb-accent text-pb-text' : 'border-transparent text-pb-faint hover:text-pb-text'}`}
+          >{s.label}</button>
+        ))}
+      </div>
+
       <div className="overflow-x-auto">
         <table className="text-xs border-collapse">
           <thead>
             <tr>
               <th className="text-left p-1 font-mono text-[10px] text-pb-faint">Player</th>
-              {SPREADSHEET_COLS.map(c => (
+              {visibleCols.map(c => (
                 <th key={c.key} className="text-left p-1 font-mono text-[10px] text-pb-faint">{c.label}</th>
               ))}
               <th></th>
@@ -352,7 +417,7 @@ function InlineSpreadsheet({ players, seasons, grades, onImported, onPending }) 
                 <td className="p-0.5 min-w-[180px]">
                   <PlayerPicker players={players} value={row.player_id} onChange={v => updateCell(rowIdx, 'player_id', v)} placeholder="Player…" />
                 </td>
-                {SPREADSHEET_COLS.map((c, colIdx) => (
+                {visibleCols.map((c, colIdx) => (
                   <td key={c.key} className="p-0.5">
                     <input
                       type={c.text ? 'text' : 'number'}
@@ -365,7 +430,7 @@ function InlineSpreadsheet({ players, seasons, grades, onImported, onPending }) 
                         updateCell(rowIdx, c.key, c.decimal ? parseFloat(v) : parseInt(v, 10))
                       }}
                       onPaste={e => handlePaste(e, rowIdx, colIdx)}
-                      className="w-16 bg-pb-surface2 border pb-hairline text-pb-text text-xs rounded px-1 py-1 focus:outline-none focus:border-pb-accent"
+                      className="w-16 bg-pb-surface2 border pb-hairline text-pb-text text-xs rounded px-1 py-1 focus:outline-none focus:border-pb-accent no-spinner"
                     />
                   </td>
                 ))}
@@ -528,8 +593,18 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.adminListSeasonAdjustments()
-      setList(data || [])
+      // Career adjustments live in their own table but are surfaced here too:
+      // they're just "adjustments with no season". Merge both lists, mark
+      // each entry's kind so edit/delete dispatches to the right endpoint.
+      const [seasonRows, careerRows] = await Promise.all([
+        api.adminListSeasonAdjustments(),
+        api.adminListCareerAdjustments(),
+      ])
+      const merged = [
+        ...(seasonRows || []).map(r => ({ ...r, kind: 'season' })),
+        ...(careerRows || []).map(r => ({ ...r, kind: 'career', season_name: 'Career (no season)' })),
+      ].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+      setList(merged)
     } catch (e) { setErr(e.message) } finally { setLoading(false) }
   }, [])
 
@@ -542,20 +617,44 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
     [grades, form.season_id]
   )
 
+  const isCareerMode = !form.season_id
+  const editingKind = editingId?.kind  // null | 'season' | 'career'
+
   const handleSubmit = () => {
     setErr(null)
     if (!form.player_id) return setErr('Choose a player')
-    if (!form.season_id) return setErr('Choose a season')
     const payload = normalizeAggregatePayload(form)
     if (!payload.grade_id) payload.grade_id = null
+
+    const isCareer = !form.season_id
+    // Career adjustments don't have season_id / grade_id fields, strip them.
+    const careerPayload = { ...payload }
+    delete careerPayload.season_id
+    delete careerPayload.grade_id
+    delete careerPayload.bowling_wides
+    delete careerPayload.bowling_no_balls
+
     onPending({
-      title: editingId ? 'Update season adjustment?' : 'Save season adjustment?',
-      body: 'This adds to (or overrides) what BetterStats already has for this player in this season. Every change is logged and can be undone from the Audit tab.',
+      title: editingId ? 'Update adjustment?' : isCareer ? 'Save career-only adjustment?' : 'Save season adjustment?',
+      body: isCareer
+        ? 'This will apply across the player\'s career totals (no specific season). It appears on the player profile lifetime view but NOT in season leaderboards. Reversible from the Audit tab.'
+        : 'This adds to (or overrides) what BetterStats already has for this player in this season. Every change is logged and can be undone from the Audit tab.',
       confirmLabel: editingId ? 'Update' : 'Save',
       action: async () => {
         try {
-          if (editingId) await api.adminPatchSeasonAdjustment(editingId, payload)
-          else await api.adminCreateSeasonAdjustment(payload)
+          if (editingId) {
+            if (editingKind === 'career') {
+              await api.adminPatchCareerAdjustment(editingId.id, careerPayload)
+            } else {
+              await api.adminPatchSeasonAdjustment(editingId.id, payload)
+            }
+          } else {
+            if (isCareer) {
+              await api.adminCreateCareerAdjustment(careerPayload)
+            } else {
+              await api.adminCreateSeasonAdjustment(payload)
+            }
+          }
           await refresh(); refreshAll(); resetForm()
         } catch (e) { setErr(e.message) }
       },
@@ -563,10 +662,11 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
   }
 
   const handleEdit = (row) => {
-    setEditingId(row.id)
+    setEditingId({ id: row.id, kind: row.kind })
     setForm({
       ...EMPTY_SEASON_FORM,
       ...row,
+      season_id: row.kind === 'career' ? '' : (row.season_id || ''),
       grade_id: row.grade_id || '',
     })
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -580,7 +680,8 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
       danger: true,
       action: async () => {
         try {
-          await api.adminDeleteSeasonAdjustment(row.id)
+          if (row.kind === 'career') await api.adminDeleteCareerAdjustment(row.id)
+          else await api.adminDeleteSeasonAdjustment(row.id)
           await refresh(); refreshAll()
         } catch (e) { setErr(e.message) }
       },
@@ -614,11 +715,14 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
             <PlayerPicker players={players} value={form.player_id} onChange={(id) => setForm({ ...form, player_id: id })} />
           </div>
           <div>
-            <label className={LABEL_CLS}>Season</label>
+            <label className={LABEL_CLS}>Season (optional)</label>
             <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm({ ...form, season_id: e.target.value, grade_id: '' })}>
-              <option value="">— Choose a season —</option>
+              <option value="">— Career only (no specific season) —</option>
               {seasons.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}
             </select>
+            {isCareerMode && (
+              <p className="text-[10px] text-pb-faint mt-1">Will save as a career-only adjustment.</p>
+            )}
           </div>
           <div>
             <label className={LABEL_CLS}>Grade (optional)</label>
@@ -826,12 +930,20 @@ const EMPTY_GAME_FORM = {
   batting_innings: [], bowling_spells: [], fielding_stats: [],
 }
 
-function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
+const GAME_FORM_SECTIONS = [
+  { key: 'match', label: 'Match Info' },
+  { key: 'batting', label: 'Batting' },
+  { key: 'bowling', label: 'Bowling' },
+  { key: 'fielding', label: 'Fielding' },
+]
+
+function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onPending }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_GAME_FORM)
   const [editingId, setEditingId] = useState(null)
   const [err, setErr] = useState(null)
+  const [formSection, setFormSection] = useState('match')
 
   const seasonGrades = useMemo(
     () => (grades || []).filter(g => g.season_id === form.season_id),
@@ -953,7 +1065,25 @@ function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
           Date, opposition and venue can be left blank if unknown. At least one batting / bowling / fielding row is required.
         </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="flex flex-wrap gap-1 mb-3 border-b pb-hairline">
+          {GAME_FORM_SECTIONS.map(s => {
+            const count = s.key === 'match' ? null
+              : s.key === 'batting' ? (form.batting_innings || []).length
+              : s.key === 'bowling' ? (form.bowling_spells || []).length
+              : (form.fielding_stats || []).length
+            return (
+              <button
+                key={s.key}
+                onClick={() => setFormSection(s.key)}
+                className={`px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors -mb-px ${formSection === s.key ? 'border-pb-accent text-pb-text' : 'border-transparent text-pb-faint hover:text-pb-text'}`}
+              >
+                {s.label}{count !== null && count > 0 && <span className="ml-1.5 text-pb-faintest font-mono">({count})</span>}
+              </button>
+            )
+          })}
+        </div>
+
+        {formSection === 'match' && <><div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className={LABEL_CLS}>Season *</label>
             <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm({ ...form, season_id: e.target.value, grade_id: '' })}>
@@ -974,7 +1104,12 @@ function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
           </div>
           <div>
             <label className={LABEL_CLS}>Opposition (optional)</label>
-            <input type="text" value={form.opposition || ''} onChange={e => setForm({ ...form, opposition: e.target.value })} className={INPUT_CLS} />
+            <ComboInput
+              value={form.opposition}
+              onChange={v => setForm({ ...form, opposition: v })}
+              suggestions={knownValues?.oppositions || []}
+              placeholder="Start typing…"
+            />
           </div>
           <div>
             <label className={LABEL_CLS}>Home team</label>
@@ -986,7 +1121,12 @@ function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
           </div>
           <div>
             <label className={LABEL_CLS}>Venue</label>
-            <input type="text" value={form.venue || ''} onChange={e => setForm({ ...form, venue: e.target.value })} className={INPUT_CLS} />
+            <ComboInput
+              value={form.venue}
+              onChange={v => setForm({ ...form, venue: v })}
+              suggestions={knownValues?.venues || []}
+              placeholder="Start typing…"
+            />
           </div>
           <div>
             <label className={LABEL_CLS}>Result</label>
@@ -1010,9 +1150,10 @@ function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
           <label className={LABEL_CLS}>Notes (admin only)</label>
           <textarea rows={2} value={form.notes || ''} onChange={e => setForm({ ...form, notes: e.target.value })} className={INPUT_CLS} />
         </div>
+        </>}
 
         {/* Batting */}
-        <div className="mt-5">
+        {formSection === 'batting' && <div className="mt-5">
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-sm font-semibold text-pb-text">Batting</h4>
             <button className={BTN_SECONDARY} onClick={() => addChild('batting_innings', emptyBattingRow)}>+ Add batting row</button>
@@ -1044,10 +1185,10 @@ function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
               </div>
             </div>
           ))}
-        </div>
+        </div>}
 
         {/* Bowling */}
-        <div className="mt-5">
+        {formSection === 'bowling' && <div className="mt-5">
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-sm font-semibold text-pb-text">Bowling</h4>
             <button className={BTN_SECONDARY} onClick={() => addChild('bowling_spells', emptyBowlingRow)}>+ Add bowling row</button>
@@ -1068,10 +1209,10 @@ function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
               </div>
             </div>
           ))}
-        </div>
+        </div>}
 
         {/* Fielding */}
-        <div className="mt-5">
+        {formSection === 'fielding' && <div className="mt-5">
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-sm font-semibold text-pb-text">Fielding</h4>
             <button className={BTN_SECONDARY} onClick={() => addChild('fielding_stats', emptyFieldingRow)}>+ Add fielding row</button>
@@ -1090,7 +1231,7 @@ function ManualGamesTab({ players, seasons, grades, refreshAll, onPending }) {
               </div>
             </div>
           ))}
-        </div>
+        </div>}
 
         {err && <p className="text-sm text-red-400 mt-3">{err}</p>}
 
@@ -1228,6 +1369,7 @@ export default function AdminManualEntries() {
   const [players, setPlayers] = useState([])
   const [seasons, setSeasons] = useState([])
   const [grades, setGrades] = useState([])
+  const [knownValues, setKnownValues] = useState({ oppositions: [], venues: [] })
   const [pending, setPending] = useState(null)
   const [tick, setTick] = useState(0)
 
@@ -1236,14 +1378,16 @@ export default function AdminManualEntries() {
   useEffect(() => {
     ;(async () => {
       try {
-        const [p, s, g] = await Promise.all([
+        const [p, s, g, kv] = await Promise.all([
           api.adminListPlayers(),
           api.adminListSeasons(),
           api.adminListGradesBySeason(),
+          api.adminListManualEntryKnownValues(),
         ])
         setPlayers((p || []).filter(x => x.is_player !== false))
         setSeasons(s || [])
         setGrades(g || [])
+        setKnownValues(kv || { oppositions: [], venues: [] })
       } catch {}
     })()
   }, [])
@@ -1286,11 +1430,8 @@ export default function AdminManualEntries() {
         {activeTab === 'season' && (
           <SeasonAdjustmentsTab key={tick + ':season'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} />
         )}
-        {activeTab === 'career' && (
-          <CareerAdjustmentsTab key={tick + ':career'} players={players} refreshAll={refreshAll} onPending={onPending} />
-        )}
         {activeTab === 'game' && (
-          <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} />
+          <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} knownValues={knownValues} refreshAll={refreshAll} onPending={onPending} />
         )}
         {activeTab === 'audit' && (
           <AuditTab key={tick + ':audit'} refreshAll={refreshAll} onPending={onPending} />

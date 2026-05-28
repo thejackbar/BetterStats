@@ -357,6 +357,7 @@ export const api = {
   adminUndoManualEntry: (logId) =>
     request(`/club-admin/manual-entries/audit/${logId}/undo`, { method: 'POST' }),
   adminListGradesBySeason: () => request('/club-admin/manual-entries/grades'),
+  adminListManualEntryKnownValues: () => request('/club-admin/manual-entries/known-values'),
 
   adminDownloadSeasonAdjustmentTemplate: () =>
     fetch(`${BASE}/club-admin/manual-entries/season-adjustments/template.csv`, { credentials: 'include' }),

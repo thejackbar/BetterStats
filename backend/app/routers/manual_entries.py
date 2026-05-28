@@ -25,7 +25,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select, func, delete as sa_delete
+from sqlalchemy import select, func, delete as sa_delete, text as _t
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
@@ -240,6 +240,60 @@ def _player_display_name(player: Player) -> str:
 
 
 # ─── Lookup helpers ──────────────────────────────────────────────────────────
+
+
+@router.get("/known-values")
+async def list_known_opposition_and_venues(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Distinct opposition club names + venues seen in this org's history,
+    drawn from BOTH synced and manual games. Powers the typeahead on the
+    manual-game form so admins pick a known value rather than typing
+    'Bayswater' / 'Bayswater CC' / 'Bayswater Cricket Club' inconsistently."""
+    # Opposition values: pull from games.opp_club_name (synced) + games.away_team
+    # / home_team (where we can derive the OPPOSING side from the org), and
+    # manual_games.opposition. Synced opposition is the most reliable source.
+    opp_rows = await db.execute(_t("""
+        WITH org_seasons AS (
+            SELECT id FROM seasons WHERE organisation_id = :org_id
+        ),
+        org_games AS (
+            SELECT g.opp_club_name, g.home_team, g.away_team, g.home_club, g.away_club
+            FROM games g
+            JOIN grades gr ON gr.id = g.grade_id
+            WHERE gr.season_id IN (SELECT id FROM org_seasons)
+        ),
+        opps AS (
+            SELECT DISTINCT opp_club_name AS name FROM org_games WHERE opp_club_name IS NOT NULL AND opp_club_name <> ''
+            UNION
+            SELECT DISTINCT home_club AS name FROM org_games WHERE home_club IS NOT NULL AND home_club <> ''
+            UNION
+            SELECT DISTINCT away_club AS name FROM org_games WHERE away_club IS NOT NULL AND away_club <> ''
+            UNION
+            SELECT DISTINCT opposition AS name FROM manual_games WHERE organisation_id = :org_id AND opposition IS NOT NULL AND opposition <> ''
+        )
+        SELECT name FROM opps WHERE name IS NOT NULL ORDER BY name
+    """), {"org_id": str(club.id)})
+    oppositions = [r[0] for r in opp_rows.all()]
+
+    venue_rows = await db.execute(_t("""
+        WITH org_seasons AS (
+            SELECT id FROM seasons WHERE organisation_id = :org_id
+        ),
+        venues AS (
+            SELECT DISTINCT g.venue
+            FROM games g JOIN grades gr ON gr.id = g.grade_id
+            WHERE gr.season_id IN (SELECT id FROM org_seasons) AND g.venue IS NOT NULL AND g.venue <> ''
+            UNION
+            SELECT DISTINCT venue FROM manual_games WHERE organisation_id = :org_id AND venue IS NOT NULL AND venue <> ''
+        )
+        SELECT venue FROM venues ORDER BY venue
+    """), {"org_id": str(club.id)})
+    venues = [r[0] for r in venue_rows.all()]
+
+    return {"oppositions": oppositions, "venues": venues}
 
 
 @router.get("/grades")
