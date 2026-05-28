@@ -25,10 +25,12 @@ The canonical public domain is **`https://betterstats.cricket`** (no `www`). The
 
 ## Version Numbers
 
-Bump version in **`frontend/src/version.js`** (`SITE_VERSION`) with every change — `Navbar.jsx` re-exports it for backwards compat:
+Each release lives in its own file under **`frontend/src/data/changelog/`** — never hand-edit `frontend/src/version.js` (it derives `SITE_VERSION` from the highest-sortKey entry in that folder). Drop a new `v-X-Y-Z.js` file when you ship:
 - Small fix: `+0.0.0.1`
 - Medium change: `+0.0.1`
 - Large change: `+0.1`
+
+See "Feature Changelog" below for the file format.
 
 ## Branch
 
@@ -159,13 +161,23 @@ Bell icon in the AdminLayout header + drop-down panel that auto-opens on login w
   - `POST /seen` — sets `last_notification_seen_at = now()` and `last_seen_app_version = <passed version>`.
 - "Since last visit" window defaults to 14 days if user has never dismissed notifications.
 
-**Feature Changelog** (`frontend/src/data/changelog.js`):
-- Static JS array, newest entry first. Each entry has `{ version, date, title, items[] }`.
-- `SITE_VERSION` moved to `frontend/src/version.js` — `Navbar.jsx` re-exports it for backwards compat.
+**Feature Changelog** (`frontend/src/data/changelog/`):
+- One file per release, Vite glob-imported and sorted by `sortKey` desc in `index.js`. Each file default-exports `{ version, date, sortKey, title, items[] }`.
+- `SITE_VERSION` (in `frontend/src/version.js`) is derived from `CHANGELOG[0].version` — never hand-edited. `Navbar.jsx` still re-exports it for backwards compat.
 - The bell computes `newChangelogCount` (entries with version > `last_seen_version`) client-side and adds it to the backend `unseen_count` for the badge.
 - Auto-open on login fires if `unseen_count > 0 || any changelog entry is newer than last_seen_version`.
 
-**Adding a new changelog entry**: bump `SITE_VERSION` in `src/version.js`, then prepend an entry in `src/data/changelog.js` with the same version string.
+**Adding a new changelog entry**: drop a single file in `frontend/src/data/changelog/`, e.g. `v1-0-5-beta.js`:
+```js
+export default {
+  version: 'v1.0.5 Beta',
+  date: '2026-05-29',
+  sortKey: '2026-05-29T12:00:00Z', // any ISO string > current top entry; `new Date().toISOString()` works
+  title: '...',
+  items: ['...'],
+}
+```
+Branches never touch a shared file, so parallel work merges cleanly. `index.js` re-sorts on every build — whichever PR ships latest naturally becomes `CHANGELOG[0]`.
 
 **Open follow-ups worth investigating**:
 - `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
