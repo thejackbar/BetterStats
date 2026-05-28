@@ -224,6 +224,21 @@ export const api = {
   // Activity log (audit trail)
   adminListActivityLog: (limit = 100) =>
     request(`/club-admin/activity-log?limit=${limit}`),
+  // Usage breadcrumbs (super-admin only)
+  adminUsageRecent: ({ limit = 200, eventType = null } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (eventType) params.set('event_type', eventType)
+    return request(`/club-admin/usage/recent?${params}`)
+  },
+  adminUsageTopRoutes: ({ days = 7, limit = 30, eventType = null } = {}) => {
+    const params = new URLSearchParams({ days: String(days), limit: String(limit) })
+    if (eventType) params.set('event_type', eventType)
+    return request(`/club-admin/usage/top-routes?${params}`)
+  },
+  adminUsageTopUsers: ({ days = 7, limit = 30 } = {}) =>
+    request(`/club-admin/usage/top-users?days=${days}&limit=${limit}`),
+  adminUsageSummary: ({ days = 7 } = {}) =>
+    request(`/club-admin/usage/summary?days=${days}`),
   // Notification centre (bell icon)
   getNotificationsCount: () => request('/club-admin/notifications/count'),
   getNotificationsSummary: () => request('/club-admin/notifications/summary'),

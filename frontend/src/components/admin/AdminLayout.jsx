@@ -69,6 +69,7 @@ const NAV_SECTIONS = [
 const SUPER_LINKS = [
   { to: '/admin/super/clubs', label: 'All Clubs' },
   { to: '/admin/super/users', label: 'Users' },
+  { to: '/admin/usage', label: 'Usage' },
 ]
 
 export default function AdminLayout({ children }) {
