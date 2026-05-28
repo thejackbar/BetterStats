@@ -9,6 +9,7 @@ import LoadingSpinner from './components/LoadingSpinner'
 import Navbar from './components/Navbar'
 import SponsorFooter from './components/SponsorFooter'
 import ScrollToTop from './components/ScrollToTop'
+import { usePageView } from './hooks/usePageView'
 
 // Marketing pages have their own MarketingNav — suppress the global Navbar on those routes
 const MARKETING_PATHS = ['/', '/features', '/pricing', '/about', '/contact', '/faq', '/terms', '/privacy', '/blog']
@@ -16,6 +17,13 @@ function ConditionalNavbar() {
   const { pathname } = useLocation()
   const isMarketing = MARKETING_PATHS.includes(pathname) || pathname.startsWith('/blog/')
   return isMarketing ? null : <Navbar />
+}
+
+// Mounted once at the App root; pings /api/usage/event whenever the
+// React Router location changes so we can see what people look at.
+function PageViewBeacon() {
+  usePageView()
+  return null
 }
 
 // Marketing — kept synchronous for instant first paint
@@ -50,6 +58,7 @@ const AdminManualEntries = lazy(() => import('./pages/admin/AdminManualEntries')
 const AdminMilestones = lazy(() => import('./pages/admin/AdminMilestones'))
 const AdminActivityLog = lazy(() => import('./pages/admin/AdminActivityLog'))
 const AdminChangelog = lazy(() => import('./pages/admin/AdminChangelog'))
+const AdminUsage = lazy(() => import('./pages/admin/AdminUsage'))
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'))
 const AdminReports = lazy(() => import('./pages/admin/AdminReports'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
@@ -90,6 +99,7 @@ export default function App() {
       <ErrorBoundary>
       <div className="min-h-screen bg-pb-bg">
         <ScrollToTop />
+        <PageViewBeacon />
         <ConditionalNavbar />
         <Suspense fallback={<PageLoader />}>
         <Routes>
@@ -131,6 +141,7 @@ export default function App() {
           <Route path="/admin/social-post" element={<ProtectedRoute><AdminSocialPost /></ProtectedRoute>} />
           <Route path="/admin/yearbook" element={<ProtectedRoute><AdminYearbook /></ProtectedRoute>} />
           <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute><AdminYearbookDetail /></ProtectedRoute>} />
+          <Route path="/admin/usage" element={<ProtectedRoute requireRole="super_admin"><AdminUsage /></ProtectedRoute>} />
           <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
 

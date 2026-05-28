@@ -1,15 +1,20 @@
 import logging
 import os
+import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from jose import JWTError, jwt
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, usage
 from app.jobs.scheduler import start_scheduler, stop_scheduler
+from app.services.usage_tracker import record_event_bg
 
 logging.basicConfig(
     level=logging.INFO,
@@ -130,6 +135,44 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_org_created "
             "ON audit_logs(org_id, created_at DESC)"
+        ))
+        # Usage events — breadcrumbs of what features people use. Distinct
+        # from audit_logs (which is admin-action history). Append-only,
+        # written fire-and-forget by middleware so request latency isn't
+        # affected. IP is stored as a truncated SHA-256 prefix; never raw.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id BIGSERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                event_type TEXT NOT NULL DEFAULT 'api',
+                method TEXT NOT NULL,
+                path TEXT NOT NULL,
+                route TEXT,
+                status INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER,
+                user_id UUID,
+                org_id UUID,
+                ip_hash TEXT,
+                user_agent TEXT,
+                referer TEXT,
+                metadata JSONB DEFAULT '{}'
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_created "
+            "ON usage_events(created_at DESC)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_user_created "
+            "ON usage_events(user_id, created_at DESC) WHERE user_id IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_type_created "
+            "ON usage_events(event_type, created_at DESC)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_route_created "
+            "ON usage_events(route, created_at DESC) WHERE route IS NOT NULL"
         ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS player_season_grade_stats (
@@ -413,6 +456,89 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Paths the breadcrumb middleware ignores. Health checks, uploaded file
+# serving, the notification-count poll (every 60s — would dominate the
+# log), and the usage endpoints themselves (avoid recursion). Prefix
+# match.
+_USAGE_SKIP_PREFIXES = (
+    "/health",
+    "/uploads/",
+    "/club-admin/notifications/count",
+    "/usage/event",
+    "/club-admin/usage/",
+    "/docs",
+    "/openapi.json",
+    "/favicon",
+)
+
+
+def _decode_user_id(request: Request) -> str | None:
+    """Best-effort user_id extraction from the session cookie. Cheap — no DB."""
+    token = request.cookies.get("bs_session")
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        sub = payload.get("sub")
+        if not sub:
+            return None
+        # Validate it's a UUID so we don't insert garbage
+        uuid.UUID(sub)
+        return sub
+    except (JWTError, ValueError, KeyError):
+        return None
+
+
+def _client_ip(request: Request) -> str | None:
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    real = request.headers.get("x-real-ip")
+    if real:
+        return real.strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
+class UsageTrackingMiddleware(BaseHTTPMiddleware):
+    """Drop a breadcrumb for every API request that isn't on the skip list."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path or ""
+        if request.method == "OPTIONS" or any(path.startswith(p) for p in _USAGE_SKIP_PREFIXES):
+            return await call_next(request)
+
+        start = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = int((time.perf_counter() - start) * 1000)
+
+        # Route template (e.g. /players/{player_id}) is more useful than the
+        # raw path for aggregation. Falls back to raw path if FastAPI didn't
+        # match a route (404s etc.).
+        route_template = None
+        scope_route = request.scope.get("route")
+        if scope_route is not None and getattr(scope_route, "path", None):
+            route_template = scope_route.path
+
+        record_event_bg(
+            event_type="api",
+            method=request.method,
+            path=path,
+            route=route_template,
+            status=response.status_code,
+            duration_ms=duration_ms,
+            user_id=_decode_user_id(request),
+            ip=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+            referer=request.headers.get("referer"),
+        )
+        return response
+
+
+app.add_middleware(UsageTrackingMiddleware)
+
 app.include_router(auth.router)
 app.include_router(clubs.router)
 app.include_router(club_admin.router)
@@ -433,6 +559,7 @@ app.include_router(notifications.router)
 app.include_router(seo.router)
 app.include_router(families.router)
 app.include_router(manual_entries.router)
+app.include_router(usage.router)
 
 # Serve uploaded files (hero images, gallery photos)
 _upload_dir = Path("/app/uploads")
