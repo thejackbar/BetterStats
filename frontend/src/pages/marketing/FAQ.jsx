@@ -15,23 +15,23 @@ const CATEGORIES = [
     items: [
       {
         q: 'How long does setup take?',
-        a: 'A simple setup is live in under an hour. You give us your PlayHQ club ID; we handle the sync, the historical backfill (however far your data goes), and the initial site polish. Onboarding included on the annual plan.',
+        a: 'A simple setup is live in under an hour. We start the first sync to bring your data in, then walk you through a quick clean-up so the site looks the way you want before it goes public.',
       },
       {
         q: 'Where does the data come from?',
-        a: 'Direct from PlayHQ and MyCricket. We pull every batting innings, bowling spell, and fielding contribution — going back as far as your data does. No manual data entry, ever.',
+        a: "We can pull your club's existing data automatically and we can import anything that isn't online manually — using our simple CSV templates and automated import tools.",
       },
       {
         q: 'Do we need to install anything?',
-        a: "No software, no plugins, no app store downloads. BetterStats is a public website — your members open the URL on their phone. Admins access through any browser.",
+        a: "No software, no plugins, no app store downloads. BetterStats is a public website that works across phones, tablets and laptops — your members and admins just open the URL.",
       },
       {
-        q: 'Does BetterStats integrate with PlayHQ?',
-        a: 'Yes. BetterStats syncs directly with PlayHQ and MyCricket via the official Cricket Australia grassroots data backends. The club does not change how scorers enter results — stats just appear on the BetterStats site automatically after each match.',
+        q: 'Does BetterStats integrate with the platforms we already use?',
+        a: 'Yes. BetterStats works alongside the tools your club already uses — your scorers don\'t change anything about how they record matches, and the stats turn up on your BetterStats site automatically.',
       },
       {
-        q: "Do we have to switch away from PlayHQ to use BetterStats?",
-        a: 'No. BetterStats does not replace PlayHQ — it reads from it. Scorers continue using the PlayHQ app exactly as they do today, and BetterStats adds the public stats website, historical archive, leaderboards and yearbook on top.',
+        q: "Do we have to move away from anything to use BetterStats?",
+        a: 'No. BetterStats complements the platforms you already use rather than replacing them. Keep scoring exactly the way you do today; BetterStats adds the public stats website, historical archive, leaderboards and yearbook on top.',
       },
     ],
   },
@@ -41,11 +41,11 @@ const CATEGORIES = [
     items: [
       {
         q: 'How far back does the historical data go?',
-        a: 'BetterStats imports the full historical dataset Cricket Australia exposes for your club. In practice this typically reaches back to the early 2000s and, for many clubs that pre-date the MyCricket migration, into the 1980s and 1970s.',
+        a: 'As far back as it can go. Every club is different — we bring across whatever\'s available and you can layer manually-imported records on top of that.',
       },
       {
         q: 'What happens to old career averages?',
-        a: 'We rebuild them — accurately. Many clubs have career stats spread across MyCricket aggregates, PlayHQ, and a spreadsheet. We reconcile them all and flag anything inconsistent so the statistician can sign off.',
+        a: 'We rebuild them — accurately. Many clubs have career stats spread across old aggregates, current platforms and a spreadsheet. We reconcile them all and flag anything inconsistent so the statistician can sign off.',
       },
       {
         q: "What if our scorers haven't been perfect?",
@@ -53,11 +53,11 @@ const CATEGORIES = [
       },
       {
         q: 'How are duplicate player records handled?',
-        a: 'PlayHQ occasionally creates a new ID for an existing player, which would normally split their stats. BetterStats has a one-click merge tool in the admin panel that combines the records and preserves every historical innings, spell, catch and partnership.',
+        a: "When the same player ends up with more than one profile, their stats can split across both. BetterStats has a one-click merge tool that combines the records and preserves every innings, spell, catch and partnership — and you can undo it if you change your mind.",
       },
       {
         q: 'Do we own the data?',
-        a: "Always. Full CSV export at any time. The platform is a lens on data PlayHQ and MyCricket already hold — we're not the source of truth, we're the layer that finally makes it useful.",
+        a: "Always. The data belongs to your club — we just help you visualise it. Full CSV export at any time.",
       },
     ],
   },
@@ -93,19 +93,15 @@ const CATEGORIES = [
     items: [
       {
         q: 'Can we customise the look?',
-        a: 'Yes — club colours, crest, sponsor logos, custom hero imagery, social card themes. Our team handles the design polish; you sign off. Annual plan includes one custom branding pass.',
+        a: 'Yes. You choose the layout and appearance of your club site — colours, crest, sponsor placement, hero imagery. You have full control of how it looks.',
       },
       {
         q: 'Can we use our own domain?',
-        a: 'Yes. Either a subdomain we provide (yourclub.betterstats.cricket) or your own domain (stats.yourclub.com.au). DNS setup included.',
-      },
-      {
-        q: 'Can we add custom pages or content?',
-        a: 'Yes — every site comes with editorial slots for committee notes, news posts, and free-form content. CMS access for committee members included.',
+        a: 'Every club gets a BetterStats link by default (yourclub.betterstats.cricket). Custom domains are available for an additional fee — get in touch and we\'ll set it up.',
       },
       {
         q: 'Sponsor logos — where do they appear?',
-        a: 'Header, footer, yearbook, share cards, match reports. We make sure your sponsors get the placement they paid for.',
+        a: 'Currently in the site footer and in the season yearbook. We\'ll be expanding sponsor placements over time.',
       },
     ],
   },
@@ -115,23 +111,27 @@ const CATEGORIES = [
     items: [
       {
         q: 'How much does BetterStats cost?',
-        a: 'BetterStats is $49 AUD per club per month, or $400 AUD per club per year (saves $188 vs. monthly). One plan covers unlimited players, unlimited seasons, automatic PlayHQ/MyCricket sync, the full public stats website, season yearbooks, awards & honours management and the admin panel. Setup and the first historical sync are handled by the BetterStats team at no extra cost. No lock-in, cancel anytime.',
+        a: 'BetterStats is $49 AUD per club per month, or $400 AUD per club per year (saves $188 vs. monthly). One plan covers unlimited players, unlimited seasons, automatic data sync, the full public stats website, season yearbooks, awards & honours management and the admin panel.',
       },
       {
         q: 'Are there setup fees?',
-        a: 'No setup fees on the annual plan. Monthly plan customers can pay $99 once for hands-on onboarding, or do it themselves through our admin guides.',
+        a: "We don't have a flat setup fee. We do a short consultation, look at how much historical data your club has and how much clean-up it'll need, then work out a low-cost plan that fits.",
       },
       {
         q: 'Can we cancel anytime?',
-        a: 'Yes. Cancel any time on monthly — your site stays up to the end of the billing month. Annual cancels at the end of the term. Data exports cleanly to CSV.',
+        a: "On monthly, yes — when you cancel, the public page comes down but your data isn't lost. The annual plan runs to the end of its term.",
       },
       {
         q: 'Do you offer a free trial?',
-        a: "We don't run free trials, but the monthly plan acts like one. $49 gets you the full platform for 30 days. If you cancel, you only pay for that month.",
+        a: "We don't run free trials — but we're happy to demo your club for you so you can see exactly what BetterStats will look like with your data.",
       },
       {
         q: 'Do you offer discounts for junior-only clubs?',
-        a: 'Yes — junior-only clubs pay $250/year. Contact us for the discount code.',
+        a: 'Yes — junior-only clubs get a discount, but only if the senior club is already onboarded with BetterStats. Contact us for the discount code.',
+      },
+      {
+        q: 'How do we pay?',
+        a: "Right now it's bank transfer / PayID. Most clubs don't have a card and we don't want to put financial pressure on volunteers. Card payments are on the roadmap.",
       },
     ],
   },
@@ -145,7 +145,7 @@ const CATEGORIES = [
       },
       {
         q: 'Who is BetterStats for?',
-        a: 'Australian cricket clubs of any size — premier grade, district, suburban, country and association clubs — and the stats volunteers, captains, coaches, committees, players, parents and sponsors who care about the club. Currently focused on Australia, initially proven at Applecross Cricket Club in Perth.',
+        a: 'Australian cricket clubs of any size — premier grade, district, suburban, country and association clubs — and the stats volunteers, captains, coaches, committees, players, parents and sponsors who care about the club.',
       },
       {
         q: 'How do I request access for my club?',

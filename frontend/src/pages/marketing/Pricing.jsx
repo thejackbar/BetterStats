@@ -23,18 +23,21 @@ const PRICING_JSONLD = {
 
 const PLAN_BENEFITS = [
   'Unlimited players and seasons',
-  'Automatic PlayHQ data sync',
+  'Automatic data sync',
+  'Full historical sync — as far back as your data goes',
   'Full public stats page',
   'Player profiles and leaderboards',
-  'Awards and honours management',
-  'Admin login for your stats volunteers',
-  'CSV import and export',
-  'Duplicate player merge tool',
   'Season yearbook',
-  'Email support',
+  'Awards and honours management',
+  'Duplicate player merge tool',
+  'Player comparison',
+  'StatLab — 200+ pre-built reports',
+  'Custom branding & crest',
+  'Sponsor placement',
+  'Admin logins for your stats volunteers',
+  'CSV import and export',
+  'Responsive support',
 ]
-
-const ANNUAL_EXTRAS = ['Hands-on onboarding', 'Full historical sync (as far back as your data goes)', 'Custom branding & crest', 'Sponsor placement', 'Priority support']
 
 // ─── Hero ────────────────────────────────────────────────────────────────
 function Hero() {
@@ -57,62 +60,60 @@ function Hero() {
 // ─── Pricing cards ───────────────────────────────────────────────────────
 function PricingCards() {
   const [billing, setBilling] = useState('annual')
+  const isAnnual = billing === 'annual'
   return (
     <section className="px-4 sm:px-6 lg:px-10 pb-20">
-      <div className="max-w-[1100px] mx-auto">
+      <div className="max-w-[900px] mx-auto">
         {/* Toggle */}
         <div className="flex justify-center mb-10">
           <div className="tabbar">
             <button className={billing === 'monthly' ? 'active' : ''} onClick={() => setBilling('monthly')}>Monthly</button>
-            <button className={billing === 'annual' ? 'active' : ''} onClick={() => setBilling('annual')}>
+            <button className={isAnnual ? 'active' : ''} onClick={() => setBilling('annual')}>
               Annual <span className="ml-1 text-[10px] font-bold opacity-80">SAVE $188</span>
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-3xl mx-auto">
-          <Reveal>
-            <div className="surface p-8 h-full">
-              <p className="text-sm font-semibold text-pb-dim mb-3">Try it out · Monthly</p>
-              <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-5xl font-bold tabular-nums">$49</span>
-                <span className="text-sm text-pb-faint">/ month AUD</span>
-              </div>
-              <p className="text-sm text-pb-dim mb-7">For clubs trialling the platform. Cancel any time. Data exports cleanly.</p>
-              <ul className="space-y-2.5 mb-8">
-                {PLAN_BENEFITS.map((b) => (
-                  <li key={b} className="flex items-center gap-3 text-sm"><span className="tick">✓</span>{b}</li>
-                ))}
-              </ul>
-              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-secondary w-full justify-center">Start monthly</a>
-            </div>
-          </Reveal>
-
-          <Reveal delay={150}>
-            <div className="relative surface p-8 h-full border-accent/40 bg-gradient-to-b from-accent/[0.06] to-transparent">
+        <Reveal>
+          <div className={`relative surface p-8 lg:p-10 max-w-2xl mx-auto ${isAnnual ? 'border-accent/40 bg-gradient-to-b from-accent/[0.06] to-transparent' : ''}`}>
+            {isAnnual && (
               <div className="absolute -top-3 left-8 px-3 py-1 bg-accent text-navy-950 rounded-full">
                 <span className="text-[10px] font-bold uppercase tracking-wide3">★ Most clubs · save $188</span>
               </div>
-              <p className="text-sm font-semibold text-accent mb-3">Recommended · Annual</p>
-              <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-5xl font-bold tabular-nums">$400</span>
-                <span className="text-sm text-pb-faint">/ year AUD</span>
-              </div>
-              <p className="text-sm text-pb-dim mb-7">Works out to $33 a month. Includes onboarding and historical sync.</p>
-              <ul className="space-y-2.5 mb-2">
-                {PLAN_BENEFITS.map((b) => (
-                  <li key={b} className="flex items-center gap-3 text-sm"><span className="tick">✓</span>{b}</li>
-                ))}
-              </ul>
-              <ul className="space-y-2.5 mb-8 pt-3 border-t pb-hairline mt-3">
-                {ANNUAL_EXTRAS.map((b) => (
-                  <li key={b} className="flex items-center gap-3 text-sm"><span className="tick">★</span><span className="text-accent font-medium">{b}</span></li>
-                ))}
-              </ul>
-              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary w-full justify-center">Get annual access →</a>
+            )}
+            <p className={`text-sm font-semibold mb-3 ${isAnnual ? 'text-accent' : 'text-pb-dim'}`}>
+              {isAnnual ? 'Recommended · Annual' : 'Try it out · Monthly'}
+            </p>
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className="text-5xl font-bold tabular-nums">{isAnnual ? '$400' : '$49'}</span>
+              <span className="text-sm text-pb-faint">/ {isAnnual ? 'year' : 'month'} AUD</span>
             </div>
-          </Reveal>
-        </div>
+            <p className="text-sm text-pb-dim mb-7">
+              {isAnnual
+                ? 'Works out to $33 a month. Best value for clubs running a full season.'
+                : 'For clubs trialling the platform. Cancel any time during a monthly term — your data is kept, the public page goes offline.'}
+            </p>
+            <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-4">What's included</p>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2.5 mb-7">
+              {PLAN_BENEFITS.map((b) => (
+                <li key={b} className="flex items-center gap-3 text-sm"><span className="tick">✓</span>{b}</li>
+              ))}
+            </ul>
+            <a
+              href={FORM_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`${isAnnual ? 'cta-primary' : 'cta-secondary'} w-full justify-center`}
+            >
+              {isAnnual ? 'Get annual access →' : 'Start monthly'}
+            </a>
+            <p className="text-xs text-pb-faint mt-4 text-center">
+              {isAnnual
+                ? 'Onboarding is not bundled, but our support is responsive — we\'ll get you set up and help you navigate the platform.'
+                : 'Cancel any time. Your data stays safe with us; only the public page comes down.'}
+            </p>
+          </div>
+        </Reveal>
       </div>
     </section>
   )
@@ -201,12 +202,11 @@ function DeepAnalytics() {
 function PricingFAQ() {
   const [open, setOpen] = useState(0)
   const faqs = [
-    { q: 'Are there any setup or migration fees?', a: 'No. The $400/year annual plan includes onboarding — we pull every scorecard from PlayHQ and any MyCricket archives you can dig up, set up your branded site, and walk you through the platform with the committee.' },
-    { q: 'Can we change plans?', a: 'Yes. Upgrade from monthly to annual any time (we credit the unused monthly). Downgrade at the end of your annual term.' },
-    { q: 'What if we cancel?', a: "Cancel any time — no fees. Your data exports cleanly to CSV. We don't hold your scorecards hostage. (PlayHQ holds your scorecards — we just present them.)" },
-    { q: 'Do you offer discounts for junior-only clubs?', a: 'Yes — junior-only clubs pay $250/year. Contact us for the discount code.' },
-    { q: 'Can we pay through the club bank account / invoice?', a: 'Yes. Most clubs pay by direct deposit on an annual invoice. We can also handle Stripe card payment if the Treasurer prefers.' },
-    { q: 'Do you cover GST?', a: 'Prices listed include GST where applicable. Tax invoice issued on payment.' },
+    { q: 'Are there any setup or migration fees?', a: "There's no flat setup fee. We do a short consultation, look at how much historical data your club has and how much clean-up it'll need, then work out a low-cost plan that fits." },
+    { q: 'Can we change plans?', a: 'Yes. Move from monthly to annual any time. Switch back at the end of an annual term.' },
+    { q: 'What if we cancel?', a: "On monthly, you can cancel any time — when you do, the public page comes down but your data isn't lost. The annual plan runs to the end of its term." },
+    { q: 'Do you offer discounts for junior-only clubs?', a: 'Yes — junior-only clubs get a discount, but only if the senior club is already onboarded with BetterStats. Contact us for the discount code.' },
+    { q: 'How do we pay?', a: "Right now it's bank transfer / PayID. Most clubs don't have a card and we don't want to put financial pressure on volunteers. Card payments are on the roadmap." },
   ]
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
@@ -242,7 +242,7 @@ function PricingFAQ() {
 export default function Pricing() {
   usePageMeta({
     title: 'Pricing — $49/mo or $400/yr per club | BetterStats',
-    description: 'Simple, transparent cricket stats pricing for Australian clubs. $49 AUD per month or $400 AUD per year per club — unlimited players, full historical sync, season yearbooks, admin panel and email support included. No lock-in.',
+    description: 'Simple, transparent cricket stats pricing for Australian clubs. $49 AUD per month or $400 AUD per year per club — unlimited players, full historical sync, season yearbooks, admin panel and responsive support included.',
     image: 'https://betterstats.cricket/og-image.png',
     url: 'https://betterstats.cricket/pricing',
     jsonLd: PRICING_JSONLD,
@@ -253,8 +253,8 @@ export default function Pricing() {
       <div id="main-content" tabIndex="-1">
         <Hero />
         <PricingCards />
-        <ValueTable />
         <DeepAnalytics />
+        <ValueTable />
         <PricingFAQ />
       </div>
       <MarketingFooter />

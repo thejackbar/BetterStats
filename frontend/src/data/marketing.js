@@ -53,26 +53,17 @@ export const LANDING_FEATURES = [
 ]
 
 // ============================================================
-// TESTIMONIALS (currently placeholders — swap with real quotes)
+// TESTIMONIALS
 // ============================================================
+// PLACEHOLDER: real testimonial copy to come from Tristram Fletcher (Secretary,
+// Applecross CC). Lorem Ipsum left in so the section composes correctly without
+// us shipping a fabricated quote in his name. Swap before next deploy.
 export const TESTIMONIALS = [
   {
-    quote: "BetterStats brought back seasons of scorecards we thought were lost. Our club's history is now searchable, sortable, and the kids can finally see their grandfathers' stats.",
-    name: 'Mike Eastwood',
-    role: 'Committee · Applecross CC',
-    yrs: 'Volunteer · 12 seasons',
-  },
-  {
-    quote: "It's the only cricket platform I've used that respects the data. Old players get found. Merges get tracked. Aggregates actually add up. It feels like it was built by someone who keeps a scorebook.",
-    name: 'Sarah Pendlebury',
-    role: 'Statistician · Booragoon DCC',
-    yrs: '12 years on committee',
-  },
-  {
-    quote: "Replaced our crusty WordPress site, our spreadsheet honour board, and the captain's nagging — all in a weekend. The yearbook alone is worth the subscription.",
-    name: 'David Ng',
-    role: 'Captain · 1st Grade',
-    yrs: '180 games',
+    quote: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
+    name: 'Tristram Fletcher',
+    role: 'Secretary · Applecross Cricket Club',
+    yrs: '[Quote pending]',
   },
 ]
 
@@ -82,21 +73,21 @@ export const TESTIMONIALS = [
 export const HOW_IT_WORKS = [
   {
     n: '01',
-    title: 'Share your PlayHQ club ID',
-    desc: 'A 5-minute form. We do the rest from there.',
+    title: 'We start your first sync',
+    desc: 'You give us your club details and we pull every scrap of available data into BetterStats.',
     mins: '5 minutes',
   },
   {
     n: '02',
-    title: 'We sync everything',
-    desc: 'Every match, every season. PlayHQ today, MyCricket archives going back as far as your data does. Nightly refresh from then on.',
-    mins: '24–48 hours',
+    title: 'First sync finished',
+    desc: 'Merge duplicate players, add your awards and tidy up the database with our streamlined admin tools.',
+    mins: '30 minutes',
   },
   {
     n: '03',
-    title: 'Your site goes live',
-    desc: 'Branded with your club colours and crest. Public URL. Yearbook auto-built. Share-cards ready.',
-    mins: 'Live by next match',
+    title: 'Your site is live',
+    desc: 'Fully branded and ready for everyone to enjoy. Everything after this is kept up to date automatically.',
+    mins: '1 hour',
   },
 ]
 
@@ -114,7 +105,10 @@ export const HOW_IT_WORKS = [
 export const COMPETITORS = {
   playhq: { name: 'PlayHQ', tag: 'System of record', sub: 'Official AU cricket scoring' },
   cstatz: { name: 'CricketStatz', tag: 'Stats software', sub: 'Long-running stats package' },
-  us:     { name: 'BetterStats', tag: 'Public club site', sub: 'Pulls PlayHQ into a club website' },
+  // Generic label used on embedded compare sections (home/features). The dedicated
+  // /compare page can opt back into the specific competitor name via prop.
+  other:  { name: 'Other Competitors', tag: 'Existing tools', sub: 'Generic stats platforms' },
+  us:     { name: 'BetterStats', tag: 'Public club site', sub: 'A complete club website' },
 }
 
 export const COMPARISON_3WAY = [
