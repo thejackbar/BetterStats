@@ -120,19 +120,28 @@ export default function AdminFeeReports() {
             {/* By payment type */}
             {summary?.by_payment_type?.length > 0 && (
               <div className="pb-card overflow-hidden mb-8">
-                <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-5 py-2.5 bg-pb-surface2/40 font-mono text-[10px] tracking-wide3 text-pb-faint">
-                  <span>PAYMENT TYPE</span><span className="text-right">MEMBERS</span>
-                  <span className="text-right">PAYABLE</span><span className="text-right">PAID</span><span className="text-right">OUTSTANDING</span>
-                </div>
-                {summary.by_payment_type.map((b, i) => (
-                  <div key={b.payment_type} className={`grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-3 px-5 py-2.5 ${i ? 'pb-hairline-t' : ''}`}>
-                    <span className="text-pb-text text-sm capitalize">{b.payment_type.replace('_', ' ')}</span>
-                    <span className="font-mono text-[11px] text-pb-dim text-right">{b.members}</span>
-                    <span className="font-mono text-[11px] text-pb-dim text-right">{money(b.payable)}</span>
-                    <span className="font-mono text-[11px] text-pb-dim text-right">{money(b.paid)}</span>
-                    <span className={`font-mono text-[11px] text-right ${b.outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>{money(b.outstanding)}</span>
-                  </div>
-                ))}
+                <table className="w-full">
+                  <thead>
+                    <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left bg-pb-surface2/40">
+                      <th className="font-medium py-2.5 pl-5 pr-3">PAYMENT TYPE</th>
+                      <th className="font-medium py-2.5 pr-3 w-20 text-right">MEMBERS</th>
+                      <th className="font-medium py-2.5 pr-3 w-28 text-right">PAYABLE</th>
+                      <th className="font-medium py-2.5 pr-3 w-28 text-right">PAID</th>
+                      <th className="font-medium py-2.5 pr-5 w-32 text-right">OUTSTANDING</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.by_payment_type.map(b => (
+                      <tr key={b.payment_type} className="pb-hairline-t align-middle">
+                        <td className="py-2.5 pl-5 pr-3 text-pb-text text-sm capitalize">{b.payment_type.replace('_', ' ')}</td>
+                        <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{b.members}</td>
+                        <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(b.payable)}</td>
+                        <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(b.paid)}</td>
+                        <td className={`py-2.5 pr-5 text-right font-mono text-[11px] tabular-nums ${b.outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>{money(b.outstanding)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
@@ -147,23 +156,35 @@ export default function AdminFeeReports() {
               <div className="pb-card p-6 text-center text-pb-dim text-sm mb-8">Everyone’s financial. 🎉</div>
             ) : (
               <div className="pb-card overflow-hidden mb-8">
-                <div className="grid grid-cols-[1.4fr_1fr_auto_auto_auto_auto] gap-3 px-5 py-2.5 bg-pb-surface2/40 font-mono text-[10px] tracking-wide3 text-pb-faint">
-                  <span>NAME</span><span>TIER</span>
-                  <span className="text-right">M’SHIP</span><span className="text-right">MATCH</span>
-                  <span className="text-right">TOTAL</span><span className="text-right">CONTACT</span>
-                </div>
-                {followUps.map((r, i) => (
-                  <div key={r.member_season_id} className={`grid grid-cols-[1.4fr_1fr_auto_auto_auto_auto] items-center gap-3 px-5 py-2.5 ${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2/40`}>
-                    <Link to={`/admin/fees/member/${r.member_id}?season=${seasonId}`} className="text-pb-text text-sm truncate hover:text-pb-accent transition-colors">{r.full_name}</Link>
-                    <span className="text-pb-dim text-sm truncate">{r.tier || '—'}</span>
-                    <span className="font-mono text-[11px] text-pb-dim text-right">{money(r.membership_outstanding)}</span>
-                    <span className="font-mono text-[11px] text-pb-dim text-right">{money(r.match_fee_outstanding)}</span>
-                    <span className="font-mono text-[11px] text-pb-text text-right" style={{ color: 'var(--pb-accent)' }}>{money(r.total_outstanding)}</span>
-                    <span className="font-mono text-[10px] text-pb-faintest text-right truncate">
-                      {r.email || r.mobile || '—'}
-                    </span>
-                  </div>
-                ))}
+                <table className="w-full">
+                  <thead>
+                    <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left bg-pb-surface2/40">
+                      <th className="font-medium py-2.5 pl-5 pr-3">NAME</th>
+                      <th className="font-medium py-2.5 pr-3">TIER</th>
+                      <th className="font-medium py-2.5 pr-3 w-24 text-right">M’SHIP</th>
+                      <th className="font-medium py-2.5 pr-3 w-24 text-right">MATCH</th>
+                      <th className="font-medium py-2.5 pr-3 w-24 text-right">TOTAL</th>
+                      <th className="font-medium py-2.5 pr-5 w-52 text-right">CONTACT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {followUps.map(r => (
+                      <tr key={r.member_season_id} className="pb-hairline-t align-middle hover:bg-pb-surface2/40">
+                        <td className="py-2.5 pl-5 pr-3">
+                          <Link to={`/admin/fees/member/${r.member_id}?season=${seasonId}`}
+                            className="text-pb-text text-sm hover:text-pb-accent transition-colors">{r.full_name}</Link>
+                        </td>
+                        <td className="py-2.5 pr-3 text-pb-dim text-sm">{r.tier || '—'}</td>
+                        <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums whitespace-nowrap">{money(r.membership_outstanding)}</td>
+                        <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums whitespace-nowrap">{money(r.match_fee_outstanding)}</td>
+                        <td className="py-2.5 pr-3 text-right font-mono text-[11px] tabular-nums whitespace-nowrap" style={{ color: 'var(--pb-accent)' }}>{money(r.total_outstanding)}</td>
+                        <td className="py-2.5 pr-5 text-right font-mono text-[10px] text-pb-faintest truncate max-w-0">
+                          {r.email || r.mobile || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
