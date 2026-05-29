@@ -170,6 +170,11 @@ class Player(Base):
     # claimed / user_id retained as columns but no longer used in business logic
     claimed = Column(Boolean, default=False)
     user_id = Column(UUID(as_uuid=True), nullable=True)
+    # BetterSelect: admin-managed contact + selection attributes (migration 044)
+    email = Column(Text, nullable=True)
+    phone = Column(Text, nullable=True)
+    skill_positions = Column(JSONB, default=list, nullable=False, server_default="[]")  # e.g. ["BAT","WKT"]
+    status = Column(Text, default="active", nullable=False, server_default="active")  # active | inactive
 
     organisation = relationship("Organisation", back_populates="players")
     batting_innings = relationship("BattingInnings", back_populates="player")
