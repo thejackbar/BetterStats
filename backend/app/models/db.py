@@ -281,21 +281,23 @@ class Team(Base):
     grade = relationship("Grade")
 
 
-class FixtureAvailability(Base):
-    """BetterSelect: a player's availability for a fixture (admin-recorded).
+class PlayerAvailability(Base):
+    """BetterSelect: a player's availability for a playing DATE (admin-recorded).
 
-    Club-wide model: availability is collected for all active players across
-    upcoming fixtures, regardless of team. recorded_by/at track which admin
-    set it (there is no player-facing input).
+    Keyed on (player, date), NOT per fixture: one answer covers every fixture
+    that day. A two-day game contributes both its dates (played_on = week 1,
+    end_on = week 2). Club-wide model — recorded_by/at track which admin set it
+    (no player-facing input).
     """
-    __tablename__ = "fixture_availability"
+    __tablename__ = "player_availability"
     __table_args__ = (
-        UniqueConstraint("fixture_id", "player_id", name="uq_fixture_availability_fixture_player"),
+        UniqueConstraint("player_id", "avail_date", name="uq_player_availability_player_date"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    avail_date = Column(Date, nullable=False)
     status = Column(Text, nullable=False, server_default="NO_RESPONSE")  # AVAILABLE|UNAVAILABLE|MAYBE|NO_RESPONSE
     note = Column(Text, nullable=True)
     recorded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
