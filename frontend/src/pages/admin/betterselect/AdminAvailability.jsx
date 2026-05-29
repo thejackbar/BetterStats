@@ -35,6 +35,11 @@ function fmtYear(d) {
   try { return new Date(d + 'T00:00:00').getFullYear() } catch { return '—' }
 }
 
+function fmtMonths(m) {
+  if (m % 12 === 0) { const y = m / 12; return `${y} year${y === 1 ? '' : 's'}` }
+  return `${m} months`
+}
+
 export default function AdminAvailability() {
   const { hasCapability } = useAuth()
   const toast = useToast()
@@ -161,8 +166,11 @@ export default function AdminAvailability() {
         {filtersActive &&
           <button onClick={resetFilters}
             className="text-xs text-pb-faint hover:text-pb-text underline px-1 py-1.5">Clear</button>}
-        <div className="ml-auto font-mono text-[10px] text-pb-faintest self-center">
+        <div className="ml-auto font-mono text-[10px] text-pb-faintest self-center text-right">
           {filteredPlayers.length} / {data.players.length} players
+          {data.dormancy_months != null && (
+            <div className="text-pb-faintest/70">dormant after {fmtMonths(data.dormancy_months)}</div>
+          )}
         </div>
       </div>
 

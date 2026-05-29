@@ -62,6 +62,10 @@ class Organisation(Base):
     theme_config = Column(JSONB, nullable=True)
     contact_email = Column(Text, nullable=True)
     player_name_format = Column(Text, default="last_first", nullable=True)
+    # BetterSelect: a player is "dormant" (hidden from default selection) if they
+    # haven't appeared within this many months. Also bounds team squad
+    # suggestions. Default 24 (migration 048).
+    dormancy_months = Column(Integer, nullable=False, server_default="24", default=24)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
