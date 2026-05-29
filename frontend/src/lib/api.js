@@ -837,4 +837,36 @@ export const api = {
     return request(`/leaderboard/sirs/${type}?${params}`)
   },
   getPlayerCaptainStats: (playerId) => request(`/players/${playerId}/captain-stats`),
+
+  // ─── BetterSelect: Fixtures ─────────────────────────────
+  bsListFixtures: (upcomingOnly = false) =>
+    request(`/fixtures${upcomingOnly ? '?upcoming_only=true' : ''}`),
+  bsCreateFixture: (data) =>
+    request('/fixtures', { method: 'POST', body: JSON.stringify(data) }),
+  bsUpdateFixture: (id, data) =>
+    request(`/fixtures/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bsDeleteFixture: (id) => request(`/fixtures/${id}`, { method: 'DELETE' }),
+  bsSyncFixtures: () => request('/fixtures/sync', { method: 'POST' }),
+
+  // ─── BetterSelect: Teams ────────────────────────────────
+  bsListTeams: (includeInactive = false) =>
+    request(`/teams${includeInactive ? '?include_inactive=true' : ''}`),
+  bsCreateTeam: (data) =>
+    request('/teams', { method: 'POST', body: JSON.stringify(data) }),
+  bsUpdateTeam: (id, data) =>
+    request(`/teams/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bsDeleteTeam: (id) => request(`/teams/${id}`, { method: 'DELETE' }),
+  bsSeedTeams: () => request('/teams/seed', { method: 'POST' }),
+
+  // ─── BetterSelect: Availability ─────────────────────────
+  bsAvailabilityMatrix: () => request('/availability/matrix'),
+  bsSetAvailability: (data) =>
+    request('/availability', { method: 'POST', body: JSON.stringify(data) }),
+  bsBulkAvailability: (items) =>
+    request('/availability/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
+
+  // ─── BetterSelect: Player profile ───────────────────────
+  bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),
+  bsUpdatePlayerProfile: (id, data) =>
+    request(`/players/${id}/profile`, { method: 'PATCH', body: JSON.stringify(data) }),
 }

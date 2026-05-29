@@ -72,7 +72,7 @@ export default function BetterSelectLayout({ children, title, actions }) {
             {actions}
             <div className="hidden sm:flex items-center gap-2 text-sm text-pb-faint">
               <span>{user?.display_name || user?.username}</span>
-              <button onClick={() => { logout(); navigate('/admin/login') }} className="text-pb-faint hover:text-pb-text underline">Logout</button>
+              <button onClick={async () => { await logout(); navigate('/login') }} className="text-pb-faint hover:text-pb-text underline">Logout</button>
             </div>
           </div>
         </header>

@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
+import { CAP } from '../../lib/capabilities'
 import AdminLayout from '../../components/admin/AdminLayout'
 
 export default function AdminDashboard() {
-  const { user } = useAuth()
+  const { user, hasCapability } = useAuth()
   const [settings, setSettings] = useState(null)
   const [seasons, setSeasons] = useState([])
 
@@ -49,6 +50,22 @@ export default function AdminDashboard() {
               </>
             )}
           </p>
+        )}
+
+        {(hasCapability(CAP.MANAGE_FIXTURES) || hasCapability(CAP.MANAGE_SELECTIONS)) && (
+          <Link
+            to="/admin/betterselect"
+            className="block pb-card p-5 mb-6 border-pb-accent/30 hover:border-pb-accent/50 transition-colors group"
+            style={{ background: 'color-mix(in srgb, var(--pb-accent) 6%, transparent)' }}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="font-display font-bold text-lg">Better<span style={{ color: 'var(--pb-accent)' }}>Select</span></div>
+                <div className="text-pb-faint text-sm mt-0.5">Availability &amp; team selection — plan your weekends.</div>
+              </div>
+              <span className="text-2xl group-hover:translate-x-1 transition-transform" style={{ color: 'var(--pb-accent)' }}>→</span>
+            </div>
+          </Link>
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">

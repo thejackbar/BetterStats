@@ -129,30 +129,52 @@ export function Card({ children, className = "", title, action, pad = "p-4 sm:p-
 }
 
 // ── Buttons ───────────────────────────────────────────────────────────
-export function Btn({ children, primary = false, onClick, className = "", icon, disabled = false, type = "button" }) {
+export function Btn({ children, primary = false, danger = false, sm = false, onClick, className = "", icon, disabled = false, type = "button" }) {
+  const size = sm ? "text-[11px] px-2.5 py-1" : "text-xs px-3.5 py-2";
+  const base = `${size} rounded transition disabled:opacity-50 disabled:cursor-not-allowed ${className}`;
   if (primary) {
     return (
-      <button
-        type={type}
-        onClick={onClick}
-        disabled={disabled}
-        className={`text-xs font-semibold px-3.5 py-2 rounded text-[#08110b] hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
-        style={{ background: "var(--pb-accent)" }}
-      >
+      <button type={type} onClick={onClick} disabled={disabled}
+        className={`${base} font-semibold text-[#08110b] hover:opacity-90`}
+        style={{ background: "var(--pb-accent)" }}>
+        {icon}{children}
+      </button>
+    );
+  }
+  if (danger) {
+    return (
+      <button type={type} onClick={onClick} disabled={disabled}
+        className={`${base} font-medium border border-pb-red/40 text-pb-red bg-transparent hover:bg-pb-red/10`}>
         {icon}{children}
       </button>
     );
   }
   return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      className={`text-xs font-medium px-3.5 py-2 rounded border border-pb-hairline2 text-pb-text bg-transparent hover:bg-pb-surface2 transition disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
-    >
+    <button type={type} onClick={onClick} disabled={disabled}
+      className={`${base} font-medium border border-pb-hairline2 text-pb-text bg-transparent hover:bg-pb-surface2`}>
       {icon}{children}
     </button>
   );
+}
+
+// ── Form primitives ────────────────────────────────────────────────────
+export function Field({ label, children, className = "" }) {
+  return (
+    <label className={`block ${className}`}>
+      {label && <span className="font-mono text-[10px] text-pb-faintest block mb-1 uppercase tracking-wide2">{label}</span>}
+      {children}
+    </label>
+  );
+}
+
+const _inputCls = "w-full bg-pb-surface2 border border-pb-hairline2 rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent";
+
+export function Input({ className = "", ...props }) {
+  return <input className={`${_inputCls} ${className}`} {...props} />;
+}
+
+export function Select({ className = "", children, ...props }) {
+  return <select className={`${_inputCls} ${className}`} {...props}>{children}</select>;
 }
 
 // ── Result pill ────────────────────────────────────────────────────────
