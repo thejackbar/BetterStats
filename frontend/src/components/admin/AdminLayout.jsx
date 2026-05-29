@@ -57,6 +57,13 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    heading: 'Fees',
+    items: [
+      { to: '/admin/fees', label: 'Members', exact: true, cap: CAP.MANAGE_FEES },
+      { to: '/admin/fees/schedule', label: 'Fee Schedule', cap: CAP.MANAGE_FEES },
+    ],
+  },
+  {
     heading: 'Account',
     items: [
       { to: '/admin/changelog', label: 'Changelog', cap: null },

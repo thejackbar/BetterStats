@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.models.db import Organisation, async_session_maker
 from app.services.sync import sync_organisation
+from app.services.fees import recompute_fee_match_days
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,12 @@ async def sync_all_organisations():
             await sync_organisation(str(org.id))
         except Exception as e:
             logger.error(f"Sync failed for org {org.id}: {e}")
+        # Refresh auto-derived fee match-days off the freshly synced games.
+        # Isolated from the sync above so a fee error never fails the sync.
+        try:
+            await recompute_fee_match_days(str(org.id))
+        except Exception as e:
+            logger.error(f"Fee recompute failed for org {org.id}: {e}")
 
 
 def start_scheduler():

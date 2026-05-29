@@ -1,0 +1,610 @@
+"""Fee tracking API (Phase 1).
+
+Membership tiers, members + per-season tiers, auto-derived match days, and the
+grade fee-format overrides. Payments / financial status arrive in Phase 2.
+
+Everything is scoped to the caller's club (get_current_club) and gated by the
+MANAGE_FEES capability. Match fee = days_played × tier.match_day_rate.
+"""
+from __future__ import annotations
+
+import uuid
+from decimal import Decimal, InvalidOperation
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
+
+from app.models.db import (
+    User, Organisation, Season, Grade, Game, Player,
+    FeeSchedule, FeeMember, FeeMemberSeason, FeeMatchDay,
+    FEE_PAYMENT_TYPES, FEE_FORMATS, get_db,
+)
+from app.routers.auth import get_current_user, get_current_club
+from app.auth.capabilities import require_cap, MANAGE_FEES
+from app.services import fees as fee_service
+
+router = APIRouter(prefix="/club-admin/fees", tags=["club-admin-fees"])
+
+_require = Depends(require_cap(MANAGE_FEES))
+
+
+def _f(x) -> float:
+    return float(x) if x is not None else 0.0
+
+
+def _money(raw) -> Decimal:
+    try:
+        return Decimal(str(raw)).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Invalid amount")
+
+
+async def _season_or_404(db: AsyncSession, club: Organisation, season_id: str) -> Season:
+    try:
+        sid = uuid.UUID(season_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid season_id")
+    season = await db.get(Season, sid)
+    if not season or season.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Season not found")
+    return season
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Fee schedule (rate card)
+# ───────────────────────────────────────────────────────────────────────────
+
+def _schedule_out(s: FeeSchedule) -> dict:
+    return {
+        "id": str(s.id),
+        "name": s.name,
+        "payment_type": s.payment_type,
+        "membership_amount": _f(s.membership_amount),
+        "match_day_rate": _f(s.match_day_rate),
+        "display_order": s.display_order,
+        "is_active": s.is_active,
+    }
+
+
+@router.get("/schedule")
+async def list_schedule(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    await _season_or_404(db, club, season_id)
+    rows = (await db.execute(
+        select(FeeSchedule)
+        .where(FeeSchedule.season_id == uuid.UUID(season_id))
+        .order_by(FeeSchedule.display_order, FeeSchedule.name)
+    )).scalars().all()
+    return [_schedule_out(s) for s in rows]
+
+
+class ScheduleCreate(BaseModel):
+    season_id: str
+    name: str
+    payment_type: str = "standard"
+    membership_amount: float = 0
+    match_day_rate: float = 0
+
+
+@router.post("/schedule")
+async def create_schedule(
+    data: ScheduleCreate,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    season = await _season_or_404(db, club, data.season_id)
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Name is required")
+    if data.payment_type not in FEE_PAYMENT_TYPES:
+        raise HTTPException(status_code=422, detail=f"payment_type must be one of {FEE_PAYMENT_TYPES}")
+    dup = (await db.execute(select(FeeSchedule).where(
+        FeeSchedule.season_id == season.id, func.lower(FeeSchedule.name) == name.lower()
+    ))).scalar_one_or_none()
+    if dup:
+        raise HTTPException(status_code=409, detail="A tier with that name already exists this season")
+    max_order = (await db.execute(select(func.coalesce(func.max(FeeSchedule.display_order), -1)).where(
+        FeeSchedule.season_id == season.id
+    ))).scalar_one()
+    s = FeeSchedule(
+        id=uuid.uuid4(), organisation_id=club.id, season_id=season.id, name=name,
+        payment_type=data.payment_type, membership_amount=_money(data.membership_amount),
+        match_day_rate=_money(data.match_day_rate), display_order=int(max_order) + 1,
+    )
+    db.add(s)
+    await db.commit()
+    return _schedule_out(s)
+
+
+class SchedulePatch(BaseModel):
+    name: Optional[str] = None
+    payment_type: Optional[str] = None
+    membership_amount: Optional[float] = None
+    match_day_rate: Optional[float] = None
+    is_active: Optional[bool] = None
+
+
+@router.patch("/schedule/{schedule_id}")
+async def patch_schedule(
+    schedule_id: str,
+    data: SchedulePatch,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    s = await db.get(FeeSchedule, uuid.UUID(schedule_id))
+    if not s or s.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Tier not found")
+    if data.name is not None:
+        s.name = data.name.strip() or s.name
+    if data.payment_type is not None:
+        if data.payment_type not in FEE_PAYMENT_TYPES:
+            raise HTTPException(status_code=422, detail=f"payment_type must be one of {FEE_PAYMENT_TYPES}")
+        s.payment_type = data.payment_type
+    if data.membership_amount is not None:
+        s.membership_amount = _money(data.membership_amount)
+    if data.match_day_rate is not None:
+        s.match_day_rate = _money(data.match_day_rate)
+    if data.is_active is not None:
+        s.is_active = data.is_active
+    await db.commit()
+    return _schedule_out(s)
+
+
+@router.delete("/schedule/{schedule_id}")
+async def delete_schedule(
+    schedule_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    s = await db.get(FeeSchedule, uuid.UUID(schedule_id))
+    if not s or s.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Tier not found")
+    # Members on this tier are set back to "needs tier" (FK is ON DELETE SET NULL).
+    await db.delete(s)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/schedule/seed-defaults")
+async def seed_defaults(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    season = await _season_or_404(db, club, season_id)
+    created = await fee_service.seed_default_schedule(db, club.id, season.id)
+    await db.commit()
+    return {"created": created}
+
+
+class ScheduleCopy(BaseModel):
+    season_id: str
+    from_season_id: str
+
+
+@router.post("/schedule/copy-from")
+async def copy_schedule(
+    data: ScheduleCopy,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    dest = await _season_or_404(db, club, data.season_id)
+    src = await _season_or_404(db, club, data.from_season_id)
+    existing = {
+        (s.name or "").strip().lower() for s in (
+            await db.execute(select(FeeSchedule).where(FeeSchedule.season_id == dest.id))
+        ).scalars().all()
+    }
+    src_rows = (await db.execute(
+        select(FeeSchedule).where(FeeSchedule.season_id == src.id).order_by(FeeSchedule.display_order)
+    )).scalars().all()
+    created = 0
+    for s in src_rows:
+        if (s.name or "").strip().lower() in existing:
+            continue
+        db.add(FeeSchedule(
+            id=uuid.uuid4(), organisation_id=club.id, season_id=dest.id, name=s.name,
+            payment_type=s.payment_type, membership_amount=s.membership_amount,
+            match_day_rate=s.match_day_rate, display_order=s.display_order, is_active=s.is_active,
+        ))
+        created += 1
+    await db.commit()
+    return {"created": created}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Grade fee-format overrides
+# ───────────────────────────────────────────────────────────────────────────
+
+@router.get("/grades")
+async def list_grades(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    season = await _season_or_404(db, club, season_id)
+    grades = (await db.execute(
+        select(Grade).where(Grade.season_id == season.id).order_by(Grade.name)
+    )).scalars().all()
+    # Per-grade format breakdown so the admin can see what each grade is before
+    # tagging it (e.g. spotting which "One Day" grades are actually women's).
+    breakdown = (await db.execute(
+        select(Game.grade_id, Game.match_format, func.count(Game.id))
+        .join(Grade, Game.grade_id == Grade.id)
+        .where(Grade.season_id == season.id)
+        .group_by(Game.grade_id, Game.match_format)
+    )).all()
+    by_grade: dict = {}
+    for gid, mf, cnt in breakdown:
+        by_grade.setdefault(gid, []).append({"match_format": mf or "Unknown", "games": cnt})
+    return [
+        {
+            "id": str(g.id),
+            "name": g.display_name,
+            "fee_format": g.fee_format,  # None = auto
+            "formats": sorted(by_grade.get(g.id, []), key=lambda x: -x["games"]),
+            "games": sum(x["games"] for x in by_grade.get(g.id, [])),
+        }
+        for g in grades
+    ]
+
+
+class GradeFormatPatch(BaseModel):
+    fee_format: Optional[str] = None  # None / "" clears the override (auto)
+
+
+@router.patch("/grades/{grade_id}")
+async def patch_grade_format(
+    grade_id: str,
+    data: GradeFormatPatch,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    g = await db.get(Grade, uuid.UUID(grade_id))
+    if not g:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    season = await db.get(Season, g.season_id)
+    if not season or season.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    ff = (data.fee_format or "").strip().lower() or None
+    if ff is not None and ff not in FEE_FORMATS:
+        raise HTTPException(status_code=422, detail=f"fee_format must be one of {FEE_FORMATS} or null")
+    g.fee_format = ff
+    await db.commit()
+    return {"id": str(g.id), "fee_format": g.fee_format}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Members
+# ───────────────────────────────────────────────────────────────────────────
+
+async def _days_by_member_season(db: AsyncSession, season_id) -> dict:
+    rows = (await db.execute(
+        select(FeeMatchDay.member_season_id, func.coalesce(func.sum(FeeMatchDay.days_played), 0))
+        .join(FeeMemberSeason, FeeMatchDay.member_season_id == FeeMemberSeason.id)
+        .where(FeeMemberSeason.season_id == season_id)
+        .group_by(FeeMatchDay.member_season_id)
+    )).all()
+    return {ms_id: float(days) for ms_id, days in rows}
+
+
+def _financials(schedule: Optional[FeeSchedule], match_days: float) -> dict:
+    membership_payable = _f(schedule.membership_amount) if schedule else 0.0
+    rate = _f(schedule.match_day_rate) if schedule else 0.0
+    match_fee_payable = round(match_days * rate, 2)
+    return {
+        "tier": schedule.name if schedule else None,
+        "payment_type": schedule.payment_type if schedule else None,
+        "membership_payable": membership_payable,
+        "match_day_rate": rate,
+        "match_days": match_days,
+        "match_fee_payable": match_fee_payable,
+        "total_payable": round(membership_payable + match_fee_payable, 2),
+        "needs_tier": schedule is None,
+    }
+
+
+@router.get("/members")
+async def list_members(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    season = await _season_or_404(db, club, season_id)
+    rows = (await db.execute(
+        select(FeeMemberSeason, FeeMember, FeeSchedule)
+        .join(FeeMember, FeeMemberSeason.member_id == FeeMember.id)
+        .outerjoin(FeeSchedule, FeeMemberSeason.fee_schedule_id == FeeSchedule.id)
+        .where(FeeMemberSeason.season_id == season.id)
+        .order_by(func.lower(FeeMember.full_name))
+    )).all()
+    days_map = await _days_by_member_season(db, season.id)
+
+    members = []
+    summary = {
+        "total_members": 0, "needs_tier": 0,
+        "membership_payable": 0.0, "match_fee_payable": 0.0,
+        "total_payable": 0.0, "match_days": 0.0,
+    }
+    for ms, member, schedule in rows:
+        fin = _financials(schedule, days_map.get(ms.id, 0.0))
+        members.append({
+            "member_id": str(member.id),
+            "member_season_id": str(ms.id),
+            "full_name": member.full_name,
+            "player_id": str(member.player_id) if member.player_id else None,
+            "is_linked": member.player_id is not None,
+            "email": member.email,
+            "mobile": member.mobile,
+            "fee_schedule_id": str(ms.fee_schedule_id) if ms.fee_schedule_id else None,
+            "is_new_registration": ms.is_new_registration,
+            **fin,
+        })
+        summary["total_members"] += 1
+        summary["needs_tier"] += 1 if fin["needs_tier"] else 0
+        summary["membership_payable"] += fin["membership_payable"]
+        summary["match_fee_payable"] += fin["match_fee_payable"]
+        summary["total_payable"] += fin["total_payable"]
+        summary["match_days"] += fin["match_days"]
+    for k in ("membership_payable", "match_fee_payable", "total_payable", "match_days"):
+        summary[k] = round(summary[k], 2)
+    return {"members": members, "summary": summary}
+
+
+class MemberCreate(BaseModel):
+    season_id: str
+    full_name: str
+    email: Optional[str] = None
+    mobile: Optional[str] = None
+    fee_schedule_id: Optional[str] = None
+
+
+@router.post("/members")
+async def create_member(
+    data: MemberCreate,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually add a non-playing member (life member, sponsor, ICL). Players
+    who appear in a game are added automatically by the sync recompute."""
+    season = await _season_or_404(db, club, data.season_id)
+    full_name = (data.full_name or "").strip()
+    if not full_name:
+        raise HTTPException(status_code=422, detail="Name is required")
+
+    schedule = await _resolve_schedule(db, club, season, data.fee_schedule_id)
+
+    member = FeeMember(
+        id=uuid.uuid4(), organisation_id=club.id, player_id=None, full_name=full_name,
+        email=(data.email or "").strip() or None, mobile=(data.mobile or "").strip() or None,
+        current_tier=schedule.name if schedule else None,
+    )
+    db.add(member)
+    await db.flush()
+    db.add(FeeMemberSeason(
+        id=uuid.uuid4(), member_id=member.id, season_id=season.id, organisation_id=club.id,
+        fee_schedule_id=schedule.id if schedule else None,
+    ))
+    await db.commit()
+    return {"member_id": str(member.id)}
+
+
+async def _resolve_schedule(db, club, season, fee_schedule_id) -> Optional[FeeSchedule]:
+    if not fee_schedule_id:
+        return None
+    schedule = await db.get(FeeSchedule, uuid.UUID(fee_schedule_id))
+    if not schedule or schedule.organisation_id != club.id or schedule.season_id != season.id:
+        raise HTTPException(status_code=422, detail="Tier not found for this season")
+    return schedule
+
+
+@router.get("/members/{member_id}")
+async def get_member(
+    member_id: str,
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    season = await _season_or_404(db, club, season_id)
+    member = await db.get(FeeMember, uuid.UUID(member_id))
+    if not member or member.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    ms = (await db.execute(select(FeeMemberSeason).where(
+        FeeMemberSeason.member_id == member.id, FeeMemberSeason.season_id == season.id
+    ))).scalar_one_or_none()
+
+    schedule = None
+    entries = []
+    fin = _financials(None, 0.0)
+    if ms is not None:
+        if ms.fee_schedule_id:
+            schedule = await db.get(FeeSchedule, ms.fee_schedule_id)
+        rows = (await db.execute(
+            select(FeeMatchDay, Game, Grade)
+            .outerjoin(Game, FeeMatchDay.game_id == Game.id)
+            .outerjoin(Grade, Game.grade_id == Grade.id)
+            .where(FeeMatchDay.member_season_id == ms.id)
+            .order_by(FeeMatchDay.played_at.nullslast())
+        )).all()
+        total_days = 0.0
+        for e, game, grade in rows:
+            total_days += _f(e.days_played)
+            entries.append({
+                "id": str(e.id),
+                "played_at": e.played_at.isoformat() if e.played_at else None,
+                "fee_format": e.fee_format,
+                "days_played": _f(e.days_played),
+                "auto_derived": e.auto_derived,
+                "override_reason": e.override_reason,
+                "grade": grade.display_name if grade else None,
+                "match": f"{game.home_team} v {game.away_team}" if game else None,
+            })
+        fin = _financials(schedule, total_days)
+
+    return {
+        "member": {
+            "id": str(member.id),
+            "full_name": member.full_name,
+            "player_id": str(member.player_id) if member.player_id else None,
+            "is_linked": member.player_id is not None,
+            "email": member.email,
+            "mobile": member.mobile,
+            "current_tier": member.current_tier,
+            "notes": member.notes,
+        },
+        "season": {"id": str(season.id), "name": season.name},
+        "member_season": None if ms is None else {
+            "id": str(ms.id),
+            "fee_schedule_id": str(ms.fee_schedule_id) if ms.fee_schedule_id else None,
+            "is_new_registration": ms.is_new_registration,
+            "membership_payment_method": ms.membership_payment_method,
+            "notes": ms.notes,
+        },
+        "financials": fin,
+        "match_days": entries,
+    }
+
+
+class MemberPatch(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    mobile: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.patch("/members/{member_id}")
+async def patch_member(
+    member_id: str,
+    data: MemberPatch,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    member = await db.get(FeeMember, uuid.UUID(member_id))
+    if not member or member.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if data.full_name is not None:
+        member.full_name = data.full_name.strip() or member.full_name
+    if data.email is not None:
+        member.email = data.email.strip() or None
+    if data.mobile is not None:
+        member.mobile = data.mobile.strip() or None
+    if data.notes is not None:
+        member.notes = data.notes.strip() or None
+    await db.commit()
+    return {"ok": True}
+
+
+class MemberSeasonPatch(BaseModel):
+    season_id: str
+    fee_schedule_id: Optional[str] = None  # null clears the tier
+    is_new_registration: Optional[bool] = None
+    membership_payment_method: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.patch("/members/{member_id}/season")
+async def patch_member_season(
+    member_id: str,
+    data: MemberSeasonPatch,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    season = await _season_or_404(db, club, data.season_id)
+    member = await db.get(FeeMember, uuid.UUID(member_id))
+    if not member or member.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    ms = (await db.execute(select(FeeMemberSeason).where(
+        FeeMemberSeason.member_id == member.id, FeeMemberSeason.season_id == season.id
+    ))).scalar_one_or_none()
+    if ms is None:
+        ms = FeeMemberSeason(
+            id=uuid.uuid4(), member_id=member.id, season_id=season.id, organisation_id=club.id,
+        )
+        db.add(ms)
+
+    # fee_schedule_id is always present in the body; treat "" / null as clear.
+    schedule = await _resolve_schedule(db, club, season, data.fee_schedule_id)
+    ms.fee_schedule_id = schedule.id if schedule else None
+    # Carry the chosen tier forward as the member's default for future seasons.
+    if schedule is not None:
+        member.current_tier = schedule.name
+
+    if data.is_new_registration is not None:
+        ms.is_new_registration = data.is_new_registration
+    if data.membership_payment_method is not None:
+        ms.membership_payment_method = data.membership_payment_method.strip() or None
+    if data.notes is not None:
+        ms.notes = data.notes.strip() or None
+    await db.commit()
+    return {"ok": True}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Match days
+# ───────────────────────────────────────────────────────────────────────────
+
+class MatchDayPatch(BaseModel):
+    days_played: float
+    override_reason: Optional[str] = None
+
+
+@router.patch("/match-days/{entry_id}")
+async def patch_match_day(
+    entry_id: str,
+    data: MatchDayPatch,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Override an auto-derived match-day (e.g. drop a two-day game to 1). Flags
+    the row so the weekly recompute leaves it alone afterwards."""
+    e = await db.get(FeeMatchDay, uuid.UUID(entry_id))
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    ms = await db.get(FeeMemberSeason, e.member_season_id)
+    if not ms or ms.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if data.days_played < 0 or data.days_played > 5:
+        raise HTTPException(status_code=422, detail="days_played out of range")
+    e.days_played = _money(data.days_played)
+    e.auto_derived = False
+    e.override_reason = (data.override_reason or "").strip() or None
+    await db.commit()
+    return {"id": str(e.id), "days_played": _f(e.days_played), "auto_derived": e.auto_derived}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Recompute
+# ───────────────────────────────────────────────────────────────────────────
+
+@router.post("/recompute")
+async def recompute(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    season = await _season_or_404(db, club, season_id)
+    result = await fee_service.recompute_fee_match_days(str(club.id), str(season.id))
+    return result

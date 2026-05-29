@@ -195,6 +195,41 @@ export const api = {
       body: JSON.stringify({ merge_log_id: mergeLogId, org_id: orgId }),
     }),
 
+  // Club admin — fees (Phase 1)
+  feeListSchedule: (seasonId) => request(`/club-admin/fees/schedule?season_id=${seasonId}`),
+  feeCreateSchedule: (data) =>
+    request('/club-admin/fees/schedule', { method: 'POST', body: JSON.stringify(data) }),
+  feeUpdateSchedule: (id, data) =>
+    request(`/club-admin/fees/schedule/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  feeDeleteSchedule: (id) =>
+    request(`/club-admin/fees/schedule/${id}`, { method: 'DELETE' }),
+  feeSeedDefaults: (seasonId) =>
+    request(`/club-admin/fees/schedule/seed-defaults?season_id=${seasonId}`, { method: 'POST' }),
+  feeCopySchedule: (seasonId, fromSeasonId) =>
+    request('/club-admin/fees/schedule/copy-from', {
+      method: 'POST',
+      body: JSON.stringify({ season_id: seasonId, from_season_id: fromSeasonId }),
+    }),
+  feeListGrades: (seasonId) => request(`/club-admin/fees/grades?season_id=${seasonId}`),
+  feeSetGradeFormat: (gradeId, feeFormat) =>
+    request(`/club-admin/fees/grades/${gradeId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ fee_format: feeFormat }),
+    }),
+  feeListMembers: (seasonId) => request(`/club-admin/fees/members?season_id=${seasonId}`),
+  feeCreateMember: (data) =>
+    request('/club-admin/fees/members', { method: 'POST', body: JSON.stringify(data) }),
+  feeGetMember: (memberId, seasonId) =>
+    request(`/club-admin/fees/members/${memberId}?season_id=${seasonId}`),
+  feePatchMember: (memberId, data) =>
+    request(`/club-admin/fees/members/${memberId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  feePatchMemberSeason: (memberId, data) =>
+    request(`/club-admin/fees/members/${memberId}/season`, { method: 'PATCH', body: JSON.stringify(data) }),
+  feePatchMatchDay: (entryId, data) =>
+    request(`/club-admin/fees/match-days/${entryId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  feeRecompute: (seasonId) =>
+    request(`/club-admin/fees/recompute?season_id=${seasonId}`, { method: 'POST' }),
+
   // Club admin — grades
   adminListGrades: () => request('/club-admin/grades'),
   adminRenameGrade: (originalName, displayNameOverride) =>
