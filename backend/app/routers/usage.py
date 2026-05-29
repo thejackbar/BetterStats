@@ -141,6 +141,12 @@ def _categorise(route: Optional[str], path: Optional[str], event_type: str) -> s
             return "Player comparison"
         if "/dashboard" in s:
             return "Club dashboard"
+        # Canonical club home: /:clubSlug (no second segment). The leading
+        # slash gives one empty + one non-empty segment; reserved roots are
+        # handled by earlier branches.
+        parts = [p for p in s.split("?")[0].split("/") if p]
+        if len(parts) == 1:
+            return "Club dashboard"
         return "Other pages"
     # API
     if s.startswith("/auth"):

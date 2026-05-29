@@ -79,7 +79,7 @@ function Logos() {
       <div className="max-w-[1200px] mx-auto flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
         <p className="text-xs text-pb-faint uppercase tracking-wide3 font-medium">Trusted by clubs at</p>
         <Link
-          to="/applecross/dashboard"
+          to="/applecross"
           className="flex items-center gap-3 text-base font-semibold text-pb-text/80 hover:text-accent transition-colors"
         >
           <img

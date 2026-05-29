@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider } from './contexts/ToastContext'
@@ -92,6 +92,12 @@ const PageLoader = () => (
   </div>
 )
 
+// Legacy /:clubSlug/dashboard → canonical /:clubSlug
+function DashboardRedirect() {
+  const { clubSlug } = useParams()
+  return <Navigate to={`/${clubSlug}`} replace />
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -155,7 +161,8 @@ export default function App() {
           {/* Public club pages (slug-based) */}
           <Route path="/club-inactive" element={<ClubInactive />} />
           <Route path="/onboard" element={<ProtectedRoute><Onboard /></ProtectedRoute>} />
-          <Route path="/:clubSlug/dashboard" element={<Dashboard />} />
+          <Route path="/:clubSlug" element={<Dashboard />} />
+          <Route path="/:clubSlug/dashboard" element={<DashboardRedirect />} />
           <Route path="/:clubSlug/players" element={<Players />} />
           <Route path="/:clubSlug/compare" element={<PlayerComparison />} />
           <Route path="/:clubSlug/leaderboard" element={<Leaderboard />} />

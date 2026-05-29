@@ -175,7 +175,7 @@ export default function Onboard() {
           ) : (
             <button
               type="button"
-              onClick={() => result && navigate(`/${result.slug}/dashboard`)}
+              onClick={() => result && navigate(`/${result.slug}`)}
               className="w-full py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >

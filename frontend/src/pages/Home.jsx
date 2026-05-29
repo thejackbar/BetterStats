@@ -35,7 +35,7 @@ export default function Home() {
               </Link>
               {orgs.length > 0 && (
                 <Link
-                  to={`/${orgs[0].slug}/dashboard`}
+                  to={`/${orgs[0].slug}`}
                   className="border pb-hairline text-pb-dim hover:text-pb-text px-6 py-3 rounded font-mono text-[11px] tracking-wide2 font-semibold transition-colors"
                 >
                   VIEW DASHBOARD →
@@ -90,7 +90,7 @@ export default function Home() {
             {orgs.map(org => (
               <Link
                 key={org.id}
-                to={`/${org.slug}/dashboard`}
+                to={`/${org.slug}`}
                 className="pb-card p-5 hover:bg-pb-surface2 transition-colors group"
               >
                 <div className="font-display font-bold text-lg text-pb-text group-hover:text-pb-accent transition-colors">

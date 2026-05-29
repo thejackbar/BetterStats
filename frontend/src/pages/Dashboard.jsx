@@ -103,7 +103,7 @@ export default function Dashboard() {
     '@type': 'SportsTeam',
     name: club.name,
     sport: 'Cricket',
-    url: `https://betterstats.cricket/${clubSlug}/dashboard`,
+    url: `https://betterstats.cricket/${clubSlug}`,
     ...(club.logo_url ? { logo: club.logo_url } : {}),
     areaServed: { '@type': 'Country', name: 'Australia' },
   } : null
@@ -115,7 +115,7 @@ export default function Dashboard() {
       ? `Live cricket statistics, leaderboards, all-time records and player profiles for ${club.name} — updated automatically from PlayHQ and MyCricket on BetterStats.`
       : null,
     image: club?.logo_url || null,
-    url: `https://betterstats.cricket/${clubSlug}/dashboard`,
+    url: `https://betterstats.cricket/${clubSlug}`,
     jsonLd: clubJsonLd,
   })
 

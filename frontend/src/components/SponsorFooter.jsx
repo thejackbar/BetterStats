@@ -3,11 +3,21 @@ import { useLocation } from 'react-router-dom'
 import { api } from '../lib/api'
 
 const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games']
+// Single-segment paths that are NOT club slugs (must stay in sync with App.jsx routes)
+const RESERVED_ROOT_SEGMENTS = new Set([
+  'login', 'admin', 'onboard', 'club-inactive',
+  'games', 'match', 'scorecards', 'players',
+  'features', 'pricing', 'compare', 'about', 'contact', 'faq',
+  'terms', 'privacy', 'blog',
+])
 
 function useSlug() {
   const { pathname } = useLocation()
   const segments = pathname.split('/').filter(Boolean)
   if (segments.length >= 2 && CLUB_SECTIONS.includes(segments[1])) {
+    return segments[0]
+  }
+  if (segments.length === 1 && !RESERVED_ROOT_SEGMENTS.has(segments[0])) {
     return segments[0]
   }
   return null

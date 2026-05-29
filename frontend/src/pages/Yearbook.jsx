@@ -1468,7 +1468,7 @@ export default function Yearbook() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <p className="text-pb-faint font-mono text-[13px]">Yearbook not found</p>
-          <Link to={`/${clubSlug}/dashboard`} className="mt-4 text-sm underline" style={{ color: 'var(--pb-accent)' }}>
+          <Link to={`/${clubSlug}`} className="mt-4 text-sm underline" style={{ color: 'var(--pb-accent)' }}>
             Back to dashboard
           </Link>
         </div>
@@ -1482,7 +1482,7 @@ export default function Yearbook() {
     return (
       <div className="min-h-screen" style={{ background: 'var(--pb-bg)' }}>
         <div className="max-w-3xl mx-auto px-4 py-12">
-          <Link to={`/${clubSlug}/dashboard`} className="font-mono text-[11px] text-pb-faintest hover:text-pb-faint transition mb-6 inline-block">
+          <Link to={`/${clubSlug}`} className="font-mono text-[11px] text-pb-faintest hover:text-pb-faint transition mb-6 inline-block">
             ← Dashboard
           </Link>
           {club?.logo_url && (
@@ -1539,7 +1539,7 @@ export default function Yearbook() {
           </div>
           <h1 className="text-2xl font-bold text-pb-text mb-2">{yearbook.season?.name || seasonSlug}</h1>
           <p className="text-pb-faint text-sm mb-6">This yearbook hasn't been published yet.</p>
-          <Link to={`/${clubSlug}/dashboard`} className="font-mono text-[12px]" style={{ color: 'var(--pb-accent)' }}>
+          <Link to={`/${clubSlug}`} className="font-mono text-[12px]" style={{ color: 'var(--pb-accent)' }}>
             ← Back to dashboard
           </Link>
         </div>

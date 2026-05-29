@@ -31,6 +31,13 @@ CLUB_SECTIONS = {
     "dashboard", "players", "leaderboard", "records",
     "compare", "statlab", "yearbook", "yearbooks", "games",
 }
+# Single-segment paths that are NOT club slugs (must stay in sync with App.jsx routes).
+RESERVED_ROOT_SEGMENTS = {
+    "login", "admin", "onboard", "club-inactive",
+    "games", "match", "scorecards", "players",
+    "features", "pricing", "compare", "about", "contact", "faq",
+    "terms", "privacy", "blog",
+}
 
 
 def _parse_route(path: str):
@@ -40,6 +47,8 @@ def _parse_route(path: str):
     if segments[0] == "players" and len(segments) > 1 and UUID_RE.match(segments[1]):
         return {"type": "player", "player_id": segments[1]}
     if len(segments) >= 2 and segments[1] in CLUB_SECTIONS:
+        return {"type": "club", "slug": segments[0]}
+    if len(segments) == 1 and segments[0] not in RESERVED_ROOT_SEGMENTS:
         return {"type": "club", "slug": segments[0]}
     return None
 
@@ -138,7 +147,7 @@ async def _player_html(player_id: str, page_url: str, db: AsyncSession) -> str |
             "sport": "Cricket",
         }
         if org.slug:
-            jsonld["memberOf"]["url"] = f"{SITE}/{org.slug}/dashboard"
+            jsonld["memberOf"]["url"] = f"{SITE}/{org.slug}"
 
     return _html(
         f"{name} — Cricket Career Stats | BetterStats",
