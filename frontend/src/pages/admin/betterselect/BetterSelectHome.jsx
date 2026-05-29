@@ -12,6 +12,8 @@ const TILES = [
     desc: 'Your club’s teams — auto-seeded from match data or created manually.' },
   { to: '/admin/betterselect/availability', label: 'Availability', icon: '✓', cap: CAP.MANAGE_SELECTIONS,
     desc: 'Mark who’s available each weekend across all upcoming fixtures.' },
+  { to: '/admin/betterselect/fixtures', label: 'Selection', icon: '✦', cap: CAP.MANAGE_SELECTIONS,
+    desc: 'Pick your XI per fixture from the available pool — open a fixture and hit Select.' },
 ]
 
 export default function BetterSelectHome() {

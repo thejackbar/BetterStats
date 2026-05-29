@@ -161,12 +161,17 @@ export default function AdminFixtures() {
                   {f.start_time ? ` · ${f.start_time}` : ''}{f.venue ? ` · ${f.venue}` : ''}{f.round ? ` · ${f.round}` : ''}
                 </div>
               </div>
-              {canManage && (
-                <div className="flex gap-2 shrink-0">
+              <div className="flex gap-2 shrink-0">
+                {f.home_away !== 'BYE' && (
+                  <Link to={`/admin/betterselect/select/${f.id}`}>
+                    <Btn sm primary>Select</Btn>
+                  </Link>
+                )}
+                {canManage && <>
                   <Btn sm onClick={() => setEditing(f)}>Edit</Btn>
                   <Btn sm danger onClick={() => del(f)}>Delete</Btn>
-                </div>
-              )}
+                </>}
+              </div>
             </div>
           ))}
         </div>

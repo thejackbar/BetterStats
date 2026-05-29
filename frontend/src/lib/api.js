@@ -870,6 +870,11 @@ export const api = {
   bsBulkAvailability: (items) =>
     request('/availability/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
 
+  // ─── BetterSelect: Selection (lineups) ──────────────────
+  bsGetSelection: (fixtureId) => request(`/selection/${fixtureId}`),
+  bsSetSelection: (fixtureId, players) =>
+    request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players }) }),
+
   // ─── BetterSelect: Player profile ───────────────────────
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),
   bsUpdatePlayerProfile: (id, data) =>

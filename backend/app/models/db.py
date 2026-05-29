@@ -301,6 +301,26 @@ class TeamMember(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class FixtureLineup(Base):
+    """BetterSelect Phase 3: a player picked for a fixture (the team sheet).
+
+    Per-fixture: the same player can be in two fixtures' lineups on one weekend
+    (the shared-player split). Any cross-fixture selection rule is enforced in
+    the app layer, not here. batting_order is the slot (1..n), nullable until
+    the side is ordered.
+    """
+    __tablename__ = "fixture_lineups"
+
+    fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), primary_key=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), primary_key=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    batting_order = Column(Integer, nullable=True)
+    is_captain = Column(Boolean, default=False, nullable=False, server_default="false")
+    is_wicket_keeper = Column(Boolean, default=False, nullable=False, server_default="false")
+    selected_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class PlayerAvailability(Base):
     """BetterSelect: a player's availability for a playing DATE (admin-recorded).
 
