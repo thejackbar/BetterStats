@@ -1,8 +1,10 @@
 """BetterSelect — availability (Phase 2).
 
 Admin-recorded player availability for upcoming fixtures. Club-wide model:
-the matrix is all active players x upcoming fixtures, regardless of team.
-There is no player-facing input — recorded_by/at track the admin who set it.
+the matrix is all active players x upcoming fixtures. There is no player-facing
+input — recorded_by/at track the admin who set it.
+
+All endpoints are scoped to the caller's club via get_current_club.
 """
 from __future__ import annotations
 
@@ -16,8 +18,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
-from app.models.db import Fixture, FixtureAvailability, Player, User, get_db
-from app.routers.auth import get_current_user
+from app.models.db import Fixture, FixtureAvailability, Organisation, Player, User, get_db
+from app.routers.auth import get_current_club, get_current_user
 
 router = APIRouter(prefix="/availability", tags=["availability"])
 
@@ -35,11 +37,25 @@ class AvailabilityBulk(BaseModel):
     items: list[AvailabilitySet]
 
 
-async def _upsert(db: AsyncSession, item: AvailabilitySet, user_id) -> None:
+async def _owned_fixture_ids(db: AsyncSession, club_id) -> set:
+    res = await db.execute(select(Fixture.id).where(Fixture.organisation_id == club_id))
+    return {r[0] for r in res.fetchall()}
+
+
+async def _owned_player_ids(db: AsyncSession, club_id) -> set:
+    res = await db.execute(select(Player.id).where(Player.organisation_id == club_id))
+    return {r[0] for r in res.fetchall()}
+
+
+async def _upsert(db: AsyncSession, item: AvailabilitySet, user_id,
+                  fixture_ids: set, player_ids: set) -> None:
     if item.status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {item.status}")
     fid = uuid.UUID(item.fixture_id)
     pid = uuid.UUID(item.player_id)
+    # Tenancy: both fixture and player must belong to the caller's club.
+    if fid not in fixture_ids or pid not in player_ids:
+        raise HTTPException(status_code=404, detail="Fixture or player not found")
     res = await db.execute(
         select(FixtureAvailability).where(
             FixtureAvailability.fixture_id == fid,
@@ -64,16 +80,13 @@ async def _upsert(db: AsyncSession, item: AvailabilitySet, user_id) -> None:
 
 @router.get("/matrix")
 async def availability_matrix(
-    org_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
 ):
     """All active players x upcoming fixtures, with any recorded availability."""
-    org_uuid = uuid.UUID(org_id)
-
     fx_res = await db.execute(
         select(Fixture)
-        .where(Fixture.organisation_id == org_uuid, Fixture.played_on >= date.today())
+        .where(Fixture.organisation_id == club.id, Fixture.played_on >= date.today())
         .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
     )
     fixtures = fx_res.scalars().all()
@@ -81,7 +94,7 @@ async def availability_matrix(
     pl_res = await db.execute(
         select(Player)
         .where(
-            Player.organisation_id == org_uuid,
+            Player.organisation_id == club.id,
             Player.status == "active",
             Player.is_player.is_(True),
         )
@@ -132,9 +145,12 @@ async def availability_matrix(
 async def set_availability(
     body: AvailabilitySet,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    await _upsert(db, body, user.id)
+    fixture_ids = await _owned_fixture_ids(db, club.id)
+    player_ids = await _owned_player_ids(db, club.id)
+    await _upsert(db, body, user.id, fixture_ids, player_ids)
     await db.commit()
     return {"status": "ok"}
 
@@ -143,10 +159,13 @@ async def set_availability(
 async def set_availability_bulk(
     body: AvailabilityBulk,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
+    fixture_ids = await _owned_fixture_ids(db, club.id)
+    player_ids = await _owned_player_ids(db, club.id)
     for item in body.items:
-        await _upsert(db, item, user.id)
+        await _upsert(db, item, user.id, fixture_ids, player_ids)
     await db.commit()
     return {"status": "ok", "count": len(body.items)}
 
@@ -155,8 +174,11 @@ async def set_availability_bulk(
 async def list_for_fixture(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
 ):
+    f = await db.get(Fixture, uuid.UUID(fixture_id))
+    if not f or f.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Fixture not found")
     res = await db.execute(
         select(FixtureAvailability).where(
             FixtureAvailability.fixture_id == uuid.UUID(fixture_id)
