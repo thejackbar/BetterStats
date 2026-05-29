@@ -1,8 +1,12 @@
-"""BetterSelect Phase 2: fixture availability.
+"""BetterSelect Phase 2: player availability (per playing date).
 
-Admin-recorded availability of players for upcoming fixtures (club-wide
-model: all active players x upcoming fixtures, regardless of team).
-recorded_by/at track which admin set it; there is no player-facing input.
+Availability is keyed on (player, date) — NOT per fixture. One answer for a
+playing date covers every fixture that day. A two-day game contributes both
+its dates (played_on = week 1, end_on = week 2), so a player can be available
+week 1 and unavailable week 2; that same week-1 answer also covers any one-day
+fixture on the week-1 date.
+
+Admin-recorded (club-wide model): recorded_by/at track which admin set it.
 
 Revision ID: 045
 Revises: 044
@@ -21,25 +25,26 @@ depends_on = None
 
 def upgrade() -> None:
     op.create_table(
-        "fixture_availability",
+        "player_availability",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("fixture_id", UUID(as_uuid=True),
-                  sa.ForeignKey("fixtures.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("organisation_id", UUID(as_uuid=True),
+                  sa.ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False),
         sa.Column("player_id", UUID(as_uuid=True),
                   sa.ForeignKey("players.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("avail_date", sa.Date(), nullable=False),
         sa.Column("status", sa.Text(), nullable=False, server_default="NO_RESPONSE"),
         sa.Column("note", sa.Text(), nullable=True),
         sa.Column("recorded_by", UUID(as_uuid=True),
                   sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("recorded_at", sa.TIMESTAMP(timezone=True), server_default=sa.func.now()),
         sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.func.now()),
-        sa.UniqueConstraint("fixture_id", "player_id", name="uq_fixture_availability_fixture_player"),
+        sa.UniqueConstraint("player_id", "avail_date", name="uq_player_availability_player_date"),
     )
-    op.create_index("ix_fixture_availability_fixture", "fixture_availability", ["fixture_id"])
-    op.create_index("ix_fixture_availability_player", "fixture_availability", ["player_id"])
+    op.create_index(
+        "ix_player_availability_org_date", "player_availability", ["organisation_id", "avail_date"]
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_fixture_availability_player", table_name="fixture_availability")
-    op.drop_index("ix_fixture_availability_fixture", table_name="fixture_availability")
-    op.drop_table("fixture_availability")
+    op.drop_index("ix_player_availability_org_date", table_name="player_availability")
+    op.drop_table("player_availability")

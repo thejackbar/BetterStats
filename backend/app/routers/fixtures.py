@@ -1,13 +1,16 @@
 """BetterSelect — fixtures (Phase 0).
 
 Persisted upcoming / scheduled fixtures: the foundation availability and team
-selection build on. BetterStats otherwise stores only completed games, so this
-is net-new data. Two sources:
+selection build on. BetterStats otherwise stores only completed games. Two
+sources:
 
-  - 'playhq': pulled from the partner API via POST /fixtures/sync. The fixture
-    id is the CA/PlayHQ game GUID, so once played it maps 1:1 to games.id.
+  - 'playhq': pulled from the partner API via POST /fixtures/sync. The PlayHQ
+    game GUID is stored in playhq_id (NOT the PK) so it maps to games.playhq
+    while still letting two clubs that play each other keep separate rows.
   - 'manual': created by hand (POST /fixtures) so admins can build lineups and
     social posts for friendlies / pre-season without an official PlayHQ game.
+
+All endpoints are scoped to the caller's club via get_current_club.
 """
 from __future__ import annotations
 
@@ -21,8 +24,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_FIXTURES, require_cap
-from app.models.db import Fixture, Organisation, Season, User, get_db
-from app.routers.auth import get_current_user
+from app.models.db import Fixture, Grade, Organisation, Season, User, get_db
+from app.routers.auth import get_current_club
 from app.services import playhq_partner_client
 
 router = APIRouter(prefix="/fixtures", tags=["fixtures"])
@@ -33,6 +36,7 @@ def _serialize(f: Fixture) -> dict:
         "id": str(f.id),
         "organisation_id": str(f.organisation_id),
         "grade_id": str(f.grade_id) if f.grade_id else None,
+        "team_id": str(f.team_id) if f.team_id else None,
         "source": f.source,
         "playhq_id": f.playhq_id,
         "label": f.label,
@@ -59,16 +63,16 @@ def _parse_date(s: Optional[str]) -> Optional[date]:
         return None
 
 
-def _derive_sides(g: dict, org: Organisation) -> tuple[Optional[str], Optional[str]]:
+def _derive_sides(g: dict, club: Organisation) -> tuple[Optional[str], Optional[str]]:
     """Best-effort (home_away, opponent_name) from the club's perspective."""
     home = g.get("home_team") or ""
     away = g.get("away_team") or ""
     keys = []
-    if org.short_name:
-        keys.append(org.short_name.lower().strip())
-    if org.name:
-        keys.append(org.name.lower().strip())
-        keys.append(org.name.split()[0].lower().strip())
+    if club.short_name:
+        keys.append(club.short_name.lower().strip())
+    if club.name:
+        keys.append(club.name.lower().strip())
+        keys.append(club.name.split()[0].lower().strip())
     hl, al = home.lower(), away.lower()
     if any(k and k in hl for k in keys):
         return "HOME", away
@@ -77,8 +81,26 @@ def _derive_sides(g: dict, org: Organisation) -> tuple[Optional[str], Optional[s
     return None, None
 
 
+async def _assert_grade_in_club(db: AsyncSession, grade_id: Optional[uuid.UUID], club_id) -> None:
+    """Reject a grade_id that belongs to another club (cross-tenant guard)."""
+    if grade_id is None:
+        return
+    grade = await db.get(Grade, grade_id)
+    if not grade:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    season = await db.get(Season, grade.season_id)
+    if not season or season.organisation_id != club_id:
+        raise HTTPException(status_code=403, detail="Grade does not belong to your club")
+
+
+async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixture:
+    f = await db.get(Fixture, uuid.UUID(fixture_id))
+    if not f or f.organisation_id != club_id:
+        raise HTTPException(status_code=404, detail="Fixture not found")
+    return f
+
+
 class FixtureCreate(BaseModel):
-    organisation_id: str
     label: Optional[str] = None
     opponent_name: Optional[str] = None
     home_away: Optional[str] = None  # HOME | AWAY | BYE
@@ -108,13 +130,12 @@ class FixtureUpdate(BaseModel):
 
 @router.get("")
 async def list_fixtures(
-    org_id: str,
     upcoming_only: bool = False,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
 ):
-    """List persisted fixtures for an org, soonest first."""
-    stmt = select(Fixture).where(Fixture.organisation_id == uuid.UUID(org_id))
+    """List the caller's club fixtures, soonest first."""
+    stmt = select(Fixture).where(Fixture.organisation_id == club.id)
     if upcoming_only:
         stmt = stmt.where(Fixture.played_on >= date.today())
     stmt = stmt.order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
@@ -126,14 +147,14 @@ async def list_fixtures(
 async def create_fixture(
     body: FixtureCreate,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_FIXTURES)),
 ):
-    """Create a manual fixture (no PlayHQ game required)."""
-    org = await db.get(Organisation, uuid.UUID(body.organisation_id))
-    if not org:
-        raise HTTPException(status_code=404, detail="Organisation not found")
+    """Create a manual fixture for the caller's club (no PlayHQ game required)."""
+    grade_uuid = uuid.UUID(body.grade_id) if body.grade_id else None
+    await _assert_grade_in_club(db, grade_uuid, club.id)
 
-    us = org.short_name or org.name
+    us = club.short_name or club.name
     home_team = away_team = None
     if body.home_away == "HOME":
         home_team, away_team = us, body.opponent_name
@@ -142,9 +163,9 @@ async def create_fixture(
 
     f = Fixture(
         id=uuid.uuid4(),
-        organisation_id=org.id,
+        organisation_id=club.id,
         source="manual",
-        grade_id=uuid.UUID(body.grade_id) if body.grade_id else None,
+        grade_id=grade_uuid,
         label=body.label,
         round=body.round,
         played_on=body.played_on,
@@ -169,14 +190,15 @@ async def update_fixture(
     fixture_id: str,
     body: FixtureUpdate,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_FIXTURES)),
 ):
-    f = await db.get(Fixture, uuid.UUID(fixture_id))
-    if not f:
-        raise HTTPException(status_code=404, detail="Fixture not found")
+    f = await _get_owned_fixture(db, fixture_id, club.id)
     data = body.model_dump(exclude_unset=True)
     if "grade_id" in data:
-        data["grade_id"] = uuid.UUID(data["grade_id"]) if data["grade_id"] else None
+        grade_uuid = uuid.UUID(data["grade_id"]) if data["grade_id"] else None
+        await _assert_grade_in_club(db, grade_uuid, club.id)
+        data["grade_id"] = grade_uuid
     for key, value in data.items():
         setattr(f, key, value)
     f.updated_at = datetime.now(timezone.utc)
@@ -189,37 +211,33 @@ async def update_fixture(
 async def delete_fixture(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_FIXTURES)),
 ):
-    f = await db.get(Fixture, uuid.UUID(fixture_id))
-    if not f:
-        raise HTTPException(status_code=404, detail="Fixture not found")
+    f = await _get_owned_fixture(db, fixture_id, club.id)
     await db.delete(f)
     await db.commit()
 
 
 @router.post("/sync")
 async def sync_fixtures(
-    org_id: str,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_FIXTURES)),
 ):
     """Pull upcoming fixtures from the PlayHQ partner API and upsert them.
 
-    Keyed on the PlayHQ game GUID, so re-running is idempotent and a fixture
-    that later completes lines up with games.id. Only non-FINAL games dated
+    Upserts on (organisation_id, playhq_id) so re-running is idempotent and two
+    clubs that play each other keep separate rows. Only non-FINAL games dated
     today-or-later are stored.
     """
-    org = await db.get(Organisation, uuid.UUID(org_id))
-    if not org:
-        raise HTTPException(status_code=404, detail="Organisation not found")
-    if not org.playhq_id:
-        return {"synced": 0, "detail": "Org has no playhq_id — manual fixtures only."}
+    if not club.playhq_id:
+        return {"synced": 0, "detail": "Club has no playhq_id — manual fixtures only."}
 
-    seasons_res = await db.execute(select(Season).where(Season.organisation_id == org.id))
+    seasons_res = await db.execute(select(Season).where(Season.organisation_id == club.id))
     db_seasons = [{"id": str(s.id), "name": s.name} for s in seasons_res.scalars().all()]
     games = await playhq_partner_client.get_org_games(
-        org.playhq_id, org.name, db_seasons=db_seasons, grassroots_org_id=str(org.id)
+        club.playhq_id, club.name, db_seasons=db_seasons, grassroots_org_id=str(club.id)
     )
 
     today_iso = date.today().isoformat()
@@ -229,13 +247,16 @@ async def sync_fixtures(
         played = g.get("played_at")
         if not gid or g.get("status") == "FINAL" or not played or played < today_iso:
             continue
-        try:
-            fid = uuid.UUID(str(gid))
-        except (ValueError, TypeError):
-            continue
-        home_away, opponent = _derive_sides(g, org)
-        existing = await db.get(Fixture, fid)
-        target = existing or Fixture(id=fid, organisation_id=org.id)
+        existing = (
+            await db.execute(
+                select(Fixture).where(
+                    Fixture.organisation_id == club.id,
+                    Fixture.playhq_id == str(gid),
+                )
+            )
+        ).scalar_one_or_none()
+        home_away, opponent = _derive_sides(g, club)
+        target = existing or Fixture(id=uuid.uuid4(), organisation_id=club.id)
         target.source = "playhq"
         target.playhq_id = str(gid)
         target.round = g.get("round")

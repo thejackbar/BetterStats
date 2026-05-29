@@ -75,6 +75,10 @@ const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
 const AdminYearbookDetail = lazy(() => import('./pages/admin/AdminYearbookDetail'))
 const SuperClubs = lazy(() => import('./pages/admin/SuperClubs'))
 const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
+const BetterSelectHome = lazy(() => import('./pages/admin/betterselect/BetterSelectHome'))
+const BsFixtures = lazy(() => import('./pages/admin/betterselect/AdminFixtures'))
+const BsTeams = lazy(() => import('./pages/admin/betterselect/AdminTeams'))
+const BsAvailability = lazy(() => import('./pages/admin/betterselect/AdminAvailability'))
 
 // Public club pages — lazy loaded (not needed for marketing visitors)
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -166,6 +170,12 @@ export default function App() {
           <Route path="/admin/usage" element={<ProtectedRoute requireRole="super_admin"><AdminUsage /></ProtectedRoute>} />
           <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
+
+          {/* BetterSelect module */}
+          <Route path="/admin/betterselect" element={<ProtectedRoute><BetterSelectHome /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/fixtures" element={<ProtectedRoute><BsFixtures /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/teams" element={<ProtectedRoute><BsTeams /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/availability" element={<ProtectedRoute><BsAvailability /></ProtectedRoute>} />
 
           {/* Game-level pages */}
           <Route path="/games/:gameId" element={<MatchScorecard />} />

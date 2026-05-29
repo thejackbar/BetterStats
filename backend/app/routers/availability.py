@@ -1,8 +1,11 @@
 """BetterSelect — availability (Phase 2).
 
-Admin-recorded player availability for upcoming fixtures. Club-wide model:
-the matrix is all active players x upcoming fixtures, regardless of team.
-There is no player-facing input — recorded_by/at track the admin who set it.
+Admin-recorded player availability, keyed on (player, playing-date). One answer
+for a date covers every fixture that day. The matrix is all active players x
+playing dates; a two-day game contributes both its dates (week 1 = played_on,
+week 2 = end_on). No player-facing input — recorded_by/at track the admin.
+
+All endpoints are scoped to the caller's club via get_current_club.
 """
 from __future__ import annotations
 
@@ -16,8 +19,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
-from app.models.db import Fixture, FixtureAvailability, Player, User, get_db
-from app.routers.auth import get_current_user
+from app.models.db import Fixture, PlayerAvailability, Organisation, Player, User, get_db
+from app.routers.auth import get_current_club
 
 router = APIRouter(prefix="/availability", tags=["availability"])
 
@@ -25,8 +28,8 @@ VALID_STATUSES = {"AVAILABLE", "UNAVAILABLE", "MAYBE", "NO_RESPONSE"}
 
 
 class AvailabilitySet(BaseModel):
-    fixture_id: str
     player_id: str
+    date: date
     status: str
     note: Optional[str] = None
 
@@ -35,15 +38,21 @@ class AvailabilityBulk(BaseModel):
     items: list[AvailabilitySet]
 
 
-async def _upsert(db: AsyncSession, item: AvailabilitySet, user_id) -> None:
+async def _owned_player_ids(db: AsyncSession, club_id) -> set:
+    res = await db.execute(select(Player.id).where(Player.organisation_id == club_id))
+    return {r[0] for r in res.fetchall()}
+
+
+async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, player_ids: set) -> None:
     if item.status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {item.status}")
-    fid = uuid.UUID(item.fixture_id)
     pid = uuid.UUID(item.player_id)
+    if pid not in player_ids:
+        raise HTTPException(status_code=404, detail="Player not found")
     res = await db.execute(
-        select(FixtureAvailability).where(
-            FixtureAvailability.fixture_id == fid,
-            FixtureAvailability.player_id == pid,
+        select(PlayerAvailability).where(
+            PlayerAvailability.player_id == pid,
+            PlayerAvailability.avail_date == item.date,
         )
     )
     row = res.scalar_one_or_none()
@@ -53,9 +62,10 @@ async def _upsert(db: AsyncSession, item: AvailabilitySet, user_id) -> None:
         row.recorded_by = user_id
         row.recorded_at = datetime.now(timezone.utc)
     else:
-        db.add(FixtureAvailability(
-            fixture_id=fid,
+        db.add(PlayerAvailability(
+            organisation_id=club_id,
             player_id=pid,
+            avail_date=item.date,
             status=item.status,
             note=item.note,
             recorded_by=user_id,
@@ -64,24 +74,44 @@ async def _upsert(db: AsyncSession, item: AvailabilitySet, user_id) -> None:
 
 @router.get("/matrix")
 async def availability_matrix(
-    org_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
 ):
-    """All active players x upcoming fixtures, with any recorded availability."""
-    org_uuid = uuid.UUID(org_id)
+    """All active players x upcoming playing dates, with recorded availability.
 
+    Dates are the union of every upcoming fixture's played_on and end_on. Each
+    date lists the fixtures occurring that day; a two-day game appears under
+    both its dates (role 'day1'/'day2'), a one-day game under its single date.
+    """
     fx_res = await db.execute(
         select(Fixture)
-        .where(Fixture.organisation_id == org_uuid, Fixture.played_on >= date.today())
+        .where(Fixture.organisation_id == club.id, Fixture.played_on >= date.today())
         .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
     )
     fixtures = fx_res.scalars().all()
 
+    # date -> [fixture entries]
+    by_date: dict[str, list[dict]] = {}
+    for f in fixtures:
+        spans = []
+        if f.played_on:
+            spans.append((f.played_on, "day1" if f.end_on and f.end_on != f.played_on else "single"))
+        if f.end_on and f.end_on != f.played_on:
+            spans.append((f.end_on, "day2"))
+        for d, role in spans:
+            by_date.setdefault(d.isoformat(), []).append({
+                "id": str(f.id),
+                "label": f.label,
+                "opponent_name": f.opponent_name,
+                "home_away": f.home_away,
+                "role": role,
+                "two_day": role in ("day1", "day2"),
+            })
+
     pl_res = await db.execute(
         select(Player)
         .where(
-            Player.organisation_id == org_uuid,
+            Player.organisation_id == club.id,
             Player.status == "active",
             Player.is_player.is_(True),
         )
@@ -90,30 +120,24 @@ async def availability_matrix(
     players = pl_res.scalars().all()
 
     avail_map: dict[str, dict[str, dict]] = {}
-    fixture_ids = [f.id for f in fixtures]
-    if fixture_ids:
+    date_keys = list(by_date.keys())
+    if date_keys:
         av_res = await db.execute(
-            select(FixtureAvailability).where(FixtureAvailability.fixture_id.in_(fixture_ids))
+            select(PlayerAvailability).where(
+                PlayerAvailability.organisation_id == club.id,
+                PlayerAvailability.avail_date.in_([date.fromisoformat(d) for d in date_keys]),
+            )
         )
         for a in av_res.scalars().all():
-            avail_map.setdefault(str(a.fixture_id), {})[str(a.player_id)] = {
+            avail_map.setdefault(str(a.player_id), {})[a.avail_date.isoformat()] = {
                 "status": a.status,
                 "note": a.note,
             }
 
     return {
-        "fixtures": [
-            {
-                "id": str(f.id),
-                "played_on": f.played_on.isoformat() if f.played_on else None,
-                "start_time": f.start_time,
-                "label": f.label,
-                "opponent_name": f.opponent_name,
-                "home_away": f.home_away,
-                "grade_id": str(f.grade_id) if f.grade_id else None,
-                "status": f.status,
-            }
-            for f in fixtures
+        "dates": [
+            {"date": d, "fixtures": by_date[d]}
+            for d in sorted(by_date.keys())
         ],
         "players": [
             {
@@ -132,9 +156,11 @@ async def availability_matrix(
 async def set_availability(
     body: AvailabilitySet,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    await _upsert(db, body, user.id)
+    player_ids = await _owned_player_ids(db, club.id)
+    await _upsert(db, body, club.id, user.id, player_ids)
     await db.commit()
     return {"status": "ok"}
 
@@ -143,23 +169,27 @@ async def set_availability(
 async def set_availability_bulk(
     body: AvailabilityBulk,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
+    player_ids = await _owned_player_ids(db, club.id)
     for item in body.items:
-        await _upsert(db, item, user.id)
+        await _upsert(db, item, club.id, user.id, player_ids)
     await db.commit()
     return {"status": "ok", "count": len(body.items)}
 
 
 @router.get("")
-async def list_for_fixture(
-    fixture_id: str,
+async def list_for_date(
+    on: date,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
 ):
+    """All recorded availability for the caller's club on a given date."""
     res = await db.execute(
-        select(FixtureAvailability).where(
-            FixtureAvailability.fixture_id == uuid.UUID(fixture_id)
+        select(PlayerAvailability).where(
+            PlayerAvailability.organisation_id == club.id,
+            PlayerAvailability.avail_date == on,
         )
     )
     return [

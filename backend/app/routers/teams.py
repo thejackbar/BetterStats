@@ -7,6 +7,8 @@ strings on games. Teams can be auto-seeded from existing appearance data
 Players are NOT hard-assigned to teams (club-wide model): a team groups
 fixtures and, later, scopes selection — but availability is asked club-wide
 and any available player can be picked for any team.
+
+All endpoints are scoped to the caller's club via get_current_club.
 """
 from __future__ import annotations
 
@@ -21,8 +23,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
-from app.models.db import Organisation, Team, User, get_db
-from app.routers.auth import get_current_user
+from app.models.db import Grade, Organisation, Season, Team, User, get_db
+from app.routers.auth import get_current_club
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
@@ -47,8 +49,25 @@ def _guess_sequence(name: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+async def _assert_grade_in_club(db: AsyncSession, grade_id: Optional[uuid.UUID], club_id) -> None:
+    if grade_id is None:
+        return
+    grade = await db.get(Grade, grade_id)
+    if not grade:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    season = await db.get(Season, grade.season_id)
+    if not season or season.organisation_id != club_id:
+        raise HTTPException(status_code=403, detail="Grade does not belong to your club")
+
+
+async def _get_owned_team(db: AsyncSession, team_id: str, club_id) -> Team:
+    t = await db.get(Team, uuid.UUID(team_id))
+    if not t or t.organisation_id != club_id:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return t
+
+
 class TeamCreate(BaseModel):
-    organisation_id: str
     name: str
     short_name: Optional[str] = None
     sequence: Optional[int] = None
@@ -68,12 +87,11 @@ class TeamUpdate(BaseModel):
 
 @router.get("")
 async def list_teams(
-    org_id: str,
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
 ):
-    stmt = select(Team).where(Team.organisation_id == uuid.UUID(org_id))
+    stmt = select(Team).where(Team.organisation_id == club.id)
     if not include_inactive:
         stmt = stmt.where(Team.is_active.is_(True))
     stmt = stmt.order_by(Team.sequence.asc(), Team.name.asc())
@@ -85,21 +103,21 @@ async def list_teams(
 async def create_team(
     body: TeamCreate,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    org = await db.get(Organisation, uuid.UUID(body.organisation_id))
-    if not org:
-        raise HTTPException(status_code=404, detail="Organisation not found")
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Team name is required")
+    grade_uuid = uuid.UUID(body.grade_id) if body.grade_id else None
+    await _assert_grade_in_club(db, grade_uuid, club.id)
     t = Team(
         id=uuid.uuid4(),
-        organisation_id=org.id,
+        organisation_id=club.id,
         name=name,
         short_name=body.short_name,
         sequence=body.sequence if body.sequence is not None else _guess_sequence(name),
-        grade_id=uuid.UUID(body.grade_id) if body.grade_id else None,
+        grade_id=grade_uuid,
         default_formation=body.default_formation,
         is_active=True if body.is_active is None else body.is_active,
         source="manual",
@@ -115,14 +133,15 @@ async def update_team(
     team_id: str,
     body: TeamUpdate,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    t = await db.get(Team, uuid.UUID(team_id))
-    if not t:
-        raise HTTPException(status_code=404, detail="Team not found")
+    t = await _get_owned_team(db, team_id, club.id)
     data = body.model_dump(exclude_unset=True)
     if "grade_id" in data:
-        data["grade_id"] = uuid.UUID(data["grade_id"]) if data["grade_id"] else None
+        grade_uuid = uuid.UUID(data["grade_id"]) if data["grade_id"] else None
+        await _assert_grade_in_club(db, grade_uuid, club.id)
+        data["grade_id"] = grade_uuid
     if data.get("name"):
         data["name"] = data["name"].strip()
     for key, value in data.items():
@@ -137,19 +156,18 @@ async def update_team(
 async def delete_team(
     team_id: str,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    t = await db.get(Team, uuid.UUID(team_id))
-    if not t:
-        raise HTTPException(status_code=404, detail="Team not found")
+    t = await _get_owned_team(db, team_id, club.id)
     await db.delete(t)
     await db.commit()
 
 
 @router.post("/seed")
 async def seed_teams(
-    org_id: str,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
     """Auto-seed teams from distinct team names our players have appeared for.
@@ -157,13 +175,8 @@ async def seed_teams(
     Idempotent: only names not already present (case-insensitive) are added,
     as source='auto'. Existing teams are left untouched.
     """
-    org_uuid = uuid.UUID(org_id)
-    org = await db.get(Organisation, org_uuid)
-    if not org:
-        raise HTTPException(status_code=404, detail="Organisation not found")
-
     existing_res = await db.execute(
-        select(Team.name).where(Team.organisation_id == org_uuid)
+        select(Team.name).where(Team.organisation_id == club.id)
     )
     existing = {(n or "").strip().lower() for n in existing_res.scalars().all()}
 
@@ -174,7 +187,7 @@ async def seed_teams(
             "WHERE p.organisation_id = :org AND ga.team_name IS NOT NULL "
             "AND ga.team_name <> ''"
         ),
-        {"org": org_uuid},
+        {"org": club.id},
     )
     discovered = [r[0] for r in names_res.fetchall()]
 
@@ -185,7 +198,7 @@ async def seed_teams(
             continue
         db.add(Team(
             id=uuid.uuid4(),
-            organisation_id=org_uuid,
+            organisation_id=club.id,
             name=clean,
             sequence=_guess_sequence(clean),
             source="auto",
