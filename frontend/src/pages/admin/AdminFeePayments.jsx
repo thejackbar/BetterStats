@@ -65,10 +65,16 @@ export default function AdminFeePayments() {
   return (
     <AdminLayout>
       <div className="max-w-5xl">
-        <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Payments</h1>
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
+          <h1 className="font-display font-bold text-2xl text-pb-text">Payments</h1>
+          <Link to="/admin/fees/payments/import"
+            className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            + IMPORT BANK CSV
+          </Link>
+        </div>
         <p className="text-pb-faint text-sm mb-5">
-          The full ledger for one season. Log payments from the individual member page; this view is for searching, reconciling,
-          and removing mistakes.
+          The full ledger for one season. Log payments from the individual member page (or bulk-import from a bank-statement CSV);
+          this view is for searching, reconciling, and removing mistakes.
         </p>
 
         <div className="flex flex-wrap items-center gap-3 mb-5">

@@ -95,6 +95,94 @@ function AddMemberModal({ seasonId, tiers, onClose, onCreated }) {
   )
 }
 
+function BulkTierModal({ seasonId, memberIds, tiers, onClose, onSaved }) {
+  const toast = useToast()
+  const [tierId, setTierId] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function submit() {
+    setBusy(true)
+    try {
+      const r = await api.feeBulkSetTier(seasonId, memberIds, tierId || null)
+      toast.success(`Tier set on ${r.updated} member${r.updated === 1 ? '' : 's'}`)
+      onSaved()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" style={{ backdropFilter: 'blur(2px)' }} onClick={onClose}>
+      <div className="bg-pb-surface pb-card w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3.5 border-b pb-hairline-b flex items-center justify-between">
+          <h2 className="font-display font-bold text-pb-text">Set tier for {memberIds.length} member{memberIds.length === 1 ? '' : 's'}</h2>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text">✕</button>
+        </div>
+        <div className="p-5 space-y-3">
+          <p className="text-pb-faint text-[12px] leading-relaxed">
+            Updates each member's tier for this season — and carries the new tier forward as their default for next season's rollover.
+          </p>
+          <div>
+            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">TIER</label>
+            <select autoFocus className={inp} value={tierId} onChange={e => setTierId(e.target.value)}>
+              <option value="">— Clear tier (needs review) —</option>
+              {tiers.map(t => <option key={t.id} value={t.id}>{t.name} ({t.payment_type})</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="px-5 py-3.5 border-t pb-hairline-t flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
+          <button onClick={submit} disabled={busy}
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+            {busy ? 'SAVING…' : 'APPLY'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RolloverModal({ seasonId, fromSeason, onClose, onDone }) {
+  const toast = useToast()
+  const [includeLeft, setIncludeLeft] = useState(false)
+  const [busy, setBusy] = useState(false)
+  async function go() {
+    setBusy(true)
+    try {
+      const r = await api.feeRollover(seasonId, fromSeason.id, includeLeft)
+      toast.success(`Rolled over ${r.created} member${r.created === 1 ? '' : 's'} (${r.skipped_left_club} left-club skipped)`)
+      onDone()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" style={{ backdropFilter: 'blur(2px)' }} onClick={onClose}>
+      <div className="bg-pb-surface pb-card w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3.5 border-b pb-hairline-b flex items-center justify-between">
+          <h2 className="font-display font-bold text-pb-text">Roll over from {fromSeason.name}</h2>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text">✕</button>
+        </div>
+        <div className="p-5 space-y-3">
+          <p className="text-pb-faint text-[12px] leading-relaxed">
+            Opens this season for every member that was in {fromSeason.name}. Each member's tier is carried across (matched by name
+            against this season's rate card). Make sure you've seeded or copied the rate card first.
+          </p>
+          <label className="flex items-center gap-2 font-mono text-[11px] text-pb-dim cursor-pointer select-none">
+            <input type="checkbox" checked={includeLeft} onChange={e => setIncludeLeft(e.target.checked)} />
+            Include "Left Club" tiers (default: skipped)
+          </label>
+          <p className="font-mono text-[10px] text-pb-faintest leading-relaxed">
+            Members who already exist in this season are skipped. Payments stay with the original season.
+          </p>
+        </div>
+        <div className="px-5 py-3.5 border-t pb-hairline-t flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
+          <button onClick={go} disabled={busy}
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+            {busy ? 'ROLLING OVER…' : 'ROLL OVER'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminFeesMembers() {
   const toast = useToast()
   const [seasons, setSeasons] = useState([])
@@ -106,6 +194,9 @@ export default function AdminFeesMembers() {
   const [owesOnly, setOwesOnly] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [recomputing, setRecomputing] = useState(false)
+  const [selected, setSelected] = useState(() => new Set())
+  const [showBulkTier, setShowBulkTier] = useState(false)
+  const [showRollover, setShowRollover] = useState(false)
 
   useEffect(() => {
     api.adminListSeasons()
@@ -116,10 +207,17 @@ export default function AdminFeesMembers() {
   const load = useCallback(() => {
     if (!seasonId) return
     setData(null)
+    setSelected(new Set())
     api.feeListMembers(seasonId).then(setData).catch(e => { toast.error(e.message); setData({ members: [], summary: {} }) })
     api.feeListSchedule(seasonId).then(setTiers).catch(() => setTiers([]))
   }, [seasonId])
   useEffect(() => { load() }, [load])
+
+  // The next-most-recent season is the rollover source when this one is empty.
+  const previousSeason = useMemo(() => {
+    const idx = seasons.findIndex(s => s.id === seasonId)
+    return idx >= 0 && idx + 1 < seasons.length ? seasons[idx + 1] : null
+  }, [seasons, seasonId])
 
   async function recompute() {
     setRecomputing(true)
@@ -155,6 +253,12 @@ export default function AdminFeesMembers() {
             <select value={seasonId} onChange={e => setSeasonId(e.target.value)} className={inp}>
               {seasons.map(se => <option key={se.id} value={se.id}>{se.name}</option>)}
             </select>
+            {previousSeason && (
+              <button onClick={() => setShowRollover(true)} disabled={!seasonId}
+                className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap">
+                ROLL OVER
+              </button>
+            )}
             <button onClick={() => setShowAdd(true)} disabled={!seasonId}
               className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
               + MEMBER
@@ -191,47 +295,90 @@ export default function AdminFeesMembers() {
             </div>
 
             {filtered.length === 0 ? (
-              <div className="pb-card p-6 text-center">
-                <p className="text-pb-dim text-sm mb-1">
-                  {data.members.length === 0 ? 'No members yet for this season.' : 'No members match your filter.'}
-                </p>
-                {data.members.length === 0 && (
-                  <p className="font-mono text-[11px] text-pb-faint">
-                    Set up the <Link to="/admin/fees/schedule" className="text-pb-accent underline">Fee Schedule</Link>, then hit “Sync Match Days”.
+              data.members.length === 0 && previousSeason ? (
+                // First view of a new season → offer to roll forward from the prior one.
+                <div className="pb-card p-6">
+                  <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">Open Season</p>
+                  <p className="text-pb-text text-sm mb-1">No members yet for this season.</p>
+                  <p className="text-pb-dim text-sm mb-4 leading-relaxed">
+                    Roll forward everyone from <span className="text-pb-text">{previousSeason.name}</span> — each member keeps their tier
+                    (so you only bulk-edit the exceptions, e.g. graduating students). Payments stay behind, "Left Club" members are skipped.
                   </p>
-                )}
-              </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setShowRollover(true)}
+                      className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg" style={{ background: 'var(--pb-accent)' }}>
+                      ROLL OVER FROM {previousSeason.name.toUpperCase()}
+                    </button>
+                    <button onClick={recompute} disabled={recomputing}
+                      className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+                      {recomputing ? 'SYNCING…' : 'JUST SYNC MATCH DAYS'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="pb-card p-6 text-center">
+                  <p className="text-pb-dim text-sm mb-1">
+                    {data.members.length === 0 ? 'No members yet for this season.' : 'No members match your filter.'}
+                  </p>
+                  {data.members.length === 0 && (
+                    <p className="font-mono text-[11px] text-pb-faint">
+                      Set up the <Link to="/admin/fees/schedule" className="text-pb-accent underline">Fee Schedule</Link>, then hit “Sync Match Days”.
+                    </p>
+                  )}
+                </div>
+              )
             ) : (
               <div className="pb-card overflow-hidden">
-                <div className="grid grid-cols-[1.4fr_1fr_auto_auto_auto_auto_auto] font-mono text-[10px] tracking-wide3 text-pb-faint px-5 py-2.5 bg-pb-surface2/40">
+                <div className="grid grid-cols-[auto_1.4fr_1fr_auto_auto_auto_auto_auto] font-mono text-[10px] tracking-wide3 text-pb-faint px-5 py-2.5 bg-pb-surface2/40 items-center gap-2">
+                  <input type="checkbox"
+                    checked={filtered.length > 0 && filtered.every(m => selected.has(m.member_id))}
+                    onChange={e => {
+                      if (e.target.checked) setSelected(new Set(filtered.map(m => m.member_id)))
+                      else setSelected(new Set())
+                    }}
+                    className="cursor-pointer" />
                   <span>NAME</span><span>TIER</span>
                   <span className="text-right">DAYS</span><span className="text-right">PAYABLE</span>
                   <span className="text-right">PAID</span><span className="text-right">OWED</span>
                   <span className="text-right pl-3">STATUS</span>
                 </div>
-                {filtered.map((m, i) => (
-                  <Link key={m.member_season_id} to={`/admin/fees/member/${m.member_id}?season=${seasonId}`}
-                    className={`grid grid-cols-[1.4fr_1fr_auto_auto_auto_auto_auto] items-center px-5 py-2.5 ${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2 transition-colors`}>
-                    <span className="text-pb-text text-sm truncate pr-2 flex items-center gap-1.5">
-                      {m.full_name}
-                      {!m.is_linked && <span className="font-mono text-[8px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1 py-px">MANUAL</span>}
-                    </span>
-                    <span className="truncate pr-2">
-                      {m.needs_tier
-                        ? <span className="font-mono text-[10px] text-pb-amber">⚠ needs tier</span>
-                        : <span className="text-pb-dim text-sm">{m.tier}</span>}
-                    </span>
-                    <span className="font-mono text-[11px] text-pb-dim text-right">{m.match_days || 0}</span>
-                    <span className="font-mono text-[11px] text-pb-dim text-right">{money(m.total_payable)}</span>
-                    <span className="font-mono text-[11px] text-pb-dim text-right">{money(m.total_paid)}</span>
-                    <span className={`font-mono text-[11px] text-right ${m.total_outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>
-                      {money(m.total_outstanding)}
-                    </span>
-                    <span className="text-right pl-3">
-                      <StatusPill status={m.status} />
-                    </span>
-                  </Link>
-                ))}
+                {filtered.map((m, i) => {
+                  const isSelected = selected.has(m.member_id)
+                  return (
+                    <div key={m.member_season_id}
+                      className={`grid grid-cols-[auto_1.4fr_1fr_auto_auto_auto_auto_auto] items-center gap-2 px-5 py-2.5 ${i ? 'pb-hairline-t' : ''} ${isSelected ? 'bg-pb-surface2/60' : 'hover:bg-pb-surface2'} transition-colors`}>
+                      <input type="checkbox" checked={isSelected}
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => {
+                          setSelected(s => {
+                            const n = new Set(s)
+                            if (e.target.checked) n.add(m.member_id); else n.delete(m.member_id)
+                            return n
+                          })
+                        }}
+                        className="cursor-pointer" />
+                      <Link to={`/admin/fees/member/${m.member_id}?season=${seasonId}`}
+                        className="text-pb-text text-sm truncate pr-2 flex items-center gap-1.5 hover:text-pb-accent transition-colors">
+                        {m.full_name}
+                        {!m.is_linked && <span className="font-mono text-[8px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1 py-px">MANUAL</span>}
+                      </Link>
+                      <span className="truncate pr-2">
+                        {m.needs_tier
+                          ? <span className="font-mono text-[10px] text-pb-amber">⚠ needs tier</span>
+                          : <span className="text-pb-dim text-sm">{m.tier}</span>}
+                      </span>
+                      <span className="font-mono text-[11px] text-pb-dim text-right">{m.match_days || 0}</span>
+                      <span className="font-mono text-[11px] text-pb-dim text-right">{money(m.total_payable)}</span>
+                      <span className="font-mono text-[11px] text-pb-dim text-right">{money(m.total_paid)}</span>
+                      <span className={`font-mono text-[11px] text-right ${m.total_outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>
+                        {money(m.total_outstanding)}
+                      </span>
+                      <span className="text-right pl-3">
+                        <StatusPill status={m.status} />
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             )}
             <p className="font-mono text-[10px] text-pb-faintest mt-3">
@@ -241,10 +388,34 @@ export default function AdminFeesMembers() {
         )}
       </div>
 
+      {/* Sticky bulk-action bar — appears when any row is checked. */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-pb-surface border pb-hairline rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3"
+          style={{ borderColor: 'var(--pb-accent)' }}>
+          <span className="font-mono text-[11px] text-pb-text">{selected.size} selected</span>
+          <button onClick={() => setShowBulkTier(true)}
+            className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg" style={{ background: 'var(--pb-accent)' }}>
+            SET TIER
+          </button>
+          <button onClick={() => setSelected(new Set())}
+            className="font-mono text-[10px] text-pb-faint hover:text-pb-text">CLEAR</button>
+        </div>
+      )}
+
       {showAdd && (
         <AddMemberModal seasonId={seasonId} tiers={tiers}
           onClose={() => setShowAdd(false)}
           onCreated={() => { setShowAdd(false); load() }} />
+      )}
+      {showBulkTier && (
+        <BulkTierModal seasonId={seasonId} memberIds={Array.from(selected)} tiers={tiers}
+          onClose={() => setShowBulkTier(false)}
+          onSaved={() => { setShowBulkTier(false); setSelected(new Set()); load() }} />
+      )}
+      {showRollover && previousSeason && (
+        <RolloverModal seasonId={seasonId} fromSeason={previousSeason}
+          onClose={() => setShowRollover(false)}
+          onDone={() => { setShowRollover(false); load() }} />
       )}
     </AdminLayout>
   )

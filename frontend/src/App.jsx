@@ -66,6 +66,7 @@ const AdminFeesMembers = lazy(() => import('./pages/admin/AdminFeesMembers'))
 const AdminFeeMemberDetail = lazy(() => import('./pages/admin/AdminFeeMemberDetail'))
 const AdminFeeSchedule = lazy(() => import('./pages/admin/AdminFeeSchedule'))
 const AdminFeePayments = lazy(() => import('./pages/admin/AdminFeePayments'))
+const AdminFeePaymentImport = lazy(() => import('./pages/admin/AdminFeePaymentImport'))
 const AdminFeeReports = lazy(() => import('./pages/admin/AdminFeeReports'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
@@ -152,6 +153,7 @@ export default function App() {
           <Route path="/admin/fees" element={<ProtectedRoute><AdminFeesMembers /></ProtectedRoute>} />
           <Route path="/admin/fees/schedule" element={<ProtectedRoute><AdminFeeSchedule /></ProtectedRoute>} />
           <Route path="/admin/fees/payments" element={<ProtectedRoute><AdminFeePayments /></ProtectedRoute>} />
+          <Route path="/admin/fees/payments/import" element={<ProtectedRoute><AdminFeePaymentImport /></ProtectedRoute>} />
           <Route path="/admin/fees/reports" element={<ProtectedRoute><AdminFeeReports /></ProtectedRoute>} />
           <Route path="/admin/fees/member/:memberId" element={<ProtectedRoute><AdminFeeMemberDetail /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
