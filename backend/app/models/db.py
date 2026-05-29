@@ -171,6 +171,11 @@ class Player(Base):
     player_role = Column(Text, nullable=True)
     is_overseas = Column(Boolean, nullable=True)
     overseas_country = Column(Text, nullable=True)
+    # BetterSelect cricket attributes for selection filters (migration 050).
+    batting_hand = Column(Text, nullable=True)        # 'LEFT' | 'RIGHT'
+    bowling_action = Column(Text, nullable=True)      # 'RIGHT_ARM' | 'LEFT_ARM'
+    bowling_type = Column(Text, nullable=True)        # FAST|FAST_MEDIUM|MEDIUM|MEDIUM_FAST|FINGER_SPIN|WRIST_SPIN
+    is_opening_batsman = Column(Boolean, nullable=True)
     # claimed / user_id retained as columns but no longer used in business logic
     claimed = Column(Boolean, default=False)
     user_id = Column(UUID(as_uuid=True), nullable=True)
