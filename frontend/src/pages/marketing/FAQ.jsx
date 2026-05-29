@@ -111,7 +111,11 @@ const CATEGORIES = [
     items: [
       {
         q: 'How much does BetterStats cost?',
-        a: 'BetterStats is $49 AUD per club per month, or $400 AUD per club per year (saves $188 vs. monthly). One plan covers unlimited players, unlimited seasons, automatic data sync, the full public stats website, season yearbooks, awards & honours management and the admin panel.',
+        a: 'BetterStats is $59 AUD per club per month, or $449 AUD per club per year (saves $259 vs. monthly). One plan covers unlimited players, unlimited seasons, automatic data sync, the full public stats website, season yearbooks, awards & honours management and the admin panel.',
+      },
+      {
+        q: 'Does the price change based on club size?',
+        a: "No — it's a flat rate. One team or fifty teams, juniors and seniors, men's and women's, the fee is the same. No per-team, per-player or per-grade pricing.",
       },
       {
         q: 'Are there setup fees?',

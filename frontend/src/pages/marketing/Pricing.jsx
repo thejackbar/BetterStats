@@ -16,8 +16,8 @@ const PRICING_JSONLD = {
   url: 'https://betterstats.cricket/pricing',
   image: 'https://betterstats.cricket/og-image.png',
   offers: [
-    { '@type': 'Offer', name: 'Monthly subscription', price: '49', priceCurrency: 'AUD', availability: 'https://schema.org/InStock', url: 'https://betterstats.cricket/pricing', priceSpecification: { '@type': 'UnitPriceSpecification', price: '49', priceCurrency: 'AUD', unitText: 'MONTH' } },
-    { '@type': 'Offer', name: 'Annual subscription', price: '400', priceCurrency: 'AUD', availability: 'https://schema.org/InStock', url: 'https://betterstats.cricket/pricing', priceSpecification: { '@type': 'UnitPriceSpecification', price: '400', priceCurrency: 'AUD', unitText: 'ANN' } },
+    { '@type': 'Offer', name: 'Monthly subscription', price: '59', priceCurrency: 'AUD', availability: 'https://schema.org/InStock', url: 'https://betterstats.cricket/pricing', priceSpecification: { '@type': 'UnitPriceSpecification', price: '59', priceCurrency: 'AUD', unitText: 'MONTH' } },
+    { '@type': 'Offer', name: 'Annual subscription', price: '449', priceCurrency: 'AUD', availability: 'https://schema.org/InStock', url: 'https://betterstats.cricket/pricing', priceSpecification: { '@type': 'UnitPriceSpecification', price: '449', priceCurrency: 'AUD', unitText: 'ANN' } },
   ],
 }
 
@@ -45,12 +45,12 @@ function Hero() {
     <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
       <div className="max-w-[1000px] mx-auto relative text-center">
-        <p className="pill mb-6 inline-flex"><span className="dot" />No hidden tiers · No per-seat fees</p>
+        <p className="pill mb-6 inline-flex"><span className="dot" />Flat rate · 1 team or 50, same price</p>
         <h1 className="font-display font-bold text-[44px] sm:text-[60px] lg:text-[80px] tracking-tight leading-[0.95] mb-6">
           One price. <span className="gradient-text">Everything in.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed">
-          Less than the post-game round at the bar. All features, all clubs.
+          Less than the post-game round at the bar. All features, all clubs — and the fee is the same whether you run one team or fifty.
         </p>
       </div>
     </section>
@@ -69,7 +69,7 @@ function PricingCards() {
           <div className="tabbar">
             <button className={billing === 'monthly' ? 'active' : ''} onClick={() => setBilling('monthly')}>Monthly</button>
             <button className={isAnnual ? 'active' : ''} onClick={() => setBilling('annual')}>
-              Annual <span className="ml-1 text-[10px] font-bold opacity-80">SAVE $188</span>
+              Annual <span className="ml-1 text-[10px] font-bold opacity-80">SAVE $259</span>
             </button>
           </div>
         </div>
@@ -78,19 +78,20 @@ function PricingCards() {
           <div className={`relative surface p-8 lg:p-10 max-w-2xl mx-auto ${isAnnual ? 'border-accent/40 bg-gradient-to-b from-accent/[0.06] to-transparent' : ''}`}>
             {isAnnual && (
               <div className="absolute -top-3 left-8 px-3 py-1 bg-accent text-navy-950 rounded-full">
-                <span className="text-[10px] font-bold uppercase tracking-wide3">★ Most clubs · save $188</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide3">★ Most clubs · save $259</span>
               </div>
             )}
             <p className={`text-sm font-semibold mb-3 ${isAnnual ? 'text-accent' : 'text-pb-dim'}`}>
               {isAnnual ? 'Recommended · Annual' : 'Try it out · Monthly'}
             </p>
             <div className="flex items-baseline gap-2 mb-2">
-              <span className="text-5xl font-bold tabular-nums">{isAnnual ? '$400' : '$49'}</span>
+              <span className="text-5xl font-bold tabular-nums">{isAnnual ? '$449' : '$59'}</span>
               <span className="text-sm text-pb-faint">/ {isAnnual ? 'year' : 'month'} AUD</span>
             </div>
+            <p className="text-xs text-accent font-semibold mb-3">Flat rate — 1 team or 50, same price.</p>
             <p className="text-sm text-pb-dim mb-7">
               {isAnnual
-                ? 'Works out to $33 a month. Best value for clubs running a full season.'
+                ? 'Works out to about $37 a month. Best value for clubs running a full season.'
                 : 'For clubs trialling the platform. Cancel any time during a monthly term — your data is kept, the public page goes offline.'}
             </p>
             <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-4">What's included</p>
@@ -134,7 +135,7 @@ function ValueTable() {
       <div className="max-w-[1100px] mx-auto">
         <Reveal>
           <div className="text-center mb-10">
-            <p className="pill-neutral inline-flex mb-5">$400 in context</p>
+            <p className="pill-neutral inline-flex mb-5">$449 in context</p>
             <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">What you stop paying for.</h2>
           </div>
         </Reveal>
@@ -154,7 +155,7 @@ function ValueTable() {
           <div className="grid grid-cols-[1.5fr,1fr,1fr] gap-4 px-6 py-5 bg-accent/[0.05]">
             <p className="text-base font-bold">Total annual cost</p>
             <p className="text-base text-pb-dim">BetterStats Annual</p>
-            <p className="text-base font-bold text-accent text-right">$400 / year</p>
+            <p className="text-base font-bold text-accent text-right">$449 / year</p>
           </div>
         </div>
       </div>
@@ -202,6 +203,7 @@ function DeepAnalytics() {
 function PricingFAQ() {
   const [open, setOpen] = useState(0)
   const faqs = [
+    { q: 'Does the price change based on club size?', a: "No. It's a flat rate — one team or fifty teams, juniors and seniors, men's and women's, the fee is the same. No per-team, per-player or per-grade pricing." },
     { q: 'Are there any setup or migration fees?', a: "There's no flat setup fee. We do a short consultation, look at how much historical data your club has and how much clean-up it'll need, then work out a low-cost plan that fits." },
     { q: 'Can we change plans?', a: 'Yes. Move from monthly to annual any time. Switch back at the end of an annual term.' },
     { q: 'What if we cancel?', a: "On monthly, you can cancel any time — when you do, the public page comes down but your data isn't lost. The annual plan runs to the end of its term." },
@@ -241,8 +243,8 @@ function PricingFAQ() {
 // ─── Page ────────────────────────────────────────────────────────────────
 export default function Pricing() {
   usePageMeta({
-    title: 'Pricing — $49/mo or $400/yr per club | BetterStats',
-    description: 'Simple, transparent cricket stats pricing for Australian clubs. $49 AUD per month or $400 AUD per year per club — unlimited players, full historical sync, season yearbooks, admin panel and responsive support included.',
+    title: 'Pricing — $59/mo or $449/yr per club | BetterStats',
+    description: 'Simple, transparent cricket stats pricing for Australian clubs. $59 AUD per month or $449 AUD per year per club — flat rate regardless of club size, unlimited players, full historical sync, season yearbooks, admin panel and responsive support included.',
     image: 'https://betterstats.cricket/og-image.png',
     url: 'https://betterstats.cricket/pricing',
     jsonLd: PRICING_JSONLD,
