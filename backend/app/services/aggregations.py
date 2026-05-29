@@ -2158,6 +2158,11 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                 ORDER BY opp_key, played_at DESC NULLS LAST
             ),
             games_by_opposition AS (
+                -- Exclude result=NULL games (abandoned / washed-out / mid-day-one
+                -- forfeits where no winner was determined). CA's aggregate
+                -- player_season_stats.matches counter excludes these too, so
+                -- filtering here keeps the opposition sum aligned with the
+                -- career total shown on the profile.
                 SELECT
                     opp_key,
                     COUNT(*) AS games,
@@ -2165,6 +2170,7 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                     COUNT(*) FILTER (WHERE result = 'LOSS') AS losses
                 FROM player_games
                 WHERE opp_key IS NOT NULL
+                  AND result IS NOT NULL
                 GROUP BY opp_key
             ),
             batting_by_opposition AS (
@@ -2246,6 +2252,9 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
                 SELECT manual_game_id AS game_id FROM manual_fielding_stats WHERE player_id = CAST(:pid AS UUID)
             ),
             games_by_venue AS (
+                -- Same NULL-result exclusion as games_by_opposition: keeps the
+                -- venue sum aligned with the career total. Abandoned games are
+                -- still recorded but don't show up in venue/opposition counts.
                 SELECT
                     g.venue,
                     COUNT(*) AS games,
@@ -2254,6 +2263,7 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
                 FROM player_game_ids pgi
                 JOIN v_effective_games g ON g.id = pgi.game_id
                 WHERE g.venue IS NOT NULL
+                  AND g.result IS NOT NULL
                 GROUP BY g.venue
             ),
             batting_by_venue AS (
