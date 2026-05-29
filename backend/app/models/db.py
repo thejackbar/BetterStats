@@ -863,7 +863,13 @@ class FeeMatchDay(Base):
     """One game's contribution to a member's match-day count. Auto-derived from
     GameAppearance during sync; `auto_derived=False` once an admin overrides it
     (e.g. drops a two-day game from 2 days to 1), which makes sync leave it
-    alone thereafter."""
+    alone thereafter.
+
+    `paid_payment_id` links to the FeePayment that settled this match day. The
+    'Mark Paid' button creates a payment and links it here; deleting the
+    payment from the Payments page nulls this out (FK ON DELETE SET NULL).
+    A single bulk payment can settle multiple match-day rows, so multiple
+    rows may share the same `paid_payment_id`."""
     __tablename__ = "fee_match_days"
     __table_args__ = (
         UniqueConstraint("member_season_id", "game_id", name="uq_fee_match_day_member_game"),
@@ -876,12 +882,13 @@ class FeeMatchDay(Base):
     fee_format = Column(Text, nullable=True)
     days_played = Column(Numeric(3, 1), nullable=False, server_default="1")
     auto_derived = Column(Boolean, nullable=False, server_default="true")
-    override_reason = Column(Text, nullable=True)
+    paid_payment_id = Column(UUID(as_uuid=True), ForeignKey("fee_payments.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     member_season = relationship("FeeMemberSeason", back_populates="match_days")
     game = relationship("Game")
+    paid_payment = relationship("FeePayment", foreign_keys=[paid_payment_id])
 
 
 class FeePayment(Base):

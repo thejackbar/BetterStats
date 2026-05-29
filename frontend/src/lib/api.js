@@ -283,6 +283,15 @@ export const api = {
     request('/club-admin/fees/payments/import/commit', {
       method: 'POST', body: JSON.stringify({ items }),
     }),
+  // Phase 3.1 — Per-match-day Mark Paid + bulk payment
+  feeMarkMatchDayPaid: (entryId, data = {}) =>
+    request(`/club-admin/fees/match-days/${entryId}/mark-paid`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  feeUnmarkMatchDayPaid: (entryId) =>
+    request(`/club-admin/fees/match-days/${entryId}/mark-paid`, { method: 'DELETE' }),
+  feeBulkPayment: (data) =>
+    request('/club-admin/fees/payments/bulk', { method: 'POST', body: JSON.stringify(data) }),
 
   // Club admin — grades
   adminListGrades: () => request('/club-admin/grades'),

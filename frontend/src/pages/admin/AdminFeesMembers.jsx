@@ -328,58 +328,75 @@ export default function AdminFeesMembers() {
                 </div>
               )
             ) : (
-              <div className="pb-card overflow-hidden">
-                <div className="grid grid-cols-[auto_1.4fr_1fr_auto_auto_auto_auto_auto] font-mono text-[10px] tracking-wide3 text-pb-faint px-5 py-2.5 bg-pb-surface2/40 items-center gap-2">
-                  <input type="checkbox"
-                    checked={filtered.length > 0 && filtered.every(m => selected.has(m.member_id))}
-                    onChange={e => {
-                      if (e.target.checked) setSelected(new Set(filtered.map(m => m.member_id)))
-                      else setSelected(new Set())
-                    }}
-                    className="cursor-pointer" />
-                  <span>NAME</span><span>TIER</span>
-                  <span className="text-right">DAYS</span><span className="text-right">PAYABLE</span>
-                  <span className="text-right">PAID</span><span className="text-right">OWED</span>
-                  <span className="text-right pl-3">STATUS</span>
+              <>
+                <p className="font-mono text-[10px] tracking-wide2 text-pb-faint mb-2">
+                  Tip: tick rows to bulk-assign a tier (e.g. promote graduating students to Senior in one go).
+                </p>
+                <div className="pb-card overflow-hidden">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left bg-pb-surface2/40">
+                        <th className="font-medium py-2.5 pl-5 pr-2 w-8">
+                          <input type="checkbox"
+                            checked={filtered.length > 0 && filtered.every(m => selected.has(m.member_id))}
+                            onChange={e => {
+                              if (e.target.checked) setSelected(new Set(filtered.map(m => m.member_id)))
+                              else setSelected(new Set())
+                            }}
+                            className="cursor-pointer align-middle" />
+                        </th>
+                        <th className="font-medium py-2.5 pr-3">NAME</th>
+                        <th className="font-medium py-2.5 pr-3">TIER</th>
+                        <th className="font-medium py-2.5 pr-3 w-16 text-right">DAYS</th>
+                        <th className="font-medium py-2.5 pr-3 w-24 text-right">PAYABLE</th>
+                        <th className="font-medium py-2.5 pr-3 w-24 text-right">PAID</th>
+                        <th className="font-medium py-2.5 pr-3 w-24 text-right">OWED</th>
+                        <th className="font-medium py-2.5 pr-5 w-28 text-right">STATUS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map(m => {
+                        const isSelected = selected.has(m.member_id)
+                        return (
+                          <tr key={m.member_season_id}
+                            className={`pb-hairline-t align-middle ${isSelected ? 'bg-pb-surface2/60' : 'hover:bg-pb-surface2/40'} transition-colors`}>
+                            <td className="py-2.5 pl-5 pr-2">
+                              <input type="checkbox" checked={isSelected}
+                                onChange={e => setSelected(s => {
+                                  const n = new Set(s)
+                                  if (e.target.checked) n.add(m.member_id); else n.delete(m.member_id)
+                                  return n
+                                })}
+                                className="cursor-pointer align-middle" />
+                            </td>
+                            <td className="py-2.5 pr-3">
+                              <Link to={`/admin/fees/member/${m.member_id}?season=${seasonId}`}
+                                className="text-pb-text text-sm hover:text-pb-accent transition-colors inline-flex items-center gap-1.5">
+                                {m.full_name}
+                                {!m.is_linked && <span className="font-mono text-[8px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1 py-px">MANUAL</span>}
+                              </Link>
+                            </td>
+                            <td className="py-2.5 pr-3">
+                              {m.needs_tier
+                                ? <span className="font-mono text-[10px] text-pb-amber">⚠ needs tier</span>
+                                : <span className="text-pb-dim text-sm">{m.tier}</span>}
+                            </td>
+                            <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{m.match_days || 0}</td>
+                            <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(m.total_payable)}</td>
+                            <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(m.total_paid)}</td>
+                            <td className={`py-2.5 pr-3 text-right font-mono text-[11px] tabular-nums ${m.total_outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>
+                              {money(m.total_outstanding)}
+                            </td>
+                            <td className="py-2.5 pr-5 text-right whitespace-nowrap">
+                              <StatusPill status={m.status} />
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-                {filtered.map((m, i) => {
-                  const isSelected = selected.has(m.member_id)
-                  return (
-                    <div key={m.member_season_id}
-                      className={`grid grid-cols-[auto_1.4fr_1fr_auto_auto_auto_auto_auto] items-center gap-2 px-5 py-2.5 ${i ? 'pb-hairline-t' : ''} ${isSelected ? 'bg-pb-surface2/60' : 'hover:bg-pb-surface2'} transition-colors`}>
-                      <input type="checkbox" checked={isSelected}
-                        onClick={e => e.stopPropagation()}
-                        onChange={e => {
-                          setSelected(s => {
-                            const n = new Set(s)
-                            if (e.target.checked) n.add(m.member_id); else n.delete(m.member_id)
-                            return n
-                          })
-                        }}
-                        className="cursor-pointer" />
-                      <Link to={`/admin/fees/member/${m.member_id}?season=${seasonId}`}
-                        className="text-pb-text text-sm truncate pr-2 flex items-center gap-1.5 hover:text-pb-accent transition-colors">
-                        {m.full_name}
-                        {!m.is_linked && <span className="font-mono text-[8px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1 py-px">MANUAL</span>}
-                      </Link>
-                      <span className="truncate pr-2">
-                        {m.needs_tier
-                          ? <span className="font-mono text-[10px] text-pb-amber">⚠ needs tier</span>
-                          : <span className="text-pb-dim text-sm">{m.tier}</span>}
-                      </span>
-                      <span className="font-mono text-[11px] text-pb-dim text-right">{m.match_days || 0}</span>
-                      <span className="font-mono text-[11px] text-pb-dim text-right">{money(m.total_payable)}</span>
-                      <span className="font-mono text-[11px] text-pb-dim text-right">{money(m.total_paid)}</span>
-                      <span className={`font-mono text-[11px] text-right ${m.total_outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>
-                        {money(m.total_outstanding)}
-                      </span>
-                      <span className="text-right pl-3">
-                        <StatusPill status={m.status} />
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
+              </>
             )}
             <p className="font-mono text-[10px] text-pb-faintest mt-3">
               Showing {filtered.length} of {data.members.length}.
