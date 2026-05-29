@@ -38,6 +38,7 @@ MANAGE_FAMILIES = "manage_families"           # create/edit player family groupi
 MANAGE_MANUAL_ENTRIES = "manage_manual_entries"  # historical manual stat entry + edit + undo
 MANAGE_FEES = "manage_fees"                   # fee tracking: members, schedule, match days
 MANAGE_FIXTURES = "manage_fixtures"           # BetterSelect: fixtures (partner sync + manual create/edit)
+MANAGE_SELECTIONS = "manage_selections"       # BetterSelect: teams, availability, team selection
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -56,6 +57,7 @@ ALL_CAPABILITIES = (
     MANAGE_MANUAL_ENTRIES,
     MANAGE_FEES,
     MANAGE_FIXTURES,
+    MANAGE_SELECTIONS,
 )
 
 

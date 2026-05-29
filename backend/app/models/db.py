@@ -226,6 +226,7 @@ class Fixture(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     source = Column(Text, nullable=False, server_default="manual")  # 'playhq' | 'manual'
     playhq_id = Column(Text, nullable=True)
     label = Column(Text, nullable=True)         # free-text title (friendlies / manual)
@@ -240,6 +241,34 @@ class Fixture(Base):
     venue = Column(Text, nullable=True)
     status = Column(Text, nullable=False, server_default="UPCOMING")  # UPCOMING|IN_PROGRESS|FINAL|CANCELLED|BYE
     notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    organisation = relationship("Organisation")
+    grade = relationship("Grade")
+    team = relationship("Team")
+
+
+class Team(Base):
+    """BetterSelect: a first-class club team. BetterStats otherwise only has
+    team *names* on games. Players are not hard-assigned to teams (club-wide
+    model); a team groups fixtures and, later, scopes selection.
+    """
+    __tablename__ = "teams"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_team_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    short_name = Column(Text, nullable=True)
+    sequence = Column(Integer, default=0, nullable=False, server_default="0")  # hierarchy rank (1 = top team)
+    grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
+    default_formation = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False, server_default="true")
+    source = Column(Text, nullable=False, server_default="manual")  # 'auto' | 'manual'
+    playhq_id = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
