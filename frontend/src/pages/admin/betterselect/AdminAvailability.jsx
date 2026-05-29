@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
+import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 
 // Click-to-cycle order and per-status display.
@@ -16,9 +17,22 @@ const META = {
   NO_RESPONSE: { g: '–', cls: 'bg-pb-surface2 text-pb-faintest border-pb-hairline' },
 }
 
+const SKILL_CODES = ['BAT', 'BWL', 'ALL', 'WKT']
+// Roster visibility: default to current squad only (hides dormant + inactive).
+const ROSTER_OPTS = [
+  { key: 'current', label: 'Current squad' },
+  { key: 'with_dormant', label: '+ Dormant' },
+  { key: 'all', label: 'All (incl. inactive)' },
+]
+
 function fmtDay(d) {
   try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
   catch { return d }
+}
+
+function fmtYear(d) {
+  if (!d) return '—'
+  try { return new Date(d + 'T00:00:00').getFullYear() } catch { return '—' }
 }
 
 export default function AdminAvailability() {
@@ -28,6 +42,14 @@ export default function AdminAvailability() {
   const [data, setData] = useState(null)
   const [avail, setAvail] = useState({}) // {playerId: {date: {status}}}
 
+  // Filters
+  const [search, setSearch] = useState('')
+  const [roster, setRoster] = useState('current')
+  const [squad, setSquad] = useState('')        // team name, '' = any
+  const [role, setRole] = useState('')          // player_role, '' = any
+  const [skill, setSkill] = useState('')        // skill code, '' = any
+  const [respFilter, setRespFilter] = useState('') // availability status across shown dates, '' = any
+
   const load = useCallback(() => {
     setData(null)
     api.bsAvailabilityMatrix()
@@ -36,6 +58,45 @@ export default function AdminAvailability() {
   }, [toast])
 
   useEffect(() => { load() }, [load])
+
+  // Distinct roles present in the roster, for the role dropdown.
+  const roleOptions = useMemo(() => {
+    const s = new Set()
+    ;(data?.players || []).forEach(p => { if (p.player_role) s.add(p.player_role) })
+    return [...s].sort()
+  }, [data])
+
+  // A player's "effective" response for the response filter: AVAILABLE/etc if
+  // they hold that status on ANY shown date; NO_RESPONSE if untouched.
+  const matchesResponse = useCallback((p) => {
+    if (!respFilter) return true
+    const dates = data?.dates || []
+    const byDate = avail[p.id] || {}
+    if (respFilter === 'NO_RESPONSE') {
+      return dates.every(d => (byDate[d.date]?.status || 'NO_RESPONSE') === 'NO_RESPONSE')
+    }
+    return dates.some(d => byDate[d.date]?.status === respFilter)
+  }, [respFilter, data, avail])
+
+  const filteredPlayers = useMemo(() => {
+    return (data?.players || []).filter(p => {
+      // Roster visibility
+      if (roster === 'current' && !p.is_current) return false
+      if (roster === 'with_dormant' && p.is_inactive) return false
+      // 'all' shows everyone
+      if (search.trim() && !nameMatchesSearch(p.display_name, search)) return false
+      if (squad && !(p.squads || []).includes(squad)) return false
+      if (role && p.player_role !== role) return false
+      if (skill && !(p.skill_positions || []).includes(skill)) return false
+      if (!matchesResponse(p)) return false
+      return true
+    })
+  }, [data, roster, search, squad, role, skill, matchesResponse])
+
+  const resetFilters = () => {
+    setSearch(''); setRoster('current'); setSquad(''); setRole(''); setSkill(''); setRespFilter('')
+  }
+  const filtersActive = search || squad || role || skill || respFilter || roster !== 'current'
 
   const cycle = async (pid, date, cur) => {
     if (!canEdit) return
@@ -73,6 +134,38 @@ export default function AdminAvailability() {
         One answer covers every fixture that day; two-day games show both weekends.
       </p>
 
+      {/* Filter bar */}
+      <div className="pb-card p-3 mb-3 flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[180px]">
+          <label className="font-mono text-[10px] text-pb-faintest block mb-1">Search</label>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Player name…"
+            className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+          />
+        </div>
+        <FilterSelect label="Roster" value={roster} onChange={setRoster}
+          options={ROSTER_OPTS.map(o => [o.key, o.label])} includeAny={false} />
+        {(data.all_squads || []).length > 0 &&
+          <FilterSelect label="Squad" value={squad} onChange={setSquad}
+            options={(data.all_squads || []).map(s => [s, s])} anyLabel="Any squad" />}
+        {roleOptions.length > 0 &&
+          <FilterSelect label="Role" value={role} onChange={setRole}
+            options={roleOptions.map(r => [r, r])} anyLabel="Any role" />}
+        <FilterSelect label="Skill" value={skill} onChange={setSkill}
+          options={SKILL_CODES.map(c => [c, c])} anyLabel="Any skill" />
+        <FilterSelect label="Response" value={respFilter} onChange={setRespFilter}
+          options={[['AVAILABLE', '✓ Available'], ['UNAVAILABLE', '✕ Unavailable'], ['MAYBE', '? Maybe'], ['NO_RESPONSE', '– No response']]}
+          anyLabel="Any response" />
+        {filtersActive &&
+          <button onClick={resetFilters}
+            className="text-xs text-pb-faint hover:text-pb-text underline px-1 py-1.5">Clear</button>}
+        <div className="ml-auto font-mono text-[10px] text-pb-faintest self-center">
+          {filteredPlayers.length} / {data.players.length} players
+        </div>
+      </div>
+
       <div className="pb-card overflow-auto">
         <table className="border-collapse text-sm w-full">
           <thead>
@@ -96,11 +189,21 @@ export default function AdminAvailability() {
             </tr>
           </thead>
           <tbody>
-            {data.players.map(p => (
+            {filteredPlayers.length === 0 && (
+              <tr>
+                <td colSpan={data.dates.length + 1} className="px-3 py-8 text-center text-pb-faint text-sm border-t pb-hairline">
+                  No players match these filters.{' '}
+                  {filtersActive && <button onClick={resetFilters} className="text-pb-accent underline">Clear filters</button>}
+                </td>
+              </tr>
+            )}
+            {filteredPlayers.map(p => (
               <tr key={p.id}>
                 <td className="sticky left-0 z-10 bg-pb-surface px-3 py-1.5 whitespace-nowrap border-t pb-hairline">
                   <span className="text-sm">{p.display_name}</span>
                   {p.player_role && <span className="ml-2 font-mono text-[9px] text-pb-faintest uppercase">{p.player_role}</span>}
+                  {p.is_inactive && <span className="ml-2 font-mono text-[9px] text-pb-red/80 uppercase" title="Marked inactive">inactive</span>}
+                  {p.is_dormant && <span className="ml-2 font-mono text-[9px] text-amber-300/80 uppercase" title={`No appearances since ${fmtYear(p.last_played)}`}>dormant · {fmtYear(p.last_played)}</span>}
                 </td>
                 {data.dates.map(d => {
                   const st = avail[p.id]?.[d.date]?.status || 'NO_RESPONSE'
@@ -122,5 +225,23 @@ export default function AdminAvailability() {
         </table>
       </div>
     </BetterSelectLayout>
+  )
+}
+
+// Compact labelled <select> for the filter bar. `options` is [value, label][].
+// When includeAny is true (default), a blank "any" option is prepended.
+function FilterSelect({ label, value, onChange, options, anyLabel = 'Any', includeAny = true }) {
+  return (
+    <div>
+      <label className="font-mono text-[10px] text-pb-faintest block mb-1">{label}</label>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+      >
+        {includeAny && <option value="">{anyLabel}</option>}
+        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    </div>
   )
 }
