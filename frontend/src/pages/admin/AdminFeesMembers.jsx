@@ -10,6 +10,16 @@ function sortSeasons(seasons) {
 }
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 
+function StatusPill({ status }) {
+  if (status === 'financial')
+    return <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5">FINANCIAL</span>
+  if (status === 'non_financial')
+    return <span className="font-mono text-[9px] tracking-wide2 text-pb-amber border border-pb-amber/40 rounded px-1.5 py-0.5">OWES</span>
+  if (status === 'needs_tier')
+    return <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">NEEDS TIER</span>
+  return null
+}
+
 function Kpi({ label, value, accent, warn }) {
   return (
     <div className="pb-card px-4 py-3">
@@ -93,6 +103,7 @@ export default function AdminFeesMembers() {
   const [tiers, setTiers] = useState([])
   const [q, setQ] = useState('')
   const [needsTierOnly, setNeedsTierOnly] = useState(false)
+  const [owesOnly, setOwesOnly] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [recomputing, setRecomputing] = useState(false)
 
@@ -124,9 +135,10 @@ export default function AdminFeesMembers() {
     const needle = q.trim().toLowerCase()
     return data.members.filter(m =>
       (!needsTierOnly || m.needs_tier) &&
+      (!owesOnly || m.status === 'non_financial') &&
       (!needle || m.full_name.toLowerCase().includes(needle) || (m.tier || '').toLowerCase().includes(needle))
     )
-  }, [data, q, needsTierOnly])
+  }, [data, q, needsTierOnly, owesOnly])
 
   const s = data?.summary || {}
   const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
@@ -156,17 +168,21 @@ export default function AdminFeesMembers() {
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
               <Kpi label="Members" value={s.total_members ?? 0} />
-              <Kpi label="Needs Tier" value={s.needs_tier ?? 0} warn={(s.needs_tier ?? 0) > 0} />
-              <Kpi label="Membership" value={money(s.membership_payable)} />
-              <Kpi label="Match Fees" value={money(s.match_fee_payable)} />
-              <Kpi label="Total Owed" value={money(s.total_payable)} accent />
+              <Kpi label="Non-Financial" value={s.non_financial ?? 0} warn={(s.non_financial ?? 0) > 0} />
+              <Kpi label="Payable" value={money(s.total_payable)} />
+              <Kpi label="Paid" value={money(s.total_paid)} />
+              <Kpi label="Outstanding" value={money(s.total_outstanding)} accent />
             </div>
 
             <div className="flex flex-wrap items-center gap-3 mb-3">
               <input className={`${inp} flex-1 min-w-[180px]`} placeholder="Search name or tier…" value={q} onChange={e => setQ(e.target.value)} />
               <label className="flex items-center gap-2 font-mono text-[10px] tracking-wide2 text-pb-faint cursor-pointer select-none">
                 <input type="checkbox" checked={needsTierOnly} onChange={e => setNeedsTierOnly(e.target.checked)} />
-                NEEDS TIER ONLY
+                NEEDS TIER
+              </label>
+              <label className="flex items-center gap-2 font-mono text-[10px] tracking-wide2 text-pb-faint cursor-pointer select-none">
+                <input type="checkbox" checked={owesOnly} onChange={e => setOwesOnly(e.target.checked)} />
+                OWES MONEY
               </label>
               <button onClick={recompute} disabled={recomputing}
                 className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
@@ -187,14 +203,15 @@ export default function AdminFeesMembers() {
               </div>
             ) : (
               <div className="pb-card overflow-hidden">
-                <div className="grid grid-cols-[1.6fr_1.2fr_auto_auto_auto_auto] font-mono text-[10px] tracking-wide3 text-pb-faint px-5 py-2.5 bg-pb-surface2/40">
+                <div className="grid grid-cols-[1.4fr_1fr_auto_auto_auto_auto_auto] font-mono text-[10px] tracking-wide3 text-pb-faint px-5 py-2.5 bg-pb-surface2/40">
                   <span>NAME</span><span>TIER</span>
-                  <span className="text-right">DAYS</span><span className="text-right">M’SHIP</span>
-                  <span className="text-right">MATCH</span><span className="text-right pl-4">TOTAL</span>
+                  <span className="text-right">DAYS</span><span className="text-right">PAYABLE</span>
+                  <span className="text-right">PAID</span><span className="text-right">OWED</span>
+                  <span className="text-right pl-3">STATUS</span>
                 </div>
                 {filtered.map((m, i) => (
                   <Link key={m.member_season_id} to={`/admin/fees/member/${m.member_id}?season=${seasonId}`}
-                    className={`grid grid-cols-[1.6fr_1.2fr_auto_auto_auto_auto] items-center px-5 py-2.5 ${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2 transition-colors`}>
+                    className={`grid grid-cols-[1.4fr_1fr_auto_auto_auto_auto_auto] items-center px-5 py-2.5 ${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2 transition-colors`}>
                     <span className="text-pb-text text-sm truncate pr-2 flex items-center gap-1.5">
                       {m.full_name}
                       {!m.is_linked && <span className="font-mono text-[8px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1 py-px">MANUAL</span>}
@@ -205,15 +222,20 @@ export default function AdminFeesMembers() {
                         : <span className="text-pb-dim text-sm">{m.tier}</span>}
                     </span>
                     <span className="font-mono text-[11px] text-pb-dim text-right">{m.match_days || 0}</span>
-                    <span className="font-mono text-[11px] text-pb-dim text-right">{money(m.membership_payable)}</span>
-                    <span className="font-mono text-[11px] text-pb-dim text-right">{money(m.match_fee_payable)}</span>
-                    <span className="font-mono text-[11px] text-pb-text text-right pl-4">{money(m.total_payable)}</span>
+                    <span className="font-mono text-[11px] text-pb-dim text-right">{money(m.total_payable)}</span>
+                    <span className="font-mono text-[11px] text-pb-dim text-right">{money(m.total_paid)}</span>
+                    <span className={`font-mono text-[11px] text-right ${m.total_outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>
+                      {money(m.total_outstanding)}
+                    </span>
+                    <span className="text-right pl-3">
+                      <StatusPill status={m.status} />
+                    </span>
                   </Link>
                 ))}
               </div>
             )}
             <p className="font-mono text-[10px] text-pb-faintest mt-3">
-              Showing {filtered.length} of {data.members.length}. Payments &amp; financial status arrive in Phase 2.
+              Showing {filtered.length} of {data.members.length}.
             </p>
           </>
         )}

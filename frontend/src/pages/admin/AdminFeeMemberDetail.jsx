@@ -10,6 +10,121 @@ const PAY_METHODS = ['', 'EFT', 'Cash', 'PlayHQ', 'Comp', 'Other']
 const FORMAT_LABEL = { two_day: 'Two Day', one_day: 'One Day', t20: 'T20', women: "Women's" }
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
+function StatusBadge({ status }) {
+  if (status === 'financial')
+    return <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5">FINANCIAL</span>
+  if (status === 'non_financial')
+    return <span className="font-mono text-[9px] tracking-wide2 text-pb-amber border border-pb-amber/40 rounded px-1.5 py-0.5">OWES</span>
+  if (status === 'needs_tier')
+    return <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">NEEDS TIER</span>
+  return null
+}
+
+function BalanceCard({ label, payable, paid, owed, footer, highlight }) {
+  const rowCss = 'flex justify-between font-mono text-[10px] tracking-wide2'
+  return (
+    <div className={`pb-card px-4 py-3 ${highlight ? 'border-pb-accent/40' : ''}`}>
+      <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">{label}</div>
+      <div className="space-y-1">
+        <div className={rowCss}><span className="text-pb-faint">Payable</span><span className="text-pb-dim">{money(payable)}</span></div>
+        <div className={rowCss}><span className="text-pb-faint">Paid</span><span className="text-pb-dim">{money(paid)}</span></div>
+        <div className={`${rowCss} pt-1 border-t pb-hairline-t mt-1`}>
+          <span className="text-pb-text">Outstanding</span>
+          <span className={`font-display font-bold text-base ${owed > 0 ? '' : 'text-pb-dim'}`}
+            style={owed > 0 && highlight ? { color: 'var(--pb-accent)' } : owed > 0 ? { color: 'var(--pb-text)' } : {}}>
+            {money(owed)}
+          </span>
+        </div>
+      </div>
+      {footer && <div className="font-mono text-[10px] text-pb-faintest mt-2">{footer}</div>}
+    </div>
+  )
+}
+
+function PaymentForm({ memberSeasonId, defaultKind = 'membership', defaultMethod = 'EFT', onCreated }) {
+  const toast = useToast()
+  const [form, setForm] = useState({
+    amount: '', kind: defaultKind, paid_at: new Date().toISOString().slice(0, 10),
+    method: defaultMethod, bank_ref: '', notes: '',
+  })
+  const [busy, setBusy] = useState(false)
+  async function submit() {
+    if (!Number(form.amount)) { toast.error('Amount is required'); return }
+    setBusy(true)
+    try {
+      await api.feeCreatePayment({
+        member_season_id: memberSeasonId,
+        amount: Number(form.amount), kind: form.kind,
+        paid_at: form.paid_at || null,
+        method: form.method || null, bank_ref: form.bank_ref || null, notes: form.notes || null,
+      })
+      toast.success('Payment logged')
+      setForm(f => ({ ...f, amount: '', bank_ref: '', notes: '' }))
+      onCreated()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  const cell = 'bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-[auto_120px_120px_120px_1fr_auto] gap-2 items-end p-4 bg-pb-surface2/30">
+      <div>
+        <label className="font-mono text-[9px] tracking-wide3 text-pb-faint mb-1 block">DATE</label>
+        <input type="date" className={`${cell} w-36`} value={form.paid_at} onChange={e => setForm(f => ({ ...f, paid_at: e.target.value }))} />
+      </div>
+      <div>
+        <label className="font-mono text-[9px] tracking-wide3 text-pb-faint mb-1 block">KIND</label>
+        <select className={`${cell} w-full`} value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value }))}>
+          <option value="membership">Membership</option>
+          <option value="match_day">Match Day</option>
+        </select>
+      </div>
+      <div>
+        <label className="font-mono text-[9px] tracking-wide3 text-pb-faint mb-1 block">AMOUNT</label>
+        <input type="number" min="0" step="0.01" className={`${cell} w-full text-right`} placeholder="0.00"
+          value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+      </div>
+      <div>
+        <label className="font-mono text-[9px] tracking-wide3 text-pb-faint mb-1 block">METHOD</label>
+        <select className={`${cell} w-full`} value={form.method} onChange={e => setForm(f => ({ ...f, method: e.target.value }))}>
+          {PAY_METHODS.filter(Boolean).map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="font-mono text-[9px] tracking-wide3 text-pb-faint mb-1 block">BANK REF / NOTE</label>
+        <input className={`${cell} w-full`} value={form.bank_ref} onChange={e => setForm(f => ({ ...f, bank_ref: e.target.value }))} />
+      </div>
+      <button onClick={submit} disabled={busy}
+        className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+        {busy ? '…' : 'LOG'}
+      </button>
+    </div>
+  )
+}
+
+function PaymentRow({ payment, onDeleted }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  async function del() {
+    if (!confirm('Delete this payment?')) return
+    setBusy(true)
+    try { await api.feeDeletePayment(payment.id); toast.success('Payment deleted'); onDeleted() }
+    catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="grid grid-cols-[auto_auto_auto_auto_1fr_auto] items-center gap-3 px-5 py-2.5 pb-hairline-t hover:bg-pb-surface2/40">
+      <span className="font-mono text-[10px] text-pb-faintest w-20">{payment.paid_at || '—'}</span>
+      <span className="font-mono text-[10px] text-pb-faint w-20">{payment.kind === 'membership' ? 'M’SHIP' : 'MATCH'}</span>
+      <span className="font-mono text-[11px] text-pb-text w-20 text-right">{money(payment.amount)}</span>
+      <span className="font-mono text-[10px] text-pb-dim w-14">{payment.method || '—'}</span>
+      <span className="text-pb-faint text-[12px] truncate">
+        {payment.bank_ref || ''}
+        {payment.notes && <span className="text-pb-faintest"> · {payment.notes}</span>}
+      </span>
+      <button onClick={del} disabled={busy}
+        className="font-mono text-[9px] text-pb-red/50 hover:text-pb-red transition-colors disabled:opacity-50">DEL</button>
+    </div>
+  )
+}
+
 function MatchDayRow({ row, onSaved }) {
   const toast = useToast()
   const [days, setDays] = useState(String(row.days_played))
@@ -122,21 +237,17 @@ export default function AdminFeeMemberDetail() {
             ? <Link to={`/players/${member.player_id}`} className="font-mono text-[9px] tracking-wide2 text-pb-accent border border-pb-accent/40 rounded px-1.5 py-0.5">LINKED PLAYER</Link>
             : <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">MANUAL</span>}
         </div>
-        <p className="text-pb-faint text-sm mb-5">{data.season.name}</p>
+        <div className="flex items-center gap-2 mb-5">
+          <span className="text-pb-faint text-sm">{data.season.name}</span>
+          <StatusBadge status={f.status} />
+        </div>
 
-        {/* Balance strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          {[
-            ['Match Days', f.match_days || 0],
-            ['Membership', money(f.membership_payable)],
-            ['Match Fees', money(f.match_fee_payable)],
-            ['Total Owed', money(f.total_payable)],
-          ].map(([label, val], i) => (
-            <div key={label} className="pb-card px-4 py-3">
-              <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">{label}</div>
-              <div className="font-display font-bold text-lg" style={i === 3 ? { color: 'var(--pb-accent)' } : { color: 'var(--pb-text)' }}>{val}</div>
-            </div>
-          ))}
+        {/* Balance strip: payable / paid / outstanding for membership + match-day */}
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+          <BalanceCard label="Membership" payable={f.membership_payable} paid={f.membership_paid} owed={f.membership_outstanding} />
+          <BalanceCard label="Match Fees" payable={f.match_fee_payable} paid={f.match_fee_paid} owed={f.match_fee_outstanding}
+            footer={`${f.match_days || 0} day${f.match_days === 1 ? '' : 's'} × ${money(f.match_day_rate || 0)}`} />
+          <BalanceCard label="Total" payable={f.total_payable} paid={f.total_paid} owed={f.total_outstanding} highlight />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
@@ -182,6 +293,36 @@ export default function AdminFeeMemberDetail() {
               {savingContact ? 'SAVING…' : 'SAVE CONTACT'}
             </button>
           </div>
+        </div>
+
+        {/* Payments */}
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2 uppercase">
+          Payments <span className="text-pb-faintest">({data.payments?.length || 0})</span>
+        </p>
+        <p className="text-pb-dim text-sm mb-3 leading-relaxed">
+          Log each payment as you reconcile it against the bank statement. Membership and match-day are tracked separately so the
+          Outstanding column above stays honest.
+        </p>
+        <div className="pb-card overflow-hidden mb-8">
+          {data.member_season ? (
+            <PaymentForm
+              memberSeasonId={data.member_season.id}
+              defaultMethod={data.member_season.membership_payment_method || 'EFT'}
+              onCreated={load}
+            />
+          ) : (
+            <div className="p-4 font-mono text-[11px] text-pb-faint">Assign a tier first to log payments.</div>
+          )}
+          {data.payments && data.payments.length > 0 && (
+            <div>
+              <div className="grid grid-cols-[auto_auto_auto_auto_1fr_auto] gap-3 px-5 py-2.5 bg-pb-surface2/40 font-mono text-[10px] tracking-wide3 text-pb-faint pb-hairline-t">
+                <span className="w-20">DATE</span><span className="w-20">KIND</span>
+                <span className="w-20 text-right">AMOUNT</span><span className="w-14">METHOD</span>
+                <span>REF / NOTES</span><span></span>
+              </div>
+              {data.payments.map(p => <PaymentRow key={p.id} payment={p} onDeleted={load} />)}
+            </div>
+          )}
         </div>
 
         {/* Match days */}

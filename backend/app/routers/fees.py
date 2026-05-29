@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from app.models.db import (
     User, Organisation, Season, Grade, Game, Player,
-    FeeSchedule, FeeMember, FeeMemberSeason, FeeMatchDay,
+    FeeSchedule, FeeMember, FeeMemberSeason, FeeMatchDay, FeePayment,
     FEE_PAYMENT_TYPES, FEE_FORMATS, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club
@@ -29,6 +29,10 @@ from app.services import fees as fee_service
 router = APIRouter(prefix="/club-admin/fees", tags=["club-admin-fees"])
 
 _require = Depends(require_cap(MANAGE_FEES))
+
+# Bank-statement-friendly payment kinds + methods. Free-form 'Other' is allowed.
+PAYMENT_KINDS = ("membership", "match_day")
+PAYMENT_METHODS = ("EFT", "Cash", "PlayHQ", "Comp", "Other")
 
 
 def _f(x) -> float:
@@ -302,10 +306,52 @@ async def _days_by_member_season(db: AsyncSession, season_id) -> dict:
     return {ms_id: float(days) for ms_id, days in rows}
 
 
-def _financials(schedule: Optional[FeeSchedule], match_days: float) -> dict:
+async def _paid_by_member_season(db: AsyncSession, season_id) -> dict:
+    """Sum payments grouped by (member_season_id, kind). Returns
+    {ms_id: {'membership': X, 'match_day': Y}}."""
+    rows = (await db.execute(
+        select(FeePayment.member_season_id, FeePayment.kind, func.coalesce(func.sum(FeePayment.amount), 0))
+        .join(FeeMemberSeason, FeePayment.member_season_id == FeeMemberSeason.id)
+        .where(FeeMemberSeason.season_id == season_id)
+        .group_by(FeePayment.member_season_id, FeePayment.kind)
+    )).all()
+    out: dict = {}
+    for ms_id, kind, amount in rows:
+        out.setdefault(ms_id, {"membership": 0.0, "match_day": 0.0})[kind] = float(amount)
+    return out
+
+
+def _financials(schedule: Optional[FeeSchedule], match_days: float, paid: Optional[dict] = None) -> dict:
+    """Build the canonical financials dict.
+
+    Status rules mirror the spreadsheet:
+      - no tier            → 'needs_tier'        (don't try to compute fees)
+      - complimentary tier → 'financial'          (no money owed regardless)
+      - upfront tier       → financial iff membership paid (match fee is $0)
+      - standard tier      → financial iff membership + match fees paid
+
+    'No games played' is a derived UI flag, not a status — it only suppresses
+    the follow-up nudge for someone who never showed up.
+    """
     membership_payable = _f(schedule.membership_amount) if schedule else 0.0
     rate = _f(schedule.match_day_rate) if schedule else 0.0
     match_fee_payable = round(match_days * rate, 2)
+    paid = paid or {"membership": 0.0, "match_day": 0.0}
+    membership_paid = float(paid.get("membership", 0.0))
+    match_fee_paid = float(paid.get("match_day", 0.0))
+    membership_outstanding = round(max(membership_payable - membership_paid, 0.0), 2)
+    match_fee_outstanding = round(max(match_fee_payable - match_fee_paid, 0.0), 2)
+    total_outstanding = round(membership_outstanding + match_fee_outstanding, 2)
+
+    if schedule is None:
+        status = "needs_tier"
+    elif schedule.payment_type == "complimentary":
+        status = "financial"
+    elif total_outstanding <= 0:
+        status = "financial"
+    else:
+        status = "non_financial"
+
     return {
         "tier": schedule.name if schedule else None,
         "payment_type": schedule.payment_type if schedule else None,
@@ -314,7 +360,15 @@ def _financials(schedule: Optional[FeeSchedule], match_days: float) -> dict:
         "match_days": match_days,
         "match_fee_payable": match_fee_payable,
         "total_payable": round(membership_payable + match_fee_payable, 2),
+        "membership_paid": round(membership_paid, 2),
+        "match_fee_paid": round(match_fee_paid, 2),
+        "total_paid": round(membership_paid + match_fee_paid, 2),
+        "membership_outstanding": membership_outstanding,
+        "match_fee_outstanding": match_fee_outstanding,
+        "total_outstanding": total_outstanding,
+        "status": status,
         "needs_tier": schedule is None,
+        "no_games_played": (match_days == 0 and membership_payable == 0),
     }
 
 
@@ -334,15 +388,18 @@ async def list_members(
         .order_by(func.lower(FeeMember.full_name))
     )).all()
     days_map = await _days_by_member_season(db, season.id)
+    paid_map = await _paid_by_member_season(db, season.id)
 
     members = []
     summary = {
-        "total_members": 0, "needs_tier": 0,
-        "membership_payable": 0.0, "match_fee_payable": 0.0,
-        "total_payable": 0.0, "match_days": 0.0,
+        "total_members": 0, "needs_tier": 0, "non_financial": 0,
+        "membership_payable": 0.0, "match_fee_payable": 0.0, "total_payable": 0.0,
+        "membership_paid": 0.0, "match_fee_paid": 0.0, "total_paid": 0.0,
+        "membership_outstanding": 0.0, "match_fee_outstanding": 0.0, "total_outstanding": 0.0,
+        "match_days": 0.0,
     }
     for ms, member, schedule in rows:
-        fin = _financials(schedule, days_map.get(ms.id, 0.0))
+        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id))
         members.append({
             "member_id": str(member.id),
             "member_season_id": str(ms.id),
@@ -357,12 +414,15 @@ async def list_members(
         })
         summary["total_members"] += 1
         summary["needs_tier"] += 1 if fin["needs_tier"] else 0
-        summary["membership_payable"] += fin["membership_payable"]
-        summary["match_fee_payable"] += fin["match_fee_payable"]
-        summary["total_payable"] += fin["total_payable"]
-        summary["match_days"] += fin["match_days"]
-    for k in ("membership_payable", "match_fee_payable", "total_payable", "match_days"):
-        summary[k] = round(summary[k], 2)
+        summary["non_financial"] += 1 if fin["status"] == "non_financial" else 0
+        for k in ("membership_payable", "match_fee_payable", "total_payable",
+                  "membership_paid", "match_fee_paid", "total_paid",
+                  "membership_outstanding", "match_fee_outstanding", "total_outstanding",
+                  "match_days"):
+            summary[k] += fin[k]
+    for k in list(summary.keys()):
+        if isinstance(summary[k], float):
+            summary[k] = round(summary[k], 2)
     return {"members": members, "summary": summary}
 
 
@@ -433,6 +493,7 @@ async def get_member(
 
     schedule = None
     entries = []
+    payments = []
     fin = _financials(None, 0.0)
     if ms is not None:
         if ms.fee_schedule_id:
@@ -457,7 +518,23 @@ async def get_member(
                 "grade": grade.display_name if grade else None,
                 "match": f"{game.home_team} v {game.away_team}" if game else None,
             })
-        fin = _financials(schedule, total_days)
+        pay_rows = (await db.execute(
+            select(FeePayment).where(FeePayment.member_season_id == ms.id)
+            .order_by(FeePayment.paid_at.desc().nullslast(), FeePayment.created_at.desc())
+        )).scalars().all()
+        paid_totals = {"membership": 0.0, "match_day": 0.0}
+        for p in pay_rows:
+            paid_totals[p.kind] = paid_totals.get(p.kind, 0.0) + _f(p.amount)
+            payments.append({
+                "id": str(p.id),
+                "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+                "amount": _f(p.amount),
+                "kind": p.kind,
+                "method": p.method,
+                "bank_ref": p.bank_ref,
+                "notes": p.notes,
+            })
+        fin = _financials(schedule, total_days, paid_totals)
 
     return {
         "member": {
@@ -480,6 +557,7 @@ async def get_member(
         },
         "financials": fin,
         "match_days": entries,
+        "payments": payments,
     }
 
 
@@ -608,3 +686,342 @@ async def recompute(
     season = await _season_or_404(db, club, season_id)
     result = await fee_service.recompute_fee_match_days(str(club.id), str(season.id))
     return result
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Payments
+# ───────────────────────────────────────────────────────────────────────────
+
+async def _member_season_for_payment(db, club, member_season_id) -> FeeMemberSeason:
+    try:
+        ms_id = uuid.UUID(member_season_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid member_season_id")
+    ms = await db.get(FeeMemberSeason, ms_id)
+    if not ms or ms.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Member season not found")
+    return ms
+
+
+def _payment_out(p: FeePayment, member: Optional[FeeMember] = None) -> dict:
+    out = {
+        "id": str(p.id),
+        "member_season_id": str(p.member_season_id),
+        "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+        "amount": _f(p.amount),
+        "kind": p.kind,
+        "method": p.method,
+        "bank_ref": p.bank_ref,
+        "notes": p.notes,
+    }
+    if member is not None:
+        out["member_id"] = str(member.id)
+        out["full_name"] = member.full_name
+    return out
+
+
+@router.get("/payments")
+async def list_payments(
+    season_id: Optional[str] = None,
+    member_season_id: Optional[str] = None,
+    kind: Optional[str] = None,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """List payments by season (admin ledger view) or by single member_season."""
+    if not season_id and not member_season_id:
+        raise HTTPException(status_code=422, detail="Provide season_id or member_season_id")
+    q = (
+        select(FeePayment, FeeMember)
+        .join(FeeMemberSeason, FeePayment.member_season_id == FeeMemberSeason.id)
+        .join(FeeMember, FeeMemberSeason.member_id == FeeMember.id)
+        .where(FeePayment.organisation_id == club.id)
+    )
+    if season_id:
+        season = await _season_or_404(db, club, season_id)
+        q = q.where(FeeMemberSeason.season_id == season.id)
+    if member_season_id:
+        ms = await _member_season_for_payment(db, club, member_season_id)
+        q = q.where(FeePayment.member_season_id == ms.id)
+    if kind:
+        if kind not in PAYMENT_KINDS:
+            raise HTTPException(status_code=422, detail=f"kind must be one of {PAYMENT_KINDS}")
+        q = q.where(FeePayment.kind == kind)
+    q = q.order_by(FeePayment.paid_at.desc().nullslast(), FeePayment.created_at.desc())
+    rows = (await db.execute(q)).all()
+    return [_payment_out(p, m) for p, m in rows]
+
+
+class PaymentCreate(BaseModel):
+    member_season_id: str
+    amount: float
+    kind: str = "membership"
+    paid_at: Optional[str] = None  # ISO date YYYY-MM-DD
+    method: Optional[str] = None
+    bank_ref: Optional[str] = None
+    notes: Optional[str] = None
+
+
+def _parse_date(s: Optional[str]):
+    if not s:
+        return None
+    from datetime import date
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="paid_at must be YYYY-MM-DD")
+
+
+@router.post("/payments")
+async def create_payment(
+    data: PaymentCreate,
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    ms = await _member_season_for_payment(db, club, data.member_season_id)
+    if data.kind not in PAYMENT_KINDS:
+        raise HTTPException(status_code=422, detail=f"kind must be one of {PAYMENT_KINDS}")
+    p = FeePayment(
+        id=uuid.uuid4(),
+        member_season_id=ms.id,
+        organisation_id=club.id,
+        amount=_money(data.amount),
+        paid_at=_parse_date(data.paid_at),
+        kind=data.kind,
+        method=(data.method or "").strip() or None,
+        bank_ref=(data.bank_ref or "").strip() or None,
+        notes=(data.notes or "").strip() or None,
+        created_by_user_id=user.id,
+    )
+    db.add(p)
+    await db.commit()
+    return _payment_out(p)
+
+
+class PaymentPatch(BaseModel):
+    amount: Optional[float] = None
+    kind: Optional[str] = None
+    paid_at: Optional[str] = None
+    method: Optional[str] = None
+    bank_ref: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.patch("/payments/{payment_id}")
+async def patch_payment(
+    payment_id: str,
+    data: PaymentPatch,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    p = await db.get(FeePayment, uuid.UUID(payment_id))
+    if not p or p.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    if data.amount is not None:
+        p.amount = _money(data.amount)
+    if data.kind is not None:
+        if data.kind not in PAYMENT_KINDS:
+            raise HTTPException(status_code=422, detail=f"kind must be one of {PAYMENT_KINDS}")
+        p.kind = data.kind
+    if data.paid_at is not None:
+        p.paid_at = _parse_date(data.paid_at)
+    if data.method is not None:
+        p.method = data.method.strip() or None
+    if data.bank_ref is not None:
+        p.bank_ref = data.bank_ref.strip() or None
+    if data.notes is not None:
+        p.notes = data.notes.strip() or None
+    await db.commit()
+    return _payment_out(p)
+
+
+@router.delete("/payments/{payment_id}")
+async def delete_payment(
+    payment_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    p = await db.get(FeePayment, uuid.UUID(payment_id))
+    if not p or p.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    await db.delete(p)
+    await db.commit()
+    return {"ok": True}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Reports
+# ───────────────────────────────────────────────────────────────────────────
+
+@router.get("/reports/summary")
+async def report_summary(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Single endpoint feeding the headline cards on the Reports page."""
+    season = await _season_or_404(db, club, season_id)
+    rows = (await db.execute(
+        select(FeeMemberSeason, FeeSchedule)
+        .outerjoin(FeeSchedule, FeeMemberSeason.fee_schedule_id == FeeSchedule.id)
+        .where(FeeMemberSeason.season_id == season.id)
+    )).all()
+    days_map = await _days_by_member_season(db, season.id)
+    paid_map = await _paid_by_member_season(db, season.id)
+
+    by_payment_type: dict = {}
+    overall = {"members": 0, "financial": 0, "non_financial": 0, "needs_tier": 0,
+               "membership_payable": 0.0, "match_fee_payable": 0.0, "total_payable": 0.0,
+               "membership_paid": 0.0, "match_fee_paid": 0.0, "total_paid": 0.0,
+               "membership_outstanding": 0.0, "match_fee_outstanding": 0.0, "total_outstanding": 0.0}
+    for ms, schedule in rows:
+        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id))
+        overall["members"] += 1
+        overall[fin["status"]] = overall.get(fin["status"], 0) + 1
+        for k in ("membership_payable", "match_fee_payable", "total_payable",
+                  "membership_paid", "match_fee_paid", "total_paid",
+                  "membership_outstanding", "match_fee_outstanding", "total_outstanding"):
+            overall[k] += fin[k]
+        bucket_key = fin["payment_type"] or "unassigned"
+        b = by_payment_type.setdefault(bucket_key, {
+            "payment_type": bucket_key, "members": 0,
+            "payable": 0.0, "paid": 0.0, "outstanding": 0.0,
+        })
+        b["members"] += 1
+        b["payable"] += fin["total_payable"]
+        b["paid"] += fin["total_paid"]
+        b["outstanding"] += fin["total_outstanding"]
+    for k in list(overall.keys()):
+        if isinstance(overall[k], float):
+            overall[k] = round(overall[k], 2)
+    for b in by_payment_type.values():
+        for k in ("payable", "paid", "outstanding"):
+            b[k] = round(b[k], 2)
+    return {"overall": overall, "by_payment_type": list(by_payment_type.values())}
+
+
+@router.get("/reports/non-financial")
+async def report_non_financial(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The follow-up list — every member with money owed, sorted biggest first."""
+    season = await _season_or_404(db, club, season_id)
+    rows = (await db.execute(
+        select(FeeMemberSeason, FeeMember, FeeSchedule)
+        .join(FeeMember, FeeMemberSeason.member_id == FeeMember.id)
+        .outerjoin(FeeSchedule, FeeMemberSeason.fee_schedule_id == FeeSchedule.id)
+        .where(FeeMemberSeason.season_id == season.id)
+    )).all()
+    days_map = await _days_by_member_season(db, season.id)
+    paid_map = await _paid_by_member_season(db, season.id)
+    out = []
+    for ms, member, schedule in rows:
+        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id))
+        if fin["status"] != "non_financial":
+            continue
+        out.append({
+            "member_id": str(member.id),
+            "member_season_id": str(ms.id),
+            "full_name": member.full_name,
+            "email": member.email,
+            "mobile": member.mobile,
+            "tier": fin["tier"],
+            "match_days": fin["match_days"],
+            "membership_outstanding": fin["membership_outstanding"],
+            "match_fee_outstanding": fin["match_fee_outstanding"],
+            "total_outstanding": fin["total_outstanding"],
+        })
+    out.sort(key=lambda r: -r["total_outstanding"])
+    return out
+
+
+@router.get("/reports/cashflow")
+async def report_cashflow(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Payments grouped by month, split by kind. Mirrors the spreadsheet's
+    'paid by month' columns but dynamic — uses whatever months actually have
+    payments rather than the fixed Oct–Mar buckets."""
+    season = await _season_or_404(db, club, season_id)
+    rows = (await db.execute(
+        select(FeePayment.paid_at, FeePayment.kind, func.sum(FeePayment.amount))
+        .join(FeeMemberSeason, FeePayment.member_season_id == FeeMemberSeason.id)
+        .where(FeeMemberSeason.season_id == season.id)
+        .group_by(FeePayment.paid_at, FeePayment.kind)
+    )).all()
+    months: dict = {}
+    for paid_at, kind, amount in rows:
+        key = paid_at.strftime("%Y-%m") if paid_at else "unknown"
+        bucket = months.setdefault(key, {"month": key, "membership": 0.0, "match_day": 0.0, "total": 0.0})
+        bucket[kind] = bucket.get(kind, 0.0) + float(amount)
+        bucket["total"] += float(amount)
+    series = sorted(months.values(), key=lambda x: (x["month"] == "unknown", x["month"]))
+    for b in series:
+        for k in ("membership", "match_day", "total"):
+            b[k] = round(b[k], 2)
+    return series
+
+
+@router.get("/reports/export")
+async def report_export(
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """CSV of the full member ledger for one season — same shape as the
+    Membership Recovery spreadsheet's Fees Master sheet."""
+    from fastapi.responses import StreamingResponse
+    import csv
+    import io
+
+    season = await _season_or_404(db, club, season_id)
+    rows = (await db.execute(
+        select(FeeMemberSeason, FeeMember, FeeSchedule)
+        .join(FeeMember, FeeMemberSeason.member_id == FeeMember.id)
+        .outerjoin(FeeSchedule, FeeMemberSeason.fee_schedule_id == FeeSchedule.id)
+        .where(FeeMemberSeason.season_id == season.id)
+        .order_by(func.lower(FeeMember.full_name))
+    )).all()
+    days_map = await _days_by_member_season(db, season.id)
+    paid_map = await _paid_by_member_season(db, season.id)
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "Full Name", "Email", "Mobile", "Tier", "Payment Type",
+        "Match Days",
+        "Membership Payable", "Membership Paid", "Membership Outstanding",
+        "Match Fee Payable", "Match Fee Paid", "Match Fee Outstanding",
+        "Total Payable", "Total Paid", "Total Outstanding",
+        "Status",
+    ])
+    for ms, member, schedule in rows:
+        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id))
+        w.writerow([
+            member.full_name, member.email or "", member.mobile or "",
+            fin["tier"] or "", fin["payment_type"] or "",
+            fin["match_days"],
+            fin["membership_payable"], fin["membership_paid"], fin["membership_outstanding"],
+            fin["match_fee_payable"], fin["match_fee_paid"], fin["match_fee_outstanding"],
+            fin["total_payable"], fin["total_paid"], fin["total_outstanding"],
+            fin["status"],
+        ])
+    buf.seek(0)
+    filename = f"fees-{season.name.replace('/', '-').replace(' ', '_')}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+    )

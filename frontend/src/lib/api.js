@@ -229,6 +229,29 @@ export const api = {
     request(`/club-admin/fees/match-days/${entryId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   feeRecompute: (seasonId) =>
     request(`/club-admin/fees/recompute?season_id=${seasonId}`, { method: 'POST' }),
+  // Payments
+  feeListPayments: ({ seasonId, memberSeasonId, kind } = {}) => {
+    const p = new URLSearchParams()
+    if (seasonId) p.set('season_id', seasonId)
+    if (memberSeasonId) p.set('member_season_id', memberSeasonId)
+    if (kind) p.set('kind', kind)
+    return request(`/club-admin/fees/payments?${p}`)
+  },
+  feeCreatePayment: (data) =>
+    request('/club-admin/fees/payments', { method: 'POST', body: JSON.stringify(data) }),
+  feeUpdatePayment: (id, data) =>
+    request(`/club-admin/fees/payments/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  feeDeletePayment: (id) =>
+    request(`/club-admin/fees/payments/${id}`, { method: 'DELETE' }),
+  // Reports
+  feeReportSummary: (seasonId) =>
+    request(`/club-admin/fees/reports/summary?season_id=${seasonId}`),
+  feeReportNonFinancial: (seasonId) =>
+    request(`/club-admin/fees/reports/non-financial?season_id=${seasonId}`),
+  feeReportCashflow: (seasonId) =>
+    request(`/club-admin/fees/reports/cashflow?season_id=${seasonId}`),
+  feeReportExportUrl: (seasonId) =>
+    `${BASE}/club-admin/fees/reports/export?season_id=${seasonId}`,
 
   // Club admin — grades
   adminListGrades: () => request('/club-admin/grades'),
