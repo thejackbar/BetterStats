@@ -24,19 +24,22 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_FIXTURES, require_cap
-from app.models.db import Fixture, Grade, Organisation, Season, User, get_db
+from app.models.db import Fixture, Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.services import playhq_partner_client
 
 router = APIRouter(prefix="/fixtures", tags=["fixtures"])
 
 
-def _serialize(f: Fixture) -> dict:
+def _serialize(f: Fixture, teams: Optional[dict] = None) -> dict:
+    t = (teams or {}).get(str(f.team_id)) if f.team_id else None
     return {
         "id": str(f.id),
         "organisation_id": str(f.organisation_id),
         "grade_id": str(f.grade_id) if f.grade_id else None,
         "team_id": str(f.team_id) if f.team_id else None,
+        "team_name": t["name"] if t else None,
+        "team_short": t["short_name"] if t else None,
         "source": f.source,
         "playhq_id": f.playhq_id,
         "label": f.label,
@@ -93,6 +96,22 @@ async def _assert_grade_in_club(db: AsyncSession, grade_id: Optional[uuid.UUID],
         raise HTTPException(status_code=403, detail="Grade does not belong to your club")
 
 
+async def _assert_team_in_club(db: AsyncSession, team_id: Optional[uuid.UUID], club_id) -> None:
+    """Reject a team_id that belongs to another club (cross-tenant guard)."""
+    if team_id is None:
+        return
+    team = await db.get(Team, team_id)
+    if not team or team.organisation_id != club_id:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+
+async def _team_map(db: AsyncSession, club_id) -> dict:
+    """{team_id_str: {name, short_name}} for the club — used to enrich fixtures
+    with the playing team's name without an async lazy-load on f.team."""
+    res = await db.execute(select(Team).where(Team.organisation_id == club_id))
+    return {str(t.id): {"name": t.name, "short_name": t.short_name} for t in res.scalars().all()}
+
+
 async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixture:
     f = await db.get(Fixture, uuid.UUID(fixture_id))
     if not f or f.organisation_id != club_id:
@@ -105,6 +124,7 @@ class FixtureCreate(BaseModel):
     opponent_name: Optional[str] = None
     home_away: Optional[str] = None  # HOME | AWAY | BYE
     grade_id: Optional[str] = None
+    team_id: Optional[str] = None    # which of our teams is playing
     round: Optional[str] = None
     played_on: Optional[date] = None
     end_on: Optional[date] = None
@@ -119,6 +139,7 @@ class FixtureUpdate(BaseModel):
     opponent_name: Optional[str] = None
     home_away: Optional[str] = None
     grade_id: Optional[str] = None
+    team_id: Optional[str] = None
     round: Optional[str] = None
     played_on: Optional[date] = None
     end_on: Optional[date] = None
@@ -157,9 +178,10 @@ async def list_fixtures(
         )
         counts = {str(fid): n for fid, n in cnt_res.fetchall()}
 
+    teams = await _team_map(db, club.id)
     out = []
     for f in fixtures:
-        d = _serialize(f)
+        d = _serialize(f, teams)
         d["lineup_count"] = counts.get(str(f.id), 0)
         out.append(d)
     return out
@@ -175,6 +197,8 @@ async def create_fixture(
     """Create a manual fixture for the caller's club (no PlayHQ game required)."""
     grade_uuid = uuid.UUID(body.grade_id) if body.grade_id else None
     await _assert_grade_in_club(db, grade_uuid, club.id)
+    team_uuid = uuid.UUID(body.team_id) if body.team_id else None
+    await _assert_team_in_club(db, team_uuid, club.id)
 
     us = club.short_name or club.name
     home_team = away_team = None
@@ -188,6 +212,7 @@ async def create_fixture(
         organisation_id=club.id,
         source="manual",
         grade_id=grade_uuid,
+        team_id=team_uuid,
         label=body.label,
         round=body.round,
         played_on=body.played_on,
@@ -204,7 +229,7 @@ async def create_fixture(
     db.add(f)
     await db.commit()
     await db.refresh(f)
-    return _serialize(f)
+    return _serialize(f, await _team_map(db, club.id))
 
 
 @router.patch("/{fixture_id}")
@@ -221,12 +246,16 @@ async def update_fixture(
         grade_uuid = uuid.UUID(data["grade_id"]) if data["grade_id"] else None
         await _assert_grade_in_club(db, grade_uuid, club.id)
         data["grade_id"] = grade_uuid
+    if "team_id" in data:
+        team_uuid = uuid.UUID(data["team_id"]) if data["team_id"] else None
+        await _assert_team_in_club(db, team_uuid, club.id)
+        data["team_id"] = team_uuid
     for key, value in data.items():
         setattr(f, key, value)
     f.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(f)
-    return _serialize(f)
+    return _serialize(f, await _team_map(db, club.id))
 
 
 @router.delete("/{fixture_id}", status_code=204)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -8,15 +8,20 @@ import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Btn, Field, Input, Select } from '../../../lib/presskit'
 
 const EMPTY = {
-  label: '', opponent_name: '', home_away: 'HOME',
+  label: '', opponent_name: '', home_away: 'HOME', team_id: '',
   played_on: '', end_on: '', start_time: '', venue: '', round: '', notes: '',
 }
 
 function FixtureModal({ fixture, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState(() => ({ ...EMPTY, ...(fixture || {}) }))
+  const [form, setForm] = useState(() => ({ ...EMPTY, ...(fixture || {}), team_id: fixture?.team_id || '' }))
   const [saving, setSaving] = useState(false)
+  const [teams, setTeams] = useState([])
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  useEffect(() => {
+    api.bsListTeams().then(setTeams).catch(() => {})
+  }, [])
 
   const save = async () => {
     setSaving(true)
@@ -25,6 +30,7 @@ function FixtureModal({ fixture, onClose, onSaved }) {
         label: form.label || null,
         opponent_name: form.opponent_name || null,
         home_away: form.home_away || null,
+        team_id: form.team_id || null,
         played_on: form.played_on || null,
         end_on: form.end_on || null,
         start_time: form.start_time || null,
@@ -63,6 +69,12 @@ function FixtureModal({ fixture, onClose, onSaved }) {
               </Select>
             </Field>
           </div>
+          <Field label="Our team">
+            <Select value={form.team_id || ''} onChange={set('team_id')}>
+              <option value="">— No team assigned —</option>
+              {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </Select>
+          </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Date"><Input type="date" value={form.played_on || ''} onChange={set('played_on')} /></Field>
             <Field label="End date (2-day, optional)"><Input type="date" value={form.end_on || ''} onChange={set('end_on')} /></Field>
@@ -89,21 +101,49 @@ function fmtDate(d) {
   catch { return d }
 }
 
+// Week helpers — weeks run Monday→Sunday so Sat/Sun fixtures stay together.
+function mondayOf(date) {
+  const x = new Date(date); x.setHours(0, 0, 0, 0)
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7))
+  return x
+}
+function addDays(date, n) { const x = new Date(date); x.setDate(x.getDate() + n); return x }
+function isoLocal(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+function weekLabel(start) {
+  const end = addDays(start, 6)
+  const opts = { day: 'numeric', month: 'short' }
+  return `${start.toLocaleDateString(undefined, opts)} – ${end.toLocaleDateString(undefined, opts)}`
+}
+
 export default function AdminFixtures() {
   const { hasCapability } = useAuth()
   const toast = useToast()
   const canManage = hasCapability(CAP.MANAGE_FIXTURES)
   const [fixtures, setFixtures] = useState(null)
-  const [upcomingOnly, setUpcomingOnly] = useState(true)
+  const [view, setView] = useState('week') // 'upcoming' | 'week' | 'all' — default to this week
+  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const [editing, setEditing] = useState(undefined) // undefined=closed, null=new, obj=edit
   const [syncing, setSyncing] = useState(false)
 
+  // 'upcoming' fetches only future; 'week'/'all' need the full set (week can be in the past).
   const load = useCallback(() => {
     setFixtures(null)
-    api.bsListFixtures(upcomingOnly).then(setFixtures).catch(e => { toast.error(e.message); setFixtures([]) })
-  }, [upcomingOnly, toast])
+    api.bsListFixtures(view === 'upcoming').then(setFixtures).catch(e => { toast.error(e.message); setFixtures([]) })
+  }, [view, toast])
 
   useEffect(() => { load() }, [load])
+
+  // Fixtures actually shown — narrowed to the selected week when in week view.
+  const displayed = useMemo(() => {
+    if (!fixtures) return fixtures
+    if (view !== 'week') return fixtures
+    const lo = isoLocal(weekStart), hi = isoLocal(addDays(weekStart, 6))
+    return fixtures.filter(f => f.played_on && f.played_on >= lo && f.played_on <= hi)
+  }, [fixtures, view, weekStart])
+
+  const thisWeek = isoLocal(weekStart) === isoLocal(mondayOf(new Date()))
 
   const sync = async () => {
     setSyncing(true)
@@ -130,22 +170,39 @@ export default function AdminFixtures() {
 
   return (
     <BetterSelectLayout title="Fixtures" actions={actions}>
-      <div className="flex items-center gap-2 mb-4">
-        <Btn sm primary={upcomingOnly} onClick={() => setUpcomingOnly(true)}>Upcoming</Btn>
-        <Btn sm primary={!upcomingOnly} onClick={() => setUpcomingOnly(false)}>All</Btn>
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <Btn sm primary={view === 'week'} onClick={() => { setView('week'); setWeekStart(mondayOf(new Date())) }}>This week</Btn>
+        <Btn sm primary={view === 'upcoming'} onClick={() => setView('upcoming')}>Upcoming</Btn>
+        <Btn sm primary={view === 'all'} onClick={() => setView('all')}>All</Btn>
+
+        {view === 'week' && (
+          <div className="flex items-center gap-2 ml-auto">
+            <Btn sm onClick={() => setWeekStart(s => addDays(s, -7))}>‹ Prev</Btn>
+            <span className="font-mono text-xs text-pb-text min-w-[130px] text-center">
+              {weekLabel(weekStart)}{thisWeek && <span className="text-pb-accent"> · this week</span>}
+            </span>
+            <Btn sm onClick={() => setWeekStart(s => addDays(s, 7))}>Next ›</Btn>
+            {!thisWeek && <Btn sm onClick={() => setWeekStart(mondayOf(new Date()))}>Today</Btn>}
+          </div>
+        )}
       </div>
 
-      {fixtures === null ? <PbSpinner message="Loading fixtures…" /> : (
+      {displayed === null ? <PbSpinner message="Loading fixtures…" /> : (
         <div className="pb-card overflow-hidden">
-          {fixtures.length === 0 && (
+          {displayed.length === 0 && (
             <div className="px-5 py-10 text-center text-pb-faint text-sm">
-              No fixtures yet. {canManage && 'Sync from PlayHQ or add one manually.'}
+              {view === 'week'
+                ? `No fixtures for ${weekLabel(weekStart)}.`
+                : <>No fixtures yet. {canManage && 'Sync from PlayHQ or add one manually.'}</>}
             </div>
           )}
-          {fixtures.map((f, i) => (
+          {displayed.map((f, i) => (
             <div key={f.id} className={`px-5 py-3 flex items-center justify-between gap-3 ${i > 0 ? 'border-t pb-hairline' : ''}`}>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
+                  {f.team_name && (
+                    <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-pb-surface2 text-pb-text border pb-hairline" title="Our team">{f.team_short || f.team_name}</span>
+                  )}
                   <span className="font-medium text-sm truncate">
                     {f.home_away === 'BYE' ? 'BYE' : `${f.home_away === 'AWAY' ? '@ ' : 'vs '}${f.opponent_name || f.label || 'TBC'}`}
                   </span>

@@ -85,6 +85,7 @@ export default function AdminSelection() {
   const [fBatHand, setFBatHand] = useState(() => new Set())
   const [fBowlAction, setFBowlAction] = useState(() => new Set())
   const [fBowlType, setFBowlType] = useState(() => new Set())
+  const [fActivity, setFActivity] = useState(() => new Set()) // ACTIVE | DORMANT
   // For the fixture switcher.
   const [allFixtures, setAllFixtures] = useState([])
   // Drag state for reordering the team sheet.
@@ -132,14 +133,15 @@ export default function AdminSelection() {
     if (fBatHand.size) list = list.filter(p => fBatHand.has(p.batting_hand))
     if (fBowlAction.size) list = list.filter(p => fBowlAction.has(p.bowling_action))
     if (fBowlType.size) list = list.filter(p => fBowlType.has(p.bowling_type))
+    if (fActivity.size) list = list.filter(p => fActivity.has(p.is_dormant ? 'DORMANT' : 'ACTIVE'))
     return list.sort((a, b) => {
       const ra = AVAIL_RANK[a.availability] ?? 9, rb = AVAIL_RANK[b.availability] ?? 9
       if (ra !== rb) return ra - rb
       return a.display_name.localeCompare(b.display_name)
     })
-  }, [data, pickedIds, search, fSquads, fRoles, fAvail, fBatHand, fBowlAction, fBowlType])
+  }, [data, pickedIds, search, fSquads, fRoles, fAvail, fBatHand, fBowlAction, fBowlType, fActivity])
 
-  const filterCount = fSquads.size + fRoles.size + fAvail.size + fBatHand.size + fBowlAction.size + fBowlType.size
+  const filterCount = fSquads.size + fRoles.size + fAvail.size + fBatHand.size + fBowlAction.size + fBowlType.size + fActivity.size
   const toggleIn = (setter) => (val) => setter(prev => {
     const next = new Set(prev)
     next.has(val) ? next.delete(val) : next.add(val)
@@ -147,7 +149,7 @@ export default function AdminSelection() {
   })
   const clearFilters = () => {
     setFSquads(new Set()); setFRoles(new Set()); setFAvail(new Set())
-    setFBatHand(new Set()); setFBowlAction(new Set()); setFBowlType(new Set())
+    setFBatHand(new Set()); setFBowlAction(new Set()); setFBowlType(new Set()); setFActivity(new Set())
   }
 
   // Tint a pool row by its most salient state.
@@ -194,6 +196,15 @@ export default function AdminSelection() {
   }
 
   const save = async () => {
+    // Warn (but don't block) if the XI doesn't match the chosen format.
+    const t = format || 0
+    if (t > 0 && picked.length !== t) {
+      const diff = picked.length > t ? `${picked.length - t} too many` : `${t - picked.length} too few`
+      const ok = window.confirm(
+        `You have ${picked.length} player${picked.length === 1 ? '' : 's'} selected for a ${t}-a-side match — ${diff}.\n\nSave anyway?`
+      )
+      if (!ok) return
+    }
     setSaving(true)
     try {
       const players = picked.map((p, i) => ({
@@ -334,6 +345,10 @@ export default function AdminSelection() {
             </FilterGroup>
             <FilterGroup title="Bowling — type">
               {Object.entries(BOWL_TYPES).map(([v, l]) => <FilterCheck key={v} label={l} checked={fBowlType.has(v)} onChange={() => toggleIn(setFBowlType)(v)} />)}
+            </FilterGroup>
+            <FilterGroup title="Activity">
+              <FilterCheck label="Active" checked={fActivity.has('ACTIVE')} onChange={() => toggleIn(setFActivity)('ACTIVE')} />
+              <FilterCheck label="Dormant" checked={fActivity.has('DORMANT')} onChange={() => toggleIn(setFActivity)('DORMANT')} />
             </FilterGroup>
           </div>
         </div>
