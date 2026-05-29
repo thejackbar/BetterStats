@@ -252,6 +252,37 @@ export const api = {
     request(`/club-admin/fees/reports/cashflow?season_id=${seasonId}`),
   feeReportExportUrl: (seasonId) =>
     `${BASE}/club-admin/fees/reports/export?season_id=${seasonId}`,
+  // Phase 3 — rollover, bulk tier, CSV import
+  feeRollover: (seasonId, fromSeasonId, includeLeftClub = false) =>
+    request('/club-admin/fees/rollover', {
+      method: 'POST',
+      body: JSON.stringify({ season_id: seasonId, from_season_id: fromSeasonId, include_left_club: includeLeftClub }),
+    }),
+  feeBulkSetTier: (seasonId, memberIds, feeScheduleId) =>
+    request('/club-admin/fees/members/bulk-tier', {
+      method: 'POST',
+      body: JSON.stringify({ season_id: seasonId, member_ids: memberIds, fee_schedule_id: feeScheduleId || null }),
+    }),
+  feeImportPreview: (seasonId, file, { defaultKind = 'membership', defaultMethod = 'EFT' } = {}) => {
+    const form = new FormData()
+    form.append('season_id', seasonId)
+    form.append('file', file)
+    form.append('default_kind', defaultKind)
+    form.append('default_method', defaultMethod)
+    return fetch(`${BASE}/club-admin/fees/payments/import/preview`, {
+      method: 'POST', body: form, credentials: 'include',
+    }).then(async res => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(typeof err.detail === 'string' ? err.detail : `HTTP ${res.status}`)
+      }
+      return res.json()
+    })
+  },
+  feeImportCommit: (items) =>
+    request('/club-admin/fees/payments/import/commit', {
+      method: 'POST', body: JSON.stringify({ items }),
+    }),
 
   // Club admin — grades
   adminListGrades: () => request('/club-admin/grades'),

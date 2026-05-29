@@ -1,18 +1,23 @@
-"""Fee tracking API (Phase 1).
+"""Fee tracking API (Phases 1–3).
 
-Membership tiers, members + per-season tiers, auto-derived match days, and the
-grade fee-format overrides. Payments / financial status arrive in Phase 2.
+Membership tiers, members + per-season tiers, auto-derived match days, grade
+fee-format overrides, payments, status + reports, and the Phase-3 conveniences:
+season rollover, bulk tier assignment, and bank-statement CSV import.
 
 Everything is scoped to the caller's club (get_current_club) and gated by the
 MANAGE_FEES capability. Match fee = days_played × tier.match_day_rate.
 """
 from __future__ import annotations
 
+import csv
+import io
+import re
 import uuid
 from decimal import Decimal, InvalidOperation
-from typing import Optional
+from difflib import SequenceMatcher
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -1025,3 +1030,419 @@ async def report_export(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
     )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Phase 3 — Season rollover
+# ───────────────────────────────────────────────────────────────────────────
+
+class RolloverRequest(BaseModel):
+    season_id: str          # destination season
+    from_season_id: str     # source season to copy from
+    include_left_club: bool = False  # by default skip "Left Club" tiers
+
+
+@router.post("/rollover")
+async def rollover_members(
+    data: RolloverRequest,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Open the destination season for every member that had a member-season
+    in the source season — tier carried forward, payments left behind.
+
+    Skips members that already have a row in the destination (idempotent),
+    and by default skips anyone on a 'Left Club' tier (since they aren't
+    members any more). Tier names are resolved against the *destination*
+    season's schedule (so this only works after rate-card copy-forward).
+    """
+    dest = await _season_or_404(db, club, data.season_id)
+    src = await _season_or_404(db, club, data.from_season_id)
+    if dest.id == src.id:
+        raise HTTPException(status_code=422, detail="Source and destination must differ")
+
+    # Existing rows in the destination — skip these.
+    existing_member_ids = {
+        ms.member_id for ms in (
+            await db.execute(select(FeeMemberSeason).where(FeeMemberSeason.season_id == dest.id))
+        ).scalars().all()
+    }
+
+    # Source rows joined to their schedule, so we know each member's tier name
+    # and payment_type at the time the season closed.
+    src_rows = (await db.execute(
+        select(FeeMemberSeason, FeeSchedule)
+        .outerjoin(FeeSchedule, FeeMemberSeason.fee_schedule_id == FeeSchedule.id)
+        .where(FeeMemberSeason.season_id == src.id)
+    )).all()
+
+    # Destination schedule, keyed by lower-cased name for tier lookup.
+    dest_schedule_by_name = {
+        (s.name or "").strip().lower(): s for s in (
+            await db.execute(select(FeeSchedule).where(FeeSchedule.season_id == dest.id))
+        ).scalars().all()
+    }
+
+    created = 0
+    skipped_left = 0
+    skipped_existing = 0
+    for ms_src, sched_src in src_rows:
+        if ms_src.member_id in existing_member_ids:
+            skipped_existing += 1
+            continue
+        if not data.include_left_club and sched_src is not None and sched_src.payment_type == "left_club":
+            skipped_left += 1
+            continue
+        # Resolve the destination tier by name match; falls back to None
+        # (members land in the "Needs Tier" queue) if the rate card doesn't
+        # have that tier any more.
+        dest_sched = None
+        if sched_src is not None:
+            dest_sched = dest_schedule_by_name.get((sched_src.name or "").strip().lower())
+        db.add(FeeMemberSeason(
+            id=uuid.uuid4(),
+            member_id=ms_src.member_id,
+            season_id=dest.id,
+            organisation_id=club.id,
+            fee_schedule_id=dest_sched.id if dest_sched else None,
+            is_new_registration=False,
+        ))
+        created += 1
+    await db.commit()
+    return {
+        "created": created,
+        "skipped_existing": skipped_existing,
+        "skipped_left_club": skipped_left,
+    }
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Phase 3 — Bulk tier assignment
+# ───────────────────────────────────────────────────────────────────────────
+
+class BulkTierRequest(BaseModel):
+    season_id: str
+    member_ids: List[str]   # the FeeMember.id list (not member_season_ids)
+    fee_schedule_id: Optional[str] = None  # null clears the tier
+
+
+@router.post("/members/bulk-tier")
+async def bulk_set_tier(
+    data: BulkTierRequest,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the tier on many members at once for one season — the 'graduate
+    all students' button. Also carries the new tier forward to each member's
+    current_tier (so next year's rollover defaults are right)."""
+    season = await _season_or_404(db, club, data.season_id)
+    if not data.member_ids:
+        return {"updated": 0, "not_found": 0}
+    schedule = await _resolve_schedule(db, club, season, data.fee_schedule_id)
+
+    try:
+        member_uuids = [uuid.UUID(m) for m in data.member_ids]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid member_id")
+
+    members = {
+        m.id: m for m in (
+            await db.execute(
+                select(FeeMember).where(
+                    FeeMember.organisation_id == club.id,
+                    FeeMember.id.in_(member_uuids),
+                )
+            )
+        ).scalars().all()
+    }
+
+    ms_rows = (await db.execute(
+        select(FeeMemberSeason).where(
+            FeeMemberSeason.season_id == season.id,
+            FeeMemberSeason.member_id.in_(member_uuids),
+        )
+    )).scalars().all()
+    existing_by_member = {ms.member_id: ms for ms in ms_rows}
+
+    updated = 0
+    for mid in member_uuids:
+        member = members.get(mid)
+        if member is None:
+            continue
+        ms = existing_by_member.get(mid)
+        if ms is None:
+            # Create the season row for any member missing one — useful when
+            # someone wants to bulk-onboard a list of new members.
+            ms = FeeMemberSeason(
+                id=uuid.uuid4(), member_id=mid, season_id=season.id,
+                organisation_id=club.id,
+            )
+            db.add(ms)
+        ms.fee_schedule_id = schedule.id if schedule else None
+        if schedule is not None:
+            member.current_tier = schedule.name
+        updated += 1
+    await db.commit()
+    not_found = len(data.member_ids) - updated
+    return {"updated": updated, "not_found": not_found}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Phase 3 — Bank CSV import
+# ───────────────────────────────────────────────────────────────────────────
+
+# A handful of header aliases the major Australian banks use. CSV column order
+# varies, so detection is by header name (case-insensitive substring), not
+# position.
+_DATE_HEADERS = ("date", "transaction date", "posted date", "processed date")
+_AMOUNT_HEADERS = ("amount", "credit", "credit amount", "deposit", "value")
+_DEBIT_HEADERS = ("debit", "withdrawal", "debit amount")
+_DESC_HEADERS = ("description", "narrative", "details", "transaction", "reference", "memo")
+
+
+def _detect_col(headers, candidates):
+    lower = [h.strip().lower() for h in headers]
+    for i, h in enumerate(lower):
+        if any(c == h for c in candidates):
+            return i
+    for i, h in enumerate(lower):
+        if any(c in h for c in candidates):
+            return i
+    return None
+
+
+_NOISE_RE = re.compile(r"\b(membership|match\s*fees?|fees?|payment|transfer|trf|eft|cba|nab|anz|st\s*george|deposit|to|from|ref|reference|account|acct)\b", re.I)
+
+
+def _clean_description(s: str) -> str:
+    s = (s or "").lower()
+    s = _NOISE_RE.sub(" ", s)
+    s = re.sub(r"[^a-z\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _match_score(cleaned_desc: str, member_name: str) -> float:
+    """0..1 confidence the description belongs to this member.
+
+    Combines:
+      - SequenceMatcher ratio between cleaned description and member name
+        (forward + 'Surname, First' → 'First Surname' flipped — the sheet
+        stores names as 'Surname, First' but bank refs usually go first-last).
+      - Token overlap bonus: every surname/firstname token from the member
+        name that appears verbatim in the description adds 0.15, capped at 1.
+    """
+    if not cleaned_desc or not member_name:
+        return 0.0
+    name_lc = member_name.lower()
+    # Flip "smith, john" → "john smith" for the second pass.
+    if "," in name_lc:
+        parts = [p.strip() for p in name_lc.split(",", 1)]
+        flipped = (parts[1] + " " + parts[0]).strip()
+    else:
+        flipped = name_lc
+    name_clean = re.sub(r"[^a-z\s]", " ", flipped)
+    name_clean = re.sub(r"\s+", " ", name_clean).strip()
+    base = max(
+        SequenceMatcher(None, cleaned_desc, name_clean).ratio(),
+        SequenceMatcher(None, cleaned_desc, name_lc).ratio(),
+    )
+    tokens = [t for t in name_clean.split() if len(t) >= 3]
+    overlap = sum(1 for t in tokens if t in cleaned_desc)
+    return min(1.0, base + 0.15 * overlap)
+
+
+@router.post("/payments/import/preview")
+async def import_preview(
+    season_id: str = Form(...),
+    file: UploadFile = File(...),
+    default_kind: str = Form("membership"),
+    default_method: str = Form("EFT"),
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Parse an uploaded bank-statement CSV and propose a member match per row.
+
+    Headers are auto-detected (works across CBA/NAB/ANZ formats). Debit-only
+    rows and negative amounts are dropped. Each surviving row comes back with
+    the top 3 member matches by confidence — the admin picks/confirms before
+    committing.
+    """
+    season = await _season_or_404(db, club, season_id)
+    if default_kind not in PAYMENT_KINDS:
+        raise HTTPException(status_code=422, detail=f"default_kind must be one of {PAYMENT_KINDS}")
+
+    raw = (await file.read()).decode("utf-8-sig", errors="ignore")
+    if not raw.strip():
+        raise HTTPException(status_code=422, detail="Empty CSV")
+    reader = list(csv.reader(io.StringIO(raw)))
+    if not reader:
+        raise HTTPException(status_code=422, detail="Could not parse CSV")
+
+    # Find the header row — the first row with a recognisable date column.
+    header_idx = None
+    headers = None
+    for i, row in enumerate(reader[:10]):
+        if _detect_col(row, _DATE_HEADERS) is not None and _detect_col(row, _DESC_HEADERS) is not None:
+            header_idx = i
+            headers = row
+            break
+    if header_idx is None:
+        raise HTTPException(status_code=422, detail="Couldn't find Date and Description columns")
+
+    date_col = _detect_col(headers, _DATE_HEADERS)
+    desc_col = _detect_col(headers, _DESC_HEADERS)
+    amount_col = _detect_col(headers, _AMOUNT_HEADERS)
+    debit_col = _detect_col(headers, _DEBIT_HEADERS)
+    if amount_col is None and debit_col is None:
+        raise HTTPException(status_code=422, detail="Couldn't find Amount column")
+
+    # Members for matching — pull their member_season for this season so we
+    # have a target to attach payments to. Members without a season row are
+    # excluded (rollover or auto-create them first).
+    rows = (await db.execute(
+        select(FeeMemberSeason, FeeMember)
+        .join(FeeMember, FeeMemberSeason.member_id == FeeMember.id)
+        .where(FeeMemberSeason.season_id == season.id)
+    )).all()
+    candidates = [(ms, m) for ms, m in rows]
+
+    out = []
+    for r_i, row in enumerate(reader[header_idx + 1:]):
+        if not row or all(not (c or "").strip() for c in row):
+            continue
+        # Amount: prefer the credit column; fall back to a signed amount
+        # column (negative = debit, skip).
+        amount: Optional[float] = None
+        if amount_col is not None and amount_col < len(row):
+            raw_amount = (row[amount_col] or "").strip().replace(",", "")
+            if raw_amount:
+                try:
+                    val = float(raw_amount)
+                    if val > 0:
+                        amount = val
+                except ValueError:
+                    pass
+        if amount is None and debit_col is not None and debit_col < len(row):
+            # Debit column populated → this is a withdrawal, skip.
+            if (row[debit_col] or "").strip():
+                continue
+        if amount is None or amount <= 0:
+            continue
+
+        date_raw = (row[date_col] or "").strip() if date_col < len(row) else ""
+        desc_raw = (row[desc_col] or "").strip() if desc_col < len(row) else ""
+
+        cleaned = _clean_description(desc_raw)
+        scored = [
+            (_match_score(cleaned, m.full_name), ms, m) for ms, m in candidates
+        ]
+        scored.sort(key=lambda x: -x[0])
+        top = [
+            {
+                "member_id": str(m.id),
+                "member_season_id": str(ms.id),
+                "full_name": m.full_name,
+                "confidence": round(score, 3),
+            }
+            for score, ms, m in scored[:3] if score > 0
+        ]
+        best = top[0] if top else None
+
+        out.append({
+            "row_index": r_i,
+            "paid_at_raw": date_raw,
+            "paid_at": _normalise_date(date_raw),
+            "description": desc_raw,
+            "amount": round(amount, 2),
+            "suggested": best,
+            "candidates": top,
+            "kind": default_kind,
+            "method": default_method,
+        })
+    return {
+        "rows": out,
+        "default_kind": default_kind,
+        "default_method": default_method,
+    }
+
+
+def _normalise_date(raw: str) -> Optional[str]:
+    """Best-effort YYYY-MM-DD from common bank date formats."""
+    from datetime import datetime
+    s = (raw or "").strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d %b %Y", "%d-%b-%Y"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+class ImportCommitItem(BaseModel):
+    member_season_id: str
+    amount: float
+    paid_at: Optional[str] = None
+    kind: str = "membership"
+    method: Optional[str] = None
+    bank_ref: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ImportCommit(BaseModel):
+    items: List[ImportCommitItem]
+
+
+@router.post("/payments/import/commit")
+async def import_commit(
+    data: ImportCommit,
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist a confirmed batch of payments from the CSV preview. All rows
+    are validated up-front (one bad row = nothing inserted)."""
+    if not data.items:
+        return {"created": 0}
+
+    # Validate every row before inserting anything so the user gets a clean
+    # all-or-nothing result.
+    ms_cache: dict = {}
+    for i, item in enumerate(data.items):
+        try:
+            ms_id = uuid.UUID(item.member_season_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail=f"Row {i}: invalid member_season_id")
+        if ms_id not in ms_cache:
+            ms = await db.get(FeeMemberSeason, ms_id)
+            if not ms or ms.organisation_id != club.id:
+                raise HTTPException(status_code=422, detail=f"Row {i}: member season not found")
+            ms_cache[ms_id] = ms
+        if item.kind not in PAYMENT_KINDS:
+            raise HTTPException(status_code=422, detail=f"Row {i}: kind must be one of {PAYMENT_KINDS}")
+        if item.amount <= 0:
+            raise HTTPException(status_code=422, detail=f"Row {i}: amount must be > 0")
+
+    created = 0
+    for item in data.items:
+        ms_id = uuid.UUID(item.member_season_id)
+        db.add(FeePayment(
+            id=uuid.uuid4(),
+            member_season_id=ms_id,
+            organisation_id=club.id,
+            amount=_money(item.amount),
+            paid_at=_parse_date(item.paid_at),
+            kind=item.kind,
+            method=(item.method or "").strip() or None,
+            bank_ref=(item.bank_ref or "").strip() or None,
+            notes=(item.notes or "").strip() or None,
+            created_by_user_id=user.id,
+        ))
+        created += 1
+    await db.commit()
+    return {"created": created}
