@@ -170,6 +170,11 @@ class Player(Base):
     # claimed / user_id retained as columns but no longer used in business logic
     claimed = Column(Boolean, default=False)
     user_id = Column(UUID(as_uuid=True), nullable=True)
+    # BetterSelect: admin-managed contact + selection attributes (migration 044)
+    email = Column(Text, nullable=True)
+    phone = Column(Text, nullable=True)
+    skill_positions = Column(JSONB, default=list, nullable=False, server_default="[]")  # e.g. ["BAT","WKT"]
+    status = Column(Text, default="active", nullable=False, server_default="active")  # active | inactive
 
     organisation = relationship("Organisation", back_populates="players")
     batting_innings = relationship("BattingInnings", back_populates="player")
@@ -226,6 +231,7 @@ class Fixture(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     source = Column(Text, nullable=False, server_default="manual")  # 'playhq' | 'manual'
     playhq_id = Column(Text, nullable=True)
     label = Column(Text, nullable=True)         # free-text title (friendlies / manual)
@@ -245,6 +251,56 @@ class Fixture(Base):
 
     organisation = relationship("Organisation")
     grade = relationship("Grade")
+    team = relationship("Team")
+
+
+class Team(Base):
+    """BetterSelect: a first-class club team. BetterStats otherwise only has
+    team *names* on games. Players are not hard-assigned to teams (club-wide
+    model); a team groups fixtures and, later, scopes selection.
+    """
+    __tablename__ = "teams"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "name", name="uq_team_org_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    short_name = Column(Text, nullable=True)
+    sequence = Column(Integer, default=0, nullable=False, server_default="0")  # hierarchy rank (1 = top team)
+    grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
+    default_formation = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False, server_default="true")
+    source = Column(Text, nullable=False, server_default="manual")  # 'auto' | 'manual'
+    playhq_id = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    organisation = relationship("Organisation")
+    grade = relationship("Grade")
+
+
+class FixtureAvailability(Base):
+    """BetterSelect: a player's availability for a fixture (admin-recorded).
+
+    Club-wide model: availability is collected for all active players across
+    upcoming fixtures, regardless of team. recorded_by/at track which admin
+    set it (there is no player-facing input).
+    """
+    __tablename__ = "fixture_availability"
+    __table_args__ = (
+        UniqueConstraint("fixture_id", "player_id", name="uq_fixture_availability_fixture_player"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    status = Column(Text, nullable=False, server_default="NO_RESPONSE")  # AVAILABLE|UNAVAILABLE|MAYBE|NO_RESPONSE
+    note = Column(Text, nullable=True)
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    recorded_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 class BattingInnings(Base):

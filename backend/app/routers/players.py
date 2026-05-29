@@ -7,6 +7,7 @@ import uuid
 
 from app.models.db import Player, User, PlayerSyncRequest, get_db
 from app.routers.auth import get_current_user
+from app.auth.capabilities import require_cap, MANAGE_PLAYERS
 from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
     get_career_batting_from_innings, get_career_bowling_from_spells, get_career_fielding_from_stats,
@@ -516,6 +517,64 @@ async def rename_player(
     )
     await db.commit()
     return {"status": "renamed", "old_name": old_name, "new_name": name}
+
+
+class PlayerProfileUpdate(BaseModel):
+    display_name_override: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    skill_positions: Optional[list[str]] = None  # e.g. ["BAT", "WKT"]
+    status: Optional[str] = None                  # active | inactive
+
+
+@router.get("/{player_id}/profile")
+async def get_player_profile(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_cap(MANAGE_PLAYERS)),
+):
+    """Admin-editable BetterSelect attributes for a player."""
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return {
+        "id": str(player.id),
+        "name": player.name,
+        "display_name": player.display_name,
+        "display_name_override": player.display_name_override,
+        "email": player.email,
+        "phone": player.phone,
+        "skill_positions": player.skill_positions or [],
+        "status": player.status,
+    }
+
+
+@router.patch("/{player_id}/profile")
+async def update_player_profile(
+    player_id: str,
+    body: PlayerProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_cap(MANAGE_PLAYERS)),
+):
+    """Update admin-managed player attributes (BetterSelect)."""
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    data = body.model_dump(exclude_unset=True)
+    if "status" in data and data["status"] not in (None, "active", "inactive"):
+        raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
+    for key, value in data.items():
+        setattr(player, key, value)
+    await db.commit()
+    return {
+        "id": str(player.id),
+        "display_name": player.display_name,
+        "display_name_override": player.display_name_override,
+        "email": player.email,
+        "phone": player.phone,
+        "skill_positions": player.skill_positions or [],
+        "status": player.status,
+    }
 
 
 @router.post("/{player_id}/claim")
