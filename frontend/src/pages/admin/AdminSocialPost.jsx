@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import { api } from '../../lib/api'
@@ -224,6 +225,7 @@ function TextInput({ value, onChange, placeholder }) {
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AdminSocialPost() {
+  const location = useLocation()
   const [settings, setSettings] = useState(null)
   const [allPlayers, setAllPlayers] = useState([])
   const [adminSponsors, setAdminSponsors] = useState([])
@@ -335,6 +337,46 @@ export default function AdminSocialPost() {
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
+
+  // Team-sheet handoff from BetterSelect selection. Pre-populates the lineup
+  // post from a saved XI once the player list has loaded. Runs once.
+  const sheetApplied = useRef(false)
+  useEffect(() => {
+    const sheet = location.state?.teamSheet
+    if (!sheet || sheetApplied.current || allPlayers.length === 0) return
+    sheetApplied.current = true
+
+    const byId = {}
+    allPlayers.forEach(p => { byId[p.id] = p })
+    const picked = (sheet.players || [])
+      .map(s => {
+        const player = byId[s.player_id]
+        if (!player) return null
+        return {
+          player,
+          role: s.role || 'BAT',
+          captain: !!s.is_captain,
+          viceCaptain: false,
+          keeper: !!s.is_wicket_keeper,
+        }
+      })
+      .filter(Boolean)
+    if (picked.length) setSelectedPlayers(picked)
+
+    if (sheet.match) {
+      setMatch(m => ({
+        ...m,
+        round: sheet.match.round || m.round,
+        venue: sheet.match.venue || m.venue,
+        date: sheet.match.date || m.date,
+        time: sheet.match.time || m.time,
+      }))
+    }
+    if (sheet.opponent?.name) setOpponent(o => ({ ...o, name: sheet.opponent.name }))
+    setTemplateId('T1') // a lineup template
+    // Clear router state so a refresh doesn't re-apply.
+    window.history.replaceState({}, document.title)
+  }, [location.state, allPlayers])
 
   // Scorecard URL import
   const handleScUrlImport = async () => {

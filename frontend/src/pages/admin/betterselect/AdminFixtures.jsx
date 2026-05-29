@@ -155,6 +155,9 @@ export default function AdminFixtures() {
                   {f.end_on && f.end_on !== f.played_on && (
                     <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300">2-day</span>
                   )}
+                  {f.lineup_count > 0 && (
+                    <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-pb-accent/15 text-pb-accent" title="Players selected">XI: {f.lineup_count}</span>
+                  )}
                 </div>
                 <div className="text-pb-faint text-xs mt-0.5">
                   {fmtDate(f.played_on)}{f.end_on && f.end_on !== f.played_on ? ` → ${fmtDate(f.end_on)}` : ''}

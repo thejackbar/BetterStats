@@ -20,7 +20,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_FIXTURES, require_cap
@@ -134,13 +134,35 @@ async def list_fixtures(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """List the caller's club fixtures, soonest first."""
+    """List the caller's club fixtures, soonest first.
+
+    Each fixture carries `lineup_count` — how many players are picked — so the
+    list can show selection progress at a glance.
+    """
     stmt = select(Fixture).where(Fixture.organisation_id == club.id)
     if upcoming_only:
         stmt = stmt.where(Fixture.played_on >= date.today())
     stmt = stmt.order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
     res = await db.execute(stmt)
-    return [_serialize(f) for f in res.scalars().all()]
+    fixtures = res.scalars().all()
+
+    counts: dict[str, int] = {}
+    if fixtures:
+        cnt_res = await db.execute(
+            text(
+                "SELECT fixture_id, COUNT(*) FROM fixture_lineups "
+                "WHERE organisation_id = :org GROUP BY fixture_id"
+            ),
+            {"org": club.id},
+        )
+        counts = {str(fid): n for fid, n in cnt_res.fetchall()}
+
+    out = []
+    for f in fixtures:
+        d = _serialize(f)
+        d["lineup_count"] = counts.get(str(f.id), 0)
+        out.append(d)
+    return out
 
 
 @router.post("", status_code=201)

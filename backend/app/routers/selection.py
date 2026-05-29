@@ -20,7 +20,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
@@ -166,6 +166,7 @@ async def get_selection(
             "squads": sorted(squads.get(pid, [])),
             "availability": avail.get(pid, "NO_RESPONSE"),
             "last_played": lp.isoformat() if lp else None,
+            "photo_url": p.photo_url,
             "is_dormant": dormant and not manual_inactive,
             "is_inactive": manual_inactive,
             "is_current": not manual_inactive and not dormant,
@@ -180,6 +181,12 @@ async def get_selection(
             "opponent_name": fx.opponent_name,
             "home_away": fx.home_away,
             "played_on": fx.played_on.isoformat() if fx.played_on else None,
+            "end_on": fx.end_on.isoformat() if fx.end_on else None,
+            "start_time": fx.start_time,
+            "round": fx.round,
+            "venue": fx.venue,
+            "home_team": fx.home_team,
+            "away_team": fx.away_team,
             "team_id": str(fx.team_id) if fx.team_id else None,
         },
         "lineup": [
@@ -233,6 +240,32 @@ async def set_selection(
         missing = seen - owned
         if missing:
             raise HTTPException(status_code=400, detail="One or more players are not in your club")
+
+        # Clash policy: a player may be in only ONE XI per date. Block the save
+        # if any picked player is already selected for another fixture that day.
+        # ORM .in_() (portable param binding) rather than raw ANY(array).
+        if fx.played_on:
+            clash_res = await db.execute(
+                select(func.coalesce(Player.display_name_override, Player.name))
+                .select_from(FixtureLineup)
+                .join(Fixture, FixtureLineup.fixture_id == Fixture.id)
+                .join(Player, FixtureLineup.player_id == Player.id)
+                .where(
+                    FixtureLineup.organisation_id == club.id,
+                    Fixture.id != fx.id,
+                    Fixture.played_on == fx.played_on,
+                    FixtureLineup.player_id.in_(seen),
+                )
+                .distinct()
+                .order_by(func.coalesce(Player.display_name_override, Player.name))
+            )
+            clashing = [r[0] for r in clash_res.fetchall()]
+            if clashing:
+                names = ", ".join(clashing)
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Already selected for another fixture on {fx.played_on.isoformat()}: {names}",
+                )
 
     # Replace: clear existing rows, insert the new set.
     await db.execute(
