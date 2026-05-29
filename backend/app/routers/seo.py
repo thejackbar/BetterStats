@@ -73,8 +73,10 @@ async def sitemap(db: AsyncSession = Depends(get_db)):
             continue
         lastmod = (updated_at.date().isoformat() if updated_at else today)
         for section in CLUB_SECTIONS:
+            # Canonical club home lives at /{slug}, not /{slug}/dashboard.
+            loc = f"{SITE}/{slug}" if section == "dashboard" else f"{SITE}/{slug}/{section}"
             entries.append(_url_entry(
-                f"{SITE}/{slug}/{section}",
+                loc,
                 lastmod=lastmod,
                 changefreq="weekly",
                 priority="0.7" if section == "dashboard" else "0.5",

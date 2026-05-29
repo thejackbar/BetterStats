@@ -37,11 +37,21 @@ function ThemeToggle() {
 }
 
 const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games', 'fixtures', 'teams'];
+// Single-segment paths that are NOT club slugs (must stay in sync with App.jsx routes)
+const RESERVED_ROOT_SEGMENTS = new Set([
+  'login', 'admin', 'onboard', 'club-inactive',
+  'games', 'match', 'scorecards', 'players',
+  'features', 'pricing', 'compare', 'about', 'contact', 'faq',
+  'terms', 'privacy', 'blog',
+]);
 
 function useSlug() {
   const { pathname } = useLocation();
   const segments = pathname.split('/').filter(Boolean);
   if (segments.length >= 2 && CLUB_SECTIONS.includes(segments[1])) {
+    return segments[0];
+  }
+  if (segments.length === 1 && !RESERVED_ROOT_SEGMENTS.has(segments[0])) {
     return segments[0];
   }
   return sessionStorage.getItem('bs_last_slug') || null;
@@ -133,7 +143,7 @@ export default function Navbar() {
   );
 
   const NAV = slug ? [
-    { type: 'link',     label: "Home",    href: `/${slug}/dashboard` },
+    { type: 'link',     label: "Home",    href: `/${slug}` },
     { type: 'link',     label: "Players", href: `/${slug}/players` },
     { type: 'dropdown', label: "Stats",   key: 'stats', isActive: statsActive },
     { type: 'dropdown', label: "Games",   key: 'games', isActive: gamesActive },
@@ -178,7 +188,7 @@ export default function Navbar() {
                   <NavLink
                     key={item.href}
                     to={item.href}
-                    end={item.href === `/${slug}/dashboard`}
+                    end={item.href === `/${slug}`}
                     className={({ isActive }) => navItemClass(isActive)}
                   >
                     {({ isActive }) => (
@@ -279,7 +289,7 @@ export default function Navbar() {
                     <NavLink
                       key={item.href}
                       to={item.href}
-                      end={item.href === `/${slug}/dashboard`}
+                      end={item.href === `/${slug}`}
                       onClick={() => setMobileOpen(false)}
                       className={({ isActive }) =>
                         `py-3 px-2 text-[14px] font-mono font-semibold tracking-wide2 transition border-b pb-hairline-b ${

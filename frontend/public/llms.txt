@@ -90,7 +90,7 @@ Setup, onboarding and the first historical sync are handled by the BetterStats t
 
 1. The club fills out the request-access form (linked from the homepage).
 2. The BetterStats team connects the club to its PlayHQ / MyCricket organisation ID and runs the first full historical sync. For most clubs this brings in 10–50 seasons of data automatically — every player, every match, every score.
-3. The club's public stats website goes live at a club-specific URL (e.g. `betterstats.cricket/your-club-slug/dashboard`).
+3. The club's public stats website goes live at a club-specific URL (e.g. `betterstats.cricket/your-club-slug`).
 4. Each week, an automated sync brings in the latest matches, updates player stats, refreshes leaderboards, and flags new records. Admins can also hit "Sync Now" or "Full Rebuild" from the admin panel at any time.
 5. Stats volunteers use the admin panel to handle the occasional housekeeping (merge duplicate player records, log this year's award winners, write the yearbook editorial, upload a player photo). Most clubs need under an hour of admin time per month.
 
@@ -125,7 +125,7 @@ BetterStats was built by a club member at **Applecross Cricket Club** in Perth, 
 
 These are the page types each connected club gets at `betterstats.cricket/{club-slug}/...`:
 
-- **Dashboard** (`/{club-slug}/dashboard`): The club's home page — current season summary, recent results, top performers, featured records.
+- **Dashboard** (`/{club-slug}`): The club's home page — current season summary, recent results, top performers, featured records.
 - **Players** (`/{club-slug}/players`): Searchable list of every player in the club's history.
 - **Player Profile** (`/players/{player-id}`): Individual player career stats, charts, milestones, honours, and shareable stat card.
 - **Player Comparison** (`/{club-slug}/compare`): Side-by-side comparison of any two players.

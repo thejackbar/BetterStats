@@ -2123,7 +2123,7 @@ export default function PlayerProfile() {
         '@type': 'SportsTeam',
         name: org.name,
         sport: 'Cricket',
-        ...(org.slug ? { url: `https://betterstats.cricket/${org.slug}/dashboard` } : {}),
+        ...(org.slug ? { url: `https://betterstats.cricket/${org.slug}` } : {}),
       }
     }
     return ld

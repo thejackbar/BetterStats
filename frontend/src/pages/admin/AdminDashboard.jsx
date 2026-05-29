@@ -39,7 +39,7 @@ export default function AdminDashboard() {
               <>
                 {' · '}
                 <Link
-                  to={`/${settings.slug}/dashboard`}
+                  to={`/${settings.slug}`}
                   className="hover:underline transition-colors"
                   style={{ color: 'var(--pb-accent)' }}
                   target="_blank"
