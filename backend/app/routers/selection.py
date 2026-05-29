@@ -24,7 +24,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
-from app.models.db import Fixture, FixtureLineup, Organisation, Player, User, get_db
+from app.models.db import Fixture, FixtureLineup, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago
 
@@ -67,6 +67,10 @@ async def selection_overview(
     if not fixtures:
         return {"fixtures": []}
 
+    # Team names, to show which of our teams each fixture belongs to.
+    tm_res = await db.execute(select(Team).where(Team.organisation_id == club.id))
+    team_names = {str(t.id): (t.short_name or t.name) for t in tm_res.scalars().all()}
+
     # Lineups for these fixtures, with player display name + flags, in order.
     rows_res = await db.execute(
         select(
@@ -98,6 +102,7 @@ async def selection_overview(
                 "played_on": f.played_on.isoformat() if f.played_on else None,
                 "round": f.round,
                 "venue": f.venue,
+                "team_name": team_names.get(str(f.team_id)) if f.team_id else None,
                 "lineup": by_fixture.get(str(f.id), []),
             }
             for f in fixtures
