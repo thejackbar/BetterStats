@@ -857,6 +857,11 @@ export const api = {
     request(`/teams/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   bsDeleteTeam: (id) => request(`/teams/${id}`, { method: 'DELETE' }),
   bsSeedTeams: () => request('/teams/seed', { method: 'POST' }),
+  bsTeamMembers: (id) => request(`/teams/${id}/members`),
+  bsAddTeamMember: (id, playerId) =>
+    request(`/teams/${id}/members`, { method: 'POST', body: JSON.stringify({ player_id: playerId }) }),
+  bsRemoveTeamMember: (id, playerId) =>
+    request(`/teams/${id}/members/${playerId}`, { method: 'DELETE' }),
 
   // ─── BetterSelect: Availability ─────────────────────────
   bsAvailabilityMatrix: () => request('/availability/matrix'),

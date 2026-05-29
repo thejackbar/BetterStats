@@ -8,6 +8,83 @@ import { PbSpinner, Btn, Field, Input } from '../../../lib/presskit'
 
 const EMPTY = { name: '', short_name: '', sequence: 0, default_formation: '', is_active: true }
 
+function fmtYear(d) {
+  if (!d) return ''
+  try { return new Date(d + 'T00:00:00').getFullYear() } catch { return '' }
+}
+
+// Inline squad panel: manually-assigned members + history suggestions.
+function SquadPanel({ team, canManage }) {
+  const toast = useToast()
+  const [data, setData] = useState(null)
+  const [busy, setBusy] = useState(null) // player_id mid-mutation
+
+  const load = useCallback(() => {
+    setData(null)
+    api.bsTeamMembers(team.id).then(setData)
+      .catch(e => { toast.error(e.message); setData({ members: [], suggestions: [] }) })
+  }, [team.id, toast])
+
+  useEffect(() => { load() }, [load])
+
+  const add = async (p) => {
+    setBusy(p.id)
+    try { await api.bsAddTeamMember(team.id, p.id); load() }
+    catch (e) { toast.error('Add failed: ' + e.message) }
+    finally { setBusy(null) }
+  }
+  const remove = async (p) => {
+    setBusy(p.id)
+    try { await api.bsRemoveTeamMember(team.id, p.id); load() }
+    catch (e) { toast.error('Remove failed: ' + e.message) }
+    finally { setBusy(null) }
+  }
+
+  if (data === null) return <div className="px-5 py-4"><PbSpinner message="Loading squad…" /></div>
+
+  return (
+    <div className="px-5 py-4 bg-pb-surface2/40 border-t pb-hairline grid sm:grid-cols-2 gap-5">
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2">
+          Squad · {data.members.length}
+        </div>
+        {data.members.length === 0 && <p className="text-pb-faintest text-xs">No one assigned yet. Add from suggestions →</p>}
+        <div className="space-y-1">
+          {data.members.map(m => (
+            <div key={m.id} className="flex items-center justify-between gap-2 text-sm">
+              <span className="truncate">
+                {m.display_name}
+                {m.player_role && <span className="ml-1.5 font-mono text-[9px] text-pb-faintest uppercase">{m.player_role}</span>}
+                {m.status === 'inactive' && <span className="ml-1.5 font-mono text-[9px] text-pb-red/80 uppercase">inactive</span>}
+              </span>
+              {canManage && <button onClick={() => remove(m)} disabled={busy === m.id}
+                className="text-pb-faintest hover:text-pb-red text-xs shrink-0" title="Remove from squad">✕</button>}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2">
+          Suggested from history · {data.suggestions.length}
+        </div>
+        {data.suggestions.length === 0 && <p className="text-pb-faintest text-xs">No recent appearances to suggest.</p>}
+        <div className="space-y-1 max-h-56 overflow-auto">
+          {data.suggestions.map(s => (
+            <div key={s.id} className="flex items-center justify-between gap-2 text-sm">
+              <span className="truncate text-pb-faint">
+                {s.display_name}
+                <span className="ml-1.5 font-mono text-[9px] text-pb-faintest">{s.appearances} app{s.appearances === 1 ? '' : 's'}{fmtYear(s.last_played) && ` · ${fmtYear(s.last_played)}`}</span>
+              </span>
+              {canManage && <button onClick={() => add(s)} disabled={busy === s.id}
+                className="text-pb-accent hover:underline text-xs shrink-0" title="Add to squad">+ add</button>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TeamModal({ team, onClose, onSaved }) {
   const toast = useToast()
   const [form, setForm] = useState(() => ({ ...EMPTY, ...(team || {}) }))
@@ -67,6 +144,7 @@ export default function AdminTeams() {
   const [teams, setTeams] = useState(null)
   const [editing, setEditing] = useState(undefined)
   const [seeding, setSeeding] = useState(false)
+  const [expanded, setExpanded] = useState(null) // team id whose squad panel is open
 
   const load = useCallback(() => {
     setTeams(null)
@@ -99,7 +177,8 @@ export default function AdminTeams() {
     <BetterSelectLayout title="Teams" actions={actions}>
       <p className="text-pb-faint text-sm mb-4 max-w-2xl">
         Your club’s teams. Auto-seed pulls distinct team names from your match history, or add teams by hand.
-        Order sets the hierarchy (1 = top team).
+        Order sets the hierarchy (1 = top team). Open <span className="text-pb-text">Squad</span> on a team to assign
+        its player pool — suggestions are drawn from who’s played for it recently.
       </p>
 
       {teams === null ? <PbSpinner message="Loading teams…" /> : (
@@ -110,26 +189,32 @@ export default function AdminTeams() {
             </div>
           )}
           {teams.map((t, i) => (
-            <div key={t.id} className={`px-5 py-3 flex items-center justify-between gap-3 ${i > 0 ? 'border-t pb-hairline' : ''}`}>
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="font-mono text-[11px] text-pb-faintest w-6 text-right">{t.sequence || '—'}</span>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm truncate">{t.name}</span>
-                    {!t.is_active && <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-pb-surface2 text-pb-faintest">inactive</span>}
-                    <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded ${t.source === 'auto' ? 'bg-pb-surface2 text-pb-faint' : 'bg-pb-accent/15 text-pb-accent'}`}>
-                      {t.source === 'auto' ? 'auto' : 'manual'}
-                    </span>
+            <div key={t.id} className={i > 0 ? 'border-t pb-hairline' : ''}>
+              <div className="px-5 py-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="font-mono text-[11px] text-pb-faintest w-6 text-right">{t.sequence || '—'}</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm truncate">{t.name}</span>
+                      {!t.is_active && <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-pb-surface2 text-pb-faintest">inactive</span>}
+                      <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded ${t.source === 'auto' ? 'bg-pb-surface2 text-pb-faint' : 'bg-pb-accent/15 text-pb-accent'}`}>
+                        {t.source === 'auto' ? 'auto' : 'manual'}
+                      </span>
+                    </div>
+                    {t.default_formation && <div className="text-pb-faint text-xs mt-0.5">{t.default_formation}</div>}
                   </div>
-                  {t.default_formation && <div className="text-pb-faint text-xs mt-0.5">{t.default_formation}</div>}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Btn sm onClick={() => setExpanded(expanded === t.id ? null : t.id)}>
+                    {expanded === t.id ? 'Hide squad' : 'Squad'}
+                  </Btn>
+                  {canManage && <>
+                    <Btn sm onClick={() => setEditing(t)}>Edit</Btn>
+                    <Btn sm danger onClick={() => del(t)}>Delete</Btn>
+                  </>}
                 </div>
               </div>
-              {canManage && (
-                <div className="flex gap-2 shrink-0">
-                  <Btn sm onClick={() => setEditing(t)}>Edit</Btn>
-                  <Btn sm danger onClick={() => del(t)}>Delete</Btn>
-                </div>
-              )}
+              {expanded === t.id && <SquadPanel team={t} canManage={canManage} />}
             </div>
           ))}
         </div>
