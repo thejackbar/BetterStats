@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,12 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
+from app.routers.availability import months_ago
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
-# Suggest players for a team's squad if they've appeared for it within this
-# many years (matches the availability "dormant" window).
-SQUAD_SUGGEST_YEARS = 2
+# Fallback squad-suggestion window (months) if the club hasn't set a dormancy
+# value. Matches the availability "dormant" default.
+DEFAULT_DORMANCY_MONTHS = 24
 
 
 def _serialize(t: Team) -> dict:
@@ -278,8 +279,9 @@ async def list_team_members(
     member_ids = {m["id"] for m in members}
 
     # Suggestions from appearance history for this team NAME, recent window only,
-    # excluding anyone already assigned.
-    cutoff = date.today() - timedelta(days=365 * SQUAD_SUGGEST_YEARS)
+    # excluding anyone already assigned. Window = club dormancy setting (months).
+    months = club.dormancy_months if club.dormancy_months else DEFAULT_DORMANCY_MONTHS
+    cutoff = months_ago(date.today(), months)
     sug_res = await db.execute(
         text(
             "SELECT ga.player_id, COALESCE(p.display_name_override, p.name) AS name, "

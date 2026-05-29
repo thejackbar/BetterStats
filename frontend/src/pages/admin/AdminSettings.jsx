@@ -57,6 +57,7 @@ export default function AdminSettings() {
         contact_email: s.contact_email || '',
         theme_mode: s.theme_mode || 'auto',
         player_name_format: s.player_name_format || 'last_first',
+        dormancy_months: s.dormancy_months ?? 24,
       })
     }).catch(() => {})
   }, [])
@@ -322,6 +323,24 @@ export default function AdminSettings() {
               <option value="last_first_initial">Last Name, First Initial (e.g. Smith, J.)</option>
             </select>
             <p className="font-mono text-[10px] text-pb-faintest mt-1">Applies to all player names across the site</p>
+          </div>
+
+          {/* --- BetterSelect: dormancy window --- */}
+          <div className="pt-5 pb-hairline-t">
+            <label className={LABEL}>Dormant player window (BetterSelect)</label>
+            <select value={form.dormancy_months ?? 24}
+              onChange={e => setForm(f => ({ ...f, dormancy_months: Number(e.target.value) }))}
+              className="bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+              <option value={6}>6 months</option>
+              <option value={12}>1 year</option>
+              <option value={18}>18 months</option>
+              <option value={24}>2 years</option>
+              <option value={36}>3 years</option>
+              <option value={60}>5 years</option>
+            </select>
+            <p className="font-mono text-[10px] text-pb-faintest mt-1">
+              Players with no appearance in this window are hidden from the default selection roster and squad suggestions
+            </p>
           </div>
 
           <div className="pt-2 flex items-center gap-4">

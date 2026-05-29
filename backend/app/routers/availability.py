@@ -9,8 +9,9 @@ All endpoints are scoped to the caller's club via get_current_club.
 """
 from __future__ import annotations
 
+import calendar
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -26,10 +27,21 @@ router = APIRouter(prefix="/availability", tags=["availability"])
 
 VALID_STATUSES = {"AVAILABLE", "UNAVAILABLE", "MAYBE", "NO_RESPONSE"}
 
-# A player who last appeared more than this many years ago is "dormant":
-# surfaced behind a toggle so selection works off the current squad, not the
-# entire historical roster. Distinct from the manual status='inactive' flag.
-DORMANT_YEARS = 2
+# Fallback dormancy window (months) if a club hasn't set one. A player who last
+# appeared more than this long ago is "dormant": surfaced behind a toggle so
+# selection works off the current squad, not the entire historical roster.
+# Distinct from the manual status='inactive' flag.
+DEFAULT_DORMANCY_MONTHS = 24
+
+
+def months_ago(d: date, months: int) -> date:
+    """The date `months` calendar months before `d`, clamped to month length
+    (e.g. 31 Mar minus 1 month -> 28/29 Feb). Avoids a python-dateutil dep."""
+    total = (d.year * 12 + (d.month - 1)) - months
+    year, month = divmod(total, 12)
+    month += 1
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
 
 
 class AvailabilitySet(BaseModel):
@@ -128,9 +140,11 @@ async def availability_matrix(
     players = pl_res.scalars().all()
 
     # Recency + squad derivation from appearance history (no schema needed).
-    # "dormant" = has played before but not within DORMANT_YEARS — the
-    # auto-archive bucket (KlubPro-style) so selection works off current players.
-    cutoff = date.today() - timedelta(days=365 * DORMANT_YEARS)
+    # "dormant" = has played before but not within the club's dormancy window —
+    # the auto-archive bucket (KlubPro-style) so selection works off current
+    # players. Window is the club setting (months), defaulting to 24.
+    months = club.dormancy_months if club.dormancy_months else DEFAULT_DORMANCY_MONTHS
+    cutoff = months_ago(date.today(), months)
 
     last_played_map: dict[uuid.UUID, date] = {}
     lp_res = await db.execute(
@@ -205,7 +219,7 @@ async def availability_matrix(
         ],
         "availability": avail_map,
         "all_squads": sorted({s for names in squads_map.values() for s in names}),
-        "dormant_years": DORMANT_YEARS,
+        "dormancy_months": months,
     }
 
 

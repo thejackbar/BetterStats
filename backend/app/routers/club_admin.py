@@ -567,6 +567,7 @@ class SettingsPatch(BaseModel):
     theme_mode: Optional[str] = None
     theme_config: Optional[dict] = None
     player_name_format: Optional[str] = None
+    dormancy_months: Optional[int] = None
 
 
 # Keys allowed inside theme_config and the sub-keys allowed in light/dark palettes.
@@ -630,6 +631,7 @@ async def get_settings(
         "is_active": club.is_active,
         "playhq_id": club.playhq_id,
         "player_name_format": club.player_name_format or "last_first",
+        "dormancy_months": club.dormancy_months if club.dormancy_months is not None else 24,
     }
 
 
@@ -659,6 +661,9 @@ async def patch_settings(
             club.accent_color = clean["accent"]
     if data.player_name_format is not None and data.player_name_format in ("last_first", "first_last", "first_initial_last", "last_first_initial"):
         club.player_name_format = data.player_name_format
+    if data.dormancy_months is not None:
+        # Clamp to a sane range: 1 month .. 50 years.
+        club.dormancy_months = max(1, min(600, int(data.dormancy_months)))
 
     # Record which fields the admin touched. Don't dump full new values into
     # the audit row — colour codes / names will already be visible in the
