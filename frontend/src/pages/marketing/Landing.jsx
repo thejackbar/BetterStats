@@ -332,8 +332,13 @@ function Testimonials() {
             <div className="flex gap-1 mb-5 text-accent text-lg">★★★★★</div>
             <blockquote className="text-2xl md:text-3xl font-semibold leading-snug mb-7">&ldquo;{t.quote}&rdquo;</blockquote>
             <figcaption className="flex items-center gap-4 pt-6 border-t pb-hairline">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500/40 to-emerald-700/20 border border-accent/30 flex items-center justify-center font-bold">
-                {t.name.split(' ').map(p => p[0]).join('')}
+              <div className="w-12 h-12 rounded-full bg-white/95 border border-accent/30 flex items-center justify-center overflow-hidden">
+                <img
+                  src="/marketing/applecross-cc.webp"
+                  alt="Applecross Cricket Club"
+                  className="w-9 h-9 object-contain"
+                  loading="lazy"
+                />
               </div>
               <div>
                 <p className="font-semibold">{t.name}</p>
