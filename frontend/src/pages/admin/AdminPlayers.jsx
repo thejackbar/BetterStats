@@ -6,12 +6,26 @@ import { nameMatchesSearch, formatPlayerName } from '../../lib/nameFormat'
 import { validateImageFile } from '../../lib/validation'
 import { CRICKET_COUNTRIES, countryFlagUrl } from '../../data/countries'
 
-// BetterSelect skill codes — toggle chips that group the selection pool.
-const SKILL_CODES = ['BAT', 'BWL', 'ALL', 'WKT']
-
 // ---------------------------------------------------------------------------
 // EditPlayerModal
 // ---------------------------------------------------------------------------
+
+// Canonical role → skill codes the selection/availability filters key on.
+// Role is the single source of truth in the UI; we still persist skill_positions
+// for the existing filter facets.
+const ROLE_TO_SKILLS = {
+  'Batter': ['BAT'],
+  'Bowler': ['BWL'],
+  'All Rounder': ['ALL'],
+  'Wicketkeeper': ['WKT'],
+  'Wicketkeeper-Batter': ['WKT', 'BAT'],
+}
+const BATTING_HANDS = [['', '—'], ['RIGHT', 'Right handed'], ['LEFT', 'Left handed']]
+const BOWLING_ACTIONS = [['', '—'], ['RIGHT_ARM', 'Right arm'], ['LEFT_ARM', 'Left arm']]
+const BOWLING_TYPES = [
+  ['', '—'], ['FAST', 'Fast'], ['FAST_MEDIUM', 'Fast medium'], ['MEDIUM', 'Medium'],
+  ['MEDIUM_FAST', 'Medium fast'], ['FINGER_SPIN', 'Finger spinner'], ['WRIST_SPIN', 'Wrist spinner'],
+]
 
 function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
   const [form, setForm] = useState({
@@ -22,6 +36,10 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
     playhq_id: player.playhq_id || '',
     is_overseas: player.is_overseas || false,
     overseas_country: player.overseas_country || '',
+    batting_hand: player.batting_hand || '',
+    bowling_action: player.bowling_action || '',
+    bowling_type: player.bowling_type || '',
+    is_opening_batsman: player.is_opening_batsman || false,
   })
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
@@ -29,6 +47,8 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [photoUrl, setPhotoUrl] = useState(player.photo_url || null)
   const [editorSource, setEditorSource] = useState(null)
+  const [editName, setEditName] = useState(false)      // inline display-name editor
+  const [editPhq, setEditPhq] = useState(false)        // inline PlayHQ-ID editor
   // BetterSelect attributes — separate endpoint, not in the list payload.
   const [profile, setProfile] = useState({ email: '', phone: '', status: 'active', skill_positions: [] })
 
@@ -73,15 +93,21 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
         player_role: form.player_role,
         playhq_id: form.playhq_id,
         is_overseas: form.is_overseas,
-        overseas_country: form.overseas_country,
+        overseas_country: form.is_overseas ? form.overseas_country : '',
+        batting_hand: form.batting_hand,
+        bowling_action: form.bowling_action,
+        bowling_type: form.bowling_type,
+        is_opening_batsman: form.is_opening_batsman,
       }
+      // Role is canonical; derive the skill codes the filters use from it.
+      const skills = ROLE_TO_SKILLS[form.player_role] || profile.skill_positions
       const [updated] = await Promise.all([
         api.adminPatchPlayer(player.id, payload),
         api.bsUpdatePlayerProfile(player.id, {
           email: profile.email || null,
           phone: profile.phone || null,
           status: profile.status || 'active',
-          skill_positions: profile.skill_positions,
+          skill_positions: skills,
         }),
       ])
       onSaved({ ...player, ...updated, photo_url: photoUrl })
@@ -132,35 +158,45 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
       style={{ backdropFilter: 'blur(2px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-pb-surface pb-card max-w-md w-full mx-4 mt-16 mb-8 overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b pb-hairline-b">
-          <div>
-            <p className="text-pb-text text-sm font-semibold">{displayedName}</p>
-            <p className="font-mono text-[10px] text-pb-faintest mt-0.5">{player.id}</p>
+      <div className="bg-pb-surface pb-card max-w-md w-full mx-4 mt-12 mb-8 overflow-hidden flex flex-col max-h-[88vh]">
+        {/* Header — name with inline display-name edit */}
+        <div className="flex items-start justify-between px-5 py-4 border-b pb-hairline-b shrink-0">
+          <div className="min-w-0">
+            {editName ? (
+              <input
+                autoFocus
+                type="text"
+                value={form.display_name_override}
+                onChange={e => setForm(f => ({ ...f, display_name_override: e.target.value }))}
+                onBlur={() => setEditName(false)}
+                onKeyDown={e => { if (e.key === 'Enter') setEditName(false) }}
+                placeholder="Blank to use synced name"
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+              />
+            ) : (
+              <div className="flex items-center gap-2">
+                <p className="text-pb-text text-base font-semibold truncate">{displayedName}</p>
+                <button
+                  onClick={() => setEditName(true)}
+                  className="font-mono text-[9px] text-pb-faint hover:text-pb-accent border pb-hairline rounded px-1.5 py-0.5 shrink-0"
+                  title="Set a display name"
+                >edit</button>
+              </div>
+            )}
+            {form.display_name_override && !editName && (
+              <p className="font-mono text-[9px] text-pb-faintest mt-0.5">synced: {player.name}</p>
+            )}
           </div>
           <button
             onClick={onClose}
-            className="text-pb-faint hover:text-pb-text transition-colors font-mono text-[11px] px-2 py-1"
+            className="text-pb-faint hover:text-pb-text transition-colors font-mono text-[11px] px-2 py-1 shrink-0"
           >
             ✕
           </button>
         </div>
 
-        {/* Body */}
-        <div className="px-5 py-4 space-y-4">
-
-          {/* Display Name */}
-          <div>
-            <label className="font-mono text-[10px] text-pb-faintest block mb-1">Display Name</label>
-            <input
-              type="text"
-              value={form.display_name_override}
-              onChange={e => setForm(f => ({ ...f, display_name_override: e.target.value }))}
-              placeholder="Blank to use synced name"
-              className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-            />
-          </div>
+        {/* Body — scrolls; footer stays pinned */}
+        <div className="px-5 py-4 space-y-4 overflow-y-auto">
 
           {/* Gender + Is Player row */}
           <div className="grid grid-cols-2 gap-3">
@@ -192,7 +228,7 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
             </div>
           </div>
 
-          {/* Role */}
+          {/* Role — single canonical field (replaces the duplicate Skills chips) */}
           <div>
             <label className="font-mono text-[10px] text-pb-faintest block mb-1">Role</label>
             <select
@@ -201,57 +237,71 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
               className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
             >
               <option value="">—</option>
-              <option value="Batter">Batter</option>
-              <option value="Bowler">Bowler</option>
-              <option value="Wicketkeeper">Wicketkeeper</option>
-              <option value="All Rounder">All Rounder</option>
+              {Object.keys(ROLE_TO_SKILLS).map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           </div>
 
-          {/* Overseas */}
+          {/* Cricket attributes (power the selection filters) */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Overseas Player</label>
-              <label className="flex items-center gap-2 cursor-pointer mt-1.5">
-                <input
-                  type="checkbox"
-                  checked={form.is_overseas}
-                  onChange={e => setForm(f => ({ ...f, is_overseas: e.target.checked }))}
-                  className="accent-pb-accent"
-                />
-                <span className="font-mono text-[10px] text-pb-text">
-                  {form.is_overseas ? 'Overseas player' : 'Local player'}
-                </span>
-              </label>
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Batting hand</label>
+              <select value={form.batting_hand} onChange={e => setForm(f => ({ ...f, batting_hand: e.target.value }))}
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+                {BATTING_HANDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
             </div>
             <div>
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Country</label>
-              <input
-                type="text"
-                list="cricket-countries"
-                value={form.overseas_country}
-                onChange={e => setForm(f => ({ ...f, overseas_country: e.target.value }))}
-                placeholder={form.is_overseas ? 'e.g. England' : ''}
-                disabled={!form.is_overseas}
-                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent disabled:opacity-40"
-              />
-              <datalist id="cricket-countries">
-                {CRICKET_COUNTRIES.map(c => <option key={c} value={c} />)}
-              </datalist>
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Bowling action</label>
+              <select value={form.bowling_action} onChange={e => setForm(f => ({ ...f, bowling_action: e.target.value }))}
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+                {BOWLING_ACTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Bowling type</label>
+              <select value={form.bowling_type} onChange={e => setForm(f => ({ ...f, bowling_type: e.target.value }))}
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+                {BOWLING_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Opening batsman</label>
+              <label className="flex items-center gap-2 cursor-pointer mt-1.5">
+                <input type="checkbox" checked={form.is_opening_batsman}
+                  onChange={e => setForm(f => ({ ...f, is_opening_batsman: e.target.checked }))}
+                  className="accent-pb-accent" />
+                <span className="font-mono text-[10px] text-pb-text">{form.is_opening_batsman ? 'Opener' : 'No'}</span>
+              </label>
             </div>
           </div>
 
-          {/* PlayHQ ID */}
+          {/* Overseas — country only appears when ticked */}
           <div>
-            <label className="font-mono text-[10px] text-pb-faintest block mb-1">PlayHQ ID</label>
-            <input
-              type="text"
-              value={form.playhq_id}
-              onChange={e => setForm(f => ({ ...f, playhq_id: e.target.value }))}
-              placeholder="e.g. a1b2c3d4-e5f6-..."
-              className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none"
-              style={{ '--tw-border-opacity': 1 }}
-            />
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.is_overseas}
+                onChange={e => setForm(f => ({ ...f, is_overseas: e.target.checked }))}
+                className="accent-pb-accent"
+              />
+              <span className="font-mono text-[10px] text-pb-text">Overseas player</span>
+            </label>
+            {form.is_overseas && (
+              <div className="mt-2">
+                <label className="font-mono text-[10px] text-pb-faintest block mb-1">Country</label>
+                <input
+                  type="text"
+                  list="cricket-countries"
+                  value={form.overseas_country}
+                  onChange={e => setForm(f => ({ ...f, overseas_country: e.target.value }))}
+                  placeholder="e.g. England"
+                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+                />
+                  <datalist id="cricket-countries">
+                    {CRICKET_COUNTRIES.map(c => <option key={c} value={c} />)}
+                  </datalist>
+              </div>
+            )}
           </div>
 
           {/* BetterSelect attributes */}
@@ -275,30 +325,6 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
                   onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))}
                   className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
                 />
-              </div>
-            </div>
-            <div className="mt-3">
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Skills (groups the selection pool)</label>
-              <div className="flex gap-2">
-                {SKILL_CODES.map(code => {
-                  const on = profile.skill_positions.includes(code)
-                  return (
-                    <button
-                      key={code}
-                      type="button"
-                      onClick={() => setProfile(p => ({
-                        ...p,
-                        skill_positions: on
-                          ? p.skill_positions.filter(c => c !== code)
-                          : [...p.skill_positions, code],
-                      }))}
-                      className={`px-3 py-1.5 rounded border font-mono text-[10px] transition-colors ${on ? 'bg-pb-accent/15 text-pb-accent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
-                      style={on ? { borderColor: 'var(--pb-accent)' } : {}}
-                    >
-                      {code}
-                    </button>
-                  )
-                })}
               </div>
             </div>
             <label className="flex items-center gap-2 cursor-pointer mt-3">
@@ -379,8 +405,29 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
           />
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between px-5 py-3 border-t pb-hairline-t">
+        {/* PlayHQ ID — rarely changed, tucked at the bottom in small text */}
+        <div className="px-5 pb-2 shrink-0">
+          {editPhq ? (
+            <input
+              autoFocus
+              type="text"
+              value={form.playhq_id}
+              onChange={e => setForm(f => ({ ...f, playhq_id: e.target.value }))}
+              onBlur={() => setEditPhq(false)}
+              onKeyDown={e => { if (e.key === 'Enter') setEditPhq(false) }}
+              placeholder="PlayHQ ID (UUID)"
+              className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1 text-pb-text text-[11px] font-mono focus:outline-none focus:border-pb-accent"
+            />
+          ) : (
+            <div className="flex items-center gap-2 font-mono text-[9px] text-pb-faintest">
+              <span className="truncate">PlayHQ ID: {form.playhq_id || '—'}</span>
+              <button onClick={() => setEditPhq(true)} className="hover:text-pb-accent border pb-hairline rounded px-1 shrink-0">edit</button>
+            </div>
+          )}
+        </div>
+
+        {/* Footer — pinned, always reachable */}
+        <div className="flex items-center justify-between px-5 py-3 border-t pb-hairline-t shrink-0">
           <div>
             {msg && (
               <span

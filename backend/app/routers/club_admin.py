@@ -63,6 +63,10 @@ async def list_players(
             "player_role": p.player_role,
             "is_overseas": p.is_overseas,
             "overseas_country": p.overseas_country,
+            "batting_hand": p.batting_hand,
+            "bowling_action": p.bowling_action,
+            "bowling_type": p.bowling_type,
+            "is_opening_batsman": p.is_opening_batsman,
         }
         for p in players
     ]
@@ -76,6 +80,10 @@ class PlayerPatch(BaseModel):
     player_role: Optional[str] = None
     is_overseas: Optional[bool] = None
     overseas_country: Optional[str] = None
+    batting_hand: Optional[str] = None
+    bowling_action: Optional[str] = None
+    bowling_type: Optional[str] = None
+    is_opening_batsman: Optional[bool] = None
 
 
 @router.patch("/players/{player_id}")
@@ -116,6 +124,14 @@ async def patch_player(
         player.is_overseas = data.is_overseas
     if data.overseas_country is not None:
         player.overseas_country = data.overseas_country.strip() or None
+    if data.batting_hand is not None:
+        player.batting_hand = data.batting_hand.strip() or None
+    if data.bowling_action is not None:
+        player.bowling_action = data.bowling_action.strip() or None
+    if data.bowling_type is not None:
+        player.bowling_type = data.bowling_type.strip() or None
+    if data.is_opening_batsman is not None:
+        player.is_opening_batsman = data.is_opening_batsman
     await db.commit()
     return {
         "id": str(player.id),
@@ -127,6 +143,10 @@ async def patch_player(
         "player_role": player.player_role,
         "is_overseas": player.is_overseas,
         "overseas_country": player.overseas_country,
+        "batting_hand": player.batting_hand,
+        "bowling_action": player.bowling_action,
+        "bowling_type": player.bowling_type,
+        "is_opening_batsman": player.is_opening_batsman,
     }
 
 

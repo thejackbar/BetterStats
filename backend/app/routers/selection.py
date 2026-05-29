@@ -49,6 +49,62 @@ async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixt
     return f
 
 
+@router.get("/overview")
+async def selection_overview(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """All upcoming fixtures with their finalised lineups, for the side-by-side
+    board. One row per fixture, players in batting order. Declared before the
+    /{fixture_id} route so 'overview' isn't read as a fixture id.
+    """
+    fx_res = await db.execute(
+        select(Fixture)
+        .where(Fixture.organisation_id == club.id, Fixture.played_on >= date.today())
+        .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
+    )
+    fixtures = fx_res.scalars().all()
+    if not fixtures:
+        return {"fixtures": []}
+
+    # Lineups for these fixtures, with player display name + flags, in order.
+    rows_res = await db.execute(
+        select(
+            FixtureLineup.fixture_id,
+            FixtureLineup.batting_order,
+            FixtureLineup.is_captain,
+            FixtureLineup.is_wicket_keeper,
+            func.coalesce(Player.display_name_override, Player.name),
+            Player.id,
+        )
+        .join(Player, FixtureLineup.player_id == Player.id)
+        .where(FixtureLineup.organisation_id == club.id)
+        .order_by(FixtureLineup.batting_order.asc().nullslast())
+    )
+    by_fixture: dict[str, list] = {}
+    for fid, order, cap, wk, name, pid in rows_res.fetchall():
+        by_fixture.setdefault(str(fid), []).append({
+            "player_id": str(pid), "display_name": name,
+            "batting_order": order, "is_captain": cap, "is_wicket_keeper": wk,
+        })
+
+    return {
+        "fixtures": [
+            {
+                "id": str(f.id),
+                "label": f.label,
+                "opponent_name": f.opponent_name,
+                "home_away": f.home_away,
+                "played_on": f.played_on.isoformat() if f.played_on else None,
+                "round": f.round,
+                "venue": f.venue,
+                "lineup": by_fixture.get(str(f.id), []),
+            }
+            for f in fixtures
+        ]
+    }
+
+
 @router.get("/{fixture_id}")
 async def get_selection(
     fixture_id: str,
@@ -167,6 +223,10 @@ async def get_selection(
             "availability": avail.get(pid, "NO_RESPONSE"),
             "last_played": lp.isoformat() if lp else None,
             "photo_url": p.photo_url,
+            "batting_hand": p.batting_hand,
+            "bowling_action": p.bowling_action,
+            "bowling_type": p.bowling_type,
+            "is_opening_batsman": p.is_opening_batsman,
             "is_dormant": dormant and not manual_inactive,
             "is_inactive": manual_inactive,
             "is_current": not manual_inactive and not dormant,
