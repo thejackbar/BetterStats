@@ -519,7 +519,8 @@ async def get_member(
                 "fee_format": e.fee_format,
                 "days_played": _f(e.days_played),
                 "auto_derived": e.auto_derived,
-                "override_reason": e.override_reason,
+                "paid_payment_id": str(e.paid_payment_id) if e.paid_payment_id else None,
+                "is_paid": e.paid_payment_id is not None,
                 "grade": grade.display_name if grade else None,
                 "match": f"{game.home_team} v {game.away_team}" if game else None,
             })
@@ -649,7 +650,6 @@ async def patch_member_season(
 
 class MatchDayPatch(BaseModel):
     days_played: float
-    override_reason: Optional[str] = None
 
 
 @router.patch("/match-days/{entry_id}")
@@ -672,9 +672,90 @@ async def patch_match_day(
         raise HTTPException(status_code=422, detail="days_played out of range")
     e.days_played = _money(data.days_played)
     e.auto_derived = False
-    e.override_reason = (data.override_reason or "").strip() or None
     await db.commit()
     return {"id": str(e.id), "days_played": _f(e.days_played), "auto_derived": e.auto_derived}
+
+
+class MarkPaidRequest(BaseModel):
+    paid_at: Optional[str] = None        # defaults to today
+    method: Optional[str] = "EFT"
+    bank_ref: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.post("/match-days/{entry_id}/mark-paid")
+async def mark_match_day_paid(
+    entry_id: str,
+    data: MarkPaidRequest,
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a single match day Paid: creates a fee_payment for
+    (days_played × tier.match_day_rate) and links it on the row.
+
+    No-op if the row is already paid (returns the existing link)."""
+    from datetime import date as _date
+    e = await db.get(FeeMatchDay, uuid.UUID(entry_id))
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    ms = await db.get(FeeMemberSeason, e.member_season_id)
+    if not ms or ms.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if e.paid_payment_id:
+        return {"id": str(e.id), "paid_payment_id": str(e.paid_payment_id), "amount": None, "already_paid": True}
+    if not ms.fee_schedule_id:
+        raise HTTPException(status_code=422, detail="Member has no tier — assign one before marking paid")
+    schedule = await db.get(FeeSchedule, ms.fee_schedule_id)
+    rate = _f(schedule.match_day_rate) if schedule else 0.0
+    amount = round(_f(e.days_played) * rate, 2)
+    if amount <= 0:
+        raise HTTPException(status_code=422, detail="Match-day rate is $0 for this tier — no payment needed")
+
+    payment = FeePayment(
+        id=uuid.uuid4(),
+        member_season_id=ms.id,
+        organisation_id=club.id,
+        amount=_money(amount),
+        paid_at=_parse_date(data.paid_at) or _date.today(),
+        kind="match_day",
+        method=(data.method or "").strip() or "EFT",
+        bank_ref=(data.bank_ref or "").strip() or None,
+        notes=(data.notes or "").strip() or (f"Match day {e.played_at.isoformat()}" if e.played_at else None),
+        created_by_user_id=user.id,
+    )
+    db.add(payment)
+    await db.flush()
+    e.paid_payment_id = payment.id
+    await db.commit()
+    return {"id": str(e.id), "paid_payment_id": str(payment.id), "amount": amount, "already_paid": False}
+
+
+@router.delete("/match-days/{entry_id}/mark-paid")
+async def unmark_match_day_paid(
+    entry_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Undo a Mark Paid: deletes the linked payment (which nulls
+    paid_payment_id automatically via the FK)."""
+    e = await db.get(FeeMatchDay, uuid.UUID(entry_id))
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    ms = await db.get(FeeMemberSeason, e.member_season_id)
+    if not ms or ms.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if not e.paid_payment_id:
+        return {"id": str(e.id), "deleted": 0}
+    payment = await db.get(FeePayment, e.paid_payment_id)
+    deleted = 0
+    if payment is not None:
+        await db.delete(payment)
+        deleted = 1
+    e.paid_payment_id = None
+    await db.commit()
+    return {"id": str(e.id), "deleted": deleted}
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -1446,3 +1527,113 @@ async def import_commit(
         created += 1
     await db.commit()
     return {"created": created}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Phase 3.1 — Bulk payment (one deposit covering many players)
+# ───────────────────────────────────────────────────────────────────────────
+
+class BulkPaymentItem(BaseModel):
+    member_season_id: str
+    amount: float
+    kind: str = "match_day"             # 'match_day' or 'membership'
+    match_day_ids: List[str] = []       # specific days to link (kind=match_day only)
+    notes: Optional[str] = None
+
+
+class BulkPaymentRequest(BaseModel):
+    paid_at: Optional[str] = None
+    method: Optional[str] = "EFT"
+    bank_ref: Optional[str] = None
+    notes: Optional[str] = None
+    expected_total: Optional[float] = None   # client-side sanity check (optional)
+    items: List[BulkPaymentItem]
+
+
+@router.post("/payments/bulk")
+async def create_bulk_payment(
+    data: BulkPaymentRequest,
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """One deposit, many players. The captain-collects case: each item
+    creates a separate fee_payment with the shared bank_ref/paid_at/method,
+    and any match_day_ids get linked to the new payment so the player's
+    Match Days view shows them as Paid.
+
+    Validates everything up front so a bad row aborts the whole batch.
+    """
+    from datetime import date as _date
+    if not data.items:
+        raise HTTPException(status_code=422, detail="At least one item required")
+    paid_at = _parse_date(data.paid_at) or _date.today()
+
+    # Pre-flight: resolve every member_season + match-day so an invalid id
+    # aborts before we write anything.
+    ms_cache: dict = {}
+    md_cache: dict = {}
+    total = 0.0
+    for i, item in enumerate(data.items):
+        try:
+            ms_id = uuid.UUID(item.member_season_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail=f"Row {i}: invalid member_season_id")
+        if ms_id not in ms_cache:
+            ms = await db.get(FeeMemberSeason, ms_id)
+            if not ms or ms.organisation_id != club.id:
+                raise HTTPException(status_code=422, detail=f"Row {i}: member season not found")
+            ms_cache[ms_id] = ms
+        if item.kind not in PAYMENT_KINDS:
+            raise HTTPException(status_code=422, detail=f"Row {i}: kind must be one of {PAYMENT_KINDS}")
+        if item.amount <= 0:
+            raise HTTPException(status_code=422, detail=f"Row {i}: amount must be > 0")
+        total += item.amount
+        for raw_id in item.match_day_ids:
+            try:
+                md_id = uuid.UUID(raw_id)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=422, detail=f"Row {i}: invalid match_day id")
+            if md_id not in md_cache:
+                md = await db.get(FeeMatchDay, md_id)
+                if not md or md.member_season_id != ms_id:
+                    raise HTTPException(status_code=422, detail=f"Row {i}: match day doesn't belong to this member")
+                md_cache[md_id] = md
+
+    if data.expected_total is not None:
+        if abs(round(total, 2) - round(float(data.expected_total), 2)) > 0.01:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Row totals (${total:.2f}) don't match the expected deposit (${data.expected_total:.2f})",
+            )
+
+    created = 0
+    md_paid = 0
+    for item in data.items:
+        ms_id = uuid.UUID(item.member_season_id)
+        payment = FeePayment(
+            id=uuid.uuid4(),
+            member_season_id=ms_id,
+            organisation_id=club.id,
+            amount=_money(item.amount),
+            paid_at=paid_at,
+            kind=item.kind,
+            method=(data.method or "").strip() or "EFT",
+            bank_ref=(data.bank_ref or "").strip() or None,
+            notes=(item.notes or data.notes or "").strip() or None,
+            created_by_user_id=user.id,
+        )
+        db.add(payment)
+        await db.flush()
+        created += 1
+        if item.kind == "match_day" and item.match_day_ids:
+            for raw_id in item.match_day_ids:
+                md_id = uuid.UUID(raw_id)
+                md = md_cache[md_id]
+                # If the day was previously linked to a different payment,
+                # leave that alone — admin should unmark it first.
+                if md.paid_payment_id is None:
+                    md.paid_payment_id = payment.id
+                    md_paid += 1
+    await db.commit()
+    return {"created": created, "match_days_marked_paid": md_paid, "total": round(total, 2)}

@@ -67,10 +67,16 @@ export default function AdminFeePayments() {
       <div className="max-w-5xl">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
           <h1 className="font-display font-bold text-2xl text-pb-text">Payments</h1>
-          <Link to="/admin/fees/payments/import"
-            className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-            + IMPORT BANK CSV
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link to={`/admin/fees/payments/bulk${seasonId ? `?season=${seasonId}` : ''}`}
+              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors whitespace-nowrap">
+              + BULK PAYMENT
+            </Link>
+            <Link to="/admin/fees/payments/import"
+              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+              + IMPORT BANK CSV
+            </Link>
+          </div>
         </div>
         <p className="text-pb-faint text-sm mb-5">
           The full ledger for one season. Log payments from the individual member page (or bulk-import from a bank-statement CSV);
@@ -114,28 +120,41 @@ export default function AdminFeePayments() {
               </div>
             ) : (
               <div className="pb-card overflow-hidden">
-                <div className="grid grid-cols-[auto_1.4fr_auto_auto_auto_1fr_auto] gap-3 px-5 py-2.5 bg-pb-surface2/40 font-mono text-[10px] tracking-wide3 text-pb-faint">
-                  <span className="w-20">DATE</span><span>MEMBER</span>
-                  <span className="w-16">KIND</span><span className="w-20 text-right">AMOUNT</span>
-                  <span className="w-14">METHOD</span><span>REF / NOTES</span><span></span>
-                </div>
-                {filtered.map((p, i) => (
-                  <div key={p.id} className={`grid grid-cols-[auto_1.4fr_auto_auto_auto_1fr_auto] items-center gap-3 px-5 py-2.5 ${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2/40`}>
-                    <span className="font-mono text-[10px] text-pb-faintest w-20">{p.paid_at || '—'}</span>
-                    <Link to={`/admin/fees/member/${p.member_id}?season=${seasonId}`} className="text-pb-text text-sm truncate hover:text-pb-accent transition-colors">
-                      {p.full_name}
-                    </Link>
-                    <span className="font-mono text-[10px] text-pb-faint w-16">{KIND_LABEL[p.kind]}</span>
-                    <span className="font-mono text-[11px] text-pb-text w-20 text-right">{money(p.amount)}</span>
-                    <span className="font-mono text-[10px] text-pb-dim w-14">{p.method || '—'}</span>
-                    <span className="text-pb-faint text-[12px] truncate">
-                      {p.bank_ref || ''}
-                      {p.notes && <span className="text-pb-faintest"> · {p.notes}</span>}
-                    </span>
-                    <button onClick={() => del(p.id)}
-                      className="font-mono text-[9px] text-pb-red/50 hover:text-pb-red transition-colors">DEL</button>
-                  </div>
-                ))}
+                <table className="w-full">
+                  <thead>
+                    <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left bg-pb-surface2/40">
+                      <th className="font-medium py-2.5 pl-5 pr-3 w-24">DATE</th>
+                      <th className="font-medium py-2.5 pr-3">MEMBER</th>
+                      <th className="font-medium py-2.5 pr-3 w-20">KIND</th>
+                      <th className="font-medium py-2.5 pr-3 w-24 text-right">AMOUNT</th>
+                      <th className="font-medium py-2.5 pr-3 w-20">METHOD</th>
+                      <th className="font-medium py-2.5 pr-3">REF / NOTES</th>
+                      <th className="font-medium py-2.5 pr-5 w-12 text-right"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(p => (
+                      <tr key={p.id} className="pb-hairline-t align-middle hover:bg-pb-surface2/40">
+                        <td className="py-2.5 pl-5 pr-3 font-mono text-[10px] text-pb-faintest whitespace-nowrap">{p.paid_at || '—'}</td>
+                        <td className="py-2.5 pr-3">
+                          <Link to={`/admin/fees/member/${p.member_id}?season=${seasonId}`}
+                            className="text-pb-text text-sm hover:text-pb-accent transition-colors">{p.full_name}</Link>
+                        </td>
+                        <td className="py-2.5 pr-3 font-mono text-[10px] text-pb-faint whitespace-nowrap">{KIND_LABEL[p.kind]}</td>
+                        <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-text tabular-nums whitespace-nowrap">{money(p.amount)}</td>
+                        <td className="py-2.5 pr-3 font-mono text-[10px] text-pb-dim whitespace-nowrap">{p.method || '—'}</td>
+                        <td className="py-2.5 pr-3 text-pb-faint text-[12px] truncate max-w-0">
+                          {p.bank_ref || ''}
+                          {p.notes && <span className="text-pb-faintest"> · {p.notes}</span>}
+                        </td>
+                        <td className="py-2.5 pr-5 text-right">
+                          <button onClick={() => del(p.id)}
+                            className="font-mono text-[9px] text-pb-red/50 hover:text-pb-red transition-colors">DEL</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </>

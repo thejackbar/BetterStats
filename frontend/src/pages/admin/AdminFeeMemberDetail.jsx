@@ -125,42 +125,69 @@ function PaymentRow({ payment, onDeleted }) {
   )
 }
 
-function MatchDayRow({ row, onSaved }) {
+function MatchDayRow({ row, rate, onSaved }) {
   const toast = useToast()
   const [days, setDays] = useState(String(row.days_played))
-  const [reason, setReason] = useState(row.override_reason || '')
   const [busy, setBusy] = useState(false)
-  useEffect(() => { setDays(String(row.days_played)); setReason(row.override_reason || '') }, [row.id, row.days_played])
+  useEffect(() => { setDays(String(row.days_played)) }, [row.id, row.days_played])
 
-  const dirty = Number(days) !== Number(row.days_played) || (reason || '') !== (row.override_reason || '')
-  async function save() {
+  const daysDirty = Number(days) !== Number(row.days_played)
+  const dayCharge = Number(rate || 0) * Number(row.days_played || 0)
+
+  async function saveDays() {
     setBusy(true)
     try {
-      await api.feePatchMatchDay(row.id, { days_played: Number(days) || 0, override_reason: reason.trim() || null })
-      toast.success('Match day updated'); onSaved()
+      await api.feePatchMatchDay(row.id, { days_played: Number(days) || 0 })
+      toast.success('Days updated'); onSaved()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  async function markPaid() {
+    setBusy(true)
+    try {
+      await api.feeMarkMatchDayPaid(row.id, {})
+      toast.success('Match day marked paid'); onSaved()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  async function unmark() {
+    setBusy(true)
+    try {
+      await api.feeUnmarkMatchDayPaid(row.id)
+      toast.success('Marked unpaid'); onSaved()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
 
   return (
-    <div className="grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-3 px-5 py-2.5 pb-hairline-t hover:bg-pb-surface2/40">
-      <span className="font-mono text-[10px] text-pb-faintest w-20">{row.played_at || '—'}</span>
-      <span className="text-pb-dim text-sm truncate">
-        {row.match || row.grade || '—'}
-        {row.grade && row.match && <span className="text-pb-faintest"> · {row.grade}</span>}
-      </span>
-      <span className="font-mono text-[10px] text-pb-faint w-16">{FORMAT_LABEL[row.fee_format] || row.fee_format}</span>
-      <div className="flex items-center gap-1.5 w-24">
+    <tr className="pb-hairline-t align-middle hover:bg-pb-surface2/40">
+      <td className="py-2 pl-5 pr-3 font-mono text-[10px] text-pb-faintest whitespace-nowrap">{row.played_at || '—'}</td>
+      <td className="py-2 pr-3 text-pb-dim text-sm">
+        <div className="truncate">{row.match || row.grade || '—'}</div>
+        {row.grade && row.match && <div className="font-mono text-[10px] text-pb-faintest truncate">{row.grade}</div>}
+      </td>
+      <td className="py-2 pr-3 font-mono text-[10px] text-pb-faint whitespace-nowrap">{FORMAT_LABEL[row.fee_format] || row.fee_format}</td>
+      <td className="py-2 pr-3 text-right whitespace-nowrap">
         <input type="number" min="0" max="5" step="0.5" value={days} onChange={e => setDays(e.target.value)}
-          className="w-14 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm text-right focus:outline-none focus:border-pb-accent" />
-        <span className="font-mono text-[9px] text-pb-faintest">{row.auto_derived ? 'auto' : 'edited'}</span>
-      </div>
-      <div className="flex items-center gap-2 justify-end">
-        <input value={reason} onChange={e => setReason(e.target.value)} placeholder="reason"
-          className="w-28 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[11px] focus:outline-none focus:border-pb-accent" />
-        <button onClick={save} disabled={!dirty || busy}
-          className="px-2.5 py-1 rounded font-mono text-[9px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-30" style={{ background: 'var(--pb-accent)' }}>SAVE</button>
-      </div>
-    </div>
+          disabled={row.is_paid || busy}
+          className="w-14 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm text-right focus:outline-none focus:border-pb-accent disabled:opacity-40" />
+        {daysDirty && (
+          <button onClick={saveDays} disabled={busy}
+            className="ml-1.5 px-2 py-1 rounded font-mono text-[9px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-30" style={{ background: 'var(--pb-accent)' }}>SAVE</button>
+        )}
+      </td>
+      <td className="py-2 pr-3 text-right font-mono text-[11px] text-pb-dim whitespace-nowrap">{money(dayCharge)}</td>
+      <td className="py-2 pr-3 text-right whitespace-nowrap">
+        {row.is_paid
+          ? <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5">PAID</span>
+          : <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">UNPAID</span>}
+      </td>
+      <td className="py-2 pr-5 text-right whitespace-nowrap">
+        {row.is_paid
+          ? <button onClick={unmark} disabled={busy}
+              className="font-mono text-[9px] tracking-wide2 border pb-hairline rounded px-2 py-1 text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50">UNMARK</button>
+          : <button onClick={markPaid} disabled={busy || !rate}
+              title={!rate ? 'Member has no tier or $0 match-day rate' : 'Log a payment for this day'}
+              className="px-2 py-1 rounded font-mono text-[9px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-40" style={{ background: 'var(--pb-accent)' }}>MARK PAID</button>}
+      </td>
+    </tr>
   )
 }
 
@@ -331,16 +358,30 @@ export default function AdminFeeMemberDetail() {
         </p>
         <p className="text-pb-dim text-sm mb-3 leading-relaxed">
           Auto-derived from appearances. Two-day games default to 2 days — drop to 1 if they only played one day.
-          Editing flags the row so it won’t be overwritten by the next sync.
+          Hit <span className="text-pb-text">Mark Paid</span> to log the day’s fee as a payment in one click.
         </p>
         {data.match_days.length === 0 ? (
           <p className="font-mono text-[11px] text-pb-faint pb-card p-5">No match days recorded this season.</p>
         ) : (
           <div className="pb-card overflow-hidden">
-            <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-3 px-5 py-2.5 bg-pb-surface2/40 font-mono text-[10px] tracking-wide3 text-pb-faint">
-              <span className="w-20">DATE</span><span>MATCH</span><span className="w-16">FORMAT</span><span className="w-24">DAYS</span><span className="text-right">OVERRIDE</span>
-            </div>
-            {data.match_days.map(row => <MatchDayRow key={row.id} row={row} onSaved={load} />)}
+            <table className="w-full">
+              <thead>
+                <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left bg-pb-surface2/40">
+                  <th className="font-medium py-2.5 pl-5 pr-3 w-24">DATE</th>
+                  <th className="font-medium py-2.5 pr-3">MATCH</th>
+                  <th className="font-medium py-2.5 pr-3 w-20">FORMAT</th>
+                  <th className="font-medium py-2.5 pr-3 w-32 text-right">DAYS</th>
+                  <th className="font-medium py-2.5 pr-3 w-20 text-right">AMOUNT</th>
+                  <th className="font-medium py-2.5 pr-3 w-20 text-right">STATUS</th>
+                  <th className="font-medium py-2.5 pr-5 w-28 text-right"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.match_days.map(row => (
+                  <MatchDayRow key={row.id} row={row} rate={f.match_day_rate} onSaved={load} />
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

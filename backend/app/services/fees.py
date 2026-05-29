@@ -235,8 +235,10 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
                     auto_derived=True,
                 ))
                 entries_upserted += 1
-            elif row.auto_derived:
-                # Keep auto rows in sync with the latest format/date mapping.
+            elif row.auto_derived and row.paid_payment_id is None:
+                # Keep auto rows in sync with the latest format/date mapping —
+                # but freeze them once paid (we don't want a re-sync to silently
+                # increase the days a member already has a payment for).
                 changed = False
                 if row.fee_format != ff:
                     row.fee_format = ff; changed = True
@@ -246,7 +248,7 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
                     row.played_at = played_at; changed = True
                 if changed:
                     entries_upserted += 1
-            # else: admin-overridden, leave untouched.
+            # else: admin-overridden or already paid — leave untouched.
 
         entries_deleted = await _delete_stale_auto_entries(session, sid, valid_keys)
         await session.commit()
@@ -278,6 +280,7 @@ async def _delete_stale_auto_entries(session, season_id, valid_keys: set) -> int
             select(FeeMatchDay).where(
                 FeeMatchDay.member_season_id.in_(ms_ids),
                 FeeMatchDay.auto_derived.is_(True),
+                FeeMatchDay.paid_payment_id.is_(None),  # never auto-remove paid rows
             )
         )
     ).scalars().all()
