@@ -330,7 +330,8 @@ async def _backfill_missing_season_stats(org_id_str: str) -> int:
                     bowling_innings, wickets, overs, bowling_balls,
                     runs_conceded, maidens, best_bowling_wickets,
                     five_wicket_innings, wides, no_balls,
-                    catches, run_outs, stumpings
+                    catches, run_outs, stumpings,
+                    source
                 )
                 SELECT
                     m.player_id, m.season_id,
@@ -359,7 +360,8 @@ async def _backfill_missing_season_stats(org_id_str: str) -> int:
                     COALESCE(bo.no_balls, 0),
                     COALESCE(fa.catches, 0),
                     COALESCE(fa.run_outs, 0),
-                    COALESCE(fa.stumpings, 0)
+                    COALESCE(fa.stumpings, 0),
+                    'backfill'
                 FROM missing m
                 LEFT JOIN bat_agg     ba ON ba.player_id = m.player_id AND ba.season_id = m.season_id
                 LEFT JOIN bowl_agg    bo ON bo.player_id = m.player_id AND bo.season_id = m.season_id

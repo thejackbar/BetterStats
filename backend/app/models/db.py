@@ -415,6 +415,7 @@ class PlayerSeasonStats(Base):
     assisted_run_outs = Column(Integer, default=0)
     unassisted_run_outs = Column(Integer, default=0)
     stumpings = Column(Integer, default=0)
+    source = Column(Text, nullable=False, server_default='api')
 
     player = relationship("Player", back_populates="season_stats")
     season = relationship("Season", back_populates="player_stats")
