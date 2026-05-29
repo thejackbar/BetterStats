@@ -16,6 +16,7 @@ export const CAP = {
   MANAGE_FAMILIES: 'manage_families',
   MANAGE_MANUAL_ENTRIES: 'manage_manual_entries',
   MANAGE_FEES: 'manage_fees',
+  MANAGE_FIXTURES: 'manage_fixtures',
 }
 
 // Display metadata for the user-management UI checkboxes.
@@ -35,4 +36,5 @@ export const CAPABILITY_INFO = [
   { key: CAP.MANAGE_FAMILIES, label: 'Manage families', hint: 'Create and edit player family groupings' },
   { key: CAP.MANAGE_MANUAL_ENTRIES, label: 'Manual stat entry', hint: 'Add historical games + season/career adjustments. Reversible via audit log.' },
   { key: CAP.MANAGE_FEES, label: 'Manage fees', hint: 'Membership tiers, members + match-day fee tracking' },
+  { key: CAP.MANAGE_FIXTURES, label: 'Manage fixtures', hint: 'BetterSelect: sync + manually add upcoming fixtures' },
 ]

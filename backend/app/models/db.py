@@ -212,6 +212,41 @@ class Game(Base):
     partnerships = relationship("Partnership", back_populates="game")
 
 
+class Fixture(Base):
+    """BetterSelect: upcoming / scheduled matches — the foundation availability
+    and team selection build on. BetterStats otherwise stores only completed
+    games. Two sources:
+      - 'playhq': synced from the partner API; id == the CA/PlayHQ game GUID,
+        so a played fixture maps 1:1 to the eventual games.id row.
+      - 'manual': admin-created (friendlies / pre-season) so lineups & social
+        posts can be built without an official PlayHQ game; id is a uuid4.
+    """
+    __tablename__ = "fixtures"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
+    source = Column(Text, nullable=False, server_default="manual")  # 'playhq' | 'manual'
+    playhq_id = Column(Text, nullable=True)
+    label = Column(Text, nullable=True)         # free-text title (friendlies / manual)
+    round = Column(Text, nullable=True)
+    played_on = Column(Date, nullable=True)     # match date (mirrors games.played_at)
+    end_on = Column(Date, nullable=True)        # multi-day cricket
+    start_time = Column(Text, nullable=True)    # "HH:MM" local, display only
+    home_team = Column(Text, nullable=True)
+    away_team = Column(Text, nullable=True)
+    home_away = Column(Text, nullable=True)     # HOME | AWAY | BYE (our perspective)
+    opponent_name = Column(Text, nullable=True)
+    venue = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="UPCOMING")  # UPCOMING|IN_PROGRESS|FINAL|CANCELLED|BYE
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    organisation = relationship("Organisation")
+    grade = relationship("Grade")
+
+
 class BattingInnings(Base):
     __tablename__ = "batting_innings"
     __table_args__ = (
