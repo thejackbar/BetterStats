@@ -1915,16 +1915,21 @@ async def cleanup_opposition_stats(
     deleted["bowler_wickets"] = res.rowcount
 
     # Drop phantom player_season_stats rows: (player, season) pairs that
-    # now have no per-game data AND no game_appearance backing. These were
-    # synthesised by the backfill from the (now-deleted) opposition rows.
-    # Restricting the scope to "player is in our org" preserves pre-
-    # scorecard-era aggregate-only rows for players from other orgs.
+    # now have no per-game data AND no game_appearance backing AND were
+    # synthesised by the backfill (source='backfill'). API-sourced rows
+    # are spared even when they have no per-game backing — that's the
+    # legitimate shape for pre-PlayHQ-migration players whose data only
+    # exists as CA career summaries (e.g. MyCricket-era aggregate stats),
+    # no scorecard rows, no appearances. Without the source check this
+    # DELETE wipes them and the next aggregate sync can't restore them
+    # if CA's API no longer surfaces those old per-season totals.
     res = await db.execute(
         _text("""
             DELETE FROM player_season_stats pss
             USING players pl
             WHERE pss.player_id = pl.id
               AND pl.organisation_id = CAST(:oid AS UUID)
+              AND pss.source = 'backfill'
               AND NOT EXISTS (
                 SELECT 1 FROM batting_innings bi
                 JOIN games g ON g.id = bi.game_id
