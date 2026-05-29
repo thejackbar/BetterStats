@@ -133,6 +133,12 @@ class Grade(Base):
     name = Column(Text, nullable=False)
     display_name_override = Column(Text, nullable=True)
     playhq_id = Column(Text, nullable=True)
+    # Fee-tracking format override. NULL = derive from Game.match_format.
+    # One of: 'two_day' | 'one_day' | 't20' | 'women' | 'exclude'.
+    # 'women' is needed because women's (PSWL) grades come through as plain
+    # One Day / T20 and can't be told apart from the men's competition;
+    # 'exclude' drops a grade from match-fee accrual entirely.
+    fee_format = Column(Text, nullable=True)
 
     season = relationship("Season", back_populates="grades")
     games = relationship("Game", back_populates="grade")
@@ -751,3 +757,150 @@ class FamilyMember(Base):
 
     family = relationship("Family", back_populates="members")
     player = relationship("Player")
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Fee Tracking (migration 041)
+#
+# A self-contained membership/match-fee ledger that lives alongside the stats
+# data. Every fee-paying person is a `fee_members` row; the financial state
+# for a given season is a `fee_member_seasons` row pointing at one
+# `fee_schedule` tier. Match-day fees accrue as `fee_match_days` rows, mostly
+# auto-derived from GameAppearance each sync (admins can override). Payments
+# are reconciled by hand against bank statements (`fee_payments`).
+#
+# The money is driven entirely by the member's tier (fee_schedule), never the
+# format: match fee = days_played × tier.match_day_rate. Format only affects
+# how many days a game contributes (two-day = 2) and which report bucket it
+# lands in.
+# ───────────────────────────────────────────────────────────────────────────
+
+# Payment-type values on a fee_schedule tier.
+FEE_PAYMENT_TYPES = ("standard", "upfront", "complimentary", "left_club")
+# fee_match_days.fee_format / Grade.fee_format values.
+FEE_FORMATS = ("two_day", "one_day", "t20", "women", "exclude")
+
+
+class FeeSchedule(Base):
+    """A membership tier for one season — the spreadsheet's PARMS rate card.
+
+    `membership_amount` is the one-off membership fee; `match_day_rate` is the
+    per-day match fee (0 for Upfront tiers, who prepay via membership).
+    """
+    __tablename__ = "fee_schedule"
+    __table_args__ = (
+        UniqueConstraint("season_id", "name", name="uq_fee_schedule_season_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    payment_type = Column(Text, nullable=False, server_default="standard")
+    membership_amount = Column(Numeric(10, 2), nullable=False, server_default="0")
+    match_day_rate = Column(Numeric(10, 2), nullable=False, server_default="0")
+    display_order = Column(Integer, nullable=False, server_default="0")
+    is_active = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FeeMember(Base):
+    """A fee-paying person. Linked to a stats Player where one exists; manual
+    members (life members, sponsors, ICL who don't play) have player_id NULL.
+
+    `current_tier` carries forward season-to-season: it seeds the tier when a
+    new member-season is opened, and is updated whenever an admin sets a tier.
+    """
+    __tablename__ = "fee_members"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "player_id", name="uq_fee_member_org_player"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    full_name = Column(Text, nullable=False)
+    email = Column(Text, nullable=True)
+    mobile = Column(Text, nullable=True)
+    # Name of the fee_schedule tier this member currently sits in (carry-forward
+    # default). Not a FK — schedules are per-season, this is a cross-season hint.
+    current_tier = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    player = relationship("Player")
+    seasons = relationship("FeeMemberSeason", back_populates="member", cascade="all, delete-orphan")
+
+
+class FeeMemberSeason(Base):
+    """A member's financial state for one season. fee_schedule_id NULL means
+    'needs a tier assigned' — the review queue surfaced on the Members page."""
+    __tablename__ = "fee_member_seasons"
+    __table_args__ = (
+        UniqueConstraint("member_id", "season_id", name="uq_fee_member_season"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), nullable=False)
+    season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    fee_schedule_id = Column(UUID(as_uuid=True), ForeignKey("fee_schedule.id", ondelete="SET NULL"), nullable=True)
+    is_new_registration = Column(Boolean, nullable=False, server_default="false")
+    membership_payment_method = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    member = relationship("FeeMember", back_populates="seasons")
+    schedule = relationship("FeeSchedule")
+    match_days = relationship("FeeMatchDay", back_populates="member_season", cascade="all, delete-orphan")
+    payments = relationship("FeePayment", back_populates="member_season", cascade="all, delete-orphan")
+
+
+class FeeMatchDay(Base):
+    """One game's contribution to a member's match-day count. Auto-derived from
+    GameAppearance during sync; `auto_derived=False` once an admin overrides it
+    (e.g. drops a two-day game from 2 days to 1), which makes sync leave it
+    alone thereafter."""
+    __tablename__ = "fee_match_days"
+    __table_args__ = (
+        UniqueConstraint("member_season_id", "game_id", name="uq_fee_match_day_member_game"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    member_season_id = Column(UUID(as_uuid=True), ForeignKey("fee_member_seasons.id", ondelete="CASCADE"), nullable=False)
+    game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"), nullable=True)
+    played_at = Column(Date, nullable=True)
+    fee_format = Column(Text, nullable=True)
+    days_played = Column(Numeric(3, 1), nullable=False, server_default="1")
+    auto_derived = Column(Boolean, nullable=False, server_default="true")
+    override_reason = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    member_season = relationship("FeeMemberSeason", back_populates="match_days")
+    game = relationship("Game")
+
+
+class FeePayment(Base):
+    """A payment reconciled against a bank statement. Defined now so Phase 2
+    (payments + financial status) is purely additive; no endpoints write here
+    yet."""
+    __tablename__ = "fee_payments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    member_season_id = Column(UUID(as_uuid=True), ForeignKey("fee_member_seasons.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False, server_default="0")
+    paid_at = Column(Date, nullable=True)
+    kind = Column(Text, nullable=False, server_default="membership")  # 'membership' | 'match_day'
+    method = Column(Text, nullable=True)
+    bank_ref = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    member_season = relationship("FeeMemberSeason", back_populates="payments")

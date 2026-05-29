@@ -36,6 +36,7 @@ MANAGE_USERS = "manage_users"                 # invite/edit club members
 MANAGE_REPORTS = "manage_reports"             # approve/reject saved StatLab reports
 MANAGE_FAMILIES = "manage_families"           # create/edit player family groupings
 MANAGE_MANUAL_ENTRIES = "manage_manual_entries"  # historical manual stat entry + edit + undo
+MANAGE_FEES = "manage_fees"                   # fee tracking: members, schedule, match days
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -52,6 +53,7 @@ ALL_CAPABILITIES = (
     MANAGE_REPORTS,
     MANAGE_FAMILIES,
     MANAGE_MANUAL_ENTRIES,
+    MANAGE_FEES,
 )
 
 
