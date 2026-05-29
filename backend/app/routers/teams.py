@@ -170,24 +170,51 @@ async def seed_teams(
     club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    """Auto-seed teams from distinct team names our players have appeared for.
+    """Auto-seed teams from the team names our players appeared for in the
+    most recent season (the current / upcoming season).
 
-    Idempotent: only names not already present (case-insensitive) are added,
-    as source='auto'. Existing teams are left untouched.
+    Scoped to a single season so decades of historical team names don't flood
+    the list. Picks the latest season (by year, then name) that actually has
+    appearances. Idempotent: only names not already present (case-insensitive)
+    are added, as source='auto'. Existing teams are left untouched.
     """
     existing_res = await db.execute(
         select(Team.name).where(Team.organisation_id == club.id)
     )
     existing = {(n or "").strip().lower() for n in existing_res.scalars().all()}
 
+    # Most recent season this club has team-name appearances in.
+    season_row = (await db.execute(
+        text(
+            "SELECT s.id, s.name FROM seasons s "
+            "JOIN grades gr ON gr.season_id = s.id "
+            "JOIN games g ON g.grade_id = gr.id "
+            "JOIN game_appearances ga ON ga.game_id = g.id "
+            "JOIN players p ON ga.player_id = p.id "
+            "WHERE p.organisation_id = :org AND ga.team_name IS NOT NULL "
+            "AND ga.team_name <> '' "
+            "GROUP BY s.id, s.name, s.year "
+            "ORDER BY s.year DESC NULLS LAST, s.name DESC "
+            "LIMIT 1"
+        ),
+        {"org": club.id},
+    )).first()
+
+    if not season_row:
+        return {"created": 0, "total_discovered": 0, "season": None}
+
+    season_id, season_name = season_row
+
     names_res = await db.execute(
         text(
             "SELECT DISTINCT ga.team_name FROM game_appearances ga "
             "JOIN players p ON ga.player_id = p.id "
-            "WHERE p.organisation_id = :org AND ga.team_name IS NOT NULL "
-            "AND ga.team_name <> ''"
+            "JOIN games g ON ga.game_id = g.id "
+            "JOIN grades gr ON g.grade_id = gr.id "
+            "WHERE p.organisation_id = :org AND gr.season_id = :season "
+            "AND ga.team_name IS NOT NULL AND ga.team_name <> ''"
         ),
-        {"org": club.id},
+        {"org": club.id, "season": season_id},
     )
     discovered = [r[0] for r in names_res.fetchall()]
 
@@ -208,4 +235,4 @@ async def seed_teams(
         created += 1
 
     await db.commit()
-    return {"created": created, "total_discovered": len(discovered)}
+    return {"created": created, "total_discovered": len(discovered), "season": season_name}

@@ -6,6 +6,9 @@ import { nameMatchesSearch, formatPlayerName } from '../../lib/nameFormat'
 import { validateImageFile } from '../../lib/validation'
 import { CRICKET_COUNTRIES, countryFlagUrl } from '../../data/countries'
 
+// BetterSelect skill codes — toggle chips that group the selection pool.
+const SKILL_CODES = ['BAT', 'BWL', 'ALL', 'WKT']
+
 // ---------------------------------------------------------------------------
 // EditPlayerModal
 // ---------------------------------------------------------------------------
@@ -26,6 +29,8 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [photoUrl, setPhotoUrl] = useState(player.photo_url || null)
   const [editorSource, setEditorSource] = useState(null)
+  // BetterSelect attributes — separate endpoint, not in the list payload.
+  const [profile, setProfile] = useState({ email: '', phone: '', status: 'active', skill_positions: [] })
 
   // Close on Escape
   useEffect(() => {
@@ -33,6 +38,18 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
+
+  // Load BetterSelect attributes on open
+  useEffect(() => {
+    let cancelled = false
+    api.bsGetPlayerProfile(player.id)
+      .then(p => { if (!cancelled) setProfile({
+        email: p.email || '', phone: p.phone || '',
+        status: p.status || 'active', skill_positions: p.skill_positions || [],
+      }) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [player.id])
 
   const setSuccess = (text) => {
     setMsgError(false)
@@ -58,7 +75,15 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
         is_overseas: form.is_overseas,
         overseas_country: form.overseas_country,
       }
-      const updated = await api.adminPatchPlayer(player.id, payload)
+      const [updated] = await Promise.all([
+        api.adminPatchPlayer(player.id, payload),
+        api.bsUpdatePlayerProfile(player.id, {
+          email: profile.email || null,
+          phone: profile.phone || null,
+          status: profile.status || 'active',
+          skill_positions: profile.skill_positions,
+        }),
+      ])
       onSaved({ ...player, ...updated, photo_url: photoUrl })
       setSuccess('Saved')
     } catch (err) {
@@ -227,6 +252,64 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
               className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none"
               style={{ '--tw-border-opacity': 1 }}
             />
+          </div>
+
+          {/* BetterSelect attributes */}
+          <div className="pt-1">
+            <p className="font-mono text-[10px] tracking-wide3 uppercase mb-2" style={{ color: 'var(--pb-accent)' }}>BetterSelect</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-mono text-[10px] text-pb-faintest block mb-1">Email</label>
+                <input
+                  type="email"
+                  value={profile.email}
+                  onChange={e => setProfile(p => ({ ...p, email: e.target.value }))}
+                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+                />
+              </div>
+              <div>
+                <label className="font-mono text-[10px] text-pb-faintest block mb-1">Phone</label>
+                <input
+                  type="tel"
+                  value={profile.phone}
+                  onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))}
+                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+                />
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Skills (groups the selection pool)</label>
+              <div className="flex gap-2">
+                {SKILL_CODES.map(code => {
+                  const on = profile.skill_positions.includes(code)
+                  return (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => setProfile(p => ({
+                        ...p,
+                        skill_positions: on
+                          ? p.skill_positions.filter(c => c !== code)
+                          : [...p.skill_positions, code],
+                      }))}
+                      className={`px-3 py-1.5 rounded border font-mono text-[10px] transition-colors ${on ? 'bg-pb-accent/15 text-pb-accent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+                      style={on ? { borderColor: 'var(--pb-accent)' } : {}}
+                    >
+                      {code}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer mt-3">
+              <input
+                type="checkbox"
+                checked={profile.status === 'inactive'}
+                onChange={e => setProfile(p => ({ ...p, status: e.target.checked ? 'inactive' : 'active' }))}
+                className="accent-pb-accent"
+              />
+              <span className="font-mono text-[10px] text-pb-text">Inactive (hide from availability &amp; selection)</span>
+            </label>
           </div>
 
           {/* Photo */}
