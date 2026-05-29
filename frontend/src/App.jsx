@@ -80,6 +80,7 @@ const BsFixtures = lazy(() => import('./pages/admin/betterselect/AdminFixtures')
 const BsTeams = lazy(() => import('./pages/admin/betterselect/AdminTeams'))
 const BsAvailability = lazy(() => import('./pages/admin/betterselect/AdminAvailability'))
 const BsSelection = lazy(() => import('./pages/admin/betterselect/AdminSelection'))
+const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminSelectionOverview'))
 
 // Public club pages — lazy loaded (not needed for marketing visitors)
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -177,6 +178,7 @@ export default function App() {
           <Route path="/admin/betterselect/fixtures" element={<ProtectedRoute><BsFixtures /></ProtectedRoute>} />
           <Route path="/admin/betterselect/teams" element={<ProtectedRoute><BsTeams /></ProtectedRoute>} />
           <Route path="/admin/betterselect/availability" element={<ProtectedRoute><BsAvailability /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/selection" element={<ProtectedRoute><BsSelectionOverview /></ProtectedRoute>} />
           <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute><BsSelection /></ProtectedRoute>} />
 
           {/* Game-level pages */}
