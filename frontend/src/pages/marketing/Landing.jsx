@@ -455,7 +455,7 @@ function FinalCTA() {
               <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
               <Link to="/pricing" className="cta-secondary">See pricing</Link>
             </div>
-            <p className="text-xs text-pb-faint">$400/yr · Simple onboarding · Responsive support</p>
+            <p className="text-xs text-pb-faint">$449/yr · Flat rate, 1 team or 50 · Simple onboarding</p>
           </div>
         </div>
       </div>

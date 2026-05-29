@@ -321,7 +321,7 @@ function FeaturesCTA() {
           <p className="pill mb-6 mx-auto"><span className="dot" />Everything in. No tiers.</p>
           <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">All features. <span className="gradient-text">One price.</span></h2>
           <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">
-            Every BetterStats club gets the whole platform. $400/year all-in. Onboarding included.
+            Every BetterStats club gets the whole platform. $449/year all-in, flat rate — one team or fifty, same price.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>

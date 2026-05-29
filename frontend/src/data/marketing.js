@@ -138,7 +138,7 @@ export const COMPARISON_3WAY = [
       { feature: 'Manual data entry required', tip: 'BetterStats pulls everything from PlayHQ — no scorer-to-spreadsheet copy work.', playhq: true, cstatz: true, us: false },
       { feature: 'Setup time', textRow: true, playhq: 'Built-in', cstatz: '2–4 weeks', us: 'Under 1 hour' },
       { feature: 'Onboarding & migration included', playhq: false, cstatz: false, us: true },
-      { feature: 'Cost for a large club', tip: 'CricketStatz figures include their highest-tier subscription plus historical data charges.', textRow: true, billing: true, playhq: '—', cstatz: '~$600/yr + ~$400 historical', us: { monthly: '$49 / month', annual: '$400 / year' } },
+      { feature: 'Cost for a large club', tip: 'CricketStatz figures include their highest-tier subscription plus historical data charges. BetterStats is a flat rate — same fee for one team or fifty.', textRow: true, billing: true, playhq: '—', cstatz: '~$600/yr + ~$400 historical', us: { monthly: '$59 / month', annual: '$449 / year (flat rate)' } },
     ],
   },
 ]
