@@ -37,6 +37,7 @@ MANAGE_REPORTS = "manage_reports"             # approve/reject saved StatLab rep
 MANAGE_FAMILIES = "manage_families"           # create/edit player family groupings
 MANAGE_MANUAL_ENTRIES = "manage_manual_entries"  # historical manual stat entry + edit + undo
 MANAGE_FEES = "manage_fees"                   # fee tracking: members, schedule, match days
+MANAGE_FIXTURES = "manage_fixtures"           # BetterSelect: fixtures (partner sync + manual create/edit)
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -54,6 +55,7 @@ ALL_CAPABILITIES = (
     MANAGE_FAMILIES,
     MANAGE_MANUAL_ENTRIES,
     MANAGE_FEES,
+    MANAGE_FIXTURES,
 )
 
 
