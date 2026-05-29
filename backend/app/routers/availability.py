@@ -165,6 +165,20 @@ async def availability_matrix(
     for pid, name in sq_res.fetchall():
         squads_map.setdefault(pid, set()).add(name.strip())
 
+    # Manual squad assignments (team_members) — the admin's source of truth —
+    # unioned in so the squad filter reflects hand-picked members too, not just
+    # recent appearance history.
+    mem_res = await db.execute(
+        text(
+            "SELECT tm.player_id, t.name FROM team_members tm "
+            "JOIN teams t ON tm.team_id = t.id "
+            "WHERE tm.organisation_id = :org AND t.name IS NOT NULL AND t.name <> ''"
+        ),
+        {"org": club.id},
+    )
+    for pid, name in mem_res.fetchall():
+        squads_map.setdefault(pid, set()).add(name.strip())
+
     avail_map: dict[str, dict[str, dict]] = {}
     date_keys = list(by_date.keys())
     if date_keys:

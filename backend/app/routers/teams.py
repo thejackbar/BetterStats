@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,10 +23,14 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
-from app.models.db import Grade, Organisation, Season, Team, User, get_db
+from app.models.db import Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
 
 router = APIRouter(prefix="/teams", tags=["teams"])
+
+# Suggest players for a team's squad if they've appeared for it within this
+# many years (matches the availability "dormant" window).
+SQUAD_SUGGEST_YEARS = 2
 
 
 def _serialize(t: Team) -> dict:
@@ -236,3 +240,108 @@ async def seed_teams(
 
     await db.commit()
     return {"created": created, "total_discovered": len(discovered), "season": season_name}
+
+
+# ─── Squad membership (manual player <-> team) ──────────────────────────────
+
+class MemberAdd(BaseModel):
+    player_id: str
+
+
+@router.get("/{team_id}/members")
+async def list_team_members(
+    team_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """A team's squad: manually-assigned members + history-derived suggestions.
+
+    - members: players the admin has added to this team's squad.
+    - suggestions: players who appeared for this team (by name) within
+      SQUAD_SUGGEST_YEARS but aren't assigned yet — "add to squad" candidates.
+    """
+    team = await _get_owned_team(db, team_id, club.id)
+
+    mem_res = await db.execute(
+        text(
+            "SELECT tm.player_id, COALESCE(p.display_name_override, p.name) AS name, "
+            "p.player_role, p.status "
+            "FROM team_members tm JOIN players p ON tm.player_id = p.id "
+            "WHERE tm.team_id = :tid ORDER BY name"
+        ),
+        {"tid": team.id},
+    )
+    members = [
+        {"id": str(r[0]), "display_name": r[1], "player_role": r[2], "status": r[3]}
+        for r in mem_res.fetchall()
+    ]
+    member_ids = {m["id"] for m in members}
+
+    # Suggestions from appearance history for this team NAME, recent window only,
+    # excluding anyone already assigned.
+    cutoff = date.today() - timedelta(days=365 * SQUAD_SUGGEST_YEARS)
+    sug_res = await db.execute(
+        text(
+            "SELECT ga.player_id, COALESCE(p.display_name_override, p.name) AS name, "
+            "p.player_role, MAX(g.played_at) AS last_played, COUNT(*) AS apps "
+            "FROM game_appearances ga "
+            "JOIN games g ON ga.game_id = g.id "
+            "JOIN players p ON ga.player_id = p.id "
+            "WHERE p.organisation_id = :org AND ga.team_name = :tname "
+            "AND g.played_at >= :cutoff "
+            "GROUP BY ga.player_id, name, p.player_role "
+            "ORDER BY apps DESC, name"
+        ),
+        {"org": club.id, "tname": team.name, "cutoff": cutoff},
+    )
+    suggestions = [
+        {
+            "id": str(r[0]),
+            "display_name": r[1],
+            "player_role": r[2],
+            "last_played": r[3].isoformat() if r[3] else None,
+            "appearances": r[4],
+        }
+        for r in sug_res.fetchall()
+        if str(r[0]) not in member_ids
+    ]
+
+    return {"team_id": str(team.id), "team_name": team.name,
+            "members": members, "suggestions": suggestions}
+
+
+@router.post("/{team_id}/members", status_code=201)
+async def add_team_member(
+    team_id: str,
+    body: MemberAdd,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    team = await _get_owned_team(db, team_id, club.id)
+    pid = uuid.UUID(body.player_id)
+    player = await db.get(Player, pid)
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    existing = await db.get(TeamMember, {"team_id": team.id, "player_id": pid})
+    if existing:
+        return {"status": "exists"}
+    db.add(TeamMember(team_id=team.id, player_id=pid,
+                      organisation_id=club.id, added_by=user.id))
+    await db.commit()
+    return {"status": "added"}
+
+
+@router.delete("/{team_id}/members/{player_id}", status_code=204)
+async def remove_team_member(
+    team_id: str,
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    team = await _get_owned_team(db, team_id, club.id)
+    tm = await db.get(TeamMember, {"team_id": team.id, "player_id": uuid.UUID(player_id)})
+    if tm:
+        await db.delete(tm)
+        await db.commit()

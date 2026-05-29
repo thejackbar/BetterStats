@@ -281,6 +281,22 @@ class Team(Base):
     grade = relationship("Grade")
 
 
+class TeamMember(Base):
+    """BetterSelect: manual squad membership — a player in a team's pool.
+
+    Optional override on top of the club-wide model. History suggests who's
+    played for a team recently; this records the admin's actual squad. M2M:
+    a player can sit in several teams' squads.
+    """
+    __tablename__ = "team_members"
+
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), primary_key=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    added_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class PlayerAvailability(Base):
     """BetterSelect: a player's availability for a playing DATE (admin-recorded).
 
