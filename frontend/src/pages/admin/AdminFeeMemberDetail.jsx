@@ -159,7 +159,7 @@ function MatchDayRow({ row, rate, onSaved }) {
   return (
     <tr className="pb-hairline-t align-middle hover:bg-pb-surface2/40">
       <td className="py-2 pl-5 pr-3 font-mono text-[10px] text-pb-faintest whitespace-nowrap">{row.played_at || '—'}</td>
-      <td className="py-2 pr-3 text-pb-dim text-sm">
+      <td className="py-2 pr-3 text-pb-dim text-sm max-w-0">
         <div className="truncate">{row.match || row.grade || '—'}</div>
         {row.grade && row.match && <div className="font-mono text-[10px] text-pb-faintest truncate">{row.grade}</div>}
       </td>
@@ -256,7 +256,7 @@ export default function AdminFeeMemberDetail() {
 
   return (
     <AdminLayout>
-      <div className="max-w-3xl">
+      <div className="max-w-5xl">
         <Link to={`/admin/fees?season=${seasonId}`} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">← MEMBERS</Link>
         <div className="flex items-center gap-2 mt-2 mb-1">
           <h1 className="font-display font-bold text-2xl text-pb-text">{member.full_name}</h1>
@@ -363,7 +363,7 @@ export default function AdminFeeMemberDetail() {
         {data.match_days.length === 0 ? (
           <p className="font-mono text-[11px] text-pb-faint pb-card p-5">No match days recorded this season.</p>
         ) : (
-          <div className="pb-card overflow-hidden">
+          <div className="pb-card overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left bg-pb-surface2/40">
