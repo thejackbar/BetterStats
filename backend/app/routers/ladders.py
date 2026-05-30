@@ -16,13 +16,14 @@ Two surfaces:
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, Team, get_db
+from app.models.db import Grade, Organisation, Season, Team, get_db
 from app.routers.auth import get_current_club
 from app.routers.teams import ensure_team_grades, _grade_name_map
 from app.services import grassroots_scores_client
@@ -32,96 +33,63 @@ router = APIRouter(prefix="/ladders", tags=["ladders"])
 INACTIVE_DETAIL = "This club page is currently not available."
 
 
-# ── Defensive normalisation of the upstream ladder JSON ──────────────────────
+# ── Ladder JSON parsing ──────────────────────────────────────────────────────
+# Confirmed shape (live, May 2026):
+#   { "grade": {...}, "ladders": [ { "name": "Overall" | "2 Day+" | "One Day",
+#       "columns": [ {"id","heading","description"} ],
+#       "pools":   [ { "teams": [ {
+#           "id", "displayName", "rank", "owningOrganisation": {...},
+#           "ladderData": [ {"id": "competitionPoints", "val": 82}, ... ] } ] } ] } ] }
+# A grade can carry multiple ladder *views* (Overall / 2 Day+ / One Day) — the
+# same switcher the official site exposes via ?ladder=N.
 
-def _first(d: dict, *keys, default=None):
-    for k in keys:
-        if isinstance(d, dict) and d.get(k) is not None:
-            return d[k]
-    return default
-
-
-def _to_num(v):
-    if v is None:
-        return 0
-    try:
-        f = float(v)
-        return int(f) if f.is_integer() else round(f, 3)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _to_int(v):
-    if v is None:
-        return None
-    try:
-        return int(float(v))
-    except (TypeError, ValueError):
-        return None
+# Stats we surface, in display order. (id, fallback heading) — the API's own
+# column heading is preferred when present.
+LADDER_STATS = [
+    ("played", "P"), ("won", "W"), ("lost", "L"), ("ties", "T"),
+    ("noResults", "NR"), ("byes", "BYE"),
+    ("competitionPoints", "PTS"), ("quotient", "Q"), ("netRunRate", "NRR"),
+]
 
 
-def _extract_rows(data) -> list:
-    """Pull the list of standing rows out of whatever envelope the proxy uses."""
-    if data is None:
+def _row_stats(ladder_data) -> dict:
+    """ladderData: [{id, val}] -> {id: val}."""
+    return {d.get("id"): d.get("val") for d in (ladder_data or []) if isinstance(d, dict)}
+
+
+def _parse_ladder_payload(raw, club_keys: list) -> list:
+    """Turn the upstream payload into display-ready views:
+    [ {name, columns: [{id, heading}], rows: [{rank, team_name, logo_url,
+       is_club, stats: {stat_id: val}}]} ].
+    """
+    if not isinstance(raw, dict):
         return []
-    if isinstance(data, list):
-        return data
-    if not isinstance(data, dict):
-        return []
-    for key in ("ladder", "ladders", "standings", "rows", "items", "table", "entries"):
-        v = data.get(key)
-        if isinstance(v, list):
-            # Some shapes nest rows inside each ladder object.
-            if v and isinstance(v[0], dict) and any(rk in v[0] for rk in ("rows", "ladder", "standings", "entries")):
-                out: list = []
-                for grp in v:
-                    for rk in ("rows", "ladder", "standings", "entries"):
-                        if isinstance(grp.get(rk), list):
-                            out.extend(grp[rk])
-                return out
-            return v
-        if isinstance(v, dict):
-            for rk in ("rows", "ladder", "standings", "items", "entries"):
-                if isinstance(v.get(rk), list):
-                    return v[rk]
-    return []
-
-
-def _norm_row(row: dict, club_keys: list) -> dict:
-    team = row.get("team") if isinstance(row.get("team"), dict) else {}
-    comp = row.get("competitor") if isinstance(row.get("competitor"), dict) else {}
-    name = (
-        _first(row, "teamName", "name", "displayName")
-        or _first(team, "name", "displayName", "shortName")
-        or _first(comp, "name", "displayName")
-        or "—"
-    )
-    tid = _first(row, "teamId", "id") or _first(team, "id") or _first(comp, "id")
-    nlow = str(name).lower()
-    return {
-        "rank": _to_int(_first(row, "rank", "position", "pos", "order")),
-        "team_id": str(tid) if tid else None,
-        "team_name": name,
-        "played": _to_num(_first(row, "played", "matchesPlayed", "games", "p", "P")),
-        "won": _to_num(_first(row, "won", "wins", "w", "W")),
-        "lost": _to_num(_first(row, "lost", "losses", "l", "L")),
-        "drawn": _to_num(_first(row, "drawn", "draws", "d", "D")),
-        "tied": _to_num(_first(row, "tied", "ties", "t", "T")),
-        "no_result": _to_num(_first(row, "noResult", "noResults", "nr", "NR", "abandoned")),
-        "byes": _to_num(_first(row, "byes", "bye", "b", "B")),
-        "points": _to_num(_first(row, "points", "pts", "competitionPoints", "totalPoints")),
-        "quotient": _first(row, "quotient", "netRunRate", "nrr", "percentage", "runRate"),
-        "is_club": any(k and k in nlow for k in club_keys),
-    }
-
-
-def _normalize(raw, club_keys: list) -> list:
-    rows = [_norm_row(r, club_keys) for r in _extract_rows(raw) if isinstance(r, dict)]
-    if any(r["rank"] is not None for r in rows):
-        rows.sort(key=lambda r: r["rank"] if r["rank"] is not None else 9999)
-    else:
-        rows.sort(key=lambda r: r["points"], reverse=True)
-    return rows
+    views = []
+    for ladder in raw.get("ladders", []) or []:
+        if not isinstance(ladder, dict):
+            continue
+        headings = {c.get("id"): c.get("heading") for c in (ladder.get("columns") or []) if isinstance(c, dict)}
+        columns = [{"id": sid, "heading": headings.get(sid) or fb} for sid, fb in LADDER_STATS if sid in headings]
+        rows = []
+        for pool in (ladder.get("pools") or []):
+            for t in (pool.get("teams") or []):
+                if not isinstance(t, dict):
+                    continue
+                stats = _row_stats(t.get("ladderData"))
+                name = t.get("displayName") or "—"
+                org = t.get("owningOrganisation") or {}
+                hay = " ".join(str(x).lower() for x in [name, org.get("name"), org.get("shortName")] if x)
+                rows.append({
+                    "rank": t.get("rank"),
+                    "team_id": t.get("id"),
+                    "team_name": name,
+                    "logo_url": org.get("logoUrl"),
+                    "is_club": any(k and k in hay for k in club_keys),
+                    "stats": {sid: stats.get(sid) for sid, _ in LADDER_STATS},
+                })
+        rows.sort(key=lambda r: (r["rank"] is None, r["rank"] if r["rank"] is not None else 9999))
+        views.append({"name": ladder.get("name") or "Ladder", "columns": columns, "rows": rows})
+    return views
 
 
 async def _compute_team_ladders(db: AsyncSession, org: Organisation, auto_link: bool = True) -> dict:
@@ -140,14 +108,14 @@ async def _compute_team_ladders(db: AsyncSession, org: Organisation, auto_link: 
 
     async def one(t: Team) -> dict:
         raw = await grassroots_scores_client.get_grade_ladder(str(t.grade_id))
-        rows = _normalize(raw, club_keys)
+        views = _parse_ladder_payload(raw, club_keys)
         return {
             "team_id": str(t.id),
             "team_name": t.name,
             "grade_id": str(t.grade_id),
             "grade_name": grade_names.get(str(t.grade_id)),
-            "available": bool(rows),
-            "rows": rows,
+            "available": bool(views and any(v["rows"] for v in views)),
+            "views": views,
         }
 
     results = list(await asyncio.gather(*[one(t) for t in linked])) if linked else []
@@ -177,3 +145,31 @@ async def public_team_ladders(slug: str, db: AsyncSession = Depends(get_db)):
     data = await _compute_team_ladders(db, org, auto_link=False)
     # Public view: drop the admin-only "unlinked teams" hint.
     return {"teams": data["teams"]}
+
+
+@router.get("/grade/{grade_id}")
+async def grade_ladder(grade_id: str, db: AsyncSession = Depends(get_db)):
+    """Public ladder for a single grade — powers historical browsing (any
+    season). Standings are public, so no auth; the grade just has to belong to
+    an active club. Club rows are flagged via the owning org's name."""
+    try:
+        gid = uuid.UUID(grade_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    grade = await db.get(Grade, gid)
+    if not grade:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    season = await db.get(Season, grade.season_id) if grade.season_id else None
+    org = await db.get(Organisation, season.organisation_id) if season else None
+    if not org or not org.is_active:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    club_keys = [k.lower().strip() for k in [org.short_name, org.name, (org.name or "").split(" ")[0]] if k]
+    raw = await grassroots_scores_client.get_grade_ladder(str(gid))
+    views = _parse_ladder_payload(raw, club_keys)
+    return {
+        "grade_id": str(gid),
+        "grade_name": grade.display_name,
+        "season_name": season.name if season else None,
+        "available": bool(views and any(v["rows"] for v in views)),
+        "views": views,
+    }

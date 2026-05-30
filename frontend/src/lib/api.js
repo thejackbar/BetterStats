@@ -854,6 +854,7 @@ export const api = {
   bsTeamGradeOptions: () => request('/teams/grade-options'),
   bsTeamLadders: () => request('/ladders/teams'),
   laddersPublic: (slug) => request(`/ladders/public/${slug}`),
+  laddersGrade: (gradeId) => request(`/ladders/grade/${gradeId}`),
   bsCreateTeam: (data) =>
     request('/teams', { method: 'POST', body: JSON.stringify(data) }),
   bsUpdateTeam: (id, data) =>
