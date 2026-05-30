@@ -297,6 +297,59 @@ async def get_selection(
     }
 
 
+@router.get("/{fixture_id}/previous-xi")
+async def previous_xi(
+    fixture_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """The most recent prior fixture's named XI, for "fill from last week".
+
+    Looks back for the same team's last fixture (before this one's date) that has
+    a saved lineup; falls back to any of the club's prior fixtures with a lineup
+    if the team has no history. Returns player ids in batting order plus the
+    captain/keeper, so the selection board can seed empty slots.
+    """
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+
+    # Candidate prior fixtures: before this fixture's date (nulls last), newest
+    # first, same team preferred. We pick the first that actually has a lineup.
+    q = (
+        select(Fixture)
+        .where(
+            Fixture.organisation_id == club.id,
+            Fixture.id != fx.id,
+        )
+    )
+    if fx.played_on:
+        q = q.where(Fixture.played_on < fx.played_on)
+    q = q.order_by(Fixture.played_on.desc().nullslast(), Fixture.start_time.desc().nullslast())
+    prior = (await db.execute(q)).scalars().all()
+
+    # Prefer same-team history, then anything.
+    ordered = [f for f in prior if fx.team_id and f.team_id == fx.team_id] + \
+              [f for f in prior if not (fx.team_id and f.team_id == fx.team_id)]
+
+    for f in ordered:
+        rows = (await db.execute(
+            select(FixtureLineup).where(FixtureLineup.fixture_id == f.id)
+        )).scalars().all()
+        if not rows:
+            continue
+        rows.sort(key=lambda r: (r.batting_order or 999))
+        return {
+            "source_fixture_id": str(f.id),
+            "source_label": f.opponent_name or f.label,
+            "source_round": f.round,
+            "source_date": f.played_on.isoformat() if f.played_on else None,
+            "player_ids": [str(r.player_id) for r in rows],
+            "captain_id": next((str(r.player_id) for r in rows if r.is_captain), None),
+            "wicket_keeper_id": next((str(r.player_id) for r in rows if r.is_wicket_keeper), None),
+        }
+
+    return {"source_fixture_id": None, "player_ids": [], "captain_id": None, "wicket_keeper_id": None}
+
+
 @router.post("/default-team-size")
 async def set_default_team_size(
     body: TeamSizeSet,
