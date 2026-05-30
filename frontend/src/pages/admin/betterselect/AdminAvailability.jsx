@@ -18,6 +18,7 @@ const META = {
 }
 
 const SKILL_CODES = ['BAT', 'BWL', 'ALL', 'WKT']
+const STATUS_LABEL = { AVAILABLE: 'available', UNAVAILABLE: 'unavailable', MAYBE: 'maybe', NO_RESPONSE: 'no response' }
 // Roster visibility: default to current squad only (hides dormant + inactive).
 const ROSTER_OPTS = [
   { key: 'current', label: 'Current squad' },
@@ -54,6 +55,12 @@ export default function AdminAvailability() {
   const [role, setRole] = useState('')          // player_role, '' = any
   const [skill, setSkill] = useState('')        // skill code, '' = any
   const [respFilter, setRespFilter] = useState('') // availability status across shown dates, '' = any
+
+  // Bulk update: select players, then mark them all in one action.
+  const [selected, setSelected] = useState(() => new Set())
+  const [bulkStatus, setBulkStatus] = useState('AVAILABLE')
+  const [bulkDate, setBulkDate] = useState('ALL')   // 'ALL' = every shown date
+  const [applying, setApplying] = useState(false)
 
   const load = useCallback(() => {
     setData(null)
@@ -112,6 +119,45 @@ export default function AdminAvailability() {
     } catch (e) {
       toast.error('Save failed: ' + e.message)
       setAvail(a => ({ ...a, [pid]: { ...(a[pid] || {}), [date]: { status: cur } } }))
+    }
+  }
+
+  const toggleSelect = (pid) => setSelected(s => {
+    const n = new Set(s); n.has(pid) ? n.delete(pid) : n.add(pid); return n
+  })
+  const allFilteredSelected = filteredPlayers.length > 0 && filteredPlayers.every(p => selected.has(p.id))
+  const toggleSelectAll = () => setSelected(s => {
+    const n = new Set(s)
+    if (filteredPlayers.every(p => n.has(p.id))) filteredPlayers.forEach(p => n.delete(p.id))
+    else filteredPlayers.forEach(p => n.add(p.id))
+    return n
+  })
+
+  const applyBulk = async () => {
+    if (!canEdit || selected.size === 0) return
+    const targetDates = bulkDate === 'ALL' ? (data.dates || []).map(d => d.date) : [bulkDate]
+    const items = []
+    for (const pid of selected) for (const date of targetDates) items.push({ player_id: pid, date, status: bulkStatus })
+    if (!items.length) return
+    setApplying(true)
+    const prev = avail
+    setAvail(a => {
+      const next = { ...a }
+      for (const pid of selected) {
+        next[pid] = { ...(next[pid] || {}) }
+        for (const date of targetDates) next[pid][date] = { status: bulkStatus }
+      }
+      return next
+    })
+    try {
+      await api.bsBulkAvailability(items)
+      toast.success(`Marked ${selected.size} player${selected.size === 1 ? '' : 's'} ${STATUS_LABEL[bulkStatus]}${bulkDate === 'ALL' ? ' (all dates)' : ' for ' + fmtDay(bulkDate)}`)
+      setSelected(new Set())
+    } catch (e) {
+      setAvail(prev)
+      toast.error('Bulk update failed: ' + e.message)
+    } finally {
+      setApplying(false)
     }
   }
 
@@ -174,11 +220,47 @@ export default function AdminAvailability() {
         </div>
       </div>
 
+      {/* Bulk action bar — appears once players are ticked */}
+      {canEdit && selected.size > 0 && (
+        <div className="pb-card p-3 mb-3 flex flex-wrap items-center gap-3 border" style={{ borderColor: 'var(--pb-accent)' }}>
+          <span className="font-mono text-[11px] text-pb-accent">{selected.size} selected</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-[10px] text-pb-faintest">mark as</span>
+            <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}
+              className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+              <option value="AVAILABLE">✓ Available</option>
+              <option value="UNAVAILABLE">✕ Unavailable</option>
+              <option value="MAYBE">? Maybe</option>
+              <option value="NO_RESPONSE">– No response</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-[10px] text-pb-faintest">for</span>
+            <select value={bulkDate} onChange={e => setBulkDate(e.target.value)}
+              className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+              <option value="ALL">All shown dates</option>
+              {data.dates.map(d => <option key={d.date} value={d.date}>{fmtDay(d.date)}</option>)}
+            </select>
+          </div>
+          <button onClick={applyBulk} disabled={applying}
+            className="px-4 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
+            style={{ background: 'var(--pb-accent)' }}>
+            {applying ? 'Applying…' : 'Apply'}
+          </button>
+          <button onClick={() => setSelected(new Set())}
+            className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline px-1">Clear</button>
+        </div>
+      )}
+
       <div className="pb-card overflow-auto">
         <table className="border-collapse text-sm w-full">
           <thead>
             <tr>
               <th className="sticky left-0 z-20 bg-pb-surface2 text-left px-3 py-2 font-mono text-[10px] uppercase tracking-wide2 text-pb-faint min-w-[160px]">
+                {canEdit && (
+                  <input type="checkbox" checked={allFilteredSelected} onChange={toggleSelectAll}
+                    className="accent-pb-accent mr-2 align-middle" title="Select all shown" />
+                )}
                 Player
               </th>
               {data.dates.map(d => (
@@ -207,7 +289,11 @@ export default function AdminAvailability() {
             )}
             {filteredPlayers.map(p => (
               <tr key={p.id}>
-                <td className="sticky left-0 z-10 bg-pb-surface px-3 py-1.5 whitespace-nowrap border-t pb-hairline">
+                <td className={`sticky left-0 z-10 px-3 py-1.5 whitespace-nowrap border-t pb-hairline ${selected.has(p.id) ? 'bg-pb-accent/10' : 'bg-pb-surface'}`}>
+                  {canEdit && (
+                    <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelect(p.id)}
+                      className="accent-pb-accent mr-2 align-middle" />
+                  )}
                   <span className="text-sm">{p.display_name}</span>
                   {p.player_role && <span className="ml-2 font-mono text-[9px] text-pb-faintest uppercase">{p.player_role}</span>}
                   {p.is_inactive && <span className="ml-2 font-mono text-[9px] text-pb-red/80 uppercase" title="Marked inactive">inactive</span>}
