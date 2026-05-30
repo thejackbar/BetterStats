@@ -66,6 +66,7 @@ class Organisation(Base):
     # haven't appeared within this many months. Also bounds team squad
     # suggestions. Default 24 (migration 048).
     dormancy_months = Column(Integer, nullable=False, server_default="24", default=24)
+    default_team_size = Column(Integer, nullable=False, server_default="11", default=11)  # 0 = no limit
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

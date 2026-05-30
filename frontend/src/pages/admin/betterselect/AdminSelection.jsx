@@ -73,7 +73,7 @@ export default function AdminSelection() {
   const [data, setData] = useState(null)
   const [picked, setPicked] = useState([]) // ordered [{ player_id, is_captain, is_wicket_keeper }]
   const [search, setSearch] = useState('')
-  const [format, setFormat] = useState(12)
+  const [format, setFormat] = useState(11)  // overwritten by the club default on load
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
@@ -95,6 +95,7 @@ export default function AdminSelection() {
     api.bsGetSelection(fixtureId)
       .then(d => {
         setData(d)
+        setFormat(d.default_team_size ?? 11)  // club default (persisted), 11 a side by default
         setPicked((d.lineup || []).map(l => ({
           player_id: l.player_id, is_captain: l.is_captain, is_wicket_keeper: l.is_wicket_keeper,
         })))
@@ -192,6 +193,15 @@ export default function AdminSelection() {
       return next
     })
     setDirty(true)
+  }
+
+  // Team size is a persisted club default (so it survives a reload), editable
+  // here by selectors. Update locally first, then save in the background.
+  const changeFormat = async (size) => {
+    setFormat(size)
+    if (!canEdit) return
+    try { await api.bsSetDefaultTeamSize(size) }
+    catch (e) { toast.error('Could not save team size: ' + e.message) }
   }
 
   const save = async () => {
@@ -302,7 +312,7 @@ export default function AdminSelection() {
         </div>
         <div>
           <label className="font-mono text-[10px] text-pb-faintest block mb-1">Format</label>
-          <select value={format} onChange={e => setFormat(Number(e.target.value))}
+          <select value={format} onChange={e => changeFormat(Number(e.target.value))}
             className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
             {FORMATS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
           </select>

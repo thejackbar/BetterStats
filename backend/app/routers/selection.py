@@ -42,6 +42,10 @@ class LineupSet(BaseModel):
     players: list[LineupSlot]
 
 
+class TeamSizeSet(BaseModel):
+    size: int
+
+
 async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixture:
     f = await db.get(Fixture, uuid.UUID(fixture_id))
     if not f or f.organisation_id != club_id:
@@ -275,7 +279,24 @@ async def get_selection(
         ],
         "pool": pool,
         "dormancy_months": months,
+        "default_team_size": club.default_team_size if club.default_team_size is not None else 11,
     }
+
+
+@router.post("/default-team-size")
+async def set_default_team_size(
+    body: TeamSizeSet,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Persist the club's default lineup size (0 = no limit). Editable here by
+    selectors so the Selection format selector sticks across reloads."""
+    if body.size not in (0, 11, 12, 13):
+        raise HTTPException(status_code=400, detail="Invalid team size")
+    club.default_team_size = body.size
+    await db.commit()
+    return {"status": "ok", "default_team_size": body.size}
 
 
 @router.put("/{fixture_id}")

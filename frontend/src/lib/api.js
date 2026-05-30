@@ -885,6 +885,8 @@ export const api = {
   bsGetSelection: (fixtureId) => request(`/selection/${fixtureId}`),
   bsSetSelection: (fixtureId, players) =>
     request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players }) }),
+  bsSetDefaultTeamSize: (size) =>
+    request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
 
   // ─── BetterSelect: Player profile ───────────────────────
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),
