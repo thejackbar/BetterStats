@@ -34,6 +34,11 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS playhq_id TEXT"
         ))
+        # BetterSelect: player → selection-pool team assignment (migration 053).
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS squad_team_id UUID "
+            "REFERENCES teams(id) ON DELETE SET NULL"
+        ))
         await conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_player_org_playhq_id "
             "ON players(organisation_id, playhq_id) WHERE playhq_id IS NOT NULL"

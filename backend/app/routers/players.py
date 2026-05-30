@@ -5,7 +5,11 @@ from pydantic import BaseModel
 from typing import Optional
 import uuid
 
-from app.models.db import Player, User, PlayerSyncRequest, get_db
+from app.models.db import (
+    Player, User, PlayerSyncRequest, Team,
+    BattingInnings, BowlingSpell, FieldingStat, Game,
+    Fixture, FixtureLineup, PlayerAvailability, get_db,
+)
 from app.routers.auth import get_current_user
 from app.auth.capabilities import require_cap, MANAGE_PLAYERS
 from app.services.aggregations import (
@@ -520,11 +524,191 @@ async def rename_player(
 
 
 class PlayerProfileUpdate(BaseModel):
+    # All editable management fields. Callers (the legacy modal and the new
+    # BetterSelect Players screen) send a subset — only provided fields update.
     display_name_override: Optional[str] = None
+    player_role: Optional[str] = None
+    skill_positions: Optional[list[str]] = None  # e.g. ["BAT", "WKT"]
+    batting_hand: Optional[str] = None
+    bowling_action: Optional[str] = None
+    bowling_type: Optional[str] = None
+    is_opening_batsman: Optional[bool] = None
+    gender: Optional[str] = None
+    is_player: Optional[bool] = None
+    status: Optional[str] = None                  # active | inactive
     email: Optional[str] = None
     phone: Optional[str] = None
-    skill_positions: Optional[list[str]] = None  # e.g. ["BAT", "WKT"]
-    status: Optional[str] = None                  # active | inactive
+    squad_team_id: Optional[str] = None
+    is_overseas: Optional[bool] = None
+    overseas_country: Optional[str] = None
+
+
+def _profile_fields(player: Player) -> dict:
+    """The editable management fields, shared by GET and PATCH responses."""
+    return {
+        "id": str(player.id),
+        "name": player.name,
+        "display_name": player.display_name,
+        "display_name_override": player.display_name_override,
+        "player_role": player.player_role,
+        "skill_positions": player.skill_positions or [],
+        "batting_hand": player.batting_hand,
+        "bowling_action": player.bowling_action,
+        "bowling_type": player.bowling_type,
+        "is_opening_batsman": player.is_opening_batsman,
+        "gender": player.gender,
+        "is_player": player.is_player,
+        "status": player.status,
+        "email": player.email,
+        "phone": player.phone,
+        "photo_url": player.photo_url,
+        "playhq_id": player.playhq_id,
+        "squad_team_id": str(player.squad_team_id) if player.squad_team_id else None,
+        "is_overseas": player.is_overseas,
+        "overseas_country": player.overseas_country,
+    }
+
+
+async def _squad_obj(db: AsyncSession, player: Player) -> Optional[dict]:
+    """The player's assigned selection-pool team as {id, name}, or None."""
+    if not player.squad_team_id:
+        return None
+    try:
+        team = await db.get(Team, player.squad_team_id)
+        if team:
+            return {"id": str(team.id), "name": team.name}
+    except Exception:
+        pass
+    return None
+
+
+def _fmt_date_label(d) -> str:
+    try:
+        return d.strftime("%a %-d %b")
+    except Exception:
+        return d.isoformat() if d else ""
+
+
+async def _snapshot(db: AsyncSession, player: Player) -> dict:
+    """Selection-relevant signal for the profile panel.
+
+    Every piece is wrapped in try/except and defaults to []/0/None so a schema
+    mismatch on any stats table never 500s the whole profile.
+    """
+    snap = {
+        "availability_next": [],
+        "recent_batting": [],
+        "recent_bowling": [],
+        "season_catches": 0,
+        "last_picked": None,
+    }
+
+    # availability_next — next ~4 upcoming fixture dates with this player's
+    # recorded status (same source the matrix uses: Fixture.played_on, joined to
+    # PlayerAvailability on avail_date). Defaults to NO_RESPONSE.
+    try:
+        from datetime import date as _date
+        fx_res = await db.execute(
+            select(Fixture.played_on)
+            .where(
+                Fixture.organisation_id == player.organisation_id,
+                Fixture.played_on.isnot(None),
+                Fixture.played_on >= _date.today(),
+            )
+            .order_by(Fixture.played_on.asc())
+        )
+        dates = []
+        for (d,) in fx_res.all():
+            if d and d not in dates:
+                dates.append(d)
+            if len(dates) >= 4:
+                break
+        if dates:
+            av_res = await db.execute(
+                select(PlayerAvailability.avail_date, PlayerAvailability.status).where(
+                    PlayerAvailability.player_id == player.id,
+                    PlayerAvailability.avail_date.in_(dates),
+                )
+            )
+            by_date = {d: s for (d, s) in av_res.all()}
+            snap["availability_next"] = [
+                {
+                    "date": d.isoformat(),
+                    "label": _fmt_date_label(d),
+                    "status": by_date.get(d, "NO_RESPONSE"),
+                }
+                for d in dates
+            ]
+    except Exception:
+        snap["availability_next"] = []
+
+    # recent_batting — last 5 scores, most-recent-first (by game date).
+    try:
+        b_res = await db.execute(
+            select(BattingInnings.runs)
+            .join(Game, Game.id == BattingInnings.game_id)
+            .where(BattingInnings.player_id == player.id)
+            .order_by(Game.played_at.desc().nullslast(), BattingInnings.id.desc())
+            .limit(5)
+        )
+        snap["recent_batting"] = [int(r or 0) for (r,) in b_res.all()]
+    except Exception:
+        snap["recent_batting"] = []
+
+    # recent_bowling — last 5 {wickets, runs}, most-recent-first.
+    try:
+        bw_res = await db.execute(
+            select(BowlingSpell.wickets, BowlingSpell.runs)
+            .join(Game, Game.id == BowlingSpell.game_id)
+            .where(BowlingSpell.player_id == player.id)
+            .order_by(Game.played_at.desc().nullslast(), BowlingSpell.id.desc())
+            .limit(5)
+        )
+        snap["recent_bowling"] = [
+            {"wickets": int(w or 0), "runs": int(r or 0)} for (w, r) in bw_res.all()
+        ]
+    except Exception:
+        snap["recent_bowling"] = []
+
+    # season_catches — total catches across recorded fielding rows.
+    try:
+        c_res = await db.execute(
+            select(func.coalesce(func.sum(FieldingStat.catches), 0)).where(
+                FieldingStat.player_id == player.id
+            )
+        )
+        snap["season_catches"] = int(c_res.scalar() or 0)
+    except Exception:
+        snap["season_catches"] = 0
+
+    # last_picked — most recent fixture this player was named in.
+    try:
+        lp_res = await db.execute(
+            select(Fixture.round, Fixture.opponent_name, Fixture.played_on)
+            .join(FixtureLineup, FixtureLineup.fixture_id == Fixture.id)
+            .where(FixtureLineup.player_id == player.id)
+            .order_by(Fixture.played_on.desc().nullslast())
+            .limit(1)
+        )
+        row = lp_res.first()
+        if row:
+            rnd, opp, played = row
+            snap["last_picked"] = {
+                "round": rnd,
+                "opponent": opp,
+                "date": played.isoformat() if played else None,
+            }
+    except Exception:
+        snap["last_picked"] = None
+
+    return snap
+
+
+async def _full_profile(db: AsyncSession, player: Player) -> dict:
+    data = _profile_fields(player)
+    data["squad"] = await _squad_obj(db, player)
+    data["snapshot"] = await _snapshot(db, player)
+    return data
 
 
 @router.get("/{player_id}/profile")
@@ -533,20 +717,11 @@ async def get_player_profile(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_cap(MANAGE_PLAYERS)),
 ):
-    """Admin-editable BetterSelect attributes for a player."""
+    """All editable management fields + assigned squad + selection snapshot."""
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return {
-        "id": str(player.id),
-        "name": player.name,
-        "display_name": player.display_name,
-        "display_name_override": player.display_name_override,
-        "email": player.email,
-        "phone": player.phone,
-        "skill_positions": player.skill_positions or [],
-        "status": player.status,
-    }
+    return await _full_profile(db, player)
 
 
 @router.patch("/{player_id}/profile")
@@ -556,25 +731,22 @@ async def update_player_profile(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_cap(MANAGE_PLAYERS)),
 ):
-    """Update admin-managed player attributes (BetterSelect)."""
+    """Update admin-managed player attributes; returns the same shape as GET."""
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     data = body.model_dump(exclude_unset=True)
     if "status" in data and data["status"] not in (None, "active", "inactive"):
         raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
+    # squad_team_id arrives as a string (or None to unassign) — coerce to UUID.
+    if "squad_team_id" in data:
+        val = data.pop("squad_team_id")
+        player.squad_team_id = uuid.UUID(val) if val else None
     for key, value in data.items():
         setattr(player, key, value)
     await db.commit()
-    return {
-        "id": str(player.id),
-        "display_name": player.display_name,
-        "display_name_override": player.display_name_override,
-        "email": player.email,
-        "phone": player.phone,
-        "skill_positions": player.skill_positions or [],
-        "status": player.status,
-    }
+    await db.refresh(player)
+    return await _full_profile(db, player)
 
 
 @router.post("/{player_id}/claim")
