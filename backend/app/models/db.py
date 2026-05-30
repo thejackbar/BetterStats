@@ -177,6 +177,9 @@ class Player(Base):
     bowling_action = Column(Text, nullable=True)      # 'RIGHT_ARM' | 'LEFT_ARM'
     bowling_type = Column(Text, nullable=True)        # FAST|FAST_MEDIUM|MEDIUM|MEDIUM_FAST|FINGER_SPIN|WRIST_SPIN
     is_opening_batsman = Column(Boolean, nullable=True)
+    # BetterSelect: the player's single assigned selection-pool squad (migration
+    # 053). Distinct from the team_members M2M, which stays for suggestions.
+    squad_team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     # claimed / user_id retained as columns but no longer used in business logic
     claimed = Column(Boolean, default=False)
     user_id = Column(UUID(as_uuid=True), nullable=True)
