@@ -124,8 +124,9 @@ def _normalize(raw, club_keys: list) -> list:
     return rows
 
 
-async def _compute_team_ladders(db: AsyncSession, org: Organisation) -> dict:
-    await ensure_team_grades(db, org.id)  # self-link any teams missing a grade
+async def _compute_team_ladders(db: AsyncSession, org: Organisation, auto_link: bool = True) -> dict:
+    if auto_link:
+        await ensure_team_grades(db, org.id)  # self-link any teams missing a grade (admin only)
     teams = (await db.execute(
         select(Team)
         .where(Team.organisation_id == org.id, Team.is_active.is_(True))
@@ -172,6 +173,7 @@ async def public_team_ladders(slug: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Club not found")
     if not org.is_active:
         raise HTTPException(status_code=403, detail=INACTIVE_DETAIL)
-    data = await _compute_team_ladders(db, org)
+    # Read-only on public GETs — linking happens on the admin side.
+    data = await _compute_team_ladders(db, org, auto_link=False)
     # Public view: drop the admin-only "unlinked teams" hint.
     return {"teams": data["teams"]}

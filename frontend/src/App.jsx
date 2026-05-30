@@ -81,6 +81,7 @@ const BsTeams = lazy(() => import('./pages/admin/betterselect/AdminTeams'))
 const BsAvailability = lazy(() => import('./pages/admin/betterselect/AdminAvailability'))
 const BsSelection = lazy(() => import('./pages/admin/betterselect/AdminSelection'))
 const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminSelectionOverview'))
+const BsLadders = lazy(() => import('./pages/admin/betterselect/AdminLadders'))
 
 // Public club pages — lazy loaded (not needed for marketing visitors)
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -89,6 +90,7 @@ const PlayerProfile = lazy(() => import('./pages/PlayerProfile'))
 const PlayerComparison = lazy(() => import('./pages/PlayerComparison'))
 const Leaderboard = lazy(() => import('./pages/Leaderboard'))
 const Records = lazy(() => import('./pages/Records'))
+const Ladders = lazy(() => import('./pages/Ladders'))
 const ShareCard = lazy(() => import('./pages/ShareCard'))
 const StatLab = lazy(() => import('./pages/StatLab'))
 const Yearbook = lazy(() => import('./pages/Yearbook'))
@@ -180,6 +182,7 @@ export default function App() {
           <Route path="/admin/betterselect/availability" element={<ProtectedRoute><BsAvailability /></ProtectedRoute>} />
           <Route path="/admin/betterselect/selection" element={<ProtectedRoute><BsSelectionOverview /></ProtectedRoute>} />
           <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute><BsSelection /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/ladders" element={<ProtectedRoute><BsLadders /></ProtectedRoute>} />
 
           {/* Game-level pages */}
           <Route path="/games/:gameId" element={<MatchScorecard />} />
@@ -195,6 +198,7 @@ export default function App() {
           <Route path="/:clubSlug/compare" element={<PlayerComparison />} />
           <Route path="/:clubSlug/leaderboard" element={<Leaderboard />} />
           <Route path="/:clubSlug/records" element={<Records />} />
+          <Route path="/:clubSlug/ladders" element={<Ladders />} />
           <Route path="/:clubSlug/statlab" element={<StatLab />} />
           <Route path="/:clubSlug/statlab/r/:reportSlug" element={<StatLab />} />
           <Route path="/:clubSlug/games" element={<GamesPage />} />
