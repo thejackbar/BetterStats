@@ -13,8 +13,13 @@ import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
 import { Icon, Btn, Segmented, Empty } from './ui'
 
-// Team colour palette (fixed category tints — not the white-label accent).
-const TEAM_TINTS = ['#3b82f6', '#a855f7', '#f5b542', '#06b6d4', '#84cc16', '#f97316', '#ef5b5b', '#16c784']
+// Home/Away accent for the left edge of each row — fixed semantic colours
+// (green = home, red = away), NOT the club's white-label accent.
+function homeAwayColor(ha) {
+  if (ha === 'HOME') return 'var(--pb-positive)'
+  if (ha === 'AWAY') return 'var(--pb-red)'
+  return 'var(--pb-faintest)' // BYE / unknown
+}
 
 const EMPTY = {
   label: '', opponent_name: '', home_away: 'HOME', team_id: '',
@@ -105,25 +110,18 @@ export default function AdminFixtures() {
   const canManage = hasCapability(CAP.MANAGE_FIXTURES)
   const canSelect = hasCapability(CAP.MANAGE_SELECTIONS)
   const [fixtures, setFixtures] = useState(null)
-  const [scope, setScope] = useState('upcoming') // 'upcoming' | 'all'
+  const [scope, setScope] = useState('upcoming') // 'upcoming' | 'past' | 'all'
   const [teamFilter, setTeamFilter] = useState('all')
   const [editing, setEditing] = useState(undefined)
   const [syncing, setSyncing] = useState(false)
 
+  // Always fetch the full set; scope (upcoming/past/all) is a client-side cut so
+  // switching tabs is instant and "past" needs no extra endpoint.
   const load = useCallback(() => {
     setFixtures(null)
-    api.bsListFixtures(scope === 'upcoming').then(setFixtures).catch((e) => { toast.error(e.message); setFixtures([]) })
-  }, [scope, toast])
+    api.bsListFixtures(false).then(setFixtures).catch((e) => { toast.error(e.message); setFixtures([]) })
+  }, [toast])
   useEffect(() => { load() }, [load])
-
-  // Stable colour per team across the page.
-  const teamTint = useMemo(() => {
-    const names = [...new Set((fixtures || []).map((f) => f.team_name).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b))
-    const m = {}
-    names.forEach((n, i) => { m[n] = TEAM_TINTS[i % TEAM_TINTS.length] })
-    return m
-  }, [fixtures])
 
   const teamOptions = useMemo(() => {
     const seen = new Map()
@@ -132,10 +130,14 @@ export default function AdminFixtures() {
     return [{ value: 'all', label: 'Whole club' }, ...sorted.map(([name]) => ({ value: name, label: name }))]
   }, [fixtures])
 
-  // Group by weekend (Monday-anchored), newest-relevant first.
+  // Group by weekend (Monday-anchored). Scope cuts to upcoming/past/all; past
+  // shows most-recent first, upcoming/all soonest first.
   const groups = useMemo(() => {
     if (!fixtures) return null
-    const filtered = teamFilter === 'all' ? fixtures : fixtures.filter((f) => f.team_name === teamFilter)
+    const todayIso = isoLocal(new Date())
+    let filtered = teamFilter === 'all' ? fixtures : fixtures.filter((f) => f.team_name === teamFilter)
+    if (scope === 'upcoming') filtered = filtered.filter((f) => !f.played_on || f.played_on >= todayIso)
+    else if (scope === 'past') filtered = filtered.filter((f) => f.played_on && f.played_on < todayIso)
     const byWeek = new Map()
     filtered.forEach((f) => {
       const key = f.played_on ? isoLocal(mondayOf(new Date(f.played_on + 'T00:00:00'))) : 'undated'
@@ -143,8 +145,13 @@ export default function AdminFixtures() {
       byWeek.get(key).push(f)
     })
     const thisMon = isoLocal(mondayOf(new Date()))
+    const desc = scope === 'past'
     return [...byWeek.entries()]
-      .sort((a, b) => (a[0] === 'undated' ? 1 : b[0] === 'undated' ? -1 : a[0].localeCompare(b[0])))
+      .sort((a, b) => {
+        if (a[0] === 'undated') return 1
+        if (b[0] === 'undated') return -1
+        return desc ? b[0].localeCompare(a[0]) : a[0].localeCompare(b[0])
+      })
       .map(([week, list]) => ({
         week,
         current: week === thisMon,
@@ -152,7 +159,7 @@ export default function AdminFixtures() {
           (a.team_sequence ?? 99) - (b.team_sequence ?? 99)
           || (a.start_time || '').localeCompare(b.start_time || '')),
       }))
-  }, [fixtures, teamFilter])
+  }, [fixtures, teamFilter, scope])
 
   const sync = async () => {
     setSyncing(true)
@@ -175,17 +182,26 @@ export default function AdminFixtures() {
 
   return (
     <BetterSelectLayout title="Fixtures" actions={actions}>
-      <div className="flex flex-wrap items-center gap-3 mb-4">
+      <div className="flex flex-wrap items-center gap-3 mb-2">
         <Segmented value={teamFilter} onChange={setTeamFilter} options={teamOptions} />
         <div className="ml-auto flex items-center gap-2">
-          <Segmented value={scope} onChange={setScope} sm options={[{ value: 'upcoming', label: 'Upcoming' }, { value: 'all', label: 'All' }]} />
+          <Segmented value={scope} onChange={setScope} sm options={[
+            { value: 'upcoming', label: 'Upcoming' },
+            { value: 'past', label: 'Past' },
+            { value: 'all', label: 'All' },
+          ]} />
         </div>
+      </div>
+      <div className="flex items-center gap-4 mb-4 font-mono text-[10px] text-pb-faint">
+        <span className="inline-flex items-center gap-1.5"><span className="w-[3px] h-3 rounded-sm" style={{ background: 'var(--pb-positive)' }} /> Home</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-[3px] h-3 rounded-sm" style={{ background: 'var(--pb-red)' }} /> Away</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: 'color-mix(in srgb, var(--pb-positive) 25%, transparent)' }} /> XI named</span>
       </div>
 
       {groups === null ? <PbSpinner message="Loading fixtures…" /> : (
         groups.length === 0 ? (
           <div className="pb-card px-5 py-12 text-center">
-            <Empty className="mb-4">{scope === 'upcoming' ? 'No upcoming fixtures.' : 'No fixtures yet.'}{canManage && ' Sync from PlayHQ or add one manually.'}</Empty>
+            <Empty className="mb-4">{scope === 'upcoming' ? 'No upcoming fixtures.' : scope === 'past' ? 'No past fixtures.' : 'No fixtures yet.'}{canManage && scope !== 'past' && ' Sync from PlayHQ or add one manually.'}</Empty>
             {canManage && (
               <div className="flex gap-2 justify-center">
                 <Btn variant="soft" sm icon="bolt" onClick={sync} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync PlayHQ'}</Btn>
@@ -207,12 +223,16 @@ export default function AdminFixtures() {
                   </div>
                   {games.map((g, gi) => {
                     const bye = g.home_away === 'BYE'
-                    const tint = teamTint[g.team_name] || 'var(--pb-dim)'
                     const named = (g.lineup_count || 0) > 0
                     const isCurrentTop = current && (g.team_sequence ?? 99) <= 1
                     return (
-                      <div key={g.id} className={`flex items-center gap-4 px-[18px] py-3 ${gi > 0 ? 'border-t pb-hairline' : ''}`}>
-                        <span className="font-display font-bold text-[13.5px] w-[64px] shrink-0 truncate" style={{ color: tint }}>{g.team_short || g.team_name || '—'}</span>
+                      <div key={g.id}
+                        className={`relative flex items-center gap-4 pl-[22px] pr-[18px] py-3 ${gi > 0 ? 'border-t pb-hairline' : ''}`}
+                        style={{ background: named ? 'color-mix(in srgb, var(--pb-positive) 6%, transparent)' : 'transparent' }}>
+                        {/* Home/away accent bar on the far left */}
+                        <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: homeAwayColor(g.home_away) }}
+                          title={g.home_away === 'HOME' ? 'Home' : g.home_away === 'AWAY' ? 'Away' : 'Bye'} />
+                        <span className="font-display font-bold text-[13.5px] w-[64px] shrink-0 truncate text-pb-text">{g.team_short || g.team_name || '—'}</span>
                         {g.grade_name && <span className="font-mono text-[10px] text-pb-faint w-[60px] shrink-0 truncate">{g.grade_name}</span>}
                         <span className="w-px h-6 bg-pb-hairline shrink-0" />
                         <div className="flex-1 min-w-0">
@@ -227,9 +247,9 @@ export default function AdminFixtures() {
                         </div>
                         {named && <span className="font-mono text-[9px] text-pb-positive bg-pb-positive/12 px-1.5 py-0.5 rounded shrink-0">XI named</span>}
                         {!bye && canSelect && (
-                          isCurrentTop
-                            ? <Btn variant="primary" sm icon="selection" onClick={() => navigate(`/admin/betterselect/select/${g.id}`)}>Pick team</Btn>
-                            : <Btn variant="ghost" sm icon="selection" onClick={() => navigate(`/admin/betterselect/select/${g.id}`)}>Select</Btn>
+                          <Btn variant={isCurrentTop ? 'primary' : 'ghost'} sm onClick={() => navigate(`/admin/betterselect/select/${g.id}`)}>
+                            {isCurrentTop ? 'Pick team' : 'Select'}
+                          </Btn>
                         )}
                         {canManage && (
                           <div className="flex gap-1 shrink-0">
