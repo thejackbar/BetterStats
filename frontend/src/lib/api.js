@@ -891,6 +891,8 @@ export const api = {
     request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players }) }),
   bsSetDefaultTeamSize: (size) =>
     request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
+  // The previous fixture's named XI (for Selection's "fill from last week").
+  bsPreviousXI: (fixtureId) => request(`/selection/${fixtureId}/previous-xi`),
 
   // ─── BetterSelect: Player profile ───────────────────────
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),

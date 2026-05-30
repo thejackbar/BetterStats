@@ -81,6 +81,7 @@ export default function AdminSelection() {
   const [showSheet, setShowSheet] = useState(false)
   const [copied, setCopied] = useState(false)
   const [allFixtures, setAllFixtures] = useState([])
+  const [prevXI, setPrevXI] = useState(null) // { player_ids, captain_id, wicket_keeper_id, source_* }
 
   const dragId = useRef(null)       // pool player being dragged
   const dragSlot = useRef(null)     // slot index being dragged (reorder)
@@ -107,6 +108,7 @@ export default function AdminSelection() {
 
   useEffect(() => { load() }, [load])
   useEffect(() => { api.bsSelectionOverview().then((d) => setAllFixtures(d.fixtures || [])).catch(() => {}) }, [])
+  useEffect(() => { setPrevXI(null); api.bsPreviousXI(fixtureId).then(setPrevXI).catch(() => setPrevXI(null)) }, [fixtureId])
 
   const fx = data?.fixture
   const poolById = useMemo(() => {
@@ -224,12 +226,23 @@ export default function AdminSelection() {
     return out
   }, [slots, data, cmp])
 
-  const autofill = () => {
+  // Fill empty slots. With `useLastWeek`, seed position-by-position from the
+  // previous XI first (skipping anyone now unavailable/clashing/already in),
+  // then top up remaining gaps with the best available player.
+  const fillEmpty = (useLastWeek) => {
     if (!canEdit) return
+    const okToPick = (p) => p && !(p.clash?.length > 0) && p.availability !== 'UNAVAILABLE'
     setSlots((prev) => {
       const next = [...prev]
       const taken = new Set(next.filter(Boolean))
-      const avail = (data?.pool || []).filter((p) => !(p.clash?.length > 0) && p.availability !== 'UNAVAILABLE')
+      if (useLastWeek && prevXI?.player_ids?.length) {
+        prevXI.player_ids.forEach((pid, i) => {
+          if (i >= next.length || next[i]) return
+          const p = poolById[pid]
+          if (p && !taken.has(pid) && okToPick(p)) { next[i] = pid; taken.add(pid) }
+        })
+      }
+      const avail = (data?.pool || []).filter(okToPick)
       next.forEach((id, i) => {
         if (id) return
         const fit = avail.filter((p) => !taken.has(p.id) && fitsSlot(p, i)).sort(cmp)
@@ -239,6 +252,11 @@ export default function AdminSelection() {
       })
       return next
     })
+    // Carry captain/keeper from last week if those slots are otherwise unset.
+    if (useLastWeek && prevXI) {
+      if (!capId && prevXI.captain_id && poolById[prevXI.captain_id]) setCapId(prevXI.captain_id)
+      if (!wkId && prevXI.wicket_keeper_id && poolById[prevXI.wicket_keeper_id]) setWkId(prevXI.wicket_keeper_id)
+    }
     markDirty()
   }
 
@@ -331,9 +349,11 @@ export default function AdminSelection() {
   const capOk = capId && filled.includes(capId)
   const wkOk = wkId && filled.includes(wkId)
 
+  const hasPrev = (prevXI?.player_ids?.length || 0) > 0
   const actions = canEdit && (
     <div className="flex gap-2">
-      {hasEmpty && <Btn variant="ghost" sm icon="bolt" onClick={autofill}>Auto-fill</Btn>}
+      {hasEmpty && hasPrev && <Btn variant="ghost" sm icon="bolt" onClick={() => fillEmpty(true)} title="Seed empty slots from last week's XI, then top up">Fill from last week</Btn>}
+      {hasEmpty && <Btn variant="ghost" sm icon="bolt" onClick={() => fillEmpty(false)}>Auto-fill</Btn>}
       <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}>Share</Btn>
       <Btn variant="primary" sm icon="check" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : dirty ? `Save XI (${count})` : 'Saved'}</Btn>
     </div>
