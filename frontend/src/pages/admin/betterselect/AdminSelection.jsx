@@ -7,28 +7,13 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner, Btn } from '../../../lib/presskit'
-import { AVAILABILITY, AVAIL_STATUSES } from '../../../lib/availability'
+import { AVAIL_RANK } from './selection/shared'
+import SelectionFilters from './selection/SelectionFilters'
+import TeamSheet from './selection/TeamSheet'
+import PlayerPool from './selection/PlayerPool'
 
-// Row state → tint. Order of precedence handled in rowState().
-const ROW_TINT = {
-  CLASH:       'bg-pb-red/15',
-  UNAVAILABLE: 'bg-pb-red/5',
-  AVAILABLE:   'bg-pb-accent/5',
-  MAYBE:       'bg-amber-400/5',
-  DORMANT:     'bg-amber-400/[0.03]',
-  NONE:        '',
-}
-const AVAIL_META = Object.fromEntries(
-  AVAIL_STATUSES.map((s) => [s, { dot: AVAILABILITY[s].dot, label: AVAILABILITY[s].label }]),
-)
-const AVAIL_RANK = Object.fromEntries(AVAIL_STATUSES.map((s) => [s, AVAILABILITY[s].rank]))
-const SKILL_LABELS = { BAT: 'Batsman', BWL: 'Bowler', ALL: 'All Rounder', WKT: 'Wicketkeeper' }
-const BAT_HANDS = { LEFT: 'Left handed', RIGHT: 'Right handed' }
-const BOWL_ACTIONS = { RIGHT_ARM: 'Right arm', LEFT_ARM: 'Left arm' }
-const BOWL_TYPES = {
-  FAST: 'Fast', FAST_MEDIUM: 'Fast medium', MEDIUM: 'Medium',
-  MEDIUM_FAST: 'Medium fast', FINGER_SPIN: 'Finger spinner', WRIST_SPIN: 'Wrist spinner',
-}
+// Status meta, row tints and the Avatar / roleText / rowState helpers live in
+// ./selection/shared, shared with the extracted TeamSheet / PlayerPool / SelectionFilters.
 const FORMATS = [
   { key: 11, label: '11 a side' },
   { key: 12, label: '12 (incl. 12th man)' },
@@ -52,16 +37,6 @@ function fmtHeader(fx) {
   return { title, sub: bits.join(', ') }
 }
 
-function Avatar({ p }) {
-  if (p.photo_url) return <img src={p.photo_url} alt="" className="w-7 h-7 rounded-full object-cover bg-pb-surface2" />
-  const initials = (p.display_name || '?').split(/[ ,]+/).filter(Boolean).slice(0, 2).map(s => s[0]).join('').toUpperCase()
-  return <span className="w-7 h-7 rounded-full bg-pb-surface2 text-pb-faint text-[10px] font-mono flex items-center justify-center">{initials}</span>
-}
-
-function roleText(p) {
-  return p.skill_positions?.length ? p.skill_positions.join(' ') : (p.player_role || '—')
-}
-
 export default function AdminSelection() {
   const { fixtureId } = useParams()
   const navigate = useNavigate()
@@ -72,7 +47,7 @@ export default function AdminSelection() {
   const [data, setData] = useState(null)
   const [picked, setPicked] = useState([]) // ordered [{ player_id, is_captain, is_wicket_keeper }]
   const [search, setSearch] = useState('')
-  const [format, setFormat] = useState(12)
+  const [format, setFormat] = useState(11)  // overwritten by the club default on load
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
@@ -94,6 +69,7 @@ export default function AdminSelection() {
     api.bsGetSelection(fixtureId)
       .then(d => {
         setData(d)
+        setFormat(d.default_team_size ?? 11)  // club default (persisted), 11 a side by default
         setPicked((d.lineup || []).map(l => ({
           player_id: l.player_id, is_captain: l.is_captain, is_wicket_keeper: l.is_wicket_keeper,
         })))
@@ -150,15 +126,10 @@ export default function AdminSelection() {
     setFBatHand(new Set()); setFBowlAction(new Set()); setFBowlType(new Set()); setFActivity(new Set())
   }
 
-  // Tint a pool row by its most salient state.
-  const rowState = (p) => {
-    if (p.clash?.length > 0) return 'CLASH'
-    if (p.availability === 'UNAVAILABLE') return 'UNAVAILABLE'
-    if (p.availability === 'AVAILABLE') return 'AVAILABLE'
-    if (p.availability === 'MAYBE') return 'MAYBE'
-    if (p.is_dormant) return 'DORMANT'
-    return 'NONE'
-  }
+  // Facet plumbing for the SelectionFilters panel: one dispatcher + a snapshot.
+  const FACET_SETTERS = { squads: setFSquads, roles: setFRoles, avail: setFAvail, batHand: setFBatHand, bowlAction: setFBowlAction, bowlType: setFBowlType, activity: setFActivity }
+  const toggleFacet = (key, val) => toggleIn(FACET_SETTERS[key])(val)
+  const facets = { squads: fSquads, roles: fRoles, avail: fAvail, batHand: fBatHand, bowlAction: fBowlAction, bowlType: fBowlType, activity: fActivity }
 
   const add = (p) => {
     if (!canEdit) return
@@ -191,6 +162,15 @@ export default function AdminSelection() {
       return next
     })
     setDirty(true)
+  }
+
+  // Team size is a persisted club default (so it survives a reload), editable
+  // here by selectors. Update locally first, then save in the background.
+  const changeFormat = async (size) => {
+    setFormat(size)
+    if (!canEdit) return
+    try { await api.bsSetDefaultTeamSize(size) }
+    catch (e) { toast.error('Could not save team size: ' + e.message) }
   }
 
   const save = async () => {
@@ -301,7 +281,7 @@ export default function AdminSelection() {
         </div>
         <div>
           <label className="font-mono text-[10px] text-pb-faintest block mb-1">Format</label>
-          <select value={format} onChange={e => setFormat(Number(e.target.value))}
+          <select value={format} onChange={e => changeFormat(Number(e.target.value))}
             className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
             {FORMATS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
           </select>
@@ -319,37 +299,13 @@ export default function AdminSelection() {
 
       {/* Filter panel */}
       {showFilters && (
-        <div className="pb-card p-4 mb-3">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-mono text-[11px] uppercase tracking-wide2 text-pb-faint">Filters</h3>
-            {filterCount > 0 && <button onClick={clearFilters} className="text-xs text-pb-accent hover:underline">Clear settings</button>}
-          </div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            <FilterGroup title="Squads">
-              {squadOptions.length === 0 && <p className="text-pb-faintest text-xs">No squads found.</p>}
-              {squadOptions.map(sq => <FilterCheck key={sq} label={sq} checked={fSquads.has(sq)} onChange={() => toggleIn(setFSquads)(sq)} />)}
-            </FilterGroup>
-            <FilterGroup title="Specialist roles">
-              {Object.entries(SKILL_LABELS).map(([code, label]) => <FilterCheck key={code} label={label} checked={fRoles.has(code)} onChange={() => toggleIn(setFRoles)(code)} />)}
-            </FilterGroup>
-            <FilterGroup title="Availability">
-              {['AVAILABLE', 'MAYBE', 'NO_RESPONSE', 'UNAVAILABLE'].map(s => <FilterCheck key={s} label={AVAIL_META[s].label} checked={fAvail.has(s)} onChange={() => toggleIn(setFAvail)(s)} />)}
-            </FilterGroup>
-            <FilterGroup title="Batting">
-              {Object.entries(BAT_HANDS).map(([v, l]) => <FilterCheck key={v} label={l} checked={fBatHand.has(v)} onChange={() => toggleIn(setFBatHand)(v)} />)}
-            </FilterGroup>
-            <FilterGroup title="Bowling — action">
-              {Object.entries(BOWL_ACTIONS).map(([v, l]) => <FilterCheck key={v} label={l} checked={fBowlAction.has(v)} onChange={() => toggleIn(setFBowlAction)(v)} />)}
-            </FilterGroup>
-            <FilterGroup title="Bowling — type">
-              {Object.entries(BOWL_TYPES).map(([v, l]) => <FilterCheck key={v} label={l} checked={fBowlType.has(v)} onChange={() => toggleIn(setFBowlType)(v)} />)}
-            </FilterGroup>
-            <FilterGroup title="Activity">
-              <FilterCheck label="Active" checked={fActivity.has('ACTIVE')} onChange={() => toggleIn(setFActivity)('ACTIVE')} />
-              <FilterCheck label="Dormant" checked={fActivity.has('DORMANT')} onChange={() => toggleIn(setFActivity)('DORMANT')} />
-            </FilterGroup>
-          </div>
-        </div>
+        <SelectionFilters
+          squadOptions={squadOptions}
+          filterCount={filterCount}
+          onClear={clearFilters}
+          facets={facets}
+          onToggle={toggleFacet}
+        />
       )}
 
       {/* Legend */}
@@ -363,141 +319,24 @@ export default function AdminSelection() {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        {/* Team sheet (drag to reorder) */}
-        <div className="pb-card overflow-hidden">
-          <div className="px-4 py-2.5 border-b pb-hairline flex items-center justify-between">
-            <h3 className="font-mono text-[11px] uppercase tracking-wide2 text-pb-faint">Team sheet · {picked.length}</h3>
-            {canEdit && picked.length > 1 && <span className="font-mono text-[9px] text-pb-faintest">drag to reorder</span>}
-          </div>
-          <div className="overflow-auto max-h-[62vh]">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-pb-faintest font-mono text-[9px] uppercase tracking-wide2">
-                  <th className="text-left px-2 py-1.5 w-8">#</th>
-                  <th className="text-left px-1 py-1.5 w-8">AVL</th>
-                  <th className="text-left px-1 py-1.5">Player</th>
-                  <th className="text-left px-1 py-1.5">Roles</th>
-                  {canEdit && <th className="px-1 py-1.5 w-24"></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {picked.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-pb-faint">Add players from the pool →</td></tr>
-                )}
-                {picked.map((sel, i) => {
-                  const p = poolById[sel.player_id]
-                  if (!p) return null
-                  const m = AVAIL_META[p.availability] || AVAIL_META.NO_RESPONSE
-                  return (
-                    <tr key={sel.player_id}
-                      draggable={canEdit}
-                      onDragStart={() => onDragStart(i)}
-                      onDragOver={onDragOver}
-                      onDrop={() => onDrop(i)}
-                      className={`border-t pb-hairline ${canEdit ? 'cursor-grab active:cursor-grabbing' : ''}`}>
-                      <td className="px-2 py-1.5 font-mono text-[11px] text-pb-faintest">{i + 1}</td>
-                      <td className="px-1 py-1.5"><span className={`inline-block w-2.5 h-2.5 rounded-full ${m.dot}`} title={m.label} /></td>
-                      <td className="px-1 py-1.5">
-                        <span className="flex items-center gap-2 min-w-0">
-                          {canEdit && <span className="text-pb-faintest text-xs">⠿</span>}
-                          <Avatar p={p} />
-                          <span className="truncate">
-                            {p.display_name}
-                            {(sel.is_captain || sel.is_wicket_keeper) && (
-                              <span className="ml-1.5 font-mono text-[9px] text-pb-accent">{[sel.is_captain && '(C)', sel.is_wicket_keeper && '(WK)'].filter(Boolean).join(' ')}</span>
-                            )}
-                          </span>
-                        </span>
-                      </td>
-                      <td className="px-1 py-1.5 text-pb-faint text-xs">{roleText(p)}</td>
-                      {canEdit && (
-                        <td className="px-1 py-1.5">
-                          <span className="flex items-center justify-end gap-1">
-                            <button onClick={() => toggleFlag(sel.player_id, 'is_captain')}
-                              className={`font-mono text-[10px] px-1 rounded border ${sel.is_captain ? 'bg-pb-accent/15 text-pb-accent border-pb-accent/40' : 'pb-hairline text-pb-faintest'}`} title="Captain">C</button>
-                            <button onClick={() => toggleFlag(sel.player_id, 'is_wicket_keeper')}
-                              className={`font-mono text-[10px] px-1 rounded border ${sel.is_wicket_keeper ? 'bg-pb-accent/15 text-pb-accent border-pb-accent/40' : 'pb-hairline text-pb-faintest'}`} title="Keeper">WK</button>
-                            <button onClick={() => remove(sel.player_id)} className="text-pb-faintest hover:text-pb-red text-xs" title="Remove">✕</button>
-                          </span>
-                        </td>
-                      )}
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <TeamSheet
+          picked={picked}
+          poolById={poolById}
+          canEdit={canEdit}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          onToggleFlag={toggleFlag}
+          onRemove={remove}
+        />
 
-        {/* Available pool — row-tinted by state */}
-        <div className="pb-card overflow-hidden">
-          <div className="px-4 py-2.5 border-b pb-hairline">
-            <h3 className="font-mono text-[11px] uppercase tracking-wide2 text-pb-faint">Available · {available.length}</h3>
-          </div>
-          <div className="overflow-auto max-h-[62vh]">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-pb-faintest font-mono text-[9px] uppercase tracking-wide2">
-                  <th className="text-left px-2 py-1.5 w-8">AVL</th>
-                  <th className="text-left px-1 py-1.5">Player</th>
-                  <th className="text-left px-1 py-1.5">Roles</th>
-                  <th className="text-left px-1 py-1.5">Squad</th>
-                </tr>
-              </thead>
-              <tbody>
-                {available.length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-pb-faint">No players match these filters.</td></tr>
-                )}
-                {available.map(p => {
-                  const m = AVAIL_META[p.availability] || AVAIL_META.NO_RESPONSE
-                  const blocked = p.clash?.length > 0
-                  const tint = ROW_TINT[rowState(p)] || ''
-                  return (
-                    <tr key={p.id}
-                      onClick={() => add(p)}
-                      title={blocked ? `Already picked for ${p.clash.join(', ')}` : undefined}
-                      className={`border-t pb-hairline ${tint} ${canEdit && !blocked ? 'cursor-pointer hover:brightness-125' : blocked ? 'opacity-70 cursor-not-allowed' : ''}`}>
-                      <td className="px-2 py-1.5"><span className={`inline-block w-2.5 h-2.5 rounded-full ${m.dot}`} title={m.label} /></td>
-                      <td className="px-1 py-1.5">
-                        <span className="flex items-center gap-2 min-w-0">
-                          <Avatar p={p} />
-                          <span className="truncate">
-                            {p.display_name}
-                            {p.is_dormant && <span className="ml-1.5 font-mono text-[9px] text-amber-300/70 uppercase">dormant</span>}
-                            {blocked && <span className="ml-1.5 font-mono text-[9px] text-pb-red/90">⛔ {p.clash.join(', ')}</span>}
-                          </span>
-                        </span>
-                      </td>
-                      <td className="px-1 py-1.5 text-pb-faint text-xs">{roleText(p)}</td>
-                      <td className="px-1 py-1.5 text-pb-faintest text-xs truncate max-w-[140px]">{p.squads?.join(' · ') || '—'}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <PlayerPool available={available} canEdit={canEdit} onAdd={add} />
       </div>
     </BetterSelectLayout>
   )
 }
 
-function FilterGroup({ title, children }) {
-  return (
-    <div>
-      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2 pb-1.5 border-b pb-hairline">{title}</div>
-      <div className="space-y-1.5">{children}</div>
-    </div>
-  )
-}
-function FilterCheck({ label, checked, onChange }) {
-  return (
-    <label className="flex items-center gap-2 text-sm text-pb-faint hover:text-pb-text cursor-pointer">
-      <input type="checkbox" checked={checked} onChange={onChange} className="accent-pb-accent" />
-      {label}
-    </label>
-  )
-}
+// FilterGroup + FilterCheck now live in lib/filters (shared with Availability).
 function LegendDot({ cls, label }) {
   return <span className="flex items-center gap-1.5"><span className={`inline-block w-2.5 h-2.5 rounded-full ${cls}`} /> {label}</span>
 }

@@ -1,7 +1,22 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
+import { api } from '../../lib/api'
+import { useClubTheme } from '../../hooks/useClubTheme'
+
+// Club branding is identical for every BetterSelect page, so fetch the club
+// settings once per session and reuse them — navigating between tools shouldn't
+// refetch. Feeds the layout the club's palette (useClubTheme), logo and name.
+let _clubCache = null
+let _clubPromise = null
+function loadClubBranding() {
+  if (_clubCache) return Promise.resolve(_clubCache)
+  if (!_clubPromise) {
+    _clubPromise = api.adminGetSettings().then(s => { _clubCache = s; return s }).catch(() => null)
+  }
+  return _clubPromise
+}
 
 // BetterSelect runs as its own module surface — a focused nav with just the
 // availability/selection tools, separate from the main admin "noise".
@@ -19,6 +34,9 @@ export default function BetterSelectLayout({ children, title, actions }) {
   const location = useLocation()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [club, setClub] = useState(_clubCache)
+  useEffect(() => { loadClubBranding().then(s => { if (s) setClub(s) }) }, [])
+  useClubTheme(club)  // inject the club's white-label palette (accent etc.)
 
   const items = NAV.filter(i => i.cap == null || hasCapability(i.cap))
 
@@ -39,8 +57,16 @@ export default function BetterSelectLayout({ children, title, actions }) {
 
   const Brand = () => (
     <div className="px-4 py-4 border-b pb-hairline">
-      <span className="font-display font-bold text-lg">Better<span className="text-pb-accent">Select</span></span>
-      <Link to="/admin" className="block mt-1 text-[11px] font-mono text-pb-faintest hover:text-pb-faint">← Back to admin</Link>
+      <div className="flex items-center gap-2.5">
+        {club?.logo_url
+          ? <img src={club.logo_url} alt="" className="w-8 h-8 rounded object-contain bg-pb-surface2 shrink-0" />
+          : <span className="w-8 h-8 rounded bg-pb-accent/15 text-pb-accent font-display font-bold flex items-center justify-center shrink-0">{(club?.name || 'B')[0]}</span>}
+        <div className="min-w-0">
+          <div className="font-display font-bold text-sm leading-tight truncate" title={club?.name || ''}>{club?.name || 'BetterStats'}</div>
+          <div className="font-mono text-[10px] text-pb-faint">Better<span className="text-pb-accent">Select</span></div>
+        </div>
+      </div>
+      <Link to="/admin" className="block mt-2 text-[11px] font-mono text-pb-faintest hover:text-pb-faint">← Back to admin</Link>
     </div>
   )
 
