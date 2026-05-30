@@ -4,7 +4,8 @@ import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import LadderBoard from '../../../components/LadderBoard'
 import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
-import { PbSpinner, Btn } from '../../../lib/presskit'
+import { PbSpinner } from '../../../lib/presskit'
+import { Btn } from './ui'
 
 export default function AdminLadders() {
   const toast = useToast()
@@ -22,7 +23,7 @@ export default function AdminLadders() {
 
   useEffect(() => { load() }, [load])
 
-  const actions = <Btn onClick={() => load(false)} disabled={refreshing}>{refreshing ? 'Refreshing…' : '⟳ Refresh'}</Btn>
+  const actions = <Btn variant="soft" sm icon="bolt" onClick={() => load(false)} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</Btn>
 
   if (data === null) return <BetterSelectLayout title="Ladders" actions={actions}><PbSpinner message="Loading ladders…" /></BetterSelectLayout>
 
@@ -36,7 +37,7 @@ export default function AdminLadders() {
       </p>
 
       {unlinked.length > 0 && (
-        <div className="rounded-lg px-4 py-2.5 mb-4 text-sm bg-amber-400/10 border border-amber-400/30 text-amber-200">
+        <div className="rounded-lg px-4 py-2.5 mb-4 text-sm bg-pb-amber/10 border border-pb-amber/30 text-pb-amber">
           {unlinked.length} team{unlinked.length === 1 ? '' : 's'} aren’t linked to a grade yet
           ({unlinked.map(t => t.team_name).join(', ')}). Set a grade on the{' '}
           <Link to="/admin/betterselect/teams" className="underline">Teams</Link> page to show their ladder.

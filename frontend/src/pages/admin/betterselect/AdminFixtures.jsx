@@ -1,11 +1,20 @@
+// BetterSelect → Fixtures. The whole club's weekend, grouped by round (design
+// handoff bs-app.jsx FixturesScreen): each weekend is a card with a row per
+// team's fixture, colour-coded by team, with a Pick/Select action. A grade
+// filter narrows to one team. Manual add / PlayHQ sync / edit / delete are
+// preserved from the previous screen.
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
-import { PbSpinner, Btn, Field, Input, Select } from '../../../lib/presskit'
+import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
+import { Icon, Btn, Segmented, Empty } from './ui'
+
+// Team colour palette (fixed category tints — not the white-label accent).
+const TEAM_TINTS = ['#3b82f6', '#a855f7', '#f5b542', '#06b6d4', '#84cc16', '#f97316', '#ef5b5b', '#16c784']
 
 const EMPTY = {
   label: '', opponent_name: '', home_away: 'HOME', team_id: '',
@@ -17,45 +26,33 @@ function FixtureModal({ fixture, onClose, onSaved }) {
   const [form, setForm] = useState(() => ({ ...EMPTY, ...(fixture || {}), team_id: fixture?.team_id || '' }))
   const [saving, setSaving] = useState(false)
   const [teams, setTeams] = useState([])
-  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
-  useEffect(() => {
-    api.bsListTeams().then(setTeams).catch(() => {})
-  }, [])
+  useEffect(() => { api.bsListTeams().then(setTeams).catch(() => {}) }, [])
 
   const save = async () => {
     setSaving(true)
     try {
       const payload = {
-        label: form.label || null,
-        opponent_name: form.opponent_name || null,
-        home_away: form.home_away || null,
-        team_id: form.team_id || null,
-        played_on: form.played_on || null,
-        end_on: form.end_on || null,
-        start_time: form.start_time || null,
-        venue: form.venue || null,
-        round: form.round || null,
-        notes: form.notes || null,
+        label: form.label || null, opponent_name: form.opponent_name || null,
+        home_away: form.home_away || null, team_id: form.team_id || null,
+        played_on: form.played_on || null, end_on: form.end_on || null,
+        start_time: form.start_time || null, venue: form.venue || null,
+        round: form.round || null, notes: form.notes || null,
       }
-      const saved = fixture
-        ? await api.bsUpdateFixture(fixture.id, payload)
-        : await api.bsCreateFixture(payload)
+      const saved = fixture ? await api.bsUpdateFixture(fixture.id, payload) : await api.bsCreateFixture(payload)
       toast.success(fixture ? 'Fixture updated' : 'Fixture added')
       onSaved(saved)
-    } catch (e) {
-      toast.error('Save failed: ' + e.message)
-    } finally {
-      setSaving(false)
-    }
+    } catch (e) { toast.error('Save failed: ' + e.message) }
+    finally { setSaving(false) }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4" style={{ backdropFilter: 'blur(2px)' }}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 backdrop-blur-sm">
       <div className="bg-pb-surface pb-card max-w-lg w-full mt-12 mb-8 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b pb-hairline">
           <h3 className="font-mono text-[11px] uppercase tracking-wide3 text-pb-faint">{fixture ? 'Edit fixture' : 'New manual fixture'}</h3>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text">✕</button>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text"><Icon name="close" size={16} /></button>
         </div>
         <div className="p-5 space-y-3">
           <Field label="Label (optional)"><Input value={form.label} onChange={set('label')} placeholder="e.g. Pre-season friendly" /></Field>
@@ -63,16 +60,14 @@ function FixtureModal({ fixture, onClose, onSaved }) {
             <Field label="Opponent"><Input value={form.opponent_name} onChange={set('opponent_name')} placeholder="Opposition club" /></Field>
             <Field label="Home / Away">
               <Select value={form.home_away} onChange={set('home_away')}>
-                <option value="HOME">Home</option>
-                <option value="AWAY">Away</option>
-                <option value="BYE">Bye</option>
+                <option value="HOME">Home</option><option value="AWAY">Away</option><option value="BYE">Bye</option>
               </Select>
             </Field>
           </div>
           <Field label="Our team">
             <Select value={form.team_id || ''} onChange={set('team_id')}>
               <option value="">— No team assigned —</option>
-              {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </Select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
@@ -87,8 +82,8 @@ function FixtureModal({ fixture, onClose, onSaved }) {
           <Field label="Notes"><Input value={form.notes || ''} onChange={set('notes')} /></Field>
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t pb-hairline">
-          <Btn onClick={onClose}>Cancel</Btn>
-          <Btn primary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Btn>
+          <Btn variant="ghost" sm onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" sm onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Btn>
         </div>
       </div>
     </div>
@@ -100,149 +95,160 @@ function fmtDate(d) {
   try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
   catch { return d }
 }
-
-// Week helpers — weeks run Monday→Sunday so Sat/Sun fixtures stay together.
-function mondayOf(date) {
-  const x = new Date(date); x.setHours(0, 0, 0, 0)
-  x.setDate(x.getDate() - ((x.getDay() + 6) % 7))
-  return x
-}
-function addDays(date, n) { const x = new Date(date); x.setDate(x.getDate() + n); return x }
-function isoLocal(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-function weekLabel(start) {
-  const end = addDays(start, 6)
-  const opts = { day: 'numeric', month: 'short' }
-  return `${start.toLocaleDateString(undefined, opts)} – ${end.toLocaleDateString(undefined, opts)}`
-}
+function mondayOf(date) { const x = new Date(date); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
+function isoLocal(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }
 
 export default function AdminFixtures() {
   const { hasCapability } = useAuth()
   const toast = useToast()
+  const navigate = useNavigate()
   const canManage = hasCapability(CAP.MANAGE_FIXTURES)
+  const canSelect = hasCapability(CAP.MANAGE_SELECTIONS)
   const [fixtures, setFixtures] = useState(null)
-  const [view, setView] = useState('week') // 'upcoming' | 'week' | 'all' — default to this week
-  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
-  const [editing, setEditing] = useState(undefined) // undefined=closed, null=new, obj=edit
+  const [scope, setScope] = useState('upcoming') // 'upcoming' | 'all'
+  const [teamFilter, setTeamFilter] = useState('all')
+  const [editing, setEditing] = useState(undefined)
   const [syncing, setSyncing] = useState(false)
 
-  // 'upcoming' fetches only future; 'week'/'all' need the full set (week can be in the past).
   const load = useCallback(() => {
     setFixtures(null)
-    api.bsListFixtures(view === 'upcoming').then(setFixtures).catch(e => { toast.error(e.message); setFixtures([]) })
-  }, [view, toast])
-
+    api.bsListFixtures(scope === 'upcoming').then(setFixtures).catch((e) => { toast.error(e.message); setFixtures([]) })
+  }, [scope, toast])
   useEffect(() => { load() }, [load])
 
-  // Fixtures actually shown — narrowed to the selected week when in week view.
-  const displayed = useMemo(() => {
-    if (!fixtures) return fixtures
-    if (view !== 'week') return fixtures
-    const lo = isoLocal(weekStart), hi = isoLocal(addDays(weekStart, 6))
-    return fixtures.filter(f => f.played_on && f.played_on >= lo && f.played_on <= hi)
-  }, [fixtures, view, weekStart])
+  // Stable colour per team across the page.
+  const teamTint = useMemo(() => {
+    const names = [...new Set((fixtures || []).map((f) => f.team_name).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b))
+    const m = {}
+    names.forEach((n, i) => { m[n] = TEAM_TINTS[i % TEAM_TINTS.length] })
+    return m
+  }, [fixtures])
 
-  const thisWeek = isoLocal(weekStart) === isoLocal(mondayOf(new Date()))
+  const teamOptions = useMemo(() => {
+    const seen = new Map()
+    ;(fixtures || []).forEach((f) => { if (f.team_name && !seen.has(f.team_name)) seen.set(f.team_name, f.team_sequence ?? 99) })
+    const sorted = [...seen.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
+    return [{ value: 'all', label: 'Whole club' }, ...sorted.map(([name]) => ({ value: name, label: name }))]
+  }, [fixtures])
+
+  // Group by weekend (Monday-anchored), newest-relevant first.
+  const groups = useMemo(() => {
+    if (!fixtures) return null
+    const filtered = teamFilter === 'all' ? fixtures : fixtures.filter((f) => f.team_name === teamFilter)
+    const byWeek = new Map()
+    filtered.forEach((f) => {
+      const key = f.played_on ? isoLocal(mondayOf(new Date(f.played_on + 'T00:00:00'))) : 'undated'
+      if (!byWeek.has(key)) byWeek.set(key, [])
+      byWeek.get(key).push(f)
+    })
+    const thisMon = isoLocal(mondayOf(new Date()))
+    return [...byWeek.entries()]
+      .sort((a, b) => (a[0] === 'undated' ? 1 : b[0] === 'undated' ? -1 : a[0].localeCompare(b[0])))
+      .map(([week, list]) => ({
+        week,
+        current: week === thisMon,
+        games: list.slice().sort((a, b) =>
+          (a.team_sequence ?? 99) - (b.team_sequence ?? 99)
+          || (a.start_time || '').localeCompare(b.start_time || '')),
+      }))
+  }, [fixtures, teamFilter])
 
   const sync = async () => {
     setSyncing(true)
-    try {
-      const r = await api.bsSyncFixtures()
-      toast.success(r.detail || `Synced ${r.synced} fixtures`)
-      load()
-    } catch (e) { toast.error('Sync failed: ' + e.message) }
+    try { const r = await api.bsSyncFixtures(); toast.success(r.detail || `Synced ${r.synced} fixtures`); load() }
+    catch (e) { toast.error('Sync failed: ' + e.message) }
     finally { setSyncing(false) }
   }
-
   const del = async (f) => {
     if (!window.confirm(`Delete this fixture${f.opponent_name ? ' vs ' + f.opponent_name : ''}?`)) return
     try { await api.bsDeleteFixture(f.id); toast.success('Deleted'); load() }
     catch (e) { toast.error('Delete failed: ' + e.message) }
   }
 
-  const actions = canManage && (
+  const actions = (
     <div className="flex gap-2">
-      <Btn onClick={sync} disabled={syncing}>{syncing ? 'Syncing…' : '⟳ Sync PlayHQ'}</Btn>
-      <Btn primary onClick={() => setEditing(null)}>+ Add fixture</Btn>
+      {canManage && <Btn variant="ghost" sm icon="fixtures" onClick={() => setEditing(null)}>Add fixture</Btn>}
+      {canManage && <Btn variant="soft" sm icon="bolt" onClick={sync} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync'}</Btn>}
     </div>
   )
 
   return (
     <BetterSelectLayout title="Fixtures" actions={actions}>
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <Btn sm primary={view === 'week'} onClick={() => { setView('week'); setWeekStart(mondayOf(new Date())) }}>This week</Btn>
-        <Btn sm primary={view === 'upcoming'} onClick={() => setView('upcoming')}>Upcoming</Btn>
-        <Btn sm primary={view === 'all'} onClick={() => setView('all')}>All</Btn>
-
-        {view === 'week' && (
-          <div className="flex items-center gap-2 ml-auto">
-            <Btn sm onClick={() => setWeekStart(s => addDays(s, -7))}>‹ Prev</Btn>
-            <span className="font-mono text-xs text-pb-text min-w-[130px] text-center">
-              {weekLabel(weekStart)}{thisWeek && <span className="text-pb-accent"> · this week</span>}
-            </span>
-            <Btn sm onClick={() => setWeekStart(s => addDays(s, 7))}>Next ›</Btn>
-            {!thisWeek && <Btn sm onClick={() => setWeekStart(mondayOf(new Date()))}>Today</Btn>}
-          </div>
-        )}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <Segmented value={teamFilter} onChange={setTeamFilter} options={teamOptions} />
+        <div className="ml-auto flex items-center gap-2">
+          <Segmented value={scope} onChange={setScope} sm options={[{ value: 'upcoming', label: 'Upcoming' }, { value: 'all', label: 'All' }]} />
+        </div>
       </div>
 
-      {displayed === null ? <PbSpinner message="Loading fixtures…" /> : (
-        <div className="pb-card overflow-hidden">
-          {displayed.length === 0 && (
-            <div className="px-5 py-10 text-center text-pb-faint text-sm">
-              {view === 'week'
-                ? `No fixtures for ${weekLabel(weekStart)}.`
-                : <>No fixtures yet. {canManage && 'Sync from PlayHQ or add one manually.'}</>}
-            </div>
-          )}
-          {displayed.map((f, i) => (
-            <div key={f.id} className={`px-5 py-3 flex items-center justify-between gap-3 ${i > 0 ? 'border-t pb-hairline' : ''}`}>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  {f.team_name && (
-                    <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-pb-surface2 text-pb-text border pb-hairline" title="Our team">{f.team_short || f.team_name}</span>
-                  )}
-                  <span className="font-medium text-sm truncate">
-                    {f.home_away === 'BYE' ? 'BYE' : `${f.home_away === 'AWAY' ? '@ ' : 'vs '}${f.opponent_name || f.label || 'TBC'}`}
-                  </span>
-                  <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded ${f.source === 'playhq' ? 'bg-pb-accent/15 text-pb-accent' : 'bg-pb-surface2 text-pb-faint'}`}>
-                    {f.source === 'playhq' ? 'PlayHQ' : 'Manual'}
-                  </span>
-                  {f.end_on && f.end_on !== f.played_on && (
-                    <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300">2-day</span>
-                  )}
-                  {f.lineup_count > 0 && (
-                    <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-pb-accent/15 text-pb-accent" title="Players selected">XI: {f.lineup_count}</span>
-                  )}
-                </div>
-                <div className="text-pb-faint text-xs mt-0.5">
-                  {fmtDate(f.played_on)}{f.end_on && f.end_on !== f.played_on ? ` → ${fmtDate(f.end_on)}` : ''}
-                  {f.start_time ? ` · ${f.start_time}` : ''}{f.venue ? ` · ${f.venue}` : ''}{f.round ? ` · ${f.round}` : ''}
-                </div>
+      {groups === null ? <PbSpinner message="Loading fixtures…" /> : (
+        groups.length === 0 ? (
+          <div className="pb-card px-5 py-12 text-center">
+            <Empty className="mb-4">{scope === 'upcoming' ? 'No upcoming fixtures.' : 'No fixtures yet.'}{canManage && ' Sync from PlayHQ or add one manually.'}</Empty>
+            {canManage && (
+              <div className="flex gap-2 justify-center">
+                <Btn variant="soft" sm icon="bolt" onClick={sync} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync PlayHQ'}</Btn>
+                <Btn variant="primary" sm icon="fixtures" onClick={() => setEditing(null)}>Add fixture</Btn>
               </div>
-              <div className="flex gap-2 shrink-0">
-                {f.home_away !== 'BYE' && (
-                  <Link to={`/admin/betterselect/select/${f.id}`}>
-                    <Btn sm primary>Select</Btn>
-                  </Link>
-                )}
-                {canManage && <>
-                  <Btn sm onClick={() => setEditing(f)}>Edit</Btn>
-                  <Btn sm danger onClick={() => del(f)}>Delete</Btn>
-                </>}
-              </div>
-            </div>
-          ))}
-        </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3.5">
+            {groups.map(({ week, current, games }) => {
+              const playable = games.filter((g) => g.home_away !== 'BYE')
+              return (
+                <div key={week} className="pb-card overflow-hidden" style={{ borderColor: current ? 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' : undefined }}>
+                  <div className="flex items-center gap-3 px-[18px] py-3 border-b pb-hairline" style={{ background: current ? 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' : 'var(--pb-surface2)' }}>
+                    <span className="font-display font-bold text-[16px]">{week === 'undated' ? 'Undated' : fmtDate(games[0]?.played_on)}</span>
+                    {games[0]?.round && <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Round {games[0].round}</span>}
+                    {current && <span className="font-mono text-[9.5px] text-pb-accent bg-pb-accent/12 px-2 py-0.5 rounded-full">THIS WEEKEND</span>}
+                    <span className="ml-auto font-mono text-[11px] text-pb-faint">{playable.length} game{playable.length === 1 ? '' : 's'}</span>
+                  </div>
+                  {games.map((g, gi) => {
+                    const bye = g.home_away === 'BYE'
+                    const tint = teamTint[g.team_name] || 'var(--pb-dim)'
+                    const named = (g.lineup_count || 0) > 0
+                    const isCurrentTop = current && (g.team_sequence ?? 99) <= 1
+                    return (
+                      <div key={g.id} className={`flex items-center gap-4 px-[18px] py-3 ${gi > 0 ? 'border-t pb-hairline' : ''}`}>
+                        <span className="font-display font-bold text-[13.5px] w-[64px] shrink-0 truncate" style={{ color: tint }}>{g.team_short || g.team_name || '—'}</span>
+                        {g.grade_name && <span className="font-mono text-[10px] text-pb-faint w-[60px] shrink-0 truncate">{g.grade_name}</span>}
+                        <span className="w-px h-6 bg-pb-hairline shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          {bye ? <span className="text-sm text-pb-faint italic">Bye</span> : (
+                            <>
+                              <span className="text-[14.5px] font-medium"><span className="text-pb-faint font-normal">{g.home_away === 'AWAY' ? '@ ' : 'vs '}</span>{g.opponent_name || g.label || 'TBC'}</span>
+                              <span className="text-[12.5px] text-pb-faint ml-2.5">
+                                {g.venue ? `${g.venue} (${g.home_away === 'AWAY' ? 'A' : 'H'})` : ''}{g.start_time ? ` · ${g.start_time}` : ''}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        {named && <span className="font-mono text-[9px] text-pb-positive bg-pb-positive/12 px-1.5 py-0.5 rounded shrink-0">XI named</span>}
+                        {!bye && canSelect && (
+                          isCurrentTop
+                            ? <Btn variant="primary" sm icon="selection" onClick={() => navigate(`/admin/betterselect/select/${g.id}`)}>Pick team</Btn>
+                            : <Btn variant="ghost" sm icon="selection" onClick={() => navigate(`/admin/betterselect/select/${g.id}`)}>Select</Btn>
+                        )}
+                        {canManage && (
+                          <div className="flex gap-1 shrink-0">
+                            <button onClick={() => setEditing(g)} title="Edit" className="text-pb-faintest hover:text-pb-text p-1"><Icon name="filter" size={14} /></button>
+                            <button onClick={() => del(g)} title="Delete" className="text-pb-faintest hover:text-pb-red p-1"><Icon name="close" size={14} /></button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        )
       )}
 
       {editing !== undefined && (
-        <FixtureModal
-          fixture={editing}
-          onClose={() => setEditing(undefined)}
-          onSaved={() => { setEditing(undefined); load() }}
-        />
+        <FixtureModal fixture={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); load() }} />
       )}
     </BetterSelectLayout>
   )
