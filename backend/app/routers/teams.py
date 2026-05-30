@@ -34,7 +34,7 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 DEFAULT_DORMANCY_MONTHS = 24
 
 
-def _serialize(t: Team) -> dict:
+def _serialize(t: Team, grades: Optional[dict] = None) -> dict:
     return {
         "id": str(t.id),
         "organisation_id": str(t.organisation_id),
@@ -42,10 +42,56 @@ def _serialize(t: Team) -> dict:
         "short_name": t.short_name,
         "sequence": t.sequence,
         "grade_id": str(t.grade_id) if t.grade_id else None,
+        "grade_name": (grades or {}).get(str(t.grade_id)) if t.grade_id else None,
         "default_formation": t.default_formation,
         "is_active": t.is_active,
         "source": t.source,
     }
+
+
+async def _grade_name_map(db: AsyncSession, club_id) -> dict:
+    """{grade_id_str: display_name} for grades this club's seasons own."""
+    res = await db.execute(
+        select(Grade.id, Grade.name, Grade.display_name_override)
+        .join(Season, Grade.season_id == Season.id)
+        .where(Season.organisation_id == club_id)
+    )
+    return {str(gid): (override or name) for gid, name, override in res.fetchall()}
+
+
+async def ensure_team_grades(db: AsyncSession, club_id) -> int:
+    """Auto-link teams with no grade_id to the grade they most recently played
+    in (matched by team name against appearance data). Idempotent; returns how
+    many were newly linked. Self-heals across seasons as new games sync.
+    """
+    unlinked = (await db.execute(
+        select(Team).where(Team.organisation_id == club_id, Team.grade_id.is_(None))
+    )).scalars().all()
+    if not unlinked:
+        return 0
+    # Most-recent grade per team name, in one pass.
+    rows = await db.execute(
+        text(
+            "SELECT DISTINCT ON (lower(ga.team_name)) lower(ga.team_name) AS tname, gr.id AS grade_id "
+            "FROM game_appearances ga "
+            "JOIN games g ON ga.game_id = g.id "
+            "JOIN grades gr ON g.grade_id = gr.id "
+            "JOIN players p ON ga.player_id = p.id "
+            "WHERE p.organisation_id = :org AND ga.team_name IS NOT NULL AND ga.team_name <> '' "
+            "ORDER BY lower(ga.team_name), g.played_at DESC NULLS LAST"
+        ),
+        {"org": str(club_id)},
+    )
+    name_to_grade = {tname: gid for tname, gid in rows.fetchall()}
+    linked = 0
+    for t in unlinked:
+        gid = name_to_grade.get((t.name or "").strip().lower())
+        if gid:
+            t.grade_id = gid
+            linked += 1
+    if linked:
+        await db.commit()
+    return linked
 
 
 def _guess_sequence(name: str) -> int:
@@ -96,12 +142,42 @@ async def list_teams(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
+    await ensure_team_grades(db, club.id)  # lazy auto-link so grades show here too
     stmt = select(Team).where(Team.organisation_id == club.id)
     if not include_inactive:
         stmt = stmt.where(Team.is_active.is_(True))
     stmt = stmt.order_by(Team.sequence.asc(), Team.name.asc())
     res = await db.execute(stmt)
-    return [_serialize(t) for t in res.scalars().all()]
+    grades = await _grade_name_map(db, club.id)
+    return [_serialize(t, grades) for t in res.scalars().all()]
+
+
+@router.get("/grade-options")
+async def grade_options(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Grades from the club's most recent season(s) — to populate the team
+    grade picker. Returns the latest two seasons that actually have grades."""
+    seasons = (await db.execute(
+        select(Season).where(Season.organisation_id == club.id)
+        .order_by(Season.year.desc().nullslast(), Season.name.desc())
+    )).scalars().all()
+    season_ids = [s.id for s in seasons]
+    grades_res = await db.execute(
+        select(Grade).where(Grade.season_id.in_(season_ids)).order_by(Grade.name)
+    )
+    by_season: dict = {}
+    for g in grades_res.scalars().all():
+        by_season.setdefault(str(g.season_id), []).append({"id": str(g.id), "name": g.display_name})
+    out = []
+    for s in seasons:
+        gl = by_season.get(str(s.id))
+        if gl:
+            out.append({"season_id": str(s.id), "season_name": s.name, "year": s.year, "grades": gl})
+        if len(out) >= 2:  # latest two seasons with grades is plenty for "current grade"
+            break
+    return {"seasons": out}
 
 
 @router.post("", status_code=201)
@@ -130,7 +206,7 @@ async def create_team(
     db.add(t)
     await db.commit()
     await db.refresh(t)
-    return _serialize(t)
+    return _serialize(t, await _grade_name_map(db, club.id))
 
 
 @router.patch("/{team_id}")
@@ -154,7 +230,7 @@ async def update_team(
     t.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(t)
-    return _serialize(t)
+    return _serialize(t, await _grade_name_map(db, club.id))
 
 
 @router.delete("/{team_id}", status_code=204)
