@@ -18,6 +18,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, availRank } from '../../../lib/availability'
 import {
   Icon, Avatar, AvailDot, RoleChips, Tag, Btn, Segmented, Search, Chip, Empty, QuickAvailModal,
+  RecencySelect, playedWithinYears,
 } from './ui'
 
 const FORMATS = [
@@ -136,12 +137,6 @@ export default function AdminSelection() {
     return [...s].sort()
   }, [data])
 
-  const withinYears = (lastPlayed, yrs) => {
-    if (!yrs) return true
-    if (!lastPlayed) return true
-    const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - yrs)
-    return new Date(lastPlayed + 'T00:00:00') >= cutoff
-  }
 
   const pool = useMemo(() => {
     let list = (data?.pool || []).filter((p) => !usedIds.has(p.id))
@@ -149,7 +144,7 @@ export default function AdminSelection() {
     if (roleF) list = list.filter((p) => (p.skill_positions || []).includes(roleF))
     if (availOnly) list = list.filter((p) => p.availability === 'AVAILABLE')
     if (squadF) list = list.filter((p) => (p.squads || []).includes(squadF))
-    if (yearsF) list = list.filter((p) => withinYears(p.last_played, yearsF))
+    if (yearsF) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
     if (selStatusF === 'unselected') list = list.filter((p) => !(p.clash?.length > 0))
     else if (selStatusF === 'clash') list = list.filter((p) => p.clash?.length > 0)
     return list.slice().sort(cmp)
@@ -463,11 +458,8 @@ export default function AdminSelection() {
                     </select>
                   </label>
                 )}
-                <span className="inline-flex items-center gap-1 text-[11.5px] text-pb-faint">
-                  Played
-                  {[{ v: 0, l: 'Any' }, { v: 1, l: '≤1y' }, { v: 2, l: '≤2y' }, { v: 3, l: '≤3y' }, { v: 5, l: '≤5y' }].map((y) => (
-                    <Chip key={y.v} label={y.l} active={yearsF === y.v} onClick={() => setYearsF(y.v)} />
-                  ))}
+                <span className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-faint">
+                  Recency <RecencySelect value={yearsF} onChange={setYearsF} />
                 </span>
                 <span className="inline-flex items-center gap-1 text-[11.5px] text-pb-faint">
                   Status
