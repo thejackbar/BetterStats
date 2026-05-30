@@ -609,7 +609,7 @@ export default function AdminTeams() {
             <div className="grid gap-3 items-start" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
               {columns.map((col) => {
                 const members = membersOf(col)
-                const isUnassignedFiltered = col.unassigned && (years > 0 || search.trim())
+                const isUnassignedFiltered = col.unassigned && (years > 0 || roleF || availOnly || search.trim())
                 return (
                   <div key={col.key}>
                     <SquadColumn
