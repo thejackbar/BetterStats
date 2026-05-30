@@ -423,3 +423,45 @@ async def remove_team_member(
     if tm:
         await db.delete(tm)
         await db.commit()
+
+
+# ─── Squad assignment (one selection-pool squad per player) ─────────────────
+# Distinct from team_members (the multi-squad M2M kept for suggestions): this is
+# the single squad that drives the Squads board and selection's "suggested
+# first" ordering, stored as players.squad_team_id.
+
+class SquadAssign(BaseModel):
+    player_ids: list[str]
+    squad_team_id: Optional[str] = None  # None / "" → unassign
+
+
+@router.post("/squad-assign")
+async def squad_assign(
+    body: SquadAssign,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Set (or clear) the assigned squad for one or many players in one call.
+
+    Powers both drag-to-reassign (one id) and bulk-add (many) on the Squads
+    board. squad_team_id=None unassigns. Skips ids that aren't this club's.
+    """
+    target = None
+    if body.squad_team_id:
+        target = await _get_owned_team(db, body.squad_team_id, club.id)  # 404 if not owned
+
+    updated = 0
+    for raw in body.player_ids:
+        try:
+            pid = uuid.UUID(raw)
+        except (ValueError, TypeError):
+            continue
+        player = await db.get(Player, pid)
+        if not player or player.organisation_id != club.id:
+            continue
+        player.squad_team_id = target.id if target else None
+        updated += 1
+    await db.commit()
+    return {"status": "ok", "updated": updated,
+            "squad_team_id": str(target.id) if target else None}

@@ -238,6 +238,7 @@ async def get_selection(
             "player_role": p.player_role,
             "skill_positions": p.skill_positions or [],
             "squads": sorted(squads.get(pid, [])),
+            "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
             "availability": avail.get(pid, "NO_RESPONSE"),
             "availability_reason": avail_reason.get(pid),
             "last_played": lp.isoformat() if lp else None,
@@ -252,6 +253,19 @@ async def get_selection(
             "selected": pid in lineup,
             "clash": clash.get(pid, []),
         })
+
+    # Squad-first ordering: players whose assigned squad == this fixture's team
+    # surface first, then by availability (available first), then by name. The
+    # `squad_match` flag lets the UI tint the matching squad tag.
+    _AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
+    _fixture_team = str(fx.team_id) if fx.team_id else None
+    for entry in pool:
+        entry["squad_match"] = bool(_fixture_team and entry.get("squad_team_id") == _fixture_team)
+    pool.sort(key=lambda e: (
+        not e["squad_match"],
+        _AVAIL_RANK.get(e["availability"], 9),
+        (e["display_name"] or "").lower(),
+    ))
 
     return {
         "fixture": {
