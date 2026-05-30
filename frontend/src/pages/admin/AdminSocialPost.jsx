@@ -55,7 +55,7 @@ const DISPLAY_FONTS = [
   { key: 'barlow',       name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif", weight: 800 },
   { key: 'anton',        name: 'Anton',            family: "'Anton', sans-serif",            weight: 400 },
   { key: 'bebas',        name: 'Bebas Neue',       family: "'Bebas Neue', sans-serif",       weight: 400 },
-  { key: 'archivo',      name: 'Archivo Black',    family: "'Archivo Black', sans-serif",    weight: 900 },
+  { key: 'archivo',      name: 'Archivo Black',    family: "'Archivo Black', sans-serif",    weight: 400 },
   { key: 'oswald',       name: 'Oswald',           family: "'Oswald', sans-serif",           weight: 700 },
   { key: 'teko',         name: 'Teko',             family: "'Teko', sans-serif",             weight: 600 },
   { key: 'bigshoulders', name: 'Big Shoulders',    family: "'Big Shoulders Display', sans-serif", weight: 800 },
