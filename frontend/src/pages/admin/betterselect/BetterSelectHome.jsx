@@ -70,15 +70,30 @@ export default function BetterSelectHome() {
     () => (fixtures || []).filter((f) => f.home_away !== 'BYE' && f.played_on),
     [fixtures],
   )
-  const hero = playable[0] || null
-  const heroDate = hero?.played_on || null
 
-  // Lineup size per fixture (for "needs an XI" + "named" markers).
+  // Lineup size per fixture (for "needs an XI" + "named" markers). Prefer the
+  // count the fixtures payload carries; fall back to the selection-overview join.
   const lineupLen = useMemo(() => {
     const m = {}
     overview.forEach((f) => { m[f.id] = (f.lineup || []).length })
     return m
   }, [overview])
+  const lineupCountOf = (f) => (typeof f.lineup_count === 'number' ? f.lineup_count : (lineupLen[f.id] || 0))
+
+  // Hero = the highest-ranked team that still needs an XI on the nearest
+  // match-day. Lower team_sequence = more senior (1 = 1st XI); 0/blank ranks
+  // last so an unranked side never outranks the firsts. If every team on that
+  // day is already picked, fall back to the most senior game of the day.
+  const hero = useMemo(() => {
+    if (!playable.length) return null
+    const rankOf = (f) => (f.team_sequence && f.team_sequence > 0 ? f.team_sequence : Infinity)
+    const bySeniority = (a, b) => rankOf(a) - rankOf(b) || (a.start_time || '').localeCompare(b.start_time || '')
+    const nextDate = playable[0].played_on              // playable is date-sorted asc
+    const dayFixtures = playable.filter((f) => f.played_on === nextDate)
+    const unpicked = dayFixtures.filter((f) => lineupCountOf(f) === 0)
+    return (unpicked.length ? unpicked : dayFixtures).slice().sort(bySeniority)[0] || null
+  }, [playable, lineupLen])
+  const heroDate = hero?.played_on || null
 
   // Availability status for a player on the hero date.
   const statusOn = (pid, d) => matrix.availability?.[pid]?.[d]?.status || matrix.availability?.[pid]?.[d] || 'NO_RESPONSE'
@@ -119,9 +134,9 @@ export default function BetterSelectHome() {
         node: <><b className="text-pb-text">{tally.NO_RESPONSE} player{tally.NO_RESPONSE === 1 ? '' : 's'}</b> {tally.NO_RESPONSE === 1 ? "hasn't" : "haven't"} set availability</> })
     }
     const weekendFx = playable.filter((f) => f.played_on === heroDate)
-    const needXI = weekendFx.filter((f) => (lineupLen[f.id] || 0) === 0).length
+    const needXI = weekendFx.filter((f) => lineupCountOf(f) === 0).length
     if (needXI > 0) {
-      items.push({ tone: 'accent', action: 'Pick', to: SELECT + (weekendFx.find((f) => (lineupLen[f.id] || 0) === 0)?.id || hero.id),
+      items.push({ tone: 'accent', action: 'Pick', to: SELECT + (weekendFx.find((f) => lineupCountOf(f) === 0)?.id || hero.id),
         node: <><b className="text-pb-text">{needXI} of {weekendFx.length}</b> weekend team{weekendFx.length === 1 ? '' : 's'} still need{needXI === 1 ? 's' : ''} an XI</> })
     }
     return items
@@ -151,7 +166,7 @@ export default function BetterSelectHome() {
           <div className="pb-card overflow-hidden" style={{ background: 'linear-gradient(120deg, color-mix(in srgb, var(--pb-accent) 10%, transparent), transparent 55%)', borderColor: 'color-mix(in srgb, var(--pb-accent) 25%, transparent)' }}>
             <div className="px-[22px] py-5">
               <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">
-                This weekend{hero.round ? ` · Round ${hero.round}` : ''}
+                {lineupCountOf(hero) === 0 ? 'Next to pick' : 'This weekend'}{hero.round ? ` · Round ${hero.round}` : ''}
               </div>
               <div className="font-display font-bold text-[30px] mt-1.5 leading-tight">{heroTitle}</div>
               <div className="flex flex-wrap gap-4 mt-2.5 text-[13.5px] text-pb-dim">
@@ -198,7 +213,7 @@ export default function BetterSelectHome() {
               </div>
               <div className="flex flex-col">
                 {playable.slice(0, 5).map((f) => {
-                  const named = (lineupLen[f.id] || 0) > 0
+                  const named = lineupCountOf(f) > 0
                   return (
                     <button key={f.id} onClick={() => navigate(SELECT + f.id)}
                       className="flex items-center gap-3 py-2 border-b pb-hairline last:border-0 text-left">

@@ -42,6 +42,7 @@ def _serialize(f: Fixture, teams: Optional[dict] = None) -> dict:
         "team_id": str(f.team_id) if f.team_id else None,
         "team_name": t["name"] if t else None,
         "team_short": t["short_name"] if t else None,
+        "team_sequence": t["sequence"] if t else None,
         "source": f.source,
         "playhq_id": f.playhq_id,
         "label": f.label,
@@ -106,7 +107,7 @@ async def _team_map(db: AsyncSession, club_id) -> dict:
     """{team_id_str: {name, short_name}} for the club — used to enrich fixtures
     with the playing team's name without an async lazy-load on f.team."""
     res = await db.execute(select(Team).where(Team.organisation_id == club_id))
-    return {str(t.id): {"name": t.name, "short_name": t.short_name} for t in res.scalars().all()}
+    return {str(t.id): {"name": t.name, "short_name": t.short_name, "sequence": t.sequence} for t in res.scalars().all()}
 
 
 def _norm(s: Optional[str]) -> str:

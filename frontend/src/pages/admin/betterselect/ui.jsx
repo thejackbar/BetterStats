@@ -7,6 +7,7 @@
 // Colours come from `cssVar` on AVAILABILITY (inline styles), not dynamically
 // built Tailwind classes — Tailwind's JIT only sees literal class strings, so
 // anything status-coloured uses the CSS variable directly.
+import { useNavigate } from 'react-router-dom'
 import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank } from '../../../lib/availability'
 
 /* ── Icons — simple geometric line glyphs (stroke = currentColor) ────────── */
@@ -51,7 +52,8 @@ function playerName(player) {
   return player?.display_name || player?.name || '?'
 }
 
-export function Avatar({ player, size = 30, className = '' }) {
+export function Avatar({ player, size = 30, className = '', noLink = false }) {
+  const navigate = useNavigate()
   const ring = isKeeper(player)
     ? 'color-mix(in srgb, var(--pb-amber) 55%, transparent)'
     : 'var(--pb-hairline2)'
@@ -59,12 +61,24 @@ export function Avatar({ player, size = 30, className = '' }) {
     width: size, height: size, minWidth: size, borderRadius: '50%',
     border: `1.5px solid ${ring}`,
   }
+  // Anywhere in BetterSelect, clicking a player's avatar opens their profile.
+  // stopPropagation keeps it from also firing the surrounding card's click
+  // (e.g. add-to-XI / select). noLink opts out (modals, headers).
+  const linked = !noLink && player?.id
+  const go = (e) => { e.stopPropagation(); navigate(`/admin/betterselect/players?player=${player.id}`) }
+  const linkProps = linked
+    ? { onClick: go, role: 'button', tabIndex: 0, title: `Open ${playerName(player)}'s profile`,
+        onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e) } },
+        className: `cursor-pointer hover:brightness-110 hover:ring-2 hover:ring-pb-accent/40 transition` }
+    : { className: '' }
   if (player?.photo_url) {
-    return <img src={player.photo_url} alt="" className={`object-cover bg-pb-surface2 ${className}`} style={common} />
+    return <img src={player.photo_url} alt="" {...linkProps}
+      className={`object-cover bg-pb-surface2 ${linkProps.className} ${className}`} style={common} />
   }
   const initials = playerName(player).split(/[ ,]+/).filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase()
   return (
-    <span className={`inline-flex items-center justify-center bg-pb-surface2 text-pb-dim font-mono font-semibold ${className}`}
+    <span {...linkProps}
+      className={`inline-flex items-center justify-center bg-pb-surface2 text-pb-dim font-mono font-semibold ${linkProps.className} ${className}`}
       style={{ ...common, fontSize: Math.round(size * 0.34) }}>
       {initials}
     </span>
@@ -300,7 +314,7 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
     <div onClick={onClose} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <div onClick={(e) => e.stopPropagation()} className="w-[380px] max-w-full bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl">
         <div className="flex items-center gap-3 px-[18px] py-4 border-b border-pb-hairline">
-          {player && <Avatar player={player} size={38} />}
+          {player && <Avatar player={player} size={38} noLink />}
           <div className="flex-1 min-w-0">
             <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">
               Update availability{dateLabel ? ` · ${dateLabel}` : ''}
