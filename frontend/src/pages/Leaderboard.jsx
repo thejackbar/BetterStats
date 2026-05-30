@@ -1,5 +1,5 @@
-import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect, Fragment } from 'react'
+import { useParams, useSearchParams, Link } from 'react-router-dom'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { useClubData } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
@@ -400,6 +400,25 @@ export default function Leaderboard() {
       })
       .catch(() => setOrgGrades([]))
   }, [orgId, selectedSeason])
+
+  // Deep-link support: ?season=<id>&grade=<gradeName> (e.g. from the Ladders page).
+  const [searchParams] = useSearchParams()
+  const urlSeasonApplied = useRef(false)
+  const urlGradeApplied = useRef(false)
+  useEffect(() => {
+    if (urlSeasonApplied.current || seasons.length === 0) return
+    const s = searchParams.get('season')
+    if (s && seasons.some(x => x.id === s)) setSelectedSeason(s)
+    urlSeasonApplied.current = true
+  }, [seasons, searchParams, setSelectedSeason])
+  useEffect(() => {
+    if (urlGradeApplied.current) return
+    const g = searchParams.get('grade')
+    if (g && orgGrades.some(x => x.name === g)) {
+      setSelectedGradeName(g)
+      urlGradeApplied.current = true
+    }
+  }, [orgGrades, searchParams])
 
   const effectiveMinRuns = battingSort === 'average' ? minRuns : 0
   const effectiveMinOvers = bowlingSort === 'economy' ? minOvers : 0

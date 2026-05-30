@@ -1,5 +1,5 @@
-import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect, useMemo } from 'react'
+import { useParams, useSearchParams, Link } from 'react-router-dom'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useClubData } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
@@ -103,12 +103,27 @@ export default function GamesPage() {
     loading: clubLoading,
   } = useClubData(orgId)
 
-  // Default to most recent season on first load
+  // Deep-link support: ?season=<id>&grade=<gradeId> (e.g. from the Ladders page).
+  const [searchParams] = useSearchParams()
+  const urlGradeApplied = useRef(false)
+
+  // Default season — honour ?season= if valid, else most recent.
   useEffect(() => {
     if (seasons.length > 0 && selectedSeason == null) {
-      setSelectedSeason(seasons[0].id)
+      const fromUrl = searchParams.get('season')
+      setSelectedSeason(fromUrl && seasons.some(s => s.id === fromUrl) ? fromUrl : seasons[0].id)
     }
-  }, [seasons, selectedSeason, setSelectedSeason])
+  }, [seasons, selectedSeason, setSelectedSeason, searchParams])
+
+  // Apply ?grade= once, after that season's grades have loaded.
+  useEffect(() => {
+    if (urlGradeApplied.current) return
+    const g = searchParams.get('grade')
+    if (g && grades.some(x => x.id === g)) {
+      setSelectedGrade(g)
+      urlGradeApplied.current = true
+    }
+  }, [grades, searchParams, setSelectedGrade])
 
   const [games, setGames] = useState([])
   const [loading, setLoading] = useState(true)
