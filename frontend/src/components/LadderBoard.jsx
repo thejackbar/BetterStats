@@ -15,11 +15,12 @@ function pickDefaultView(views) {
   return overall >= 0 ? overall : 0
 }
 
-function TeamLadder({ team }) {
+function TeamLadder({ team, navFor }) {
   const views = team.views || []
   const [vi, setVi] = useState(() => pickDefaultView(views))
   const view = views[vi]
   const rows = view?.rows || []
+  const nav = navFor ? navFor(team) : null
 
   return (
     <div className="pb-card overflow-hidden">
@@ -39,6 +40,7 @@ function TeamLadder({ team }) {
           </div>
         )}
       </div>
+      {nav && <div className="px-4 py-2 border-b pb-hairline flex flex-wrap gap-2">{nav}</div>}
       {!team.available || rows.length === 0 ? (
         <div className="px-4 py-6 text-center text-pb-faintest text-sm">Ladder not available for this grade yet.</div>
       ) : (
@@ -77,13 +79,13 @@ function TeamLadder({ team }) {
   )
 }
 
-export default function LadderBoard({ teams }) {
+export default function LadderBoard({ teams, navFor }) {
   if (!teams || teams.length === 0) {
     return <div className="pb-card px-5 py-10 text-center text-pb-faint text-sm">No team ladders to show.</div>
   }
   return (
     <div className="grid lg:grid-cols-2 gap-4">
-      {teams.map(t => <TeamLadder key={t.team_id} team={t} />)}
+      {teams.map(t => <TeamLadder key={t.team_id} team={t} navFor={navFor} />)}
     </div>
   )
 }

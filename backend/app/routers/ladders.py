@@ -16,13 +16,14 @@ Two surfaces:
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, Team, get_db
+from app.models.db import Grade, Organisation, Season, Team, get_db
 from app.routers.auth import get_current_club
 from app.routers.teams import ensure_team_grades, _grade_name_map
 from app.services import grassroots_scores_client
@@ -144,3 +145,31 @@ async def public_team_ladders(slug: str, db: AsyncSession = Depends(get_db)):
     data = await _compute_team_ladders(db, org, auto_link=False)
     # Public view: drop the admin-only "unlinked teams" hint.
     return {"teams": data["teams"]}
+
+
+@router.get("/grade/{grade_id}")
+async def grade_ladder(grade_id: str, db: AsyncSession = Depends(get_db)):
+    """Public ladder for a single grade — powers historical browsing (any
+    season). Standings are public, so no auth; the grade just has to belong to
+    an active club. Club rows are flagged via the owning org's name."""
+    try:
+        gid = uuid.UUID(grade_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    grade = await db.get(Grade, gid)
+    if not grade:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    season = await db.get(Season, grade.season_id) if grade.season_id else None
+    org = await db.get(Organisation, season.organisation_id) if season else None
+    if not org or not org.is_active:
+        raise HTTPException(status_code=404, detail="Grade not found")
+    club_keys = [k.lower().strip() for k in [org.short_name, org.name, (org.name or "").split(" ")[0]] if k]
+    raw = await grassroots_scores_client.get_grade_ladder(str(gid))
+    views = _parse_ladder_payload(raw, club_keys)
+    return {
+        "grade_id": str(gid),
+        "grade_name": grade.display_name,
+        "season_name": season.name if season else None,
+        "available": bool(views and any(v["rows"] for v in views)),
+        "views": views,
+    }
