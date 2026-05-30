@@ -7,7 +7,7 @@ import uuid
 
 from app.models.db import (
     Player, User, PlayerSyncRequest, Team,
-    BattingInnings, BowlingSpell, FieldingStat, Game,
+    BattingInnings, BowlingSpell, FieldingStat, Game, Grade, Season,
     Fixture, FixtureLineup, PlayerAvailability, get_db,
 )
 from app.routers.auth import get_current_user
@@ -670,14 +670,28 @@ async def _snapshot(db: AsyncSession, player: Player) -> dict:
     except Exception:
         snap["recent_bowling"] = []
 
-    # season_catches — total catches across recorded fielding rows.
+    # season_catches — catches in the club's latest season only (the profile
+    # labels this "this season"; an unfiltered sum would be career catches).
     try:
-        c_res = await db.execute(
-            select(func.coalesce(func.sum(FieldingStat.catches), 0)).where(
-                FieldingStat.player_id == player.id
+        latest_season = (await db.execute(
+            select(Season.id)
+            .where(Season.organisation_id == player.organisation_id)
+            .order_by(Season.year.desc().nullslast(), Season.name.desc())
+            .limit(1)
+        )).scalar()
+        catches = 0
+        if latest_season:
+            c_res = await db.execute(
+                select(func.coalesce(func.sum(FieldingStat.catches), 0))
+                .join(Game, Game.id == FieldingStat.game_id)
+                .join(Grade, Grade.id == Game.grade_id)
+                .where(
+                    FieldingStat.player_id == player.id,
+                    Grade.season_id == latest_season,
+                )
             )
-        )
-        snap["season_catches"] = int(c_res.scalar() or 0)
+            catches = int(c_res.scalar() or 0)
+        snap["season_catches"] = catches
     except Exception:
         snap["season_catches"] = 0
 

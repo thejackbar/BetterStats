@@ -310,6 +310,7 @@ def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set],
     return {
         "id": str(p.id),
         "display_name": p.display_name,
+        "photo_url": p.photo_url,
         "skill_positions": p.skill_positions or [],
         "player_role": p.player_role,
         "status": p.status,
