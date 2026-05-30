@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 import { api } from '../../lib/api'
 import { useClubTheme } from '../../hooks/useClubTheme'
+import { Icon } from '../../pages/admin/betterselect/ui'
 
 // Club branding is identical for every BetterSelect page, so fetch the club
 // settings once per session and reuse them — navigating between tools shouldn't
@@ -21,12 +22,12 @@ function loadClubBranding() {
 // BetterSelect runs as its own module surface — a focused nav with just the
 // availability/selection tools, separate from the main admin "noise".
 const NAV = [
-  { to: '/admin/betterselect', label: 'Overview', icon: '◧', cap: null, exact: true },
-  { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: '◴', cap: CAP.MANAGE_FIXTURES },
-  { to: '/admin/betterselect/teams', label: 'Teams', icon: '⊞', cap: CAP.MANAGE_SELECTIONS },
-  { to: '/admin/betterselect/availability', label: 'Availability', icon: '✓', cap: CAP.MANAGE_SELECTIONS },
-  { to: '/admin/betterselect/selection', label: 'Selection', icon: '✦', cap: CAP.MANAGE_SELECTIONS },
-  { to: '/admin/betterselect/ladders', label: 'Ladders', icon: '⊺', cap: CAP.MANAGE_SELECTIONS },
+  { to: '/admin/betterselect', label: 'Overview', icon: 'overview', cap: null, exact: true },
+  { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: 'fixtures', cap: CAP.MANAGE_FIXTURES },
+  { to: '/admin/betterselect/teams', label: 'Squads', icon: 'teams', cap: CAP.MANAGE_SELECTIONS },
+  { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS },
+  { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_SELECTIONS },
+  { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: CAP.MANAGE_SELECTIONS },
 ]
 
 export default function BetterSelectLayout({ children, title, actions }) {
@@ -47,7 +48,7 @@ export default function BetterSelectLayout({ children, title, actions }) {
         return (
           <Link key={item.to} to={item.to} onClick={onNavigate}
             className={`flex items-center gap-3 px-4 py-2 text-sm transition-colors ${active ? 'bg-pb-accent/10 text-pb-accent border-r-2 border-pb-accent' : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'}`}>
-            <span className="text-base">{item.icon}</span>
+            <Icon name={item.icon} size={18} className="shrink-0" />
             <span>{item.label}</span>
           </Link>
         )

@@ -6,36 +6,55 @@
 
 export const AVAIL_STATUSES = ['AVAILABLE', 'UNAVAILABLE', 'MAYBE', 'NO_RESPONSE']
 
+// Each status carries: `label` (full), `short` (compact, e.g. button copy),
+// `glyph` (cell symbol), `chip`/`dot` (Tailwind class strings for legacy
+// consumers), `cssVar` (a CSS custom-property string for inline styling so the
+// BetterSelect atom kit can colour dots/bars without dynamic Tailwind classes
+// the JIT can't see), and `rank` (sort order — available first).
 export const AVAILABILITY = {
   AVAILABLE: {
     label: 'Available',
+    short: 'In',
     glyph: '✓',
     chip: 'bg-pb-accent/20 text-pb-accent border-pb-accent/40',
     dot: 'bg-pb-accent',
+    cssVar: 'var(--pb-accent)',
     rank: 0,
   },
   UNAVAILABLE: {
     label: 'Unavailable',
+    short: 'Out',
     glyph: '✕',
     chip: 'bg-pb-red/20 text-pb-red border-pb-red/40',
     dot: 'bg-pb-red',
+    cssVar: 'var(--pb-red)',
     rank: 3,
   },
   MAYBE: {
     label: 'Maybe',
+    short: 'Maybe',
     glyph: '?',
-    chip: 'bg-amber-400/20 text-amber-300 border-amber-400/40',
-    dot: 'bg-amber-400',
+    chip: 'bg-pb-amber/20 text-pb-amber border-pb-amber/40',
+    dot: 'bg-pb-amber',
+    cssVar: 'var(--pb-amber)',
     rank: 1,
   },
   NO_RESPONSE: {
     label: 'No response',
+    short: 'No reply',
     glyph: '–',
     chip: 'bg-pb-surface2 text-pb-faintest border-pb-hairline',
     dot: 'bg-pb-faintest',
+    cssVar: 'var(--pb-faintest)',
     rank: 2,
   },
 }
+
+// Statuses in display order (available → maybe → no-response → unavailable),
+// derived from `rank` so this stays in lockstep with the map above.
+export const AVAIL_ORDER = [...AVAIL_STATUSES].sort(
+  (a, b) => (AVAILABILITY[a]?.rank ?? 99) - (AVAILABILITY[b]?.rank ?? 99),
+)
 
 // Lowercase label, e.g. for inline sentences ("marked unavailable").
 export const availLabel = (s) => (AVAILABILITY[s]?.label ?? String(s ?? ''))
