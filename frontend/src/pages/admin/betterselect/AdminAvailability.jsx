@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
@@ -7,28 +7,30 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner } from '../../../lib/presskit'
-import { AVAILABILITY, AVAIL_STATUSES } from '../../../lib/availability'
-import { FilterSelect } from '../../../lib/filters'
+import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
+import {
+  Icon, Avatar, RoleChips, Btn, Segmented, Search, Chip, Empty, AvailSummary, QuickAvailModal,
+} from './ui'
 
-// Click-to-cycle order; per-status glyph/colour comes from the shared module.
-const CYCLE = ['NO_RESPONSE', 'AVAILABLE', 'UNAVAILABLE', 'MAYBE']
-const META = Object.fromEntries(
-  AVAIL_STATUSES.map((s) => [s, { g: AVAILABILITY[s].glyph, cls: AVAILABILITY[s].chip }]),
-)
+// ============================================================================
+// Availability — players × upcoming-dates matrix.
+//
+// Ported from docs/design_handoff_betterselect/prototype/bs-availability.jsx
+// onto the real ./ui atom kit and the live availability API.
+//
+// NOTE on "periods": the old Availability-Periods editor that used to live on
+// this screen has been REPLACED by the date-range bulk-fill below. Applying a
+// range expands to explicit per-(player,date) rows via bsBulkAvailability, which
+// the backend already treats as overrides ("an explicit answer always takes
+// precedence over a period" — see availability.py:resolve_period_statuses). The
+// period endpoints (bsAvailabilityPeriods / bsCreateAvailabilityPeriod /
+// bsDeleteAvailabilityPeriod) are intentionally LEFT IN PLACE server-side: any
+// pre-existing period still resolves as a background fallback for dates that
+// have no explicit row, and such cells still render with a dashed border. We
+// simply no longer surface period CRUD here.
+// ============================================================================
 
-const SKILL_CODES = ['BAT', 'BWL', 'ALL', 'WKT']
-const STATUS_LABEL = Object.fromEntries(AVAIL_STATUSES.map((s) => [s, AVAILABILITY[s].label.toLowerCase()]))
-// Roster visibility: default to current squad only (hides dormant + inactive).
-const ROSTER_OPTS = [
-  { key: 'current', label: 'Current squad' },
-  { key: 'with_dormant', label: '+ Dormant' },
-  { key: 'all', label: 'All (incl. inactive)' },
-]
-
-// Periods: a span of dates a player is un/available. NO_RESPONSE isn't a valid
-// period status (a period asserts a state). Reason is free text with hints.
-const PERIOD_STATUS_OPTS = ['UNAVAILABLE', 'AVAILABLE', 'MAYBE']
-const REASON_SUGGESTIONS = ['Injured', 'Travelling', 'Work', 'Suspended', 'Personal']
+const STATUS_LABEL = Object.fromEntries(AVAIL_ORDER.map((s) => [s, AVAILABILITY[s].label.toLowerCase()]))
 
 function fmtDay(d) {
   try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
@@ -36,151 +38,169 @@ function fmtDay(d) {
 }
 
 function fmtYear(d) {
-  if (!d) return '—'
-  try { return new Date(d + 'T00:00:00').getFullYear() } catch { return '—' }
+  if (!d) return ''
+  try { return new Date(d + 'T00:00:00').getFullYear() } catch { return '' }
 }
 
-function fmtMonths(m) {
-  if (m % 12 === 0) { const y = m / 12; return `${y} year${y === 1 ? '' : 's'}` }
-  return `${m} months`
-}
-
-function fmtRange(start, end) {
-  if (!end) return `${fmtDay(start)} → open-ended`
-  if (start === end) return fmtDay(start)
-  return `${fmtDay(start)} → ${fmtDay(end)}`
+// Build the prototype's "vs Willetton" fixture sub-label from a date's fixtures.
+function fixtureSub(dateObj) {
+  const fxs = dateObj.fixtures || []
+  if (!fxs.length) return ''
+  return fxs.map((f) => {
+    const opp = f.opponent_name || f.label || 'TBC'
+    const prefix = f.home_away === 'AWAY' ? '@ ' : f.home_away === 'BYE' ? '' : 'vs '
+    const d1d2 = f.two_day ? (f.role === 'day1' ? 'D1 ' : f.role === 'day2' ? 'D2 ' : '') : ''
+    return `${d1d2}${prefix}${opp}`
+  }).join(' · ')
 }
 
 export default function AdminAvailability() {
   const { hasCapability } = useAuth()
   const toast = useToast()
+  const navigate = useNavigate()
   const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+
   const [data, setData] = useState(null)
-  const [avail, setAvail] = useState({}) // {playerId: {date: {status}}}
+  const [avail, setAvail] = useState({}) // {playerId: {date: {status, source, note, ...}}}
 
   // Filters
   const [search, setSearch] = useState('')
-  const [roster, setRoster] = useState('current')
-  const [squad, setSquad] = useState('')        // team name, '' = any
-  const [role, setRole] = useState('')          // player_role, '' = any
-  const [skill, setSkill] = useState('')        // skill code, '' = any
-  const [respFilter, setRespFilter] = useState('') // availability status across shown dates, '' = any
+  const [roster, setRoster] = useState('current')   // 'current' hides dormant/inactive; 'all' shows everyone
+  const [respFilter, setRespFilter] = useState(null) // availability status across shown dates
 
-  // Bulk update: select players, then mark them all in one action.
+  // Selected week (column) — drives the Pick XI handoff and single-week bulk.
+  const [selDate, setSelDate] = useState(null)
+
+  // Date-range bulk-fill (replaces the old Periods editor).
+  const [rangeOn, setRangeOn] = useState(false)
+  const [rangeFrom, setRangeFrom] = useState(null)
+  const [rangeTo, setRangeTo] = useState(null)
+
+  // Bulk update
   const [selected, setSelected] = useState(() => new Set())
   const [bulkStatus, setBulkStatus] = useState('AVAILABLE')
-  const [bulkDate, setBulkDate] = useState('ALL')   // 'ALL' = every shown date
+  const [bulkReason, setBulkReason] = useState('')
   const [applying, setApplying] = useState(false)
 
-  // Availability periods (date-range un/availability).
-  const todayISO = new Date().toISOString().slice(0, 10)
-  const [periods, setPeriods] = useState([])
-  const [showPeriods, setShowPeriods] = useState(false)
-  const [pForm, setPForm] = useState({ player_id: '', status: 'UNAVAILABLE', start_date: todayISO, end_date: '', reason: '' })
-  const [savingPeriod, setSavingPeriod] = useState(false)
+  // Quick-update modal: { pid, date }
+  const [modal, setModal] = useState(null)
 
   const load = useCallback(() => {
     setData(null)
     api.bsAvailabilityMatrix()
-      .then(d => { setData(d); setAvail(d.availability || {}) })
-      .catch(e => { toast.error(e.message); setData({ dates: [], players: [], availability: {} }) })
+      .then((d) => {
+        setData(d)
+        setAvail(d.availability || {})
+        const dts = d.dates || []
+        if (dts.length) {
+          setSelDate((cur) => cur || dts[0].date)
+          setRangeFrom((cur) => cur || dts[0].date)
+          setRangeTo((cur) => cur || dts[dts.length - 1].date)
+        }
+      })
+      .catch((e) => { toast.error(e.message); setData({ dates: [], players: [], availability: {} }) })
   }, [toast])
 
   useEffect(() => { load() }, [load])
 
-  // Refresh the matrix in place (no loading flash) after a period change, so the
-  // newly-covered cells appear without collapsing the page to a spinner.
-  const refreshMatrix = useCallback(() => {
-    api.bsAvailabilityMatrix().then(d => { setData(d); setAvail(d.availability || {}) }).catch(() => {})
-  }, [])
+  const dates = useMemo(() => data?.dates || [], [data])
+  const idxOf = useCallback((dt) => dates.findIndex((d) => d.date === dt), [dates])
+  const inRange = useCallback((dt) => {
+    const i = idxOf(dt), a = idxOf(rangeFrom), b = idxOf(rangeTo)
+    if (i < 0 || a < 0 || b < 0) return false
+    return i >= Math.min(a, b) && i <= Math.max(a, b)
+  }, [idxOf, rangeFrom, rangeTo])
+  const rangeDates = useMemo(() => dates.filter((d) => inRange(d.date)), [dates, inRange])
 
-  const loadPeriods = useCallback(() => {
-    api.bsAvailabilityPeriods().then(setPeriods).catch(() => {})
-  }, [])
-  useEffect(() => { loadPeriods() }, [loadPeriods])
+  // Keep the active week inside the range when one is set.
+  useEffect(() => {
+    if (rangeOn && selDate && rangeFrom && !inRange(selDate)) setSelDate(rangeFrom)
+  }, [rangeOn, rangeFrom, rangeTo, selDate, inRange])
 
-  // Distinct roles present in the roster, for the role dropdown.
-  const roleOptions = useMemo(() => {
-    const s = new Set()
-    ;(data?.players || []).forEach(p => { if (p.player_role) s.add(p.player_role) })
-    return [...s].sort()
-  }, [data])
-
-  // A player's "effective" response for the response filter: AVAILABLE/etc if
-  // they hold that status on ANY shown date; NO_RESPONSE if untouched.
+  // A player's "effective" response for the response filter.
   const matchesResponse = useCallback((p) => {
     if (!respFilter) return true
-    const dates = data?.dates || []
     const byDate = avail[p.id] || {}
     if (respFilter === 'NO_RESPONSE') {
-      return dates.every(d => (byDate[d.date]?.status || 'NO_RESPONSE') === 'NO_RESPONSE')
+      return dates.every((d) => (byDate[d.date]?.status || 'NO_RESPONSE') === 'NO_RESPONSE')
     }
-    return dates.some(d => byDate[d.date]?.status === respFilter)
-  }, [respFilter, data, avail])
+    return dates.some((d) => byDate[d.date]?.status === respFilter)
+  }, [respFilter, avail, dates])
 
-  const filteredPlayers = useMemo(() => {
-    return (data?.players || []).filter(p => {
-      // Roster visibility
+  const players = useMemo(() => {
+    return (data?.players || []).filter((p) => {
+      // Roster visibility — 'current' hides dormant (and never-played inactive).
       if (roster === 'current' && !p.is_current) return false
-      if (roster === 'with_dormant' && p.is_inactive) return false
-      // 'all' shows everyone
       if (search.trim() && !nameMatchesSearch(p.display_name, search)) return false
-      if (squad && !(p.squads || []).includes(squad)) return false
-      if (role && p.player_role !== role) return false
-      if (skill && !(p.skill_positions || []).includes(skill)) return false
       if (!matchesResponse(p)) return false
       return true
     })
-  }, [data, roster, search, squad, role, skill, matchesResponse])
+  }, [data, roster, search, matchesResponse])
 
-  const resetFilters = () => {
-    setSearch(''); setRoster('current'); setSquad(''); setRole(''); setSkill(''); setRespFilter('')
-  }
-  const filtersActive = search || squad || role || skill || respFilter || roster !== 'current'
+  // Per-date player list as objects carrying a flat `availability` status, so we
+  // can hand the matched-player set straight to <AvailSummary statusOf=…>.
+  const colPlayers = useCallback((date) =>
+    players.map((p) => ({ availability: avail[p.id]?.[date]?.status || 'NO_RESPONSE' })),
+  [players, avail])
+  const colInCount = useCallback((date) =>
+    players.reduce((n, p) => n + ((avail[p.id]?.[date]?.status || 'NO_RESPONSE') === 'AVAILABLE' ? 1 : 0), 0),
+  [players, avail])
 
-  const cycle = async (pid, date, cur) => {
+  // ---- single-cell write (quick modal; no cell cycling) --------------------
+  const setCell = async (pid, date, status) => {
     if (!canEdit) return
-    const next = CYCLE[(CYCLE.indexOf(cur) + 1) % CYCLE.length]
-    setAvail(a => ({ ...a, [pid]: { ...(a[pid] || {}), [date]: { status: next } } }))
+    const prev = avail
+    setAvail((a) => ({ ...a, [pid]: { ...(a[pid] || {}), [date]: { status, source: 'explicit' } } }))
+    setModal(null)
     try {
-      await api.bsSetAvailability({ player_id: pid, date, status: next })
+      await api.bsSetAvailability({ player_id: pid, date, status })
     } catch (e) {
+      setAvail(prev)
       toast.error('Save failed: ' + e.message)
-      setAvail(a => ({ ...a, [pid]: { ...(a[pid] || {}), [date]: { status: cur } } }))
     }
   }
 
-  const toggleSelect = (pid) => setSelected(s => {
-    const n = new Set(s); n.has(pid) ? n.delete(pid) : n.add(pid); return n
-  })
-  const allFilteredSelected = filteredPlayers.length > 0 && filteredPlayers.every(p => selected.has(p.id))
-  const toggleSelectAll = () => setSelected(s => {
+  const toggleSel = (pid) => setSelected((s) => { const n = new Set(s); n.has(pid) ? n.delete(pid) : n.add(pid); return n })
+  const allSelected = players.length > 0 && players.every((p) => selected.has(p.id))
+  const toggleSelAll = () => setSelected((s) => {
+    const all = players.every((p) => s.has(p.id))
     const n = new Set(s)
-    if (filteredPlayers.every(p => n.has(p.id))) filteredPlayers.forEach(p => n.delete(p.id))
-    else filteredPlayers.forEach(p => n.add(p.id))
+    players.forEach((p) => all ? n.delete(p.id) : n.add(p.id))
     return n
   })
 
+  // ---- bulk write: expand (selected players × target dates) into ONE call --
+  // In range mode the targets are every date in [From → To]; otherwise just the
+  // selected week. Each item carries the optional reason as `note`.
   const applyBulk = async () => {
     if (!canEdit || selected.size === 0) return
-    const targetDates = bulkDate === 'ALL' ? (data.dates || []).map(d => d.date) : [bulkDate]
+    const targets = rangeOn ? rangeDates.map((d) => d.date) : (selDate ? [selDate] : [])
+    if (!targets.length) return
+    const note = bulkReason.trim() || undefined
     const items = []
-    for (const pid of selected) for (const date of targetDates) items.push({ player_id: pid, date, status: bulkStatus })
-    if (!items.length) return
+    for (const pid of selected) {
+      for (const date of targets) {
+        items.push({ player_id: pid, date, status: bulkStatus, ...(note ? { note } : {}) })
+      }
+    }
     setApplying(true)
     const prev = avail
-    setAvail(a => {
+    setAvail((a) => {
       const next = { ...a }
       for (const pid of selected) {
         next[pid] = { ...(next[pid] || {}) }
-        for (const date of targetDates) next[pid][date] = { status: bulkStatus }
+        for (const date of targets) next[pid][date] = { status: bulkStatus, note, source: 'explicit' }
       }
       return next
     })
     try {
       await api.bsBulkAvailability(items)
-      toast.success(`Marked ${selected.size} player${selected.size === 1 ? '' : 's'} ${STATUS_LABEL[bulkStatus]}${bulkDate === 'ALL' ? ' (all dates)' : ' for ' + fmtDay(bulkDate)}`)
+      const span = rangeOn
+        ? `${fmtDay(rangeFrom)} → ${fmtDay(rangeTo)} (${targets.length} game${targets.length === 1 ? '' : 's'})`
+        : fmtDay(selDate)
+      toast.success(`Marked ${selected.size} player${selected.size === 1 ? '' : 's'} ${STATUS_LABEL[bulkStatus]} · ${span}`)
       setSelected(new Set())
+      setBulkReason('')
     } catch (e) {
       setAvail(prev)
       toast.error('Bulk update failed: ' + e.message)
@@ -189,271 +209,221 @@ export default function AdminAvailability() {
     }
   }
 
-  const addPeriod = async () => {
-    if (!canEdit || !pForm.player_id || !pForm.start_date) return
-    if (pForm.end_date && pForm.end_date < pForm.start_date) { toast.error('End date is before start date'); return }
-    setSavingPeriod(true)
-    try {
-      await api.bsCreateAvailabilityPeriod({
-        player_id: pForm.player_id,
-        status: pForm.status,
-        start_date: pForm.start_date,
-        end_date: pForm.end_date || null,
-        reason: pForm.reason.trim() || null,
-      })
-      toast.success('Period added')
-      setPForm(f => ({ ...f, player_id: '', reason: '' }))
-      loadPeriods(); refreshMatrix()   // refresh list + matrix cells
-    } catch (e) {
-      toast.error('Could not add period: ' + e.message)
-    } finally {
-      setSavingPeriod(false)
-    }
+  if (data === null) {
+    return <BetterSelectLayout title="Availability"><PbSpinner message="Loading availability…" /></BetterSelectLayout>
   }
 
-  const removePeriod = async (id) => {
-    if (!canEdit) return
-    const prev = periods
-    setPeriods(ps => ps.filter(p => p.id !== id))
-    try { await api.bsDeleteAvailabilityPeriod(id); refreshMatrix() }
-    catch (e) { setPeriods(prev); toast.error('Could not remove period: ' + e.message) }
-  }
-
-  if (data === null) return <BetterSelectLayout title="Availability"><PbSpinner message="Loading availability…" /></BetterSelectLayout>
-
-  if (!data.dates.length) {
+  if (!dates.length) {
     return (
       <BetterSelectLayout title="Availability">
         <div className="pb-card px-5 py-10 text-center text-pb-faint text-sm">
           No upcoming fixtures to collect availability for.{' '}
-          <Link to="/admin/betterselect/fixtures" className="text-pb-accent underline">Add or sync fixtures</Link> first.
+          <button onClick={() => navigate('/admin/betterselect/fixtures')} className="text-pb-accent underline">Add or sync fixtures</button> first.
         </div>
       </BetterSelectLayout>
     )
   }
 
   return (
-    <BetterSelectLayout title="Availability">
-      <p className="text-pb-faint text-sm mb-3 max-w-2xl">
-        {canEdit ? 'Click a cell to cycle: ' : 'Read-only — '}
-        <span className="text-pb-accent">✓ available</span> ·{' '}
-        <span className="text-pb-red">✕ unavailable</span> ·{' '}
-        <span className="text-amber-300">? maybe</span> ·{' '}
-        <span className="text-pb-faintest">– no response</span>.
-        One answer covers every fixture that day; two-day games show both weekends.{' '}
-        A <span className="px-1 border border-dashed pb-hairline rounded text-pb-faint">dashed</span> cell comes from a period.
-      </p>
-
-      {/* Availability periods — set a span of un/availability in one action */}
-      <div className="pb-card mb-3">
-        <button onClick={() => setShowPeriods(s => !s)}
-          className="w-full flex items-center gap-2 px-4 py-2.5 text-left">
-          <span className="font-mono text-[11px] uppercase tracking-wide2 text-pb-faint">Availability periods</span>
-          {periods.length > 0 && <span className="font-mono text-[10px] text-pb-accent">{periods.length} active</span>}
-          <span className="ml-auto text-pb-faintest text-xs">{showPeriods ? '▲' : '▼'}</span>
+    <BetterSelectLayout
+      title="Availability"
+      actions={canEdit && (
+        <Btn variant="primary" sm icon="selection" onClick={() => navigate('/admin/betterselect/selection')}>Pick this weekend</Btn>
+      )}
+    >
+      {/* Filter bar — one compact row */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <Search value={search} onChange={setSearch} placeholder="Search players…" />
+        <Segmented value={roster} onChange={setRoster} options={[
+          { value: 'current', label: 'Current squad' },
+          { value: 'all', label: 'All' },
+        ]} />
+        <div className="flex flex-wrap gap-1.5">
+          {AVAIL_ORDER.map((s) => (
+            <Chip key={s} label={AVAILABILITY[s].label} dot={AVAILABILITY[s].cssVar}
+              active={respFilter === s} onClick={() => setRespFilter(respFilter === s ? null : s)} />
+          ))}
+        </div>
+        <button onClick={() => setRangeOn((v) => !v)}
+          className={`ml-auto inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${rangeOn ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
+          <Icon name="fixtures" size={14} /> Date range {rangeOn ? '▲' : '▼'}
         </button>
-        {showPeriods && (
-          <div className="px-4 pb-4 border-t pb-hairline">
-            <p className="text-pb-faint text-xs mt-3 mb-3 max-w-2xl">
-              Mark a player un/available across a date range — set once, it covers every fixture in the span.
-              Leave the end date blank for open-ended (until further notice). An explicit click on a cell always overrides.
-            </p>
-
-            {canEdit && (
-              <div className="flex flex-wrap items-end gap-3 mb-4">
-                <div className="min-w-[170px]">
-                  <label className="font-mono text-[10px] text-pb-faintest block mb-1">Player</label>
-                  <select value={pForm.player_id} onChange={e => setPForm(f => ({ ...f, player_id: e.target.value }))}
-                    className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-                    <option value="">Select player…</option>
-                    {(data?.players || []).map(p => <option key={p.id} value={p.id}>{p.display_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="font-mono text-[10px] text-pb-faintest block mb-1">Status</label>
-                  <select value={pForm.status} onChange={e => setPForm(f => ({ ...f, status: e.target.value }))}
-                    className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-                    {PERIOD_STATUS_OPTS.map(s => <option key={s} value={s}>{AVAILABILITY[s].label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="font-mono text-[10px] text-pb-faintest block mb-1">From</label>
-                  <input type="date" value={pForm.start_date} onChange={e => setPForm(f => ({ ...f, start_date: e.target.value }))}
-                    className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
-                </div>
-                <div>
-                  <label className="font-mono text-[10px] text-pb-faintest block mb-1">To <span className="text-pb-faintest/60">(blank = open)</span></label>
-                  <input type="date" value={pForm.end_date} min={pForm.start_date} onChange={e => setPForm(f => ({ ...f, end_date: e.target.value }))}
-                    className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
-                </div>
-                <div className="flex-1 min-w-[150px]">
-                  <label className="font-mono text-[10px] text-pb-faintest block mb-1">Reason</label>
-                  <input list="period-reasons" value={pForm.reason} onChange={e => setPForm(f => ({ ...f, reason: e.target.value }))}
-                    placeholder="e.g. Injured (optional)"
-                    className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
-                  <datalist id="period-reasons">{REASON_SUGGESTIONS.map(r => <option key={r} value={r} />)}</datalist>
-                </div>
-                <button onClick={addPeriod} disabled={savingPeriod || !pForm.player_id}
-                  className="px-4 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
-                  style={{ background: 'var(--pb-accent)' }}>
-                  {savingPeriod ? 'Adding…' : 'Add period'}
-                </button>
-              </div>
-            )}
-
-            {periods.length === 0 ? (
-              <p className="text-pb-faintest text-xs">No active periods.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {periods.map(p => (
-                  <div key={p.id} className="flex items-center gap-2.5 text-sm bg-pb-surface2 rounded px-3 py-1.5">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${AVAILABILITY[p.status]?.dot || 'bg-pb-faintest'}`} />
-                    <span className="font-medium text-pb-text">{p.player_name}</span>
-                    <span className="font-mono text-[10px] uppercase text-pb-faint">{AVAILABILITY[p.status]?.label || p.status}</span>
-                    <span className="text-pb-faint text-xs">{fmtRange(p.start_date, p.end_date)}</span>
-                    {p.reason && <span className="text-pb-faintest text-xs truncate">· {p.reason}</span>}
-                    {canEdit && (
-                      <button onClick={() => removePeriod(p.id)}
-                        className="ml-auto shrink-0 text-pb-faintest hover:text-pb-red text-xs px-1" title="Remove period">✕</button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* Filter bar */}
-      <div className="pb-card p-3 mb-3 flex flex-wrap items-end gap-3">
-        <div className="flex-1 min-w-[180px]">
-          <label className="font-mono text-[10px] text-pb-faintest block mb-1">Search</label>
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Player name…"
-            className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-          />
-        </div>
-        <FilterSelect label="Roster" value={roster} onChange={setRoster}
-          options={ROSTER_OPTS.map(o => [o.key, o.label])} includeAny={false} />
-        {(data.all_squads || []).length > 0 &&
-          <FilterSelect label="Squad" value={squad} onChange={setSquad}
-            options={(data.all_squads || []).map(s => [s, s])} anyLabel="Any squad" />}
-        {roleOptions.length > 0 &&
-          <FilterSelect label="Role" value={role} onChange={setRole}
-            options={roleOptions.map(r => [r, r])} anyLabel="Any role" />}
-        <FilterSelect label="Skill" value={skill} onChange={setSkill}
-          options={SKILL_CODES.map(c => [c, c])} anyLabel="Any skill" />
-        <FilterSelect label="Response" value={respFilter} onChange={setRespFilter}
-          options={[['AVAILABLE', '✓ Available'], ['UNAVAILABLE', '✕ Unavailable'], ['MAYBE', '? Maybe'], ['NO_RESPONSE', '– No response']]}
-          anyLabel="Any response" />
-        {filtersActive &&
-          <button onClick={resetFilters}
-            className="text-xs text-pb-faint hover:text-pb-text underline px-1 py-1.5">Clear</button>}
-        <div className="ml-auto font-mono text-[10px] text-pb-faintest self-center text-right">
-          {filteredPlayers.length} / {data.players.length} players
-          {data.dormancy_months != null && (
-            <div className="text-pb-faintest/70">dormant after {fmtMonths(data.dormancy_months)}</div>
-          )}
-        </div>
-      </div>
-
-      {/* Bulk action bar — appears once players are ticked */}
-      {canEdit && selected.size > 0 && (
-        <div className="pb-card p-3 mb-3 flex flex-wrap items-center gap-3 border" style={{ borderColor: 'var(--pb-accent)' }}>
-          <span className="font-mono text-[11px] text-pb-accent">{selected.size} selected</span>
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[10px] text-pb-faintest">mark as</span>
-            <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}
-              className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-              <option value="AVAILABLE">✓ Available</option>
-              <option value="UNAVAILABLE">✕ Unavailable</option>
-              <option value="MAYBE">? Maybe</option>
-              <option value="NO_RESPONSE">– No response</option>
-            </select>
+      {/* Date-range bulk-fill panel (replaces the retired Periods editor) */}
+      {rangeOn && (
+        <div className="pb-card p-3 mb-4 flex flex-wrap items-center gap-3">
+          <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Date range</span>
+          <select value={rangeFrom || ''} onChange={(e) => setRangeFrom(e.target.value)}
+            className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+            {dates.map((d) => <option key={d.date} value={d.date}>{fmtDay(d.date)}</option>)}
+          </select>
+          <span className="text-pb-faint">→</span>
+          <select value={rangeTo || ''} onChange={(e) => setRangeTo(e.target.value)}
+            className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+            {dates.map((d) => <option key={d.date} value={d.date}>{fmtDay(d.date)}</option>)}
+          </select>
+          <div className="w-px h-6 bg-pb-hairline" />
+          <span className="text-xs text-pb-faint">{rangeDates.length} game{rangeDates.length === 1 ? '' : 's'}:</span>
+          <div className="flex flex-wrap gap-1.5">
+            {rangeDates.map((g) => {
+              const sub = fixtureSub(g)
+              return (
+                <span key={g.date} className="inline-flex items-center gap-1.5 rounded-full border border-pb-hairline bg-pb-surface2 px-2.5 py-1 text-[11px] text-pb-dim">
+                  <span className="text-pb-faint">{fmtDay(g.date)}</span>{sub && <span>{sub}</span>}
+                </span>
+              )
+            })}
+            {rangeDates.every((g) => !fixtureSub(g)) && <span className="text-[11px] text-pb-faintest">no fixtures in range</span>}
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[10px] text-pb-faintest">for</span>
-            <select value={bulkDate} onChange={e => setBulkDate(e.target.value)}
-              className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-              <option value="ALL">All shown dates</option>
-              {data.dates.map(d => <option key={d.date} value={d.date}>{fmtDay(d.date)}</option>)}
-            </select>
-          </div>
-          <button onClick={applyBulk} disabled={applying}
-            className="px-4 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
-            style={{ background: 'var(--pb-accent)' }}>
-            {applying ? 'Applying…' : 'Apply'}
-          </button>
-          <button onClick={() => setSelected(new Set())}
-            className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline px-1">Clear</button>
+          <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-pb-faint">
+            <Icon name="info" size={13} /> Tick players, then bulk-mark across the range
+          </span>
         </div>
       )}
 
+      {/* Bulk action bar — appears once players are ticked */}
+      {canEdit && selected.size > 0 && (
+        <div className="pb-card p-3 mb-4 flex flex-wrap items-center gap-3 border" style={{ borderColor: 'var(--pb-accent)' }}>
+          <span className="font-mono text-[11px] text-pb-accent">{selected.size} selected</span>
+          <span className="text-sm text-pb-dim">mark</span>
+          <Segmented sm value={bulkStatus} onChange={setBulkStatus}
+            options={AVAIL_ORDER.map((s) => ({ value: s, label: AVAILABILITY[s].short }))} />
+          {rangeOn ? (
+            <span className="inline-flex items-center gap-2 text-sm text-pb-dim">
+              across
+              <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-pb-accent bg-pb-accent/10 border border-pb-accent/30">
+                {fmtDay(rangeFrom)} → {fmtDay(rangeTo)} <span className="font-mono">· {rangeDates.length} games</span>
+              </span>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-2 text-sm text-pb-dim">
+              for
+              <select value={selDate || ''} onChange={(e) => setSelDate(e.target.value)}
+                className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+                {dates.map((d) => <option key={d.date} value={d.date}>{fmtDay(d.date)}</option>)}
+              </select>
+            </span>
+          )}
+          <input value={bulkReason} onChange={(e) => setBulkReason(e.target.value)}
+            placeholder="Reason (optional)"
+            className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent min-w-[150px]" />
+          <Btn variant="primary" sm onClick={applyBulk} disabled={applying}>{applying ? 'Applying…' : 'Apply'}</Btn>
+          <Btn variant="ghost" sm onClick={() => { setSelected(new Set()); setBulkReason('') }}>Clear</Btn>
+        </div>
+      )}
+
+      {/* Matrix */}
       <div className="pb-card overflow-auto">
-        <table className="border-collapse text-sm w-full">
+        <table className="border-separate w-full" style={{ borderSpacing: 0, minWidth: 760 }}>
           <thead>
             <tr>
-              <th className="sticky left-0 z-20 bg-pb-surface2 text-left px-3 py-2 font-mono text-[10px] uppercase tracking-wide2 text-pb-faint min-w-[160px]">
-                {canEdit && (
-                  <input type="checkbox" checked={allFilteredSelected} onChange={toggleSelectAll}
-                    className="accent-pb-accent mr-2 align-middle" title="Select all shown" />
-                )}
-                Player
+              <th className="sticky left-0 top-0 z-30 bg-pb-surface2 text-left px-4 py-3 border-b pb-hairline" style={{ minWidth: 250 }}>
+                <div className="flex items-center gap-2.5">
+                  {canEdit && (
+                    <input type="checkbox" checked={allSelected} onChange={toggleSelAll}
+                      className="accent-pb-accent" style={{ width: 15, height: 15 }} title="Select all shown" />
+                  )}
+                  <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Player</span>
+                  <span className="ml-auto font-mono text-[11px] text-pb-faint">{players.length}</span>
+                </div>
               </th>
-              {data.dates.map(d => (
-                <th key={d.date} className="px-2 py-2 border-l pb-hairline bg-pb-surface2 align-top min-w-[112px]">
-                  <div className="font-semibold text-pb-text text-xs">{fmtDay(d.date)}</div>
-                  <div className="mt-1 space-y-0.5">
-                    {d.fixtures.map((f, fi) => (
-                      <div key={fi} className="text-[10px] text-pb-faint truncate max-w-[104px]" title={f.opponent_name || f.label || ''}>
-                        {f.two_day && <span className="text-amber-300">{f.role === 'day1' ? 'D1 ' : 'D2 '}</span>}
-                        {f.home_away === 'AWAY' ? '@' : f.home_away === 'BYE' ? '' : 'v'} {f.opponent_name || f.label || 'TBC'}
-                      </div>
-                    ))}
-                  </div>
-                </th>
-              ))}
+              {dates.map((d) => {
+                const sel = d.date === selDate
+                const dim = rangeOn && !inRange(d.date)
+                const sub = fixtureSub(d)
+                return (
+                  <th key={d.date} onClick={() => setSelDate(d.date)}
+                    className="sticky top-0 z-20 px-3 py-2.5 border-b border-l pb-hairline text-center cursor-pointer transition-opacity"
+                    style={{
+                      minWidth: 120,
+                      background: sel ? 'color-mix(in srgb, var(--pb-accent) 7%, var(--pb-surface2))' : 'var(--pb-surface2)',
+                      borderTop: sel ? '2px solid var(--pb-accent)' : '2px solid transparent',
+                      opacity: dim ? 0.4 : 1,
+                    }}>
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span className="inline-block rounded-full" style={{
+                        width: 8, height: 8,
+                        border: `1.5px solid ${sel ? 'var(--pb-accent)' : 'var(--pb-faintest)'}`,
+                        background: sel ? 'var(--pb-accent)' : 'transparent',
+                      }} />
+                      <span className="font-display font-bold text-[13px]" style={{ color: sel ? 'var(--pb-accent)' : 'var(--pb-text)' }}>{fmtDay(d.date)}</span>
+                    </div>
+                    {sub && <div className="text-[10px] text-pb-faint mt-0.5 truncate" title={sub} style={{ maxWidth: 112, margin: '2px auto 0' }}>{sub}</div>}
+                    <div className="mt-2"><AvailSummary players={colPlayers(d.date)} compact hideTotal /></div>
+                    <div className="font-mono text-[10px] text-pb-dim mt-1.5"><b className="text-pb-accent">{colInCount(d.date)}</b> in</div>
+                    {sel ? (
+                      <Btn variant="primary" sm className="mt-2 w-full justify-center"
+                        onClick={(e) => { e.stopPropagation(); navigate('/admin/betterselect/selection') }}>
+                        Pick XI <Icon name="arrow" size={13} />
+                      </Btn>
+                    ) : (
+                      <div className="mt-2 text-[10px] text-pb-faintest py-1">select week</div>
+                    )}
+                  </th>
+                )
+              })}
             </tr>
           </thead>
           <tbody>
-            {filteredPlayers.length === 0 && (
+            {players.length === 0 && (
               <tr>
-                <td colSpan={data.dates.length + 1} className="px-3 py-8 text-center text-pb-faint text-sm border-t pb-hairline">
-                  No players match these filters.{' '}
-                  {filtersActive && <button onClick={resetFilters} className="text-pb-accent underline">Clear filters</button>}
+                <td colSpan={dates.length + 1} className="border-t pb-hairline px-4 py-8 text-center">
+                  <Empty>No players match these filters. Try clearing the search/response filter, or switch to “All”.</Empty>
                 </td>
               </tr>
             )}
-            {filteredPlayers.map(p => (
-              <tr key={p.id}>
-                <td className={`sticky left-0 z-10 px-3 py-1.5 whitespace-nowrap border-t pb-hairline ${selected.has(p.id) ? 'bg-pb-accent/10' : 'bg-pb-surface'}`}>
-                  {canEdit && (
-                    <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelect(p.id)}
-                      className="accent-pb-accent mr-2 align-middle" />
-                  )}
-                  <span className="text-sm">{p.display_name}</span>
-                  {p.player_role && <span className="ml-2 font-mono text-[9px] text-pb-faintest uppercase">{p.player_role}</span>}
-                  {p.is_inactive && <span className="ml-2 font-mono text-[9px] text-pb-red/80 uppercase" title="Marked inactive">inactive</span>}
-                  {p.is_dormant && <span className="ml-2 font-mono text-[9px] text-amber-300/80 uppercase" title={`No appearances since ${fmtYear(p.last_played)}`}>dormant · {fmtYear(p.last_played)}</span>}
+            {players.map((p) => (
+              <tr key={p.id} style={{ background: selected.has(p.id) ? 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' : 'transparent' }}>
+                <td className="sticky left-0 z-10 px-4 py-2 border-b pb-hairline"
+                  style={{ background: selected.has(p.id) ? 'var(--pb-surface2)' : 'var(--pb-surface)' }}>
+                  <div className="flex items-center gap-2.5">
+                    {canEdit && (
+                      <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSel(p.id)}
+                        className="accent-pb-accent" style={{ width: 15, height: 15 }} />
+                    )}
+                    <Avatar player={p} size={30} />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate">{p.display_name}</span>
+                        {p.is_dormant && <span className="font-mono text-[9px] text-amber-300/80 uppercase" title={`Dormant${p.last_played ? ' since ' + fmtYear(p.last_played) : ''}`}>dormant</span>}
+                        {p.is_inactive && <span className="font-mono text-[9px] text-pb-red/80 uppercase" title="Marked inactive">inactive</span>}
+                      </div>
+                      <div className="mt-0.5"><RoleChips roles={p.skill_positions} muted /></div>
+                    </div>
+                  </div>
                 </td>
-                {data.dates.map(d => {
+                {dates.map((d) => {
                   const cell = avail[p.id]?.[d.date]
                   const st = cell?.status || 'NO_RESPONSE'
-                  const m = META[st]
+                  const meta = AVAILABILITY[st]
                   const fromPeriod = cell?.source === 'period'
+                  const empty = st === 'NO_RESPONSE'
+                  const dim = rangeOn && !inRange(d.date)
+                  const sel = d.date === selDate
                   const title = fromPeriod
-                    ? `${AVAILABILITY[st]?.label || st}${cell.reason ? ' · ' + cell.reason : ''} — from a period${cell.period_end ? ' until ' + fmtDay(cell.period_end) : ' (open-ended)'}${canEdit ? '. Click to override.' : ''}`
-                    : (AVAILABILITY[st]?.label || st)
+                    ? `${meta.label}${cell.note ? ' · ' + cell.note : ''} — from a period${canEdit ? ' (click to override)' : ''}`
+                    : meta.label
                   return (
-                    <td key={d.date} className="px-1.5 py-1.5 border-l border-t pb-hairline text-center">
+                    <td key={d.date} className="text-center border-b border-l pb-hairline transition-opacity"
+                      style={{
+                        padding: '8px 0',
+                        opacity: dim ? 0.4 : 1,
+                        background: sel ? 'color-mix(in srgb, var(--pb-accent) 4%, transparent)' : 'transparent',
+                      }}>
                       <button
-                        onClick={() => cycle(p.id, d.date, st)}
+                        onClick={() => canEdit && setModal({ pid: p.id, date: d.date })}
                         disabled={!canEdit}
-                        className={`w-9 h-7 rounded border text-sm transition-transform active:scale-90 ${m.cls} ${fromPeriod ? 'border-dashed' : ''} ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
                         title={title}
-                      >{m.g}</button>
+                        className={`inline-flex items-center justify-center font-mono text-sm transition-transform active:scale-90 ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
+                        style={{
+                          width: 38, height: 30, borderRadius: 7, fontWeight: 600,
+                          color: empty ? 'var(--pb-faintest)' : meta.cssVar,
+                          background: empty ? 'transparent' : `color-mix(in srgb, ${meta.cssVar} 14%, transparent)`,
+                          border: fromPeriod ? `1.5px dashed ${meta.cssVar}` : `1px solid ${empty ? 'var(--pb-hairline)' : 'transparent'}`,
+                        }}>
+                        {meta.glyph}
+                      </button>
                     </td>
                   )
                 })}
@@ -462,8 +432,23 @@ export default function AdminAvailability() {
           </tbody>
         </table>
       </div>
+
+      {/* Quick-update modal — set one player's availability on one date */}
+      {modal && (() => {
+        const pl = (data.players || []).find((p) => p.id === modal.pid)
+        const cur = avail[modal.pid]?.[modal.date]?.status || 'NO_RESPONSE'
+        const dObj = dates.find((d) => d.date === modal.date)
+        const sub = dObj ? fixtureSub(dObj) : ''
+        return (
+          <QuickAvailModal
+            player={pl}
+            dateLabel={`${fmtDay(modal.date)}${sub ? ' · ' + sub : ''}`}
+            current={cur}
+            onPick={(s) => setCell(modal.pid, modal.date, s)}
+            onClose={() => setModal(null)}
+          />
+        )
+      })()}
     </BetterSelectLayout>
   )
 }
-
-// FilterSelect now lives in lib/filters (shared with the Selection screen).
