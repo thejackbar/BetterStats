@@ -258,6 +258,153 @@ function SquadColumn({ col, members, statusOf, canManage, collapsed, onToggleCol
   )
 }
 
+/* ── Auto-assign modal: suggest a squad per player from where they played ──── */
+function AutoAssignModal({ onApply, onClose }) {
+  const toast = useToast()
+  const [seasons, setSeasons] = useState(2)
+  const [onlyUnassigned, setOnlyUnassigned] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)      // { seasons_considered, suggestions, unmatched }
+  const [picked, setPicked] = useState(() => new Set())
+  const [applying, setApplying] = useState(false)
+  const [showUnmatched, setShowUnmatched] = useState(false)
+
+  const preview = useCallback(async (s = seasons, ou = onlyUnassigned) => {
+    setLoading(true); setResult(null)
+    try {
+      const d = await api.bsAutoAssignSuggest({ seasons: s, onlyUnassigned: ou })
+      setResult(d)
+      setPicked(new Set((d.suggestions || []).map((x) => x.player_id)))
+    } catch (e) { toast.error('Preview failed: ' + e.message) }
+    finally { setLoading(false) }
+  }, [seasons, onlyUnassigned, toast])
+
+  useEffect(() => { preview(2, true) }, [])   // initial preview with defaults
+
+  const toggle = (pid) => setPicked((s) => { const n = new Set(s); n.has(pid) ? n.delete(pid) : n.add(pid); return n })
+
+  const groups = useMemo(() => {
+    const m = new Map()
+    ;(result?.suggestions || []).forEach((s) => {
+      if (!m.has(s.team_id)) m.set(s.team_id, { name: s.team_name, rows: [] })
+      m.get(s.team_id).rows.push(s)
+    })
+    return [...m.values()]
+  }, [result])
+
+  const apply = async () => {
+    const chosen = (result?.suggestions || []).filter((s) => picked.has(s.player_id))
+    if (!chosen.length) return
+    setApplying(true)
+    try {
+      const byTeam = new Map()
+      chosen.forEach((s) => { if (!byTeam.has(s.team_id)) byTeam.set(s.team_id, []); byTeam.get(s.team_id).push(s.player_id) })
+      await onApply([...byTeam.entries()])
+      toast.success(`Assigned ${chosen.length} player${chosen.length === 1 ? '' : 's'} to their squads`)
+      onClose()
+    } catch (e) { toast.error('Apply failed: ' + e.message) }
+    finally { setApplying(false) }
+  }
+
+  const total = result?.suggestions?.length || 0
+  const unmatched = result?.unmatched || []
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div onClick={(e) => e.stopPropagation()} className="w-[560px] max-w-full max-h-[88%] flex flex-col bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl">
+        <div className="flex items-start gap-3 px-[18px] py-4 border-b pb-hairline">
+          <div className="flex-1 min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">Auto-assign squads</div>
+            <div className="font-display font-bold text-[18px] mt-0.5">From where players actually played</div>
+            <div className="text-[12px] text-pb-faint mt-1">Each player is matched to the squad they played the most games for over the chosen window. Review and adjust before applying — nothing is saved until you hit Apply.</div>
+          </div>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1 shrink-0"><Icon name="close" size={18} /></button>
+        </div>
+
+        {/* Controls */}
+        <div className="px-4 py-3 border-b pb-hairline flex flex-wrap items-center gap-3">
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-pb-faint">
+            Last
+            {[1, 2, 3, 5].map((n) => (
+              <Chip key={n} label={`${n}`} active={seasons === n} onClick={() => { setSeasons(n); preview(n, onlyUnassigned) }} />
+            ))}
+            season{seasons === 1 ? '' : 's'}
+          </span>
+          <label className="inline-flex items-center gap-2 text-[12px] text-pb-faint cursor-pointer">
+            <input type="checkbox" checked={onlyUnassigned} onChange={(e) => { setOnlyUnassigned(e.target.checked); preview(seasons, e.target.checked) }} className="accent-pb-accent w-[14px] h-[14px]" />
+            Only players without a squad
+          </label>
+          {result?.seasons_considered?.length > 0 && (
+            <span className="ml-auto font-mono text-[10px] text-pb-faintest truncate" title={result.seasons_considered.join(', ')}>{result.seasons_considered.join(' · ')}</span>
+          )}
+        </div>
+
+        {/* Body */}
+        <div className="overflow-auto flex-1 pb-scroll">
+          {loading ? <div className="py-10"><PbSpinner message="Working out squads…" /></div> : (
+            total === 0 ? (
+              <div className="px-4 py-10"><Empty>{onlyUnassigned ? 'No unassigned players have games in this window. Try more seasons, or untick “only players without a squad”.' : 'Everyone is already in the squad they played most for.'}</Empty></div>
+            ) : (
+              <>
+                {groups.map((g) => (
+                  <div key={g.name}>
+                    <div className="sticky top-0 z-10 bg-pb-surface2 px-4 py-1.5 flex items-center gap-2 border-b pb-hairline">
+                      <span className="font-display font-bold text-[13px]">{g.name}</span>
+                      <span className="font-mono text-[10px] text-pb-faint">{g.rows.filter((r) => picked.has(r.player_id)).length}/{g.rows.length}</span>
+                    </div>
+                    {g.rows.map((s) => {
+                      const on = picked.has(s.player_id)
+                      return (
+                        <label key={s.player_id} className={`flex items-center gap-3 px-4 py-2 border-b pb-hairline cursor-pointer ${on ? '' : 'opacity-50'}`}>
+                          <input type="checkbox" checked={on} onChange={() => toggle(s.player_id)} className="accent-pb-accent w-[15px] h-[15px]" />
+                          <span className="flex-1 text-[13.5px] font-medium truncate">{s.player_name}</span>
+                          {s.current_team_name && <span className="font-mono text-[10px] text-pb-faintest truncate">from {s.current_team_name}</span>}
+                          {s.matched_by === 'grade' && <span className="font-mono text-[8.5px] text-pb-faint uppercase" title="Matched via grade name (no squad matched the team name)">via grade</span>}
+                          <span className="font-mono text-[11px] text-pb-faint pb-num shrink-0">{s.games}g</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                ))}
+                {unmatched.length > 0 && (
+                  <div className="px-4 py-3">
+                    <button onClick={() => setShowUnmatched((v) => !v)} className="text-[11.5px] text-pb-faint hover:text-pb-text inline-flex items-center gap-1">
+                      <span className="inline-block transition-transform" style={{ transform: showUnmatched ? 'rotate(90deg)' : 'none' }}><Icon name="chevron" size={12} /></span>
+                      {unmatched.length} player{unmatched.length === 1 ? '' : 's'} couldn’t be matched to a squad
+                    </button>
+                    {showUnmatched && (
+                      <div className="mt-2 space-y-1">
+                        {unmatched.map((u) => (
+                          <div key={u.player_id} className="flex items-center gap-2 text-[12px] text-pb-faint">
+                            <span className="flex-1 truncate">{u.player_name}</span>
+                            <span className="font-mono text-[10px] text-pb-faintest truncate">played “{u.top_team_name}” · {u.games}g</span>
+                          </div>
+                        ))}
+                        <p className="text-[10.5px] text-pb-faintest pt-1">No squad is named like their team. Create/rename a squad to match, then re-run.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center gap-2.5 px-4 py-3 border-t pb-hairline">
+          <span className={`font-mono text-xs ${picked.size ? 'text-pb-accent' : 'text-pb-faint'}`}>{picked.size} selected</span>
+          <div className="ml-auto flex gap-2">
+            <Btn variant="ghost" sm onClick={onClose}>Cancel</Btn>
+            <Btn variant="primary" sm icon="check" disabled={!picked.size || applying || loading} onClick={apply}>
+              {applying ? 'Assigning…' : `Apply ${picked.size || ''}`}
+            </Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminTeams() {
   const { hasCapability } = useAuth()
   const toast = useToast()
@@ -271,6 +418,7 @@ export default function AdminTeams() {
   const [addTo, setAddTo] = useState(null)
   const [over, setOver] = useState(null)
   const [seeding, setSeeding] = useState(false)
+  const [autoAssign, setAutoAssign] = useState(false)  // auto-assign modal open
   const [availEdit, setAvailEdit] = useState(null)     // player for quick-update modal
 
   // Filters + view
@@ -369,11 +517,17 @@ export default function AdminTeams() {
     try { await api.bsDeleteTeam(t.id); toast.success('Deleted'); loadTeams(); loadPlayers() }
     catch (e) { toast.error('Delete failed: ' + e.message) }
   }
+  // Apply auto-assign: one squad-assign call per target team, then reload.
+  const applyAutoAssign = async (entries) => {
+    for (const [teamId, ids] of entries) await api.bsAssignSquad(ids, teamId)
+    loadPlayers()
+  }
 
   const loading = teams === null || players === null
   const actions = canManage && (
     <div className="flex gap-2">
       {(teams?.length || 0) > 0 && <Btn variant="ghost" sm icon="bolt" onClick={seed} disabled={seeding}>{seeding ? 'Seeding…' : 'Auto-seed'}</Btn>}
+      {(teams?.length || 0) > 0 && <Btn variant="soft" sm icon="bolt" onClick={() => setAutoAssign(true)}>Auto-assign players</Btn>}
       <Btn variant="primary" sm icon="plus" onClick={() => setEditing(null)}>New squad</Btn>
     </div>
   )
@@ -392,6 +546,7 @@ export default function AdminTeams() {
         <QuickAvailModal player={availEdit} dateLabel={firstDate}
           current={statusOf(availEdit.id)} onPick={pickAvail} onClose={() => setAvailEdit(null)} />
       )}
+      {autoAssign && <AutoAssignModal onApply={applyAutoAssign} onClose={() => setAutoAssign(false)} />}
 
       {loading ? <PbSpinner message="Loading squads…" /> : (
         (teams.length === 0) ? (

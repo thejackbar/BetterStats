@@ -19,11 +19,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
-from app.models.db import Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
+from app.models.db import Game, GameAppearance, Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import months_ago
 
@@ -465,3 +465,164 @@ async def squad_assign(
     await db.commit()
     return {"status": "ok", "updated": updated,
             "squad_team_id": str(target.id) if target else None}
+
+
+def _later(a, b):
+    """Max of two optional dates (None-safe)."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if a >= b else b
+
+
+@router.get("/auto-assign-suggest")
+async def auto_assign_suggest(
+    seasons: int = 2,
+    only_unassigned: bool = True,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Suggest a squad for each player from where they actually played most over
+    the last `seasons` seasons. Read-only — returns a preview; the caller applies
+    the accepted moves through POST /teams/squad-assign.
+
+    Matching mirrors how squads were seeded/auto-linked:
+      1. primary — the team name a player appeared for most maps to a squad by
+         name (lower(game_appearances.team_name) == lower(teams.name));
+      2. fallback — if that name has no squad (e.g. the squad was renamed), the
+         grade they played most in maps to the squad linked to a grade of the
+         same name (handles cross-season grade_id differences by grade NAME).
+
+    `only_unassigned` (default True) restricts suggestions to players who have no
+    squad yet, so existing/manual assignments are never silently overwritten.
+    Players with no appearances in the window are left untouched; players whose
+    top team/grade matches no squad are returned under `unmatched`.
+    """
+    await ensure_team_grades(db, club.id)  # make sure squads are grade-linked for the fallback
+    seasons = max(1, min(int(seasons or 2), 60))
+
+    teams = (await db.execute(
+        select(Team).where(Team.organisation_id == club.id)
+    )).scalars().all()
+    team_by_id = {t.id: t for t in teams}
+    by_lname: dict[str, Team] = {}
+    for t in teams:
+        by_lname.setdefault((t.name or "").strip().lower(), t)
+
+    # Squad-by-grade-name lookup (for the rename fallback).
+    grade_ids = [t.grade_id for t in teams if t.grade_id]
+    grade_name_by_id: dict = {}
+    if grade_ids:
+        for gid, gname in (await db.execute(
+            select(Grade.id, Grade.name).where(Grade.id.in_(grade_ids))
+        )).all():
+            grade_name_by_id[gid] = gname
+    by_grade_name: dict[str, Team] = {}
+    for t in teams:
+        gname = grade_name_by_id.get(t.grade_id)
+        if gname:
+            by_grade_name.setdefault(gname.strip().lower(), t)
+
+    # The latest `seasons` seasons this club has any record of.
+    season_rows = (await db.execute(
+        select(Season.id, Season.name)
+        .where(Season.organisation_id == club.id)
+        .order_by(Season.year.desc().nullslast(), Season.name.desc())
+        .limit(seasons)
+    )).all()
+    season_ids = [r[0] for r in season_rows]
+    season_names = [r[1] for r in season_rows]
+    if not season_ids:
+        return {"seasons_considered": [], "suggestions": [], "unmatched": []}
+
+    # Appearance counts per (player, team_name, grade_name) inside the window —
+    # one pass; both signals accumulated in Python.
+    rows = (await db.execute(
+        select(
+            GameAppearance.player_id,
+            func.lower(GameAppearance.team_name).label("tname"),
+            func.lower(Grade.name).label("gname"),
+            func.count().label("games"),
+            func.max(Game.played_at).label("last_played"),
+        )
+        .join(Game, Game.id == GameAppearance.game_id)
+        .join(Grade, Grade.id == Game.grade_id)
+        .join(Player, Player.id == GameAppearance.player_id)
+        .where(
+            Player.organisation_id == club.id,
+            Grade.season_id.in_(season_ids),
+            GameAppearance.team_name.isnot(None),
+            GameAppearance.team_name != "",
+        )
+        .group_by(GameAppearance.player_id, func.lower(GameAppearance.team_name), func.lower(Grade.name))
+    )).all()
+
+    # pid -> {team_name|grade_name -> [games, last_played]}
+    team_tot: dict = {}
+    grade_tot: dict = {}
+    for pid, tname, gname, games, last_played in rows:
+        if tname:
+            slot = team_tot.setdefault(pid, {}).setdefault(tname, [0, None])
+            slot[0] += int(games); slot[1] = _later(slot[1], last_played)
+        if gname:
+            slot = grade_tot.setdefault(pid, {}).setdefault(gname, [0, None])
+            slot[0] += int(games); slot[1] = _later(slot[1], last_played)
+
+    def _top(d):
+        # Most games, tie-break on most recent appearance.
+        if not d:
+            return None
+        return max(d.items(), key=lambda kv: (kv[1][0], (kv[1][1] or date.min)))
+
+    players = (await db.execute(
+        select(Player).where(Player.organisation_id == club.id)
+    )).scalars().all()
+
+    suggestions, unmatched = [], []
+    for p in players:
+        if only_unassigned and p.squad_team_id is not None:
+            continue
+        top_team = _top(team_tot.get(p.id))
+        if not top_team:
+            continue  # no appearances in the window — leave untouched
+        tname, (games, last_played) = top_team
+        target = by_lname.get(tname)
+        matched_by = "team_name"
+        if not target:
+            top_grade = _top(grade_tot.get(p.id))
+            if top_grade:
+                gname, (g_games, g_last) = top_grade
+                target = by_grade_name.get(gname)
+                if target:
+                    matched_by, games, last_played = "grade", g_games, g_last
+        if not target:
+            unmatched.append({
+                "player_id": str(p.id), "player_name": p.display_name,
+                "top_team_name": tname, "games": int(games),
+            })
+            continue
+        if target.id == p.squad_team_id:
+            continue  # already where they belong
+        cur = team_by_id.get(p.squad_team_id)
+        suggestions.append({
+            "player_id": str(p.id),
+            "player_name": p.display_name,
+            "current_team_id": str(p.squad_team_id) if p.squad_team_id else None,
+            "current_team_name": cur.name if cur else None,
+            "team_id": str(target.id),
+            "team_name": target.name,
+            "team_sequence": target.sequence or 0,
+            "games": int(games),
+            "matched_by": matched_by,
+            "last_played": last_played.isoformat() if last_played else None,
+        })
+
+    suggestions.sort(key=lambda s: (s["team_sequence"], s["team_name"], -s["games"]))
+    unmatched.sort(key=lambda u: -u["games"])
+    return {
+        "seasons_considered": season_names,
+        "suggestions": suggestions,
+        "unmatched": unmatched,
+    }
