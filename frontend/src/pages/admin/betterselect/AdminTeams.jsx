@@ -1,107 +1,57 @@
-import { useState, useEffect, useCallback } from 'react'
+// BetterSelect → Squads. A drag-and-drop kanban of selection pools: one column
+// per team plus a leading "Unassigned" column. A player belongs to exactly one
+// squad via players.squad_team_id; dragging a card (or bulk-adding) reassigns
+// it through POST /teams/squad-assign. Recreates
+// docs/design_handoff_betterselect/prototype/bs-teams.jsx with real components
+// and the live API. Team CRUD (create/edit/delete/seed + grade linking) is
+// preserved from the previous Teams screen.
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
-import { PbSpinner, Btn, Field, Input, Select } from '../../../lib/presskit'
+import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
+import { AVAILABILITY } from '../../../lib/availability'
+import {
+  Icon, Avatar, Dot, RoleChips, Btn, Search, Empty, AvailSummary,
+} from './ui'
 
-const EMPTY = { name: '', short_name: '', sequence: 0, default_formation: '', is_active: true, grade_id: '' }
-
-function fmtYear(d) {
-  if (!d) return ''
-  try { return new Date(d + 'T00:00:00').getFullYear() } catch { return '' }
+// Self-contained name match (display name or underlying name, case-insensitive)
+// so the board doesn't depend on a shared helper's exact arg order.
+function matchesName(p, q) {
+  const needle = q.trim().toLowerCase()
+  if (!needle) return true
+  return `${p.display_name || ''} ${p.name || ''}`.toLowerCase().includes(needle)
 }
 
-// Inline squad panel: manually-assigned members + history suggestions.
-function SquadPanel({ team, canManage }) {
-  const toast = useToast()
-  const [data, setData] = useState(null)
-  const [busy, setBusy] = useState(null) // player_id mid-mutation
+// Per-column accent tints — a fixed category palette (NOT the club white-label
+// accent, and deliberately not the semantic availability green). Indexed by the
+// column's position so each squad reads as visually distinct.
+const COLUMN_TINTS = ['#3b82f6', '#a855f7', '#f5b542', '#06b6d4', '#84cc16', '#f97316', '#ef5b5b', '#16c784']
+const UNASSIGNED_TINT = 'var(--pb-faintest)'
 
-  const load = useCallback(() => {
-    setData(null)
-    api.bsTeamMembers(team.id).then(setData)
-      .catch(e => { toast.error(e.message); setData({ members: [], suggestions: [] }) })
-  }, [team.id, toast])
+const EMPTY_TEAM = { name: '', short_name: '', sequence: 0, default_formation: '', is_active: true, grade_id: '' }
 
-  useEffect(() => { load() }, [load])
+function isKeeper(p) { return (p.skill_positions || []).includes('WKT') }
 
-  const add = async (p) => {
-    setBusy(p.id)
-    try { await api.bsAddTeamMember(team.id, p.id); load() }
-    catch (e) { toast.error('Add failed: ' + e.message) }
-    finally { setBusy(null) }
-  }
-  const remove = async (p) => {
-    setBusy(p.id)
-    try { await api.bsRemoveTeamMember(team.id, p.id); load() }
-    catch (e) { toast.error('Remove failed: ' + e.message) }
-    finally { setBusy(null) }
-  }
-
-  if (data === null) return <div className="px-5 py-4"><PbSpinner message="Loading squad…" /></div>
-
-  return (
-    <div className="px-5 py-4 bg-pb-surface2/40 border-t pb-hairline grid sm:grid-cols-2 gap-5">
-      <div>
-        <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2">
-          Squad · {data.members.length}
-        </div>
-        {data.members.length === 0 && <p className="text-pb-faintest text-xs">No one assigned yet. Add from suggestions →</p>}
-        <div className="space-y-1">
-          {data.members.map(m => (
-            <div key={m.id} className="flex items-center justify-between gap-2 text-sm">
-              <span className="truncate">
-                {m.display_name}
-                {m.player_role && <span className="ml-1.5 font-mono text-[9px] text-pb-faintest uppercase">{m.player_role}</span>}
-                {m.status === 'inactive' && <span className="ml-1.5 font-mono text-[9px] text-pb-red/80 uppercase">inactive</span>}
-              </span>
-              {canManage && <button onClick={() => remove(m)} disabled={busy === m.id}
-                className="text-pb-faintest hover:text-pb-red text-xs shrink-0" title="Remove from squad">✕</button>}
-            </div>
-          ))}
-        </div>
-      </div>
-      <div>
-        <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2">
-          Suggested from history · {data.suggestions.length}
-        </div>
-        {data.suggestions.length === 0 && <p className="text-pb-faintest text-xs">No recent appearances to suggest.</p>}
-        <div className="space-y-1 max-h-56 overflow-auto">
-          {data.suggestions.map(s => (
-            <div key={s.id} className="flex items-center justify-between gap-2 text-sm">
-              <span className="truncate text-pb-faint">
-                {s.display_name}
-                <span className="ml-1.5 font-mono text-[9px] text-pb-faintest">{s.appearances} app{s.appearances === 1 ? '' : 's'}{fmtYear(s.last_played) && ` · ${fmtYear(s.last_played)}`}</span>
-              </span>
-              {canManage && <button onClick={() => add(s)} disabled={busy === s.id}
-                className="text-pb-accent hover:underline text-xs shrink-0" title="Add to squad">+ add</button>}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
+/* ── Team create/edit modal (grade linking preserved from the old screen) ─── */
 function TeamModal({ team, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState(() => ({ ...EMPTY, ...(team || {}), grade_id: team?.grade_id || '' }))
+  const [form, setForm] = useState(() => ({ ...EMPTY_TEAM, ...(team || {}), grade_id: team?.grade_id || '' }))
   const [saving, setSaving] = useState(false)
   const [gradeSeasons, setGradeSeasons] = useState([])
-  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
   useEffect(() => {
-    api.bsTeamGradeOptions().then(d => setGradeSeasons(d.seasons || [])).catch(() => {})
+    api.bsTeamGradeOptions().then((d) => setGradeSeasons(d.seasons || [])).catch(() => {})
   }, [])
 
-  // If the team's current grade is older than the option window, keep it selectable.
-  const knownGradeIds = new Set(gradeSeasons.flatMap(s => s.grades.map(g => g.id)))
+  const knownGradeIds = new Set(gradeSeasons.flatMap((s) => s.grades.map((g) => g.id)))
   const currentGradeMissing = form.grade_id && !knownGradeIds.has(form.grade_id)
 
   const save = async () => {
-    if (!form.name.trim()) { toast.error('Team name is required'); return }
+    if (!form.name.trim()) { toast.error('Squad name is required'); return }
     setSaving(true)
     try {
       const payload = {
@@ -113,18 +63,18 @@ function TeamModal({ team, onClose, onSaved }) {
         grade_id: form.grade_id || null,
       }
       const saved = team ? await api.bsUpdateTeam(team.id, payload) : await api.bsCreateTeam(payload)
-      toast.success(team ? 'Team updated' : 'Team added')
+      toast.success(team ? 'Squad updated' : 'Squad added')
       onSaved(saved)
     } catch (e) { toast.error('Save failed: ' + e.message) }
     finally { setSaving(false) }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4" style={{ backdropFilter: 'blur(2px)' }}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 backdrop-blur-sm">
       <div className="bg-pb-surface pb-card max-w-md w-full mt-16 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b pb-hairline">
-          <h3 className="font-mono text-[11px] uppercase tracking-wide3 text-pb-faint">{team ? 'Edit team' : 'New team'}</h3>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text">✕</button>
+          <h3 className="font-mono text-[11px] uppercase tracking-wide3 text-pb-faint">{team ? 'Edit squad' : 'New squad'}</h3>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text"><Icon name="close" size={16} /></button>
         </div>
         <div className="p-5 space-y-3">
           <Field label="Name"><Input value={form.name} onChange={set('name')} placeholder="e.g. 1st XI" /></Field>
@@ -137,23 +87,163 @@ function TeamModal({ team, onClose, onSaved }) {
             <Select value={form.grade_id || ''} onChange={set('grade_id')}>
               <option value="">— Auto-link from match data —</option>
               {currentGradeMissing && <option value={form.grade_id}>{team?.grade_name || 'Current grade'}</option>}
-              {gradeSeasons.map(s => (
+              {gradeSeasons.map((s) => (
                 <optgroup key={s.season_id} label={s.season_name}>
-                  {s.grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  {s.grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </optgroup>
               ))}
             </Select>
           </Field>
           <label className="flex items-center gap-2 text-sm text-pb-faint">
-            <input type="checkbox" checked={!!form.is_active} onChange={(e) => setForm(f => ({ ...f, is_active: e.target.checked }))} />
+            <input type="checkbox" checked={!!form.is_active} onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))} className="accent-pb-accent" />
             Active
           </label>
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t pb-hairline">
-          <Btn onClick={onClose}>Cancel</Btn>
-          <Btn primary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Btn>
+          <Btn variant="ghost" sm onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" sm onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Btn>
         </div>
       </div>
+    </div>
+  )
+}
+
+/* ── Bulk-add modal: pick players not already in this squad ────────────────── */
+function BulkAddModal({ squadName, candidates, statusOf, onAdd, onClose }) {
+  const [sel, setSel] = useState(() => new Set())
+  const [q, setQ] = useState('')
+  const [saving, setSaving] = useState(false)
+  const list = candidates.filter((p) => matchesName(p, q))
+  const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  const submit = async () => {
+    setSaving(true)
+    await onAdd([...sel])
+    setSaving(false)
+    onClose()
+  }
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div onClick={(e) => e.stopPropagation()} className="w-[460px] max-w-full max-h-[84%] flex flex-col bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl">
+        <div className="flex items-center gap-3 px-[18px] py-4 border-b pb-hairline">
+          <div className="flex-1 min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">Add players to</div>
+            <div className="font-display font-bold text-[18px] mt-0.5 truncate">{squadName}</div>
+          </div>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1"><Icon name="close" size={18} /></button>
+        </div>
+        <div className="px-4 py-3 border-b pb-hairline"><Search value={q} onChange={setQ} placeholder="Search players…" /></div>
+        <div className="overflow-auto flex-1 pb-scroll">
+          {list.map((p) => {
+            const on = sel.has(p.id)
+            return (
+              <label key={p.id} className={`flex items-center gap-3 px-4 py-2 border-b pb-hairline cursor-pointer ${on ? 'bg-pb-accent/[0.06]' : ''}`}>
+                <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="accent-pb-accent w-[15px] h-[15px]" />
+                <Dot status={statusOf(p)} />
+                <Avatar player={p} size={26} />
+                <span className="flex-1 text-[13.5px] font-medium truncate">{p.display_name || p.name}</span>
+                <RoleChips roles={p.skill_positions} muted />
+              </label>
+            )
+          })}
+          {list.length === 0 && <div className="px-4 py-6"><Empty>No players to add.</Empty></div>}
+        </div>
+        <div className="flex items-center gap-2.5 px-4 py-3 border-t pb-hairline">
+          <span className={`font-mono text-xs ${sel.size ? 'text-pb-accent' : 'text-pb-faint'}`}>{sel.size} selected</span>
+          <div className="ml-auto flex gap-2">
+            <Btn variant="ghost" sm onClick={onClose}>Cancel</Btn>
+            <Btn variant="primary" sm icon="plus" disabled={!sel.size || saving} onClick={submit}>
+              {saving ? 'Adding…' : `Add ${sel.size || ''} to ${squadName}`}
+            </Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── A draggable player card ───────────────────────────────────────────────── */
+function PlayerCard({ p, statusOf, draggable, onDragStart, onDragEnd }) {
+  const st = statusOf(p)
+  const meta = AVAILABILITY[st] || AVAILABILITY.NO_RESPONSE
+  return (
+    <div
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-pb-hairline ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      style={{ background: st === 'NO_RESPONSE' ? 'var(--pb-surface2)' : `color-mix(in srgb, ${meta.cssVar} 8%, var(--pb-surface2))` }}
+    >
+      {draggable && <span className="text-pb-faintest shrink-0"><Icon name="grip" size={14} /></span>}
+      <Dot status={st} />
+      <Avatar player={p} size={26} />
+      <span className="flex-1 min-w-0 text-[13px] font-medium truncate">{p.display_name || p.name}</span>
+      <RoleChips roles={p.skill_positions} muted />
+    </div>
+  )
+}
+
+/* ── One squad column ──────────────────────────────────────────────────────── */
+function SquadColumn({ col, members, statusOf, canManage, isOver, dragHandlers, onAdd, onEdit, onDelete }) {
+  const hasKeeper = members.some(isKeeper)
+  const sorted = useMemo(
+    () => [...members].sort((a, b) =>
+      (AVAILABILITY[statusOf(a)]?.rank ?? 9) - (AVAILABILITY[statusOf(b)]?.rank ?? 9)
+      || (a.display_name || a.name || '').localeCompare(b.display_name || b.name || '')),
+    [members, statusOf],
+  )
+
+  return (
+    <div
+      {...dragHandlers}
+      className="pb-card flex flex-col min-h-0 transition-colors"
+      style={{ borderColor: isOver ? 'var(--pb-accent)' : undefined, background: isOver ? 'color-mix(in srgb, var(--pb-accent) 5%, var(--pb-surface))' : undefined }}
+    >
+      <div className="px-3 py-2.5 border-b pb-hairline">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: col.tint }} />
+          <span className="font-display font-bold text-[14.5px] truncate">{col.name}</span>
+          <span className="ml-auto font-mono text-xs text-pb-faint pb-num">{members.length}</span>
+          {canManage && !col.unassigned && (
+            <div className="flex items-center gap-1 ml-1">
+              <button onClick={onEdit} title="Edit squad" className="text-pb-faintest hover:text-pb-text p-0.5"><Icon name="filter" size={13} /></button>
+              <button onClick={onDelete} title="Delete squad" className="text-pb-faintest hover:text-pb-red p-0.5"><Icon name="close" size={13} /></button>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 mt-1.5">
+          {col.grade_name && <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint truncate">{col.grade_name}</span>}
+          {members.length > 0 && !hasKeeper && !col.unassigned && <span className="text-[10px] text-pb-amber">· no keeper</span>}
+        </div>
+        {members.length > 0 && <div className="mt-2"><AvailSummary players={members} statusOf={statusOf} compact hideTotal /></div>}
+      </div>
+
+      <div className="overflow-auto flex-1 p-2 flex flex-col gap-1.5 pb-scroll">
+        {sorted.map((p) => (
+          <PlayerCard
+            key={p.id} p={p} statusOf={statusOf} draggable={canManage}
+            onDragStart={() => dragHandlers.onCardDragStart(p.id)}
+            onDragEnd={dragHandlers.onCardDragEnd}
+          />
+        ))}
+        {members.length === 0 && (
+          <div className="m-1 px-2.5 py-5 text-center text-pb-faintest text-[11.5px] border border-dashed border-pb-hairline2 rounded-lg">
+            {col.unassigned ? 'Everyone is assigned' : 'Empty — drag or add players'}
+          </div>
+        )}
+      </div>
+
+      {canManage && !col.unassigned && (
+        <div className="p-2 border-t pb-hairline">
+          <button
+            onClick={onAdd}
+            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-pb-hairline2 text-pb-faint hover:text-pb-accent hover:border-pb-accent/40 py-1.5 text-xs transition-colors"
+          >
+            <Icon name="plus" size={14} /> Add players
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -162,92 +252,162 @@ export default function AdminTeams() {
   const { hasCapability } = useAuth()
   const toast = useToast()
   const canManage = hasCapability(CAP.MANAGE_SELECTIONS)
-  const [teams, setTeams] = useState(null)
-  const [editing, setEditing] = useState(undefined)
-  const [seeding, setSeeding] = useState(false)
-  const [expanded, setExpanded] = useState(null) // team id whose squad panel is open
 
-  const load = useCallback(() => {
-    setTeams(null)
-    api.bsListTeams(true).then(setTeams).catch(e => { toast.error(e.message); setTeams([]) })
+  const [teams, setTeams] = useState(null)
+  const [players, setPlayers] = useState(null)
+  const [avail, setAvail] = useState({})       // {playerId: {date: {status}}}
+  const [nextDate, setNextDate] = useState(null)
+  const [editing, setEditing] = useState(undefined) // undefined=closed, null=new, team=edit
+  const [addTo, setAddTo] = useState(null)     // team object for bulk-add modal
+  const [over, setOver] = useState(null)       // column key being dragged over
+  const [seeding, setSeeding] = useState(false)
+  const dragId = useRef(null)
+
+  const loadTeams = useCallback(() => {
+    api.bsListTeams(true).then(setTeams).catch((e) => { toast.error(e.message); setTeams([]) })
+  }, [toast])
+  const loadPlayers = useCallback(() => {
+    api.adminListPlayers().then((rows) => setPlayers(rows.filter((p) => p.is_player !== false)))
+      .catch((e) => { toast.error(e.message); setPlayers([]) })
   }, [toast])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { loadTeams() }, [loadTeams])
+  useEffect(() => { loadPlayers() }, [loadPlayers])
+  // Availability is best-effort decoration — never block the board on it.
+  useEffect(() => {
+    api.bsAvailabilityMatrix()
+      .then((d) => { setAvail(d.availability || {}); setNextDate(d.dates?.[0]?.date || null) })
+      .catch(() => {})
+  }, [])
+
+  const statusOf = useCallback((p) => {
+    const cell = nextDate && avail[p.id]?.[nextDate]
+    return (cell && (cell.status || cell)) || 'NO_RESPONSE'
+  }, [avail, nextDate])
+
+  // Columns: Unassigned first, then teams by sequence/name.
+  const columns = useMemo(() => {
+    const cols = [{ key: '__unassigned__', id: null, name: 'Unassigned', unassigned: true, tint: UNASSIGNED_TINT }]
+    ;(teams || []).forEach((t, i) => cols.push({
+      key: t.id, id: t.id, name: t.name, grade_name: t.grade_name,
+      tint: COLUMN_TINTS[i % COLUMN_TINTS.length], team: t,
+    }))
+    return cols
+  }, [teams])
+
+  const membersOf = useCallback(
+    (col) => (players || []).filter((p) => (p.squad_team_id || null) === col.id),
+    [players],
+  )
+
+  // Reassign one or many players to a squad (or null). Optimistic + rollback.
+  const assign = useCallback(async (ids, squadId) => {
+    if (!ids.length) return
+    const prev = players
+    setPlayers((ps) => ps.map((p) => (ids.includes(p.id) ? { ...p, squad_team_id: squadId } : p)))
+    try {
+      await api.bsAssignSquad(ids, squadId)
+    } catch (e) {
+      setPlayers(prev) // rollback
+      toast.error('Move failed: ' + e.message)
+    }
+  }, [players, toast])
+
+  const onDrop = (col) => {
+    setOver(null)
+    const id = dragId.current
+    dragId.current = null
+    if (!id) return
+    const player = players.find((p) => p.id === id)
+    if (player && (player.squad_team_id || null) !== col.id) assign([id], col.id)
+  }
 
   const seed = async () => {
     setSeeding(true)
-    try { const r = await api.bsSeedTeams(); toast.success(`Created ${r.created} team(s) from match data`); load() }
+    try { const r = await api.bsSeedTeams(); toast.success(`Created ${r.created} squad(s) from match data`); loadTeams() }
     catch (e) { toast.error('Seed failed: ' + e.message) }
     finally { setSeeding(false) }
   }
-
   const del = async (t) => {
-    if (!window.confirm(`Delete team "${t.name}"?`)) return
-    try { await api.bsDeleteTeam(t.id); toast.success('Deleted'); load() }
+    if (!window.confirm(`Delete squad "${t.name}"? Players in it become Unassigned.`)) return
+    try { await api.bsDeleteTeam(t.id); toast.success('Deleted'); loadTeams(); loadPlayers() }
     catch (e) { toast.error('Delete failed: ' + e.message) }
   }
 
+  const loading = teams === null || players === null
   const actions = canManage && (
     <div className="flex gap-2">
-      <Btn onClick={seed} disabled={seeding}>{seeding ? 'Seeding…' : '⤓ Auto-seed'}</Btn>
-      <Btn primary onClick={() => setEditing(null)}>+ Add team</Btn>
+      {(teams?.length || 0) > 0 && <Btn variant="ghost" sm icon="bolt" onClick={seed} disabled={seeding}>{seeding ? 'Seeding…' : 'Auto-seed'}</Btn>}
+      <Btn variant="primary" sm icon="plus" onClick={() => setEditing(null)}>New squad</Btn>
     </div>
   )
 
+  const overlay = (
+    <>
+      {editing !== undefined && (
+        <TeamModal team={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); loadTeams() }} />
+      )}
+      {addTo && (
+        <BulkAddModal
+          squadName={addTo.name}
+          candidates={(players || []).filter((p) => (p.squad_team_id || null) !== addTo.id)}
+          statusOf={statusOf}
+          onAdd={(ids) => assign(ids, addTo.id)}
+          onClose={() => setAddTo(null)}
+        />
+      )}
+    </>
+  )
+
   return (
-    <BetterSelectLayout title="Teams" actions={actions}>
+    <BetterSelectLayout title="Squads" actions={actions}>
+      {overlay}
       <p className="text-pb-faint text-sm mb-4 max-w-2xl">
-        Your club’s teams. Auto-seed pulls distinct team names from your match history, or add teams by hand.
-        Order sets the hierarchy (1 = top team). Open <span className="text-pb-text">Squad</span> on a team to assign
-        its player pool — suggestions are drawn from who’s played for it recently.
+        Selection pools — a player's squad drives who's suggested first when picking. Drag a player between
+        squads to reassign, or use <span className="text-pb-text">Add players</span>. Players not in a squad sit under Unassigned.
       </p>
 
-      {teams === null ? <PbSpinner message="Loading teams…" /> : (
-        <div className="pb-card overflow-hidden">
-          {teams.length === 0 && (
-            <div className="px-5 py-10 text-center text-pb-faint text-sm">
-              No teams yet. {canManage && 'Auto-seed from your data or add one.'}
-            </div>
-          )}
-          {teams.map((t, i) => (
-            <div key={t.id} className={i > 0 ? 'border-t pb-hairline' : ''}>
-              <div className="px-5 py-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="font-mono text-[11px] text-pb-faintest w-6 text-right">{t.sequence || '—'}</span>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm truncate">{t.name}</span>
-                      {!t.is_active && <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-pb-surface2 text-pb-faintest">inactive</span>}
-                      <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded ${t.source === 'auto' ? 'bg-pb-surface2 text-pb-faint' : 'bg-pb-accent/15 text-pb-accent'}`}>
-                        {t.source === 'auto' ? 'auto' : 'manual'}
-                      </span>
-                    </div>
-                    <div className="text-pb-faint text-xs mt-0.5">
-                      {t.grade_name
-                        ? <span title="Grade used for the ladder">🏆 {t.grade_name}</span>
-                        : <span className="text-pb-faintest">no grade linked</span>}
-                      {t.default_formation && <span> · {t.default_formation}</span>}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <Btn sm onClick={() => setExpanded(expanded === t.id ? null : t.id)}>
-                    {expanded === t.id ? 'Hide squad' : 'Squad'}
-                  </Btn>
-                  {canManage && <>
-                    <Btn sm onClick={() => setEditing(t)}>Edit</Btn>
-                    <Btn sm danger onClick={() => del(t)}>Delete</Btn>
-                  </>}
-                </div>
+      {loading ? <PbSpinner message="Loading squads…" /> : (
+        (teams.length === 0) ? (
+          <div className="pb-card px-5 py-12 text-center">
+            <p className="text-pb-faint text-sm mb-4">No squads yet.{canManage && ' Auto-seed from your match history, or create one.'}</p>
+            {canManage && (
+              <div className="flex gap-2 justify-center">
+                <Btn variant="ghost" sm icon="bolt" onClick={seed} disabled={seeding}>{seeding ? 'Seeding…' : 'Auto-seed from data'}</Btn>
+                <Btn variant="primary" sm icon="plus" onClick={() => setEditing(null)}>New squad</Btn>
               </div>
-              {expanded === t.id && <SquadPanel team={t} canManage={canManage} />}
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-4 text-pb-faint text-[12.5px] mb-3">
+              <span><b className="text-pb-text pb-num">{players.length}</b> players</span>
+              <span><b className="text-pb-text pb-num">{teams.length}</b> squads</span>
             </div>
-          ))}
-        </div>
-      )}
-
-      {editing !== undefined && (
-        <TeamModal team={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); load() }} />
+            <div className="grid gap-3 items-start" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(200px, 1fr))` }}>
+              {columns.map((col) => (
+                <SquadColumn
+                  key={col.key}
+                  col={col}
+                  members={membersOf(col)}
+                  statusOf={statusOf}
+                  canManage={canManage}
+                  isOver={over === col.key}
+                  dragHandlers={{
+                    onDragOver: canManage ? (e) => { e.preventDefault(); setOver(col.key) } : undefined,
+                    onDragLeave: canManage ? () => setOver((o) => (o === col.key ? null : o)) : undefined,
+                    onDrop: canManage ? () => onDrop(col) : undefined,
+                    onCardDragStart: (id) => { dragId.current = id },
+                    onCardDragEnd: () => { dragId.current = null; setOver(null) },
+                  }}
+                  onAdd={() => setAddTo(col.team)}
+                  onEdit={() => setEditing(col.team)}
+                  onDelete={() => del(col.team)}
+                />
+              ))}
+            </div>
+          </>
+        )
       )}
     </BetterSelectLayout>
   )
