@@ -873,6 +873,12 @@ export const api = {
     request('/availability', { method: 'POST', body: JSON.stringify(data) }),
   bsBulkAvailability: (items) =>
     request('/availability/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
+  bsAvailabilityPeriods: (includePast = false) =>
+    request(`/availability/periods${includePast ? '?include_past=true' : ''}`),
+  bsCreateAvailabilityPeriod: (data) =>
+    request('/availability/periods', { method: 'POST', body: JSON.stringify(data) }),
+  bsDeleteAvailabilityPeriod: (id) =>
+    request(`/availability/periods/${id}`, { method: 'DELETE' }),
 
   // ─── BetterSelect: Selection (lineups) ──────────────────
   bsSelectionOverview: () => request('/selection/overview'),

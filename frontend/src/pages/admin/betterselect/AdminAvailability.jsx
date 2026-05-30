@@ -24,6 +24,11 @@ const ROSTER_OPTS = [
   { key: 'all', label: 'All (incl. inactive)' },
 ]
 
+// Periods: a span of dates a player is un/available. NO_RESPONSE isn't a valid
+// period status (a period asserts a state). Reason is free text with hints.
+const PERIOD_STATUS_OPTS = ['UNAVAILABLE', 'AVAILABLE', 'MAYBE']
+const REASON_SUGGESTIONS = ['Injured', 'Travelling', 'Work', 'Suspended', 'Personal']
+
 function fmtDay(d) {
   try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
   catch { return d }
@@ -37,6 +42,12 @@ function fmtYear(d) {
 function fmtMonths(m) {
   if (m % 12 === 0) { const y = m / 12; return `${y} year${y === 1 ? '' : 's'}` }
   return `${m} months`
+}
+
+function fmtRange(start, end) {
+  if (!end) return `${fmtDay(start)} → open-ended`
+  if (start === end) return fmtDay(start)
+  return `${fmtDay(start)} → ${fmtDay(end)}`
 }
 
 export default function AdminAvailability() {
@@ -60,6 +71,13 @@ export default function AdminAvailability() {
   const [bulkDate, setBulkDate] = useState('ALL')   // 'ALL' = every shown date
   const [applying, setApplying] = useState(false)
 
+  // Availability periods (date-range un/availability).
+  const todayISO = new Date().toISOString().slice(0, 10)
+  const [periods, setPeriods] = useState([])
+  const [showPeriods, setShowPeriods] = useState(false)
+  const [pForm, setPForm] = useState({ player_id: '', status: 'UNAVAILABLE', start_date: todayISO, end_date: '', reason: '' })
+  const [savingPeriod, setSavingPeriod] = useState(false)
+
   const load = useCallback(() => {
     setData(null)
     api.bsAvailabilityMatrix()
@@ -68,6 +86,17 @@ export default function AdminAvailability() {
   }, [toast])
 
   useEffect(() => { load() }, [load])
+
+  // Refresh the matrix in place (no loading flash) after a period change, so the
+  // newly-covered cells appear without collapsing the page to a spinner.
+  const refreshMatrix = useCallback(() => {
+    api.bsAvailabilityMatrix().then(d => { setData(d); setAvail(d.availability || {}) }).catch(() => {})
+  }, [])
+
+  const loadPeriods = useCallback(() => {
+    api.bsAvailabilityPeriods().then(setPeriods).catch(() => {})
+  }, [])
+  useEffect(() => { loadPeriods() }, [loadPeriods])
 
   // Distinct roles present in the roster, for the role dropdown.
   const roleOptions = useMemo(() => {
@@ -159,6 +188,36 @@ export default function AdminAvailability() {
     }
   }
 
+  const addPeriod = async () => {
+    if (!canEdit || !pForm.player_id || !pForm.start_date) return
+    if (pForm.end_date && pForm.end_date < pForm.start_date) { toast.error('End date is before start date'); return }
+    setSavingPeriod(true)
+    try {
+      await api.bsCreateAvailabilityPeriod({
+        player_id: pForm.player_id,
+        status: pForm.status,
+        start_date: pForm.start_date,
+        end_date: pForm.end_date || null,
+        reason: pForm.reason.trim() || null,
+      })
+      toast.success('Period added')
+      setPForm(f => ({ ...f, player_id: '', reason: '' }))
+      loadPeriods(); refreshMatrix()   // refresh list + matrix cells
+    } catch (e) {
+      toast.error('Could not add period: ' + e.message)
+    } finally {
+      setSavingPeriod(false)
+    }
+  }
+
+  const removePeriod = async (id) => {
+    if (!canEdit) return
+    const prev = periods
+    setPeriods(ps => ps.filter(p => p.id !== id))
+    try { await api.bsDeleteAvailabilityPeriod(id); refreshMatrix() }
+    catch (e) { setPeriods(prev); toast.error('Could not remove period: ' + e.message) }
+  }
+
   if (data === null) return <BetterSelectLayout title="Availability"><PbSpinner message="Loading availability…" /></BetterSelectLayout>
 
   if (!data.dates.length) {
@@ -180,8 +239,89 @@ export default function AdminAvailability() {
         <span className="text-pb-red">✕ unavailable</span> ·{' '}
         <span className="text-amber-300">? maybe</span> ·{' '}
         <span className="text-pb-faintest">– no response</span>.
-        One answer covers every fixture that day; two-day games show both weekends.
+        One answer covers every fixture that day; two-day games show both weekends.{' '}
+        A <span className="px-1 border border-dashed pb-hairline rounded text-pb-faint">dashed</span> cell comes from a period.
       </p>
+
+      {/* Availability periods — set a span of un/availability in one action */}
+      <div className="pb-card mb-3">
+        <button onClick={() => setShowPeriods(s => !s)}
+          className="w-full flex items-center gap-2 px-4 py-2.5 text-left">
+          <span className="font-mono text-[11px] uppercase tracking-wide2 text-pb-faint">Availability periods</span>
+          {periods.length > 0 && <span className="font-mono text-[10px] text-pb-accent">{periods.length} active</span>}
+          <span className="ml-auto text-pb-faintest text-xs">{showPeriods ? '▲' : '▼'}</span>
+        </button>
+        {showPeriods && (
+          <div className="px-4 pb-4 border-t pb-hairline">
+            <p className="text-pb-faint text-xs mt-3 mb-3 max-w-2xl">
+              Mark a player un/available across a date range — set once, it covers every fixture in the span.
+              Leave the end date blank for open-ended (until further notice). An explicit click on a cell always overrides.
+            </p>
+
+            {canEdit && (
+              <div className="flex flex-wrap items-end gap-3 mb-4">
+                <div className="min-w-[170px]">
+                  <label className="font-mono text-[10px] text-pb-faintest block mb-1">Player</label>
+                  <select value={pForm.player_id} onChange={e => setPForm(f => ({ ...f, player_id: e.target.value }))}
+                    className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+                    <option value="">Select player…</option>
+                    {(data?.players || []).map(p => <option key={p.id} value={p.id}>{p.display_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faintest block mb-1">Status</label>
+                  <select value={pForm.status} onChange={e => setPForm(f => ({ ...f, status: e.target.value }))}
+                    className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+                    {PERIOD_STATUS_OPTS.map(s => <option key={s} value={s}>{AVAILABILITY[s].label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faintest block mb-1">From</label>
+                  <input type="date" value={pForm.start_date} onChange={e => setPForm(f => ({ ...f, start_date: e.target.value }))}
+                    className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
+                </div>
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faintest block mb-1">To <span className="text-pb-faintest/60">(blank = open)</span></label>
+                  <input type="date" value={pForm.end_date} min={pForm.start_date} onChange={e => setPForm(f => ({ ...f, end_date: e.target.value }))}
+                    className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
+                </div>
+                <div className="flex-1 min-w-[150px]">
+                  <label className="font-mono text-[10px] text-pb-faintest block mb-1">Reason</label>
+                  <input list="period-reasons" value={pForm.reason} onChange={e => setPForm(f => ({ ...f, reason: e.target.value }))}
+                    placeholder="e.g. Injured (optional)"
+                    className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
+                  <datalist id="period-reasons">{REASON_SUGGESTIONS.map(r => <option key={r} value={r} />)}</datalist>
+                </div>
+                <button onClick={addPeriod} disabled={savingPeriod || !pForm.player_id}
+                  className="px-4 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
+                  style={{ background: 'var(--pb-accent)' }}>
+                  {savingPeriod ? 'Adding…' : 'Add period'}
+                </button>
+              </div>
+            )}
+
+            {periods.length === 0 ? (
+              <p className="text-pb-faintest text-xs">No active periods.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {periods.map(p => (
+                  <div key={p.id} className="flex items-center gap-2.5 text-sm bg-pb-surface2 rounded px-3 py-1.5">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${AVAILABILITY[p.status]?.dot || 'bg-pb-faintest'}`} />
+                    <span className="font-medium text-pb-text">{p.player_name}</span>
+                    <span className="font-mono text-[10px] uppercase text-pb-faint">{AVAILABILITY[p.status]?.label || p.status}</span>
+                    <span className="text-pb-faint text-xs">{fmtRange(p.start_date, p.end_date)}</span>
+                    {p.reason && <span className="text-pb-faintest text-xs truncate">· {p.reason}</span>}
+                    {canEdit && (
+                      <button onClick={() => removePeriod(p.id)}
+                        className="ml-auto shrink-0 text-pb-faintest hover:text-pb-red text-xs px-1" title="Remove period">✕</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Filter bar */}
       <div className="pb-card p-3 mb-3 flex flex-wrap items-end gap-3">
@@ -298,15 +438,20 @@ export default function AdminAvailability() {
                   {p.is_dormant && <span className="ml-2 font-mono text-[9px] text-amber-300/80 uppercase" title={`No appearances since ${fmtYear(p.last_played)}`}>dormant · {fmtYear(p.last_played)}</span>}
                 </td>
                 {data.dates.map(d => {
-                  const st = avail[p.id]?.[d.date]?.status || 'NO_RESPONSE'
+                  const cell = avail[p.id]?.[d.date]
+                  const st = cell?.status || 'NO_RESPONSE'
                   const m = META[st]
+                  const fromPeriod = cell?.source === 'period'
+                  const title = fromPeriod
+                    ? `${AVAILABILITY[st]?.label || st}${cell.reason ? ' · ' + cell.reason : ''} — from a period${cell.period_end ? ' until ' + fmtDay(cell.period_end) : ' (open-ended)'}${canEdit ? '. Click to override.' : ''}`
+                    : (AVAILABILITY[st]?.label || st)
                   return (
                     <td key={d.date} className="px-1.5 py-1.5 border-l border-t pb-hairline text-center">
                       <button
                         onClick={() => cycle(p.id, d.date, st)}
                         disabled={!canEdit}
-                        className={`w-9 h-7 rounded border text-sm transition-transform active:scale-90 ${m.cls} ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
-                        title={st}
+                        className={`w-9 h-7 rounded border text-sm transition-transform active:scale-90 ${m.cls} ${fromPeriod ? 'border-dashed' : ''} ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
+                        title={title}
                       >{m.g}</button>
                     </td>
                   )
