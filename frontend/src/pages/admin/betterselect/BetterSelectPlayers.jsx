@@ -4,6 +4,7 @@
 // docs/design_handoff_betterselect/prototype/bs-players.jsx with real
 // components, the live API, and dirty-tracked saves.
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
@@ -464,13 +465,17 @@ export default function BetterSelectPlayers() {
   const { hasCapability } = useAuth()
   const toast = useToast()
   const canEdit = hasCapability(CAP.MANAGE_PLAYERS)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [players, setPlayers] = useState(null)   // roster (adminListPlayers)
   const [teams, setTeams] = useState([])         // bsListTeams
   const [availability, setAvailability] = useState({}) // playerId → {date: {status}}
   const [firstDate, setFirstDate] = useState(null)     // next upcoming date
 
-  const [selId, setSelId] = useState(null)
+  // ?player=<id> deep-link — set when an Avatar is clicked anywhere in
+  // BetterSelect. Selecting a player keeps the URL in sync so it's shareable
+  // and the back button works.
+  const [selId, setSelId] = useState(() => searchParams.get('player') || null)
   const [profile, setProfile] = useState(null)   // full profile of selId
   const [draft, setDraft] = useState(null)
   const [savedTick, setSavedTick] = useState(false)
@@ -482,12 +487,34 @@ export default function BetterSelectPlayers() {
     api.adminListPlayers()
       .then((rows) => {
         setPlayers(rows)
-        if (rows.length && selId == null) setSelId(rows[0].id)
+        // Default to the first player only when nothing's been deep-linked or
+        // chosen, and the deep-linked id actually exists in this roster.
+        setSelId((cur) => {
+          if (cur && rows.some((r) => r.id === cur)) return cur
+          return rows.length ? rows[0].id : null
+        })
       })
       .catch((e) => { toast.error(e.message); setPlayers([]) })
-  }, [toast, selId])
+  }, [toast])
 
   useEffect(() => { loadRoster() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Follow ?player= changes that happen while already mounted (e.g. clicking an
+  // avatar elsewhere routes here with a new id).
+  useEffect(() => {
+    const pid = searchParams.get('player')
+    if (pid && pid !== selId) setSelId(pid)
+  }, [searchParams])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep the URL's ?player= in sync with the active selection (replace, so we
+  // don't stack history entries as the user browses the roster).
+  useEffect(() => {
+    if (!selId) return
+    if (searchParams.get('player') === selId) return
+    const next = new URLSearchParams(searchParams)
+    next.set('player', selId)
+    setSearchParams(next, { replace: true })
+  }, [selId])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMatrix = useCallback(() => {
     api.bsAvailabilityMatrix()
