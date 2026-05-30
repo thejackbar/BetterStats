@@ -16,16 +16,20 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
-from app.models.db import Fixture, PlayerAvailability, Organisation, Player, User, get_db
+from app.models.db import (
+    Fixture, PlayerAvailability, PlayerAvailabilityPeriod, Organisation, Player, User, get_db,
+)
 from app.routers.auth import get_current_club
 
 router = APIRouter(prefix="/availability", tags=["availability"])
 
 VALID_STATUSES = {"AVAILABLE", "UNAVAILABLE", "MAYBE", "NO_RESPONSE"}
+# A period asserts a state, so NO_RESPONSE (the absence of an answer) isn't valid.
+PERIOD_STATUSES = {"AVAILABLE", "UNAVAILABLE", "MAYBE"}
 
 # Fallback dormancy window (months) if a club hasn't set one. A player who last
 # appeared more than this long ago is "dormant": surfaced behind a toggle so
@@ -53,6 +57,14 @@ class AvailabilitySet(BaseModel):
 
 class AvailabilityBulk(BaseModel):
     items: list[AvailabilitySet]
+
+
+class PeriodCreate(BaseModel):
+    player_id: str
+    start_date: date
+    end_date: Optional[date] = None  # None = open-ended
+    status: str = "UNAVAILABLE"
+    reason: Optional[str] = None
 
 
 async def _owned_player_ids(db: AsyncSession, club_id) -> set:
@@ -87,6 +99,51 @@ async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, pla
             note=item.note,
             recorded_by=user_id,
         ))
+
+
+async def resolve_period_statuses(
+    db: AsyncSession, club_id, dates: list[date],
+) -> dict[str, dict[str, dict]]:
+    """{date_iso: {player_id_str: {status, reason, period_id, start, end}}} from
+    covering availability periods.
+
+    When several periods overlap a date, the most recently-starting one wins
+    (tie-break: later created_at). Callers layer explicit per-date availability
+    rows on top — an explicit answer always takes precedence over a period.
+    """
+    if not dates:
+        return {}
+    dmin, dmax = min(dates), max(dates)
+    res = await db.execute(
+        select(PlayerAvailabilityPeriod)
+        .where(
+            PlayerAvailabilityPeriod.organisation_id == club_id,
+            PlayerAvailabilityPeriod.start_date <= dmax,
+            or_(
+                PlayerAvailabilityPeriod.end_date.is_(None),
+                PlayerAvailabilityPeriod.end_date >= dmin,
+            ),
+        )
+        .order_by(
+            PlayerAvailabilityPeriod.start_date.asc(),
+            PlayerAvailabilityPeriod.created_at.asc(),
+        )
+    )
+    periods = res.scalars().all()
+    out: dict[str, dict[str, dict]] = {}
+    for d in dates:
+        di = d.isoformat()
+        for p in periods:
+            if p.start_date <= d and (p.end_date is None or p.end_date >= d):
+                # asc order => the last matching write wins (most recent period).
+                out.setdefault(di, {})[str(p.player_id)] = {
+                    "status": p.status,
+                    "reason": p.reason,
+                    "period_id": p.id,
+                    "start": p.start_date.isoformat(),
+                    "end": p.end_date.isoformat() if p.end_date else None,
+                }
+    return out
 
 
 @router.get("/matrix")
@@ -206,7 +263,28 @@ async def availability_matrix(
             avail_map.setdefault(str(a.player_id), {})[a.avail_date.isoformat()] = {
                 "status": a.status,
                 "note": a.note,
+                "source": "manual",
             }
+
+        # Layer covering availability periods UNDER the explicit answers above: a
+        # period supplies a date's status only where no per-date row exists.
+        # Period-derived cells carry source='period' + reason/range so the UI can
+        # mark them distinctly (and a click still writes an explicit override).
+        period_map = await resolve_period_statuses(
+            db, club.id, [date.fromisoformat(d) for d in date_keys]
+        )
+        for di, players_d in period_map.items():
+            for pid, info in players_d.items():
+                if avail_map.get(pid, {}).get(di) is not None:
+                    continue  # explicit answer wins
+                avail_map.setdefault(pid, {})[di] = {
+                    "status": info["status"],
+                    "note": info["reason"],
+                    "source": "period",
+                    "reason": info["reason"],
+                    "period_start": info["start"],
+                    "period_end": info["end"],
+                }
 
     return {
         "dates": [
@@ -278,14 +356,119 @@ async def list_for_date(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """All recorded availability for the caller's club on a given date."""
+    """All recorded availability for the caller's club on a given date —
+    explicit per-date answers plus any covering period (explicit wins)."""
     res = await db.execute(
         select(PlayerAvailability).where(
             PlayerAvailability.organisation_id == club.id,
             PlayerAvailability.avail_date == on,
         )
     )
-    return [
-        {"player_id": str(a.player_id), "status": a.status, "note": a.note}
-        for a in res.scalars().all()
+    rows = res.scalars().all()
+    out = [
+        {"player_id": str(a.player_id), "status": a.status, "note": a.note, "source": "manual"}
+        for a in rows
     ]
+    seen = {str(a.player_id) for a in rows}
+    period_map = await resolve_period_statuses(db, club.id, [on])
+    for pid, info in period_map.get(on.isoformat(), {}).items():
+        if pid in seen:
+            continue
+        out.append({
+            "player_id": pid,
+            "status": info["status"],
+            "note": info["reason"],
+            "source": "period",
+            "reason": info["reason"],
+            "period_start": info["start"],
+            "period_end": info["end"],
+        })
+    return out
+
+
+@router.get("/periods")
+async def list_periods(
+    include_past: bool = False,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Availability periods for the club. Active/upcoming only by default; pass
+    include_past=true for the full history."""
+    name_col = func.coalesce(Player.display_name_override, Player.name)
+    q = (
+        select(PlayerAvailabilityPeriod, name_col)
+        .join(Player, Player.id == PlayerAvailabilityPeriod.player_id)
+        .where(PlayerAvailabilityPeriod.organisation_id == club.id)
+    )
+    if not include_past:
+        q = q.where(or_(
+            PlayerAvailabilityPeriod.end_date.is_(None),
+            PlayerAvailabilityPeriod.end_date >= date.today(),
+        ))
+    q = q.order_by(PlayerAvailabilityPeriod.start_date.asc(), name_col.asc())
+    res = await db.execute(q)
+    return [
+        {
+            "id": p.id,
+            "player_id": str(p.player_id),
+            "player_name": name,
+            "start_date": p.start_date.isoformat(),
+            "end_date": p.end_date.isoformat() if p.end_date else None,
+            "status": p.status,
+            "reason": p.reason,
+        }
+        for p, name in res.all()
+    ]
+
+
+@router.post("/periods")
+async def create_period(
+    body: PeriodCreate,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    if body.status not in PERIOD_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
+    if body.end_date and body.end_date < body.start_date:
+        raise HTTPException(status_code=400, detail="End date is before start date")
+    try:
+        pid = uuid.UUID(body.player_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid player_id")
+    if pid not in await _owned_player_ids(db, club.id):
+        raise HTTPException(status_code=404, detail="Player not found")
+    period = PlayerAvailabilityPeriod(
+        organisation_id=club.id,
+        player_id=pid,
+        start_date=body.start_date,
+        end_date=body.end_date,
+        status=body.status,
+        reason=(body.reason or "").strip() or None,
+        recorded_by=user.id,
+    )
+    db.add(period)
+    await db.commit()
+    await db.refresh(period)
+    return {"status": "ok", "id": period.id}
+
+
+@router.delete("/periods/{period_id}")
+async def delete_period(
+    period_id: int,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    res = await db.execute(
+        select(PlayerAvailabilityPeriod).where(
+            PlayerAvailabilityPeriod.id == period_id,
+            PlayerAvailabilityPeriod.organisation_id == club.id,  # cross-tenant guard
+        )
+    )
+    period = res.scalar_one_or_none()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+    await db.delete(period)
+    await db.commit()
+    return {"status": "ok"}

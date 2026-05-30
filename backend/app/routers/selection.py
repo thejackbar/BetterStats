@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
-from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago
+from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 
 router = APIRouter(prefix="/selection", tags=["selection"])
 
@@ -176,6 +176,7 @@ async def get_selection(
     # Availability for this fixture's playing date(s). Availability is keyed on
     # date; the relevant answer is for played_on (week 1). One row per player.
     avail: dict[str, str] = {}
+    avail_reason: dict[str, str] = {}
     if fx.played_on:
         av_res = await db.execute(
             text(
@@ -186,6 +187,14 @@ async def get_selection(
         )
         for pid, status in av_res.fetchall():
             avail[str(pid)] = status
+        # Fall back to a covering availability period where the admin hasn't set
+        # an explicit answer for this date (explicit wins). Carries the reason.
+        period_map = await resolve_period_statuses(db, club.id, [fx.played_on])
+        for pid, info in period_map.get(fx.played_on.isoformat(), {}).items():
+            if pid not in avail:
+                avail[pid] = info["status"]
+                if info.get("reason"):
+                    avail_reason[pid] = info["reason"]
 
     # Players also already selected for ANOTHER fixture on the same date —
     # surfaced so the UI can flag a clash (rule layer decides if it's allowed).
@@ -226,6 +235,7 @@ async def get_selection(
             "skill_positions": p.skill_positions or [],
             "squads": sorted(squads.get(pid, [])),
             "availability": avail.get(pid, "NO_RESPONSE"),
+            "availability_reason": avail_reason.get(pid),
             "last_played": lp.isoformat() if lp else None,
             "photo_url": p.photo_url,
             "batting_hand": p.batting_hand,

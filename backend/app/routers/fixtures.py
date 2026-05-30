@@ -28,6 +28,7 @@ from app.auth.capabilities import MANAGE_FIXTURES, require_cap
 from app.models.db import Fixture, Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.services import playhq_partner_client
+from app.services.club_match import club_match_keys
 
 router = APIRouter(prefix="/fixtures", tags=["fixtures"])
 
@@ -71,16 +72,11 @@ def _derive_sides(g: dict, club: Organisation) -> tuple[Optional[str], Optional[
     """Best-effort (home_away, opponent_name) from the club's perspective."""
     home = g.get("home_team") or ""
     away = g.get("away_team") or ""
-    keys = []
-    if club.short_name:
-        keys.append(club.short_name.lower().strip())
-    if club.name:
-        keys.append(club.name.lower().strip())
-        keys.append(club.name.split()[0].lower().strip())
+    keys = club_match_keys(club)
     hl, al = home.lower(), away.lower()
-    if any(k and k in hl for k in keys):
+    if any(k in hl for k in keys):
         return "HOME", away
-    if any(k and k in al for k in keys):
+    if any(k in al for k in keys):
         return "AWAY", home
     return None, None
 

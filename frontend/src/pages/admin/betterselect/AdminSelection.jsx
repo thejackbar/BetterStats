@@ -7,6 +7,7 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner, Btn } from '../../../lib/presskit'
+import { AVAILABILITY, AVAIL_STATUSES } from '../../../lib/availability'
 
 // Row state → tint. Order of precedence handled in rowState().
 const ROW_TINT = {
@@ -17,13 +18,10 @@ const ROW_TINT = {
   DORMANT:     'bg-amber-400/[0.03]',
   NONE:        '',
 }
-const AVAIL_META = {
-  AVAILABLE:   { dot: 'bg-pb-accent',   label: 'Available' },
-  UNAVAILABLE: { dot: 'bg-pb-red',      label: 'Unavailable' },
-  MAYBE:       { dot: 'bg-amber-400',   label: 'Maybe' },
-  NO_RESPONSE: { dot: 'bg-pb-faintest', label: 'No response' },
-}
-const AVAIL_RANK = { AVAILABLE: 0, MAYBE: 1, NO_RESPONSE: 2, UNAVAILABLE: 3 }
+const AVAIL_META = Object.fromEntries(
+  AVAIL_STATUSES.map((s) => [s, { dot: AVAILABILITY[s].dot, label: AVAILABILITY[s].label }]),
+)
+const AVAIL_RANK = Object.fromEntries(AVAIL_STATUSES.map((s) => [s, AVAILABILITY[s].rank]))
 const SKILL_LABELS = { BAT: 'Batsman', BWL: 'Bowler', ALL: 'All Rounder', WKT: 'Wicketkeeper' }
 const BAT_HANDS = { LEFT: 'Left handed', RIGHT: 'Right handed' }
 const BOWL_ACTIONS = { RIGHT_ARM: 'Right arm', LEFT_ARM: 'Left arm' }

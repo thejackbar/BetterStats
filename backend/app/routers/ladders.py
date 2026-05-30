@@ -27,6 +27,7 @@ from app.models.db import Grade, Organisation, Season, Team, get_db
 from app.routers.auth import get_current_club
 from app.routers.teams import ensure_team_grades, _grade_name_map
 from app.services import grassroots_scores_client
+from app.services.club_match import club_match_keys
 
 router = APIRouter(prefix="/ladders", tags=["ladders"])
 
@@ -101,7 +102,7 @@ async def _compute_team_ladders(db: AsyncSession, org: Organisation, auto_link: 
         .order_by(Team.sequence.asc(), Team.name.asc())
     )).scalars().all()
     grade_names = await _grade_name_map(db, org.id)
-    club_keys = [k.lower().strip() for k in [org.short_name, org.name, (org.name or "").split(" ")[0]] if k]
+    club_keys = club_match_keys(org)
 
     linked = [t for t in teams if t.grade_id]
     unlinked = [{"team_id": str(t.id), "team_name": t.name} for t in teams if not t.grade_id]
@@ -163,7 +164,7 @@ async def grade_ladder(grade_id: str, db: AsyncSession = Depends(get_db)):
     org = await db.get(Organisation, season.organisation_id) if season else None
     if not org or not org.is_active:
         raise HTTPException(status_code=404, detail="Grade not found")
-    club_keys = [k.lower().strip() for k in [org.short_name, org.name, (org.name or "").split(" ")[0]] if k]
+    club_keys = club_match_keys(org)
     raw = await grassroots_scores_client.get_grade_ladder(str(gid))
     views = _parse_ladder_payload(raw, club_keys)
     return {

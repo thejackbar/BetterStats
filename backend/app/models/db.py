@@ -350,6 +350,28 @@ class PlayerAvailability(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class PlayerAvailabilityPeriod(Base):
+    """BetterSelect: a player's availability across a DATE RANGE (admin-recorded).
+
+    Set once to cover a span — e.g. "injured 1 Jun–15 Jul", or open-ended "out
+    until further notice" (end_date NULL). A covering period supplies a date's
+    status wherever no explicit per-date PlayerAvailability row exists; explicit
+    rows always win. Club-wide; recorded_by/at track which admin set it.
+    """
+    __tablename__ = "player_availability_periods"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=True)  # NULL = open-ended
+    status = Column(Text, nullable=False)   # AVAILABLE|UNAVAILABLE|MAYBE
+    reason = Column(Text, nullable=True)
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    recorded_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class BattingInnings(Base):
     __tablename__ = "batting_innings"
     __table_args__ = (
