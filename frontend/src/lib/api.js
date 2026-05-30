@@ -866,6 +866,10 @@ export const api = {
     request(`/teams/${id}/members`, { method: 'POST', body: JSON.stringify({ player_id: playerId }) }),
   bsRemoveTeamMember: (id, playerId) =>
     request(`/teams/${id}/members/${playerId}`, { method: 'DELETE' }),
+  // Assign one or many players to a single selection-pool squad (or null to
+  // unassign). Powers the Squads board's drag-to-reassign and bulk-add.
+  bsAssignSquad: (playerIds, squadTeamId) =>
+    request('/teams/squad-assign', { method: 'POST', body: JSON.stringify({ player_ids: playerIds, squad_team_id: squadTeamId ?? null }) }),
 
   // ─── BetterSelect: Availability ─────────────────────────
   bsAvailabilityMatrix: () => request('/availability/matrix'),
