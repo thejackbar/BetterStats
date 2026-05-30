@@ -10,6 +10,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Search, Chip, Empty, AvailSummary, QuickAvailModal,
+  RecencySelect, playedWithinYears,
 } from './ui'
 
 // ============================================================================
@@ -67,6 +68,7 @@ export default function AdminAvailability() {
   const [search, setSearch] = useState('')
   const [roster, setRoster] = useState('current')   // 'current' hides dormant/inactive; 'all' shows everyone
   const [squadFilter, setSquadFilter] = useState('') // '' = any squad
+  const [years, setYears] = useState(0)              // recency: played within N yrs (0 = any)
   const [respFilter, setRespFilter] = useState(null) // availability status across shown dates
 
   // Selected week (column) — drives the Pick XI handoff and single-week bulk.
@@ -149,11 +151,12 @@ export default function AdminAvailability() {
       // Roster visibility — 'current' hides dormant (and never-played inactive).
       if (roster === 'current' && !p.is_current) return false
       if (squadFilter && !(p.squads || []).includes(squadFilter)) return false
+      if (!playedWithinYears(p.last_played, years)) return false
       if (search.trim() && !nameMatchesSearch(p.display_name, search)) return false
       if (!matchesResponse(p)) return false
       return true
     })
-  }, [data, roster, squadFilter, search, matchesResponse])
+  }, [data, roster, squadFilter, years, search, matchesResponse])
 
   // Per-date player list as objects carrying a flat `availability` status, so we
   // can hand the matched-player set straight to <AvailSummary statusOf=…>.
@@ -264,6 +267,7 @@ export default function AdminAvailability() {
             {squadOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         )}
+        <RecencySelect value={years} onChange={setYears} />
         <div className="flex flex-wrap gap-1.5">
           {AVAIL_ORDER.map((s) => (
             <Chip key={s} label={AVAILABILITY[s].label} dot={AVAILABILITY[s].cssVar}
