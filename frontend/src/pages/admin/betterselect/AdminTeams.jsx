@@ -18,6 +18,7 @@ import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
 import { AVAILABILITY } from '../../../lib/availability'
 import {
   Icon, Avatar, Dot, AvailDot, RoleChips, Btn, Search, Chip, Empty, AvailSummary, QuickAvailModal,
+  RecencySelect, playedWithinYears, FilterButton, FilterPanel, FacetGroup,
 } from './ui'
 
 function matchesName(p, q) {
@@ -26,22 +27,8 @@ function matchesName(p, q) {
   return `${p.display_name || ''} ${p.name || ''}`.toLowerCase().includes(needle)
 }
 
-// "Played within" recency filter — drops the long tail of historical-only
-// players from the Unassigned pool. Never-played players (e.g. a freshly added
-// manual player with no appearances yet) are kept.
-const YEAR_FILTERS = [
-  { value: 0, label: 'Any' },
-  { value: 1, label: '≤1y' },
-  { value: 2, label: '≤2y' },
-  { value: 3, label: '≤3y' },
-  { value: 5, label: '≤5y' },
-]
-function playedWithinYears(lastPlayed, years) {
-  if (!years) return true
-  if (!lastPlayed) return true
-  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
-  return new Date(lastPlayed + 'T00:00:00') >= cutoff
-}
+const ROLE_CHIPS = ['BAT', 'BWL', 'ALL', 'WKT']
+const ROLE_LABEL = { BAT: 'Bat', BWL: 'Bowl', ALL: 'All-r', WKT: 'WK' }
 
 const UNASSIGNED_TINT = 'var(--pb-faintest)'
 // Per-column accent tints (a fixed category palette — not the white-label
@@ -120,41 +107,66 @@ function TeamModal({ team, onClose, onSaved }) {
   )
 }
 
-/* ── Bulk-add modal: pick players not already in this squad ────────────────── */
-function BulkAddModal({ squadName, candidates, statusOf, onAdd, onClose }) {
+/* ── Bulk-add modal ──────────────────────────────────────────────────────────
+ * Two modes: a fixed target (the "Add players" button on a squad) or "choose a
+ * squad" (the toolbar Bulk-add tool) where you pick the destination here. Either
+ * way: multi-select players, then assign them all at once. */
+function BulkAddModal({ fixedTeam, teams, players, statusOf, onAssign, onClose }) {
   const [sel, setSel] = useState(() => new Set())
   const [q, setQ] = useState('')
-  const [years, setYears] = useState(3)
+  const [years, setYears] = useState(0)
+  const [targetId, setTargetId] = useState(fixedTeam?.id || '')
   const [saving, setSaving] = useState(false)
-  const list = candidates.filter((p) => matchesName(p, q) && playedWithinYears(p.last_played, years))
+
+  const nameById = useMemo(() => new Map((teams || []).map((t) => [t.id, t.name])), [teams])
+  const targetName = fixedTeam?.name || nameById.get(targetId) || ''
+  // Candidates = everyone not already in the chosen target.
+  const list = useMemo(() => (players || []).filter((p) =>
+    (p.squad_team_id || null) !== (targetId || null)
+    && matchesName(p, q) && playedWithinYears(p.last_played, years),
+  ), [players, targetId, q, years])
+
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const submit = async () => { setSaving(true); await onAdd([...sel]); setSaving(false); onClose() }
+  const submit = async () => {
+    if (!targetId || !sel.size) return
+    setSaving(true)
+    try { await onAssign([...sel], targetId); onClose() }
+    finally { setSaving(false) }
+  }
 
   return (
     <div onClick={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div onClick={(e) => e.stopPropagation()} className="w-[460px] max-w-full max-h-[84%] flex flex-col bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl">
+      <div onClick={(e) => e.stopPropagation()} className="w-[480px] max-w-full max-h-[84%] flex flex-col bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl">
         <div className="flex items-center gap-3 px-[18px] py-4 border-b pb-hairline">
           <div className="flex-1 min-w-0">
-            <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">Add players to</div>
-            <div className="font-display font-bold text-[18px] mt-0.5 truncate">{squadName}</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">{fixedTeam ? 'Add players to' : 'Bulk add to squad'}</div>
+            {fixedTeam ? (
+              <div className="font-display font-bold text-[18px] mt-0.5 truncate">{fixedTeam.name}</div>
+            ) : (
+              <select value={targetId} onChange={(e) => setTargetId(e.target.value)}
+                className="mt-1 bg-pb-surface2 border pb-hairline rounded-lg px-2.5 py-1.5 text-pb-text text-[15px] font-medium focus:outline-none focus:border-pb-accent">
+                <option value="">— choose a squad —</option>
+                {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
           </div>
           <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1"><Icon name="close" size={18} /></button>
         </div>
         <div className="px-4 py-3 border-b pb-hairline flex flex-wrap items-center gap-2">
           <Search value={q} onChange={setQ} placeholder="Search players…" className="flex-1 min-w-[160px]" />
-          <div className="flex gap-1">
-            {YEAR_FILTERS.map((y) => <Chip key={y.value} label={y.label} active={years === y.value} onClick={() => setYears(y.value)} />)}
-          </div>
+          <RecencySelect value={years} onChange={setYears} />
         </div>
         <div className="overflow-auto flex-1 pb-scroll">
           {list.map((p) => {
             const on = sel.has(p.id)
+            const cur = p.squad_team_id ? nameById.get(p.squad_team_id) : null
             return (
               <label key={p.id} className={`flex items-center gap-3 px-4 py-2 border-b pb-hairline cursor-pointer ${on ? 'bg-pb-accent/[0.06]' : ''}`}>
                 <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="accent-pb-accent w-[15px] h-[15px]" />
                 <Dot status={statusOf(p.id)} />
                 <Avatar player={p} size={26} />
                 <span className="flex-1 text-[13.5px] font-medium truncate">{p.display_name || p.name}</span>
+                {cur && <span className="font-mono text-[9px] text-pb-faintest truncate shrink-0">in {cur}</span>}
                 {!playedWithinYears(p.last_played, 3) && <span className="font-mono text-[8.5px] text-amber-300/70 uppercase shrink-0">dormant</span>}
                 <RoleChips roles={p.skill_positions} muted />
               </label>
@@ -166,8 +178,8 @@ function BulkAddModal({ squadName, candidates, statusOf, onAdd, onClose }) {
           <span className={`font-mono text-xs ${sel.size ? 'text-pb-accent' : 'text-pb-faint'}`}>{sel.size} selected</span>
           <div className="ml-auto flex gap-2">
             <Btn variant="ghost" sm onClick={onClose}>Cancel</Btn>
-            <Btn variant="primary" sm icon="plus" disabled={!sel.size || saving} onClick={submit}>
-              {saving ? 'Adding…' : `Add ${sel.size || ''} to ${squadName}`}
+            <Btn variant="primary" sm icon="plus" disabled={!sel.size || !targetId || saving} onClick={submit}>
+              {saving ? 'Adding…' : `Add ${sel.size || ''}${targetName ? ' to ' + targetName : ''}`}
             </Btn>
           </div>
         </div>
@@ -415,7 +427,7 @@ export default function AdminTeams() {
   const [availability, setAvailability] = useState({})  // playerId → {date:{status}}
   const [firstDate, setFirstDate] = useState(null)
   const [editing, setEditing] = useState(undefined)
-  const [addTo, setAddTo] = useState(null)
+  const [addTo, setAddTo] = useState(undefined)        // BulkAddModal target: a team (fixed), or null (choose squad)
   const [over, setOver] = useState(null)
   const [seeding, setSeeding] = useState(false)
   const [autoAssign, setAutoAssign] = useState(false)  // auto-assign modal open
@@ -424,6 +436,9 @@ export default function AdminTeams() {
   // Filters + view
   const [search, setSearch] = useState('')
   const [years, setYears] = useState(3)                // Unassigned recency filter; default ≤3y
+  const [showFilters, setShowFilters] = useState(false)
+  const [roleF, setRoleF] = useState(null)             // skill-position filter (all columns)
+  const [availOnly, setAvailOnly] = useState(false)    // available-only filter (all columns)
   const [collapsed, setCollapsed] = useState(() => new Set())
   const dragId = useRef(null)
 
@@ -459,15 +474,20 @@ export default function AdminTeams() {
     return cols
   }, [teams])
 
-  // Members of a column. Search applies everywhere; the recency filter applies
-  // only to the Unassigned pool (assigned squads always show full membership,
-  // so a dormant "backup" you've filed into BackUps stays visible there).
+  const activeFilters = (roleF ? 1 : 0) + (availOnly ? 1 : 0) + (years ? 1 : 0)
+
+  // Members of a column. Search / role / availability apply everywhere; the
+  // recency filter applies only to the Unassigned pool (assigned squads always
+  // show full membership, so a dormant "backup" you've filed into BackUps stays
+  // visible there).
   const membersOf = useCallback((col) => {
     let list = (players || []).filter((p) => (p.squad_team_id || null) === col.id)
     if (search.trim()) list = list.filter((p) => matchesName(p, search))
+    if (roleF) list = list.filter((p) => (p.skill_positions || []).includes(roleF))
+    if (availOnly) list = list.filter((p) => statusOf(p.id) === 'AVAILABLE')
     if (col.unassigned) list = list.filter((p) => playedWithinYears(p.last_played, years))
     return list
-  }, [players, search, years])
+  }, [players, search, roleF, availOnly, years, statusOf])
 
   // For the Unassigned "showing X of Y" hint.
   const unassignedTotal = useMemo(
@@ -537,10 +557,9 @@ export default function AdminTeams() {
       {editing !== undefined && (
         <TeamModal team={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); loadTeams() }} />
       )}
-      {addTo && (
-        <BulkAddModal squadName={addTo.name}
-          candidates={(players || []).filter((p) => (p.squad_team_id || null) !== addTo.id)}
-          statusOf={statusOf} onAdd={(ids) => assign(ids, addTo.id)} onClose={() => setAddTo(null)} />
+      {addTo !== undefined && (
+        <BulkAddModal fixedTeam={addTo} teams={teams || []} players={players || []}
+          statusOf={statusOf} onAssign={assign} onClose={() => setAddTo(undefined)} />
       )}
       {availEdit && (
         <QuickAvailModal player={availEdit} dateLabel={firstDate}
@@ -561,13 +580,12 @@ export default function AdminTeams() {
           </div>
         ) : (
           <>
-            {/* Toolbar: search + Unassigned recency filter + collapse controls */}
-            <div className="flex flex-wrap items-center gap-3 mb-4">
-              <Search value={search} onChange={setSearch} placeholder="Search players…" className="w-[220px]" />
-              <div className="flex items-center gap-1.5">
-                <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest">Unassigned: played</span>
-                {YEAR_FILTERS.map((y) => <Chip key={y.value} label={y.label} active={years === y.value} onClick={() => setYears(y.value)} />)}
-              </div>
+            {/* Toolbar: search + quiet filters + bulk-add + collapse controls */}
+            <div className="flex flex-wrap items-center gap-2.5 mb-3">
+              <Search value={search} onChange={setSearch} placeholder="Search players…" className="w-[200px]" />
+              <FilterButton active={showFilters} count={activeFilters} onClick={() => setShowFilters((v) => !v)} />
+              <RecencySelect value={years} onChange={setYears} title="Hide unassigned players who haven’t played recently" />
+              {canManage && <Btn variant="soft" sm icon="plus" onClick={() => setAddTo(null)}>Bulk add</Btn>}
               <div className="ml-auto flex items-center gap-3">
                 <span className="text-pb-faint text-[12.5px]"><b className="text-pb-text pb-num">{players.length}</b> players · <b className="text-pb-text pb-num">{teams.length}</b> squads</span>
                 <div className="flex gap-1">
@@ -576,6 +594,17 @@ export default function AdminTeams() {
                 </div>
               </div>
             </div>
+            {showFilters && (
+              <FilterPanel className="mb-4">
+                <FacetGroup label="Role">
+                  {ROLE_CHIPS.map((r) => <Chip key={r} label={ROLE_LABEL[r]} active={roleF === r} onClick={() => setRoleF(roleF === r ? null : r)} />)}
+                </FacetGroup>
+                <Chip label="Available only" active={availOnly} onClick={() => setAvailOnly((v) => !v)} />
+                <FacetGroup label="Unassigned recency"><RecencySelect value={years} onChange={setYears} /></FacetGroup>
+                {activeFilters > 0 && <button onClick={() => { setRoleF(null); setAvailOnly(false); setYears(0) }} className="text-[11.5px] text-pb-accent hover:underline">Clear</button>}
+                <span className="ml-auto font-mono text-[10px] text-pb-faintest">Role & availability filter every column · recency only thins Unassigned</span>
+              </FilterPanel>
+            )}
 
             <div className="grid gap-3 items-start" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
               {columns.map((col) => {

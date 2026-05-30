@@ -203,6 +203,66 @@ export function Empty({ children, className = '' }) {
   return <div className={`text-pb-faint text-sm ${className}`}>{children}</div>
 }
 
+/* ── Player recency filter (shared, deliberately quiet) ──────────────────────
+ * "Played within N years (by last appearance)". Used on every player list so
+ * the long tail of historical-only players can be hidden — rendered as a small
+ * subtle dropdown, never a prominent chip row. */
+export const RECENCY_OPTIONS = [
+  { value: 0, label: 'Played: any time' },
+  { value: 1, label: 'Played ≤ 1 yr' },
+  { value: 2, label: 'Played ≤ 2 yrs' },
+  { value: 3, label: 'Played ≤ 3 yrs' },
+  { value: 5, label: 'Played ≤ 5 yrs' },
+  { value: 10, label: 'Played ≤ 10 yrs' },
+]
+export function playedWithinYears(lastPlayed, years) {
+  if (!years) return true
+  if (!lastPlayed) return true // never-played (e.g. a new manual add) — keep
+  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
+  return new Date(lastPlayed + 'T00:00:00') >= cutoff
+}
+export function RecencySelect({ value, onChange, title = 'Hide players who haven’t played recently', className = '' }) {
+  return (
+    <select value={value} onChange={(e) => onChange(Number(e.target.value))} title={title}
+      className={`bg-transparent text-[11.5px] rounded-md border px-1.5 py-1 focus:outline-none focus:border-pb-accent transition-colors ${
+        value ? 'text-pb-accent border-pb-accent/40' : 'text-pb-faint border-pb-hairline hover:text-pb-text'
+      } ${className}`}>
+      {RECENCY_OPTIONS.map((o) => <option key={o.value} value={o.value} className="bg-pb-surface text-pb-text">{o.label}</option>)}
+    </select>
+  )
+}
+
+/* ── Filters toggle + reveal panel (shared) ──────────────────────────────────
+ * The quiet "Filters" affordance used across player lists: a small button that
+ * shows an active-count badge, plus a panel container for the facet controls. */
+export function FilterButton({ active, count = 0, onClick }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12.5px] transition-colors ${
+        active || count ? 'border-pb-accent/50 text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'
+      }`}>
+      <Icon name="filter" size={14} />
+      {count ? `Filters · ${count}` : 'Filters'}
+    </button>
+  )
+}
+export function FilterPanel({ children, className = '' }) {
+  return (
+    <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-pb-hairline2 bg-pb-surface2/40 px-3 py-2 ${className}`}>
+      {children}
+    </div>
+  )
+}
+export function FacetGroup({ label, children }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faintest">{label}</span>
+      {children}
+    </span>
+  )
+}
+
+
 /* ── Availability summary — stacked bar + legend over a set of players ────── */
 export function AvailSummary({ players, statusOf = (p) => p.availability ?? p.avail ?? 'NO_RESPONSE', compact = false, hideTotal = false, className = '' }) {
   const total = players.length

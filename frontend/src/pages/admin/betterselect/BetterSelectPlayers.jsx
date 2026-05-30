@@ -13,25 +13,8 @@ import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import {
   Icon, Avatar, Dot, AvailDot, RoleChips, Tag, Btn, Search, Chip, Empty,
-  AVAILABILITY, QuickAvailModal,
+  AVAILABILITY, QuickAvailModal, RecencySelect, playedWithinYears,
 } from './ui'
-
-// "Played within" recency filter — drops the long tail of historical-only
-// players (last appearance older than N years). Never-played players (no
-// appearance yet, e.g. a freshly added manual player) are kept.
-const YEAR_FILTERS = [
-  { value: 0, label: 'Any time' },
-  { value: 1, label: '≤ 1 yr' },
-  { value: 2, label: '≤ 2 yrs' },
-  { value: 3, label: '≤ 3 yrs' },
-  { value: 5, label: '≤ 5 yrs' },
-]
-function playedWithinYears(lastPlayed, years) {
-  if (!years) return true
-  if (!lastPlayed) return true
-  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
-  return new Date(lastPlayed + 'T00:00:00') >= cutoff
-}
 
 /* ── Option sets (mirror AdminPlayers field enums) ───────────────────────── */
 const ROLE_OPTS = ['', 'Batter', 'Bowler', 'All Rounder', 'Wicketkeeper', 'Wicketkeeper-Batter']
@@ -391,25 +374,16 @@ function PlayerList({ players, statusOf, squadNameOf, selectedId, onSelect, onOp
 
   return (
     <div className="pb-card bg-pb-surface flex flex-col min-h-0 h-full overflow-hidden">
-      <div className="px-3.5 py-3 border-b border-pb-hairline flex flex-col gap-2.5">
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <Search value={q} onChange={setQ} placeholder="Search players…" className="w-[200px]" />
-          <div className="flex gap-1.5">
-            {ROLE_CHIPS.map(([label, value]) => (
-              <Chip key={value} label={label} active={role === value} onClick={() => setRole(role === value ? null : value)} />
-            ))}
-          </div>
-          <Chip label="Show inactive" active={showInactive} onClick={() => setShowInactive((v) => !v)} />
-          <span className="ml-auto font-mono text-[11px] text-pb-faint">{list.length} players</span>
+      <div className="px-3.5 py-3 border-b border-pb-hairline flex items-center gap-2.5 flex-wrap">
+        <Search value={q} onChange={setQ} placeholder="Search players…" className="w-[200px]" />
+        <div className="flex gap-1.5">
+          {ROLE_CHIPS.map(([label, value]) => (
+            <Chip key={value} label={label} active={role === value} onClick={() => setRole(role === value ? null : value)} />
+          ))}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest">Played</span>
-          <div className="flex gap-1">
-            {YEAR_FILTERS.map((y) => (
-              <Chip key={y.value} label={y.label} active={years === y.value} onClick={() => setYears(y.value)} />
-            ))}
-          </div>
-        </div>
+        <Chip label="Show inactive" active={showInactive} onClick={() => setShowInactive((v) => !v)} />
+        <RecencySelect value={years} onChange={setYears} />
+        <span className="ml-auto font-mono text-[11px] text-pb-faint">{list.length} players</span>
       </div>
 
       <div className="overflow-auto flex-1">
