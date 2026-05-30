@@ -15,6 +15,7 @@ All endpoints are scoped to the caller's club via get_current_club.
 from __future__ import annotations
 
 import uuid
+import re
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -110,6 +111,36 @@ async def _team_map(db: AsyncSession, club_id) -> dict:
     with the playing team's name without an async lazy-load on f.team."""
     res = await db.execute(select(Team).where(Team.organisation_id == club_id))
     return {str(t.id): {"name": t.name, "short_name": t.short_name} for t in res.scalars().all()}
+
+
+def _norm(s: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def _match_team(our_name: Optional[str], teams: list[tuple]):
+    """Best-effort map a fixture's own-side team name to one of the club's teams.
+
+    teams: list of (id, name, sequence). Returns a team id or None.
+
+    Auto-seeded teams have no grade_id, so we match on the team *name* (which
+    both the seed and the fixture sync derive from CA data), falling back to the
+    grade number. Both steps require an unambiguous hit — never guess.
+    """
+    n = _norm(our_name)
+    if not n:
+        return None
+    # 1. exact normalised name
+    for tid, tname, _ in teams:
+        if _norm(tname) == n:
+            return tid
+    # 2. grade number (e.g. "...1st Grade" -> 1), only if exactly one team ranks there
+    m = re.search(r"(\d+)", n)
+    if m:
+        seq = int(m.group(1))
+        hits = [tid for tid, _, tseq in teams if tseq == seq]
+        if len(hits) == 1:
+            return hits[0]
+    return None
 
 
 async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixture:
@@ -291,8 +322,15 @@ async def sync_fixtures(
         club.playhq_id, club.name, db_seasons=db_seasons, grassroots_org_id=str(club.id)
     )
 
+    # Teams for name-based auto-attribution (id, name, sequence).
+    tm_res = await db.execute(
+        select(Team.id, Team.name, Team.sequence).where(Team.organisation_id == club.id)
+    )
+    teams = [(tid, tname, tseq) for tid, tname, tseq in tm_res.fetchall()]
+
     today_iso = date.today().isoformat()
     synced = 0
+    teams_assigned = 0
     for g in games:
         gid = g.get("id")
         played = g.get("played_at")
@@ -319,6 +357,14 @@ async def sync_fixtures(
         target.opponent_name = opponent
         target.venue = g.get("venue")
         target.status = g.get("status") or "UPCOMING"
+        # Auto-attribute our team by name — only when unset, so a manual
+        # assignment is never overwritten by a later sync.
+        if teams and target.team_id is None:
+            our_name = target.home_team if home_away == "HOME" else target.away_team if home_away == "AWAY" else None
+            matched = _match_team(our_name, teams)
+            if matched:
+                target.team_id = matched
+                teams_assigned += 1
         if existing:
             target.updated_at = datetime.now(timezone.utc)
         else:
@@ -326,4 +372,9 @@ async def sync_fixtures(
         synced += 1
 
     await db.commit()
-    return {"synced": synced}
+    detail = f"Synced {synced} fixture{'' if synced == 1 else 's'}"
+    if teams_assigned:
+        detail += f", auto-assigned {teams_assigned} to a team"
+    elif not teams:
+        detail += " — seed teams first to auto-assign them"
+    return {"synced": synced, "teams_assigned": teams_assigned, "detail": detail}

@@ -13,6 +13,7 @@ column (both are Grassroots GUIDs), so no extra mapping table is required.
 """
 import asyncio
 import logging
+import time
 from typing import Optional
 
 import httpx
@@ -35,6 +36,8 @@ _HEADERS = {
 _grade_matches_cache: dict[str, list] = {}  # grade_id -> matches
 _matches_cache: dict[str, list] = {}  # team_id -> matches
 _scorecard_cache: dict[str, Optional[dict]] = {}  # match_id -> scorecard or None
+_ladder_cache: dict[str, tuple] = {}  # grade_id -> (fetched_at, data | None)
+_LADDER_TTL = 3600  # ladders move ~weekly; an hour keeps the proxy happy
 
 
 async def _get(url: str, params: dict | None = None) -> httpx.Response:
@@ -73,6 +76,32 @@ async def get_grade_matches(grade_id: str) -> list[dict]:
     except Exception as e:
         logger.warning(f"GR scores: /grades/{grade_id}/matches failed: {e}")
         return []
+
+
+async def get_grade_ladder(grade_id: str) -> Optional[dict]:
+    """Return the live ladder/standings for a grade.
+
+    Uses /fixturesladders/grades/{grade_id}/ladders — unauthenticated, 200 OK
+    for current grades (grade_id is the same UUID as grades.id in our DB).
+    Returns the raw JSON dict, or None on any non-200 / failure. Cached for an
+    hour. The response *shape* is normalised by the caller, defensively.
+    """
+    now = time.time()
+    hit = _ladder_cache.get(grade_id)
+    if hit and now - hit[0] < _LADDER_TTL:
+        return hit[1]
+    try:
+        r = await _get(f"{BASE_URL}/fixturesladders/grades/{grade_id}/ladders")
+        if r.status_code != 200:
+            logger.debug(f"GR ladders: /grades/{grade_id}/ladders → {r.status_code}")
+            _ladder_cache[grade_id] = (now, None)
+            return None
+        data = r.json()
+        _ladder_cache[grade_id] = (now, data)
+        return data
+    except Exception as e:
+        logger.warning(f"GR ladders: /grades/{grade_id}/ladders failed: {e}")
+        return None
 
 
 async def get_team_matches(team_id: str) -> list[dict]:

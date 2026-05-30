@@ -4,9 +4,9 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
-import { PbSpinner, Btn, Field, Input } from '../../../lib/presskit'
+import { PbSpinner, Btn, Field, Input, Select } from '../../../lib/presskit'
 
-const EMPTY = { name: '', short_name: '', sequence: 0, default_formation: '', is_active: true }
+const EMPTY = { name: '', short_name: '', sequence: 0, default_formation: '', is_active: true, grade_id: '' }
 
 function fmtYear(d) {
   if (!d) return ''
@@ -87,9 +87,18 @@ function SquadPanel({ team, canManage }) {
 
 function TeamModal({ team, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState(() => ({ ...EMPTY, ...(team || {}) }))
+  const [form, setForm] = useState(() => ({ ...EMPTY, ...(team || {}), grade_id: team?.grade_id || '' }))
   const [saving, setSaving] = useState(false)
+  const [gradeSeasons, setGradeSeasons] = useState([])
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  useEffect(() => {
+    api.bsTeamGradeOptions().then(d => setGradeSeasons(d.seasons || [])).catch(() => {})
+  }, [])
+
+  // If the team's current grade is older than the option window, keep it selectable.
+  const knownGradeIds = new Set(gradeSeasons.flatMap(s => s.grades.map(g => g.id)))
+  const currentGradeMissing = form.grade_id && !knownGradeIds.has(form.grade_id)
 
   const save = async () => {
     if (!form.name.trim()) { toast.error('Team name is required'); return }
@@ -101,6 +110,7 @@ function TeamModal({ team, onClose, onSaved }) {
         sequence: Number(form.sequence) || 0,
         default_formation: form.default_formation || null,
         is_active: !!form.is_active,
+        grade_id: form.grade_id || null,
       }
       const saved = team ? await api.bsUpdateTeam(team.id, payload) : await api.bsCreateTeam(payload)
       toast.success(team ? 'Team updated' : 'Team added')
@@ -123,6 +133,17 @@ function TeamModal({ team, onClose, onSaved }) {
             <Field label="Order (1 = top)"><Input type="number" value={form.sequence} onChange={set('sequence')} /></Field>
           </div>
           <Field label="Default formation (optional)"><Input value={form.default_formation || ''} onChange={set('default_formation')} placeholder="e.g. Traditional" /></Field>
+          <Field label="Grade (for ladder — auto-linked, override here)">
+            <Select value={form.grade_id || ''} onChange={set('grade_id')}>
+              <option value="">— Auto-link from match data —</option>
+              {currentGradeMissing && <option value={form.grade_id}>{team?.grade_name || 'Current grade'}</option>}
+              {gradeSeasons.map(s => (
+                <optgroup key={s.season_id} label={s.season_name}>
+                  {s.grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </optgroup>
+              ))}
+            </Select>
+          </Field>
           <label className="flex items-center gap-2 text-sm text-pb-faint">
             <input type="checkbox" checked={!!form.is_active} onChange={(e) => setForm(f => ({ ...f, is_active: e.target.checked }))} />
             Active
@@ -201,7 +222,12 @@ export default function AdminTeams() {
                         {t.source === 'auto' ? 'auto' : 'manual'}
                       </span>
                     </div>
-                    {t.default_formation && <div className="text-pb-faint text-xs mt-0.5">{t.default_formation}</div>}
+                    <div className="text-pb-faint text-xs mt-0.5">
+                      {t.grade_name
+                        ? <span title="Grade used for the ladder">🏆 {t.grade_name}</span>
+                        : <span className="text-pb-faintest">no grade linked</span>}
+                      {t.default_formation && <span> · {t.default_formation}</span>}
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-2 shrink-0">

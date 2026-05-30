@@ -851,6 +851,9 @@ export const api = {
   // ─── BetterSelect: Teams ────────────────────────────────
   bsListTeams: (includeInactive = false) =>
     request(`/teams${includeInactive ? '?include_inactive=true' : ''}`),
+  bsTeamGradeOptions: () => request('/teams/grade-options'),
+  bsTeamLadders: () => request('/ladders/teams'),
+  laddersPublic: (slug) => request(`/ladders/public/${slug}`),
   bsCreateTeam: (data) =>
     request('/teams', { method: 'POST', body: JSON.stringify(data) }),
   bsUpdateTeam: (id, data) =>

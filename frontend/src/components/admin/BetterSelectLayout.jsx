@@ -11,6 +11,7 @@ const NAV = [
   { to: '/admin/betterselect/teams', label: 'Teams', icon: '⊞', cap: CAP.MANAGE_SELECTIONS },
   { to: '/admin/betterselect/availability', label: 'Availability', icon: '✓', cap: CAP.MANAGE_SELECTIONS },
   { to: '/admin/betterselect/selection', label: 'Selection', icon: '✦', cap: CAP.MANAGE_SELECTIONS },
+  { to: '/admin/betterselect/ladders', label: 'Ladders', icon: '⊺', cap: CAP.MANAGE_SELECTIONS },
 ]
 
 export default function BetterSelectLayout({ children, title, actions }) {
