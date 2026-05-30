@@ -8,6 +8,7 @@ import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner, Btn } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_STATUSES } from '../../../lib/availability'
+import { FilterGroup, FilterCheck } from '../../../lib/filters'
 
 // Row state → tint. Order of precedence handled in rowState().
 const ROW_TINT = {
@@ -482,22 +483,7 @@ export default function AdminSelection() {
   )
 }
 
-function FilterGroup({ title, children }) {
-  return (
-    <div>
-      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2 pb-1.5 border-b pb-hairline">{title}</div>
-      <div className="space-y-1.5">{children}</div>
-    </div>
-  )
-}
-function FilterCheck({ label, checked, onChange }) {
-  return (
-    <label className="flex items-center gap-2 text-sm text-pb-faint hover:text-pb-text cursor-pointer">
-      <input type="checkbox" checked={checked} onChange={onChange} className="accent-pb-accent" />
-      {label}
-    </label>
-  )
-}
+// FilterGroup + FilterCheck now live in lib/filters (shared with Availability).
 function LegendDot({ cls, label }) {
   return <span className="flex items-center gap-1.5"><span className={`inline-block w-2.5 h-2.5 rounded-full ${cls}`} /> {label}</span>
 }

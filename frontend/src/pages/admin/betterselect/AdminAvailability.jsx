@@ -8,6 +8,7 @@ import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_STATUSES } from '../../../lib/availability'
+import { FilterSelect } from '../../../lib/filters'
 
 // Click-to-cycle order; per-status glyph/colour comes from the shared module.
 const CYCLE = ['NO_RESPONSE', 'AVAILABLE', 'UNAVAILABLE', 'MAYBE']
@@ -465,20 +466,4 @@ export default function AdminAvailability() {
   )
 }
 
-// Compact labelled <select> for the filter bar. `options` is [value, label][].
-// When includeAny is true (default), a blank "any" option is prepended.
-function FilterSelect({ label, value, onChange, options, anyLabel = 'Any', includeAny = true }) {
-  return (
-    <div>
-      <label className="font-mono text-[10px] text-pb-faintest block mb-1">{label}</label>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-      >
-        {includeAny && <option value="">{anyLabel}</option>}
-        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-    </div>
-  )
-}
+// FilterSelect now lives in lib/filters (shared with the Selection screen).
