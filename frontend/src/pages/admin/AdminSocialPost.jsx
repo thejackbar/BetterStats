@@ -522,38 +522,39 @@ export default function AdminSocialPost() {
     })
   }, [])
 
-  // Export to PNG
+  // Export to JPG. Uses modern-screenshot, which serializes the node into an
+  // SVG <foreignObject> and lets the real browser engine lay it out — so the
+  // capture matches the on-screen render exactly. (Replaces html2canvas, which
+  // re-implemented layout in JS and caused text/image drift.) The render target
+  // is already mounted off-screen at full W×H, so we capture it in place — no
+  // reposition hack needed.
   const handleExport = async () => {
     if (!renderRef.current) return
     setExporting(true)
     setExportError(null)
     try {
       await document.fonts.ready
-      const html2canvas = (await import('html2canvas')).default
+      const { domToBlob } = await import('modern-screenshot')
       const el = renderRef.current
-      const wrapper = el.parentElement
       const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
       const H = tmpl.h || 1080
-      const prevStyle = wrapper.getAttribute('style') || ''
-      wrapper.setAttribute('style', 'position:fixed;left:0;top:0;z-index:-1;opacity:0.001;pointer-events:none;overflow:hidden')
-      await new Promise(r => requestAnimationFrame(r))
-      await new Promise(r => requestAnimationFrame(r))
-      const canvas = await html2canvas(el, {
-        scale: 1, useCORS: true, allowTaint: false, backgroundColor: null, logging: false,
-        width: W, height: H, windowWidth: W, windowHeight: H,
+      const blob = await domToBlob(el, {
+        type: 'image/jpeg',
+        quality: 0.95,
+        scale: 2,                   // 2× for crisp, high-DPI output
+        width: W,
+        height: H,
+        backgroundColor: '#080808', // JPG has no alpha — match the dark canvas
       })
-      wrapper.setAttribute('style', prevStyle)
-      canvas.toBlob(blob => {
-        if (!blob) { setExportError('Could not generate image'); return }
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `betterstats-${templateId.toLowerCase()}-${Date.now()}.png`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-      }, 'image/png')
+      if (!blob) { setExportError('Could not generate image'); return }
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `betterstats-${templateId.toLowerCase()}-${Date.now()}.jpg`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
     } catch (e) {
       setExportError(e.message || 'Export failed')
     } finally {
@@ -1378,7 +1379,7 @@ export default function AdminSocialPost() {
                   <button onClick={handleExport} disabled={exporting}
                     className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 disabled:opacity-60"
                     style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-                    {exporting ? '...' : '↓ PNG'}
+                    {exporting ? '...' : '↓ JPG'}
                   </button>
                   <button onClick={handleReset} className="px-3 py-1.5 rounded text-xs font-mono border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
                     ↺ Reset
@@ -1411,7 +1412,7 @@ export default function AdminSocialPost() {
                   <button onClick={handleExport} disabled={exporting}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono tracking-wide2 transition-colors disabled:opacity-60"
                     style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-                    {exporting ? 'EXPORTING...' : '↓ DOWNLOAD PNG'}
+                    {exporting ? 'EXPORTING...' : '↓ DOWNLOAD JPG'}
                   </button>
                   <button onClick={handleReset}
                     className="px-3 py-1.5 rounded text-xs font-mono border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
