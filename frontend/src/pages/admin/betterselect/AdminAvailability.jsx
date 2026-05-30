@@ -7,18 +7,16 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner } from '../../../lib/presskit'
+import { AVAILABILITY, AVAIL_STATUSES } from '../../../lib/availability'
 
-// Click-to-cycle order and per-status display.
+// Click-to-cycle order; per-status glyph/colour comes from the shared module.
 const CYCLE = ['NO_RESPONSE', 'AVAILABLE', 'UNAVAILABLE', 'MAYBE']
-const META = {
-  AVAILABLE:   { g: '✓', cls: 'bg-pb-accent/20 text-pb-accent border-pb-accent/40' },
-  UNAVAILABLE: { g: '✕', cls: 'bg-pb-red/20 text-pb-red border-pb-red/40' },
-  MAYBE:       { g: '?', cls: 'bg-amber-400/20 text-amber-300 border-amber-400/40' },
-  NO_RESPONSE: { g: '–', cls: 'bg-pb-surface2 text-pb-faintest border-pb-hairline' },
-}
+const META = Object.fromEntries(
+  AVAIL_STATUSES.map((s) => [s, { g: AVAILABILITY[s].glyph, cls: AVAILABILITY[s].chip }]),
+)
 
 const SKILL_CODES = ['BAT', 'BWL', 'ALL', 'WKT']
-const STATUS_LABEL = { AVAILABLE: 'available', UNAVAILABLE: 'unavailable', MAYBE: 'maybe', NO_RESPONSE: 'no response' }
+const STATUS_LABEL = Object.fromEntries(AVAIL_STATUSES.map((s) => [s, AVAILABILITY[s].label.toLowerCase()]))
 // Roster visibility: default to current squad only (hides dormant + inactive).
 const ROSTER_OPTS = [
   { key: 'current', label: 'Current squad' },
