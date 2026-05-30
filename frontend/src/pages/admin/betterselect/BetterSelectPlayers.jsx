@@ -12,9 +12,26 @@ import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import {
-  Icon, Avatar, Dot, RoleChips, Tag, Btn, Search, Chip, Empty,
-  AVAILABILITY,
+  Icon, Avatar, Dot, AvailDot, RoleChips, Tag, Btn, Search, Chip, Empty,
+  AVAILABILITY, QuickAvailModal,
 } from './ui'
+
+// "Played within" recency filter — drops the long tail of historical-only
+// players (last appearance older than N years). Never-played players (no
+// appearance yet, e.g. a freshly added manual player) are kept.
+const YEAR_FILTERS = [
+  { value: 0, label: 'Any time' },
+  { value: 1, label: '≤ 1 yr' },
+  { value: 2, label: '≤ 2 yrs' },
+  { value: 3, label: '≤ 3 yrs' },
+  { value: 5, label: '≤ 5 yrs' },
+]
+function playedWithinYears(lastPlayed, years) {
+  if (!years) return true
+  if (!lastPlayed) return true
+  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
+  return new Date(lastPlayed + 'T00:00:00') >= cutoff
+}
 
 /* ── Option sets (mirror AdminPlayers field enums) ───────────────────────── */
 const ROLE_OPTS = ['', 'Batter', 'Bowler', 'All Rounder', 'Wicketkeeper', 'Wicketkeeper-Batter']
@@ -95,7 +112,7 @@ function PToggle({ on, onChange, label }) {
 }
 
 /* ── Selection snapshot (right column, left half) ─────────────────────────── */
-function Snapshot({ snapshot, squad, draft }) {
+function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail }) {
   const snap = snapshot || {}
   const avail = snap.availability_next || []
   const bat = snap.recent_batting || []
@@ -118,14 +135,17 @@ function Snapshot({ snapshot, squad, draft }) {
           : (
             <div className="flex gap-2">
               {avail.map((a, j) => (
-                <div key={a.date} className="flex-1 text-center rounded-lg py-[9px] px-1"
+                <button key={a.date} type="button"
+                  onClick={canEditAvail ? () => onEditAvail(player, a.date) : undefined}
+                  title={canEditAvail ? 'Update availability for this date' : undefined}
+                  className={`flex-1 text-center rounded-lg py-[9px] px-1 ${canEditAvail ? 'cursor-pointer hover:border-pb-accent/50' : 'cursor-default'}`}
                   style={{
                     background: j === 0 ? 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' : 'var(--pb-surface2)',
                     border: `1px solid ${j === 0 ? 'color-mix(in srgb, var(--pb-accent) 25%, transparent)' : 'var(--pb-hairline)'}`,
                   }}>
                   <div className="font-mono text-[9.5px] text-pb-faint">{(a.label || '').replace(/^[A-Za-z]{3} /, '')}</div>
                   <div className="flex justify-center mt-1.5"><Dot status={a.status} size={11} /></div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -255,7 +275,7 @@ function Details({ draft, set, teams }) {
 }
 
 /* ── Profile panel ────────────────────────────────────────────────────────── */
-function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit }) {
+function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit, onEditAvail, canEditAvail }) {
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }))
   const squad = profile.squad
   const handLabel = (BAT_HANDS.find((h) => h[0] === (draft.batting_hand || '')) || [])[1]
@@ -293,7 +313,8 @@ function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2">
-        <Snapshot snapshot={profile.snapshot} squad={squad} draft={draft} />
+        <Snapshot snapshot={profile.snapshot} squad={squad} draft={draft}
+          player={profile} onEditAvail={onEditAvail} canEditAvail={canEditAvail} />
         <Details draft={draft} set={set} teams={profile._teams || []} />
       </div>
     </div>
@@ -301,9 +322,8 @@ function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit }) {
 }
 
 /* ── List row ─────────────────────────────────────────────────────────────── */
-function PlayerRow({ p, active, selected, status, squadName, onSelect, onOpenProfile, onToggleSel }) {
+function PlayerRow({ p, active, selected, status, squadName, onSelect, onOpenProfile, onToggleSel, onEditAvail, canEditAvail }) {
   const inactive = p.status === 'inactive'
-  const meta = AVAILABILITY[status] || AVAILABILITY.NO_RESPONSE
   const hasContact = !!(p.email || p.phone)
   return (
     <div onClick={onSelect}
@@ -334,7 +354,9 @@ function PlayerRow({ p, active, selected, status, squadName, onSelect, onOpenPro
         <span className="font-mono text-[9px] text-pb-faint bg-pb-surface2 px-1.5 py-0.5 rounded">{squadName}</span>
       )}
       <RoleChips roles={p.skill_positions || []} muted />
-      <span className="flex items-center gap-1.5 justify-end"><Dot status={status} /></span>
+      <span className="flex items-center gap-1.5 justify-end">
+        <AvailDot player={p} status={status} onEdit={canEditAvail ? () => onEditAvail(p) : undefined} />
+      </span>
       <span className="flex items-center gap-2 justify-end">
         <span title={hasContact ? 'Contact on file' : 'No contact'} className={`flex ${hasContact ? 'text-pb-dim' : 'text-pb-faintest'}`}>
           <Icon name={hasContact ? 'check' : 'close'} size={13} />
@@ -348,10 +370,11 @@ function PlayerRow({ p, active, selected, status, squadName, onSelect, onOpenPro
 }
 
 /* ── List panel ───────────────────────────────────────────────────────────── */
-function PlayerList({ players, statusOf, squadNameOf, selectedId, onSelect, onOpenProfile, canEdit, teams, onBulkSquad, onBulkInactive }) {
+function PlayerList({ players, statusOf, squadNameOf, selectedId, onSelect, onOpenProfile, canEdit, teams, onBulkSquad, onBulkInactive, onEditAvail }) {
   const [q, setQ] = useState('')
   const [role, setRole] = useState(null)
   const [showInactive, setShowInactive] = useState(false)
+  const [years, setYears] = useState(0)        // 0 = any time
   const [sel, setSel] = useState(() => new Set())
   const [bulkSquad, setBulkSquad] = useState('')
 
@@ -359,8 +382,9 @@ function PlayerList({ players, statusOf, squadNameOf, selectedId, onSelect, onOp
     if (!showInactive && p.status === 'inactive') return false
     if (q.trim() && !nameMatchesSearch(p.display_name || p.name, q)) return false
     if (role && p.player_role !== role) return false
+    if (!playedWithinYears(p.last_played, years)) return false
     return true
-  }), [players, showInactive, q, role])
+  }), [players, showInactive, q, role, years])
 
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const clearSel = () => setSel(new Set())
@@ -378,6 +402,14 @@ function PlayerList({ players, statusOf, squadNameOf, selectedId, onSelect, onOp
           <Chip label="Show inactive" active={showInactive} onClick={() => setShowInactive((v) => !v)} />
           <span className="ml-auto font-mono text-[11px] text-pb-faint">{list.length} players</span>
         </div>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest">Played</span>
+          <div className="flex gap-1">
+            {YEAR_FILTERS.map((y) => (
+              <Chip key={y.value} label={y.label} active={years === y.value} onClick={() => setYears(y.value)} />
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="overflow-auto flex-1">
@@ -386,7 +418,8 @@ function PlayerList({ players, statusOf, squadNameOf, selectedId, onSelect, onOp
           : list.map((p) => (
             <PlayerRow key={p.id} p={p} active={p.id === selectedId} selected={sel.has(p.id)}
               status={statusOf(p.id)} squadName={squadNameOf(p)}
-              onSelect={() => onSelect(p.id)} onOpenProfile={() => onOpenProfile(p.id)} onToggleSel={() => toggleSel(p.id)} />
+              onSelect={() => onSelect(p.id)} onOpenProfile={() => onOpenProfile(p.id)} onToggleSel={() => toggleSel(p.id)}
+              onEditAvail={onEditAvail} canEditAvail={!!onEditAvail} />
           ))}
       </div>
 
@@ -460,13 +493,15 @@ export default function BetterSelectPlayers() {
 
   const [players, setPlayers] = useState(null)   // roster (adminListPlayers)
   const [teams, setTeams] = useState([])         // bsListTeams
-  const [matrix, setMatrix] = useState({})       // playerId → status (this weekend)
+  const [availability, setAvailability] = useState({}) // playerId → {date: {status}}
+  const [firstDate, setFirstDate] = useState(null)     // next upcoming date
 
   const [selId, setSelId] = useState(null)
   const [profile, setProfile] = useState(null)   // full profile of selId
   const [draft, setDraft] = useState(null)
   const [savedTick, setSavedTick] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [availEdit, setAvailEdit] = useState(null) // { player, date } for the quick-update modal
 
   // Load roster + teams + availability matrix (matrix degrades gracefully).
   const loadRoster = useCallback(() => {
@@ -480,19 +515,19 @@ export default function BetterSelectPlayers() {
 
   useEffect(() => { loadRoster() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    api.bsListTeams().then((t) => setTeams(t || [])).catch(() => setTeams([]))
+  const loadMatrix = useCallback(() => {
     api.bsAvailabilityMatrix()
       .then((d) => {
-        // First upcoming date = "this weekend" dot for each player row.
-        const firstDate = (d?.dates || [])[0]?.date
-        const av = d?.availability || {}
-        const out = {}
-        if (firstDate) for (const pid of Object.keys(av)) out[pid] = av[pid]?.[firstDate]?.status || 'NO_RESPONSE'
-        setMatrix(out)
+        setAvailability(d?.availability || {})
+        setFirstDate((d?.dates || [])[0]?.date || null)
       })
-      .catch(() => setMatrix({}))
+      .catch(() => { setAvailability({}); setFirstDate(null) })
   }, [])
+
+  useEffect(() => {
+    api.bsListTeams().then((t) => setTeams(t || [])).catch(() => setTeams([]))
+    loadMatrix()
+  }, [loadMatrix])
 
   // Load the selected player's full profile.
   useEffect(() => {
@@ -505,7 +540,33 @@ export default function BetterSelectPlayers() {
     return () => { live = false }
   }, [selId, toast])
 
-  const statusOf = useCallback((id) => matrix[id] || 'NO_RESPONSE', [matrix])
+  // List-row dot = the player's status on the next upcoming date.
+  const statusOf = useCallback(
+    (id) => (firstDate && availability[id]?.[firstDate]?.status) || 'NO_RESPONSE',
+    [availability, firstDate],
+  )
+
+  // Quick-update modal: opened from a list dot (date defaults to firstDate) or a
+  // specific date cell in the profile snapshot. Writes one (player, date) row.
+  const openAvail = useCallback((player, date) => {
+    const d = date || firstDate
+    if (!d) { toast.error('No upcoming fixtures to set availability against'); return }
+    setAvailEdit({ player, date: d })
+  }, [firstDate, toast])
+
+  const pickAvail = async (status) => {
+    const { player, date } = availEdit || {}
+    setAvailEdit(null)
+    if (!player || !date) return
+    setAvailability((a) => ({ ...a, [player.id]: { ...(a[player.id] || {}), [date]: { ...(a[player.id]?.[date] || {}), status } } }))
+    try {
+      await api.bsSetAvailability({ player_id: player.id, date, status })
+      // Refresh the selected player's profile snapshot dots if it's this player.
+      if (player.id === selId) {
+        api.bsGetPlayerProfile(selId).then((p) => { setProfile(p) }).catch(() => {})
+      }
+    } catch (e) { toast.error('Could not update availability: ' + e.message); loadMatrix() }
+  }
 
   const teamNameById = useMemo(() => Object.fromEntries(teams.map((t) => [t.id, t.name])), [teams])
   const squadNameOf = useCallback((p) => (p.squad_team_id ? teamNameById[p.squad_team_id] : null), [teamNameById])
@@ -566,16 +627,27 @@ export default function BetterSelectPlayers() {
         <PlayerList
           players={players} statusOf={statusOf} squadNameOf={squadNameOf}
           selectedId={selId} onSelect={setSelId} onOpenProfile={setSelId}
-          canEdit={canEdit} teams={teams} onBulkSquad={onBulkSquad} onBulkInactive={onBulkInactive} />
+          canEdit={canEdit} teams={teams} onBulkSquad={onBulkSquad} onBulkInactive={onBulkInactive}
+          onEditAvail={canEdit ? (p) => openAvail(p, null) : undefined} />
         <div className="pb-card bg-pb-surface min-h-0 overflow-hidden">
           {!selId
             ? <div className="p-6"><Empty>Select a player</Empty></div>
             : (!profileForView || !draft)
               ? <PbSpinner message="Loading profile…" />
               : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
-                  dirty={dirty} saved={savedTick} onSave={onSave} canEdit={canEdit} />}
+                  dirty={dirty} saved={savedTick} onSave={onSave} canEdit={canEdit}
+                  onEditAvail={openAvail} canEditAvail={canEdit} />}
         </div>
       </div>
+
+      {availEdit && (
+        <QuickAvailModal
+          player={availEdit.player}
+          dateLabel={availEdit.date}
+          current={availability[availEdit.player.id]?.[availEdit.date]?.status || 'NO_RESPONSE'}
+          onPick={pickAvail}
+          onClose={() => setAvailEdit(null)} />
+      )}
     </BetterSelectLayout>
   )
 }

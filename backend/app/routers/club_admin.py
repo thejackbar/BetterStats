@@ -50,6 +50,20 @@ async def list_players(
         )
     )
     players = result.scalars().all()
+
+    # Last appearance per player (most recent game date) — lets the selection
+    # surfaces filter out players who haven't played in N years. One grouped
+    # query rather than N per-player lookups.
+    last_played: dict[str, str] = {}
+    lp_res = await db.execute(_text(
+        "SELECT ga.player_id, MAX(g.played_at) AS last_played "
+        "FROM game_appearances ga JOIN games g ON ga.game_id = g.id "
+        "JOIN players p ON ga.player_id = p.id "
+        "WHERE p.organisation_id = :org GROUP BY ga.player_id"
+    ), {"org": club.id})
+    for pid, lp in lp_res.fetchall():
+        last_played[str(pid)] = lp.isoformat() if lp else None
+
     return [
         {
             "id": str(p.id),
@@ -70,6 +84,7 @@ async def list_players(
             "skill_positions": p.skill_positions or [],
             "status": p.status,
             "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
+            "last_played": last_played.get(str(p.id)),
         }
         for p in players
     ]

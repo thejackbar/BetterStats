@@ -77,6 +77,10 @@ export default function AdminSelection() {
   const [search, setSearch] = useState('')
   const [roleF, setRoleF] = useState(null)
   const [availOnly, setAvailOnly] = useState(false)
+  const [squadF, setSquadF] = useState('')          // '' = any squad
+  const [yearsF, setYearsF] = useState(3)           // recency: played within N yrs (0 = any)
+  const [selStatusF, setSelStatusF] = useState('')  // '' | 'unselected' | 'clash'
+  const [showFilters, setShowFilters] = useState(false)
   const [availEdit, setAvailEdit] = useState(null) // player object for quick-update modal
   const [showSheet, setShowSheet] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -126,13 +130,32 @@ export default function AdminSelection() {
     return (a.display_name || '').localeCompare(b.display_name || '')
   }, [])
 
+  const squadOptions = useMemo(() => {
+    const s = new Set()
+    ;(data?.pool || []).forEach((p) => (p.squads || []).forEach((sq) => s.add(sq)))
+    return [...s].sort()
+  }, [data])
+
+  const withinYears = (lastPlayed, yrs) => {
+    if (!yrs) return true
+    if (!lastPlayed) return true
+    const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - yrs)
+    return new Date(lastPlayed + 'T00:00:00') >= cutoff
+  }
+
   const pool = useMemo(() => {
     let list = (data?.pool || []).filter((p) => !usedIds.has(p.id))
     if (search.trim()) list = list.filter((p) => (p.display_name || '').toLowerCase().includes(search.trim().toLowerCase()))
     if (roleF) list = list.filter((p) => (p.skill_positions || []).includes(roleF))
     if (availOnly) list = list.filter((p) => p.availability === 'AVAILABLE')
+    if (squadF) list = list.filter((p) => (p.squads || []).includes(squadF))
+    if (yearsF) list = list.filter((p) => withinYears(p.last_played, yearsF))
+    if (selStatusF === 'unselected') list = list.filter((p) => !(p.clash?.length > 0))
+    else if (selStatusF === 'clash') list = list.filter((p) => p.clash?.length > 0)
     return list.slice().sort(cmp)
-  }, [data, usedIds, search, roleF, availOnly, cmp])
+  }, [data, usedIds, search, roleF, availOnly, squadF, yearsF, selStatusF, cmp])
+
+  const activeFilters = (squadF ? 1 : 0) + (yearsF ? 1 : 0) + (selStatusF ? 1 : 0)
 
   const filled = slots.filter(Boolean)
   const count = filled.length
@@ -231,6 +254,8 @@ export default function AdminSelection() {
   // then top up remaining gaps with the best available player.
   const fillEmpty = (useLastWeek) => {
     if (!canEdit) return
+    // No-limit has no fixed slots to fill — autofill would be meaningless.
+    if (format === 0) { toast.error('Set a side size (11/12/13) to auto-fill'); return }
     const okToPick = (p) => p && !(p.clash?.length > 0) && p.availability !== 'UNAVAILABLE'
     setSlots((prev) => {
       const next = [...prev]
@@ -345,15 +370,16 @@ export default function AdminSelection() {
   if (data === null) return <BetterSelectLayout title="Selection"><PbSpinner message="Loading selection…" /></BetterSelectLayout>
 
   const { title, sub } = fmtHeader(fx)
-  const hasEmpty = slots.some((x) => x == null) || format === 0
+  // Auto-fill only applies to fixed-size sides with empty slots — never No Limit.
+  const canAutofill = format > 0 && slots.some((x) => x == null)
   const capOk = capId && filled.includes(capId)
   const wkOk = wkId && filled.includes(wkId)
 
   const hasPrev = (prevXI?.player_ids?.length || 0) > 0
   const actions = canEdit && (
     <div className="flex gap-2">
-      {hasEmpty && hasPrev && <Btn variant="ghost" sm icon="bolt" onClick={() => fillEmpty(true)} title="Seed empty slots from last week's XI, then top up">Fill from last week</Btn>}
-      {hasEmpty && <Btn variant="ghost" sm icon="bolt" onClick={() => fillEmpty(false)}>Auto-fill</Btn>}
+      {canAutofill && hasPrev && <Btn variant="ghost" sm icon="bolt" onClick={() => fillEmpty(true)} title="Seed empty slots from last week's XI, then top up">Fill from last week</Btn>}
+      {canAutofill && <Btn variant="ghost" sm icon="bolt" onClick={() => fillEmpty(false)}>Auto-fill</Btn>}
       <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}>Share</Btn>
       <Btn variant="primary" sm icon="check" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : dirty ? `Save XI (${count})` : 'Saved'}</Btn>
     </div>
@@ -416,12 +442,43 @@ export default function AdminSelection() {
       <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0, 1.25fr) minmax(0, 1fr)' }}>
         {/* POOL */}
         <div className="pb-card flex flex-col min-h-0">
-          <div className="px-3 py-2.5 border-b pb-hairline flex flex-wrap items-center gap-2">
-            <Search value={search} onChange={setSearch} placeholder="Search players…" className="flex-1 min-w-[160px]" />
-            {ROLE_CHIPS.map((r) => <Chip key={r} label={ROLE_LABEL[r]} active={roleF === r} onClick={() => setRoleF(roleF === r ? null : r)} />)}
-            <Chip label="Available only" active={availOnly} onClick={() => setAvailOnly(!availOnly)} />
+          <div className="px-3 py-2.5 border-b pb-hairline flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Search value={search} onChange={setSearch} placeholder="Search players…" className="flex-1 min-w-[160px]" />
+              {ROLE_CHIPS.map((r) => <Chip key={r} label={ROLE_LABEL[r]} active={roleF === r} onClick={() => setRoleF(roleF === r ? null : r)} />)}
+              <Chip label="Available only" active={availOnly} onClick={() => setAvailOnly(!availOnly)} />
+              <Btn variant={showFilters || activeFilters ? 'soft' : 'ghost'} sm icon="filter" onClick={() => setShowFilters((v) => !v)}>
+                {activeFilters ? `Filters (${activeFilters})` : 'Filters'}
+              </Btn>
+            </div>
+            {showFilters && (
+              <div className="flex flex-wrap items-center gap-3 pt-1.5 border-t pb-hairline">
+                {squadOptions.length > 0 && (
+                  <label className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-faint">
+                    Squad
+                    <select value={squadF} onChange={(e) => setSquadF(e.target.value)}
+                      className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent">
+                      <option value="">Any</option>
+                      {squadOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </label>
+                )}
+                <span className="inline-flex items-center gap-1 text-[11.5px] text-pb-faint">
+                  Played
+                  {[{ v: 0, l: 'Any' }, { v: 1, l: '≤1y' }, { v: 2, l: '≤2y' }, { v: 3, l: '≤3y' }, { v: 5, l: '≤5y' }].map((y) => (
+                    <Chip key={y.v} label={y.l} active={yearsF === y.v} onClick={() => setYearsF(y.v)} />
+                  ))}
+                </span>
+                <span className="inline-flex items-center gap-1 text-[11.5px] text-pb-faint">
+                  Status
+                  <Chip label="Unselected" active={selStatusF === 'unselected'} onClick={() => setSelStatusF(selStatusF === 'unselected' ? '' : 'unselected')} />
+                  <Chip label="In another XI" active={selStatusF === 'clash'} onClick={() => setSelStatusF(selStatusF === 'clash' ? '' : 'clash')} />
+                </span>
+                {activeFilters > 0 && <button onClick={() => { setSquadF(''); setYearsF(0); setSelStatusF('') }} className="text-[11.5px] text-pb-accent hover:underline">Clear</button>}
+              </div>
+            )}
           </div>
-          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1.5 pb-scroll max-h-[640px]">
+          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1 pb-scroll" style={{ maxHeight: 'calc(100vh - 360px)' }}>
             {pool.map((p) => {
               const clash = p.clash?.length > 0
               const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
@@ -460,7 +517,7 @@ export default function AdminSelection() {
             <h3 className="font-mono text-[11px] uppercase tracking-wide3 text-pb-faint">Batting order</h3>
             <span className="font-mono text-[11px] text-pb-faint pb-num">{count}{target > 0 ? `/${target}` : ''}</span>
           </div>
-          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1.5 pb-scroll max-h-[640px]">
+          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1 pb-scroll" style={{ maxHeight: 'calc(100vh - 360px)' }}>
             {slots.map((id, i) => {
               const p = id ? poolById[id] : null
               const isFocus = focus === i
@@ -470,20 +527,22 @@ export default function AdminSelection() {
                   onDragOver={(e) => { if (canEdit) e.preventDefault() }}
                   onDrop={() => canEdit && onDropSlot(i)}
                   onClick={() => !id && setFocus(i)}
-                  className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border transition-colors"
+                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-colors"
                   style={{
                     borderColor: isFocus && !id ? 'var(--pb-accent)' : 'var(--pb-hairline)',
-                    background: id ? 'var(--pb-surface2)' : 'transparent',
+                    borderStyle: id ? 'solid' : 'dashed',
+                    background: id ? 'var(--pb-surface2)' : isFocus ? 'color-mix(in srgb, var(--pb-accent) 4%, transparent)' : 'transparent',
                   }}>
                   <span className="font-mono text-xs text-pb-faintest w-5 text-right shrink-0">{i + 1}</span>
                   {p ? (
                     <>
-                      <span draggable={canEdit} onDragStart={() => { dragSlot.current = i }} onDragEnd={() => { dragSlot.current = null }} className={canEdit ? 'cursor-grab text-pb-faintest' : 'hidden'}><Icon name="grip" size={14} /></span>
+                      <span draggable={canEdit} onDragStart={() => { dragSlot.current = i }} onDragEnd={() => { dragSlot.current = null }} className={canEdit ? 'cursor-grab text-pb-faintest shrink-0' : 'hidden'}><Icon name="grip" size={13} /></span>
                       <AvailDot player={p} status={p.availability} onEdit={canEdit ? setAvailEdit : undefined} />
-                      <Avatar player={p} size={28} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-medium truncate">{p.display_name}{id === capId && <> <Tag>C</Tag></>}{id === wkId && <> <Tag tone="amber">WK</Tag></>}</div>
-                        <div className="text-[10.5px] text-pb-faint">{POS_HINTS[i] || ''}</div>
+                      <Avatar player={p} size={24} />
+                      <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                        <span className="text-[13px] font-medium truncate">{p.display_name}</span>
+                        {id === capId && <Tag>C</Tag>}{id === wkId && <Tag tone="amber">WK</Tag>}
+                        <span className="text-[10px] text-pb-faintest hidden xl:inline">{POS_HINTS[i] || ''}</span>
                       </div>
                       {canEdit && (
                         <div className="flex items-center gap-1 shrink-0">
