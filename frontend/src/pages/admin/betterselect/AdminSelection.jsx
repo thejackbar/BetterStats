@@ -310,8 +310,8 @@ export default function AdminSelection() {
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 font-mono text-[10px] text-pb-faint">
-        <LegendDot cls="bg-pb-accent" label="Available" />
-        <LegendDot cls="bg-amber-400" label="Maybe" />
+        <LegendDot cls="bg-pb-positive" label="Available" />
+        <LegendDot cls="bg-pb-amber" label="Maybe" />
         <LegendDot cls="bg-pb-faintest" label="No response" />
         <LegendDot cls="bg-pb-red" label="Unavailable" />
         <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded bg-pb-red/15 border border-pb-red/40" /> Picked elsewhere (blocked)</span>
