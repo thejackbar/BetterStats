@@ -23,6 +23,7 @@ function loadClubBranding() {
 // availability/selection tools, separate from the main admin "noise".
 const NAV = [
   { to: '/admin/betterselect', label: 'Overview', icon: 'overview', cap: null, exact: true },
+  { to: '/admin/betterselect/players', label: 'Players', icon: 'player', cap: CAP.MANAGE_PLAYERS },
   { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: 'fixtures', cap: CAP.MANAGE_FIXTURES },
   { to: '/admin/betterselect/teams', label: 'Squads', icon: 'teams', cap: CAP.MANAGE_SELECTIONS },
   { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS },

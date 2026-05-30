@@ -76,6 +76,7 @@ const AdminYearbookDetail = lazy(() => import('./pages/admin/AdminYearbookDetail
 const SuperClubs = lazy(() => import('./pages/admin/SuperClubs'))
 const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
 const BetterSelectHome = lazy(() => import('./pages/admin/betterselect/BetterSelectHome'))
+const BsPlayers = lazy(() => import('./pages/admin/betterselect/BetterSelectPlayers'))
 const BsFixtures = lazy(() => import('./pages/admin/betterselect/AdminFixtures'))
 const BsTeams = lazy(() => import('./pages/admin/betterselect/AdminTeams'))
 const BsAvailability = lazy(() => import('./pages/admin/betterselect/AdminAvailability'))
@@ -177,6 +178,7 @@ export default function App() {
 
           {/* BetterSelect module */}
           <Route path="/admin/betterselect" element={<ProtectedRoute><BetterSelectHome /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/players" element={<ProtectedRoute><BsPlayers /></ProtectedRoute>} />
           <Route path="/admin/betterselect/fixtures" element={<ProtectedRoute><BsFixtures /></ProtectedRoute>} />
           <Route path="/admin/betterselect/teams" element={<ProtectedRoute><BsTeams /></ProtectedRoute>} />
           <Route path="/admin/betterselect/availability" element={<ProtectedRoute><BsAvailability /></ProtectedRoute>} />
