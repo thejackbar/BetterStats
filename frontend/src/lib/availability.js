@@ -16,9 +16,12 @@ export const AVAILABILITY = {
     label: 'Available',
     short: 'In',
     glyph: '✓',
-    chip: 'bg-pb-accent/20 text-pb-accent border-pb-accent/40',
-    dot: 'bg-pb-accent',
-    cssVar: 'var(--pb-accent)',
+    // Semantic green — uses --pb-positive (fixed), NOT --pb-accent (the club's
+    // white-label colour). "Available = green" must never re-colour per club;
+    // applyClubTheme only overrides --pb-accent. Same for amber/red below.
+    chip: 'bg-pb-positive/20 text-pb-positive border-pb-positive/40',
+    dot: 'bg-pb-positive',
+    cssVar: 'var(--pb-positive)',
     rank: 0,
   },
   UNAVAILABLE: {

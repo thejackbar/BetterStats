@@ -67,6 +67,9 @@ async def list_players(
             "bowling_action": p.bowling_action,
             "bowling_type": p.bowling_type,
             "is_opening_batsman": p.is_opening_batsman,
+            "skill_positions": p.skill_positions or [],
+            "status": p.status,
+            "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
         }
         for p in players
     ]

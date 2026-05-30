@@ -5,12 +5,15 @@
 import { AVAILABILITY, AVAIL_STATUSES } from '../../../../lib/availability'
 
 // Row state → tint. Order of precedence handled in rowState().
+// Availability tints use the fixed semantic colours (positive/red/amber), NOT
+// the club's white-label --pb-accent — "available" must read green for every
+// club. Accent is reserved for chrome (buttons, selection highlights).
 export const ROW_TINT = {
   CLASH:       'bg-pb-red/15',
   UNAVAILABLE: 'bg-pb-red/5',
-  AVAILABLE:   'bg-pb-accent/5',
-  MAYBE:       'bg-amber-400/5',
-  DORMANT:     'bg-amber-400/[0.03]',
+  AVAILABLE:   'bg-pb-positive/5',
+  MAYBE:       'bg-pb-amber/5',
+  DORMANT:     'bg-pb-amber/[0.03]',
   NONE:        '',
 }
 export const AVAIL_META = Object.fromEntries(
