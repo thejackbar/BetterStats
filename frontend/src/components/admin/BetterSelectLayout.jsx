@@ -73,7 +73,15 @@ export default function BetterSelectLayout({ children, title, actions }) {
   )
 
   return (
-    <div className="min-h-screen bg-pb-bg text-pb-text flex">
+    // BetterSelect is BetterStats-branded chrome, NOT the club's white-labelled
+    // public site. A club's accent can be any colour (e.g. Applecross is red),
+    // which reads as alarming/error-like on headers, labels and status dots.
+    // Re-point --pb-accent to the fixed brand green for everything inside this
+    // module — custom properties inherit, so this one override cascades to every
+    // child (text-pb-accent, bg-pb-accent, color-mix tints, the lot) without
+    // touching the rest of the app, where the club accent still applies.
+    <div className="min-h-screen bg-pb-bg text-pb-text flex"
+      style={{ '--pb-accent': 'var(--pb-brand)', '--pb-accent-rgb': '22 199 132' }}>
       {/* Sidebar */}
       <aside className="w-60 border-r pb-hairline bg-pb-surface hidden md:flex flex-col sticky top-0 h-screen">
         <Brand />
