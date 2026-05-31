@@ -65,7 +65,7 @@ export default function BetterSelectLayout({ children, title, actions }) {
           : <span className="w-8 h-8 rounded bg-pb-accent/15 text-pb-accent font-display font-bold flex items-center justify-center shrink-0">{(club?.name || 'B')[0]}</span>}
         <div className="min-w-0">
           <div className="font-display font-bold text-sm leading-tight truncate" title={club?.name || ''}>{club?.name || 'BetterStats'}</div>
-          <div className="font-mono text-[10px] text-pb-faint">Better<span className="text-pb-accent">Select</span></div>
+          <div className="font-mono text-[10px] text-pb-faint">Better<span className="text-pb-brand">Select</span></div>
         </div>
       </div>
       <Link to="/admin" className="block mt-2 text-[11px] font-mono text-pb-faintest hover:text-pb-faint">← Back to admin</Link>

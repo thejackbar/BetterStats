@@ -388,7 +388,7 @@ export default function AdminSelection() {
           <Link to="/admin/betterselect/selection" className="text-[11px] opacity-80 hover:opacity-100">← All teams</Link>
           {allFixtures.length > 1 && (
             <select value={fixtureId} onChange={(e) => navigate(`/admin/betterselect/select/${e.target.value}`)}
-              className="bg-black/15 rounded px-2 py-1 text-[11px] max-w-[55%]" style={{ color: 'var(--pb-bg)' }}>
+              className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[11px] text-pb-text max-w-[55%]">
               {allFixtures.map((f) => (
                 <option key={f.id} value={f.id} style={{ color: '#000' }}>
                   {(f.home_away === 'AWAY' ? '@ ' : 'vs ') + (f.opponent_name || f.label || 'TBC')}{f.played_on ? ` · ${f.played_on}` : ''}
@@ -400,12 +400,12 @@ export default function AdminSelection() {
         <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 mt-1">
           <div>
             <h2 className="font-display font-bold text-xl leading-tight">{title}</h2>
-            {sub && <div className="text-sm opacity-90">{sub}</div>}
+            {sub && <div className="text-sm text-pb-faint">{sub}</div>}
           </div>
           <div className="flex items-center gap-2">
             <Segmented value={format} onChange={changeFormat} sm options={FORMATS} />
             <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full"
-              style={{ background: offCount ? 'var(--pb-amber)' : 'rgba(0,0,0,0.18)', color: offCount ? '#1b1205' : 'var(--pb-bg)' }}>
+              style={{ background: offCount ? 'var(--pb-amber)' : 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: offCount ? '#1b1205' : 'var(--pb-accent)' }}>
               {count}{target > 0 ? ` / ${target}` : ''} picked
             </span>
           </div>
