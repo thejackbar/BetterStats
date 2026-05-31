@@ -348,6 +348,7 @@ export default function AdminSelection() {
           }),
           match: { round: fx?.round || '', venue: fx?.venue || '', date: fx?.played_on || '', time: fx?.start_time || '' },
           opponent: { name: fx?.opponent_name || '' },
+          teamName: (fx?.home_away === 'AWAY' ? fx?.away_team : fx?.home_team) || '',
         },
       },
     })
