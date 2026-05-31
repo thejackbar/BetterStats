@@ -31,6 +31,7 @@ export default {
           faint:     "var(--pb-faint)",
           faintest:  "var(--pb-faintest)",
           accent:    "var(--pb-accent)",
+          brand:     "var(--pb-brand)",
           red:       "var(--pb-red)",
           amber:     "var(--pb-amber)",
           positive:  "var(--pb-positive)",

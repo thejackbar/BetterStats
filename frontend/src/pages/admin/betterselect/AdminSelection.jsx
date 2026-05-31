@@ -399,7 +399,7 @@ export default function AdminSelection() {
         </div>
         <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 mt-1">
           <div>
-            <h2 className="font-display font-bold text-xl leading-tight">{title}</h2>
+            <h2 className="font-display font-bold text-xl leading-tight text-pb-text">{title}</h2>
             {sub && <div className="text-sm text-pb-faint">{sub}</div>}
           </div>
           <div className="flex items-center gap-2">
