@@ -12,6 +12,7 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
 import { Icon, Btn, Segmented, Empty } from './ui'
+import { useFilters, FilterBar } from './filters'
 
 // Home/Away accent for the left edge of each row — fixed semantic colours
 // (green = home, red = away), NOT the club's white-label accent.
@@ -103,6 +104,16 @@ function fmtDate(d) {
 function mondayOf(date) { const x = new Date(date); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
 function isoLocal(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }
 
+// 3-state selection progress: no XI / in progress / complete (vs the club's
+// lineup size; format_size 0 = no limit, so it can only ever be in-progress).
+function xiState(f) {
+  const n = f.lineup_count || 0
+  if (n === 0) return 'none'
+  const size = f.format_size || 0
+  if (size && n >= size) return 'complete'
+  return 'progress'
+}
+
 export default function AdminFixtures() {
   const { hasCapability } = useAuth()
   const toast = useToast()
@@ -111,7 +122,6 @@ export default function AdminFixtures() {
   const canSelect = hasCapability(CAP.MANAGE_SELECTIONS)
   const [fixtures, setFixtures] = useState(null)
   const [scope, setScope] = useState('upcoming') // 'upcoming' | 'past' | 'all'
-  const [teamFilter, setTeamFilter] = useState('all')
   const [editing, setEditing] = useState(undefined)
   const [syncing, setSyncing] = useState(false)
 
@@ -126,16 +136,41 @@ export default function AdminFixtures() {
   const teamOptions = useMemo(() => {
     const seen = new Map()
     ;(fixtures || []).forEach((f) => { if (f.team_name && !seen.has(f.team_name)) seen.set(f.team_name, f.team_sequence ?? 99) })
-    const sorted = [...seen.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
-    return [{ value: 'all', label: 'Whole club' }, ...sorted.map(([name]) => ({ value: name, label: name }))]
+    return [...seen.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).map(([name]) => ({ value: name, label: name }))
   }, [fixtures])
+
+  const roundOptions = useMemo(() => {
+    const set = new Set((fixtures || []).map((f) => f.round).filter(Boolean))
+    return [...set].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true })).map((r) => ({ value: r, label: `Round ${r}` }))
+  }, [fixtures])
+
+  const facets = useMemo(() => [
+    { key: 'team', label: 'Team', type: 'multi', options: teamOptions },
+    { key: 'xi', label: 'Completed XI', type: 'single', options: [
+      { value: 'none', label: 'No XI' },
+      { value: 'progress', label: 'In progress' },
+      { value: 'complete', label: 'Complete' },
+    ] },
+    { key: 'homeaway', label: 'Home / Away', type: 'multi', options: [
+      { value: 'HOME', label: 'Home' },
+      { value: 'AWAY', label: 'Away' },
+      { value: 'BYE', label: 'Bye' },
+    ] },
+    ...(roundOptions.length ? [{ key: 'round', label: 'Round', type: 'multi', options: roundOptions }] : []),
+  ], [teamOptions, roundOptions])
+  const filters = useFilters(facets)
+  const { values } = filters
 
   // Group by weekend (Monday-anchored). Scope cuts to upcoming/past/all; past
   // shows most-recent first, upcoming/all soonest first.
   const groups = useMemo(() => {
     if (!fixtures) return null
     const todayIso = isoLocal(new Date())
-    let filtered = teamFilter === 'all' ? fixtures : fixtures.filter((f) => f.team_name === teamFilter)
+    let filtered = fixtures
+    if (values.team?.length) filtered = filtered.filter((f) => values.team.includes(f.team_name))
+    if (values.homeaway?.length) filtered = filtered.filter((f) => values.homeaway.includes(f.home_away))
+    if (values.round?.length) filtered = filtered.filter((f) => values.round.includes(f.round))
+    if (values.xi) filtered = filtered.filter((f) => xiState(f) === values.xi)
     if (scope === 'upcoming') filtered = filtered.filter((f) => !f.played_on || f.played_on >= todayIso)
     else if (scope === 'past') filtered = filtered.filter((f) => f.played_on && f.played_on < todayIso)
     const byWeek = new Map()
@@ -159,7 +194,9 @@ export default function AdminFixtures() {
           (a.team_sequence ?? 99) - (b.team_sequence ?? 99)
           || (a.start_time || '').localeCompare(b.start_time || '')),
       }))
-  }, [fixtures, teamFilter, scope])
+  }, [fixtures, values, scope])
+
+  const shownCount = groups ? groups.reduce((n, g) => n + g.games.length, 0) : undefined
 
   const sync = async () => {
     setSyncing(true)
@@ -182,16 +219,17 @@ export default function AdminFixtures() {
 
   return (
     <BetterSelectLayout title="Fixtures" actions={actions}>
-      <div className="flex flex-wrap items-center gap-3 mb-2">
-        <Segmented value={teamFilter} onChange={setTeamFilter} options={teamOptions} />
-        <div className="ml-auto flex items-center gap-2">
+      <FilterBar
+        filters={filters} facets={facets} showSearch={false}
+        count={shownCount} total={fixtures?.length} className="mb-2"
+        right={(
           <Segmented value={scope} onChange={setScope} sm options={[
             { value: 'upcoming', label: 'Upcoming' },
             { value: 'past', label: 'Past' },
             { value: 'all', label: 'All' },
           ]} />
-        </div>
-      </div>
+        )}
+      />
       <div className="flex items-center gap-4 mb-4 font-mono text-[10px] text-pb-faint">
         <span className="inline-flex items-center gap-1.5"><span className="w-[3px] h-3 rounded-sm" style={{ background: 'var(--pb-positive)' }} /> Home</span>
         <span className="inline-flex items-center gap-1.5"><span className="w-[3px] h-3 rounded-sm" style={{ background: 'var(--pb-red)' }} /> Away</span>
