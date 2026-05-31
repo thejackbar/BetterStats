@@ -395,11 +395,11 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
               border: `2px solid ${palette.accent}`,
               display: 'flex', flexDirection: 'column',
             }}>
-              <div style={{ flex: 1, display: 'grid', placeItems: 'center', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ height: '75%', display: 'grid', placeItems: 'center', position: 'relative', overflow: 'hidden' }}>
                 <Halftone color={palette.ink} opacity={0.08} size={6} />
                 {p.headshot ? (
                   <img src={p.headshot} alt={p.first + ' ' + p.last}
-                    style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center bottom' }} />
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center top' }} />
                 ) : team.logo ? (
                   <img src={team.logo} alt={team.short}
                     style={{ width: '68%', height: '68%', objectFit: 'contain', opacity: 0.92 }} />
@@ -410,11 +410,12 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
                 <div style={{ position: 'absolute', top: 8, left: 8, fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: palette.ink, opacity: 0.4, letterSpacing: 1.5 }}>#{String(i + 1).padStart(2, '0')}</div>
               </div>
               <div style={{
-                background: palette.accent, color: palette.primary,
-                padding: '10px 10px', textAlign: 'center',
-                fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1,
-                lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              }}>{p.last}</div>
+                height: '25%', background: palette.accent, color: palette.primary,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px',
+                fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, lineHeight: 1,
+              }}>
+                <span style={{ maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.last}</span>
+              </div>
             </div>
           )
         })}
@@ -462,7 +463,8 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
           return (
             <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
               style={{
-                position: 'absolute', top: 14, left: 14, right: 14, bottom: 8,
+                position: 'absolute', inset: 0,
+                width: '100%', height: '100%',
                 objectFit: hasHead ? 'cover' : 'contain',
                 objectPosition: hasHead ? 'top center' : 'center',
                 padding: hasHead ? 0 : 40,
