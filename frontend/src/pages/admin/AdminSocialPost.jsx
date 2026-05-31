@@ -299,6 +299,9 @@ export default function AdminSocialPost() {
 
   const [match, setMatch] = useState({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
   const patchMatch = patch => setMatch(m => ({ ...m, ...patch }))
+  // Headline shown on lineup templates (T1). Empty = template default ("SQUAD").
+  // Auto-fills from the squad/team name when arriving from a saved XI.
+  const [headline, setHeadline] = useState('')
 
   const [opponent, setOpponent] = useState({ name: '', short: '', monogram: '', logo: null })
   const patchOpp = patch => setOpponent(o => ({ ...o, ...patch }))
@@ -424,6 +427,7 @@ export default function AdminSocialPost() {
       }))
     }
     if (sheet.opponent?.name) setOpponent(o => ({ ...o, name: sheet.opponent.name }))
+    if (sheet.teamName) setHeadline(sheet.teamName)
     setTemplateId('T1') // a lineup template
     // Clear router state so a refresh doesn't re-apply.
     window.history.replaceState({}, document.title)
@@ -733,6 +737,7 @@ export default function AdminSocialPost() {
     const tid = TAB_FIRST[activeTab] || 'T1'
     setTemplateId(tid)
     setMatch({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
+    setHeadline('')
     setOpponent({ name: '', short: '', monogram: '', logo: null })
     setSelectedPlayers([])
     setHeroImage({ blobUrl: null })
@@ -913,6 +918,7 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Match Info</h2>
                 <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2"><Field label="Headline (lineup posts)"><TextInput value={headline} onChange={setHeadline} placeholder="SQUAD · e.g. Applecross 6th XI" /></Field></div>
                   <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder="PREMIER T20" /></Field>
                   <Field label="Round"><TextInput value={match.round} onChange={v => patchMatch({ round: v })} placeholder="ROUND 7" /></Field>
                   <Field label="Venue"><TextInput value={match.venue} onChange={v => patchMatch({ venue: v })} placeholder="Heathcote Reserve" /></Field>
@@ -1448,7 +1454,7 @@ export default function AdminSocialPost() {
                 return (
                   <div style={{ width: mobileW, height: Math.round(H * scale), overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
                     <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none' }}>
-                      <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} {...extraProps} />
+                      <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} headline={headline} {...extraProps} />
                     </div>
                   </div>
                 )
@@ -1485,7 +1491,7 @@ export default function AdminSocialPost() {
                   <>
                     <div style={{ width: pw, height: ph, overflow: 'hidden', border: '1px solid var(--pb-hairline)', borderRadius: 6, background: '#080808' }}>
                       <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: 'none' }}>
-                        <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} {...extraProps} />
+                        <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} headline={headline} {...extraProps} />
                       </div>
                     </div>
                     <p className="text-pb-faintest text-[10px] font-mono mt-2">
@@ -1503,7 +1509,7 @@ export default function AdminSocialPost() {
       {/* Hidden full-size render for export */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
         <div ref={renderRef} style={{ ...fontStyle, width: W, height: H }}>
-          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} {...extraProps} />
+          <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={themedPalette} headline={headline} {...extraProps} />
         </div>
       </div>
 

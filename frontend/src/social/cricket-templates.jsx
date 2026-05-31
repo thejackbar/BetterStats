@@ -2,6 +2,62 @@
 // All templates render at exactly 1080×1080px using inline styles.
 // Font stack: Anton, Bebas Neue, Archivo Black, Inter, JetBrains Mono (loaded in index.html)
 
+import { useRef, useState, useLayoutEffect } from 'react'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTO-FIT TEXT
+// Shrinks the font size until the text fits its container, so long names /
+// headlines never clip or wrap unexpectedly. Measures after layout and on every
+// content/size change. `max` is the design size, `min` the floor. By default it
+// fits on a single line (nowrap); pass `lines` to allow up to N wrapped lines
+// and fit by height instead. Works inside the modern-screenshot export because
+// the measure runs synchronously via useLayoutEffect before the capture clones
+// the DOM (the computed fontSize is inlined on the node).
+// ─────────────────────────────────────────────────────────────────────────────
+function AutoFitText({ text, children, max, min = 8, lines = 1, style = {}, measureDeps = [], ...rest }) {
+  const ref = useRef(null)
+  const [size, setSize] = useState(max)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const parent = el.parentElement
+    if (!parent) return
+    // Always measure from the design size down, so growing the box (or
+    // shortening the text) lets the size recover. Manipulate the inline style
+    // directly during measurement, then commit the final value once.
+    let next = max
+    el.style.fontSize = next + 'px'
+    let guard = 0
+    while (guard++ < 200 && next > min) {
+      const overflowW = el.scrollWidth > parent.clientWidth + 0.5
+      const overflowH = lines > 1 && el.scrollHeight > parent.clientHeight + 0.5
+      if (!overflowW && !overflowH) break
+      next -= 1
+      el.style.fontSize = next + 'px'
+    }
+    setSize(next)
+  }, [text, max, min, lines, ...measureDeps])
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        fontSize: size,
+        whiteSpace: lines > 1 ? 'normal' : 'nowrap',
+        display: lines > 1 ? '-webkit-box' : 'block',
+        WebkitLineClamp: lines > 1 ? lines : undefined,
+        WebkitBoxOrient: lines > 1 ? 'vertical' : undefined,
+        overflow: 'hidden',
+        ...style,
+      }}
+      {...rest}
+    >
+      {children != null ? children : text}
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SHARED VISUAL PRIMITIVES
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,7 +252,7 @@ export function orgToPalette(org) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 1 — Hero cutout + bold name list
 // ─────────────────────────────────────────────────────────────────────────────
-export function T1_HeroList({ team, opponent, match, players, palette, heroImage }) {
+export function T1_HeroList({ team, opponent, match, players, palette, heroImage, headline }) {
   const P = players.slice(0, 13)
   return (
     <div style={{
@@ -269,10 +325,14 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
             }}>{match.season}</div>
           </div>
         </div>
-        <div style={{
-          fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 180, lineHeight: 0.85,
-          letterSpacing: -2, marginTop: 28, color: palette.ink,
-        }}>SQUAD</div>
+        <div style={{ height: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', marginTop: 20, overflow: 'hidden' }}>
+          <AutoFitText
+            text={(headline || 'SQUAD').toUpperCase()} max={180} min={48} lines={2}
+            style={{
+              fontFamily: "var(--social-display-font, 'Anton', sans-serif)", lineHeight: 0.85,
+              letterSpacing: -2, color: palette.ink, textAlign: 'right', width: '100%',
+            }} />
+        </div>
         <div style={{ width: 60, height: 4, background: palette.accent, marginTop: 10, marginBottom: 24 }} />
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
@@ -292,13 +352,19 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
           {P.map((p, i) => {
             const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
             return (
-              <div key={i} style={{
-                fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 40, lineHeight: 1.05,
-                letterSpacing: 0.5, color: palette.ink,
-                display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10,
-              }}>
-                <span style={{ fontWeight: 300, opacity: 0.72, fontSize: 30 }}>{p.first.toUpperCase()}</span>
-                <span style={{ color: palette.ink }}>{p.last}</span>
+              <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, width: '100%' }}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
+                  <AutoFitText max={40} min={18} lines={1} measureDeps={[chip ? 1 : 0]}
+                    style={{
+                      fontFamily: "var(--social-display-font, 'Anton', sans-serif)", lineHeight: 1.05,
+                      letterSpacing: 0.5, color: palette.ink,
+                    }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.25em', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontWeight: 300, opacity: 0.72, fontSize: '0.75em' }}>{p.first.toUpperCase()}</span>
+                      <span>{p.last}</span>
+                    </span>
+                  </AutoFitText>
+                </div>
                 {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
               </div>
             )
@@ -412,9 +478,9 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
               <div style={{
                 height: '25%', background: palette.accent, color: palette.primary,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px',
-                fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, lineHeight: 1,
               }}>
-                <span style={{ maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.last}</span>
+                <AutoFitText text={p.last} max={26} min={11} lines={1}
+                  style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1, lineHeight: 1, maxWidth: '100%', textAlign: 'center' }} />
               </div>
             </div>
           )
@@ -512,9 +578,14 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${palette.ink}1c` }}>
                 <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 42, color: palette.accent, lineHeight: 1, width: 50, textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
-                <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: 10, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                  <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, color: palette.ink, opacity: 0.65, fontWeight: 300, letterSpacing: 0.5 }}>{p.first.toUpperCase()}</span>
-                  <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 38, letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>{p.last}</span>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
+                  <AutoFitText max={38} min={16} lines={1}
+                    style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.26em', whiteSpace: 'nowrap' }}>
+                      <span style={{ opacity: 0.65, fontWeight: 300, fontSize: '0.74em' }}>{p.first.toUpperCase()}</span>
+                      <span>{p.last}</span>
+                    </span>
+                  </AutoFitText>
                 </div>
                 {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
               </div>
@@ -578,9 +649,16 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
               borderLeft: `3px solid ${i === 10 ? palette.accent : 'transparent'}`,
             }}>
               <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 40, color: palette.accent, lineHeight: 1, textAlign: 'center' }}>{i + 1}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, color: palette.ink, opacity: 0.62, fontWeight: 300, letterSpacing: 0.5 }}>{p.first.toUpperCase()}</span>
-                <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>{p.last}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
+                  <AutoFitText max={30} min={14} lines={1} measureDeps={[chip ? 1 : 0]}
+                    style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.28em', whiteSpace: 'nowrap' }}>
+                      <span style={{ opacity: 0.62, fontWeight: 300, fontSize: '0.73em' }}>{p.first.toUpperCase()}</span>
+                      <span>{p.last}</span>
+                    </span>
+                  </AutoFitText>
+                </div>
                 {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
               </div>
               <div style={{ width: 64, justifySelf: 'end', textAlign: 'center', padding: '5px 0', background: 'transparent', border: `1.5px solid ${palette.ink}55`, color: palette.ink, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 1.5, lineHeight: 1, borderRadius: 2 }}>
@@ -631,9 +709,14 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
           return (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '56px 1fr 70px 60px', alignItems: 'center', gap: 14, borderBottom: `1px solid ${palette.ink}1a`, padding: '4px 0' }}>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.accent, opacity: 0.9 }}>{String(i + 1).padStart(2, '0')}</div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, lineHeight: 0.95, overflow: 'hidden' }}>
-                <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, color: palette.ink, opacity: 0.5, letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{p.first.toUpperCase()}</span>
-                <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 64, color: palette.ink, letterSpacing: -1, whiteSpace: 'nowrap', lineHeight: 0.95 }}>{p.last}</span>
+              <div style={{ minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
+                <AutoFitText max={64} min={22} lines={1}
+                  style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, letterSpacing: -1, lineHeight: 0.95 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.2em', whiteSpace: 'nowrap' }}>
+                    <span style={{ opacity: 0.5, letterSpacing: 0.5, fontSize: '0.47em' }}>{p.first.toUpperCase()}</span>
+                    <span>{p.last}</span>
+                  </span>
+                </AutoFitText>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
@@ -711,9 +794,14 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
           return (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0', borderBottom: `1px solid ${palette.ink}1a` }}>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.accent, width: 26 }}>{String(i + 1).padStart(2, '0')}</div>
-              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 0.5, color: palette.ink, lineHeight: 1.1, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                <span style={{ opacity: 0.55, fontWeight: 300 }}>{p.first.toUpperCase()}</span>{' '}
-                <span>{p.last}</span>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
+                <AutoFitText max={26} min={13} lines={1}
+                  style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1.1 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.28em', whiteSpace: 'nowrap' }}>
+                    <span style={{ opacity: 0.55, fontWeight: 300 }}>{p.first.toUpperCase()}</span>
+                    <span>{p.last}</span>
+                  </span>
+                </AutoFitText>
               </div>
               {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
             </div>
