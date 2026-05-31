@@ -339,7 +339,7 @@ export default function AdminAvailability() {
         <table className="border-separate w-full" style={{ borderSpacing: 0, minWidth: 760 }}>
           <thead>
             <tr>
-              <th className="sticky left-0 top-0 z-30 bg-pb-surface2 text-left px-4 py-3 border-b pb-hairline" style={{ minWidth: 250 }}>
+              <th className="sticky left-0 top-0 z-30 bg-pb-surface2 text-left px-4 py-3 border-b pb-hairline" style={{ minWidth: 170 }}>
                 <div className="flex items-center gap-2.5">
                   {canEdit && (
                     <input type="checkbox" checked={allSelected} onChange={toggleSelAll}

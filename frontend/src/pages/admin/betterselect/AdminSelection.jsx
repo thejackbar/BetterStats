@@ -397,7 +397,7 @@ export default function AdminSelection() {
             </select>
           )}
         </div>
-        <div className="flex items-end justify-between gap-3 mt-1">
+        <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 mt-1">
           <div>
             <h2 className="font-display font-bold text-xl leading-tight">{title}</h2>
             {sub && <div className="text-sm opacity-90">{sub}</div>}
@@ -434,7 +434,7 @@ export default function AdminSelection() {
       </div>
 
       {/* Body: pool (left, wider) + numbered slots (right) */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0, 1.25fr) minmax(0, 1fr)' }}>
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
         {/* POOL */}
         <div className="pb-card flex flex-col min-h-0">
           <div className="px-3 py-2.5 border-b pb-hairline flex flex-col gap-2">

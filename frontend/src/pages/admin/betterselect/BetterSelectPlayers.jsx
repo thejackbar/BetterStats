@@ -59,7 +59,7 @@ function statusOfMatrixRow(row) {
 /* ── Inline field controls (match prototype look via pb-* tokens) ─────────── */
 function Field({ label, half, children }) {
   return (
-    <div className={half ? 'flex-1 min-w-0 basis-[calc(50%-6px)]' : 'flex-1 min-w-0 basis-full'}>
+    <div className={half ? 'flex-1 min-w-0 basis-full sm:basis-[calc(50%-6px)]' : 'flex-1 min-w-0 basis-full'}>
       <label className="block text-[11.5px] text-pb-faint mb-[5px]">{label}</label>
       {children}
     </div>
@@ -108,7 +108,7 @@ function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail })
     : null
 
   return (
-    <div className="px-5 py-[18px] border-r border-pb-hairline">
+    <div className="px-4 sm:px-5 py-[18px] border-b lg:border-b-0 lg:border-r border-pb-hairline">
       <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-faint mb-3.5">Selection snapshot</div>
 
       {/* Availability — next 4 weeks */}
@@ -374,9 +374,9 @@ function PlayerList({ players, statusOf, squadNameOf, selectedId, onSelect, onOp
   const clearSel = () => setSel(new Set())
 
   return (
-    <div className="pb-card bg-pb-surface flex flex-col min-h-0 h-full overflow-hidden">
+    <div className="pb-card bg-pb-surface flex flex-col min-h-0 h-[70vh] lg:h-full overflow-hidden">
       <div className="px-3.5 py-3 border-b border-pb-hairline flex items-center gap-2.5 flex-wrap">
-        <Search value={q} onChange={setQ} placeholder="Search players…" className="w-[200px]" />
+        <Search value={q} onChange={setQ} placeholder="Search players…" className="w-full sm:w-[200px]" />
         <div className="flex gap-1.5">
           {ROLE_CHIPS.map(([label, value]) => (
             <Chip key={value} label={label} active={role === value} onClick={() => setRole(role === value ? null : value)} />
@@ -624,13 +624,13 @@ export default function BetterSelectPlayers() {
 
   return (
     <BetterSelectLayout title="Players">
-      <div className="grid gap-4 h-[calc(100vh-140px)]" style={{ gridTemplateColumns: 'minmax(420px, 1fr) 1.35fr' }}>
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(380px,1fr)_1.35fr] lg:h-[calc(100vh-140px)]">
         <PlayerList
           players={players} statusOf={statusOf} squadNameOf={squadNameOf}
           selectedId={selId} onSelect={setSelId} onOpenProfile={setSelId}
           canEdit={canEdit} teams={teams} onBulkSquad={onBulkSquad} onBulkInactive={onBulkInactive}
           onEditAvail={canEdit ? (p) => openAvail(p, null) : undefined} />
-        <div className="pb-card bg-pb-surface min-h-0 overflow-hidden">
+        <div className="pb-card bg-pb-surface min-h-0 h-[80vh] lg:h-full overflow-hidden">
           {!selId
             ? <div className="p-6"><Empty>Select a player</Empty></div>
             : (!profileForView || !draft)

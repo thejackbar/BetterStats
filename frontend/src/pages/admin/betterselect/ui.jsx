@@ -172,7 +172,7 @@ export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, di
 /* ── Segmented control ───────────────────────────────────────────────────── */
 export function Segmented({ options, value, onChange, sm = false }) {
   return (
-    <div className="inline-flex p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline">
+    <div className="inline-flex flex-wrap p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline">
       {options.map((o) => {
         const active = o.value === value
         return (

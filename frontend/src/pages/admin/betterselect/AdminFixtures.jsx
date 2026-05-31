@@ -227,14 +227,14 @@ export default function AdminFixtures() {
                     const isCurrentTop = current && (g.team_sequence ?? 99) <= 1
                     return (
                       <div key={g.id}
-                        className={`relative flex items-center gap-4 pl-[22px] pr-[18px] py-3 ${gi > 0 ? 'border-t pb-hairline' : ''}`}
+                        className={`relative flex items-center gap-2 sm:gap-4 pl-[18px] pr-3 sm:pl-[22px] sm:pr-[18px] py-3 ${gi > 0 ? 'border-t pb-hairline' : ''}`}
                         style={{ background: named ? 'color-mix(in srgb, var(--pb-positive) 6%, transparent)' : 'transparent' }}>
                         {/* Home/away accent bar on the far left */}
                         <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: homeAwayColor(g.home_away) }}
                           title={g.home_away === 'HOME' ? 'Home' : g.home_away === 'AWAY' ? 'Away' : 'Bye'} />
                         <span className="font-display font-bold text-[13.5px] w-[64px] shrink-0 truncate text-pb-text">{g.team_short || g.team_name || '—'}</span>
-                        {g.grade_name && <span className="font-mono text-[10px] text-pb-faint w-[60px] shrink-0 truncate">{g.grade_name}</span>}
-                        <span className="w-px h-6 bg-pb-hairline shrink-0" />
+                        {g.grade_name && <span className="hidden sm:block font-mono text-[10px] text-pb-faint w-[60px] shrink-0 truncate">{g.grade_name}</span>}
+                        <span className="hidden sm:block w-px h-6 bg-pb-hairline shrink-0" />
                         <div className="flex-1 min-w-0">
                           {bye ? <span className="text-sm text-pb-faint italic">Bye</span> : (
                             <>
