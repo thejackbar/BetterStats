@@ -15,11 +15,12 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
-import { AVAILABILITY, availRank } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_ORDER, availRank } from '../../../lib/availability'
 import {
-  Icon, Avatar, AvailDot, RoleChips, Tag, Btn, Segmented, Search, Chip, Empty, QuickAvailModal,
+  Icon, Avatar, AvailDot, RoleChips, Tag, Btn, Segmented, Empty, QuickAvailModal,
   RecencySelect, playedWithinYears,
 } from './ui'
+import { useFilters, FilterBar } from './filters'
 
 const FORMATS = [
   { value: 11, label: '11' },
@@ -41,7 +42,6 @@ function fitsSlot(p, i) {
   const acc = slotAccepts(i)
   return (p.skill_positions || []).some((r) => acc.includes(r))
 }
-const ROLE_CHIPS = ['BAT', 'BWL', 'ALL', 'WKT']
 const ROLE_LABEL = { BAT: 'BAT', BWL: 'BWL', ALL: 'ALL', WKT: 'WK' }
 
 function fmtHeader(fx) {
@@ -75,13 +75,7 @@ export default function AdminSelection() {
   const [format, setFormat] = useState(11)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
-  const [search, setSearch] = useState('')
-  const [roleF, setRoleF] = useState(null)
-  const [availOnly, setAvailOnly] = useState(false)
-  const [squadF, setSquadF] = useState('')          // '' = any squad
-  const [yearsF, setYearsF] = useState(3)           // recency: played within N yrs (0 = any)
-  const [selStatusF, setSelStatusF] = useState('')  // '' | 'unselected' | 'clash'
-  const [showFilters, setShowFilters] = useState(false)
+  const [yearsF, setYearsF] = useState(3)           // recency: played within N yrs (0 = any; quiet control)
   const [availEdit, setAvailEdit] = useState(null) // player object for quick-update modal
   const [showSheet, setShowSheet] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -142,20 +136,31 @@ export default function AdminSelection() {
     return [...s].sort()
   }, [data])
 
+  const facets = useMemo(() => [
+    { key: 'squad', label: 'Squad', type: 'multi', options: squadOptions.map((s) => ({ value: s, label: s })) },
+    { key: 'avail', label: 'Availability', type: 'multi', options: AVAIL_ORDER.map((s) => ({ value: s, label: AVAILABILITY[s].label, dot: AVAILABILITY[s].cssVar })) },
+    { key: 'role', label: 'Role', type: 'multi', options: [
+      { value: 'BAT', label: 'BAT' }, { value: 'BWL', label: 'BWL' }, { value: 'ALL', label: 'ALL' }, { value: 'WKT', label: 'WK' },
+    ] },
+    { key: 'status', label: 'Selection', type: 'single', options: [
+      { value: 'unselected', label: 'Unselected' }, { value: 'clash', label: 'In another XI' },
+    ] },
+  ], [squadOptions])
+  const filters = useFilters(facets)
+  const { values, search } = filters
 
+  const available = useMemo(() => (data?.pool || []).filter((p) => !usedIds.has(p.id)), [data, usedIds])
   const pool = useMemo(() => {
-    let list = (data?.pool || []).filter((p) => !usedIds.has(p.id))
+    let list = available
     if (search.trim()) list = list.filter((p) => (p.display_name || '').toLowerCase().includes(search.trim().toLowerCase()))
-    if (roleF) list = list.filter((p) => (p.skill_positions || []).includes(roleF))
-    if (availOnly) list = list.filter((p) => p.availability === 'AVAILABLE')
-    if (squadF) list = list.filter((p) => (p.squads || []).includes(squadF))
+    if (values.role?.length) list = list.filter((p) => (p.skill_positions || []).some((r) => values.role.includes(r)))
+    if (values.avail?.length) list = list.filter((p) => values.avail.includes(p.availability || 'NO_RESPONSE'))
+    if (values.squad?.length) list = list.filter((p) => values.squad.some((s) => (p.squads || []).includes(s)))
     if (yearsF) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
-    if (selStatusF === 'unselected') list = list.filter((p) => !(p.clash?.length > 0))
-    else if (selStatusF === 'clash') list = list.filter((p) => p.clash?.length > 0)
+    if (values.status === 'unselected') list = list.filter((p) => !(p.clash?.length > 0))
+    else if (values.status === 'clash') list = list.filter((p) => p.clash?.length > 0)
     return list.slice().sort(cmp)
-  }, [data, usedIds, search, roleF, availOnly, squadF, yearsF, selStatusF, cmp])
-
-  const activeFilters = (squadF ? 1 : 0) + (yearsF ? 1 : 0) + (selStatusF ? 1 : 0)
+  }, [available, search, values, yearsF, cmp])
 
   const filled = slots.filter(Boolean)
   const count = filled.length
@@ -460,38 +465,10 @@ export default function AdminSelection() {
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
         {/* POOL */}
         <div className="pb-card flex flex-col min-h-0">
-          <div className="px-3 py-2.5 border-b pb-hairline flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Search value={search} onChange={setSearch} placeholder="Search players…" className="flex-1 min-w-[160px]" />
-              {ROLE_CHIPS.map((r) => <Chip key={r} label={ROLE_LABEL[r]} active={roleF === r} onClick={() => setRoleF(roleF === r ? null : r)} />)}
-              <Chip label="Available only" active={availOnly} onClick={() => setAvailOnly(!availOnly)} />
-              <Btn variant={showFilters || activeFilters ? 'soft' : 'ghost'} sm icon="filter" onClick={() => setShowFilters((v) => !v)}>
-                {activeFilters ? `Filters (${activeFilters})` : 'Filters'}
-              </Btn>
-            </div>
-            {showFilters && (
-              <div className="flex flex-wrap items-center gap-3 pt-1.5 border-t pb-hairline">
-                {squadOptions.length > 0 && (
-                  <label className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-faint">
-                    Squad
-                    <select value={squadF} onChange={(e) => setSquadF(e.target.value)}
-                      className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent">
-                      <option value="">Any</option>
-                      {squadOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </label>
-                )}
-                <span className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-faint">
-                  Recency <RecencySelect value={yearsF} onChange={setYearsF} />
-                </span>
-                <span className="inline-flex items-center gap-1 text-[11.5px] text-pb-faint">
-                  Status
-                  <Chip label="Unselected" active={selStatusF === 'unselected'} onClick={() => setSelStatusF(selStatusF === 'unselected' ? '' : 'unselected')} />
-                  <Chip label="In another XI" active={selStatusF === 'clash'} onClick={() => setSelStatusF(selStatusF === 'clash' ? '' : 'clash')} />
-                </span>
-                {activeFilters > 0 && <button onClick={() => { setSquadF(''); setYearsF(0); setSelStatusF('') }} className="text-[11.5px] text-pb-accent hover:underline">Clear</button>}
-              </div>
-            )}
+          <div className="px-3 py-2.5 border-b pb-hairline">
+            <FilterBar filters={filters} facets={facets} searchPlaceholder="Search players…"
+              count={pool.length} total={available.length}
+              right={<RecencySelect value={yearsF} onChange={setYearsF} />} />
           </div>
           <div className="overflow-auto flex-1 p-2 flex flex-col gap-1 pb-scroll max-h-[60vh] lg:max-h-[calc(100vh-360px)]">
             {pool.map((p) => {
