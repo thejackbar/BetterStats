@@ -55,12 +55,59 @@ const DISPLAY_FONTS = [
   { key: 'barlow',       name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif", weight: 800 },
   { key: 'anton',        name: 'Anton',            family: "'Anton', sans-serif",            weight: 400 },
   { key: 'bebas',        name: 'Bebas Neue',       family: "'Bebas Neue', sans-serif",       weight: 400 },
-  { key: 'archivo',      name: 'Archivo Black',    family: "'Archivo Black', sans-serif",    weight: 900 },
+  { key: 'archivo',      name: 'Archivo Black',    family: "'Archivo Black', sans-serif",    weight: 400 },
   { key: 'oswald',       name: 'Oswald',           family: "'Oswald', sans-serif",           weight: 700 },
   { key: 'teko',         name: 'Teko',             family: "'Teko', sans-serif",             weight: 600 },
   { key: 'bigshoulders', name: 'Big Shoulders',    family: "'Big Shoulders Display', sans-serif", weight: 800 },
   { key: 'antonio',      name: 'Antonio',          family: "'Antonio', sans-serif",          weight: 700 },
 ]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FONT EMBEDDING FOR EXPORT
+// modern-screenshot only embeds fonts from stylesheets it can read, and reading
+// a cross-origin <link> sheet's cssRules throws a SecurityError — so it silently
+// skips them. Our display fonts come from fonts.googleapis.com, meaning they
+// never make it into the captured SVG and the export falls back to a wide system
+// font (text overflows / clips). We fetch those stylesheets ourselves, inline
+// every font file as a data URI, and hand the result to the exporter's
+// `font.cssText` option. Cached after the first successful build.
+// ─────────────────────────────────────────────────────────────────────────────
+let _embeddedFontCssPromise = null
+function getEmbeddedFontCss() {
+  if (!_embeddedFontCssPromise) {
+    _embeddedFontCssPromise = buildEmbeddedFontCss().catch(e => {
+      _embeddedFontCssPromise = null // let the next export retry
+      throw e
+    })
+  }
+  return _embeddedFontCssPromise
+}
+async function buildEmbeddedFontCss() {
+  const hrefs = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+    .map(l => l.href)
+    .filter(h => /fonts\.googleapis\.com/.test(h))
+  let css = ''
+  for (const href of hrefs) {
+    try { css += (await (await fetch(href)).text()) + '\n' } catch { /* skip unreachable sheet */ }
+  }
+  const urls = Array.from(new Set(
+    Array.from(css.matchAll(/url\((https:\/\/[^)]+?)\)/g)).map(m => m[1].replace(/['"]/g, ''))
+  ))
+  const pairs = await Promise.all(urls.map(async url => {
+    try {
+      const blob = await (await fetch(url)).blob()
+      const dataUri = await new Promise((resolve, reject) => {
+        const fr = new FileReader()
+        fr.onload = () => resolve(fr.result)
+        fr.onerror = reject
+        fr.readAsDataURL(blob)
+      })
+      return [url, dataUri]
+    } catch { return null }
+  }))
+  for (const pair of pairs) { if (pair) css = css.split(pair[0]).join(pair[1]) }
+  return css
+}
 
 function applyTheme(palette, isDark) {
   if (isDark || !palette) return palette
@@ -538,6 +585,11 @@ export default function AdminSocialPost() {
       const el = renderRef.current
       const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
       const H = tmpl.h || 1080
+      // Embed the Google Fonts faces ourselves — modern-screenshot can't read
+      // the cross-origin sheet, so without this the condensed display font is
+      // dropped and the export falls back to a wide system font (text overflows).
+      let font
+      try { font = { cssText: await getEmbeddedFontCss() } } catch { /* fall back to system fonts */ }
       const blob = await domToBlob(el, {
         type: 'image/jpeg',
         quality: 0.95,
@@ -545,6 +597,7 @@ export default function AdminSocialPost() {
         width: W,
         height: H,
         backgroundColor: '#080808', // JPG has no alpha — match the dark canvas
+        font,
       })
       if (!blob) { setExportError('Could not generate image'); return }
       const url = URL.createObjectURL(blob)
