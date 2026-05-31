@@ -470,7 +470,7 @@ export default function AdminSelection() {
               </div>
             )}
           </div>
-          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1 pb-scroll" style={{ maxHeight: 'calc(100vh - 360px)' }}>
+          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1 pb-scroll max-h-[60vh] lg:max-h-[calc(100vh-360px)]">
             {pool.map((p) => {
               const clash = p.clash?.length > 0
               const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
@@ -509,7 +509,7 @@ export default function AdminSelection() {
             <h3 className="font-mono text-[11px] uppercase tracking-wide3 text-pb-faint">Batting order</h3>
             <span className="font-mono text-[11px] text-pb-faint pb-num">{count}{target > 0 ? `/${target}` : ''}</span>
           </div>
-          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1 pb-scroll" style={{ maxHeight: 'calc(100vh - 360px)' }}>
+          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1 pb-scroll max-h-[60vh] lg:max-h-[calc(100vh-360px)]">
             {slots.map((id, i) => {
               const p = id ? poolById[id] : null
               const isFocus = focus === i

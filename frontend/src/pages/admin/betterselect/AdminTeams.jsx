@@ -582,7 +582,7 @@ export default function AdminTeams() {
           <>
             {/* Toolbar: search + quiet filters + bulk-add + collapse controls */}
             <div className="flex flex-wrap items-center gap-2.5 mb-3">
-              <Search value={search} onChange={setSearch} placeholder="Search players…" className="w-[200px]" />
+              <Search value={search} onChange={setSearch} placeholder="Search players…" className="w-full sm:w-[200px]" />
               <FilterButton active={showFilters} count={activeFilters} onClick={() => setShowFilters((v) => !v)} />
               <RecencySelect value={years} onChange={setYears} title="Hide unassigned players who haven’t played recently" />
               {canManage && <Btn variant="soft" sm icon="plus" onClick={() => setAddTo(null)}>Bulk add</Btn>}
