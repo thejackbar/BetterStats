@@ -49,8 +49,8 @@ export default function AdminSelectionOverview() {
         {data.fixtures.map(f => (
           <Link key={f.id} to={`/admin/betterselect/select/${f.id}`}
             className="pb-card overflow-hidden hover:border-pb-accent/40 transition-colors flex flex-col">
-            <div className="px-3 py-2 border-b pb-hairline" style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-              {f.team_name && <div className="font-mono text-[10px] uppercase tracking-wide2 opacity-80 truncate">{f.team_name}</div>}
+            <div className="px-3 py-2 border-b pb-hairline" style={{ background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' }}>
+              {f.team_name && <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-accent truncate">{f.team_name}</div>}
               <div className="font-semibold text-sm truncate">{fmtTitle(f)}</div>
               <div className="text-[11px] opacity-90">{fmtDate(f.played_on)}{f.round ? ` · R${f.round}` : ''}</div>
             </div>
