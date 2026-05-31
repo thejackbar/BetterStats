@@ -895,6 +895,9 @@ export const api = {
     request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
   // The previous fixture's named XI (for Selection's "fill from last week").
   bsPreviousXI: (fixtureId) => request(`/selection/${fixtureId}/previous-xi`),
+  // Player ids named in any saved XI for the round containing `on` (a date) —
+  // powers the cross-screen "Selected" filter.
+  bsSelectedPlayers: (on) => request(`/selection/selected-players?on=${encodeURIComponent(on)}`),
 
   // ─── BetterSelect: Player profile ───────────────────────
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),

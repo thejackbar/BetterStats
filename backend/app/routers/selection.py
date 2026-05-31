@@ -15,10 +15,10 @@ All endpoints scoped to the caller's club via get_current_club.
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -254,6 +254,50 @@ async def selection_overview(
             }
             for f in fixtures
         ]
+    }
+
+
+@router.get("/selected-players")
+async def selected_players(
+    on: Optional[str] = None,
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Player ids named in ANY saved XI for a round.
+
+    A "round" is a Mon–Sun week. Anchor it with ?on=YYYY-MM-DD (expanded to that
+    date's week) or an explicit ?from=&to= window. Powers the cross-screen
+    "Selected" filter: a player counts as selected if they're picked in some XI
+    that round (one XI per date is enforced on save, so it's unambiguous).
+    Declared before /{fixture_id} so the literal path isn't read as an id.
+    """
+    if from_ and to:
+        start, end = date.fromisoformat(from_), date.fromisoformat(to)
+    elif on:
+        anchor = date.fromisoformat(on)
+        start = anchor - timedelta(days=anchor.weekday())
+        end = start + timedelta(days=6)
+    else:
+        raise HTTPException(status_code=400, detail="Provide ?on= or ?from=&to=")
+    if end < start:
+        start, end = end, start
+
+    res = await db.execute(
+        text(
+            "SELECT DISTINCT fl.player_id FROM fixture_lineups fl "
+            "JOIN fixtures f ON fl.fixture_id = f.id "
+            "WHERE fl.organisation_id = :org "
+            "AND ((f.played_on BETWEEN :start AND :end) "
+            "OR (f.end_on BETWEEN :start AND :end))"
+        ),
+        {"org": club.id, "start": start, "end": end},
+    )
+    return {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "player_ids": [str(r[0]) for r in res.fetchall()],
     }
 
 

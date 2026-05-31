@@ -26,6 +26,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Game, GameAppearance, Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import months_ago
+from app.services.squad_membership import sync_squad_membership
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
@@ -440,12 +441,15 @@ async def squad_assign(
     body: SquadAssign,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
     """Set (or clear) the assigned squad for one or many players in one call.
 
     Powers both drag-to-reassign (one id) and bulk-add (many) on the Squads
     board. squad_team_id=None unassigns. Skips ids that aren't this club's.
+
+    The assignment is mirrored into team_members so the "Squad" filter resolves
+    to the same set on every BetterSelect screen.
     """
     target = None
     if body.squad_team_id:
@@ -460,7 +464,10 @@ async def squad_assign(
         player = await db.get(Player, pid)
         if not player or player.organisation_id != club.id:
             continue
-        player.squad_team_id = target.id if target else None
+        old_team_id = player.squad_team_id
+        new_team_id = target.id if target else None
+        player.squad_team_id = new_team_id
+        await sync_squad_membership(db, club.id, pid, old_team_id, new_team_id, user.id)
         updated += 1
     await db.commit()
     return {"status": "ok", "updated": updated,

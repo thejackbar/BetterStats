@@ -15,11 +15,13 @@ import { PbSpinner } from '../../../lib/presskit'
 import { bowls, bowlingLabel } from '../../../lib/playerAttributes'
 import { Profile, draftFromProfile, patchFromDraft } from '../../../components/player/PlayerProfilePanel'
 import {
-  Icon, Avatar, AvailDot, RoleChips, Btn, Search, Chip, Empty,
+  Icon, Avatar, AvailDot, RoleChips, Btn, Empty,
   QuickAvailModal, RecencySelect, playedWithinYears,
+  AVAIL_ORDER, AVAILABILITY,
 } from './ui'
+import { useFilters, FilterBar } from './filters'
 
-const ROLE_CHIPS = [['Batter', 'Batter'], ['Bowler', 'Bowler'], ['All-R', 'All Rounder'], ['Wicketkeeper', 'Wicketkeeper']]
+function normGender(g) { const s = (g || '').toLowerCase(); return s.startsWith('f') ? 'female' : s.startsWith('m') ? 'male' : '' }
 
 function statusOfMatrixRow(row) {
   return row?.status ?? 'NO_RESPONSE'
@@ -74,37 +76,60 @@ function PlayerRow({ p, active, selected, status, squadName, onSelect, onOpenPro
 }
 
 /* ── List panel ───────────────────────────────────────────────────────────── */
-function PlayerList({ players, statusOf, squadNameOf, selectedId, onSelect, onOpenProfile, canEdit, teams, onBulkSquad, onBulkInactive, onEditAvail }) {
-  const [q, setQ] = useState('')
-  const [role, setRole] = useState(null)
-  const [showInactive, setShowInactive] = useState(false)
-  const [years, setYears] = useState(0)        // 0 = any time
+function PlayerList({ players, statusOf, squadNameOf, selectedIds, selectedId, onSelect, onOpenProfile, canEdit, teams, onBulkSquad, onBulkInactive, onEditAvail }) {
+  const [years, setYears] = useState(0)        // 0 = any time (quiet recency control)
   const [sel, setSel] = useState(() => new Set())
   const [bulkSquad, setBulkSquad] = useState('')
 
+  const squadOptions = useMemo(() => teams.map((t) => ({ value: t.id, label: t.name })), [teams])
+  const facets = useMemo(() => [
+    { key: 'squad', label: 'Squad', type: 'multi', options: squadOptions },
+    { key: 'avail', label: 'Availability', type: 'multi', options: AVAIL_ORDER.map((s) => ({ value: s, label: AVAILABILITY[s].label, dot: AVAILABILITY[s].cssVar })) },
+    { key: 'role', label: 'Role', type: 'multi', options: [
+      { value: 'Batter', label: 'Batter' }, { value: 'Bowler', label: 'Bowler' },
+      { value: 'All Rounder', label: 'All-rounder' }, { value: 'Wicketkeeper', label: 'Keeper' },
+    ] },
+    { key: 'gender', label: 'Gender', type: 'single', options: [
+      { value: 'male', label: 'Men' }, { value: 'female', label: 'Women' },
+    ] },
+    { key: 'selected', label: 'Selected', type: 'single', options: [
+      { value: 'selected', label: 'Selected this round' }, { value: 'unselected', label: 'Not selected' },
+    ] },
+    { key: 'inactive', label: 'Include inactive', type: 'bool' },
+    { key: 'nocontact', label: 'Missing contact', type: 'bool' },
+    { key: 'overseas', label: 'Overseas', type: 'bool' },
+    { key: 'nophoto', label: 'Missing photo', type: 'bool' },
+    { key: 'newbie', label: 'Never played', type: 'bool' },
+  ], [squadOptions])
+  const filters = useFilters(facets)
+  const { values, search } = filters
+
   const list = useMemo(() => players.filter((p) => {
-    if (!showInactive && p.status === 'inactive') return false
-    if (q.trim() && !nameMatchesSearch(p.display_name || p.name, q)) return false
-    if (role && p.player_role !== role) return false
+    if (!values.inactive && p.status === 'inactive') return false
+    if (search.trim() && !nameMatchesSearch(p.display_name || p.name, search)) return false
+    if (values.role?.length && !values.role.includes(p.player_role)) return false
+    if (values.squad?.length && !values.squad.includes(p.squad_team_id)) return false
+    if (values.avail?.length && !values.avail.includes(statusOf(p.id))) return false
+    if (values.gender && normGender(p.gender) !== values.gender) return false
+    if (values.selected === 'selected' && !selectedIds.has(p.id)) return false
+    if (values.selected === 'unselected' && selectedIds.has(p.id)) return false
+    if (values.nocontact && (p.email || p.phone)) return false
+    if (values.overseas && !p.is_overseas) return false
+    if (values.nophoto && p.photo_url) return false
+    if (values.newbie && p.last_played) return false
     if (!playedWithinYears(p.last_played, years)) return false
     return true
-  }), [players, showInactive, q, role, years])
+  }), [players, values, search, years, statusOf, selectedIds])
 
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const clearSel = () => setSel(new Set())
 
   return (
     <div className="pb-card bg-pb-surface flex flex-col min-h-0 h-[70vh] lg:h-full overflow-hidden">
-      <div className="px-3.5 py-3 border-b border-pb-hairline flex items-center gap-2.5 flex-wrap">
-        <Search value={q} onChange={setQ} placeholder="Search players…" className="w-full sm:w-[200px]" />
-        <div className="flex gap-1.5">
-          {ROLE_CHIPS.map(([label, value]) => (
-            <Chip key={value} label={label} active={role === value} onClick={() => setRole(role === value ? null : value)} />
-          ))}
-        </div>
-        <Chip label="Show inactive" active={showInactive} onClick={() => setShowInactive((v) => !v)} />
-        <RecencySelect value={years} onChange={setYears} />
-        <span className="ml-auto font-mono text-[11px] text-pb-faint">{list.length} players</span>
+      <div className="px-3.5 py-3 border-b border-pb-hairline">
+        <FilterBar filters={filters} facets={facets} searchPlaceholder="Search players…"
+          count={list.length} total={players.length}
+          right={<RecencySelect value={years} onChange={setYears} />} />
       </div>
 
       <div className="overflow-auto flex-1">
@@ -147,6 +172,7 @@ export default function BetterSelectPlayers() {
   const [teams, setTeams] = useState([])         // bsListTeams
   const [availability, setAvailability] = useState({}) // playerId → {date: {status}}
   const [firstDate, setFirstDate] = useState(null)     // next upcoming date
+  const [selectedIds, setSelectedIds] = useState(() => new Set()) // picked in any XI this round
 
   // ?player=<id> deep-link — set when an Avatar is clicked anywhere in
   // BetterSelect. Selecting a player keeps the URL in sync so it's shareable
@@ -205,6 +231,17 @@ export default function BetterSelectPlayers() {
     api.bsListTeams().then((t) => setTeams(t || [])).catch(() => setTeams([]))
     loadMatrix()
   }, [loadMatrix])
+
+  // Who's named in any saved XI for the round of the next upcoming date — powers
+  // the "Selected" filter. Degrades to an empty set when there are no fixtures.
+  useEffect(() => {
+    if (!firstDate) { setSelectedIds(new Set()); return }
+    let live = true
+    api.bsSelectedPlayers(firstDate)
+      .then((d) => { if (live) setSelectedIds(new Set(d?.player_ids || [])) })
+      .catch(() => { if (live) setSelectedIds(new Set()) })
+    return () => { live = false }
+  }, [firstDate])
 
   // Load the selected player's full profile.
   useEffect(() => {
@@ -309,7 +346,7 @@ export default function BetterSelectPlayers() {
     <BetterSelectLayout title="Players">
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(380px,1fr)_1.35fr] lg:h-[calc(100vh-140px)]">
         <PlayerList
-          players={players} statusOf={statusOf} squadNameOf={squadNameOf}
+          players={players} statusOf={statusOf} squadNameOf={squadNameOf} selectedIds={selectedIds}
           selectedId={selId} onSelect={setSelId} onOpenProfile={setSelId}
           canEdit={canEdit} teams={teams} onBulkSquad={onBulkSquad} onBulkInactive={onBulkInactive}
           onEditAvail={canEdit ? (p) => openAvail(p, null) : undefined} />
