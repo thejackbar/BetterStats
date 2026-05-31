@@ -67,6 +67,15 @@ class Organisation(Base):
     # suggestions. Default 24 (migration 048).
     dormancy_months = Column(Integer, nullable=False, server_default="24", default=24)
     default_team_size = Column(Integer, nullable=False, server_default="11", default=11)  # 0 = no limit
+    # Public player-profile attribute visibility (per-club). Overseas is always
+    # shown; these gate the descriptive attributes on the public /players/:id
+    # profile so each club chooses how much of a player's profile is public
+    # (migration 054). Default off — opt-in.
+    public_show_role = Column(Boolean, nullable=False, server_default="false", default=False)
+    public_show_batting = Column(Boolean, nullable=False, server_default="false", default=False)
+    public_show_bowling = Column(Boolean, nullable=False, server_default="false", default=False)
+    public_show_opening = Column(Boolean, nullable=False, server_default="false", default=False)
+    public_show_gender = Column(Boolean, nullable=False, server_default="false", default=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

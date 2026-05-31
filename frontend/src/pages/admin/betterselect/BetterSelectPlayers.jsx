@@ -1,8 +1,8 @@
-// BetterSelect → Players. Master–detail replacement for the cramped edit modal:
-// a filterable roster on the left, a rich profile (selection snapshot +
-// inline-editable management fields) on the right. Recreates
-// docs/design_handoff_betterselect/prototype/bs-players.jsx with real
-// components, the live API, and dirty-tracked saves.
+// BetterSelect → Players. Master–detail roster + the canonical player profile:
+// a filterable list on the left, the shared <Profile> panel (selection snapshot
+// + inline-editable management fields) on the right. The profile UI itself now
+// lives in components/player/PlayerProfilePanel so Admin → Players renders the
+// exact same thing.
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
@@ -12,297 +12,17 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner } from '../../../lib/presskit'
+import { bowls, bowlingLabel } from '../../../lib/playerAttributes'
+import { Profile, draftFromProfile, patchFromDraft } from '../../../components/player/PlayerProfilePanel'
 import {
-  Icon, Avatar, Dot, AvailDot, RoleChips, Tag, Btn, Search, Chip, Empty,
-  AVAILABILITY, QuickAvailModal, RecencySelect, playedWithinYears,
+  Icon, Avatar, AvailDot, RoleChips, Btn, Search, Chip, Empty,
+  QuickAvailModal, RecencySelect, playedWithinYears,
 } from './ui'
-
-/* ── Option sets (mirror AdminPlayers field enums) ───────────────────────── */
-const ROLE_OPTS = ['', 'Batter', 'Bowler', 'All Rounder', 'Wicketkeeper', 'Wicketkeeper-Batter']
-const ROLE_LABEL = { '': '—' }
-const BAT_HANDS = [['', '—'], ['RIGHT', 'Right handed'], ['LEFT', 'Left handed']]
-const GENDER_OPTS = [['', '—'], ['male', 'Male'], ['female', 'Female']]
-
-// Bowling action + type merged into one human-readable field. Each entry maps a
-// label to the (bowling_action, bowling_type) pair persisted on the player.
-const BOWLING_OPTS = [
-  ['—', null, null],
-  ['Right-arm fast', 'RIGHT_ARM', 'FAST'],
-  ['Right-arm fast-medium', 'RIGHT_ARM', 'FAST_MEDIUM'],
-  ['Right-arm medium', 'RIGHT_ARM', 'MEDIUM'],
-  ['Off spin', 'RIGHT_ARM', 'FINGER_SPIN'],
-  ['Leg spin', 'RIGHT_ARM', 'WRIST_SPIN'],
-  ['Left-arm fast', 'LEFT_ARM', 'FAST'],
-  ['Left-arm medium', 'LEFT_ARM', 'MEDIUM'],
-  ['Left-arm orthodox', 'LEFT_ARM', 'FINGER_SPIN'],
-  ['Left-arm wrist spin', 'LEFT_ARM', 'WRIST_SPIN'],
-]
-// (action, type) → label, for deriving the current selection.
-function bowlingLabel(action, type) {
-  const hit = BOWLING_OPTS.find((o) => o[1] === (action || null) && o[2] === (type || null))
-  return hit ? hit[0] : '—'
-}
-function bowlingFromLabel(label) {
-  const hit = BOWLING_OPTS.find((o) => o[0] === label)
-  return hit ? { bowling_action: hit[1], bowling_type: hit[2] } : { bowling_action: null, bowling_type: null }
-}
-function bowls(action, type) {
-  return !!(action || type)
-}
 
 const ROLE_CHIPS = [['Batter', 'Batter'], ['Bowler', 'Bowler'], ['All-R', 'All Rounder'], ['Wicketkeeper', 'Wicketkeeper']]
 
 function statusOfMatrixRow(row) {
   return row?.status ?? 'NO_RESPONSE'
-}
-
-/* ── Inline field controls (match prototype look via pb-* tokens) ─────────── */
-function Field({ label, half, children }) {
-  return (
-    <div className={half ? 'flex-1 min-w-0 basis-full sm:basis-[calc(50%-6px)]' : 'flex-1 min-w-0 basis-full'}>
-      <label className="block text-[11.5px] text-pb-faint mb-[5px]">{label}</label>
-      {children}
-    </div>
-  )
-}
-function PSelect({ value, onChange, options }) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)}
-      className="w-full bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2.5 py-2 text-[13.5px] cursor-pointer focus:outline-none focus:border-pb-accent">
-      {options.map((o) => Array.isArray(o)
-        ? <option key={o[0]} value={o[0]}>{o[1]}</option>
-        : <option key={o} value={o}>{ROLE_LABEL[o] ?? o}</option>)}
-    </select>
-  )
-}
-function PInput({ value, onChange, placeholder, type }) {
-  return (
-    <input type={type || 'text'} value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-      className="w-full bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2.5 py-2 text-[13.5px] outline-none focus:border-pb-accent placeholder:text-pb-faint" />
-  )
-}
-function PToggle({ on, onChange, label }) {
-  return (
-    <label className="flex items-center gap-2.5 cursor-pointer py-2">
-      <span onClick={() => onChange(!on)}
-        className="relative w-[38px] h-[22px] rounded-full transition shrink-0"
-        style={{ background: on ? 'var(--pb-accent)' : 'var(--pb-surface2)', border: `1px solid ${on ? 'var(--pb-accent)' : 'var(--pb-hairline2)'}` }}>
-        <span className="absolute top-[2px] w-4 h-4 rounded-full transition-all"
-          style={{ left: on ? 18 : 2, background: on ? '#04130c' : 'var(--pb-faint)' }} />
-      </span>
-      <span className="text-[13.5px] text-pb-text">{label}</span>
-    </label>
-  )
-}
-
-/* ── Selection snapshot (right column, left half) ─────────────────────────── */
-function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail }) {
-  const snap = snapshot || {}
-  const avail = snap.availability_next || []
-  const bat = snap.recent_batting || []
-  const bowl = snap.recent_bowling || []
-  const showBowling = bowls(draft.bowling_action, draft.bowling_type) && bowl.length > 0
-  const lp = snap.last_picked
-  const lastPicked = lp
-    ? [lp.round, lp.opponent ? `vs ${lp.opponent}` : null].filter(Boolean).join(' · ') || (lp.date || null)
-    : null
-
-  return (
-    <div className="px-4 sm:px-5 py-[18px] border-b lg:border-b-0 lg:border-r border-pb-hairline">
-      <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-faint mb-3.5">Selection snapshot</div>
-
-      {/* Availability — next 4 weeks */}
-      <div className="mb-[18px]">
-        <div className="text-xs text-pb-faint mb-2">Availability — next 4 weeks</div>
-        {avail.length === 0
-          ? <div className="text-[11.5px] text-pb-faintest">No upcoming fixtures.</div>
-          : (
-            <div className="flex gap-2">
-              {avail.map((a, j) => (
-                <button key={a.date} type="button"
-                  onClick={canEditAvail ? () => onEditAvail(player, a.date) : undefined}
-                  title={canEditAvail ? 'Update availability for this date' : undefined}
-                  className={`flex-1 text-center rounded-lg py-[9px] px-1 ${canEditAvail ? 'cursor-pointer hover:border-pb-accent/50' : 'cursor-default'}`}
-                  style={{
-                    background: j === 0 ? 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' : 'var(--pb-surface2)',
-                    border: `1px solid ${j === 0 ? 'color-mix(in srgb, var(--pb-accent) 25%, transparent)' : 'var(--pb-hairline)'}`,
-                  }}>
-                  <div className="font-mono text-[9.5px] text-pb-faint">{(a.label || '').replace(/^[A-Za-z]{3} /, '')}</div>
-                  <div className="flex justify-center mt-1.5"><Dot status={a.status} size={11} /></div>
-                </button>
-              ))}
-            </div>
-          )}
-      </div>
-
-      {/* Squad & eligibility */}
-      <div className="mb-[18px]">
-        <div className="text-xs text-pb-faint mb-2">Squad &amp; eligibility</div>
-        {squad
-          ? (
-            <div className="flex gap-1.5 flex-wrap items-center">
-              <Tag tone="accent">{squad.name}</Tag>
-              <span className="text-[11.5px] text-pb-faintest">assigned · suggested first for {squad.name} fixtures</span>
-            </div>
-          )
-          : <span className="text-[11.5px] text-pb-faintest">No squad assigned.</span>}
-      </div>
-
-      {/* Recent form */}
-      <div className="mb-[18px]">
-        <div className="text-xs text-pb-faint mb-2">Recent form</div>
-        <div className="flex flex-col gap-2.5">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[9.5px] text-pb-faint w-14">BATTING</span>
-            <div className="flex gap-1.5">
-              {bat.length === 0
-                ? <span className="text-[11.5px] text-pb-faintest">No innings yet</span>
-                : bat.map((s, i) => (
-                  <span key={i} className="pb-num min-w-[28px] text-center py-[5px] rounded-md text-[12.5px] font-semibold"
-                    style={{
-                      background: s >= 50 ? 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' : 'var(--pb-surface2)',
-                      color: s >= 50 ? 'var(--pb-accent)' : s === 0 ? 'var(--pb-red)' : 'var(--pb-dim)',
-                      border: '1px solid var(--pb-hairline)',
-                    }}>{s}</span>
-                ))}
-            </div>
-          </div>
-          {showBowling && (
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[9.5px] text-pb-faint w-14">BOWLING</span>
-              <div className="flex gap-1.5">
-                {bowl.map((f, i) => (
-                  <span key={i} className="pb-num min-w-[38px] text-center py-[5px] rounded-md text-[12.5px] font-semibold"
-                    style={{
-                      background: f.wickets >= 3 ? 'color-mix(in srgb, var(--pb-chart-wickets) 14%, transparent)' : 'var(--pb-surface2)',
-                      color: f.wickets >= 3 ? 'var(--pb-chart-wickets)' : 'var(--pb-dim)',
-                      border: '1px solid var(--pb-hairline)',
-                    }}>{f.wickets}/{f.runs}</span>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[9.5px] text-pb-faint w-14">CATCHES</span>
-            <span className="pb-num font-display font-bold text-base text-pb-text">{snap.season_catches ?? 0}</span>
-            <span className="text-[11.5px] text-pb-faintest">this season</span>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <div className="text-xs text-pb-faint mb-1">Last picked</div>
-        <div className={`text-[13.5px] ${lastPicked ? 'text-pb-text' : 'text-pb-faint'}`}>{lastPicked || 'Not recently'}</div>
-      </div>
-    </div>
-  )
-}
-
-/* ── Details (right column, right half) — inline editable ─────────────────── */
-function Details({ draft, set, teams }) {
-  const bowlingLabelVal = bowlingLabel(draft.bowling_action, draft.bowling_type)
-  return (
-    <div className="px-5 py-[18px]">
-      <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-faint mb-3.5">Details</div>
-      <div className="flex flex-wrap gap-3">
-        <Field label="Squad (selection pool)" half>
-          <PSelect value={draft.squad_team_id || ''} onChange={(v) => set('squad_team_id', v || null)}
-            options={[['', '— Unassigned —'], ...teams.map((t) => [t.id, t.name])]} />
-        </Field>
-        <Field label="Role" half>
-          <PSelect value={draft.player_role || ''} onChange={(v) => set('player_role', v || null)} options={ROLE_OPTS} />
-        </Field>
-        <Field label="Batting hand" half>
-          <PSelect value={draft.batting_hand || ''} onChange={(v) => set('batting_hand', v || null)} options={BAT_HANDS} />
-        </Field>
-        <Field label="Bowling" half>
-          <PSelect value={bowlingLabelVal}
-            onChange={(label) => { const m = bowlingFromLabel(label); set('bowling_action', m.bowling_action); set('bowling_type', m.bowling_type) }}
-            options={BOWLING_OPTS.map((o) => [o[0], o[0]])} />
-        </Field>
-        <Field label="Gender" half>
-          <PSelect value={draft.gender || ''} onChange={(v) => set('gender', v || null)} options={GENDER_OPTS} />
-        </Field>
-        <Field label="Email" half>
-          <PInput value={draft.email} onChange={(v) => set('email', v)} type="email" placeholder="—" />
-        </Field>
-        <Field label="Phone" half>
-          <PInput value={draft.phone} onChange={(v) => set('phone', v)} placeholder="—" />
-        </Field>
-      </div>
-
-      <div className="mt-1.5 border-t border-pb-hairline pt-1.5">
-        <PToggle on={!!draft.is_opening_batsman} onChange={(v) => set('is_opening_batsman', v)} label="Opening batsman" />
-        <PToggle on={!!draft.is_overseas} onChange={(v) => set('is_overseas', v)} label="Overseas player" />
-        {draft.is_overseas && (
-          <div className="pl-[47px] pb-1.5">
-            <PInput value={draft.overseas_country} onChange={(v) => set('overseas_country', v)} placeholder="Country" />
-          </div>
-        )}
-        <PToggle on={draft.status === 'inactive'} onChange={(v) => set('status', v ? 'inactive' : 'active')}
-          label="Inactive — hide from availability & selection" />
-      </div>
-
-      {/* Tucked away */}
-      <div className="mt-3 pt-3 border-t border-pb-hairline flex flex-wrap gap-3.5 items-center">
-        <span className="font-mono text-[10px] text-pb-faintest">
-          PlayHQ ID: {draft.playhq_id ? `${String(draft.playhq_id).slice(0, 18)}…` : '—'}
-        </span>
-        <label className="inline-flex items-center gap-1.5 text-[11px] text-pb-faintest cursor-pointer">
-          <input type="checkbox" checked={!draft.is_player} onChange={(e) => set('is_player', !e.target.checked)}
-            className="accent-pb-faint" />
-          Non-player (coach/scorer)
-        </label>
-      </div>
-    </div>
-  )
-}
-
-/* ── Profile panel ────────────────────────────────────────────────────────── */
-function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit, onEditAvail, canEditAvail }) {
-  const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }))
-  const squad = profile.squad
-  const handLabel = (BAT_HANDS.find((h) => h[0] === (draft.batting_hand || '')) || [])[1]
-  const showBowlMeta = bowls(draft.bowling_action, draft.bowling_type)
-
-  return (
-    <div className="overflow-auto h-full">
-      {/* Header */}
-      <div className="px-5 py-[18px] border-b border-pb-hairline"
-        style={{ background: 'linear-gradient(140deg, color-mix(in srgb, var(--pb-accent) 8%, transparent), transparent 55%)' }}>
-        <div className="flex items-center gap-4">
-          <Avatar player={{ ...profile, skill_positions: draft.skill_positions }} size={56} />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <h2 className="m-0 font-display font-extrabold text-2xl truncate">{profile.display_name || profile.name}</h2>
-              {squad && <Tag tone="accent">{squad.name} squad</Tag>}
-              {draft.is_overseas && <Tag tone="amber">Overseas{draft.overseas_country ? ` · ${draft.overseas_country}` : ''}</Tag>}
-              {draft.status === 'inactive' && <Tag tone="faint">Inactive</Tag>}
-            </div>
-            <div className="flex items-center gap-2.5 mt-1.5 text-pb-dim text-[13px] flex-wrap">
-              {draft.player_role && <><span>{draft.player_role}</span><span className="text-pb-faintest">·</span></>}
-              {handLabel && <span>{handLabel}</span>}
-              {showBowlMeta && <><span className="text-pb-faintest">·</span><span>{bowlingLabel(draft.bowling_action, draft.bowling_type)}</span></>}
-              {draft.is_opening_batsman && (
-                <span className="font-mono text-[9.5px] text-pb-accent bg-pb-accent/10 px-1.5 py-px rounded">OPENER</span>
-              )}
-            </div>
-          </div>
-          {canEdit && (
-            <Btn variant="primary" sm icon={saved ? 'check' : undefined} disabled={!dirty} onClick={onSave}>
-              {saved ? 'Saved' : 'Save changes'}
-            </Btn>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2">
-        <Snapshot snapshot={profile.snapshot} squad={squad} draft={draft}
-          player={profile} onEditAvail={onEditAvail} canEditAvail={canEditAvail} />
-        <Details draft={draft} set={set} teams={profile._teams || []} />
-      </div>
-    </div>
-  )
 }
 
 /* ── List row ─────────────────────────────────────────────────────────────── */
@@ -415,50 +135,6 @@ function PlayerList({ players, statusOf, squadNameOf, selectedId, onSelect, onOp
       )}
     </div>
   )
-}
-
-/* ── Build the editable draft from a profile payload ─────────────────────── */
-function draftFromProfile(p) {
-  return {
-    display_name_override: p.display_name_override || '',
-    player_role: p.player_role || '',
-    batting_hand: p.batting_hand || '',
-    bowling_action: p.bowling_action || null,
-    bowling_type: p.bowling_type || null,
-    is_opening_batsman: !!p.is_opening_batsman,
-    gender: p.gender || '',
-    is_player: p.is_player !== false,
-    status: p.status || 'active',
-    email: p.email || '',
-    phone: p.phone || '',
-    squad_team_id: p.squad_team_id || null,
-    is_overseas: !!p.is_overseas,
-    overseas_country: p.overseas_country || '',
-    skill_positions: p.skill_positions || [],
-    playhq_id: p.playhq_id || null,
-  }
-}
-
-// Only the fields the PATCH endpoint accepts, normalised (empty string → null
-// for the optional text/select fields so they clear cleanly).
-function patchFromDraft(d) {
-  const norm = (v) => (v === '' ? null : v)
-  return {
-    display_name_override: norm(d.display_name_override),
-    player_role: norm(d.player_role),
-    batting_hand: norm(d.batting_hand),
-    bowling_action: d.bowling_action || null,
-    bowling_type: d.bowling_type || null,
-    is_opening_batsman: !!d.is_opening_batsman,
-    gender: norm(d.gender),
-    is_player: d.is_player !== false,
-    status: d.status || 'active',
-    email: norm(d.email),
-    phone: norm(d.phone),
-    squad_team_id: d.squad_team_id || null,
-    is_overseas: !!d.is_overseas,
-    overseas_country: norm(d.overseas_country),
-  }
 }
 
 export default function BetterSelectPlayers() {
@@ -598,6 +274,13 @@ export default function BetterSelectPlayers() {
     }
   }
 
+  // Photo upload/remove happens inside the profile panel; reflect the new URL
+  // into the panel header avatar and the list row immediately.
+  const onPhotoChange = useCallback((url) => {
+    setProfile((p) => p ? { ...p, photo_url: url } : p)
+    setPlayers((rows) => (rows || []).map((r) => r.id === selId ? { ...r, photo_url: url } : r))
+  }, [selId])
+
   const onBulkSquad = async (ids, squadId) => {
     try {
       await Promise.all(ids.map((id) => api.bsUpdatePlayerProfile(id, { squad_team_id: squadId })))
@@ -637,7 +320,8 @@ export default function BetterSelectPlayers() {
               ? <PbSpinner message="Loading profile…" />
               : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
                   dirty={dirty} saved={savedTick} onSave={onSave} canEdit={canEdit}
-                  onEditAvail={openAvail} canEditAvail={canEdit} />}
+                  onEditAvail={openAvail} canEditAvail={canEdit}
+                  onPhotoChange={onPhotoChange} />}
         </div>
       </div>
 

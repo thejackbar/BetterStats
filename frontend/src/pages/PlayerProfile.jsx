@@ -14,6 +14,8 @@ import {
 } from '../lib/presskit'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
+import { CAP } from '../lib/capabilities'
+import { battingHandLabel, bowlingLabel, bowls, genderLabel } from '../lib/playerAttributes'
 import {
   BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -2065,6 +2067,8 @@ function AchievementsSection({ playerId, orgId, playerName }) {
 // ── Main component ────────────────────────────────────────────────────────
 export default function PlayerProfile() {
   const { playerId } = useParams()
+  const { hasCapability } = useAuth()
+  const canManage = hasCapability(CAP.MANAGE_PLAYERS)
   const [seasonId, setSeasonId] = useState(null)
   const { data, loading, error } = usePlayerStats(playerId, { seasonId })
   const [org, setOrg] = useState(null)
@@ -2232,6 +2236,20 @@ export default function PlayerProfile() {
     }).slice(0, 6)
   })()
 
+  // Descriptive attributes the club has opted to show publicly (the backend
+  // only emits the fields whose visibility toggle is on; overseas is shown
+  // separately and always). Role lives in the eyebrow label above.
+  const playerBioBits = (() => {
+    if (!player) return []
+    const bits = []
+    const bh = battingHandLabel(player.batting_hand)
+    if (bh) bits.push(bh)
+    if (bowls(player.bowling_action, player.bowling_type)) bits.push(bowlingLabel(player.bowling_action, player.bowling_type))
+    const g = genderLabel(player.gender)
+    if (g) bits.push(g)
+    return bits
+  })()
+
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
@@ -2246,7 +2264,7 @@ export default function PlayerProfile() {
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-6 mb-6 items-end">
           <div>
             <Label>
-              {org?.name || ''} · {player.role || 'PLAYER'}
+              {org?.name || ''} · {player.player_role || player.role || 'PLAYER'}
               {player.is_overseas && (
                 <span className="ml-2 inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 px-2 py-0.5 rounded-sm border"
                   style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 40%, transparent)', color: 'var(--pb-amber)', background: 'color-mix(in srgb, var(--pb-amber) 10%, transparent)' }}>
@@ -2264,6 +2282,20 @@ export default function PlayerProfile() {
             <h1 className="font-display text-[48px] sm:text-[72px] font-bold tracking-tight leading-[0.92] mt-1.5 text-pb-text">
               {fmtName(player.display_name)}
             </h1>
+            {/* Descriptive attributes (batting hand · bowling · gender · opener) */}
+            {(playerBioBits.length > 0 || player.is_opening_batsman) && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3 text-[13px] text-pb-dim">
+                {playerBioBits.map((b, i) => (
+                  <span key={i} className="inline-flex items-center">
+                    {i > 0 && <span className="text-pb-faintest mr-2">·</span>}
+                    {b}
+                  </span>
+                ))}
+                {player.is_opening_batsman && (
+                  <span className="font-mono text-[9.5px] tracking-wide2 text-pb-accent bg-pb-accent/10 px-1.5 py-0.5 rounded ml-1">OPENER</span>
+                )}
+              </div>
+            )}
             {/* Header achievement badges */}
             {headerAchievements.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-3">
@@ -2292,6 +2324,11 @@ export default function PlayerProfile() {
               />
             )}
             <div className="flex gap-2 flex-wrap justify-end">
+              {canManage && (
+                <Link to={`/admin/betterselect/players?player=${playerId}`}>
+                  <Btn>Manage</Btn>
+                </Link>
+              )}
               {orgSlug && (
                 <Link to={`/${orgSlug}/compare?playerA=${playerId}`}>
                   <Btn>Compare</Btn>

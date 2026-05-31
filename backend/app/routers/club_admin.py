@@ -607,6 +607,12 @@ class SettingsPatch(BaseModel):
     player_name_format: Optional[str] = None
     dormancy_months: Optional[int] = None
     default_team_size: Optional[int] = None
+    # Public player-profile attribute visibility (overseas is always shown).
+    public_show_role: Optional[bool] = None
+    public_show_batting: Optional[bool] = None
+    public_show_bowling: Optional[bool] = None
+    public_show_opening: Optional[bool] = None
+    public_show_gender: Optional[bool] = None
 
 
 # Keys allowed inside theme_config and the sub-keys allowed in light/dark palettes.
@@ -672,6 +678,11 @@ async def get_settings(
         "player_name_format": club.player_name_format or "last_first",
         "dormancy_months": club.dormancy_months if club.dormancy_months is not None else 24,
         "default_team_size": club.default_team_size if club.default_team_size is not None else 11,
+        "public_show_role": bool(club.public_show_role),
+        "public_show_batting": bool(club.public_show_batting),
+        "public_show_bowling": bool(club.public_show_bowling),
+        "public_show_opening": bool(club.public_show_opening),
+        "public_show_gender": bool(club.public_show_gender),
     }
 
 
@@ -706,6 +717,17 @@ async def patch_settings(
         club.dormancy_months = max(1, min(600, int(data.dormancy_months)))
     if data.default_team_size is not None and int(data.default_team_size) in (0, 11, 12, 13):
         club.default_team_size = int(data.default_team_size)
+    # Public player-attribute visibility toggles.
+    if data.public_show_role is not None:
+        club.public_show_role = bool(data.public_show_role)
+    if data.public_show_batting is not None:
+        club.public_show_batting = bool(data.public_show_batting)
+    if data.public_show_bowling is not None:
+        club.public_show_bowling = bool(data.public_show_bowling)
+    if data.public_show_opening is not None:
+        club.public_show_opening = bool(data.public_show_opening)
+    if data.public_show_gender is not None:
+        club.public_show_gender = bool(data.public_show_gender)
 
     # Record which fields the admin touched. Don't dump full new values into
     # the audit row — colour codes / names will already be visible in the
