@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 import { PbSpinner } from '../../lib/presskit'
 import { Profile, draftFromProfile, patchFromDraft } from '../../components/player/PlayerProfilePanel'
+import { QuickAvailModal } from './betterselect/ui'
 
 // ---------------------------------------------------------------------------
 // ProfileModal — the canonical player profile (shared with BetterSelect),
@@ -19,6 +20,7 @@ function ProfileModal({ playerId, teams, canEdit, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState('')
+  const [availEdit, setAvailEdit] = useState(null) // { player, date }
 
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose() }
@@ -62,23 +64,52 @@ function ProfileModal({ playerId, teams, canEdit, onClose, onSaved }) {
     onSaved?.({ id: playerId, photo_url: url })
   }, [playerId, onSaved])
 
+  // Availability editing — same quick-update flow as BetterSelect. Persists one
+  // (player, date) row, then re-pulls the profile so the snapshot dot updates.
+  const pickAvail = async (status) => {
+    const ed = availEdit
+    setAvailEdit(null)
+    if (!ed?.player || !ed?.date) return
+    try {
+      await api.bsSetAvailability({ player_id: ed.player.id, date: ed.date, status })
+      const fresh = await api.bsGetPlayerProfile(playerId)
+      setProfile(fresh)
+    } catch (e) {
+      setErr(e.message || 'Could not update availability')
+    }
+  }
+  const availEntry = availEdit
+    ? (profile?.snapshot?.availability_next || []).find((a) => a.date === availEdit.date)
+    : null
+
   const profileForView = profile ? { ...profile, _teams: teams } : null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4"
-      style={{ backdropFilter: 'blur(2px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div className="pb-card bg-pb-surface w-full max-w-5xl mt-8 mb-8 max-h-[88vh] overflow-hidden flex flex-col">
-        {err && <div className="px-5 py-2 font-mono text-[11px] text-pb-red border-b border-pb-hairline shrink-0">{err.toUpperCase()}</div>}
-        {!profileForView || !draft
-          ? <div className="p-10"><PbSpinner message="Loading profile…" /></div>
-          : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
-              dirty={dirty} saved={saved} onSave={onSave} canEdit={canEdit}
-              canEditAvail={false} onClose={onClose} onPhotoChange={onPhotoChange} />}
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4"
+        style={{ backdropFilter: 'blur(2px)' }}
+        onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      >
+        <div className="pb-card bg-pb-surface w-full max-w-5xl mt-8 mb-8 max-h-[88vh] overflow-hidden flex flex-col">
+          {err && <div className="px-5 py-2 font-mono text-[11px] text-pb-red border-b border-pb-hairline shrink-0">{err.toUpperCase()}</div>}
+          {!profileForView || !draft
+            ? <div className="p-10"><PbSpinner message="Loading profile…" /></div>
+            : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
+                dirty={dirty} saved={saved} onSave={onSave} canEdit={canEdit}
+                canEditAvail={canEdit} onEditAvail={(pl, date) => setAvailEdit({ player: pl, date })}
+                onClose={onClose} onPhotoChange={onPhotoChange} />}
+        </div>
       </div>
-    </div>
+      {availEdit && (
+        <QuickAvailModal
+          player={availEdit.player}
+          dateLabel={availEntry?.label || availEdit.date}
+          current={availEntry?.status || 'NO_RESPONSE'}
+          onPick={pickAvail}
+          onClose={() => setAvailEdit(null)} />
+      )}
+    </>
   )
 }
 
