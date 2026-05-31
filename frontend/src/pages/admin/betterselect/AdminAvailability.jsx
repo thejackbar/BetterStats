@@ -9,9 +9,15 @@ import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import {
-  Icon, Avatar, RoleChips, Btn, Segmented, Search, Chip, Empty, AvailSummary, QuickAvailModal,
+  Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
   RecencySelect, playedWithinYears,
 } from './ui'
+import { useFilters, FilterBar } from './filters'
+
+const ROLE_OPTS = [
+  { value: 'Batter', label: 'Batter' }, { value: 'Bowler', label: 'Bowler' },
+  { value: 'All Rounder', label: 'All-rounder' }, { value: 'Wicketkeeper', label: 'Keeper' },
+]
 
 // ============================================================================
 // Availability — players × upcoming-dates matrix.
@@ -64,12 +70,10 @@ export default function AdminAvailability() {
   const [data, setData] = useState(null)
   const [avail, setAvail] = useState({}) // {playerId: {date: {status, source, note, ...}}}
 
-  // Filters
-  const [search, setSearch] = useState('')
+  // Filters — roster + recency are quiet view controls; the rest are facets.
   const [roster, setRoster] = useState('current')   // 'current' hides dormant/inactive; 'all' shows everyone
-  const [squadFilter, setSquadFilter] = useState('') // '' = any squad
   const [years, setYears] = useState(0)              // recency: played within N yrs (0 = any)
-  const [respFilter, setRespFilter] = useState(null) // availability status across shown dates
+  const [selectedIds, setSelectedIds] = useState(() => new Set()) // picked in any XI this round
 
   // Selected week (column) — drives the Pick XI handoff and single-week bulk.
   const [selDate, setSelDate] = useState(null)
@@ -120,6 +124,17 @@ export default function AdminAvailability() {
   }, [allDates, rangeApplied])
   const squadOptions = useMemo(() => data?.all_squads || [], [data])
 
+  const facets = useMemo(() => [
+    { key: 'squad', label: 'Squad', type: 'multi', options: squadOptions.map((s) => ({ value: s, label: s })) },
+    { key: 'avail', label: 'Availability', type: 'multi', options: AVAIL_ORDER.map((s) => ({ value: s, label: AVAILABILITY[s].label, dot: AVAILABILITY[s].cssVar })) },
+    { key: 'role', label: 'Role', type: 'multi', options: ROLE_OPTS },
+    { key: 'selected', label: 'Selected', type: 'single', options: [
+      { value: 'selected', label: 'Selected this round' }, { value: 'unselected', label: 'Not selected' },
+    ] },
+  ], [squadOptions])
+  const filters = useFilters(facets)
+  const { values, search } = filters
+
   // Staged-range preview (for the panel's "N games" + chips, before Apply).
   const idxAll = useCallback((dt) => allDates.findIndex((d) => d.date === dt), [allDates])
   const stagedDates = useMemo(() => {
@@ -136,27 +151,41 @@ export default function AdminAvailability() {
     if (dates.length && selDate && !dates.some((d) => d.date === selDate)) setSelDate(dates[0].date)
   }, [dates, selDate])
 
-  // A player's "effective" response for the response filter.
+  // Who's named in any saved XI for the selected week's round — powers "Selected".
+  useEffect(() => {
+    if (!selDate) { setSelectedIds(new Set()); return }
+    let live = true
+    api.bsSelectedPlayers(selDate)
+      .then((d) => { if (live) setSelectedIds(new Set(d?.player_ids || [])) })
+      .catch(() => { if (live) setSelectedIds(new Set()) })
+    return () => { live = false }
+  }, [selDate])
+
+  // A player's "effective" response for the (multi-select) availability facet:
+  // matches if ANY chosen status applies across the shown dates.
   const matchesResponse = useCallback((p) => {
-    if (!respFilter) return true
+    const sel = values.avail || []
+    if (!sel.length) return true
     const byDate = avail[p.id] || {}
-    if (respFilter === 'NO_RESPONSE') {
-      return dates.every((d) => (byDate[d.date]?.status || 'NO_RESPONSE') === 'NO_RESPONSE')
-    }
-    return dates.some((d) => byDate[d.date]?.status === respFilter)
-  }, [respFilter, avail, dates])
+    return sel.some((s) => s === 'NO_RESPONSE'
+      ? dates.every((d) => (byDate[d.date]?.status || 'NO_RESPONSE') === 'NO_RESPONSE')
+      : dates.some((d) => byDate[d.date]?.status === s))
+  }, [values.avail, avail, dates])
 
   const players = useMemo(() => {
     return (data?.players || []).filter((p) => {
       // Roster visibility — 'current' hides dormant (and never-played inactive).
       if (roster === 'current' && !p.is_current) return false
-      if (squadFilter && !(p.squads || []).includes(squadFilter)) return false
+      if (values.squad?.length && !values.squad.some((s) => (p.squads || []).includes(s))) return false
+      if (values.role?.length && !values.role.includes(p.player_role)) return false
+      if (values.selected === 'selected' && !selectedIds.has(p.id)) return false
+      if (values.selected === 'unselected' && selectedIds.has(p.id)) return false
       if (!playedWithinYears(p.last_played, years)) return false
       if (search.trim() && !nameMatchesSearch(p.display_name, search)) return false
       if (!matchesResponse(p)) return false
       return true
     })
-  }, [data, roster, squadFilter, years, search, matchesResponse])
+  }, [data, roster, values, years, search, selectedIds, matchesResponse])
 
   // Per-date player list as objects carrying a flat `availability` status, so we
   // can hand the matched-player set straight to <AvailSummary statusOf=…>.
@@ -252,33 +281,22 @@ export default function AdminAvailability() {
         <Btn variant="primary" sm icon="selection" onClick={() => navigate('/admin/betterselect/selection')}>Pick this weekend</Btn>
       )}
     >
-      {/* Filter bar — one compact row */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <Search value={search} onChange={setSearch} placeholder="Search players…" />
-        <Segmented value={roster} onChange={setRoster} options={[
-          { value: 'current', label: 'Current squad' },
-          { value: 'all', label: 'All' },
-        ]} />
-        {squadOptions.length > 0 && (
-          <select value={squadFilter} onChange={(e) => setSquadFilter(e.target.value)}
-            title="Filter to one squad"
-            className="bg-pb-surface2 border pb-hairline rounded-lg px-2.5 h-[38px] text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-            <option value="">All squads</option>
-            {squadOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        )}
-        <RecencySelect value={years} onChange={setYears} />
-        <div className="flex flex-wrap gap-1.5">
-          {AVAIL_ORDER.map((s) => (
-            <Chip key={s} label={AVAILABILITY[s].label} dot={AVAILABILITY[s].cssVar}
-              active={respFilter === s} onClick={() => setRespFilter(respFilter === s ? null : s)} />
-          ))}
-        </div>
-        <button onClick={() => setRangeOn((v) => !v)}
-          className={`ml-auto inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${rangeOn ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
-          <Icon name="fixtures" size={14} /> Date range {rangeOn ? '▲' : '▼'}
-        </button>
-      </div>
+      {/* Filter bar — shared FilterBar (facets) + quiet view controls */}
+      <FilterBar
+        filters={filters} facets={facets} searchPlaceholder="Search players…"
+        count={players.length} total={data.players?.length} className="mb-4"
+        right={(<>
+          <Segmented value={roster} onChange={setRoster} sm options={[
+            { value: 'current', label: 'Current squad' },
+            { value: 'all', label: 'All' },
+          ]} />
+          <RecencySelect value={years} onChange={setYears} />
+          <button onClick={() => setRangeOn((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${rangeOn ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
+            <Icon name="fixtures" size={14} /> Date range {rangeOn ? '▲' : '▼'}
+          </button>
+        </>)}
+      />
 
       {/* Date-range panel: narrows the shown columns (Apply) and scopes the
           bulk-fill. Staged From/To only take effect on Apply, so the column
