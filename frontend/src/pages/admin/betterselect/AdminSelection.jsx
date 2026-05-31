@@ -382,10 +382,11 @@ export default function AdminSelection() {
 
   return (
     <BetterSelectLayout title="Selection" actions={actions}>
-      {/* Context bar — fixture identity + side size + count (accent banner = legit white-label) */}
-      <div className="rounded-lg px-5 py-3 mb-3" style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+      {/* Context bar — fixture identity + side size + count. Soft accent tint
+          (not a solid fill) so the club colour reads as a calm header band. */}
+      <div className="rounded-lg px-5 py-3 mb-3 border" style={{ background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' }}>
         <div className="flex items-center justify-between gap-3">
-          <Link to="/admin/betterselect/selection" className="text-[11px] opacity-80 hover:opacity-100">← All teams</Link>
+          <Link to="/admin/betterselect/selection" className="text-[11px] text-pb-faint hover:text-pb-text">← All teams</Link>
           {allFixtures.length > 1 && (
             <select value={fixtureId} onChange={(e) => navigate(`/admin/betterselect/select/${e.target.value}`)}
               className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[11px] text-pb-text max-w-[55%]">

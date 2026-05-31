@@ -10,6 +10,11 @@
 :root {
   /* Brand + semantic colours (shared across light and dark) */
   --pb-accent:          #16c784;
+  /* Fixed BetterStats brand green — NEVER overridden by club white-labelling
+     (buildThemeCss writes --pb-accent and friends, never this). Used for the
+     BetterStats product wordmark so its identity stays green under any club
+     accent. */
+  --pb-brand:           #16c784;
   --pb-positive:        #16c784;
   --pb-negative:        #ef5b5b;
   --pb-red:             #ef5b5b;
