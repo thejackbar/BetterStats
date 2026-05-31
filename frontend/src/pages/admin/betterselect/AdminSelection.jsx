@@ -123,9 +123,14 @@ export default function AdminSelection() {
   }, [data])
   const usedIds = useMemo(() => new Set(slots.filter(Boolean)), [slots])
 
-  // Comparator: assigned-squad match first, then availability, then name.
+  // Comparator: autofill tier (own-squad → grade below → grade above), then
+  // composite form score, then availability, then name. Tier/score come from
+  // the backend; ineligibles (null tier) sink to the bottom.
   const cmp = useCallback((a, b) => {
-    if (!!a.squad_match !== !!b.squad_match) return a.squad_match ? -1 : 1
+    const at = a.tier ?? 99, bt = b.tier ?? 99
+    if (at !== bt) return at - bt
+    const sa = a.score ?? 0, sb = b.score ?? 0
+    if (sa !== sb) return sb - sa
     const r = availRank(a.availability) - availRank(b.availability)
     if (r !== 0) return r
     return (a.display_name || '').localeCompare(b.display_name || '')
@@ -229,15 +234,20 @@ export default function AdminSelection() {
   const toggleCap = (id) => { setCapId((c) => (c === id ? null : id)); markDirty() }
   const toggleWk = (id) => { setWkId((c) => (c === id ? null : id)); markDirty() }
 
-  // Suggestion per empty slot (distinct candidates).
+  // Per-slot suggestion: best autofill-eligible candidate that fits the slot's
+  // role band (openers for 1-2, bowlers for 9-11, etc.). Same tier discipline
+  // as fillEmpty — never proposes a women's-grade player for a men's fixture
+  // or a 1st XI regular for a 6th XI sheet.
   const suggestMap = useMemo(() => {
     const out = {}
     const taken = new Set(slots.filter(Boolean))
-    const avail = (data?.pool || []).filter((p) => !taken.has(p.id) && !(p.clash?.length > 0) && p.availability !== 'UNAVAILABLE')
+    const eligible = (data?.pool || []).filter((p) =>
+      p.autofill_eligible && !taken.has(p.id) && !(p.clash?.length > 0) && p.availability !== 'UNAVAILABLE'
+    )
     slots.forEach((id, i) => {
       if (id) return
-      const fit = avail.filter((p) => !taken.has(p.id) && fitsSlot(p, i)).sort(cmp)
-      const any = avail.filter((p) => !taken.has(p.id)).sort(cmp)
+      const fit = eligible.filter((p) => !taken.has(p.id) && fitsSlot(p, i)).sort(cmp)
+      const any = eligible.filter((p) => !taken.has(p.id)).sort(cmp)
       const pick = fit[0] || any[0]
       if (pick) { out[i] = pick; taken.add(pick.id) }
     })
@@ -247,6 +257,12 @@ export default function AdminSelection() {
   // Fill empty slots. With `useLastWeek`, seed position-by-position from the
   // previous XI first (skipping anyone now unavailable/clashing/already in),
   // then top up remaining gaps with the best available player.
+  //
+  // Tier discipline: own-squad players fill first; only when that pool is
+  // exhausted do we dip into the grade below (promotion candidates), then the
+  // grade above (drop-down candidates). A player carried over from last week
+  // who's no longer eligible (e.g. they've moved squads) stays put — we don't
+  // tear last week's XI apart, but we don't bring more like them in either.
   const fillEmpty = (useLastWeek) => {
     if (!canEdit) return
     // No-limit has no fixed slots to fill — autofill would be meaningless.
@@ -262,14 +278,19 @@ export default function AdminSelection() {
           if (p && !taken.has(pid) && okToPick(p)) { next[i] = pid; taken.add(pid) }
         })
       }
-      const avail = (data?.pool || []).filter(okToPick)
-      next.forEach((id, i) => {
-        if (id) return
-        const fit = avail.filter((p) => !taken.has(p.id) && fitsSlot(p, i)).sort(cmp)
-        const any = avail.filter((p) => !taken.has(p.id)).sort(cmp)
-        const pick = fit[0] || any[0]
-        if (pick) { next[i] = pick.id; taken.add(pick.id) }
-      })
+      const eligible = (data?.pool || []).filter((p) => p.autofill_eligible && okToPick(p))
+      for (const tier of [1, 2, 3]) {
+        if (next.every(Boolean)) break
+        const tierPool = eligible.filter((p) => p.tier === tier)
+        if (!tierPool.length) continue
+        next.forEach((id, i) => {
+          if (id) return
+          const fit = tierPool.filter((p) => !taken.has(p.id) && fitsSlot(p, i)).sort(cmp)
+          const any = tierPool.filter((p) => !taken.has(p.id)).sort(cmp)
+          const pick = fit[0] || any[0]
+          if (pick) { next[i] = pick.id; taken.add(pick.id) }
+        })
+      }
       return next
     })
     // Carry captain/keeper from last week if those slots are otherwise unset.
