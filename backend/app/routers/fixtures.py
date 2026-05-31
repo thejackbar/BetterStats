@@ -211,6 +211,9 @@ async def list_fixtures(
     for f in fixtures:
         d = _serialize(f, teams)
         d["lineup_count"] = counts.get(str(f.id), 0)
+        # Club lineup size (0 = no limit) so the list can derive the 3-state
+        # "Completed XI" facet: none / in progress / complete.
+        d["format_size"] = club.default_team_size if club.default_team_size is not None else 11
         out.append(d)
     return out
 

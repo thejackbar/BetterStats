@@ -12,6 +12,7 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_user
 from app.auth.capabilities import require_cap, MANAGE_PLAYERS
+from app.services.squad_membership import sync_squad_membership
 from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
     get_career_batting_from_innings, get_career_bowling_from_spells, get_career_fielding_from_stats,
@@ -773,7 +774,7 @@ async def update_player_profile(
     player_id: str,
     body: PlayerProfileUpdate,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    user: User = Depends(require_cap(MANAGE_PLAYERS)),
 ):
     """Update admin-managed player attributes; returns the same shape as GET."""
     player = await db.get(Player, uuid.UUID(player_id))
@@ -782,10 +783,20 @@ async def update_player_profile(
     data = body.model_dump(exclude_unset=True)
     if "status" in data and data["status"] not in (None, "active", "inactive"):
         raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
-    # squad_team_id arrives as a string (or None to unassign) — coerce to UUID.
+    # squad_team_id arrives as a string (or None to unassign) — coerce to UUID,
+    # then mirror the change into team_members so "Squad" resolves to the same
+    # set on every BetterSelect screen.
     if "squad_team_id" in data:
         val = data.pop("squad_team_id")
-        player.squad_team_id = uuid.UUID(val) if val else None
+        old_team_id = player.squad_team_id
+        new_team_id = uuid.UUID(val) if val else None
+        player.squad_team_id = new_team_id
+        if new_team_id is None:
+            await sync_squad_membership(db, player.organisation_id, player.id, old_team_id, None, user.id)
+        else:
+            target = await db.get(Team, new_team_id)
+            if target and target.organisation_id == player.organisation_id:
+                await sync_squad_membership(db, player.organisation_id, player.id, old_team_id, new_team_id, user.id)
     for key, value in data.items():
         setattr(player, key, value)
     await db.commit()
