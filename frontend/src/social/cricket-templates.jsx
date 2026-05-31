@@ -215,23 +215,21 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
       <Halftone color={palette.ink} opacity={0.08} size={12} />
       <Stripes color={palette.ink} opacity={0.04} gap={20} angle={-30} />
       <div style={{
-        position: 'absolute', left: 56, top: 0, width: 564, height: 1080,
+        position: 'absolute', left: 72, top: 175, width: 468, height: 880,
         display: 'grid', placeItems: 'end center', overflow: 'hidden',
       }}>
         <div style={{
-          position: 'absolute', left: -100, bottom: -100, width: 700, height: 700,
-          background: `radial-gradient(circle at 40% 40%, ${palette.accent}33 0%, transparent 60%)`,
+          position: 'absolute', left: -60, bottom: -120, width: 620, height: 620,
+          background: `radial-gradient(circle at 45% 45%, ${palette.accent}33 0%, transparent 60%)`,
         }} />
         {(() => {
           const featured = featuredOf(players)
-          const hasHead = !!(heroImage || (featured && featured.headshot))
           const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
           return (
             <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
               style={{
                 position: 'relative',
-                height: hasHead ? 1960 : 920,
-                width: 'auto', marginBottom: hasHead ? -40 : 400,
+                maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto',
                 objectFit: 'contain', objectPosition: 'bottom',
                 filter: `drop-shadow(0 30px 60px ${palette.primary}cc)`,
               }} />
@@ -368,7 +366,9 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
             {match.venue.toUpperCase()}
           </div>
         </div>
-        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={100} shape="shield" />
+      </div>
+      <div style={{ position: 'absolute', top: 24, right: 32, zIndex: 3 }}>
+        <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={200} shape="shield" />
       </div>
       <div style={{
         position: 'absolute', left: 56, right: 56, top: 380, bottom: 100,
@@ -388,7 +388,7 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
                 <Halftone color={palette.ink} opacity={0.08} size={6} />
                 {p.headshot ? (
                   <img src={p.headshot} alt={p.first + ' ' + p.last}
-                    style={{ width: '84%', height: '84%', objectFit: 'contain', objectPosition: 'center bottom' }} />
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
                 ) : team.logo ? (
                   <img src={team.logo} alt={team.short}
                     style={{ width: '68%', height: '68%', objectFit: 'contain', opacity: 0.92 }} />
@@ -451,11 +451,10 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
           return (
             <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
               style={{
-                position: 'absolute', inset: 0,
-                width: '100%', height: '100%',
+                position: 'absolute', top: 56, left: 14, right: 14, bottom: 200,
                 objectFit: hasHead ? 'cover' : 'contain',
                 objectPosition: hasHead ? 'top center' : 'center',
-                padding: hasHead ? 0 : 80,
+                padding: hasHead ? 0 : 40,
               }} />
           )
         })()}
@@ -560,7 +559,7 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
           const isRole = p.role || 'BAT'
           return (
             <div key={i} style={{
-              display: 'grid', gridTemplateColumns: '60px 1fr auto', alignItems: 'center', gap: 14,
+              display: 'grid', gridTemplateColumns: '60px 1fr 76px', alignItems: 'center', gap: 14,
               padding: '8px 16px',
               background: i % 2 === 0 ? `${palette.ink}08` : 'transparent',
               borderLeft: `3px solid ${i === 10 ? palette.accent : 'transparent'}`,
@@ -571,7 +570,7 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
                 <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>{p.last}</span>
                 {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
               </div>
-              <div style={{ width: 64, textAlign: 'center', padding: '5px 0', background: 'transparent', border: `1.5px solid ${palette.ink}55`, color: palette.ink, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 1.5, lineHeight: 1, borderRadius: 2 }}>
+              <div style={{ width: 64, justifySelf: 'end', textAlign: 'center', padding: '5px 0', background: 'transparent', border: `1.5px solid ${palette.ink}55`, color: palette.ink, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 1.5, lineHeight: 1, borderRadius: 2 }}>
                 {ROLE_LABEL[isRole]}
               </div>
             </div>
@@ -677,7 +676,7 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={260} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, color: palette.ink, opacity: 0.85, marginTop: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
         </div>
-        <div style={{ flex: 1, height: 370, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'visible' }}>
+        <div style={{ flex: 1, height: 370, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'hidden' }}>
           {(() => {
             const featured = featuredOf(players)
             const hasHead = !!(heroImage || (featured && featured.headshot))
@@ -685,8 +684,8 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
             return (
               <img src={src} alt={featured?.last || team.short}
                 style={{
-                  maxHeight: 680,
-                  width: 'auto', objectFit: 'contain', objectPosition: 'bottom',
+                  maxHeight: '100%', maxWidth: '100%', width: 'auto', height: 'auto',
+                  objectFit: 'contain', objectPosition: 'bottom',
                   filter: `drop-shadow(0 20px 40px ${palette.primary}cc)`,
                 }} />
             )
@@ -708,7 +707,7 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: -200, bottom: -40, width: 1500, height: 130, background: palette.secondary, transform: 'rotate(-4deg)', transformOrigin: 'bottom left', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', padding: '0 240px' }}>
+      <div style={{ position: 'absolute', left: -200, bottom: -30, width: 1500, height: 150, background: palette.secondary, transform: 'rotate(-3deg)', transformOrigin: 'bottom left', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', padding: '0 290px' }}>
         <div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: 1.5, color: palette.accent, opacity: 0.85 }}>VENUE</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1.5, color: palette.ink, marginTop: 2 }}>{match.venue.toUpperCase()}</div>
