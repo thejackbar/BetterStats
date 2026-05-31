@@ -24,11 +24,154 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
-from app.models.db import Fixture, FixtureLineup, Organisation, Player, Team, User, get_db
+from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 
 router = APIRouter(prefix="/selection", tags=["selection"])
+
+# Autofill scoring constants ─────────────────────────────────────────────────
+# Window for "recent form" — last N batting innings & bowling spells per player.
+# Tight enough to react to the current streak, wide enough to absorb one duck.
+RECENT_FORM_GAMES = 4
+# Weighting between recent form (last N innings) and season-to-date stats.
+RECENT_FORM_WEIGHT = 0.6
+SEASON_FORM_WEIGHT = 0.4
+# A wicket is worth ~25 runs in cricket's standard equivalence, so wickets per
+# innings are multiplied by this to land on the same scale as runs/innings.
+WICKET_RUN_EQUIV = 25.0
+# Hard activity wall for autofill eligibility. The frontend's "Recency" filter
+# is just for the visible list; autofill always enforces this 12-month cutoff.
+AUTOFILL_RECENCY_MONTHS = 12
+
+
+def _compute_score(skill_positions: list[str] | None,
+                   recent_bat: dict | None,
+                   recent_bowl: dict | None,
+                   season: dict | None) -> float:
+    """Composite form score: 60% last-4 innings + 40% season-to-date, with the
+    underlying stat chosen by role (batters on batting, bowlers on bowling,
+    all-rounders blended). Output is on the "runs per innings" scale — typical
+    range 0–60, with bowlers' wickets/inn rebased into the same units."""
+    skills = {s.upper() for s in (skill_positions or []) if s}
+
+    bat_recent = 0.0
+    if recent_bat and recent_bat.get("innings"):
+        bat_recent = float(recent_bat["total_runs"] or 0) / recent_bat["innings"]
+    bat_season = float(season["batting_average"]) if (season and season.get("batting_average") is not None) else 0.0
+    bat_score = RECENT_FORM_WEIGHT * bat_recent + SEASON_FORM_WEIGHT * bat_season
+
+    bowl_recent = 0.0
+    if recent_bowl and recent_bowl.get("innings"):
+        bowl_recent = (float(recent_bowl["total_wickets"] or 0) / recent_bowl["innings"]) * WICKET_RUN_EQUIV
+    bowl_season = 0.0
+    if season and season.get("wickets") and season.get("bowling_innings"):
+        bowl_season = (float(season["wickets"]) / float(season["bowling_innings"])) * WICKET_RUN_EQUIV
+    bowl_score = RECENT_FORM_WEIGHT * bowl_recent + SEASON_FORM_WEIGHT * bowl_season
+
+    is_bowler_only = "BWL" in skills and not (skills & {"BAT", "WKT", "ALL"})
+    if is_bowler_only:
+        return bowl_score
+    if "ALL" in skills or ("BWL" in skills and skills & {"BAT", "WKT"}):
+        return (bat_score + bowl_score) / 2.0
+    return bat_score
+
+
+def _tier_for(fx_seq: int | None, sq_seq: int | None) -> int | None:
+    """Tier 1 = same XI, 2 = one grade below (promotion pool), 3 = one grade
+    above (drop-down pool). None = too far (or no sequence on either side) —
+    excluded from autofill though still visible in the pool list."""
+    if not fx_seq or not sq_seq:
+        return None
+    if sq_seq == fx_seq:
+        return 1
+    if sq_seq == fx_seq + 1:
+        return 2
+    if sq_seq == fx_seq - 1:
+        return 3
+    return None
+
+
+async def _recent_batting_form(db: AsyncSession, org_id) -> dict[str, dict]:
+    """Per-player last-N batting innings: {total_runs, innings}. Excludes
+    DNB/absent so a no-show doesn't drag the average down."""
+    rows = await db.execute(
+        text(
+            """
+            WITH ranked AS (
+                SELECT ba.player_id, COALESCE(ba.runs, 0) AS runs,
+                       ROW_NUMBER() OVER (PARTITION BY ba.player_id ORDER BY g.played_at DESC NULLS LAST) AS rn
+                FROM batting_innings ba
+                JOIN games g ON ba.game_id = g.id
+                JOIN players p ON ba.player_id = p.id
+                WHERE p.organisation_id = :org
+                  AND COALESCE(ba.did_not_bat, false) = false
+                  AND (ba.dismissal_type IS NULL
+                       OR LOWER(ba.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb'))
+                  AND g.played_at IS NOT NULL
+            )
+            SELECT player_id, SUM(runs)::float AS total_runs, COUNT(*)::int AS innings
+            FROM ranked WHERE rn <= :n GROUP BY player_id
+            """
+        ),
+        {"org": org_id, "n": RECENT_FORM_GAMES},
+    )
+    return {str(pid): {"total_runs": runs, "innings": inns} for pid, runs, inns in rows.fetchall()}
+
+
+async def _recent_bowling_form(db: AsyncSession, org_id) -> dict[str, dict]:
+    """Per-player last-N bowling spells: {total_wickets, innings}."""
+    rows = await db.execute(
+        text(
+            """
+            WITH ranked AS (
+                SELECT bs.player_id, COALESCE(bs.wickets, 0) AS wickets,
+                       ROW_NUMBER() OVER (PARTITION BY bs.player_id ORDER BY g.played_at DESC NULLS LAST) AS rn
+                FROM bowling_spells bs
+                JOIN games g ON bs.game_id = g.id
+                JOIN players p ON bs.player_id = p.id
+                WHERE p.organisation_id = :org
+                  AND g.played_at IS NOT NULL
+            )
+            SELECT player_id, SUM(wickets)::float AS total_wickets, COUNT(*)::int AS innings
+            FROM ranked WHERE rn <= :n GROUP BY player_id
+            """
+        ),
+        {"org": org_id, "n": RECENT_FORM_GAMES},
+    )
+    return {str(pid): {"total_wickets": wkts, "innings": inns} for pid, wkts, inns in rows.fetchall()}
+
+
+async def _latest_season_stats(db: AsyncSession, org_id) -> dict[str, dict]:
+    """Per-player most-recent season's aggregate stats. Falls back to the most
+    recent season the player has any data for — picking 'current season'
+    explicitly is fragile pre-season when no games have been played yet."""
+    rows = await db.execute(
+        text(
+            """
+            SELECT DISTINCT ON (pss.player_id)
+                pss.player_id,
+                pss.batting_average, pss.runs, pss.batting_innings,
+                pss.wickets, pss.bowling_innings
+            FROM player_season_stats pss
+            JOIN seasons s ON pss.season_id = s.id
+            JOIN players p ON pss.player_id = p.id
+            WHERE p.organisation_id = :org
+            ORDER BY pss.player_id, s.year DESC NULLS LAST
+            """
+        ),
+        {"org": org_id},
+    )
+    out: dict[str, dict] = {}
+    for pid, bavg, runs, batt_inn, wkts, bowl_inn in rows.fetchall():
+        out[str(pid)] = {
+            "batting_average": bavg,
+            "runs": runs,
+            "batting_innings": batt_inn,
+            "wickets": wkts,
+            "bowling_innings": bowl_inn,
+        }
+    return out
 
 
 class LineupSlot(BaseModel):
@@ -226,19 +369,68 @@ async def get_selection(
     )
     players = pl_res.scalars().all()
 
+    # Fixture's team sequence + grade gender, used to compute autofill tier
+    # and the women's/men's hard wall. Either may be missing (manual fixture
+    # with no team / unranked team) — the rules degrade gracefully.
+    fx_team_seq: int | None = None
+    if fx.team_id:
+        fx_team_obj = await db.get(Team, fx.team_id)
+        if fx_team_obj and (fx_team_obj.sequence or 0) > 0:
+            fx_team_seq = fx_team_obj.sequence
+    fx_is_women = False
+    if fx.grade_id:
+        fx_grade_obj = await db.get(Grade, fx.grade_id)
+        if fx_grade_obj:
+            fx_is_women = (fx_grade_obj.fee_format == "women")
+
+    # Per-squad-team metadata: sequence + women's-grade flag. One query covers
+    # every team in the club so the per-player loop stays in-memory.
+    squad_meta: dict[str, tuple[int, bool]] = {}
+    sq_meta_res = await db.execute(
+        select(Team.id, Team.sequence, Grade.fee_format)
+        .select_from(Team)
+        .outerjoin(Grade, Team.grade_id == Grade.id)
+        .where(Team.organisation_id == club.id)
+    )
+    for tid, seq, fee in sq_meta_res.fetchall():
+        squad_meta[str(tid)] = (seq or 0, fee == "women")
+
+    recent_bat = await _recent_batting_form(db, club.id)
+    recent_bowl = await _recent_bowling_form(db, club.id)
+    season_stats = await _latest_season_stats(db, club.id)
+
+    autofill_cutoff = months_ago(date.today(), AUTOFILL_RECENCY_MONTHS)
+    _fixture_team_id = str(fx.team_id) if fx.team_id else None
+
     pool = []
     for p in players:
         pid = str(p.id)
         lp = last_played.get(pid)
         dormant = bool(lp) and lp < cutoff
         manual_inactive = p.status == "inactive"
+        sq_tid = str(p.squad_team_id) if p.squad_team_id else None
+        sq_seq, sq_is_women = squad_meta.get(sq_tid, (0, False)) if sq_tid else (0, False)
+
+        squad_match = bool(_fixture_team_id and sq_tid == _fixture_team_id)
+        # Tier degrades to "same-squad = tier 1" when the fixture team has no
+        # sequence configured, so clubs that haven't ranked their teams still
+        # get sensible autofill (just no promotion/drop-down spill).
+        if fx_team_seq:
+            tier = _tier_for(fx_team_seq, sq_seq)
+        else:
+            tier = 1 if squad_match else None
+
+        gender_ok = (fx_is_women == sq_is_women)
+        recent_ok = bool(lp) and lp >= autofill_cutoff
+        score = _compute_score(p.skill_positions, recent_bat.get(pid), recent_bowl.get(pid), season_stats.get(pid))
+
         pool.append({
             "id": pid,
             "display_name": p.display_name,
             "player_role": p.player_role,
             "skill_positions": p.skill_positions or [],
             "squads": sorted(squads.get(pid, [])),
-            "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
+            "squad_team_id": sq_tid,
             "availability": avail.get(pid, "NO_RESPONSE"),
             "availability_reason": avail_reason.get(pid),
             "last_played": lp.isoformat() if lp else None,
@@ -252,17 +444,25 @@ async def get_selection(
             "is_current": not manual_inactive and not dormant,
             "selected": pid in lineup,
             "clash": clash.get(pid, []),
+            "squad_match": squad_match,
+            "tier": tier,
+            "score": round(score, 2),
+            "autofill_eligible": bool(
+                tier in (1, 2, 3)
+                and recent_ok
+                and gender_ok
+                and not manual_inactive
+            ),
         })
 
-    # Squad-first ordering: players whose assigned squad == this fixture's team
-    # surface first, then by availability (available first), then by name. The
-    # `squad_match` flag lets the UI tint the matching squad tag.
+    # Display ordering: tier first (so own-squad bubbles to the top), then the
+    # composite score within a tier, then availability, then name. Autofill
+    # itself walks tiers explicitly on the frontend — this sort is just for the
+    # pool list the selector scrolls.
     _AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
-    _fixture_team = str(fx.team_id) if fx.team_id else None
-    for entry in pool:
-        entry["squad_match"] = bool(_fixture_team and entry.get("squad_team_id") == _fixture_team)
     pool.sort(key=lambda e: (
-        not e["squad_match"],
+        e["tier"] if e["tier"] is not None else 99,
+        -(e["score"] or 0.0),
         _AVAIL_RANK.get(e["availability"], 9),
         (e["display_name"] or "").lower(),
     ))
