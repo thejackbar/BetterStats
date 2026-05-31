@@ -6,7 +6,7 @@ from typing import Optional
 import uuid
 
 from app.models.db import (
-    Player, User, PlayerSyncRequest, Team,
+    Player, User, PlayerSyncRequest, Team, Organisation,
     BattingInnings, BowlingSpell, FieldingStat, Game, Grade, Season,
     Fixture, FixtureLineup, PlayerAvailability, get_db,
 )
@@ -34,6 +34,34 @@ def _str_keys(d: dict | None) -> dict | None:
     if not d:
         return d
     return {k: str(v) if isinstance(v, uuid.UUID) else v for k, v in d.items()}
+
+
+async def _public_player_attrs(db: AsyncSession, player: Player) -> dict:
+    """Descriptive player attributes the club has opted to show publicly.
+
+    Overseas is handled separately (always shown). Everything here is gated by a
+    per-club setting so the value is omitted entirely from the public payload
+    when the toggle is off — the public profile simply renders whatever fields
+    are present.
+    """
+    if not player.organisation_id:
+        return {}
+    org = await db.get(Organisation, player.organisation_id)
+    if not org:
+        return {}
+    attrs: dict = {}
+    if org.public_show_role and player.player_role:
+        attrs["player_role"] = player.player_role
+    if org.public_show_batting and player.batting_hand:
+        attrs["batting_hand"] = player.batting_hand
+    if org.public_show_bowling and (player.bowling_action or player.bowling_type):
+        attrs["bowling_action"] = player.bowling_action
+        attrs["bowling_type"] = player.bowling_type
+    if org.public_show_opening and player.is_opening_batsman:
+        attrs["is_opening_batsman"] = True
+    if org.public_show_gender and player.gender:
+        attrs["gender"] = player.gender
+    return attrs
 
 
 @router.get("")
@@ -74,6 +102,7 @@ async def get_player(player_id: str, db: AsyncSession = Depends(get_db)):
         "playhq_id": player.playhq_id,
         "is_overseas": player.is_overseas,
         "overseas_country": player.overseas_country,
+        **(await _public_player_attrs(db, player)),
     }
 
 
@@ -107,7 +136,7 @@ async def get_player_stats(
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id)
 
     return {
-        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url, "is_overseas": player.is_overseas, "overseas_country": player.overseas_country},
+        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url, "is_overseas": player.is_overseas, "overseas_country": player.overseas_country, **(await _public_player_attrs(db, player))},
         "career_batting": _str_keys(batting),
         "career_bowling": _str_keys(bowling),
         "career_fielding": _str_keys(fielding),
@@ -527,6 +556,7 @@ class PlayerProfileUpdate(BaseModel):
     # All editable management fields. Callers (the legacy modal and the new
     # BetterSelect Players screen) send a subset — only provided fields update.
     display_name_override: Optional[str] = None
+    playhq_id: Optional[str] = None
     player_role: Optional[str] = None
     skill_positions: Optional[list[str]] = None  # e.g. ["BAT", "WKT"]
     batting_hand: Optional[str] = None

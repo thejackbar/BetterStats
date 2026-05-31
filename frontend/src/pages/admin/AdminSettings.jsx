@@ -58,6 +58,11 @@ export default function AdminSettings() {
         theme_mode: s.theme_mode || 'auto',
         player_name_format: s.player_name_format || 'last_first',
         dormancy_months: s.dormancy_months ?? 24,
+        public_show_role: !!s.public_show_role,
+        public_show_batting: !!s.public_show_batting,
+        public_show_bowling: !!s.public_show_bowling,
+        public_show_opening: !!s.public_show_opening,
+        public_show_gender: !!s.public_show_gender,
       })
     }).catch(() => {})
   }, [])
@@ -341,6 +346,33 @@ export default function AdminSettings() {
             <p className="font-mono text-[10px] text-pb-faintest mt-1">
               Players with no appearance in this window are hidden from the default selection roster and squad suggestions
             </p>
+          </div>
+
+          {/* --- Public profile: visible player attributes --- */}
+          <div className="pt-5 pb-hairline-t">
+            <label className={LABEL}>Public profile — visible attributes</label>
+            <p className="font-mono text-[10px] text-pb-faintest mb-3">
+              Choose which descriptive player attributes appear on the public player profile. Overseas status is always shown.
+            </p>
+            <div className="space-y-2.5">
+              {[
+                ['public_show_role', 'Player role', 'e.g. All Rounder, Wicketkeeper-Batter'],
+                ['public_show_batting', 'Batting hand', 'Right / left handed'],
+                ['public_show_bowling', 'Bowling style', 'e.g. Right-arm fast, Off spin'],
+                ['public_show_opening', 'Opening batter', 'Shows an OPENER badge under the name'],
+                ['public_show_gender', 'Gender', 'Male / female'],
+              ].map(([key, label, hint]) => (
+                <label key={key} className="flex items-start gap-2.5 cursor-pointer">
+                  <input type="checkbox" checked={!!form[key]}
+                    onChange={e => setForm(f => ({ ...f, [key]: e.target.checked }))}
+                    className="accent-pb-accent mt-0.5 shrink-0" />
+                  <span className="leading-tight">
+                    <span className="text-pb-text text-sm">{label}</span>
+                    <span className="font-mono text-[10px] text-pb-faintest block">{hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
           </div>
 
           <div className="pt-2 flex items-center gap-4">

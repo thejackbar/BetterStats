@@ -189,7 +189,7 @@ export default function AdminMilestones() {
                             <td className="px-4 py-3">
                               {slug ? (
                                 <Link
-                                  to={`/${slug}/players/${item.player_id}`}
+                                  to={`/players/${item.player_id}`}
                                   className="text-pb-text text-sm hover:underline"
                                   style={{ color: 'var(--pb-accent)' }}
                                 >
@@ -260,7 +260,7 @@ export default function AdminMilestones() {
                             <td className="px-4 py-3">
                               {slug ? (
                                 <Link
-                                  to={`/${slug}/players/${item.player_id}`}
+                                  to={`/players/${item.player_id}`}
                                   className="text-sm hover:underline"
                                   style={{ color: 'var(--pb-accent)' }}
                                 >

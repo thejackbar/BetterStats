@@ -1,460 +1,82 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
-import ImageEditorModal from '../../components/ImageEditorModal'
 import { nameMatchesSearch, formatPlayerName } from '../../lib/nameFormat'
-import { validateImageFile } from '../../lib/validation'
-import { CRICKET_COUNTRIES, countryFlagUrl } from '../../data/countries'
+import { countryFlagUrl } from '../../data/countries'
+import { useAuth } from '../../contexts/AuthContext'
+import { CAP } from '../../lib/capabilities'
+import { PbSpinner } from '../../lib/presskit'
+import { Profile, draftFromProfile, patchFromDraft } from '../../components/player/PlayerProfilePanel'
 
 // ---------------------------------------------------------------------------
-// EditPlayerModal
+// ProfileModal — the canonical player profile (shared with BetterSelect),
+// shown in a modal. Replaces the old cramped edit form so editing a player is
+// the same experience everywhere.
 // ---------------------------------------------------------------------------
-
-// Canonical role → skill codes the selection/availability filters key on.
-// Role is the single source of truth in the UI; we still persist skill_positions
-// for the existing filter facets.
-const ROLE_TO_SKILLS = {
-  'Batter': ['BAT'],
-  'Bowler': ['BWL'],
-  'All Rounder': ['ALL'],
-  'Wicketkeeper': ['WKT'],
-  'Wicketkeeper-Batter': ['WKT', 'BAT'],
-}
-const BATTING_HANDS = [['', '—'], ['RIGHT', 'Right handed'], ['LEFT', 'Left handed']]
-const BOWLING_ACTIONS = [['', '—'], ['RIGHT_ARM', 'Right arm'], ['LEFT_ARM', 'Left arm']]
-const BOWLING_TYPES = [
-  ['', '—'], ['FAST', 'Fast'], ['FAST_MEDIUM', 'Fast medium'], ['MEDIUM', 'Medium'],
-  ['MEDIUM_FAST', 'Medium fast'], ['FINGER_SPIN', 'Finger spinner'], ['WRIST_SPIN', 'Wrist spinner'],
-]
-
-function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
-  const [form, setForm] = useState({
-    display_name_override: player.display_name_override || '',
-    gender: player.gender || '',
-    is_player: player.is_player !== false, // default true
-    player_role: player.player_role || '',
-    playhq_id: player.playhq_id || '',
-    is_overseas: player.is_overseas || false,
-    overseas_country: player.overseas_country || '',
-    batting_hand: player.batting_hand || '',
-    bowling_action: player.bowling_action || '',
-    bowling_type: player.bowling_type || '',
-    is_opening_batsman: player.is_opening_batsman || false,
-  })
+function ProfileModal({ playerId, teams, canEdit, onClose, onSaved }) {
+  const [profile, setProfile] = useState(null)
+  const [draft, setDraft] = useState(null)
   const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState('')
-  const [msgError, setMsgError] = useState(false)
-  const [uploadingPhoto, setUploadingPhoto] = useState(false)
-  const [photoUrl, setPhotoUrl] = useState(player.photo_url || null)
-  const [editorSource, setEditorSource] = useState(null)
-  const [editName, setEditName] = useState(false)      // inline display-name editor
-  const [editPhq, setEditPhq] = useState(false)        // inline PlayHQ-ID editor
-  // BetterSelect attributes — separate endpoint, not in the list payload.
-  const [profile, setProfile] = useState({ email: '', phone: '', status: 'active', skill_positions: [] })
+  const [saved, setSaved] = useState(false)
+  const [err, setErr] = useState('')
 
-  // Close on Escape
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
-  // Load BetterSelect attributes on open
   useEffect(() => {
-    let cancelled = false
-    api.bsGetPlayerProfile(player.id)
-      .then(p => { if (!cancelled) setProfile({
-        email: p.email || '', phone: p.phone || '',
-        status: p.status || 'active', skill_positions: p.skill_positions || [],
-      }) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [player.id])
+    let live = true
+    setProfile(null); setDraft(null); setErr('')
+    api.bsGetPlayerProfile(playerId)
+      .then((p) => { if (live) { setProfile(p); setDraft(draftFromProfile(p)) } })
+      .catch((e) => { if (live) setErr(e.message || 'Could not load profile') })
+    return () => { live = false }
+  }, [playerId])
 
-  const setSuccess = (text) => {
-    setMsgError(false)
-    setMsg(text)
-    setTimeout(() => setMsg(''), 2500)
-  }
+  const dirty = useMemo(() => {
+    if (!profile || !draft) return false
+    return JSON.stringify(patchFromDraft(draftFromProfile(profile))) !== JSON.stringify(patchFromDraft(draft))
+  }, [profile, draft])
 
-  const setError = (text) => {
-    setMsgError(true)
-    setMsg(text)
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
-    setMsg('')
+  const onSave = async () => {
+    if (!draft || saving) return
+    setSaving(true); setErr('')
     try {
-      const payload = {
-        display_name_override: form.display_name_override,
-        gender: form.gender,
-        is_player: form.is_player,
-        player_role: form.player_role,
-        playhq_id: form.playhq_id,
-        is_overseas: form.is_overseas,
-        overseas_country: form.is_overseas ? form.overseas_country : '',
-        batting_hand: form.batting_hand,
-        bowling_action: form.bowling_action,
-        bowling_type: form.bowling_type,
-        is_opening_batsman: form.is_opening_batsman,
-      }
-      // Role is canonical; derive the skill codes the filters use from it.
-      const skills = ROLE_TO_SKILLS[form.player_role] || profile.skill_positions
-      const [updated] = await Promise.all([
-        api.adminPatchPlayer(player.id, payload),
-        api.bsUpdatePlayerProfile(player.id, {
-          email: profile.email || null,
-          phone: profile.phone || null,
-          status: profile.status || 'active',
-          skill_positions: skills,
-        }),
-      ])
-      onSaved({ ...player, ...updated, photo_url: photoUrl })
-      setSuccess('Saved')
-    } catch (err) {
-      setError(err.message || 'Save failed')
+      const updated = await api.bsUpdatePlayerProfile(playerId, patchFromDraft(draft))
+      setProfile(updated)
+      setDraft(draftFromProfile(updated))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 1800)
+      onSaved?.(updated)
+    } catch (e) {
+      setErr(e.message || 'Save failed')
     } finally {
       setSaving(false)
     }
   }
 
-  const handlePhotoUpload = async (file) => {
-    if (!file) return
-    setUploadingPhoto(true)
-    setMsg('')
-    try {
-      const result = await api.adminUploadPlayerPhoto(player.id, file)
-      setPhotoUrl(result.photo_url)
-      onSaved({ ...player, photo_url: result.photo_url })
-      setSuccess('Photo saved')
-    } catch (err) {
-      setError(err.message || 'Upload failed')
-    } finally {
-      setUploadingPhoto(false)
-    }
-  }
+  const onPhotoChange = useCallback((url) => {
+    setProfile((p) => p ? { ...p, photo_url: url } : p)
+    onSaved?.({ id: playerId, photo_url: url })
+  }, [playerId, onSaved])
 
-  const handlePhotoDelete = async () => {
-    setUploadingPhoto(true)
-    setMsg('')
-    try {
-      await api.adminDeletePlayerPhoto(player.id)
-      setPhotoUrl(null)
-      onSaved({ ...player, photo_url: null })
-      setSuccess('Photo removed')
-    } catch (err) {
-      setError(err.message || 'Delete failed')
-    } finally {
-      setUploadingPhoto(false)
-    }
-  }
-
-  const displayedName = player.display_name_override || formatPlayerName(player.name, nameFormat)
+  const profileForView = profile ? { ...profile, _teams: teams } : null
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4"
       style={{ backdropFilter: 'blur(2px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-pb-surface pb-card max-w-md w-full mx-4 mt-12 mb-8 overflow-hidden flex flex-col max-h-[88vh]">
-        {/* Header — name with inline display-name edit */}
-        <div className="flex items-start justify-between px-5 py-4 border-b pb-hairline-b shrink-0">
-          <div className="min-w-0">
-            {editName ? (
-              <input
-                autoFocus
-                type="text"
-                value={form.display_name_override}
-                onChange={e => setForm(f => ({ ...f, display_name_override: e.target.value }))}
-                onBlur={() => setEditName(false)}
-                onKeyDown={e => { if (e.key === 'Enter') setEditName(false) }}
-                placeholder="Blank to use synced name"
-                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-              />
-            ) : (
-              <div className="flex items-center gap-2">
-                <p className="text-pb-text text-base font-semibold truncate">{displayedName}</p>
-                <button
-                  onClick={() => setEditName(true)}
-                  className="font-mono text-[9px] text-pb-faint hover:text-pb-accent border pb-hairline rounded px-1.5 py-0.5 shrink-0"
-                  title="Set a display name"
-                >edit</button>
-              </div>
-            )}
-            {form.display_name_override && !editName && (
-              <p className="font-mono text-[9px] text-pb-faintest mt-0.5">synced: {player.name}</p>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            className="text-pb-faint hover:text-pb-text transition-colors font-mono text-[11px] px-2 py-1 shrink-0"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Body — scrolls; footer stays pinned */}
-        <div className="px-5 py-4 space-y-4 overflow-y-auto">
-
-          {/* Gender + Is Player row */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Gender</label>
-              <select
-                value={form.gender}
-                onChange={e => setForm(f => ({ ...f, gender: e.target.value }))}
-                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-              >
-                <option value="">—</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-              </select>
-            </div>
-            <div>
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Type</label>
-              <label className="flex items-center gap-2 cursor-pointer mt-1.5">
-                <input
-                  type="checkbox"
-                  checked={form.is_player}
-                  onChange={e => setForm(f => ({ ...f, is_player: e.target.checked }))}
-                  className="accent-pb-accent"
-                />
-                <span className="font-mono text-[10px] text-pb-text">
-                  {form.is_player ? 'Player' : 'Non-Player (coach/scorer/official)'}
-                </span>
-              </label>
-            </div>
-          </div>
-
-          {/* Role — single canonical field (replaces the duplicate Skills chips) */}
-          <div>
-            <label className="font-mono text-[10px] text-pb-faintest block mb-1">Role</label>
-            <select
-              value={form.player_role}
-              onChange={e => setForm(f => ({ ...f, player_role: e.target.value }))}
-              className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-            >
-              <option value="">—</option>
-              {Object.keys(ROLE_TO_SKILLS).map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-
-          {/* Cricket attributes (power the selection filters) */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Batting hand</label>
-              <select value={form.batting_hand} onChange={e => setForm(f => ({ ...f, batting_hand: e.target.value }))}
-                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-                {BATTING_HANDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Bowling action</label>
-              <select value={form.bowling_action} onChange={e => setForm(f => ({ ...f, bowling_action: e.target.value }))}
-                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-                {BOWLING_ACTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Bowling type</label>
-              <select value={form.bowling_type} onChange={e => setForm(f => ({ ...f, bowling_type: e.target.value }))}
-                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-                {BOWLING_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Opening batsman</label>
-              <label className="flex items-center gap-2 cursor-pointer mt-1.5">
-                <input type="checkbox" checked={form.is_opening_batsman}
-                  onChange={e => setForm(f => ({ ...f, is_opening_batsman: e.target.checked }))}
-                  className="accent-pb-accent" />
-                <span className="font-mono text-[10px] text-pb-text">{form.is_opening_batsman ? 'Opener' : 'No'}</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Overseas — country only appears when ticked */}
-          <div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.is_overseas}
-                onChange={e => setForm(f => ({ ...f, is_overseas: e.target.checked }))}
-                className="accent-pb-accent"
-              />
-              <span className="font-mono text-[10px] text-pb-text">Overseas player</span>
-            </label>
-            {form.is_overseas && (
-              <div className="mt-2">
-                <label className="font-mono text-[10px] text-pb-faintest block mb-1">Country</label>
-                <input
-                  type="text"
-                  list="cricket-countries"
-                  value={form.overseas_country}
-                  onChange={e => setForm(f => ({ ...f, overseas_country: e.target.value }))}
-                  placeholder="e.g. England"
-                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-                />
-                  <datalist id="cricket-countries">
-                    {CRICKET_COUNTRIES.map(c => <option key={c} value={c} />)}
-                  </datalist>
-              </div>
-            )}
-          </div>
-
-          {/* BetterSelect attributes */}
-          <div className="pt-1">
-            <p className="font-mono text-[10px] tracking-wide3 uppercase mb-2" style={{ color: 'var(--pb-accent)' }}>BetterSelect</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="font-mono text-[10px] text-pb-faintest block mb-1">Email</label>
-                <input
-                  type="email"
-                  value={profile.email}
-                  onChange={e => setProfile(p => ({ ...p, email: e.target.value }))}
-                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-                />
-              </div>
-              <div>
-                <label className="font-mono text-[10px] text-pb-faintest block mb-1">Phone</label>
-                <input
-                  type="tel"
-                  value={profile.phone}
-                  onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))}
-                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-                />
-              </div>
-            </div>
-            <label className="flex items-center gap-2 cursor-pointer mt-3">
-              <input
-                type="checkbox"
-                checked={profile.status === 'inactive'}
-                onChange={e => setProfile(p => ({ ...p, status: e.target.checked ? 'inactive' : 'active' }))}
-                className="accent-pb-accent"
-              />
-              <span className="font-mono text-[10px] text-pb-text">Inactive (hide from availability &amp; selection)</span>
-            </label>
-          </div>
-
-          {/* Photo */}
-          <div>
-            <label className="font-mono text-[10px] text-pb-faintest block mb-2">Photo</label>
-            <div className="flex items-center gap-3">
-              {photoUrl && (
-                <img
-                  src={photoUrl}
-                  alt="Player"
-                  className="w-12 h-12 rounded object-cover border pb-hairline"
-                />
-              )}
-              <div className="flex items-center gap-2 flex-wrap">
-                <label
-                  className={`font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text cursor-pointer transition-colors ${uploadingPhoto ? 'opacity-50 pointer-events-none' : ''}`}
-                >
-                  {uploadingPhoto ? '…' : (photoUrl ? 'Replace' : 'Upload photo')}
-                  <input
-                    type="file"
-                    accept=".jpg,.jpeg,.png,.webp,.gif"
-                    className="hidden"
-                    onChange={e => {
-                      const f = e.target.files?.[0]
-                      e.target.value = ''
-                      if (!f) return
-                      const err = validateImageFile(f)
-                      if (err) { setError(err); return }
-                      setEditorSource(f)
-                    }}
-                  />
-                </label>
-                {photoUrl && (
-                  <>
-                    <button
-                      onClick={() => setEditorSource(photoUrl)}
-                      disabled={uploadingPhoto}
-                      className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={handlePhotoDelete}
-                      disabled={uploadingPhoto}
-                      className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faintest hover:text-pb-red transition-colors disabled:opacity-50"
-                    >
-                      Remove
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <ImageEditorModal
-            open={!!editorSource}
-            source={editorSource}
-            title="Edit Player Photo"
-            aspect={1}
-            outputType="image/png"
-            outputName={`player-${player.id}.png`}
-            onCancel={() => setEditorSource(null)}
-            onApply={async (file) => {
-              setEditorSource(null)
-              await handlePhotoUpload(file)
-            }}
-          />
-        </div>
-
-        {/* PlayHQ ID — rarely changed, tucked at the bottom in small text */}
-        <div className="px-5 pb-2 shrink-0">
-          {editPhq ? (
-            <input
-              autoFocus
-              type="text"
-              value={form.playhq_id}
-              onChange={e => setForm(f => ({ ...f, playhq_id: e.target.value }))}
-              onBlur={() => setEditPhq(false)}
-              onKeyDown={e => { if (e.key === 'Enter') setEditPhq(false) }}
-              placeholder="PlayHQ ID (UUID)"
-              className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1 text-pb-text text-[11px] font-mono focus:outline-none focus:border-pb-accent"
-            />
-          ) : (
-            <div className="flex items-center gap-2 font-mono text-[9px] text-pb-faintest">
-              <span className="truncate">PlayHQ ID: {form.playhq_id || '—'}</span>
-              <button onClick={() => setEditPhq(true)} className="hover:text-pb-accent border pb-hairline rounded px-1 shrink-0">edit</button>
-            </div>
-          )}
-        </div>
-
-        {/* Footer — pinned, always reachable */}
-        <div className="flex items-center justify-between px-5 py-3 border-t pb-hairline-t shrink-0">
-          <div>
-            {msg && (
-              <span
-                className="font-mono text-[10px] tracking-wide"
-                style={{ color: msgError ? 'var(--pb-red)' : 'var(--pb-accent)' }}
-              >
-                {msg.toUpperCase()}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
-            >
-              CLOSE
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="px-4 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
-              style={{ background: 'var(--pb-accent)' }}
-            >
-              {saving ? 'SAVING…' : 'SAVE'}
-            </button>
-          </div>
-        </div>
+      <div className="pb-card bg-pb-surface w-full max-w-5xl mt-8 mb-8 max-h-[88vh] overflow-hidden flex flex-col">
+        {err && <div className="px-5 py-2 font-mono text-[11px] text-pb-red border-b border-pb-hairline shrink-0">{err.toUpperCase()}</div>}
+        {!profileForView || !draft
+          ? <div className="p-10"><PbSpinner message="Loading profile…" /></div>
+          : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
+              dirty={dirty} saved={saved} onSave={onSave} canEdit={canEdit}
+              canEditAvail={false} onClose={onClose} onPhotoChange={onPhotoChange} />}
       </div>
     </div>
   )
@@ -465,7 +87,10 @@ function EditPlayerModal({ player, onClose, onSaved, nameFormat }) {
 // ---------------------------------------------------------------------------
 
 export default function AdminPlayers() {
+  const { hasCapability } = useAuth()
+  const canEdit = hasCapability(CAP.MANAGE_PLAYERS)
   const [players, setPlayers] = useState([])
+  const [teams, setTeams] = useState([])
   const [filter, setFilter] = useState('')
   const [overseasFilter, setOverseasFilter] = useState('all') // 'all' | 'only' | 'exclude'
   const [msg, setMsg] = useState('')
@@ -474,11 +99,12 @@ export default function AdminPlayers() {
   const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', playhq_id: '', display_name_override: '' })
   const [creating, setCreating] = useState(false)
   const [createMsg, setCreateMsg] = useState('')
-  const [editingPlayer, setEditingPlayer] = useState(null) // player object or null
+  const [editingId, setEditingId] = useState(null) // player id or null
 
   useEffect(() => {
     api.adminListPlayers().then(setPlayers).catch(() => {})
     api.adminGetSettings().then(s => setNameFormat(s.player_name_format || 'last_first')).catch(() => {})
+    api.bsListTeams().then(t => setTeams(t || [])).catch(() => setTeams([]))
   }, [])
 
   const fmt = (name) => formatPlayerName(name, nameFormat)
@@ -495,13 +121,11 @@ export default function AdminPlayers() {
     )
   })
 
+  // Merge whatever the modal sends back (a full profile on save, or a partial
+  // { id, photo_url } on photo change) into the matching list row.
   const handleModalSaved = useCallback((updated) => {
+    if (!updated?.id) return
     setPlayers(ps => ps.map(p => p.id === updated.id ? { ...p, ...updated } : p))
-    // If modal is still open, keep it open — user closed it themselves
-  }, [])
-
-  const handleModalClose = useCallback(() => {
-    setEditingPlayer(null)
   }, [])
 
   const submitCreate = async (e) => {
@@ -530,12 +154,13 @@ export default function AdminPlayers() {
 
   return (
     <AdminLayout>
-      {editingPlayer && (
-        <EditPlayerModal
-          player={editingPlayer}
-          onClose={handleModalClose}
+      {editingId && (
+        <ProfileModal
+          playerId={editingId}
+          teams={teams}
+          canEdit={canEdit}
+          onClose={() => setEditingId(null)}
           onSaved={handleModalSaved}
-          nameFormat={nameFormat}
         />
       )}
 
@@ -654,7 +279,7 @@ export default function AdminPlayers() {
             ))}
           </div>
           <span className="font-mono text-[10px] text-pb-faintest ml-1">
-            Click <span style={{ color: 'var(--pb-accent)' }}>Edit</span> on any player to update their details.
+            Click <span style={{ color: 'var(--pb-accent)' }}>{canEdit ? 'Edit' : 'View'}</span> on any player to open their profile.
           </span>
         </div>
 
@@ -708,10 +333,10 @@ export default function AdminPlayers() {
               </div>
 
               <button
-                onClick={() => setEditingPlayer(p)}
+                onClick={() => setEditingId(p.id)}
                 className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors shrink-0"
               >
-                Edit
+                {canEdit ? 'Edit' : 'View'}
               </button>
             </div>
           ))}
