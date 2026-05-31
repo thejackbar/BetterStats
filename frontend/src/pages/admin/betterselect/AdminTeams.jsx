@@ -15,20 +15,18 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
-import { AVAILABILITY } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import {
   Icon, Avatar, Dot, AvailDot, RoleChips, Btn, Search, Chip, Empty, AvailSummary, QuickAvailModal,
-  RecencySelect, playedWithinYears, FilterButton, FilterPanel, FacetGroup,
+  RecencySelect, playedWithinYears,
 } from './ui'
+import { useFilters, FilterBar } from './filters'
 
 function matchesName(p, q) {
   const needle = q.trim().toLowerCase()
   if (!needle) return true
   return `${p.display_name || ''} ${p.name || ''}`.toLowerCase().includes(needle)
 }
-
-const ROLE_CHIPS = ['BAT', 'BWL', 'ALL', 'WKT']
-const ROLE_LABEL = { BAT: 'Bat', BWL: 'Bowl', ALL: 'All-r', WKT: 'WK' }
 
 const UNASSIGNED_TINT = 'var(--pb-faintest)'
 // Per-column accent tints (a fixed category palette — not the white-label
@@ -433,12 +431,9 @@ export default function AdminTeams() {
   const [autoAssign, setAutoAssign] = useState(false)  // auto-assign modal open
   const [availEdit, setAvailEdit] = useState(null)     // player for quick-update modal
 
-  // Filters + view
-  const [search, setSearch] = useState('')
+  // Filters + view — years/recency is a quiet control; the rest are facets.
   const [years, setYears] = useState(3)                // Unassigned recency filter; default ≤3y
-  const [showFilters, setShowFilters] = useState(false)
-  const [roleF, setRoleF] = useState(null)             // skill-position filter (all columns)
-  const [availOnly, setAvailOnly] = useState(false)    // available-only filter (all columns)
+  const [selectedIds, setSelectedIds] = useState(() => new Set()) // picked in any XI this round
   const [collapsed, setCollapsed] = useState(() => new Set())
   const dragId = useRef(null)
 
@@ -459,6 +454,16 @@ export default function AdminTeams() {
   useEffect(() => { loadPlayers() }, [loadPlayers])
   useEffect(() => { loadMatrix() }, [loadMatrix])
 
+  // Who's named in any saved XI for the round of the next upcoming date.
+  useEffect(() => {
+    if (!firstDate) { setSelectedIds(new Set()); return }
+    let live = true
+    api.bsSelectedPlayers(firstDate)
+      .then((d) => { if (live) setSelectedIds(new Set(d?.player_ids || [])) })
+      .catch(() => { if (live) setSelectedIds(new Set()) })
+    return () => { live = false }
+  }, [firstDate])
+
   const statusOf = useCallback(
     (id) => (firstDate && availability[id]?.[firstDate]?.status) || 'NO_RESPONSE',
     [availability, firstDate],
@@ -474,20 +479,40 @@ export default function AdminTeams() {
     return cols
   }, [teams])
 
-  const activeFilters = (roleF ? 1 : 0) + (availOnly ? 1 : 0) + (years ? 1 : 0)
+  const facets = useMemo(() => [
+    { key: 'squad', label: 'Squad', type: 'multi', options: (teams || []).map((t) => ({ value: t.id, label: t.name })) },
+    { key: 'avail', label: 'Availability', type: 'multi', options: AVAIL_ORDER.map((s) => ({ value: s, label: AVAILABILITY[s].label, dot: AVAILABILITY[s].cssVar })) },
+    { key: 'role', label: 'Role', type: 'multi', options: [
+      { value: 'BAT', label: 'BAT' }, { value: 'BWL', label: 'BWL' }, { value: 'ALL', label: 'ALL' }, { value: 'WKT', label: 'WK' },
+    ] },
+    { key: 'selected', label: 'Selected', type: 'single', options: [
+      { value: 'selected', label: 'Selected this round' }, { value: 'unselected', label: 'Not selected' },
+    ] },
+    { key: 'hideunassigned', label: 'Hide unassigned pool', type: 'bool' },
+  ], [teams])
+  const filters = useFilters(facets)
+  const { values, search } = filters
 
-  // Members of a column. Search / role / availability apply everywhere; the
-  // recency filter applies only to the Unassigned pool (assigned squads always
-  // show full membership, so a dormant "backup" you've filed into BackUps stays
-  // visible there).
+  // The squad facet hides whole columns; the bool hides the Unassigned pool.
+  const visibleColumns = useMemo(() => columns.filter((col) => {
+    if (col.unassigned) return !values.hideunassigned
+    if (values.squad?.length) return values.squad.includes(col.id)
+    return true
+  }), [columns, values.squad, values.hideunassigned])
+
+  // Members of a column. Search / role / availability / selected apply
+  // everywhere; the recency filter applies only to the Unassigned pool (assigned
+  // squads always show full membership, so a dormant "backup" stays visible).
   const membersOf = useCallback((col) => {
     let list = (players || []).filter((p) => (p.squad_team_id || null) === col.id)
     if (search.trim()) list = list.filter((p) => matchesName(p, search))
-    if (roleF) list = list.filter((p) => (p.skill_positions || []).includes(roleF))
-    if (availOnly) list = list.filter((p) => statusOf(p.id) === 'AVAILABLE')
+    if (values.role?.length) list = list.filter((p) => (p.skill_positions || []).some((r) => values.role.includes(r)))
+    if (values.avail?.length) list = list.filter((p) => values.avail.includes(statusOf(p.id)))
+    if (values.selected === 'selected') list = list.filter((p) => selectedIds.has(p.id))
+    else if (values.selected === 'unselected') list = list.filter((p) => !selectedIds.has(p.id))
     if (col.unassigned) list = list.filter((p) => playedWithinYears(p.last_played, years))
     return list
-  }, [players, search, roleF, availOnly, years, statusOf])
+  }, [players, search, values, years, statusOf, selectedIds])
 
   // For the Unassigned "showing X of Y" hint.
   const unassignedTotal = useMemo(
@@ -580,36 +605,24 @@ export default function AdminTeams() {
           </div>
         ) : (
           <>
-            {/* Toolbar: search + quiet filters + bulk-add + collapse controls */}
-            <div className="flex flex-wrap items-center gap-2.5 mb-3">
-              <Search value={search} onChange={setSearch} placeholder="Search players…" className="w-full sm:w-[200px]" />
-              <FilterButton active={showFilters} count={activeFilters} onClick={() => setShowFilters((v) => !v)} />
-              <RecencySelect value={years} onChange={setYears} title="Hide unassigned players who haven’t played recently" />
-              {canManage && <Btn variant="soft" sm icon="plus" onClick={() => setAddTo(null)}>Bulk add</Btn>}
-              <div className="ml-auto flex items-center gap-3">
-                <span className="text-pb-faint text-[12.5px]"><b className="text-pb-text pb-num">{players.length}</b> players · <b className="text-pb-text pb-num">{teams.length}</b> squads</span>
+            {/* Toolbar: shared FilterBar + bulk-add + collapse controls */}
+            <FilterBar
+              filters={filters} facets={facets} searchPlaceholder="Search players…" className="mb-3"
+              right={(<>
+                <RecencySelect value={years} onChange={setYears} title="Hide unassigned players who haven’t played recently" />
+                {canManage && <Btn variant="soft" sm icon="plus" onClick={() => setAddTo(null)}>Bulk add</Btn>}
+                <span className="ml-auto text-pb-faint text-[12.5px]"><b className="text-pb-text pb-num">{players.length}</b> players · <b className="text-pb-text pb-num">{teams.length}</b> squads</span>
                 <div className="flex gap-1">
                   <Btn variant="ghost" sm onClick={collapseAll}>Collapse all</Btn>
                   <Btn variant="ghost" sm onClick={expandAll}>Expand all</Btn>
                 </div>
-              </div>
-            </div>
-            {showFilters && (
-              <FilterPanel className="mb-4">
-                <FacetGroup label="Role">
-                  {ROLE_CHIPS.map((r) => <Chip key={r} label={ROLE_LABEL[r]} active={roleF === r} onClick={() => setRoleF(roleF === r ? null : r)} />)}
-                </FacetGroup>
-                <Chip label="Available only" active={availOnly} onClick={() => setAvailOnly((v) => !v)} />
-                <FacetGroup label="Unassigned recency"><RecencySelect value={years} onChange={setYears} /></FacetGroup>
-                {activeFilters > 0 && <button onClick={() => { setRoleF(null); setAvailOnly(false); setYears(0) }} className="text-[11.5px] text-pb-accent hover:underline">Clear</button>}
-                <span className="ml-auto font-mono text-[10px] text-pb-faintest">Role & availability filter every column · recency only thins Unassigned</span>
-              </FilterPanel>
-            )}
+              </>)}
+            />
 
             <div className="grid gap-3 items-start" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
-              {columns.map((col) => {
+              {visibleColumns.map((col) => {
                 const members = membersOf(col)
-                const isUnassignedFiltered = col.unassigned && (years > 0 || roleF || availOnly || search.trim())
+                const isUnassignedFiltered = col.unassigned && (years > 0 || values.role?.length || values.avail?.length || values.selected || search.trim())
                 return (
                   <div key={col.key}>
                     <SquadColumn
