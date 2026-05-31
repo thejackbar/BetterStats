@@ -140,6 +140,17 @@ export function featuredOf(players) {
 // ROLE STYLING (templates B)
 // ─────────────────────────────────────────────────────────────────────────────
 const ROLE_LABEL = { BAT: 'BAT', BOWL: 'BOWL', AR: 'AR', WK: 'WK' }
+// Normalise any role value (a code like 'AR'/'WK' OR free text like
+// 'Bowler'/'Wicketkeeper'/'All-Rounder') to a short, consistent badge label.
+function roleShort(role) {
+  if (!role) return ''
+  const r = String(role).toUpperCase()
+  if (r.startsWith('WK') || r.includes('KEEP')) return 'WK'
+  if (r === 'AR' || r.startsWith('ALL') || r.includes('ROUND')) return 'ALL'
+  if (r.startsWith('BOWL')) return 'BOWL'
+  if (r.startsWith('BAT')) return 'BAT'
+  return r.slice(0, 4)
+}
 const ROLE_COLOR_BG = (palette, role) => {
   switch (role) {
     case 'BAT': return palette.accent
@@ -215,7 +226,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
       <Halftone color={palette.ink} opacity={0.08} size={12} />
       <Stripes color={palette.ink} opacity={0.04} gap={20} angle={-30} />
       <div style={{
-        position: 'absolute', left: 72, top: 175, width: 468, height: 880,
+        position: 'absolute', left: 64, top: 210, width: 480, height: 845,
         display: 'grid', placeItems: 'end center', overflow: 'hidden',
       }}>
         <div style={{
@@ -228,9 +239,9 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
           return (
             <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
               style={{
-                position: 'relative',
-                maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto',
-                objectFit: 'contain', objectPosition: 'bottom',
+                position: 'absolute', inset: 0,
+                width: '100%', height: '100%',
+                objectFit: 'cover', objectPosition: 'center top',
                 filter: `drop-shadow(0 30px 60px ${palette.primary}cc)`,
               }} />
           )
@@ -388,7 +399,7 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
                 <Halftone color={palette.ink} opacity={0.08} size={6} />
                 {p.headshot ? (
                   <img src={p.headshot} alt={p.first + ' ' + p.last}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
+                    style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center bottom' }} />
                 ) : team.logo ? (
                   <img src={team.logo} alt={team.short}
                     style={{ width: '68%', height: '68%', objectFit: 'contain', opacity: 0.92 }} />
@@ -451,7 +462,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
           return (
             <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
               style={{
-                position: 'absolute', top: 56, left: 14, right: 14, bottom: 200,
+                position: 'absolute', top: 14, left: 14, right: 14, bottom: 8,
                 objectFit: hasHead ? 'cover' : 'contain',
                 objectPosition: hasHead ? 'top center' : 'center',
                 padding: hasHead ? 0 : 40,
@@ -571,7 +582,7 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
                 {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
               </div>
               <div style={{ width: 64, justifySelf: 'end', textAlign: 'center', padding: '5px 0', background: 'transparent', border: `1.5px solid ${palette.ink}55`, color: palette.ink, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 1.5, lineHeight: 1, borderRadius: 2 }}>
-                {ROLE_LABEL[isRole]}
+                {roleShort(isRole)}
               </div>
             </div>
           )
@@ -625,7 +636,7 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
               </div>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.5, textAlign: 'right' }}>{p.role}</div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.5, textAlign: 'right', whiteSpace: 'nowrap' }}>{roleShort(p.role)}</div>
             </div>
           )
         })}
@@ -658,7 +669,7 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
       <Halftone color={palette.ink} opacity={0.07} size={10} />
       <div style={{
         position: 'absolute', left: -200, width: 1500, height: 220,
-        background: palette.accent, transform: 'rotate(-8deg)', transformOrigin: 'top left', top: 10, padding: '60px 0px 0px',
+        background: palette.accent, transform: 'rotate(-5deg)', transformOrigin: 'top left', top: 28, padding: '60px 0px 0px',
       }}>
         <div style={{ padding: '30px 240px 0', color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 100, lineHeight: 0.9, letterSpacing: -1, transform: 'rotate(0deg)', display: 'flex', alignItems: 'center', gap: 28 }}>
           1ST XI
