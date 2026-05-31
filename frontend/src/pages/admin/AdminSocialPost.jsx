@@ -60,6 +60,10 @@ const DISPLAY_FONTS = [
   { key: 'teko',         name: 'Teko',             family: "'Teko', sans-serif",             weight: 600 },
   { key: 'bigshoulders', name: 'Big Shoulders',    family: "'Big Shoulders Display', sans-serif", weight: 800 },
   { key: 'antonio',      name: 'Antonio',          family: "'Antonio', sans-serif",          weight: 700 },
+  { key: 'marker',       name: 'Permanent Marker', family: "'Permanent Marker', cursive",    weight: 400 },
+  { key: 'caveat',       name: 'Caveat',           family: "'Caveat', cursive",              weight: 700 },
+  { key: 'abril',        name: 'Abril Fatface',    family: "'Abril Fatface', serif",         weight: 400 },
+  { key: 'bungee',       name: 'Bungee',           family: "'Bungee', sans-serif",           weight: 400 },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -591,19 +595,18 @@ export default function AdminSocialPost() {
       let font
       try { font = { cssText: await getEmbeddedFontCss() } } catch { /* fall back to system fonts */ }
       const blob = await domToBlob(el, {
-        type: 'image/jpeg',
-        quality: 0.95,
+        type: 'image/png',          // lossless PNG — exact replica, no JPG artefacts on crisp text
         scale: 2,                   // 2× for crisp, high-DPI output
         width: W,
         height: H,
-        backgroundColor: '#080808', // JPG has no alpha — match the dark canvas
+        backgroundColor: '#080808', // fallback for any uncovered area; templates are full-bleed dark
         font,
       })
       if (!blob) { setExportError('Could not generate image'); return }
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `betterstats-${templateId.toLowerCase()}-${Date.now()}.jpg`
+      a.download = `betterstats-${templateId.toLowerCase()}-${Date.now()}.png`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -1432,7 +1435,7 @@ export default function AdminSocialPost() {
                   <button onClick={handleExport} disabled={exporting}
                     className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 disabled:opacity-60"
                     style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-                    {exporting ? '...' : '↓ JPG'}
+                    {exporting ? '...' : '↓ PNG'}
                   </button>
                   <button onClick={handleReset} className="px-3 py-1.5 rounded text-xs font-mono border pb-hairline text-pb-faint hover:text-pb-text transition-colors">
                     ↺ Reset
@@ -1465,7 +1468,7 @@ export default function AdminSocialPost() {
                   <button onClick={handleExport} disabled={exporting}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono tracking-wide2 transition-colors disabled:opacity-60"
                     style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-                    {exporting ? 'EXPORTING...' : '↓ DOWNLOAD JPG'}
+                    {exporting ? 'EXPORTING...' : '↓ DOWNLOAD PNG'}
                   </button>
                   <button onClick={handleReset}
                     className="px-3 py-1.5 rounded text-xs font-mono border pb-hairline text-pb-faint hover:text-pb-text transition-colors"
