@@ -272,24 +272,65 @@ function VenueCard({ venues }) {
   )
 }
 
-/* ── our bowlers vs their batters (instant, from wickets we've taken) ─────── */
+/* ── bowler match-ups: our hold over their batters (instant report) ───────── */
 
-function MatchupCard({ matchups }) {
-  if (!matchups?.length) return null
+function BowlerMatchups({ matchups }) {
+  const rows = matchups?.bowler_dominance || []
+  if (!rows.length) return null
   return (
-    <Card title="Match-ups" accent right={<span className="text-pb-faint text-xs">our bowlers vs their batters</span>}>
-      <div className="space-y-1.5">
-        {matchups.map((m, i) => (
-          <div key={i} className="flex items-center justify-between gap-2 text-sm">
-            <span className="truncate"><span className="font-medium">{m.bowler}</span> <span className="text-pb-faintest">▸</span> {m.batter}</span>
-            <span className="pb-num whitespace-nowrap text-pb-faint" title={`${m.runs} runs scored before dismissal`}>
-              <b className="text-pb-text">{m.dismissals}×</b>
-            </span>
-          </div>
-        ))}
+    <Card title="Bowler match-ups" right={<span className="text-pb-faint text-xs">our hold over their batters</span>}>
+      <div className="text-pb-faintest text-[11px] mb-2">Their batters our bowlers have dismissed 2+ times — a selection edge.</div>
+      <div className="overflow-x-auto -mx-1">
+        <table className="w-full text-sm">
+          <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
+            <th className="py-1 px-1 font-medium">Our bowler</th>
+            <th className="py-1 px-1 font-medium">Their batter</th>
+            <th className="py-1 px-1 font-medium text-right">Out</th>
+            <th className="py-1 px-1 font-medium">How</th>
+            <th className="py-1 px-1 font-medium text-right">Runs off us</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((m, i) => (
+              <tr key={i} className="border-t pb-hairline">
+                <td className="py-1.5 px-1 font-medium whitespace-nowrap">{m.bowler}{!m.active && <span className="text-pb-faint" title="no longer active"> ·</span>}</td>
+                <td className="py-1.5 px-1 whitespace-nowrap">{m.batter}</td>
+                <td className="py-1.5 px-1 text-right pb-num font-semibold">{m.dismissals}×</td>
+                <td className="py-1.5 px-1 text-pb-faint text-[11px] capitalize">{(m.how || []).join(', ') || '—'}</td>
+                <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{num(m.runs_made, 0)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-      <div className="text-pb-faintest text-[11px] mt-2">Times each of our bowlers has dismissed their batters.</div>
     </Card>
+  )
+}
+
+/* ── opponent team filter (which side within the club to scout) ───────────── */
+
+function TeamPill({ active, onClick, label, sub }) {
+  return (
+    <button onClick={onClick}
+      className="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap"
+      style={active
+        ? { background: 'color-mix(in srgb, var(--pb-accent) 16%, transparent)', borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }
+        : { borderColor: 'color-mix(in srgb, var(--pb-faint) 40%, transparent)' }}>
+      {label}{sub ? <span className="text-pb-faint ml-1 pb-num">{sub}</span> : null}
+    </button>
+  )
+}
+
+function TeamSelector({ teams, value, onChange, disabled }) {
+  if (!teams?.length) return null
+  return (
+    <div className={`flex flex-wrap items-center gap-1.5 ${disabled ? 'opacity-60 pointer-events-none' : ''}`}>
+      <span className="text-pb-faint text-[11px] uppercase tracking-wide2 mr-1">Team</span>
+      <TeamPill active={!value} onClick={() => onChange(null)} label="Whole club" />
+      {teams.map(t => (
+        <TeamPill key={t.grade_id} active={value === t.grade_id} onClick={() => onChange(t.grade_id)}
+          label={t.team_name} sub={t.matches || null} />
+      ))}
+    </div>
   )
 }
 
@@ -403,6 +444,8 @@ export default function OppositionScout() {
   const [selected, setSelected] = useState(null)     // {opponent?, fixtureId?, name?}
   const [report, setReport] = useState(null)         // instant held-data report
   const [dossier, setDossier] = useState(null)       // live dossier (status/payload)
+  const [team, setTeam] = useState(null)             // chosen opponent team (grade_id) | null = whole club
+  const [teamsList, setTeamsList] = useState([])     // their teams, held stable across rebuilds
   const [tab, setTab] = useState('batting')
   const [matching, setMatching] = useState(null)     // fixture being matched to a club
   const pollRef = useRef(null)
@@ -422,35 +465,46 @@ export default function OppositionScout() {
 
   const stopPoll = () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
 
-  // Load report + dossier whenever the selection changes.
+  // Instant report (head-to-head + matchups) — club-wide, independent of the team
+  // filter, so it only reloads when the opponent changes.
   useEffect(() => {
-    stopPoll()
-    setReport(null); setDossier(null)
+    setReport(null)
     if (!selected) return
     let alive = true
-    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId }
+    api.iqOppositionReport({ opponent: selected.opponent, fixtureId: selected.fixtureId })
+      .then(r => { if (alive) setReport(r) }).catch(() => { if (alive) setReport({ error: true }) })
+    return () => { alive = false }
+  }, [selected])
 
-    api.iqOppositionReport(params).then(r => { if (alive) setReport(r) }).catch(() => { if (alive) setReport({ error: true }) })
-
+  // Live dossier (squad + form) — re-polled when the opponent OR chosen team changes.
+  useEffect(() => {
+    stopPoll()
+    setDossier(null)
+    if (!selected) return
+    let alive = true
+    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team }
     const poll = () => {
       api.iqOppositionDossier(params).then(d => {
         if (!alive) return
         setDossier(d)
+        if (d.teams?.length) setTeamsList(d.teams)
         if (d.status === 'building') pollRef.current = setTimeout(poll, POLL_MS)
       }).catch(() => { if (alive) setDossier({ status: 'error' }) })
     }
     poll()
     return () => { alive = false; stopPoll() }
-  }, [selected])
+  }, [selected, team])
 
   const pick = (sel) => {
     setSelected(sel)
+    setTeam(null)
+    setTeamsList([])
     const sp = {}
     if (sel.fixtureId) sp.fixture = sel.fixtureId
     else if (sel.opponent) sp.opponent = sel.opponent
     setSearchParams(sp, { replace: true })
   }
-  const clearSelection = () => { setSelected(null); setSearchParams({}, { replace: true }) }
+  const clearSelection = () => { setSelected(null); setTeam(null); setTeamsList([]); setSearchParams({}, { replace: true }) }
 
   // Manually match an unlinked fixture to a known club entity.
   const startMatch = (fx) => setMatching({ fixtureId: fx.fixture_id, name: fx.opponent_name })
@@ -463,12 +517,14 @@ export default function OppositionScout() {
   const refresh = () => {
     if (!selected) return
     setDossier({ status: 'building' })
-    api.iqRefreshDossier({ opponent: selected.opponent, fixtureId: selected.fixtureId })
+    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team }
+    api.iqRefreshDossier(params)
       .then(d => {
         setDossier(d)
+        if (d.teams?.length) setTeamsList(d.teams)
         if (d.status === 'building') { stopPoll(); pollRef.current = setTimeout(function p() {
-          api.iqOppositionDossier({ opponent: selected.opponent, fixtureId: selected.fixtureId }).then(d2 => {
-            setDossier(d2); if (d2.status === 'building') pollRef.current = setTimeout(p, POLL_MS)
+          api.iqOppositionDossier(params).then(d2 => {
+            setDossier(d2); if (d2.teams?.length) setTeamsList(d2.teams); if (d2.status === 'building') pollRef.current = setTimeout(p, POLL_MS)
           }).catch(() => setDossier({ status: 'error' }))
         }, POLL_MS) }
       }).catch(() => setDossier({ status: 'error' }))
@@ -527,11 +583,18 @@ export default function OppositionScout() {
         {report && <OurRecord performers={report.our_performers} />}
       </div>
 
-      {/* Instant: venue record + match-ups (from held data) */}
-      {report && !report.error && (report.venues?.length > 0 || report.matchups?.length > 0) && (
+      {/* Instant: venue record + bowler match-ups (from held data) */}
+      {report && !report.error && (report.venues?.length > 0 || report.matchups?.bowler_dominance?.length > 0) && (
         <div className="grid gap-4 lg:grid-cols-2 mb-4">
           <VenueCard venues={report.venues} />
-          <MatchupCard matchups={report.matchups} />
+          <BowlerMatchups matchups={report.matchups} />
+        </div>
+      )}
+
+      {/* Which side of the club to scout — drives the live squad + form below */}
+      {teamsList.length > 0 && (
+        <div className="mb-3">
+          <TeamSelector teams={teamsList} value={team} onChange={setTeam} disabled={building} />
         </div>
       )}
 
@@ -569,7 +632,7 @@ export default function OppositionScout() {
 
           <div className="mt-4">
             <Card
-              title="Their squad"
+              title={dossier.selected_team_name ? `Squad · ${dossier.selected_team_name}` : 'Their squad'}
               right={<Segmented sm value={tab} onChange={setTab} options={[{ value: 'batting', label: 'Batting' }, { value: 'bowling', label: 'Bowling' }]} />}
             >
               {tab === 'batting' ? <BattingTable rows={dossier.batting} /> : <BowlingTable rows={dossier.bowling} />}
