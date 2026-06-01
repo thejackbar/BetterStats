@@ -31,6 +31,21 @@ function VerdictTag({ v }) {
 
 /* ── overview: milestones + movers ────────────────────────────────────────── */
 
+function fmtEta(g) { return g ? `~${g} game${g === 1 ? '' : 's'}` : null }
+
+function Sparkline({ values, max }) {
+  if (!values?.length) return <span className="text-pb-faintest text-[11px]">—</span>
+  const m = max || Math.max(1, ...values)
+  return (
+    <span className="inline-flex items-end gap-[2px] h-5">
+      {values.map((v, i) => (
+        <span key={i} title={String(v)} className="w-[5px] rounded-sm"
+          style={{ height: `${Math.max(8, Math.round((v / m) * 100))}%`, background: 'color-mix(in srgb, var(--pb-accent) 70%, transparent)' }} />
+      ))}
+    </span>
+  )
+}
+
 function MilestoneList({ items }) {
   if (!items?.length) return <Empty>No milestones in reach right now.</Empty>
   return (
@@ -39,7 +54,7 @@ function MilestoneList({ items }) {
         <div key={i} className="flex items-center justify-between gap-2">
           <span className="font-medium truncate">{m.name}</span>
           <span className="text-sm pb-num whitespace-nowrap">
-            <b>{m.needed}</b> <span className="text-pb-faint">more {TYPE_LABEL[m.type] || m.type} → {m.target}</span>
+            <b>{m.needed}</b> <span className="text-pb-faint">more {TYPE_LABEL[m.type] || m.type} → {m.target}{m.eta_games ? ` · ${fmtEta(m.eta_games)}` : ''}</span>
           </span>
         </div>
       ))}
@@ -177,12 +192,41 @@ export default function PlayerTrends() {
 
             <Card title="Career"><CareerStrip career={detail.career} /></Card>
 
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <Card title="Recent form" right={detail.role_evolution ? <Tag tone="accent">{detail.role_evolution}</Tag> : null}>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-pb-faint">Last innings</span>
+                    <Sparkline values={(detail.recent_form?.batting || []).map(b => b.runs)} />
+                  </div>
+                  <div className="text-pb-faintest text-[11px] pb-num">{(detail.recent_form?.batting || []).map(b => (b.not_out ? `${b.runs}*` : b.runs)).join(', ') || 'no recent innings'}</div>
+                  {(detail.recent_form?.bowling || []).some(w => w > 0) && (
+                    <>
+                      <div className="flex items-center justify-between gap-3 pt-1">
+                        <span className="text-pb-faint">Last spells (wkts)</span>
+                        <Sparkline values={detail.recent_form.bowling} />
+                      </div>
+                      <div className="text-pb-faintest text-[11px] pb-num">{detail.recent_form.bowling.join(', ')}</div>
+                    </>
+                  )}
+                </div>
+              </Card>
+              <Card title="Career shape">
+                <div className="space-y-2 text-sm">
+                  {detail.peak?.batting && <div className="flex justify-between gap-2"><span className="text-pb-faint">Best batting season</span><span className="pb-num text-right">{detail.peak.batting.season} · {detail.peak.batting.runs} @ {num(detail.peak.batting.average)}</span></div>}
+                  {detail.peak?.bowling && <div className="flex justify-between gap-2"><span className="text-pb-faint">Best bowling season</span><span className="pb-num text-right">{detail.peak.bowling.season} · {detail.peak.bowling.wickets}w @ {num(detail.peak.bowling.average)}</span></div>}
+                  {detail.consistency != null && <div className="flex justify-between gap-2"><span className="text-pb-faint">Consistency (σ of season avg)</span><span className="pb-num">±{detail.consistency}</span></div>}
+                  {!detail.peak?.batting && !detail.peak?.bowling && <Empty>Not enough history yet.</Empty>}
+                </div>
+              </Card>
+            </div>
+
             {detail.milestones?.length > 0 && (
               <div className="mt-4">
                 <Card title="Closing in on" accent>
                   <div className="flex flex-wrap gap-x-6 gap-y-1.5">
                     {detail.milestones.map((m, i) => (
-                      <span key={i} className="text-sm"><b className="pb-num">{m.needed}</b> <span className="text-pb-faint">more {TYPE_LABEL[m.type] || m.type} → {m.target}</span></span>
+                      <span key={i} className="text-sm"><b className="pb-num">{m.needed}</b> <span className="text-pb-faint">more {TYPE_LABEL[m.type] || m.type} → {m.target}{m.eta_games ? ` (${fmtEta(m.eta_games)})` : ''}</span></span>
                     ))}
                   </div>
                 </Card>
@@ -223,6 +267,22 @@ export default function PlayerTrends() {
           )}
         </Card>
       </div>
+
+      {overview?.emerging?.length > 0 && (
+        <div className="mb-4">
+          <Card title="Emerging — ones to watch" accent right={<span className="text-pb-faint text-xs">few seasons, strong form</span>}>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {overview.emerging.map(p => (
+                <button key={p.player_id} onClick={() => pick(p.player_id)}
+                  className="pb-card px-3 py-2 text-left hover:border-pb-accent/50 transition-colors flex items-center justify-between gap-2">
+                  <span className="font-medium truncate">{p.name}</span>
+                  <span className="text-pb-faintest text-[11px] pb-num whitespace-nowrap">{p.runs}r · {p.wickets}w · {p.seasons}s</span>
+                </button>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
 
       <Card title={`Players (${players.length})`}>
         <Search value={q} onChange={setQ} placeholder="Search players…" className="mb-3 max-w-sm" />

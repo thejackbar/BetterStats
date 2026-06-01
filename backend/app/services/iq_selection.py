@@ -44,6 +44,53 @@ def _tier_updown(tier) -> str | None:
     return "up" if tier == 2 else ("down" if tier == 3 else None)
 
 
+_AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2}
+
+
+def _is_keeper(p) -> bool:
+    return "WKT" in _skills(p.get("skill_positions"))
+
+
+def _does_bowl(p) -> bool:
+    sk = _skills(p.get("skill_positions"))
+    return "BWL" in sk or "ALL" in sk or bool(p.get("bowling_type"))
+
+
+def _best_available_xi(pool: list[dict], target: int) -> list[dict]:
+    """Greedy best-available XI from the eligible pool: top form, available first,
+    then constraint-repaired to include a keeper and ≥5 bowling options."""
+    cands = [p for p in pool if p.get("autofill_eligible") and p.get("availability") != "UNAVAILABLE"]
+    cands.sort(key=lambda p: (_AVAIL_RANK.get(p.get("availability"), 3), -(p.get("score") or 0)))
+    if len(cands) <= target:
+        return sorted(cands, key=lambda p: -(p.get("score") or 0))
+
+    picked, bench = cands[:target], cands[target:]
+
+    # Ensure a keeper.
+    if not any(_is_keeper(p) for p in picked):
+        kp = next((p for p in bench if _is_keeper(p)), None)
+        if kp:
+            drop = min(picked, key=lambda p: (p.get("score") or 0))
+            picked.remove(drop); picked.append(kp); bench.remove(kp); bench.append(drop)
+
+    # Ensure ≥5 bowling options (don't trade away the keeper).
+    def nbowl(lst): return sum(1 for p in lst if _does_bowl(p))
+    guard = 0
+    while nbowl(picked) < 5 and guard < target:
+        guard += 1
+        add = next((p for p in sorted(bench, key=lambda p: -(p.get("score") or 0)) if _does_bowl(p)), None)
+        if not add:
+            break
+        droppable = [p for p in picked if not _is_keeper(p) and not _does_bowl(p)] or \
+                    [p for p in picked if not _is_keeper(p)]
+        if not droppable:
+            break
+        drop = min(droppable, key=lambda p: (p.get("score") or 0))
+        picked.remove(drop); picked.append(add); bench.remove(add); bench.append(drop)
+
+    return sorted(picked, key=lambda p: -(p.get("score") or 0))
+
+
 async def list_lineups(db: AsyncSession, club) -> list[dict]:
     """Fixtures with a saved lineup, soonest-upcoming first then recent past."""
     res = await db.execute(
@@ -372,6 +419,25 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
                          "recent_scores": p["recent_scores"], "recent_avg": p["recent_avg"],
                          "reason": ", ".join(reasons)})
 
+    # ── Best available XI (from the eligible pool) + diff vs the pick ──
+    target = sel.get("default_team_size") or 11
+    best = _best_available_xi(sel["pool"], target)
+    best_ids = {p["id"] for p in best}
+
+    def _shape_best(p):
+        f = form.get(p["id"], {})
+        return {
+            "player_id": p["id"], "name": p["display_name"],
+            "skills": sorted(_skills(p.get("skill_positions"))),
+            "score": p.get("score"), "availability": p.get("availability"),
+            "play_updown": _tier_updown(p.get("tier")),
+            "recent_scores": f.get("bat", []), "in_xi": p["id"] in selected_ids,
+        }
+    best_xi = [_shape_best(p) for p in best]
+    suggest_in = [_shape_best(p) for p in best if p["id"] not in selected_ids]
+    suggest_out = [{"player_id": p["player_id"], "name": p["name"], "flags": p["flags"]}
+                   for p in players if p["player_id"] not in best_ids]
+
     # ── Verdict (one-liner) ──
     warn_count = sum(1 for w in warnings if w["level"] == "warn")
     if warn_count == 0:
@@ -392,6 +458,9 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
         "warnings": warnings,
         "promote": promote,
         "rest": rest,
+        "best_xi": best_xi,
+        "suggest_in": suggest_in,
+        "suggest_out": suggest_out,
         "team_size_target": sel.get("default_team_size", 11),
         "coverage": {
             "notes": [

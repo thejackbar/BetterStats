@@ -466,6 +466,64 @@ async def _their_danger_batters(session: AsyncSession, org_id: str, opp_key: str
     ]
 
 
+async def _venues_vs(session: AsyncSession, org_id: str, opp_key: str) -> list[dict]:
+    """Our win/loss record at each venue against this opponent."""
+    res = await session.execute(
+        text(
+            f"""
+            SELECT g.venue,
+                   COUNT(*) FILTER (WHERE g.result IS NOT NULL) AS played,
+                   COUNT(*) FILTER (WHERE g.result = 'WIN') AS wins,
+                   COUNT(*) FILTER (WHERE g.result = 'LOSS') AS losses
+            FROM v_effective_games g{_ORG_SCOPE}
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND {_OPP_KEY} = :opp_key
+              AND g.venue IS NOT NULL AND g.venue <> ''
+            GROUP BY g.venue
+            HAVING COUNT(*) FILTER (WHERE g.result IS NOT NULL) >= 2
+            ORDER BY played DESC
+            LIMIT 8
+            """
+        ),
+        {"org_id": org_id, "opp_key": opp_key},
+    )
+    return [
+        {"venue": r["venue"], "played": r["played"], "wins": r["wins"], "losses": r["losses"]}
+        for r in res.mappings()
+    ]
+
+
+async def _matchups_vs(session: AsyncSession, org_id: str, opp_key: str) -> list[dict]:
+    """Our-bowler × their-batter dismissal grid (who owns whom), from the wickets
+    our bowlers have taken against this opponent. A real match-up edge from held
+    data — though it only sees dismissals BY us (not their not-outs)."""
+    res = await session.execute(
+        text(
+            f"""
+            SELECT COALESCE(pb.display_name_override, pb.name) AS bowler,
+                   bw.batter_name AS batter,
+                   COUNT(*) AS dismissals,
+                   COALESCE(SUM(bw.batter_runs), 0) AS runs
+            FROM bowler_wickets bw
+            JOIN v_effective_games g ON g.id = bw.game_id{_ORG_SCOPE}
+            JOIN players pb ON pb.id = bw.bowler_id
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND {_OPP_KEY} = :opp_key
+              AND bw.batter_name IS NOT NULL AND bw.batter_name <> ''
+            GROUP BY pb.id, bowler, bw.batter_name
+            HAVING COUNT(*) >= 2
+            ORDER BY dismissals DESC, runs ASC
+            LIMIT 15
+            """
+        ),
+        {"org_id": org_id, "opp_key": opp_key},
+    )
+    return [
+        {"bowler": r["bowler"], "batter": r["batter"], "dismissals": r["dismissals"], "runs": r["runs"]}
+        for r in res.mappings()
+    ]
+
+
 async def _their_key_players(session: AsyncSession, opp_org_uuid: str) -> dict:
     """Rich coverage: the opponent's own top run-scorers / wicket-takers.
 
@@ -570,11 +628,15 @@ async def opposition_report(
             "our_performers": None,
             "their_danger_batters": [],
             "their_key_players": None,
+            "venues": [],
+            "matchups": [],
         }
 
     head_to_head = await _head_to_head(session, org_id, opp_key)
     our_performers = await _our_performers_vs(session, org_id, opp_key)
     danger = await _their_danger_batters(session, org_id, opp_key)
+    venues = await _venues_vs(session, org_id, opp_key)
+    matchups = await _matchups_vs(session, org_id, opp_key)
 
     # Rich coverage only if the opponent is itself a synced org we hold.
     held = await _held_org_keys(session)
@@ -612,4 +674,6 @@ async def opposition_report(
         "our_performers": our_performers,
         "their_danger_batters": danger,
         "their_key_players": their_key_players,
+        "venues": venues,
+        "matchups": matchups,
     }

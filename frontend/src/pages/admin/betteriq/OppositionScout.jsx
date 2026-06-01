@@ -248,6 +248,51 @@ function OurRecord({ performers }) {
   )
 }
 
+/* ── venue record vs this opponent (instant) ─────────────────────────────── */
+
+function VenueCard({ venues }) {
+  if (!venues?.length) return null
+  return (
+    <Card title="By venue" right={<span className="text-pb-faint text-xs">vs this opponent</span>}>
+      <div className="space-y-1.5">
+        {venues.map((v, i) => {
+          const losses = v.losses || 0
+          const tone = v.wins > losses ? 'var(--pb-brand)' : v.wins < losses ? 'var(--pb-red)' : 'var(--pb-amber)'
+          return (
+            <div key={i} className="flex items-center justify-between gap-2 text-sm">
+              <span className="truncate">{v.venue}</span>
+              <span className="pb-num whitespace-nowrap" style={{ color: tone }}>
+                {v.wins}–{losses}<span className="text-pb-faintest"> /{v.played}</span>
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </Card>
+  )
+}
+
+/* ── our bowlers vs their batters (instant, from wickets we've taken) ─────── */
+
+function MatchupCard({ matchups }) {
+  if (!matchups?.length) return null
+  return (
+    <Card title="Match-ups" accent right={<span className="text-pb-faint text-xs">our bowlers vs their batters</span>}>
+      <div className="space-y-1.5">
+        {matchups.map((m, i) => (
+          <div key={i} className="flex items-center justify-between gap-2 text-sm">
+            <span className="truncate"><span className="font-medium">{m.bowler}</span> <span className="text-pb-faintest">▸</span> {m.batter}</span>
+            <span className="pb-num whitespace-nowrap text-pb-faint" title={`${m.runs} runs scored before dismissal`}>
+              <b className="text-pb-text">{m.dismissals}×</b>
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="text-pb-faintest text-[11px] mt-2">Times each of our bowlers has dismissed their batters.</div>
+    </Card>
+  )
+}
+
 /* ── opponent picker ──────────────────────────────────────────────────────── */
 
 function OpponentPicker({ data, onPick, onMatch }) {
@@ -481,6 +526,14 @@ export default function OppositionScout() {
         {report === null ? <div className="pb-card p-5 animate-pulse text-pb-faint text-sm">Loading head-to-head…</div> : <HeadToHead h2h={report.head_to_head} />}
         {report && <OurRecord performers={report.our_performers} />}
       </div>
+
+      {/* Instant: venue record + match-ups (from held data) */}
+      {report && !report.error && (report.venues?.length > 0 || report.matchups?.length > 0) && (
+        <div className="grid gap-4 lg:grid-cols-2 mb-4">
+          <VenueCard venues={report.venues} />
+          <MatchupCard matchups={report.matchups} />
+        </div>
+      )}
 
       {/* Live dossier */}
       {building && (
