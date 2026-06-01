@@ -9,9 +9,9 @@ import { Icon, Btn, Tag, Empty } from '../betterselect/ui'
 const CAPABILITIES = [
   { key: 'opposition', title: 'Opposition analysis', to: '/admin/betteriq/opposition', live: true,
     blurb: 'Scout an upcoming opponent — squad & form pulled live, danger men, and deep head-to-head vs us.' },
-  { key: 'selection', title: 'Selection analysis', live: false,
+  { key: 'selection', title: 'Selection analysis', to: '/admin/betteriq/selection', live: true,
     blurb: 'Form trends, batting/bowling balance of a proposed XI, who to promote or rest, fairness across grades.' },
-  { key: 'trends', title: 'Player trends & development', live: false,
+  { key: 'trends', title: 'Player trends & development', to: '/admin/betteriq/trends', live: true,
     blurb: 'Individual trajectories, breakout / decline detection and milestone forecasting.' },
   { key: 'qa', title: 'Natural-language Q&A', live: false,
     blurb: 'Ask your club’s data in plain English and get an answer grounded in the actual numbers.' },

@@ -85,6 +85,8 @@ const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminS
 const BsLadders = lazy(() => import('./pages/admin/betterselect/AdminLadders'))
 const BetterIQHome = lazy(() => import('./pages/admin/betteriq/BetterIQHome'))
 const IqOpposition = lazy(() => import('./pages/admin/betteriq/OppositionScout'))
+const IqSelection = lazy(() => import('./pages/admin/betteriq/SelectionAnalysis'))
+const IqTrends = lazy(() => import('./pages/admin/betteriq/PlayerTrends'))
 
 // Public club pages — lazy loaded (not needed for marketing visitors)
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -191,6 +193,8 @@ export default function App() {
           {/* BetterIQ module */}
           <Route path="/admin/betteriq" element={<ProtectedRoute requireModule="iq"><BetterIQHome /></ProtectedRoute>} />
           <Route path="/admin/betteriq/opposition" element={<ProtectedRoute requireModule="iq"><IqOpposition /></ProtectedRoute>} />
+          <Route path="/admin/betteriq/selection" element={<ProtectedRoute requireModule="iq"><IqSelection /></ProtectedRoute>} />
+          <Route path="/admin/betteriq/trends" element={<ProtectedRoute requireModule="iq"><IqTrends /></ProtectedRoute>} />
 
           {/* Game-level pages */}
           <Route path="/games/:gameId" element={<MatchScorecard />} />

@@ -159,11 +159,30 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
 async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str | None, fixture_id: str | None) -> tuple[str | None, str | None]:
     """Resolve a request into (opp_key, display_name).
 
-    Accepts an explicit ``opponent`` (already an opp_key) or a ``fixture_id``
-    whose opponent name we look up against our game history. Returns
+    Accepts an explicit ``opponent`` (already an opp_key) and/or a ``fixture_id``
+    whose opponent name we look up against our game history. An explicit
+    ``opponent`` **takes precedence** — the "match this opponent" UI passes both a
+    chosen opp_key and the fixture, and we want identity from the chosen club
+    (the fixture is only used for its grade, resolved separately). Returns
     ``(None, name)`` when a fixture names an opponent we've never played (so the
     caller can show an honest "no history" report).
     """
+    if opponent:
+        # Confirm the opp_key exists in our history and fetch its display name.
+        nm_res = await session.execute(
+            text(
+                f"""
+                SELECT MAX(g.opp_club_name) AS name
+                FROM v_effective_games g{_ORG_SCOPE}
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND {_OPP_KEY} = :opp_key
+                """
+            ),
+            {"org_id": org_id, "opp_key": opponent},
+        )
+        nrow = nm_res.mappings().first()
+        return opponent, (nrow["name"] if nrow else None) or opponent
+
     if fixture_id:
         fx = await session.execute(
             text(
@@ -195,22 +214,6 @@ async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str 
         if krow:
             return krow["opp_key"], krow["name"]
         return None, name  # named opponent, but no history held
-
-    if opponent:
-        # Confirm the opp_key exists in our history and fetch its display name.
-        nm_res = await session.execute(
-            text(
-                f"""
-                SELECT MAX(g.opp_club_name) AS name
-                FROM v_effective_games g{_ORG_SCOPE}
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND {_OPP_KEY} = :opp_key
-                """
-            ),
-            {"org_id": org_id, "opp_key": opponent},
-        )
-        nrow = nm_res.mappings().first()
-        return opponent, (nrow["name"] if nrow else None) or opponent
 
     return None, None
 
