@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
+import { TIER_ORDER, TIER_INFO, tierLabel } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
@@ -14,8 +15,9 @@ export default function SuperClubs() {
   const [saving, setSaving] = useState(false)
 
   const [editId, setEditId] = useState(null)
-  const [editForm, setEditForm] = useState({ name: '', slug: '', short_name: '', contact_email: '' })
+  const [editForm, setEditForm] = useState({ name: '', slug: '', short_name: '', contact_email: '', tier: 'good' })
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [syncing, setSyncing] = useState(null)
 
   // Club search (same source as the public onboarding flow)
   const [query, setQuery] = useState('')
@@ -127,7 +129,21 @@ export default function SuperClubs() {
       slug: club.slug || '',
       short_name: club.short_name || '',
       contact_email: club.contact_email || '',
+      tier: club.tier || 'good',
     })
+  }
+
+  const syncClub = async (club) => {
+    setSyncing(club.id)
+    setMsg('')
+    try {
+      await api.triggerSync(club.id)
+      setMsg(`Sync started for ${club.name}`)
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setSyncing(null)
+    }
   }
 
   const saveEdit = async (e) => {
@@ -285,6 +301,12 @@ export default function SuperClubs() {
                 <div>
                   <span className="text-pb-text text-sm">{club.name}</span>
                   <span className="font-mono text-[10px] text-pb-faintest ml-2">/{club.slug}</span>
+                  <span
+                    className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border pb-hairline text-pb-faint"
+                    title={club.modules?.length ? `Modules: ${club.modules.join(', ')}` : 'Core only'}
+                  >
+                    {tierLabel(club.tier)}
+                  </span>
                 </div>
                 <button
                   onClick={() => toggleActive(club)}
@@ -301,6 +323,14 @@ export default function SuperClubs() {
                   {club.created_at ? new Date(club.created_at).toLocaleDateString('en-AU') : '—'}
                 </span>
                 <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => syncClub(club)}
+                    disabled={syncing === club.id}
+                    className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
+                    title="Pull latest games & stats from Cricket Australia"
+                  >
+                    {syncing === club.id ? 'Syncing…' : 'Sync'}
+                  </button>
                   <button
                     onClick={() => (editId === club.id ? setEditId(null) : startEdit(club))}
                     className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
@@ -343,7 +373,20 @@ export default function SuperClubs() {
                         onChange={e => setEditForm(f => ({ ...f, contact_email: e.target.value }))}
                         className={INPUT_CLS} />
                     </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Tier (plan)</label>
+                      <select value={editForm.tier}
+                        onChange={e => setEditForm(f => ({ ...f, tier: e.target.value }))}
+                        className={INPUT_CLS}>
+                        {TIER_ORDER.map(t => (
+                          <option key={t} value={t}>{TIER_INFO[t].label} — ${TIER_INFO[t].annual}/yr</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
+                  <p className="font-mono text-[10px] text-pb-faintest">
+                    Good = Core only · Better = + BetterSelect + BetterSocials · Best = everything (+ BetterFees + BetterIQ)
+                  </p>
                   <div className="flex gap-2">
                     <button type="submit" disabled={saving}
                       className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-50 text-pb-bg"

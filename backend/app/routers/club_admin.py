@@ -24,6 +24,7 @@ from app.auth.capabilities import (
     require_cap, effective_capabilities, ALL_CAPABILITIES,
     MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, RUN_HARD_REFRESH, RUN_SYNC,
 )
+from app.auth.modules import ALL_TIERS, ALL_MODULES, org_entitled_modules
 from app.services import playhq_client
 
 # Keep strong references to background tasks so they aren't GC'd before completing
@@ -1299,6 +1300,9 @@ async def list_all_clubs(
             "short_name": o.short_name,
             "is_active": o.is_active,
             "contact_email": o.contact_email,
+            "tier": o.tier,
+            "module_overrides": list(o.module_overrides or []),
+            "modules": sorted(org_entitled_modules(o)),
             "created_at": o.created_at.isoformat() if o.created_at else None,
         }
         for o in orgs
@@ -1353,6 +1357,8 @@ class ClubUpdate(BaseModel):
     primary_color: Optional[str] = None
     accent_color: Optional[str] = None
     is_active: Optional[bool] = None
+    tier: Optional[str] = None
+    module_overrides: Optional[list[str]] = None
 
 
 @router.patch("/super/clubs/{club_id}")
@@ -1385,6 +1391,17 @@ async def patch_club(
             raise HTTPException(status_code=422, detail="Name cannot be empty")
         fields["name"] = name
 
+    if "tier" in fields:
+        if fields["tier"] not in ALL_TIERS:
+            raise HTTPException(status_code=422, detail=f"Tier must be one of: {', '.join(ALL_TIERS)}")
+
+    if "module_overrides" in fields:
+        overrides = fields["module_overrides"] or []
+        unknown = [m for m in overrides if m not in ALL_MODULES]
+        if unknown:
+            raise HTTPException(status_code=422, detail=f"Unknown modules: {', '.join(unknown)}")
+        fields["module_overrides"] = sorted(set(overrides))
+
     for key, value in fields.items():
         setattr(org, key, value)
 
@@ -1394,6 +1411,9 @@ async def patch_club(
         "slug": org.slug,
         "name": org.name,
         "is_active": org.is_active,
+        "tier": org.tier,
+        "module_overrides": list(org.module_overrides or []),
+        "modules": sorted(org_entitled_modules(org)),
     }
 
 
