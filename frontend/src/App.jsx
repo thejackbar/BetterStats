@@ -160,16 +160,16 @@ export default function App() {
           <Route path="/admin/changelog" element={<ProtectedRoute><AdminChangelog /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
           <Route path="/admin/reports" element={<ProtectedRoute><AdminReports /></ProtectedRoute>} />
-          <Route path="/admin/fees" element={<ProtectedRoute><AdminFeesMembers /></ProtectedRoute>} />
-          <Route path="/admin/fees/schedule" element={<ProtectedRoute><AdminFeeSchedule /></ProtectedRoute>} />
-          <Route path="/admin/fees/payments" element={<ProtectedRoute><AdminFeePayments /></ProtectedRoute>} />
-          <Route path="/admin/fees/payments/import" element={<ProtectedRoute><AdminFeePaymentImport /></ProtectedRoute>} />
-          <Route path="/admin/fees/payments/bulk" element={<ProtectedRoute><AdminFeeBulkPayment /></ProtectedRoute>} />
-          <Route path="/admin/fees/reports" element={<ProtectedRoute><AdminFeeReports /></ProtectedRoute>} />
-          <Route path="/admin/fees/member/:memberId" element={<ProtectedRoute><AdminFeeMemberDetail /></ProtectedRoute>} />
+          <Route path="/admin/fees" element={<ProtectedRoute requireModule="fees"><AdminFeesMembers /></ProtectedRoute>} />
+          <Route path="/admin/fees/schedule" element={<ProtectedRoute requireModule="fees"><AdminFeeSchedule /></ProtectedRoute>} />
+          <Route path="/admin/fees/payments" element={<ProtectedRoute requireModule="fees"><AdminFeePayments /></ProtectedRoute>} />
+          <Route path="/admin/fees/payments/import" element={<ProtectedRoute requireModule="fees"><AdminFeePaymentImport /></ProtectedRoute>} />
+          <Route path="/admin/fees/payments/bulk" element={<ProtectedRoute requireModule="fees"><AdminFeeBulkPayment /></ProtectedRoute>} />
+          <Route path="/admin/fees/reports" element={<ProtectedRoute requireModule="fees"><AdminFeeReports /></ProtectedRoute>} />
+          <Route path="/admin/fees/member/:memberId" element={<ProtectedRoute requireModule="fees"><AdminFeeMemberDetail /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
-          <Route path="/admin/social-post" element={<ProtectedRoute><AdminSocialPost /></ProtectedRoute>} />
+          <Route path="/admin/social-post" element={<ProtectedRoute requireModule="socials"><AdminSocialPost /></ProtectedRoute>} />
           <Route path="/admin/yearbook" element={<ProtectedRoute><AdminYearbook /></ProtectedRoute>} />
           <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute><AdminYearbookDetail /></ProtectedRoute>} />
           <Route path="/admin/usage" element={<ProtectedRoute requireRole="super_admin"><AdminUsage /></ProtectedRoute>} />
@@ -177,14 +177,14 @@ export default function App() {
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
 
           {/* BetterSelect module */}
-          <Route path="/admin/betterselect" element={<ProtectedRoute><BetterSelectHome /></ProtectedRoute>} />
-          <Route path="/admin/betterselect/players" element={<ProtectedRoute><BsPlayers /></ProtectedRoute>} />
-          <Route path="/admin/betterselect/fixtures" element={<ProtectedRoute><BsFixtures /></ProtectedRoute>} />
-          <Route path="/admin/betterselect/teams" element={<ProtectedRoute><BsTeams /></ProtectedRoute>} />
-          <Route path="/admin/betterselect/availability" element={<ProtectedRoute><BsAvailability /></ProtectedRoute>} />
-          <Route path="/admin/betterselect/selection" element={<ProtectedRoute><BsSelectionOverview /></ProtectedRoute>} />
-          <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute><BsSelection /></ProtectedRoute>} />
-          <Route path="/admin/betterselect/ladders" element={<ProtectedRoute><BsLadders /></ProtectedRoute>} />
+          <Route path="/admin/betterselect" element={<ProtectedRoute requireModule="select"><BetterSelectHome /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/players" element={<ProtectedRoute requireModule="select"><BsPlayers /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/fixtures" element={<ProtectedRoute requireModule="select"><BsFixtures /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/teams" element={<ProtectedRoute requireModule="select"><BsTeams /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/availability" element={<ProtectedRoute requireModule="select"><BsAvailability /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/selection" element={<ProtectedRoute requireModule="select"><BsSelectionOverview /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute requireModule="select"><BsSelection /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/ladders" element={<ProtectedRoute requireModule="select"><BsLadders /></ProtectedRoute>} />
 
           {/* Game-level pages */}
           <Route path="/games/:gameId" element={<MatchScorecard />} />
