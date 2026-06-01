@@ -2336,7 +2336,10 @@ class ClubUserCreate(BaseModel):
     username: str
     display_name: Optional[str] = None
     password: str
-    role: str = "club_member"  # super_admin and club_admin invites still go through super-admin
+    # Retained for backward-compat with older clients; ignored — every club
+    # user is created as club_admin (club_member is retired). super_admin
+    # invites go through the Super Admin console.
+    role: str = "club_admin"
     capabilities: list[str] = []
 
 
@@ -2389,20 +2392,6 @@ async def list_capabilities(
     return {"capabilities": list(ALL_CAPABILITIES)}
 
 
-def _validate_cap_payload(role: str, caps: list[str]) -> list[str]:
-    if role not in ("club_admin", "club_member"):
-        raise HTTPException(400, "role must be club_admin or club_member")
-    bad = [c for c in caps if c not in ALL_CAPABILITIES]
-    if bad:
-        raise HTTPException(400, f"Unknown capability: {bad[0]}")
-    # club_admin ignores caps anyway — store empty for cleanliness
-    if role == "club_admin":
-        return []
-    # de-dup preserving order
-    seen = set()
-    return [c for c in caps if not (c in seen or seen.add(c))]
-
-
 @router.post("/users")
 async def create_club_user(
     data: ClubUserCreate,
@@ -2414,7 +2403,10 @@ async def create_club_user(
     if not username or len(data.password) < 6:
         raise HTTPException(400, "Username required and password must be 6+ chars")
 
-    caps = _validate_cap_payload(data.role, data.capabilities)
+    # club_member is retired — every invited user is a full club admin
+    # (club_admin implies all capabilities).
+    role = "club_admin"
+    caps: list[str] = []
 
     # Username uniqueness
     existing = await db.execute(_text("SELECT id FROM users WHERE username = :u"), {"u": username})
@@ -2438,7 +2430,7 @@ async def create_club_user(
             "id": str(uuid.uuid4()),
             "club": str(club.id),
             "uid": str(new_user_id),
-            "role": data.role,
+            "role": role,
             "caps": _json.dumps(caps),
         },
     )
@@ -2447,11 +2439,11 @@ async def create_club_user(
     await log_activity(
         db, org_id=club.id, user_id=current_user.id,
         action="create_club_user", target_type="user", target_id=str(new_user_id),
-        details={"username": username, "role": data.role, "capabilities": caps},
+        details={"username": username, "role": role, "capabilities": caps},
     )
 
     await db.commit()
-    return {"id": str(new_user_id), "username": username, "role": data.role, "capabilities": caps}
+    return {"id": str(new_user_id), "username": username, "role": role, "capabilities": caps}
 
 
 @router.patch("/users/{user_id}")
@@ -2462,12 +2454,6 @@ async def update_club_user(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    if str(current_user.id) == user_id:
-        # Main Admin can edit display name + password on themselves, but not
-        # role/caps (prevents self-demotion locking everyone out of admin).
-        if data.role is not None or data.capabilities is not None:
-            raise HTTPException(400, "Use a different admin to change your own role or capabilities")
-
     # Confirm target is a member of this club
     row = await db.execute(
         _text(
@@ -2481,6 +2467,8 @@ async def update_club_user(
     if not target:
         raise HTTPException(404, "User not found in this club")
 
+    # Role + capabilities are no longer editable here — club_member is retired,
+    # so every club user is a full club admin. Only display name + password.
     changes = {}
     if data.display_name is not None:
         await db.execute(_text("UPDATE users SET display_name = :d WHERE id = :id"), {"d": data.display_name, "id": user_id})
@@ -2490,17 +2478,6 @@ async def update_club_user(
             raise HTTPException(400, "Password must be 6+ chars")
         await db.execute(_text("UPDATE users SET password_hash = :h WHERE id = :id"), {"h": _hash_password(data.password), "id": user_id})
         changes["password"] = True
-
-    if data.role is not None or data.capabilities is not None:
-        new_role = data.role or target["current_role"]
-        new_caps = data.capabilities if data.capabilities is not None else []
-        new_caps = _validate_cap_payload(new_role, new_caps)
-        await db.execute(
-            _text("UPDATE club_memberships SET role = :r, capabilities = CAST(:c AS JSONB) WHERE id = :id"),
-            {"r": new_role, "c": _json.dumps(new_caps), "id": target["membership_id"]},
-        )
-        changes["role"] = new_role
-        changes["capabilities"] = new_caps
 
     from app.services.audit_log import log_activity
     await log_activity(
