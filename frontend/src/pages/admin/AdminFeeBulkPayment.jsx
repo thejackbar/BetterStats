@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
@@ -236,7 +236,7 @@ export default function AdminFeeBulkPayment() {
   const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
   return (
-    <AdminLayout>
+    <BetterFeesLayout>
       <div className="max-w-4xl">
         <Link to="/admin/fees/payments" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">← PAYMENTS</Link>
         <h1 className="font-display font-bold text-2xl text-pb-text mt-2 mb-1">Bulk payment</h1>
@@ -334,6 +334,6 @@ export default function AdminFeeBulkPayment() {
           </>
         )}
       </div>
-    </AdminLayout>
+    </BetterFeesLayout>
   )
 }

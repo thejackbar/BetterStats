@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
@@ -94,7 +94,7 @@ export default function AdminFeePaymentImport() {
   const cell = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent'
 
   return (
-    <AdminLayout>
+    <BetterFeesLayout>
       <div className="max-w-6xl">
         <Link to="/admin/fees/payments" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">← PAYMENTS</Link>
         <h1 className="font-display font-bold text-2xl text-pb-text mt-2 mb-1">Import bank statement</h1>
@@ -223,6 +223,6 @@ export default function AdminFeePaymentImport() {
           </>
         )}
       </div>
-    </AdminLayout>
+    </BetterFeesLayout>
   )
 }

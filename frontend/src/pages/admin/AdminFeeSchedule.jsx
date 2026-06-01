@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 const PAYMENT_TYPES = [
@@ -214,7 +214,7 @@ export default function AdminFeeSchedule() {
   }
 
   return (
-    <AdminLayout>
+    <BetterFeesLayout>
       <div className="max-w-4xl">
         <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Fee Schedule</h1>
         <p className="text-pb-faint text-sm mb-5 leading-relaxed">
@@ -284,6 +284,6 @@ export default function AdminFeeSchedule() {
           </>
         )}
       </div>
-    </AdminLayout>
+    </BetterFeesLayout>
   )
 }

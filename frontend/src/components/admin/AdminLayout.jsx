@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
-import { MODULE } from '../../lib/modules'
+import { MODULE_INFO, tierLabel } from '../../lib/modules'
 import { api } from '../../lib/api'
 import { SITE_VERSION } from '../../version'
 import { CHANGELOG } from '../../data/changelog'
@@ -23,8 +23,8 @@ function compareVersions(a, b) {
 
 // `cap: null` means everyone gets it (dashboard, read-only listing pages).
 // `cap: <CAP>` hides the link from users without that capability.
-// `module: <MODULE>` additionally hides the link when the club's tier doesn't
-// include that Better module (BetterSocials, BetterFees, …).
+// BetterSelect / BetterSocials / BetterFees are NOT here — each is its own
+// module surface (own layout + nav), reached from the dashboard module tiles.
 const NAV_SECTIONS = [
   { items: [{ to: '/admin', label: 'Dashboard', exact: true, cap: null }] },
   {
@@ -40,7 +40,6 @@ const NAV_SECTIONS = [
     items: [
       { to: '/admin/award-definitions', label: 'Award Types', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/awards', label: 'Awards', cap: CAP.MANAGE_AWARDS },
-      { to: '/admin/social-post', label: 'Social Posts', cap: CAP.MANAGE_SOCIAL, module: MODULE.SOCIALS },
       { to: '/admin/sponsors', label: 'Sponsors', cap: CAP.MANAGE_SPONSORS },
       { to: '/admin/yearbook', label: 'Yearbooks', cap: CAP.MANAGE_YEARBOOKS },
     ],
@@ -57,15 +56,6 @@ const NAV_SECTIONS = [
       { to: '/admin/milestones', label: 'Milestones', cap: CAP.MANAGE_MILESTONES },
       { to: '/admin/partnerships', label: 'Partnership Rec.', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/reports', label: 'Saved Reports', cap: CAP.MANAGE_REPORTS },
-    ],
-  },
-  {
-    heading: 'Fees',
-    items: [
-      { to: '/admin/fees', label: 'Members', exact: true, cap: CAP.MANAGE_FEES, module: MODULE.FEES },
-      { to: '/admin/fees/payments', label: 'Payments', cap: CAP.MANAGE_FEES, module: MODULE.FEES },
-      { to: '/admin/fees/reports', label: 'Reports', cap: CAP.MANAGE_FEES, module: MODULE.FEES },
-      { to: '/admin/fees/schedule', label: 'Fee Schedule', cap: CAP.MANAGE_FEES, module: MODULE.FEES },
     ],
   },
   {
@@ -99,10 +89,7 @@ export default function AdminLayout({ children }) {
   // under it.
   const visibleSections = NAV_SECTIONS.map(s => ({
     ...s,
-    items: s.items.filter(i =>
-      (i.cap == null || hasCapability(i.cap)) &&
-      (i.module == null || hasModule(i.module))
-    ),
+    items: s.items.filter(i => i.cap == null || hasCapability(i.cap)),
   })).filter(s => s.items.length > 0)
 
   // Open the modal immediately, then fetch the summary in the background.
@@ -213,6 +200,44 @@ export default function AdminLayout({ children }) {
           w-full md:w-40 shrink-0 border-r pb-hairline-r pt-3 pb-6 px-1.5
         `}>
           <nav>
+            {/* Modules — the headline Better products. Bolder + on top of the
+                admin sections below; each opens its own module surface. Modules
+                the club's plan doesn't include are greyed out (with the plan
+                that unlocks them); BetterIQ shows "Soon". */}
+            <div className="pb-2 mb-1 border-b pb-hairline-b">
+              <div className="pb-1 px-2 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Modules</div>
+              {MODULE_INFO.map(mod => {
+                if (mod.built && hasModule(mod.key)) {
+                  return (
+                    <Link
+                      key={mod.key}
+                      to={mod.to}
+                      onClick={() => setMobileOpen(false)}
+                      className={`block px-2 py-1.5 rounded transition-colors font-display font-bold text-[13px] ${
+                        isActive(mod.to)
+                          ? 'bg-pb-surface2 text-pb-text'
+                          : 'text-pb-text hover:bg-pb-surface2'
+                      }`}
+                      style={isActive(mod.to) ? { color: 'var(--pb-accent)' } : {}}
+                    >
+                      {mod.name}
+                    </Link>
+                  )
+                }
+                const locked = mod.built  // built but not entitled
+                return (
+                  <div
+                    key={mod.key}
+                    title={locked ? `Included in the ${tierLabel(mod.requiredTier)} plan` : 'Coming soon'}
+                    className="flex items-center justify-between px-2 py-1.5 rounded font-display font-bold text-[13px] text-pb-faintest opacity-50 cursor-default select-none"
+                  >
+                    <span>{mod.name}</span>
+                    <span className="font-mono text-[9px]">{locked ? '🔒' : 'SOON'}</span>
+                  </div>
+                )
+              })}
+            </div>
+
             {visibleSections.map((section, i) => (
               <div
                 key={section.heading || `section-${i}`}
