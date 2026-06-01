@@ -1,8 +1,8 @@
 export default {
-  version: 'v1.2.0 Beta',
+  version: 'v2.0.0 Beta',
   date: '2026-06-01',
   sortKey: '2026-06-01T16:00:00Z',
-  title: 'BetterIQ is live — opposition scouting',
+  title: 'BetterIQ is live — the Better ecosystem is complete',
   items: [
     "BetterIQ opens as its own module (Best tier) from the dashboard — the analytics brain that reads the data the Core already holds.",
     "Opposition analysis: pick an upcoming fixture or any past opponent and get a scouting report — head-to-head record (home/away, recent form, last meetings) and your own players' record against them for selection.",

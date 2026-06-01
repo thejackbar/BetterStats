@@ -6,8 +6,8 @@ grade's Grassroots scorecards, plus player-level head-to-head vs us). Built on
 demand; `status` drives the build/poll UX, `built_at` drives a freshness TTL +
 manual refresh. See app/services/iq_opponent.py.
 
-Revision ID: 058
-Revises: 057
+Revision ID: 059
+Revises: 058
 Create Date: 2026-06-01
 
 """
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
 
-revision = '058'
-down_revision = '057'
+revision = '059'
+down_revision = '058'
 branch_labels = None
 depends_on = None
 

@@ -58,6 +58,40 @@ def derive_fee_format(grade_fee_format: str | None, match_format: str | None):
     return "one_day", FORMAT_DEFAULT_DAYS["one_day"]
 
 
+def allocate_match_days(charges, match_paid):
+    """Spread a member's total match-fee money across their match days, oldest
+    game first — the BetterFees auto-allocation.
+
+    `charges` is the per-game fee (days_played × tier rate) in settle order
+    (oldest game first). `match_paid` is the sum of the member's match_day
+    payments. Each game is paid in full while the money lasts; the first game
+    the money can't fully cover is 'partial' (with whatever is left), the rest
+    'unpaid'. A $0 game (rate $0 / no tier) is 'na' and never consumes money.
+
+    Returns (rows, credit):
+      rows   — list parallel to `charges` of (status, amount_covered),
+               status ∈ {'paid', 'partial', 'unpaid', 'na'}.
+      credit — money left over once every game is fully covered (the member is
+               'in the Green'); Decimal('0') otherwise.
+    """
+    remaining = Decimal(str(match_paid or 0))
+    rows = []
+    for charge in charges:
+        c = Decimal(str(charge or 0))
+        if c <= 0:
+            rows.append(("na", Decimal("0")))
+        elif remaining >= c:
+            rows.append(("paid", c))
+            remaining -= c
+        elif remaining > 0:
+            rows.append(("partial", remaining))
+            remaining = Decimal("0")
+        else:
+            rows.append(("unpaid", Decimal("0")))
+    credit = remaining if remaining > 0 else Decimal("0")
+    return rows, credit
+
+
 async def latest_season_id(session, organisation_id):
     """The club's most recent season (by year, then name) — the fees season."""
     row = await session.execute(
