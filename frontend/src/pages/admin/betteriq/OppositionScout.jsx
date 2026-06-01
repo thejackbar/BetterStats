@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import { Icon, Btn, Tag, Empty, Search, Segmented } from '../betterselect/ui'
+import KeyPlayersCard from './KeyPlayersCard'
 
 const POLL_MS = 2500
 
@@ -17,12 +18,6 @@ function ResultBadge({ r }) {
   )
 }
 
-function FormTag({ form }) {
-  if (!form) return null
-  const tone = form === 'hot' ? 'amber' : form === 'cold' ? 'faint' : 'accent'
-  const label = form === 'hot' ? 'In form' : form === 'cold' ? 'Out of form' : 'Steady'
-  return <Tag tone={tone}>{label}</Tag>
-}
 
 function Stat({ label, value, sub }) {
   return (
@@ -170,50 +165,6 @@ function BowlingTable({ rows }) {
 
 /* ── danger men cards ─────────────────────────────────────────────────────── */
 
-function DangerMen({ batters, bowlers }) {
-  if (!batters?.length && !bowlers?.length) return null
-  return (
-    <Card title="Danger men" accent right={<Tag tone="accent">Watch these</Tag>}>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div>
-          <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-2">Top batters</div>
-          <div className="space-y-2">
-            {(batters || []).map(p => (
-              <div key={p.player_id} className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <span className="font-medium">{p.name}</span> <FormTag form={p.form} />
-                  <div className="text-pb-faintest text-[11px]">{(p.recent_scores || []).join(', ') || 'no recent scores'}</div>
-                </div>
-                <div className="text-right shrink-0 pb-num">
-                  <div className="font-semibold">{p.runs} <span className="text-pb-faint text-xs">runs</span></div>
-                  <div className="text-pb-faint text-[11px]">avg {num(p.average)}{p.vs_us ? ` · ${p.vs_us.runs} vs us` : ''}</div>
-                </div>
-              </div>
-            ))}
-            {!batters?.length && <Empty>—</Empty>}
-          </div>
-        </div>
-        <div>
-          <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-2">Top bowlers</div>
-          <div className="space-y-2">
-            {(bowlers || []).map(p => (
-              <div key={p.player_id} className="flex items-center justify-between gap-2">
-                <div className="min-w-0"><span className="font-medium">{p.name}</span>
-                  <div className="text-pb-faintest text-[11px]">econ {num(p.economy)} · best {num(p.best)}</div>
-                </div>
-                <div className="text-right shrink-0 pb-num">
-                  <div className="font-semibold">{p.wickets} <span className="text-pb-faint text-xs">wkts</span></div>
-                  <div className="text-pb-faint text-[11px]">avg {num(p.average)}{p.vs_us ? ` · ${p.vs_us.wickets}w vs us` : ''}</div>
-                </div>
-              </div>
-            ))}
-            {!bowlers?.length && <Empty>—</Empty>}
-          </div>
-        </div>
-      </div>
-    </Card>
-  )
-}
 
 /* ── our players vs them (selection intel, from the instant report) ───────── */
 
@@ -436,6 +387,52 @@ function MatchOpponentModal({ opponents, fixture, onPick, onClose }) {
   )
 }
 
+/* ── how they get out + partnership/collapse map (from their scorecards) ───── */
+
+function HowTheyGetOut({ breakdown }) {
+  if (!breakdown?.length) return null
+  const palette = ['var(--pb-accent)', 'var(--pb-amber)', 'var(--pb-brand)', 'var(--pb-red)', 'var(--pb-dim)', 'var(--pb-faint)']
+  return (
+    <Card title="How they get out" right={<span className="text-pb-faint text-xs">this season</span>}>
+      <div className="flex h-2.5 rounded-full overflow-hidden bg-pb-surface2 mb-3">
+        {breakdown.map((d, idx) => (
+          <div key={d.type} title={`${d.type} ${d.pct}%`} style={{ flexGrow: d.count, background: palette[idx % palette.length], opacity: 0.85 }} />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {breakdown.map((d, idx) => (
+          <span key={d.type} className="inline-flex items-center gap-1.5 text-[12px]">
+            <span className="w-2 h-2 rounded-full" style={{ background: palette[idx % palette.length] }} />
+            <span className="capitalize">{d.type}</span> <b className="pb-num">{d.pct}%</b>
+          </span>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+function Partnerships({ partnerships, insight }) {
+  if (!partnerships?.length) return null
+  const max = Math.max(1, ...partnerships.map(p => p.avg_partnership || 0))
+  const ord = (k) => ({ 1: '1st', 2: '2nd', 3: '3rd' }[k] || `${k}th`)
+  return (
+    <Card title="Where they wobble" accent right={<span className="text-pb-faint text-xs">avg partnership by wicket</span>}>
+      <div className="space-y-1">
+        {partnerships.map(p => (
+          <div key={p.wicket} className="flex items-center gap-2 text-[12px]">
+            <span className="w-7 text-pb-faint shrink-0">{ord(p.wicket)}</span>
+            <div className="flex-1 h-2 rounded-full bg-pb-surface2 overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${Math.round((p.avg_partnership / max) * 100)}%`, background: 'var(--pb-accent)' }} />
+            </div>
+            <span className="w-9 text-right pb-num shrink-0">{p.avg_partnership}</span>
+          </div>
+        ))}
+      </div>
+      {insight && <div className="text-pb-faint text-[12px] mt-3">{insight}</div>}
+    </Card>
+  )
+}
+
 /* ── main ─────────────────────────────────────────────────────────────────── */
 
 export default function OppositionScout() {
@@ -616,7 +613,21 @@ export default function OppositionScout() {
 
       {ready && (
         <>
-          <DangerMen batters={dossier.danger_batters} bowlers={dossier.danger_bowlers} />
+          {/* Key players — flick-through showcase cards */}
+          {(dossier.danger_batters?.length > 0 || dossier.danger_bowlers?.length > 0) && (
+            <div className="grid gap-4 lg:grid-cols-2 mb-4">
+              <KeyPlayersCard title="Danger batters" subtitle="their top run-scorers this season" players={dossier.danger_batters} kind="bat" />
+              <KeyPlayersCard title="Danger bowlers" subtitle="their leading wicket-takers" players={dossier.danger_bowlers} kind="bowl" />
+            </div>
+          )}
+
+          {/* How they get out + where they wobble (from their scorecards) */}
+          {(dossier.dismissal_breakdown?.length > 0 || dossier.partnerships?.length > 0) && (
+            <div className="grid gap-4 lg:grid-cols-2 mb-4">
+              <HowTheyGetOut breakdown={dossier.dismissal_breakdown} />
+              <Partnerships partnerships={dossier.partnerships} insight={dossier.partnership_insight} />
+            </div>
+          )}
 
           {dossier.historical_threats?.length > 0 && (
             <div className="mt-4">
