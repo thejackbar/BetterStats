@@ -348,6 +348,14 @@ def _financials(schedule: Optional[FeeSchedule], match_days: float, paid: Option
     match_fee_outstanding = round(max(match_fee_payable - match_fee_paid, 0.0), 2)
     total_outstanding = round(membership_outstanding + match_fee_outstanding, 2)
 
+    # Credit ('in the Green') — surplus on each bucket. Membership and match-fee
+    # pots are kept separate (club preference), so over-paying one never masks
+    # money still owed on the other. No tier means we can't say what's owed, so
+    # we don't claim any credit.
+    membership_credit = round(max(membership_paid - membership_payable, 0.0), 2) if schedule is not None else 0.0
+    match_fee_credit = round(max(match_fee_paid - match_fee_payable, 0.0), 2) if schedule is not None else 0.0
+    credit = round(membership_credit + match_fee_credit, 2)
+
     if schedule is None:
         status = "needs_tier"
     elif schedule.payment_type == "complimentary":
@@ -371,6 +379,10 @@ def _financials(schedule: Optional[FeeSchedule], match_days: float, paid: Option
         "membership_outstanding": membership_outstanding,
         "match_fee_outstanding": match_fee_outstanding,
         "total_outstanding": total_outstanding,
+        "membership_credit": membership_credit,
+        "match_fee_credit": match_fee_credit,
+        "credit": credit,
+        "in_credit": credit > 0,
         "status": status,
         "needs_tier": schedule is None,
         "no_games_played": (match_days == 0 and membership_payable == 0),
@@ -401,6 +413,7 @@ async def list_members(
         "membership_payable": 0.0, "match_fee_payable": 0.0, "total_payable": 0.0,
         "membership_paid": 0.0, "match_fee_paid": 0.0, "total_paid": 0.0,
         "membership_outstanding": 0.0, "match_fee_outstanding": 0.0, "total_outstanding": 0.0,
+        "membership_credit": 0.0, "match_fee_credit": 0.0, "credit": 0.0,
         "match_days": 0.0,
     }
     for ms, member, schedule in rows:
@@ -423,6 +436,7 @@ async def list_members(
         for k in ("membership_payable", "match_fee_payable", "total_payable",
                   "membership_paid", "match_fee_paid", "total_paid",
                   "membership_outstanding", "match_fee_outstanding", "total_outstanding",
+                  "membership_credit", "match_fee_credit", "credit",
                   "match_days"):
             summary[k] += fin[k]
     for k in list(summary.keys()):
@@ -503,27 +517,8 @@ async def get_member(
     if ms is not None:
         if ms.fee_schedule_id:
             schedule = await db.get(FeeSchedule, ms.fee_schedule_id)
-        rows = (await db.execute(
-            select(FeeMatchDay, Game, Grade)
-            .outerjoin(Game, FeeMatchDay.game_id == Game.id)
-            .outerjoin(Grade, Game.grade_id == Grade.id)
-            .where(FeeMatchDay.member_season_id == ms.id)
-            .order_by(FeeMatchDay.played_at.nullslast())
-        )).all()
-        total_days = 0.0
-        for e, game, grade in rows:
-            total_days += _f(e.days_played)
-            entries.append({
-                "id": str(e.id),
-                "played_at": e.played_at.isoformat() if e.played_at else None,
-                "fee_format": e.fee_format,
-                "days_played": _f(e.days_played),
-                "auto_derived": e.auto_derived,
-                "paid_payment_id": str(e.paid_payment_id) if e.paid_payment_id else None,
-                "is_paid": e.paid_payment_id is not None,
-                "grade": grade.display_name if grade else None,
-                "match": f"{game.home_team} v {game.away_team}" if game else None,
-            })
+        # Payments first — we need the match-day total before we can allocate
+        # it across games.
         pay_rows = (await db.execute(
             select(FeePayment).where(FeePayment.member_season_id == ms.id)
             .order_by(FeePayment.paid_at.desc().nullslast(), FeePayment.created_at.desc())
@@ -540,6 +535,42 @@ async def get_member(
                 "bank_ref": p.bank_ref,
                 "notes": p.notes,
             })
+
+        # Match days oldest-first — that's the order match-fee money settles in.
+        rows = (await db.execute(
+            select(FeeMatchDay, Game, Grade)
+            .outerjoin(Game, FeeMatchDay.game_id == Game.id)
+            .outerjoin(Grade, Game.grade_id == Grade.id)
+            .where(FeeMatchDay.member_season_id == ms.id)
+            .order_by(FeeMatchDay.played_at.nullslast(), FeeMatchDay.id)
+        )).all()
+        rate = Decimal(str(_f(schedule.match_day_rate))) if schedule else Decimal("0")
+        charges = [
+            (_money(e.days_played) * rate) if e.days_played is not None else Decimal("0")
+            for e, _game, _grade in rows
+        ]
+        # Auto-allocate the member's match-fee money across these games, oldest
+        # first. Per-game Paid/Part-paid/Unpaid is derived from money paid — not
+        # a stored flag — so it stays correct as payments are added or removed.
+        alloc, _credit = fee_service.allocate_match_days(charges, paid_totals.get("match_day", 0.0))
+
+        total_days = 0.0
+        for (e, game, grade), charge, (st, covered) in zip(rows, charges, alloc):
+            total_days += _f(e.days_played)
+            entries.append({
+                "id": str(e.id),
+                "played_at": e.played_at.isoformat() if e.played_at else None,
+                "fee_format": e.fee_format,
+                "days_played": _f(e.days_played),
+                "auto_derived": e.auto_derived,
+                "charge": round(float(charge), 2),
+                "status": st,                       # paid | partial | unpaid | na
+                "amount_covered": round(float(covered), 2),
+                "is_paid": st == "paid",
+                "grade": grade.display_name if grade else None,
+                "match": f"{game.home_team} v {game.away_team}" if game else None,
+            })
+
         fin = _financials(schedule, total_days, paid_totals)
 
     return {
@@ -964,29 +995,32 @@ async def report_summary(
     overall = {"members": 0, "financial": 0, "non_financial": 0, "needs_tier": 0,
                "membership_payable": 0.0, "match_fee_payable": 0.0, "total_payable": 0.0,
                "membership_paid": 0.0, "match_fee_paid": 0.0, "total_paid": 0.0,
-               "membership_outstanding": 0.0, "match_fee_outstanding": 0.0, "total_outstanding": 0.0}
+               "membership_outstanding": 0.0, "match_fee_outstanding": 0.0, "total_outstanding": 0.0,
+               "membership_credit": 0.0, "match_fee_credit": 0.0, "credit": 0.0}
     for ms, schedule in rows:
         fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id))
         overall["members"] += 1
         overall[fin["status"]] = overall.get(fin["status"], 0) + 1
         for k in ("membership_payable", "match_fee_payable", "total_payable",
                   "membership_paid", "match_fee_paid", "total_paid",
-                  "membership_outstanding", "match_fee_outstanding", "total_outstanding"):
+                  "membership_outstanding", "match_fee_outstanding", "total_outstanding",
+                  "membership_credit", "match_fee_credit", "credit"):
             overall[k] += fin[k]
         bucket_key = fin["payment_type"] or "unassigned"
         b = by_payment_type.setdefault(bucket_key, {
             "payment_type": bucket_key, "members": 0,
-            "payable": 0.0, "paid": 0.0, "outstanding": 0.0,
+            "payable": 0.0, "paid": 0.0, "outstanding": 0.0, "credit": 0.0,
         })
         b["members"] += 1
         b["payable"] += fin["total_payable"]
         b["paid"] += fin["total_paid"]
         b["outstanding"] += fin["total_outstanding"]
+        b["credit"] += fin["credit"]
     for k in list(overall.keys()):
         if isinstance(overall[k], float):
             overall[k] = round(overall[k], 2)
     for b in by_payment_type.values():
-        for k in ("payable", "paid", "outstanding"):
+        for k in ("payable", "paid", "outstanding", "credit"):
             b[k] = round(b[k], 2)
     return {"overall": overall, "by_payment_type": list(by_payment_type.values())}
 
