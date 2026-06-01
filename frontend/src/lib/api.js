@@ -919,15 +919,18 @@ export const api = {
   iqOppositionReport: ({ opponent, fixtureId } = {}) =>
     request(`/iq/opposition/report?${_iqQs(opponent, fixtureId)}`),
   // Live dossier (squad + form + deep vs-us). Poll until status === 'ready'.
-  iqOppositionDossier: ({ opponent, fixtureId } = {}) =>
-    request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId)}`),
-  iqRefreshDossier: ({ opponent, fixtureId } = {}) =>
-    request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId)}`, { method: 'POST' }),
+  // `team` (a grade_id from the dossier's `teams`) narrows the scout to one side;
+  // omit it for the whole club.
+  iqOppositionDossier: ({ opponent, fixtureId, team } = {}) =>
+    request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId, team)}`),
+  iqRefreshDossier: ({ opponent, fixtureId, team } = {}) =>
+    request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId, team)}`, { method: 'POST' }),
 }
 
-function _iqQs(opponent, fixtureId) {
+function _iqQs(opponent, fixtureId, team) {
   const qs = new URLSearchParams()
   if (opponent) qs.set('opponent', opponent)
   if (fixtureId) qs.set('fixture_id', fixtureId)
+  if (team) qs.set('team', team)
   return qs.toString()
 }

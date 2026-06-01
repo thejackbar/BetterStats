@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 
@@ -45,9 +46,26 @@ logger = logging.getLogger(__name__)
 TTL = timedelta(days=7)
 # A 'building' row whose task died (process restart) shouldn't wedge forever.
 BUILD_STALE_AFTER = timedelta(minutes=5)
-# Bound the work so a first build stays in the ~10–40s window the UX expects.
+# Single-team mode: a full season of one grade → complete current-season form for
+# that side (enough matches that every regular shows up).
 MAX_OPP_SEASON_MATCHES = 18
+# Whole-club mode: a club fields many teams (one per grade). Scan up to this many
+# of their grades, a few recent matches each, capped overall — enough to surface
+# every regular across every grade (the missing-players fix) without hammering the
+# proxy. First build still lands in the ~10–40s window the UX expects.
+MAX_TEAMS_SCOUTED = 8
+MAX_MATCHES_PER_TEAM = 8
+MAX_TOTAL_SEASON_MATCHES = 44
+# Cap the grades touched during team discovery (a club season is well under this).
+MAX_DISCOVERY_GRADES = 18
 MAX_HEAD_TO_HEAD_GAMES = 25
+
+# '1st XI' < '2nd XI' < … so a club's teams list reads top-down.
+_TEAM_ORDINALS = {
+    "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, "5th": 5, "6th": 6, "7th": 7, "8th": 8,
+    "9th": 9, "10th": 10, "first": 1, "second": 2, "third": 3, "fourth": 4,
+    "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
+}
 
 # Hold references to in-flight build tasks so the event loop doesn't GC a
 # fire-and-forget task mid-build (asyncio only keeps a weak ref otherwise).
@@ -331,6 +349,12 @@ async def _upsert(session: AsyncSession, org_id: str, opp_key: str, **fields) ->
     await session.commit()
 
 
+def _cache_key(opp_key: str, team_grade_id: str | None) -> str:
+    """Dossier cache key. A team-scoped dossier is cached separately from the
+    whole-club one (and from other teams) by suffixing the chosen grade."""
+    return f"{opp_key}::team::{team_grade_id}" if team_grade_id else opp_key
+
+
 async def get_or_start_dossier(
     session: AsyncSession,
     org_id: str,
@@ -338,15 +362,19 @@ async def get_or_start_dossier(
     *,
     opp_name: str | None = None,
     grade_id: str | None = None,
+    team_grade_id: str | None = None,
     force: bool = False,
 ) -> dict:
     """Return a ready dossier, or kick off a background build and report status.
 
     The router polls this: ``{status: 'building'}`` until the task finishes, then
     ``{status: 'ready', ...payload}``. ``force`` (Refresh button) rebuilds even a
-    fresh cache hit.
+    fresh cache hit. ``team_grade_id`` narrows the squad+form scout to one of the
+    opponent's teams (a grade); ``None`` scouts the whole club across all their
+    grades. ``grade_id`` is the fixture's grade — a hint for which season to scout.
     """
-    row = await _load_row(session, org_id, opp_key)
+    cache_key = _cache_key(opp_key, team_grade_id)
+    row = await _load_row(session, org_id, cache_key)
     now = datetime.now(timezone.utc)
 
     def _fresh(r):
@@ -363,27 +391,28 @@ async def get_or_start_dossier(
         }
 
     # Mark building and launch the detached build (its own session).
-    await _upsert(session, org_id, opp_key, opp_name=opp_name, status="building", error=None)
-    task = asyncio.create_task(_run_build(org_id, opp_key, opp_name, grade_id))
+    await _upsert(session, org_id, cache_key, opp_name=opp_name, status="building", error=None)
+    task = asyncio.create_task(_run_build(org_id, cache_key, opp_key, opp_name, grade_id, team_grade_id))
     _BUILD_TASKS.add(task)
     task.add_done_callback(_BUILD_TASKS.discard)
     return {"status": "building", "opponent": {"opp_key": opp_key, "name": opp_name}}
 
 
-async def _run_build(org_id: str, opp_key: str, opp_name: str | None, grade_id: str | None) -> None:
+async def _run_build(org_id: str, cache_key: str, opp_key: str, opp_name: str | None,
+                     grade_hint: str | None, team_grade_id: str | None) -> None:
     async with async_session_maker() as session:
         try:
-            payload = await _assemble(session, org_id, opp_key, opp_name, grade_id)
+            payload = await _assemble(session, org_id, opp_key, opp_name, grade_hint, team_grade_id)
             await _upsert(
-                session, org_id, opp_key,
+                session, org_id, cache_key,
                 opp_name=payload.get("opponent", {}).get("name") or opp_name,
                 status="ready", payload=payload, built_at=datetime.now(timezone.utc), error=None,
             )
-            logger.info(f"BetterIQ: dossier built for org={org_id} opp={opp_key}")
+            logger.info(f"BetterIQ: dossier built for org={org_id} opp={cache_key}")
         except Exception as e:  # never leave the row wedged at 'building'
-            logger.exception(f"BetterIQ: dossier build failed for org={org_id} opp={opp_key}: {e}")
+            logger.exception(f"BetterIQ: dossier build failed for org={org_id} opp={cache_key}: {e}")
             try:
-                await _upsert(session, org_id, opp_key, status="error", error=str(e)[:500])
+                await _upsert(session, org_id, cache_key, status="error", error=str(e)[:500])
             except Exception:
                 pass
 
@@ -408,89 +437,267 @@ async def _our_games_vs(session: AsyncSession, org_id: str, opp_key: str) -> lis
     return [dict(r) for r in res.mappings()]
 
 
-async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: str | None, grade_id: str | None) -> dict:
+# ─── opponent team / grade discovery ─────────────────────────────────────────
+
+def _team_is_opponent(t: dict, *, opp_org_id: str | None, opp_name: str | None) -> bool:
+    """Does this ``teams[]`` entry belong to the opponent (by org id or club name)?"""
+    org = t.get("owningOrganisation") or {}
+    if opp_org_id and _norm(org.get("id")) == _norm(opp_org_id):
+        return True
+    target = _club_norm(opp_name)
+    if target and target in (
+        _club_norm(org.get("name")), _club_norm(org.get("displayName")),
+        _club_norm(t.get("displayName") or t.get("name")),
+    ):
+        return True
+    return False
+
+
+def _team_rank(name: str | None) -> int:
+    """Sort key so '1st XI' precedes '2nd XI'; named/unknown sides fall to the back."""
+    n = _norm(name)
+    for word, rank in _TEAM_ORDINALS.items():
+        if word in n:
+            return rank
+    m = re.search(r"\b(\d{1,2})\b", n)
+    return int(m.group(1)) if m else 50
+
+
+def _match_list_date(m: dict) -> date | None:
+    """Best-effort match date from a grade-matches list entry (schema varies)."""
+    for key in ("matchSchedule", "schedule"):
+        for sched in (m.get(key) or []):
+            iso = sched.get("startDateTime") or sched.get("startDate") or ""
+            if iso:
+                try:
+                    return date.fromisoformat(iso[:10])
+                except ValueError:
+                    pass
+    for key in ("startDateTime", "startDate", "date"):
+        iso = m.get(key) or ""
+        if iso:
+            try:
+                return date.fromisoformat(str(iso)[:10])
+            except ValueError:
+                pass
+    return None
+
+
+async def _grade_name(session: AsyncSession, grade_id: str) -> str | None:
+    res = await session.execute(
+        text("SELECT name FROM grades WHERE id = CAST(:g AS UUID)"), {"g": grade_id}
+    )
+    row = res.mappings().first()
+    return row["name"] if row else None
+
+
+async def _target_season_grades(session: AsyncSession, org_id: str, opp_key: str | None, grade_hint: str | None) -> list[tuple[str, str]]:
+    """All (grade_id, grade_name) in the season we should scout the opponent in.
+
+    Season precedence: the fixture's grade season → the season of our most recent
+    meeting → our latest season. A club fields one team per grade per season, so a
+    season's grades are the universe of their 'teams' we can see.
+    """
+    season_id = None
+    if grade_hint:
+        res = await session.execute(
+            text("SELECT season_id::text AS sid FROM grades WHERE id = CAST(:g AS UUID)"),
+            {"g": grade_hint},
+        )
+        row = res.mappings().first()
+        season_id = row["sid"] if row else None
+    if not season_id and opp_key:
+        res = await session.execute(
+            text(
+                """
+                SELECT gr.season_id::text AS sid
+                FROM v_effective_games g
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org AS UUID)
+                  AND COALESCE(g.opp_org_id, g.opp_club_name) = :opp
+                ORDER BY g.played_at DESC NULLS LAST
+                LIMIT 1
+                """
+            ),
+            {"org": org_id, "opp": opp_key},
+        )
+        row = res.mappings().first()
+        season_id = row["sid"] if row else None
+    if not season_id:
+        res = await session.execute(
+            text(
+                """
+                SELECT id::text AS sid FROM seasons
+                WHERE organisation_id = CAST(:org AS UUID)
+                ORDER BY COALESCE(display_order, 999999) ASC, year DESC NULLS LAST
+                LIMIT 1
+                """
+            ),
+            {"org": org_id},
+        )
+        row = res.mappings().first()
+        season_id = row["sid"] if row else None
+    if not season_id:
+        return []
+    res = await session.execute(
+        text("SELECT id::text AS gid, name FROM grades WHERE season_id = CAST(:sid AS UUID)"),
+        {"sid": season_id},
+    )
+    return [(r["gid"], r["name"]) for r in res.mappings()]
+
+
+async def _discover_opponent_teams(
+    session: AsyncSession, org_id: str, opp_key: str | None, opp_name: str | None, grade_hint: str | None
+) -> tuple[list[dict], str | None]:
+    """The opponent's teams this season = the grades they field a side in.
+
+    Returns ``([{grade_id, grade_name, team_name, matches}], opp_org_id)`` — each
+    entry a selectable 'team'. ``opp_org_id`` is resolved opportunistically from
+    the first matching team's owning org (handy when we only had a club name).
+    """
     opp_org_id = opp_key if _is_uuid(opp_key) else None
-    our_games = await _our_games_vs(session, org_id, opp_key)
-
-    # Resolve the grade to scout for current-season form: the fixture's grade if
-    # given, else the grade of our most recent meeting (same league-wide grade).
-    scout_grade = grade_id
-    if not scout_grade:
-        for g in our_games:
-            if g.get("grade_id"):
-                scout_grade = g["grade_id"]
-                break
-
-    resolved_name = opp_name
-    season_bat: dict = {}
-    season_bowl: dict = {}
-    season_field: dict = {}
-    season_matches = 0
-    season_dates: list[date] = []
-
-    if scout_grade:
+    season_grades = await _target_season_grades(session, org_id, opp_key, grade_hint)
+    teams: list[dict] = []
+    for gid, gname in season_grades[:MAX_DISCOVERY_GRADES]:
         try:
-            grade_matches = await gr.get_grade_matches(scout_grade)
-        except Exception as e:
-            logger.warning(f"BetterIQ: grade {scout_grade} matches failed: {e}")
-            grade_matches = []
+            matches = await gr.get_grade_matches(gid)
+        except Exception:
+            matches = []
+        team_name = None
+        count = 0
+        for m in matches:
+            hit = next(
+                (t for t in (m.get("teams") or [])
+                 if _team_is_opponent(t, opp_org_id=opp_org_id, opp_name=opp_name)),
+                None,
+            )
+            if not hit:
+                continue
+            count += 1
+            if not team_name:
+                team_name = hit.get("displayName") or hit.get("name")
+            if not opp_org_id:
+                oid = (hit.get("owningOrganisation") or {}).get("id")
+                if oid:
+                    opp_org_id = oid
+        if count:
+            teams.append({"grade_id": gid, "grade_name": gname, "team_name": team_name or gname, "matches": count})
+    teams.sort(key=lambda d: (_team_rank(d["team_name"]), d["grade_name"] or ""))
+    return teams, opp_org_id
 
-        # Keep only matches the opponent is in — by org id, else by club name.
-        opp_match_ids: list[str] = []
-        for m in grade_matches:
-            mid = m.get("id")
-            if not mid:
-                continue
-            for t in (m.get("teams") or []):
-                org = t.get("owningOrganisation") or {}
-                if opp_org_id and _norm(org.get("id")) == _norm(opp_org_id):
-                    opp_match_ids.append(mid)
-                    if not resolved_name:
-                        resolved_name = org.get("name") or org.get("displayName")
-                    break
-                if opp_name and _club_norm(opp_name) and _club_norm(opp_name) in (
-                    _club_norm(org.get("name")), _club_norm(org.get("displayName")), _club_norm(t.get("displayName"))
-                ):
-                    opp_match_ids.append(mid)
-                    if not opp_org_id:
-                        opp_org_id = org.get("id")
-                    break
-        opp_match_ids = opp_match_ids[:MAX_OPP_SEASON_MATCHES]
 
-        for mid in opp_match_ids:
-            sc = await gr.get_match_scorecard(mid)
-            if not sc:
-                continue
-            opp_team = _find_opponent_team(sc, our_org_id=org_id, opp_org_id=opp_org_id, opp_name=opp_name or resolved_name)
-            if not opp_team:
-                continue
-            roster = _team_roster(opp_team)
-            if not roster:
-                continue
-            when = _match_date(sc)
-            if when:
-                season_dates.append(when)
-            _accumulate(sc, mid, roster, when, season_bat, season_bowl, season_field)
-            season_matches += 1
-
-    # Head-to-head vs us — re-fetch our stored games against them (capped, newest
-    # first) and parse the opponent's cards specifically against Applecross.
-    h2h_bat: dict = {}
-    h2h_bowl: dict = {}
-    h2h_field: dict = {}
-    h2h_games = 0
-    for g in our_games[:MAX_HEAD_TO_HEAD_GAMES]:
-        sc = await gr.get_match_scorecard(g["id"])
+async def _scout_grade(
+    grade_id: str, *, our_org_id: str, opp_org_id: str | None, opp_name: str | None, cap: int,
+    bat: dict, bowl: dict, field: dict, dates: list, seen: set,
+) -> int:
+    """Fold up to ``cap`` of the opponent's most-recent matches in one grade into
+    the accumulators (in place). Returns how many were scouted."""
+    try:
+        grade_matches = await gr.get_grade_matches(grade_id)
+    except Exception as e:
+        logger.warning(f"BetterIQ: grade {grade_id} matches failed: {e}")
+        return 0
+    opp_matches = [
+        m for m in grade_matches
+        if any(_team_is_opponent(t, opp_org_id=opp_org_id, opp_name=opp_name) for t in (m.get("teams") or []))
+    ]
+    opp_matches.sort(key=lambda m: (_match_list_date(m) or date.min), reverse=True)
+    scouted = 0
+    for m in opp_matches:
+        if scouted >= cap:
+            break
+        mid = m.get("id")
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        sc = await gr.get_match_scorecard(mid)
         if not sc:
-            continue  # manual game / 204 — no CA scorecard
-        opp_team = _find_opponent_team(sc, our_org_id=org_id, opp_org_id=opp_org_id, opp_name=opp_name or resolved_name)
+            continue
+        opp_team = _find_opponent_team(sc, our_org_id=our_org_id, opp_org_id=opp_org_id, opp_name=opp_name)
         if not opp_team:
             continue
         roster = _team_roster(opp_team)
         if not roster:
             continue
-        when = _match_date(sc) or (date.fromisoformat(g["played_at"]) if isinstance(g.get("played_at"), str) else g.get("played_at"))
-        _accumulate(sc, g["id"], roster, when, h2h_bat, h2h_bowl, h2h_field)
+        when = _match_date(sc)
+        if when:
+            dates.append(when)
+        _accumulate(sc, mid, roster, when, bat, bowl, field)
+        scouted += 1
+    return scouted
+
+
+async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: str | None,
+                    grade_hint: str | None, team_grade_id: str | None) -> dict:
+    opp_name = opp_name or (opp_key if not _is_uuid(opp_key) else None)
+    our_games = await _our_games_vs(session, org_id, opp_key)
+
+    # Discover the opponent's teams (= the grades they field a side in this season).
+    teams, opp_org_id = await _discover_opponent_teams(session, org_id, opp_key, opp_name, grade_hint)
+    if opp_name is None:
+        opp_name = next((t["team_name"] for t in teams), None)
+
+    # Decide which grades to scout: one chosen team, or the whole club. Whole-club
+    # is the default so no player is missed just because they play a different grade.
+    selected_team_name = None
+    if team_grade_id:
+        scout_grades = [g for g in teams if g["grade_id"] == team_grade_id]
+        if not scout_grades:  # selected a team discovery didn't list — scout it directly
+            gn = await _grade_name(session, team_grade_id)
+            scout_grades = [{"grade_id": team_grade_id, "grade_name": gn, "team_name": gn or "Selected team", "matches": None}]
+        selected_team_name = scout_grades[0]["team_name"]
+        per_team_cap, total_cap = MAX_OPP_SEASON_MATCHES, MAX_OPP_SEASON_MATCHES
+    else:
+        scout_grades = teams[:MAX_TEAMS_SCOUTED]
+        if not scout_grades:  # discovery found nothing — fall back to the most-recent-meeting grade
+            fb = next((g["grade_id"] for g in our_games if g.get("grade_id")), None)
+            if fb:
+                gn = await _grade_name(session, fb)
+                scout_grades = [{"grade_id": fb, "grade_name": gn, "team_name": gn or (opp_name or ""), "matches": None}]
+            per_team_cap, total_cap = MAX_OPP_SEASON_MATCHES, MAX_OPP_SEASON_MATCHES
+        else:
+            per_team_cap, total_cap = MAX_MATCHES_PER_TEAM, MAX_TOTAL_SEASON_MATCHES
+
+    season_bat: dict = {}
+    season_bowl: dict = {}
+    season_field: dict = {}
+    season_dates: list[date] = []
+    seen_match_ids: set[str] = set()
+    season_matches = 0
+    teams_scouted = 0
+    for g in scout_grades:
+        if season_matches >= total_cap:
+            break
+        cap = min(per_team_cap, total_cap - season_matches)
+        n = await _scout_grade(
+            g["grade_id"], our_org_id=org_id, opp_org_id=opp_org_id, opp_name=opp_name, cap=cap,
+            bat=season_bat, bowl=season_bowl, field=season_field, dates=season_dates, seen=seen_match_ids,
+        )
+        season_matches += n
+        if n:
+            teams_scouted += 1
+
+    # Head-to-head vs us — re-fetch our stored games against them (club-wide, all
+    # seasons, capped, newest first) and parse the opponent's cards specifically
+    # against us. Stays club-wide even in single-team mode: a player's record vs us
+    # spans grades/seasons, and grade ids are per-season so can't scope it.
+    h2h_bat: dict = {}
+    h2h_bowl: dict = {}
+    h2h_field: dict = {}
+    h2h_games = 0
+    for game in our_games[:MAX_HEAD_TO_HEAD_GAMES]:
+        sc = await gr.get_match_scorecard(game["id"])
+        if not sc:
+            continue  # manual game / 204 — no CA scorecard
+        opp_team = _find_opponent_team(sc, our_org_id=org_id, opp_org_id=opp_org_id, opp_name=opp_name)
+        if not opp_team:
+            continue
+        roster = _team_roster(opp_team)
+        if not roster:
+            continue
+        when = _match_date(sc) or (date.fromisoformat(game["played_at"]) if isinstance(game.get("played_at"), str) else game.get("played_at"))
+        _accumulate(sc, game["id"], roster, when, h2h_bat, h2h_bowl, h2h_field)
         h2h_games += 1
 
     # ── assemble squad: season form, annotated with vs-us records ────────────
@@ -539,25 +746,34 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
 
     coverage = "rich" if season_matches else ("history_only" if h2h_games else "none")
     notes = []
-    if season_matches:
-        notes.append(f"Squad & form built live from {season_matches} of {(opp_name or resolved_name) or 'their'} matches in this grade.")
+    if team_grade_id and season_matches:
+        notes.append(f"Focused on {selected_team_name or 'one team'} — {season_matches} recent matches in this grade.")
+    elif season_matches:
+        notes.append(
+            f"Squad & form built live from {season_matches} matches across "
+            f"{teams_scouted} of {opp_name or 'their'} team(s) this season."
+        )
     else:
-        notes.append("No current-season matches found in this grade — showing head-to-head history only.")
+        notes.append("No current-season matches found — showing head-to-head history only.")
     if h2h_games:
         notes.append(f"Head-to-head built from {h2h_games} of our games against them.")
     notes.append("Based on scorecards (no ball-by-ball), so no phase or ball-level matchup data.")
 
     return {
-        "opponent": {"opp_key": opp_key, "name": (opp_name or resolved_name)},
+        "opponent": {"opp_key": opp_key, "name": opp_name},
         "coverage": {"level": coverage, "notes": notes},
+        "teams": teams,
+        "selected_team": team_grade_id,
+        "selected_team_name": selected_team_name,
         "scouted": {
             "season_matches": season_matches,
+            "teams_scouted": teams_scouted,
             "head_to_head_games": h2h_games,
             "span": {
                 "from": min(season_dates).isoformat() if season_dates else None,
                 "to": max(season_dates).isoformat() if season_dates else None,
             },
-            "grade_id": scout_grade,
+            "grade_id": (scout_grades[0]["grade_id"] if scout_grades else None),
         },
         "danger_batters": danger_batters,
         "danger_bowlers": danger_bowlers,

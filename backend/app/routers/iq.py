@@ -51,12 +51,16 @@ async def opposition_report(
 async def opposition_dossier(
     opponent: str | None = Query(None, description="opp_key from the opponents list"),
     fixture_id: str | None = Query(None, description="resolve the opponent (and grade) from a fixture"),
+    team: str | None = Query(None, description="narrow the scout to one of the opponent's teams (a grade_id); omit for the whole club"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Live opponent dossier (squad + form pulled from the grade, plus deep
     head-to-head vs us). Built on demand in the background; this returns
-    ``{status: 'building'}`` until ready, then the assembled payload. Poll it."""
+    ``{status: 'building'}`` until ready, then the assembled payload. Poll it.
+
+    By default scouts the whole club (every team/grade) so no player is missed;
+    pass ``team`` (a grade_id from the payload's ``teams``) to focus on one side."""
     opp_key, name, grade_id = await iq_service.resolve_opponent(
         db, str(club.id), opponent=opponent, fixture_id=fixture_id
     )
@@ -74,7 +78,7 @@ async def opposition_dossier(
             ),
         }
     return await iq_opponent.get_or_start_dossier(
-        db, str(club.id), key, opp_name=name, grade_id=grade_id
+        db, str(club.id), key, opp_name=name, grade_id=grade_id, team_grade_id=team
     )
 
 
@@ -82,6 +86,7 @@ async def opposition_dossier(
 async def refresh_opposition_dossier(
     opponent: str | None = Query(None),
     fixture_id: str | None = Query(None),
+    team: str | None = Query(None, description="narrow the scout to one of the opponent's teams (a grade_id)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
@@ -93,5 +98,5 @@ async def refresh_opposition_dossier(
     if not key:
         return {"status": "unavailable", "opponent": {"opp_key": None, "name": name}}
     return await iq_opponent.get_or_start_dossier(
-        db, str(club.id), key, opp_name=name, grade_id=grade_id, force=True
+        db, str(club.id), key, opp_name=name, grade_id=grade_id, team_grade_id=team, force=True
     )

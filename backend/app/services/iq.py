@@ -463,6 +463,59 @@ async def _their_danger_batters(session: AsyncSession, org_id: str, opp_key: str
     ]
 
 
+async def _our_bowler_dominance(session: AsyncSession, org_id: str, opp_key: str) -> list[dict]:
+    """Our bowler → their batter match-ups: who we've dismissed repeatedly.
+
+    Selection gold — "Smith has Jones' number" — read straight from
+    ``bowler_wickets`` (``bowler_id`` is our player; ``batter_name`` the opponent).
+    Only pairings we've ended 2+ times, ordered by count then runs they made off us.
+    A *partial* signal like ``their_danger_batters`` (knocks we didn't end are
+    invisible), but the repeat-dismissal pattern is exactly the matchup intel asked
+    for. Only synced games carry ``bowler_wickets`` (manual games have none).
+    """
+    res = await session.execute(
+        text(
+            f"""
+            SELECT
+                p.id::text AS bowler_id,
+                COALESCE(p.display_name_override, p.name) AS bowler,
+                p.status AS status,
+                bw.batter_name AS batter,
+                COUNT(*) AS dismissals,
+                COALESCE(SUM(bw.batter_runs), 0) AS runs_made,
+                MAX(bw.batter_runs) AS top_score,
+                ARRAY_AGG(DISTINCT LOWER(bw.dismissal_type)) AS how
+            FROM bowler_wickets bw
+            JOIN v_effective_games g ON g.id = bw.game_id{_ORG_SCOPE}
+            JOIN players p ON p.id = bw.bowler_id
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND {_OPP_KEY} = :opp_key
+              AND bw.batter_name IS NOT NULL AND bw.batter_name <> ''
+            GROUP BY p.id, bowler, p.status, bw.batter_name
+            HAVING COUNT(*) >= 2
+            ORDER BY COUNT(*) DESC, runs_made ASC, bowler ASC
+            LIMIT 20
+            """
+        ),
+        {"org_id": org_id, "opp_key": opp_key},
+    )
+    out = []
+    for r in res.mappings():
+        out.append(
+            {
+                "bowler_id": r["bowler_id"],
+                "bowler": r["bowler"],
+                "active": r["status"] == "active",
+                "batter": r["batter"],
+                "dismissals": r["dismissals"],
+                "runs_made": r["runs_made"],
+                "top_score": r["top_score"],
+                "how": [h for h in (r["how"] or []) if h],
+            }
+        )
+    return out
+
+
 async def _their_key_players(session: AsyncSession, opp_org_uuid: str) -> dict:
     """Rich coverage: the opponent's own top run-scorers / wicket-takers.
 
@@ -567,11 +620,13 @@ async def opposition_report(
             "our_performers": None,
             "their_danger_batters": [],
             "their_key_players": None,
+            "matchups": {"bowler_dominance": []},
         }
 
     head_to_head = await _head_to_head(session, org_id, opp_key)
     our_performers = await _our_performers_vs(session, org_id, opp_key)
     danger = await _their_danger_batters(session, org_id, opp_key)
+    bowler_dominance = await _our_bowler_dominance(session, org_id, opp_key)
 
     # Rich coverage only if the opponent is itself a synced org we hold.
     held = await _held_org_keys(session)
@@ -609,4 +664,5 @@ async def opposition_report(
         "our_performers": our_performers,
         "their_danger_batters": danger,
         "their_key_players": their_key_players,
+        "matchups": {"bowler_dominance": bowler_dominance},
     }
