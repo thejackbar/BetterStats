@@ -165,9 +165,9 @@ function MatchDayRow({ row, rate, onSaved }) {
       </td>
       <td className="py-2 pr-3 font-mono text-[10px] text-pb-faint whitespace-nowrap">{FORMAT_LABEL[row.fee_format] || row.fee_format}</td>
       <td className="py-2 pr-3 text-right whitespace-nowrap">
-        <input type="number" min="0" max="5" step="0.5" value={days} onChange={e => setDays(e.target.value)}
+        <input type="number" inputMode="decimal" min="0" max="5" step="1" value={days} onChange={e => setDays(e.target.value)}
           disabled={row.is_paid || busy}
-          className="w-14 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm text-right focus:outline-none focus:border-pb-accent disabled:opacity-40" />
+          className="w-16 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm text-right focus:outline-none focus:border-pb-accent disabled:opacity-40" />
         {daysDirty && (
           <button onClick={saveDays} disabled={busy}
             className="ml-1.5 px-2 py-1 rounded font-mono text-[9px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-30" style={{ background: 'var(--pb-accent)' }}>SAVE</button>
