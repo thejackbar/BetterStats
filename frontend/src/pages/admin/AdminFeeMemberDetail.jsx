@@ -20,7 +20,17 @@ function StatusBadge({ status }) {
   return null
 }
 
-function BalanceCard({ label, payable, paid, owed, footer, highlight }) {
+function CreditChip({ amount }) {
+  if (!amount || amount <= 0) return null
+  return (
+    <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5"
+      title="Paid more than owed — credit toward future games">
+      +{money(amount)} CREDIT
+    </span>
+  )
+}
+
+function BalanceCard({ label, payable, paid, owed, credit = 0, footer, highlight }) {
   const rowCss = 'flex justify-between font-mono text-[10px] tracking-wide2'
   return (
     <div className={`pb-card px-4 py-3 ${highlight ? 'border-pb-accent/40' : ''}`}>
@@ -29,11 +39,20 @@ function BalanceCard({ label, payable, paid, owed, footer, highlight }) {
         <div className={rowCss}><span className="text-pb-faint">Payable</span><span className="text-pb-dim">{money(payable)}</span></div>
         <div className={rowCss}><span className="text-pb-faint">Paid</span><span className="text-pb-dim">{money(paid)}</span></div>
         <div className={`${rowCss} pt-1 border-t pb-hairline-t mt-1`}>
-          <span className="text-pb-text">Outstanding</span>
-          <span className={`font-display font-bold text-base ${owed > 0 ? '' : 'text-pb-dim'}`}
-            style={owed > 0 && highlight ? { color: 'var(--pb-accent)' } : owed > 0 ? { color: 'var(--pb-text)' } : {}}>
-            {money(owed)}
-          </span>
+          {credit > 0 ? (
+            <>
+              <span className="text-green-300">In Credit</span>
+              <span className="font-display font-bold text-base text-green-300">+{money(credit)}</span>
+            </>
+          ) : (
+            <>
+              <span className="text-pb-text">Outstanding</span>
+              <span className={`font-display font-bold text-base ${owed > 0 ? '' : 'text-pb-dim'}`}
+                style={owed > 0 && highlight ? { color: 'var(--pb-accent)' } : owed > 0 ? { color: 'var(--pb-text)' } : {}}>
+                {money(owed)}
+              </span>
+            </>
+          )}
         </div>
       </div>
       {footer && <div className="font-mono text-[10px] text-pb-faintest mt-2">{footer}</div>}
@@ -100,6 +119,58 @@ function PaymentForm({ memberSeasonId, defaultKind = 'membership', defaultMethod
   )
 }
 
+// Compact match-fee recorder that sits above the Match Days table. Posts a
+// single match_day payment; the backend auto-allocates it across games
+// oldest-first and surfaces any surplus as credit. Distinct from PaymentForm
+// (which also handles membership) so the common case is one field + Record.
+function RecordMatchFeeForm({ memberSeasonId, defaultMethod = 'EFT', onCreated }) {
+  const toast = useToast()
+  const [amount, setAmount] = useState('')
+  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10))
+  const [method, setMethod] = useState(defaultMethod)
+  const [busy, setBusy] = useState(false)
+  async function submit() {
+    if (!Number(amount)) { toast.error('Enter an amount'); return }
+    setBusy(true)
+    try {
+      await api.feeCreatePayment({
+        member_season_id: memberSeasonId,
+        amount: Number(amount), kind: 'match_day',
+        paid_at: paidAt || null, method: method || null,
+      })
+      toast.success('Match-fee payment recorded — allocated oldest-first')
+      setAmount('')
+      onCreated()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  const cell = 'bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
+  return (
+    <div className="flex flex-wrap items-end gap-2 p-4 bg-pb-surface2/30 pb-hairline-b">
+      <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase self-center mr-1">Record match-fee payment</div>
+      <div>
+        <label className="font-mono text-[9px] tracking-wide3 text-pb-faint mb-1 block">DATE</label>
+        <input type="date" className={`${cell} w-36`} value={paidAt} onChange={e => setPaidAt(e.target.value)} />
+      </div>
+      <div>
+        <label className="font-mono text-[9px] tracking-wide3 text-pb-faint mb-1 block">AMOUNT</label>
+        <input type="number" inputMode="decimal" min="0" step="0.01" placeholder="0.00"
+          className={`${cell} w-28 text-right`} value={amount} onChange={e => setAmount(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') submit() }} />
+      </div>
+      <div>
+        <label className="font-mono text-[9px] tracking-wide3 text-pb-faint mb-1 block">METHOD</label>
+        <select className={`${cell} w-28`} value={method} onChange={e => setMethod(e.target.value)}>
+          {PAY_METHODS.filter(Boolean).map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </div>
+      <button onClick={submit} disabled={busy}
+        className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+        {busy ? '…' : 'RECORD'}
+      </button>
+    </div>
+  )
+}
+
 function PaymentRow({ payment, onDeleted }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -125,34 +196,33 @@ function PaymentRow({ payment, onDeleted }) {
   )
 }
 
-function MatchDayRow({ row, rate, onSaved }) {
+// Paid / Part-paid / Unpaid is DERIVED oldest-first from the member's total
+// match-fee payments (see backend allocate_match_days) — there's no per-row
+// toggle. 'na' = the game costs nothing ($0 rate / no tier yet).
+function MatchDayStatus({ row }) {
+  if (row.status === 'paid')
+    return <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5">● PAID</span>
+  if (row.status === 'partial')
+    return <span className="font-mono text-[9px] tracking-wide2 text-pb-amber border border-pb-amber/40 rounded px-1.5 py-0.5"
+      title="Part-paid — the next payment finishes it">◐ {money(row.amount_covered)} / {money(row.charge)}</span>
+  if (row.status === 'unpaid')
+    return <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">○ UNPAID</span>
+  return <span className="font-mono text-[10px] text-pb-faintest">—</span>
+}
+
+function MatchDayRow({ row, onSaved }) {
   const toast = useToast()
   const [days, setDays] = useState(String(row.days_played))
   const [busy, setBusy] = useState(false)
   useEffect(() => { setDays(String(row.days_played)) }, [row.id, row.days_played])
 
   const daysDirty = Number(days) !== Number(row.days_played)
-  const dayCharge = Number(rate || 0) * Number(row.days_played || 0)
 
   async function saveDays() {
     setBusy(true)
     try {
       await api.feePatchMatchDay(row.id, { days_played: Number(days) || 0 })
       toast.success('Days updated'); onSaved()
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
-  }
-  async function markPaid() {
-    setBusy(true)
-    try {
-      await api.feeMarkMatchDayPaid(row.id, {})
-      toast.success('Match day marked paid'); onSaved()
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
-  }
-  async function unmark() {
-    setBusy(true)
-    try {
-      await api.feeUnmarkMatchDayPaid(row.id)
-      toast.success('Marked unpaid'); onSaved()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
 
@@ -166,27 +236,15 @@ function MatchDayRow({ row, rate, onSaved }) {
       <td className="py-2 pr-3 font-mono text-[10px] text-pb-faint whitespace-nowrap">{FORMAT_LABEL[row.fee_format] || row.fee_format}</td>
       <td className="py-2 pr-3 text-right whitespace-nowrap">
         <input type="number" inputMode="decimal" min="0" max="5" step="1" value={days} onChange={e => setDays(e.target.value)}
-          disabled={row.is_paid || busy}
+          disabled={busy}
           className="w-16 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-sm text-right focus:outline-none focus:border-pb-accent disabled:opacity-40" />
         {daysDirty && (
           <button onClick={saveDays} disabled={busy}
             className="ml-1.5 px-2 py-1 rounded font-mono text-[9px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-30" style={{ background: 'var(--pb-accent)' }}>SAVE</button>
         )}
       </td>
-      <td className="py-2 pr-3 text-right font-mono text-[11px] text-pb-dim whitespace-nowrap">{money(dayCharge)}</td>
-      <td className="py-2 pr-3 text-right whitespace-nowrap">
-        {row.is_paid
-          ? <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5">PAID</span>
-          : <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">UNPAID</span>}
-      </td>
-      <td className="py-2 pr-5 text-right whitespace-nowrap">
-        {row.is_paid
-          ? <button onClick={unmark} disabled={busy}
-              className="font-mono text-[9px] tracking-wide2 border pb-hairline rounded px-2 py-1 text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50">UNMARK</button>
-          : <button onClick={markPaid} disabled={busy || !rate}
-              title={!rate ? 'Member has no tier or $0 match-day rate' : 'Log a payment for this day'}
-              className="px-2 py-1 rounded font-mono text-[9px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-40" style={{ background: 'var(--pb-accent)' }}>MARK PAID</button>}
-      </td>
+      <td className="py-2 pr-3 text-right font-mono text-[11px] text-pb-dim whitespace-nowrap">{money(row.charge)}</td>
+      <td className="py-2 pr-5 text-right whitespace-nowrap"><MatchDayStatus row={row} /></td>
     </tr>
   )
 }
@@ -267,14 +325,15 @@ export default function AdminFeeMemberDetail() {
         <div className="flex items-center gap-2 mb-5">
           <span className="text-pb-faint text-sm">{data.season.name}</span>
           <StatusBadge status={f.status} />
+          <CreditChip amount={f.credit} />
         </div>
 
-        {/* Balance strip: payable / paid / outstanding for membership + match-day */}
+        {/* Balance strip: payable / paid / outstanding (or credit) for membership + match-day */}
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-          <BalanceCard label="Membership" payable={f.membership_payable} paid={f.membership_paid} owed={f.membership_outstanding} />
-          <BalanceCard label="Match Fees" payable={f.match_fee_payable} paid={f.match_fee_paid} owed={f.match_fee_outstanding}
+          <BalanceCard label="Membership" payable={f.membership_payable} paid={f.membership_paid} owed={f.membership_outstanding} credit={f.membership_credit} />
+          <BalanceCard label="Match Fees" payable={f.match_fee_payable} paid={f.match_fee_paid} owed={f.match_fee_outstanding} credit={f.match_fee_credit}
             footer={`${f.match_days || 0} day${f.match_days === 1 ? '' : 's'} × ${money(f.match_day_rate || 0)}`} />
-          <BalanceCard label="Total" payable={f.total_payable} paid={f.total_paid} owed={f.total_outstanding} highlight />
+          <BalanceCard label="Total" payable={f.total_payable} paid={f.total_paid} owed={f.total_outstanding} credit={f.credit} highlight />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
@@ -358,30 +417,39 @@ export default function AdminFeeMemberDetail() {
         </p>
         <p className="text-pb-dim text-sm mb-3 leading-relaxed">
           Auto-derived from appearances. Two-day games default to 2 days — drop to 1 if they only played one day.
-          Hit <span className="text-pb-text">Mark Paid</span> to log the day’s fee as a payment in one click.
+          Record a match-fee payment below and it settles games <span className="text-pb-text">oldest-first</span>;
+          anything left over becomes <span className="text-green-300">credit</span> toward their next games.
         </p>
         {data.match_days.length === 0 ? (
           <p className="font-mono text-[11px] text-pb-faint pb-card p-5">No match days recorded this season.</p>
         ) : (
-          <div className="pb-card overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left bg-pb-surface2/40">
-                  <th className="font-medium py-2.5 pl-5 pr-3 w-24">DATE</th>
-                  <th className="font-medium py-2.5 pr-3">MATCH</th>
-                  <th className="font-medium py-2.5 pr-3 w-20">FORMAT</th>
-                  <th className="font-medium py-2.5 pr-3 w-32 text-right">DAYS</th>
-                  <th className="font-medium py-2.5 pr-3 w-20 text-right">AMOUNT</th>
-                  <th className="font-medium py-2.5 pr-3 w-20 text-right">STATUS</th>
-                  <th className="font-medium py-2.5 pr-5 w-28 text-right"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.match_days.map(row => (
-                  <MatchDayRow key={row.id} row={row} rate={f.match_day_rate} onSaved={load} />
-                ))}
-              </tbody>
-            </table>
+          <div className="pb-card overflow-hidden">
+            {data.member_season && (
+              <RecordMatchFeeForm
+                memberSeasonId={data.member_season.id}
+                defaultMethod={data.member_season.membership_payment_method || 'EFT'}
+                onCreated={load}
+              />
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left bg-pb-surface2/40">
+                    <th className="font-medium py-2.5 pl-5 pr-3 w-24">DATE</th>
+                    <th className="font-medium py-2.5 pr-3">MATCH</th>
+                    <th className="font-medium py-2.5 pr-3 w-20">FORMAT</th>
+                    <th className="font-medium py-2.5 pr-3 w-32 text-right">DAYS</th>
+                    <th className="font-medium py-2.5 pr-3 w-20 text-right">AMOUNT</th>
+                    <th className="font-medium py-2.5 pr-5 w-28 text-right">STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.match_days.map(row => (
+                    <MatchDayRow key={row.id} row={row} onSaved={load} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

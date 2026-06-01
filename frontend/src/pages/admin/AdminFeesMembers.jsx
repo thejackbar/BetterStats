@@ -388,6 +388,10 @@ export default function AdminFeesMembers() {
                               {money(m.total_outstanding)}
                             </td>
                             <td className="py-2.5 pr-5 text-right whitespace-nowrap">
+                              {m.in_credit && (
+                                <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5 mr-1.5"
+                                  title="In credit toward future games">+{money(m.credit)}</span>
+                              )}
                               <StatusPill status={m.status} />
                             </td>
                           </tr>
