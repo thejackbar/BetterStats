@@ -29,11 +29,7 @@ function Stat({ label, value, tone }) {
   )
 }
 
-const AVAIL = {
-  AVAILABLE: ['Avail', 'var(--pb-brand)'],
-  UNAVAILABLE: ['Out', 'var(--pb-red)'],
-  MAYBE: ['Maybe', 'var(--pb-amber)'],
-}
+const AVAIL = { AVAILABLE: ['Avail', 'var(--pb-brand)'], UNAVAILABLE: ['Out', 'var(--pb-red)'], MAYBE: ['Maybe', 'var(--pb-amber)'] }
 function AvailDot({ status }) {
   if (!status || status === 'NO_RESPONSE') return <span className="text-pb-faintest text-[11px]">—</span>
   const [label, color] = AVAIL[status] || ['?', 'var(--pb-faint)']
@@ -46,13 +42,49 @@ function UpDown({ d }) {
   return <span title={up ? 'Playing up a grade' : 'Dropping down a grade'} className="font-mono text-[10px]" style={{ color: up ? 'var(--pb-amber)' : 'var(--pb-faint)' }}>{up ? '▲ up' : '▼ down'}</span>
 }
 
-/* ── balance summary ──────────────────────────────────────────────────────── */
-function Balance({ b }) {
+const FLAG_META = {
+  'wrong-grade': ['Wrong grade', 'var(--pb-red)'],
+  inactive: ['Inactive', 'var(--pb-red)'],
+  dormant: ['Dormant', 'var(--pb-amber)'],
+  unavailable: ['Unavailable', 'var(--pb-red)'],
+}
+function Flags({ flags }) {
+  if (!flags?.length) return null
+  return (
+    <span className="inline-flex gap-1 ml-1">
+      {flags.map(f => {
+        const [label, color] = FLAG_META[f] || [f, 'var(--pb-faint)']
+        return <span key={f} className="font-mono text-[9px] px-1 py-0.5 rounded" style={{ background: `color-mix(in srgb, ${color} 16%, transparent)`, color }}>{label}</span>
+      })}
+    </span>
+  )
+}
+
+// Recent batting scores as "75, 74*, 12"; recent wickets summarised as "9w/5".
+function recentBat(p) { return (p.recent_scores || []).join(', ') || '—' }
+function recentBowl(p) {
+  const w = p.recent_wickets || []
+  const t = w.reduce((a, b) => a + (b || 0), 0)
+  return t > 0 ? `${t}w/${w.length}` : null
+}
+function VsOpp({ v }) {
+  if (!v) return <span className="text-pb-faintest">—</span>
+  return (
+    <span className="pb-num text-[11px]">
+      {v.bat ? <span title={`${v.bat.runs} runs @ ${num(v.bat.avg)} vs them`}>{v.bat.runs}@{num(v.bat.avg)}</span> : null}
+      {v.bat && v.bowl ? ' · ' : ''}
+      {v.bowl ? <span title={`${v.bowl.wickets} wkts @ ${num(v.bowl.avg)} vs them`}>{v.bowl.wickets}w@{num(v.bowl.avg)}</span> : null}
+    </span>
+  )
+}
+
+/* ── balance ──────────────────────────────────────────────────────────────── */
+function Balance({ b, target }) {
   if (!b) return null
   return (
     <Card title="XI balance">
       <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-        <Stat label="In XI" value={b.size} tone={b.size === 11 ? undefined : 'var(--pb-amber)'} />
+        <Stat label="In XI" value={b.size} tone={target && b.size !== target ? 'var(--pb-amber)' : undefined} />
         <Stat label="Batters" value={b.specialist_batters} />
         <Stat label="All-round" value={b.all_rounders} />
         <Stat label="Bowlers" value={b.bowling_options} tone={b.bowling_options < 5 ? 'var(--pb-amber)' : undefined} />
@@ -65,11 +97,10 @@ function Balance({ b }) {
   )
 }
 
-/* ── warnings ─────────────────────────────────────────────────────────────── */
 function Warnings({ warnings }) {
   if (!warnings?.length) return (
     <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--pb-brand)' }}>
-      <Icon name="check" size={16} /> No balance flags — looks like a well-rounded XI.
+      <Icon name="check" size={16} /> No balance flags — a well-rounded XI.
     </div>
   )
   return (
@@ -88,7 +119,7 @@ function Warnings({ warnings }) {
 }
 
 /* ── XI table ─────────────────────────────────────────────────────────────── */
-function XITable({ players }) {
+function XITable({ players, oppLabel }) {
   if (!players?.length) return <Empty>No players in this lineup yet.</Empty>
   return (
     <div className="overflow-x-auto -mx-1">
@@ -99,29 +130,31 @@ function XITable({ players }) {
           <th className="py-1 px-1 font-medium">Role</th>
           <th className="py-1 px-1 font-medium">Recent</th>
           <th className="py-1 px-1 font-medium text-right">Form avg</th>
-          <th className="py-1 px-1 font-medium text-right">Season</th>
+          {oppLabel && <th className="py-1 px-1 font-medium text-right">vs {oppLabel}</th>}
           <th className="py-1 px-1 font-medium">Avail</th>
         </tr></thead>
         <tbody>
-          {players.map(p => (
-            <tr key={p.player_id} className="border-t pb-hairline">
-              <td className="py-1.5 px-1 pb-num text-pb-faint">{num(p.batting_order, '·')}</td>
-              <td className="py-1.5 px-1 font-medium whitespace-nowrap">
-                {p.name}
-                {p.is_captain && <Tag tone="accent" className="ml-1">C</Tag>}
-                {p.is_wicket_keeper && <Tag tone="amber" className="ml-1">WK</Tag>}
-                {' '}<UpDown d={p.play_updown} />
-              </td>
-              <td className="py-1.5 px-1 text-pb-faint text-[11px] font-mono">{(p.skills || []).join(' ') || '—'}{p.bowling_type ? ` · ${p.bowling_type.toLowerCase().replace('_', ' ')}` : ''}</td>
-              <td className="py-1.5 px-1 text-pb-faint pb-num text-[11px] whitespace-nowrap">
-                {(p.recent_scores || []).join(' ') || '—'}
-                {p.recent_wickets?.some(w => w !== '0') ? <span className="text-pb-faintest"> · {p.recent_wickets.join('')}w</span> : ''}
-              </td>
-              <td className="py-1.5 px-1 text-right pb-num">{num(p.recent_avg)}</td>
-              <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{num(p.season_matches, 0)}</td>
-              <td className="py-1.5 px-1"><AvailDot status={p.availability} /></td>
-            </tr>
-          ))}
+          {players.map(p => {
+            const rb = recentBowl(p)
+            return (
+              <tr key={p.player_id} className="border-t pb-hairline">
+                <td className="py-1.5 px-1 pb-num text-pb-faint">{num(p.batting_order, '·')}</td>
+                <td className="py-1.5 px-1 font-medium whitespace-nowrap">
+                  {p.name}
+                  {p.is_captain && <Tag tone="accent" className="ml-1">C</Tag>}
+                  {p.is_wicket_keeper && <Tag tone="amber" className="ml-1">WK</Tag>}
+                  {' '}<UpDown d={p.play_updown} /><Flags flags={p.flags} />
+                </td>
+                <td className="py-1.5 px-1 text-pb-faint text-[11px] font-mono">{(p.skills || []).join(' ') || '—'}{p.bowling_type ? ` · ${p.bowling_type.toLowerCase().replace(/_/g, ' ')}` : ''}</td>
+                <td className="py-1.5 px-1 text-pb-faint pb-num text-[11px] whitespace-nowrap">
+                  {recentBat(p)}{rb ? <span className="text-pb-faintest"> · {rb}</span> : ''}
+                </td>
+                <td className="py-1.5 px-1 text-right pb-num">{num(p.recent_avg)}</td>
+                {oppLabel && <td className="py-1.5 px-1 text-right text-pb-faint"><VsOpp v={p.vs_opponent} /></td>}
+                <td className="py-1.5 px-1"><AvailDot status={p.availability} /></td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
@@ -135,9 +168,7 @@ function LineupPicker({ rows, onPick }) {
     const t = q.trim().toLowerCase()
     return t ? rows.filter(r => (r.opponent_name || '').toLowerCase().includes(t) || (r.team_name || '').toLowerCase().includes(t)) : rows
   }, [q, rows])
-  if (!rows.length) return (
-    <Empty>No saved lineups yet. Pick a team for an upcoming fixture in BetterSelect, then come back to analyse it.</Empty>
-  )
+  if (!rows.length) return <Empty>No saved lineups yet. Pick a team for a fixture in BetterSelect, then analyse it here.</Empty>
   return (
     <div>
       <Search value={q} onChange={setQ} placeholder="Search fixtures…" className="mb-3 max-w-sm" />
@@ -166,17 +197,13 @@ export default function SelectionAnalysis() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState(false)
 
-  useEffect(() => {
-    api.iqSelectionLineups().then(setRows).catch(() => setRows([]))
-  }, [])
+  useEffect(() => { api.iqSelectionLineups().then(setRows).catch(() => setRows([])) }, [])
 
   useEffect(() => {
     if (!fixtureId) { setData(null); return }
     let alive = true
     setData(null); setErr(false)
-    api.iqSelectionAnalysis(fixtureId)
-      .then(d => { if (alive) setData(d) })
-      .catch(() => { if (alive) setErr(true) })
+    api.iqSelectionAnalysis(fixtureId).then(d => { if (alive) setData(d) }).catch(() => { if (alive) setErr(true) })
     return () => { alive = false }
   }, [fixtureId])
 
@@ -187,14 +214,13 @@ export default function SelectionAnalysis() {
     return (
       <IQLayout title="Selection analysis">
         <p className="text-pb-faint text-sm mb-4 max-w-2xl">BetterSelect picks the team — BetterIQ checks the balance and justifies the pick. Choose a fixture with a saved lineup.</p>
-        {rows === null
-          ? <div className="pb-card p-5 animate-pulse text-pb-faint text-sm">Loading lineups…</div>
-          : <LineupPicker rows={rows} onPick={pick} />}
+        {rows === null ? <div className="pb-card p-5 animate-pulse text-pb-faint text-sm">Loading lineups…</div> : <LineupPicker rows={rows} onPick={pick} />}
       </IQLayout>
     )
   }
 
   const fx = data?.fixture
+  const oppLabel = fx?.opponent_resolved_name || (fx?.opponent_key ? fx?.opponent_name : null)
   return (
     <IQLayout title="Selection analysis" actions={<Btn variant="ghost" sm icon="back" onClick={clear}>Change fixture</Btn>}>
       {data === null && !err && <div className="pb-card p-5 animate-pulse text-pb-faint text-sm">Analysing the XI…</div>}
@@ -210,44 +236,52 @@ export default function SelectionAnalysis() {
               {fx.grade_name && <span>· {fx.grade_name}</span>}
               {fx.venue && <span>· {fx.venue}</span>}
             </div>
+            {data.verdict && <div className="text-sm mt-2 font-medium">{data.verdict}</div>}
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2 mb-4">
-            <Balance b={data.balance} />
+            <Balance b={data.balance} target={data.team_size_target} />
             <Card title="Selection check"><Warnings warnings={data.warnings} /></Card>
           </div>
 
           <Card title="The XI" right={<span className="text-pb-faint text-xs">form = last 5</span>}>
-            <XITable players={data.players} />
+            <XITable players={data.players} oppLabel={oppLabel} />
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-2 mt-4">
-            <Card title="Promote — in form, left out" accent>
+            <Card title="Promote — in form, eligible, left out" accent>
               {data.promote?.length ? (
                 <div className="space-y-2">
-                  {data.promote.map(p => (
-                    <div key={p.player_id} className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <span className="font-medium">{p.name}</span> <UpDown d={p.play_updown} />
-                        <div className="text-pb-faintest text-[11px]">{(p.recent_scores || []).join(', ') || 'no recent bat'}{p.recent_wickets?.some(w => w !== '0') ? ` · ${p.recent_wickets.join('')}w` : ''}</div>
+                  {data.promote.map(p => {
+                    const rb = recentBowl(p)
+                    return (
+                      <div key={p.player_id} className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="font-medium">{p.name}</span> <UpDown d={p.play_updown} />
+                          <div className="text-pb-faintest text-[11px]">
+                            {recentBat(p)}{rb ? ` · ${rb}` : ''}{p.vs_opponent?.bat ? ` · ${p.vs_opponent.bat.runs} vs them` : ''}
+                          </div>
+                        </div>
+                        <AvailDot status={p.availability} />
                       </div>
-                      <AvailDot status={p.available} />
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
-              ) : <Empty>No clear in-form players left out.</Empty>}
+              ) : <Empty>No eligible, in-form players are being left out.</Empty>}
             </Card>
-            <Card title="Watch — out of form in the XI">
+            <Card title="Watch — ineligible or out of form">
               {data.rest?.length ? (
                 <div className="space-y-2">
                   {data.rest.map(p => (
                     <div key={p.player_id} className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{p.name}</span>
-                      <span className="text-pb-faint text-sm pb-num">{(p.recent_scores || []).join(', ')} · avg {num(p.recent_avg)}</span>
+                      <div className="min-w-0"><span className="font-medium">{p.name}</span>
+                        <div className="text-pb-faintest text-[11px]">{p.reason}</div>
+                      </div>
+                      <span className="text-pb-faint text-sm pb-num">{recentBat(p)}{p.recent_avg != null ? ` · avg ${p.recent_avg}` : ''}</span>
                     </div>
                   ))}
                 </div>
-              ) : <Empty>Nobody picked is conspicuously out of form.</Empty>}
+              ) : <Empty>Nobody picked is out of form or ineligible.</Empty>}
             </Card>
           </div>
 
