@@ -85,8 +85,8 @@ export default function AdminLayout({ children }) {
   const [bellRefresh, setBellRefresh] = useState(0)
 
   // Filter nav: drop links the user lacks the cap for. Empty sections are
-  // dropped too so club_member users don't see a bare heading with nothing
-  // under it.
+  // dropped too so a heading never renders with nothing under it. (Club admins
+  // hold every capability, so in practice they see the full set.)
   const visibleSections = NAV_SECTIONS.map(s => ({
     ...s,
     items: s.items.filter(i => i.cap == null || hasCapability(i.cap)),
