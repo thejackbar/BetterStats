@@ -32,6 +32,8 @@ const ICON_PATHS = {
   bolt: <><path d="M13 3L5 13h6l-1 8 8-10h-6z" /></>,
   back: <><path d="M19 12H5M11 6l-6 6 6 6" /></>,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
+  money: <><rect x="2.5" y="6" width="19" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6 9.5v5M18 9.5v5" /></>,
+  list: <><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" /></>,
 }
 
 export function Icon({ name, size = 18, strokeWidth = 1.6, className = '', style }) {

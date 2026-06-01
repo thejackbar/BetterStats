@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterSocialsLayout from '../../components/admin/BetterSocialsLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import { api } from '../../lib/api'
 import {
@@ -757,11 +757,11 @@ export default function AdminSocialPost() {
   }
 
   if (loading) return (
-    <AdminLayout>
+    <BetterSocialsLayout>
       <div className="flex items-center justify-center h-64">
         <span className="font-mono text-[11px] text-pb-faint animate-pulse">LOADING...</span>
       </div>
-    </AdminLayout>
+    </BetterSocialsLayout>
   )
 
   // ─── Preview renderer ────────────────────────────────────────────────────────
@@ -775,7 +775,7 @@ export default function AdminSocialPost() {
   const showHeroImage = ['T1','T3','T6','T7','C1','C3'].includes(templateId)
 
   return (
-    <AdminLayout>
+    <BetterSocialsLayout>
       <div className="max-w-full">
         <div className="flex gap-5 items-start">
 
@@ -1533,6 +1533,6 @@ export default function AdminSocialPost() {
           }
         }}
       />
-    </AdminLayout>
+    </BetterSocialsLayout>
   )
 }

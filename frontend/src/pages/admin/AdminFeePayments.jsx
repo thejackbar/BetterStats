@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
@@ -63,7 +63,7 @@ export default function AdminFeePayments() {
   const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
   return (
-    <AdminLayout>
+    <BetterFeesLayout>
       <div className="max-w-5xl">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
           <h1 className="font-display font-bold text-2xl text-pb-text">Payments</h1>
@@ -160,6 +160,6 @@ export default function AdminFeePayments() {
           </>
         )}
       </div>
-    </AdminLayout>
+    </BetterFeesLayout>
   )
 }

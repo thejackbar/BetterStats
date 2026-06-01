@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
-import AdminLayout from '../../components/admin/AdminLayout'
+import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
@@ -249,13 +249,13 @@ export default function AdminFeeMemberDetail() {
     } catch (e) { toast.error(e.message) } finally { setSavingTier(false) }
   }
 
-  if (data === null) return <AdminLayout><PbSpinner message="Loading member…" /></AdminLayout>
+  if (data === null) return <BetterFeesLayout><PbSpinner message="Loading member…" /></BetterFeesLayout>
 
   const f = data.financials
   const member = data.member
 
   return (
-    <AdminLayout>
+    <BetterFeesLayout>
       <div className="max-w-5xl">
         <Link to={`/admin/fees?season=${seasonId}`} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">← MEMBERS</Link>
         <div className="flex items-center gap-2 mt-2 mb-1">
@@ -385,6 +385,6 @@ export default function AdminFeeMemberDetail() {
           </div>
         )}
       </div>
-    </AdminLayout>
+    </BetterFeesLayout>
   )
 }
