@@ -5,13 +5,14 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
+from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, usage, fees, fixtures, teams, availability, selection, ladders
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
@@ -596,12 +597,17 @@ app.include_router(seo.router)
 app.include_router(families.router)
 app.include_router(manual_entries.router)
 app.include_router(usage.router)
-app.include_router(fees.router)
-app.include_router(fixtures.router)
-app.include_router(teams.router)
-app.include_router(availability.router)
-app.include_router(selection.router)
-app.include_router(ladders.router)
+# ─── Better ecosystem module gating ──────────────────────────────────────────
+# These routers are the discrete Better modules; require_module() returns 402
+# (with an upsell payload) when the caller's club isn't entitled. Core routers
+# above are always on. BetterSocials' backend surface is gated per-route in
+# admin.py (it shares the admin router). See app/auth/modules.py.
+app.include_router(fees.router, dependencies=[Depends(require_module("fees"))])           # BetterFees
+app.include_router(fixtures.router, dependencies=[Depends(require_module("select"))])     # BetterSelect
+app.include_router(teams.router, dependencies=[Depends(require_module("select"))])        # BetterSelect
+app.include_router(availability.router, dependencies=[Depends(require_module("select"))]) # BetterSelect
+app.include_router(selection.router, dependencies=[Depends(require_module("select"))])    # BetterSelect
+app.include_router(ladders.router)  # standings power public club pages — not gated
 
 # Serve uploaded files (hero images, gallery photos)
 _upload_dir = Path("/app/uploads")

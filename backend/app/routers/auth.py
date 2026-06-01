@@ -136,8 +136,8 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
     if not membership:
         raise HTTPException(status_code=403, detail="No club membership found")
 
+    club = await db.get(Organisation, membership.club_id)
     if membership.role != "super_admin":
-        club = await db.get(Organisation, membership.club_id)
         if not club or not club.is_active:
             raise HTTPException(status_code=403, detail="Club is not active")
 
@@ -152,6 +152,7 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
 
     role = membership.role if membership else None
     from app.auth.capabilities import effective_capabilities
+    from app.auth.modules import entitlement_summary
     caps = effective_capabilities(role, membership.capabilities if membership else None) if role else []
     return {
         "id": str(user.id),
@@ -159,6 +160,7 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
         "display_name": user.display_name,
         "role": role,
         "capabilities": caps,
+        "entitlements": entitlement_summary(club, role),
     }
 
 
@@ -174,6 +176,7 @@ async def me(
     db: AsyncSession = Depends(get_db),
 ):
     from app.auth.capabilities import effective_capabilities
+    from app.auth.modules import entitlement_summary
 
     membership_res = await db.execute(
         select(ClubMembership).where(ClubMembership.user_id == current_user.id)
@@ -182,6 +185,7 @@ async def me(
     role = membership.role if membership else None
     club_id = str(membership.club_id) if membership else None
     caps = effective_capabilities(role, membership.capabilities if membership else None) if role else []
+    club = await db.get(Organisation, membership.club_id) if membership else None
 
     return {
         "id": str(current_user.id),
@@ -190,4 +194,5 @@ async def me(
         "role": role,
         "club_id": club_id,
         "capabilities": caps,
+        "entitlements": entitlement_summary(club, role),
     }

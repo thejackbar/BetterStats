@@ -17,6 +17,7 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_user
 from app.auth.capabilities import require_cap, MANAGE_MERGES
+from app.auth.modules import require_module
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -658,9 +659,12 @@ def _team_id_from_inn(inn: dict) -> str | None:
     return None
 
 
-@router.get("/social/scorecard/{match_id}")
+@router.get("/social/scorecard/{match_id}", dependencies=[Depends(require_module("socials"))])
 async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
-    """Fetch a Grassroots scorecard and return it in the social template format."""
+    """Fetch a Grassroots scorecard and return it in the social template format.
+
+    Gated behind the BetterSocials module (require_module).
+    """
     try:
         return await _get_social_scorecard_inner(match_id, db)
     except HTTPException:

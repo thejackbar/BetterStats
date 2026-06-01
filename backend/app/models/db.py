@@ -76,6 +76,13 @@ class Organisation(Base):
     public_show_bowling = Column(Boolean, nullable=False, server_default="false", default=False)
     public_show_opening = Column(Boolean, nullable=False, server_default="false", default=False)
     public_show_gender = Column(Boolean, nullable=False, server_default="false", default=False)
+    # ─── Better ecosystem entitlements (migration 056) ───────────────────────
+    # Subscription tier (good/better/best) bundles a set of modules; see
+    # app/auth/modules.py for the tier→module map. module_overrides grants
+    # individual modules à la carte on top of the tier. Core (BetterStats) is
+    # always on and is not a gateable module.
+    tier = Column(Text, nullable=False, server_default="good", default="good")
+    module_overrides = Column(JSONB, nullable=False, server_default="[]", default=list)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
