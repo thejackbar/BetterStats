@@ -30,7 +30,7 @@ export const TIER_INFO = {
 
 // Module registry — the admin dashboard renders one tile per entry, in order.
 // - requiredTier: the lowest tier that bundles the module (drives the upsell)
-// - built:        false → tile shows "Coming soon" instead of opening (BetterIQ)
+// - built:        false → tile shows "Coming soon" instead of opening
 // - caps:         capabilities that let a club_member actually use the module
 export const MODULE_INFO = [
   {
@@ -64,10 +64,10 @@ export const MODULE_INFO = [
     key: MODULE.IQ,
     name: 'BetterIQ',
     blurb: 'AI + stats deep-dive: opposition scouting, selection analysis, trends.',
-    to: null,
+    to: '/admin/betteriq',
     requiredTier: TIER.BEST,
-    built: false,
-    caps: [],
+    built: true,
+    caps: [CAP.MANAGE_IQ],
   },
 ]
 
