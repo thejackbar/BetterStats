@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
-import { TIER_ORDER, TIER_INFO, tierLabel } from '../../lib/modules'
+import { TIER_ORDER, TIER_INFO, tierLabel, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
@@ -15,7 +15,10 @@ export default function SuperClubs() {
   const [saving, setSaving] = useState(false)
 
   const [editId, setEditId] = useState(null)
-  const [editForm, setEditForm] = useState({ name: '', slug: '', short_name: '', contact_email: '', tier: 'good' })
+  const [editForm, setEditForm] = useState({
+    name: '', slug: '', short_name: '', contact_email: '',
+    tier: 'good', subscription_status: 'active', renewal_date: '', billing_cycle: '',
+  })
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [syncing, setSyncing] = useState(null)
 
@@ -130,6 +133,9 @@ export default function SuperClubs() {
       short_name: club.short_name || '',
       contact_email: club.contact_email || '',
       tier: club.tier || 'good',
+      subscription_status: club.subscription_status || 'active',
+      renewal_date: club.renewal_date || '',
+      billing_cycle: club.billing_cycle || '',
     })
   }
 
@@ -151,7 +157,13 @@ export default function SuperClubs() {
     setSaving(true)
     setMsg('')
     try {
-      await api.superPatchClub(editId, editForm)
+      // Empty date / cycle must go as null, not '' (the API validates them).
+      const payload = {
+        ...editForm,
+        renewal_date: editForm.renewal_date || null,
+        billing_cycle: editForm.billing_cycle || null,
+      }
+      await api.superPatchClub(editId, payload)
       setMsg('Club updated')
       setEditId(null)
       load()
@@ -299,14 +311,23 @@ export default function SuperClubs() {
             <div key={club.id} className={i > 0 ? 'pb-hairline-t' : ''}>
               <div className="grid grid-cols-[1fr_auto_auto_auto] items-center px-5 py-3 hover:bg-pb-surface2">
                 <div>
-                  <span className="text-pb-text text-sm">{club.name}</span>
-                  <span className="font-mono text-[10px] text-pb-faintest ml-2">/{club.slug}</span>
-                  <span
-                    className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border pb-hairline text-pb-faint"
-                    title={club.modules?.length ? `Modules: ${club.modules.join(', ')}` : 'Core only'}
-                  >
-                    {tierLabel(club.tier)}
-                  </span>
+                  <div>
+                    <span className="text-pb-text text-sm">{club.name}</span>
+                    <span className="font-mono text-[10px] text-pb-faintest ml-2">/{club.slug}</span>
+                    <span
+                      className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border pb-hairline text-pb-faint"
+                      title={club.modules?.length ? `Modules: ${club.modules.join(', ')}` : 'Core only'}
+                    >
+                      {tierLabel(club.tier)}
+                    </span>
+                  </div>
+                  <div className={`font-mono text-[10px] mt-0.5 ${statusIsLive(club.subscription_status) ? 'text-pb-faintest' : 'text-pb-red'}`}>
+                    {[
+                      club.billing_cycle && (BILLING_CYCLES.find(c => c.key === club.billing_cycle)?.label || club.billing_cycle),
+                      club.renewal_date && `renews ${new Date(club.renewal_date).toLocaleDateString('en-AU')}`,
+                      statusLabel(club.subscription_status),
+                    ].filter(Boolean).join(' · ')}
+                  </div>
                 </div>
                 <button
                   onClick={() => toggleActive(club)}
@@ -383,9 +404,36 @@ export default function SuperClubs() {
                         ))}
                       </select>
                     </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Subscription status</label>
+                      <select value={editForm.subscription_status}
+                        onChange={e => setEditForm(f => ({ ...f, subscription_status: e.target.value }))}
+                        className={INPUT_CLS}>
+                        {SUBSCRIPTION_STATUSES.map(s => (
+                          <option key={s.key} value={s.key}>{s.label}{s.live ? '' : ' (locks modules)'}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Billing cycle</label>
+                      <select value={editForm.billing_cycle}
+                        onChange={e => setEditForm(f => ({ ...f, billing_cycle: e.target.value }))}
+                        className={INPUT_CLS}>
+                        {BILLING_CYCLES.map(c => (
+                          <option key={c.key} value={c.key}>{c.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Renewal date</label>
+                      <input type="date" value={editForm.renewal_date}
+                        onChange={e => setEditForm(f => ({ ...f, renewal_date: e.target.value }))}
+                        className={INPUT_CLS} />
+                    </div>
                   </div>
                   <p className="font-mono text-[10px] text-pb-faintest">
-                    Good = Core only · Better = + BetterSelect + BetterSocials · Best = everything (+ BetterFees + BetterIQ)
+                    Good = Core only · Better = + BetterSelect + BetterSocials · Best = everything (+ BetterFees + BetterIQ).
+                    Paused / Cancelled fall back to Core only regardless of tier.
                   </p>
                   <div className="flex gap-2">
                     <button type="submit" disabled={saving}

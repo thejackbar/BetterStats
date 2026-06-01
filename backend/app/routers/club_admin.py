@@ -24,7 +24,10 @@ from app.auth.capabilities import (
     require_cap, effective_capabilities, ALL_CAPABILITIES,
     MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, RUN_HARD_REFRESH, RUN_SYNC,
 )
-from app.auth.modules import ALL_TIERS, ALL_MODULES, org_entitled_modules
+from app.auth.modules import (
+    ALL_TIERS, ALL_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
+)
+from datetime import date as _date
 from app.services import playhq_client
 
 # Keep strong references to background tasks so they aren't GC'd before completing
@@ -1303,6 +1306,9 @@ async def list_all_clubs(
             "tier": o.tier,
             "module_overrides": list(o.module_overrides or []),
             "modules": sorted(org_entitled_modules(o)),
+            "subscription_status": o.subscription_status,
+            "renewal_date": o.renewal_date.isoformat() if o.renewal_date else None,
+            "billing_cycle": o.billing_cycle,
             "created_at": o.created_at.isoformat() if o.created_at else None,
         }
         for o in orgs
@@ -1359,6 +1365,9 @@ class ClubUpdate(BaseModel):
     is_active: Optional[bool] = None
     tier: Optional[str] = None
     module_overrides: Optional[list[str]] = None
+    subscription_status: Optional[str] = None
+    renewal_date: Optional[_date] = None
+    billing_cycle: Optional[str] = None
 
 
 @router.patch("/super/clubs/{club_id}")
@@ -1402,6 +1411,13 @@ async def patch_club(
             raise HTTPException(status_code=422, detail=f"Unknown modules: {', '.join(unknown)}")
         fields["module_overrides"] = sorted(set(overrides))
 
+    if "subscription_status" in fields:
+        if fields["subscription_status"] not in ALL_STATUSES:
+            raise HTTPException(status_code=422, detail=f"Status must be one of: {', '.join(ALL_STATUSES)}")
+
+    if fields.get("billing_cycle") is not None and fields["billing_cycle"] not in ALL_BILLING_CYCLES:
+        raise HTTPException(status_code=422, detail=f"Billing cycle must be one of: {', '.join(ALL_BILLING_CYCLES)}")
+
     for key, value in fields.items():
         setattr(org, key, value)
 
@@ -1414,6 +1430,9 @@ async def patch_club(
         "tier": org.tier,
         "module_overrides": list(org.module_overrides or []),
         "modules": sorted(org_entitled_modules(org)),
+        "subscription_status": org.subscription_status,
+        "renewal_date": org.renewal_date.isoformat() if org.renewal_date else None,
+        "billing_cycle": org.billing_cycle,
     }
 
 

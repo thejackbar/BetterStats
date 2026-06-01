@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
-import { MODULE_INFO, tierInfo, tierLabel, TIER } from '../../lib/modules'
+import { MODULE_INFO, tierInfo, tierLabel, statusLabel, statusIsLive, TIER } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
 
 // Render "BetterX" with the suffix in the club accent colour, matching the
@@ -84,6 +84,8 @@ export default function AdminDashboard() {
 
   const isSuper = user?.role === 'super_admin'
   const planTier = user?.entitlements?.tier || TIER.GOOD
+  const planStatus = user?.entitlements?.status || 'active'
+  const renewalDate = user?.entitlements?.renewal_date
 
   // Core admin tasks (BetterStats / Core — always available). BetterSocials is
   // now represented by its own module tile, so it's dropped from here.
@@ -123,9 +125,19 @@ export default function AdminDashboard() {
           </p>
         )}
         <p className="text-pb-faintest text-xs mb-6">
-          {isSuper
-            ? 'Super admin — all modules available'
-            : <>Plan: <span className="text-pb-faint">{tierLabel(planTier)}</span> — {tierInfo(planTier).tagline}</>}
+          {isSuper ? (
+            'Super admin — all modules available'
+          ) : (
+            <>
+              Plan: <span className="text-pb-faint">{tierLabel(planTier)}</span>
+              {planStatus !== 'active' && (
+                <span className={statusIsLive(planStatus) ? 'text-pb-faint' : 'text-pb-red'}> · {statusLabel(planStatus)}</span>
+              )}
+              {renewalDate
+                ? <> · renews {new Date(renewalDate).toLocaleDateString('en-AU')}</>
+                : <> — {tierInfo(planTier).tagline}</>}
+            </>
+          )}
         </p>
 
         {/* Better modules — entitled tiles open; locked tiles upsell. */}

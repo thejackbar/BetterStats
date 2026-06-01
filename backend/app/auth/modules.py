@@ -68,6 +68,30 @@ MODULE_REQUIRED_TIER: dict[str, str] = {
 }
 
 
+# ─── Subscription status (Phase 3) ───────────────────────────────────────────
+# Reflects the manual-invoicing state and gates entitlement. active/trial/
+# past_due keep modules live (past_due is a grace period — don't cut a club off
+# the moment an invoice is late); paused/cancelled fall back to Core only.
+
+STATUS_ACTIVE = "active"
+STATUS_TRIAL = "trial"
+STATUS_PAST_DUE = "past_due"
+STATUS_PAUSED = "paused"
+STATUS_CANCELLED = "cancelled"
+
+ALL_STATUSES = (STATUS_ACTIVE, STATUS_TRIAL, STATUS_PAST_DUE, STATUS_PAUSED, STATUS_CANCELLED)
+ACTIVE_STATUSES = frozenset({STATUS_ACTIVE, STATUS_TRIAL, STATUS_PAST_DUE})
+DEFAULT_STATUS = STATUS_ACTIVE
+
+ALL_BILLING_CYCLES = ("monthly", "annual")
+
+
+def org_subscription_active(org) -> bool:
+    if org is None:
+        return False
+    return (getattr(org, "subscription_status", None) or DEFAULT_STATUS) in ACTIVE_STATUSES
+
+
 # ─── Entitlement resolution ──────────────────────────────────────────────────
 
 def tier_modules(tier: str | None) -> frozenset[str]:
@@ -77,9 +101,13 @@ def tier_modules(tier: str | None) -> frozenset[str]:
 def org_entitled_modules(org) -> set[str]:
     """The set of module keys a club may use right now.
 
-    = the modules its tier bundles, plus any à-la-carte overrides.
+    = the modules its tier bundles, plus any à-la-carte overrides — but only
+    while the subscription is active. A lapsed (paused/cancelled) club falls
+    back to Core only.
     """
     if org is None:
+        return set()
+    if not org_subscription_active(org):
         return set()
     mods = set(tier_modules(getattr(org, "tier", None)))
     for m in (getattr(org, "module_overrides", None) or []):
@@ -102,10 +130,14 @@ def entitlement_summary(org, role: str | None = None) -> dict:
         mods = set(ALL_MODULES)
     else:
         mods = org_entitled_modules(org)
+    renewal = getattr(org, "renewal_date", None) if org is not None else None
     return {
         "tier": (getattr(org, "tier", None) or DEFAULT_TIER) if org is not None else DEFAULT_TIER,
         "modules": sorted(mods),
         "overrides": list(getattr(org, "module_overrides", None) or []) if org is not None else [],
+        "status": (getattr(org, "subscription_status", None) or DEFAULT_STATUS) if org is not None else DEFAULT_STATUS,
+        "renewal_date": renewal.isoformat() if renewal else None,
+        "billing_cycle": getattr(org, "billing_cycle", None) if org is not None else None,
     }
 
 

@@ -78,3 +78,28 @@ export function tierLabel(tier) {
 export function tierInfo(tier) {
   return TIER_INFO[tier] || TIER_INFO[TIER.GOOD]
 }
+
+// Subscription statuses — keep in sync with backend ALL_STATUSES /
+// ACTIVE_STATUSES. `live` = entitlements stay active for that status.
+export const SUBSCRIPTION_STATUSES = [
+  { key: 'active', label: 'Active', live: true },
+  { key: 'trial', label: 'Trial', live: true },
+  { key: 'past_due', label: 'Past due', live: true },
+  { key: 'paused', label: 'Paused', live: false },
+  { key: 'cancelled', label: 'Cancelled', live: false },
+]
+
+export const BILLING_CYCLES = [
+  { key: '', label: '—' },
+  { key: 'monthly', label: 'Monthly' },
+  { key: 'annual', label: 'Annual' },
+]
+
+export function statusLabel(status) {
+  return SUBSCRIPTION_STATUSES.find(s => s.key === status)?.label || 'Active'
+}
+
+export function statusIsLive(status) {
+  const s = SUBSCRIPTION_STATUSES.find(x => x.key === status)
+  return s ? s.live : true
+}

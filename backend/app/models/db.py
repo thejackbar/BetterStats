@@ -83,6 +83,13 @@ class Organisation(Base):
     # always on and is not a gateable module.
     tier = Column(Text, nullable=False, server_default="good", default="good")
     module_overrides = Column(JSONB, nullable=False, server_default="[]", default=list)
+    # ─── Subscription state (migration 057) ──────────────────────────────────
+    # Drives entitlement now (status gates module access) and reflects the
+    # manual-invoicing state in-app ahead of Stripe. Statuses: active/trial/
+    # past_due keep modules live; paused/cancelled fall back to Core only.
+    subscription_status = Column(Text, nullable=False, server_default="active", default="active")
+    renewal_date = Column(Date, nullable=True)
+    billing_cycle = Column(Text, nullable=True)  # 'monthly' | 'annual' | None
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
