@@ -1,7 +1,7 @@
 export default {
-  version: 'v2.0.1 Beta',
-  date: '2026-06-01',
-  sortKey: '2026-06-01T18:30:00Z', // > v2.0.0's 16:00 so this sorts to the top
+  version: 'v2.1.1 Beta',
+  date: '2026-06-02',
+  sortKey: '2026-06-02T12:00:00Z', // > v2.1.0's 10:00 so this sorts to the top
   title: 'BetterIQ opposition analysis: whole-club squads, team filter & bowler match-ups',
   items: [
     "Opposition dossiers now scout the opponent's whole club by default — every team across every grade they field this season — so players who turn out in a different grade (and were previously missed) are picked up.",

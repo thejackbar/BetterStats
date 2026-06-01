@@ -23,6 +23,8 @@ function loadClubBranding() {
 const NAV = [
   { to: '/admin/betteriq', label: 'Overview', icon: 'overview', cap: null, exact: true },
   { to: '/admin/betteriq/opposition', label: 'Opposition', icon: 'search', cap: CAP.MANAGE_IQ },
+  { to: '/admin/betteriq/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_IQ },
+  { to: '/admin/betteriq/trends', label: 'Player trends', icon: 'ladders', cap: CAP.MANAGE_IQ },
 ]
 
 export default function IQLayout({ children, title, actions }) {

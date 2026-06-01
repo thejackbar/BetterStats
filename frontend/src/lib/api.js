@@ -925,6 +925,18 @@ export const api = {
     request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId, team)}`),
   iqRefreshDossier: ({ opponent, fixtureId, team } = {}) =>
     request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId, team)}`, { method: 'POST' }),
+
+  // ─── BetterIQ: Selection analysis ───────────────────────
+  // Fixtures with a saved BetterSelect lineup, ready to analyse.
+  iqSelectionLineups: () => request('/iq/selection/lineups'),
+  // Balance / form / warnings / promote-rest / fairness for one fixture's XI.
+  iqSelectionAnalysis: (fixtureId) =>
+    request(`/iq/selection/analysis?fixture_id=${encodeURIComponent(fixtureId)}`),
+
+  // ─── BetterIQ: Player trends & development ──────────────
+  iqTrendsOverview: () => request('/iq/trends/overview'),
+  iqTrendsPlayers: () => request('/iq/trends/players'),
+  iqTrendsPlayer: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}`),
 }
 
 function _iqQs(opponent, fixtureId, team) {

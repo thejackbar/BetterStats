@@ -312,7 +312,7 @@ function TeamSelector({ teams, value, onChange, disabled }) {
 
 /* ── opponent picker ──────────────────────────────────────────────────────── */
 
-function OpponentPicker({ data, onPick }) {
+function OpponentPicker({ data, onPick, onMatch }) {
   const [q, setQ] = useState('')
   const opponents = data?.opponents || []
   const filtered = useMemo(() => {
@@ -326,12 +326,21 @@ function OpponentPicker({ data, onPick }) {
         <div className="mb-5">
           <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-2">Upcoming</div>
           <div className="flex flex-wrap gap-2">
-            {data.upcoming.slice(0, 6).map(fx => (
+            {data.upcoming.slice(0, 6).map(fx => fx.opp_key ? (
               <button key={fx.fixture_id} onClick={() => onPick({ fixtureId: fx.fixture_id, opponent: fx.opp_key, name: fx.opponent_name })}
                 className="pb-card px-3 py-2 text-left hover:border-pb-accent/50 transition-colors">
-                <div className="font-medium text-sm">{fx.opponent_name}</div>
+                <div className="font-medium text-sm flex items-center gap-1.5">{fx.opponent_name} <Tag tone="accent">History</Tag></div>
                 <div className="text-pb-faintest text-[11px]">{fx.played_on || ''} {fx.home_away ? `· ${fx.home_away}` : ''}</div>
               </button>
+            ) : (
+              <div key={fx.fixture_id} className="pb-card px-3 py-2">
+                <div className="font-medium text-sm flex items-center gap-1.5">{fx.opponent_name} <Tag tone="faint">Not linked</Tag></div>
+                <div className="text-pb-faintest text-[11px] mb-1.5">{fx.played_on || ''} {fx.home_away ? `· ${fx.home_away}` : ''}</div>
+                <div className="flex gap-1.5">
+                  <Btn sm variant="soft" icon="search" onClick={() => onMatch(fx)}>Match club</Btn>
+                  <Btn sm variant="ghost" onClick={() => onPick({ fixtureId: fx.fixture_id, name: fx.opponent_name })}>Scout as new</Btn>
+                </div>
+              </div>
             ))}
           </div>
         </div>
@@ -358,6 +367,51 @@ function OpponentPicker({ data, onPick }) {
   )
 }
 
+/* ── match-to-club modal ─────────────────────────────────────────────────────
+ * When a fixture's free-text opponent name doesn't auto-link to a club in our
+ * history, let the user search and pick the right club entity. The chosen
+ * opp_key then drives head-to-head / our-record (identity), while the fixture
+ * still supplies the grade for the live dossier. */
+function MatchOpponentModal({ opponents, fixture, onPick, onClose }) {
+  const [q, setQ] = useState('')
+  const filtered = useMemo(() => {
+    const t = q.trim().toLowerCase()
+    const base = t ? opponents.filter(o => (o.name || '').toLowerCase().includes(t)) : opponents
+    return base.slice(0, 50)
+  }, [q, opponents])
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div onClick={e => e.stopPropagation()} className="w-[440px] max-w-full bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
+        <div className="px-4 py-3 border-b border-pb-hairline">
+          <div className="font-mono text-[10px] uppercase tracking-wide3" style={{ color: 'var(--pb-accent)' }}>Match opponent to a club</div>
+          <div className="font-display font-bold text-[15px] mt-0.5 truncate">{fixture?.name || 'Opponent'}</div>
+          <div className="text-pb-faintest text-[11px]">Link this fixture to a club in your history to unlock head-to-head and your record vs them.</div>
+        </div>
+        <div className="p-3"><Search value={q} onChange={setQ} placeholder="Search your clubs…" /></div>
+        <div className="px-3 pb-2 overflow-y-auto">
+          {filtered.length === 0 ? <Empty>No clubs found.</Empty> : (
+            <div className="space-y-1">
+              {filtered.map(o => (
+                <button key={o.opp_key} onClick={() => onPick(o)}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg hover:bg-pb-surface2 text-left">
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{o.name}</div>
+                    <div className="text-pb-faintest text-[11px]">{o.meetings} meetings{o.last_played ? ` · last ${o.last_played.slice(0, 4)}` : ''}</div>
+                  </div>
+                  {o.coverage === 'rich' && <Tag tone="accent">Synced</Tag>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="px-4 py-3 border-t border-pb-hairline flex justify-end">
+          <Btn variant="ghost" sm onClick={onClose}>Cancel</Btn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ── main ─────────────────────────────────────────────────────────────────── */
 
 export default function OppositionScout() {
@@ -369,6 +423,7 @@ export default function OppositionScout() {
   const [team, setTeam] = useState(null)             // chosen opponent team (grade_id) | null = whole club
   const [teamsList, setTeamsList] = useState([])     // their teams, held stable across rebuilds
   const [tab, setTab] = useState('batting')
+  const [matching, setMatching] = useState(null)     // fixture being matched to a club
   const pollRef = useRef(null)
 
   // Pull opponent list once.
@@ -427,6 +482,14 @@ export default function OppositionScout() {
   }
   const clearSelection = () => { setSelected(null); setTeam(null); setTeamsList([]); setSearchParams({}, { replace: true }) }
 
+  // Manually match an unlinked fixture to a known club entity.
+  const startMatch = (fx) => setMatching({ fixtureId: fx.fixture_id, name: fx.opponent_name })
+  const applyMatch = (opp) => {
+    const m = matching
+    setMatching(null)
+    if (m) pick({ fixtureId: m.fixtureId, opponent: opp.opp_key, name: opp.name })
+  }
+
   const refresh = () => {
     if (!selected) return
     setDossier({ status: 'building' })
@@ -453,10 +516,14 @@ export default function OppositionScout() {
       <IQLayout title="Opposition analysis">
         {list === null
           ? <div className="pb-card p-5 animate-pulse text-pb-faint text-sm">Loading opponents…</div>
-          : <OpponentPicker data={list} onPick={pick} />}
+          : <OpponentPicker data={list} onPick={pick} onMatch={startMatch} />}
+        {matching && <MatchOpponentModal opponents={list?.opponents || []} fixture={matching} onPick={applyMatch} onClose={() => setMatching(null)} />}
       </IQLayout>
     )
   }
+
+  // A fixture was picked but its opponent didn't resolve to club history.
+  const unresolved = !!selected?.fixtureId && report && !report.error && report.opponent && !report.opponent.opp_key
 
   // ── Report view ──
   return (
@@ -474,6 +541,17 @@ export default function OppositionScout() {
           {building ? 'Building…' : 'Refresh'}
         </Btn>
       </div>
+
+      {unresolved && (
+        <div className="pb-card p-4 mb-4 flex flex-wrap items-center justify-between gap-3"
+          style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' }}>
+          <div className="text-sm">
+            <span className="font-medium">No history matched for “{oppName}”.</span>{' '}
+            <span className="text-pb-faint">Link this fixture to a club to unlock head-to-head and your record against them.</span>
+          </div>
+          <Btn sm variant="soft" icon="search" onClick={() => startMatch({ fixture_id: selected.fixtureId, opponent_name: oppName })}>Match club</Btn>
+        </div>
+      )}
 
       {/* Instant: head-to-head + our record */}
       <div className="grid gap-4 lg:grid-cols-2 mb-4">
@@ -543,6 +621,8 @@ export default function OppositionScout() {
           )}
         </>
       )}
+
+      {matching && <MatchOpponentModal opponents={list?.opponents || []} fixture={matching} onPick={applyMatch} onClose={() => setMatching(null)} />}
     </IQLayout>
   )
 }
