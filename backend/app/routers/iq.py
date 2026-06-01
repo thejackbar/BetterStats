@@ -113,7 +113,7 @@ async def selection_lineups(
     club: Organisation = Depends(get_current_club),
 ):
     """Fixtures with a saved BetterSelect lineup, ready to analyse."""
-    return await iq_selection.list_lineups(db, str(club.id))
+    return await iq_selection.list_lineups(db, club)
 
 
 @router.get("/selection/analysis")
@@ -123,7 +123,7 @@ async def selection_analysis(
     club: Organisation = Depends(get_current_club),
 ):
     """Balance, form, warnings, promote/rest and fairness for a fixture's XI."""
-    result = await iq_selection.selection_analysis(db, str(club.id), fixture_id)
+    result = await iq_selection.selection_analysis(db, club, fixture_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Fixture not found")
     return result
