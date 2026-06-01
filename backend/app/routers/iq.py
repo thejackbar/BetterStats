@@ -11,7 +11,7 @@ analysis, player trends and NL Q&A are later phases.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_IQ, require_cap
@@ -19,6 +19,8 @@ from app.models.db import Organisation, get_db
 from app.routers.auth import get_current_club
 from app.services import iq as iq_service
 from app.services import iq_opponent
+from app.services import iq_selection
+from app.services import iq_trends
 
 # Every BetterIQ route requires the MANAGE_IQ capability.
 router = APIRouter(prefix="/iq", tags=["iq"], dependencies=[Depends(require_cap(MANAGE_IQ))])
@@ -95,3 +97,62 @@ async def refresh_opposition_dossier(
     return await iq_opponent.get_or_start_dossier(
         db, str(club.id), key, opp_name=name, grade_id=grade_id, force=True
     )
+
+
+# ─── Selection analysis (Phase 2) ────────────────────────────────────────────
+
+
+@router.get("/selection/lineups")
+async def selection_lineups(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Fixtures with a saved BetterSelect lineup, ready to analyse."""
+    return await iq_selection.list_lineups(db, str(club.id))
+
+
+@router.get("/selection/analysis")
+async def selection_analysis(
+    fixture_id: str = Query(..., description="fixture whose saved XI to analyse"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Balance, form, warnings, promote/rest and fairness for a fixture's XI."""
+    result = await iq_selection.selection_analysis(db, str(club.id), fixture_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Fixture not found")
+    return result
+
+
+# ─── Player trends & development (Phase 3) ───────────────────────────────────
+
+
+@router.get("/trends/overview")
+async def trends_overview(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Club-wide development: milestone watch + breakout/decline movers."""
+    return await iq_trends.trends_overview(db, str(club.id))
+
+
+@router.get("/trends/players")
+async def trends_players(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Active players (with career context) for the trends picker."""
+    return await iq_trends.list_players(db, str(club.id))
+
+
+@router.get("/trends/player/{player_id}")
+async def trends_player(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """One player's trajectory, career totals, next milestones and verdict."""
+    result = await iq_trends.player_trend(db, str(club.id), player_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return result
