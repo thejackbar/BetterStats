@@ -869,6 +869,35 @@ class SyncRun(Base):
     error = Column(Text, nullable=True)
 
 
+class OppositionDossier(Base):
+    """BetterIQ — cached opponent scouting dossier (assembled live report).
+
+    Keyed by (organisation_id, opp_key). ``payload`` is the fully assembled
+    dossier JSON: the opponent's current-season squad + form pulled live from
+    the grade's scorecards, plus player-level head-to-head vs us. Built on
+    demand; ``status`` drives the build/poll UX and ``built_at`` lets the reader
+    apply a freshness TTL + offer a manual refresh. Opponent player stats are
+    deliberately *not* normalised into their own tables — this cache is the only
+    place live opponent data lands (keeps the data-rights surface small and
+    avoids an opponent-stats schema).
+    """
+    __tablename__ = "opposition_dossiers"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "opp_key", name="uq_dossier_org_opp"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    opp_key = Column(Text, nullable=False)
+    opp_name = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="building")  # building | ready | error
+    payload = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    built_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class SavedReport(Base):
     __tablename__ = "saved_reports"
     __table_args__ = (

@@ -911,4 +911,23 @@ export const api = {
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),
   bsUpdatePlayerProfile: (id, data) =>
     request(`/players/${id}/profile`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // ─── BetterIQ: Opposition analysis ──────────────────────
+  // Opponents we have history against + upcoming fixtures to scout.
+  iqListOpponents: () => request('/iq/opposition/opponents'),
+  // Instant report from data we already hold (head-to-head, our record vs them).
+  iqOppositionReport: ({ opponent, fixtureId } = {}) =>
+    request(`/iq/opposition/report?${_iqQs(opponent, fixtureId)}`),
+  // Live dossier (squad + form + deep vs-us). Poll until status === 'ready'.
+  iqOppositionDossier: ({ opponent, fixtureId } = {}) =>
+    request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId)}`),
+  iqRefreshDossier: ({ opponent, fixtureId } = {}) =>
+    request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId)}`, { method: 'POST' }),
+}
+
+function _iqQs(opponent, fixtureId) {
+  const qs = new URLSearchParams()
+  if (opponent) qs.set('opponent', opponent)
+  if (fixtureId) qs.set('fixture_id', fixtureId)
+  return qs.toString()
 }

@@ -33,13 +33,13 @@ MODULE_IQ = "iq"             # BetterIQ      — AI + stats deep-dive (not built
 ALL_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ)
 
 # Display metadata, surfaced to the admin module-tile dashboard. ``built`` flags
-# whether the module exists yet — BetterIQ is greenfield (master-plan Phase 4),
-# so its tile shows "coming soon" rather than opening.
+# whether the module exists yet. BetterIQ Phase 1 (opposition analysis) is now
+# live; selection analysis, player trends and NL Q&A are later phases.
 MODULE_META: dict[str, dict] = {
     MODULE_SELECT: {"name": "BetterSelect", "blurb": "Availability & smart team selection", "built": True},
     MODULE_SOCIALS: {"name": "BetterSocials", "blurb": "Auto-post lineups, scorecards & milestones", "built": True},
     MODULE_FEES: {"name": "BetterFees", "blurb": "Fee schedules & payment tracking", "built": True},
-    MODULE_IQ: {"name": "BetterIQ", "blurb": "AI + stats deep-dive — opposition scouting & selection analysis", "built": False},
+    MODULE_IQ: {"name": "BetterIQ", "blurb": "AI + stats deep-dive — opposition scouting & selection analysis", "built": True},
 }
 
 
