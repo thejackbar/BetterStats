@@ -1,8 +1,8 @@
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
-export default function ProtectedRoute({ children, requireRole }) {
-  const { user } = useAuth()
+export default function ProtectedRoute({ children, requireRole, requireModule }) {
+  const { user, hasModule } = useAuth()
 
   if (user === undefined) {
     return (
@@ -15,6 +15,12 @@ export default function ProtectedRoute({ children, requireRole }) {
   if (!user) return <Navigate to="/login" replace />
 
   if (requireRole && user.role !== requireRole && user.role !== 'super_admin') {
+    return <Navigate to="/admin" replace />
+  }
+
+  // Module entitlement gate — clubs whose tier doesn't include the module are
+  // bounced back to the dashboard, where the locked tile explains the upsell.
+  if (requireModule && !hasModule(requireModule)) {
     return <Navigate to="/admin" replace />
   }
 

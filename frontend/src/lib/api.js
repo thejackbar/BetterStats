@@ -5,9 +5,17 @@ async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include' })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    const detail = Array.isArray(err.detail)
-      ? err.detail.map(e => e.msg || JSON.stringify(e)).join(', ')
-      : (typeof err.detail === 'string' ? err.detail : `HTTP ${res.status}`)
+    let detail
+    if (Array.isArray(err.detail)) {
+      detail = err.detail.map(e => e.msg || JSON.stringify(e)).join(', ')
+    } else if (typeof err.detail === 'string') {
+      detail = err.detail
+    } else if (err.detail && typeof err.detail === 'object') {
+      // Structured errors (e.g. require_module's 402 upsell payload).
+      detail = err.detail.message || err.detail.detail || `HTTP ${res.status}`
+    } else {
+      detail = `HTTP ${res.status}`
+    }
     throw new Error(detail)
   }
   return res.json()

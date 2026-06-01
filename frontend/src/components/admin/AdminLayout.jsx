@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
+import { MODULE } from '../../lib/modules'
 import { api } from '../../lib/api'
 import { SITE_VERSION } from '../../version'
 import { CHANGELOG } from '../../data/changelog'
@@ -22,6 +23,8 @@ function compareVersions(a, b) {
 
 // `cap: null` means everyone gets it (dashboard, read-only listing pages).
 // `cap: <CAP>` hides the link from users without that capability.
+// `module: <MODULE>` additionally hides the link when the club's tier doesn't
+// include that Better module (BetterSocials, BetterFees, …).
 const NAV_SECTIONS = [
   { items: [{ to: '/admin', label: 'Dashboard', exact: true, cap: null }] },
   {
@@ -37,7 +40,7 @@ const NAV_SECTIONS = [
     items: [
       { to: '/admin/award-definitions', label: 'Award Types', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/awards', label: 'Awards', cap: CAP.MANAGE_AWARDS },
-      { to: '/admin/social-post', label: 'Social Posts', cap: CAP.MANAGE_SOCIAL },
+      { to: '/admin/social-post', label: 'Social Posts', cap: CAP.MANAGE_SOCIAL, module: MODULE.SOCIALS },
       { to: '/admin/sponsors', label: 'Sponsors', cap: CAP.MANAGE_SPONSORS },
       { to: '/admin/yearbook', label: 'Yearbooks', cap: CAP.MANAGE_YEARBOOKS },
     ],
@@ -59,10 +62,10 @@ const NAV_SECTIONS = [
   {
     heading: 'Fees',
     items: [
-      { to: '/admin/fees', label: 'Members', exact: true, cap: CAP.MANAGE_FEES },
-      { to: '/admin/fees/payments', label: 'Payments', cap: CAP.MANAGE_FEES },
-      { to: '/admin/fees/reports', label: 'Reports', cap: CAP.MANAGE_FEES },
-      { to: '/admin/fees/schedule', label: 'Fee Schedule', cap: CAP.MANAGE_FEES },
+      { to: '/admin/fees', label: 'Members', exact: true, cap: CAP.MANAGE_FEES, module: MODULE.FEES },
+      { to: '/admin/fees/payments', label: 'Payments', cap: CAP.MANAGE_FEES, module: MODULE.FEES },
+      { to: '/admin/fees/reports', label: 'Reports', cap: CAP.MANAGE_FEES, module: MODULE.FEES },
+      { to: '/admin/fees/schedule', label: 'Fee Schedule', cap: CAP.MANAGE_FEES, module: MODULE.FEES },
     ],
   },
   {
@@ -82,7 +85,7 @@ const SUPER_LINKS = [
 ]
 
 export default function AdminLayout({ children }) {
-  const { user, logout, hasCapability, justLoggedIn, clearJustLoggedIn } = useAuth()
+  const { user, logout, hasCapability, hasModule, justLoggedIn, clearJustLoggedIn } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -96,7 +99,10 @@ export default function AdminLayout({ children }) {
   // under it.
   const visibleSections = NAV_SECTIONS.map(s => ({
     ...s,
-    items: s.items.filter(i => i.cap == null || hasCapability(i.cap)),
+    items: s.items.filter(i =>
+      (i.cap == null || hasCapability(i.cap)) &&
+      (i.module == null || hasModule(i.module))
+    ),
   })).filter(s => s.items.length > 0)
 
   // Open the modal immediately, then fetch the summary in the background.

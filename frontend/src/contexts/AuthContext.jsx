@@ -54,8 +54,17 @@ export function AuthProvider({ children }) {
     return Array.isArray(user.capabilities) && user.capabilities.includes(cap)
   }, [user])
 
+  // Module entitlement — driven by the club's tier (+ à-la-carte overrides),
+  // sent by the backend on /auth/me + /auth/login as `entitlements.modules`.
+  // Super admins act cross-club and are entitled to everything.
+  const hasModule = useCallback((moduleKey) => {
+    if (!user) return false
+    if (user.role === 'super_admin') return true
+    return Array.isArray(user.entitlements?.modules) && user.entitlements.modules.includes(moduleKey)
+  }, [user])
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability }}>
+    <AuthContext.Provider value={{ user, login, logout, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule }}>
       {children}
     </AuthContext.Provider>
   )
