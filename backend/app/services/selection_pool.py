@@ -136,7 +136,10 @@ async def _latest_season_stats(db: AsyncSession, org_id) -> dict[str, dict]:
             FROM player_season_stats pss
             JOIN seasons s ON pss.season_id = s.id
             JOIN players p ON pss.player_id = p.id
-            WHERE p.organisation_id = :org
+            -- Scope to this org's seasons. Without it, a dual-club player
+            -- (shared CA participant GUID) could resolve their "latest season"
+            -- form snapshot to another club's season (see migration 060).
+            WHERE p.organisation_id = :org AND s.organisation_id = :org
             ORDER BY pss.player_id, s.year DESC NULLS LAST
             """
         ),

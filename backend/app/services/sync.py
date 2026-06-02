@@ -78,6 +78,58 @@ def _parse_uuid(val: str) -> Optional[uuid.UUID]:
         return None
 
 
+def _org_player_id(org_id: uuid.UUID, grassroots_guid: str) -> uuid.UUID:
+    """Per-club player id derived from the org + raw CA participant GUID.
+
+    Mirrors the Season id scheme (uuid5(org, grassroots_id)). A CA participant
+    GUID is shared across every club a person plays for, so it can't be a global
+    primary key — this gives each club its own deterministic id for that person.
+    """
+    return uuid.uuid5(org_id, grassroots_guid)
+
+
+async def _resolve_org_player(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    org_player_map: dict[str, uuid.UUID],
+    grassroots_guid: str,
+    name: str,
+    merged_away: dict,
+) -> Optional[uuid.UUID]:
+    """Resolve a CA participant GUID to this org's player id, creating a per-club
+    player (id = uuid5(org, guid)) the first time the org sees that GUID.
+
+    ``org_player_map`` is a ``grassroots_id -> player_id`` cache for the org and
+    is updated in place. Returns ``None`` when the GUID belongs to a player that
+    was merged away (so the caller redirects via ``merged_away`` rather than
+    recreating it). Legacy single-club orgs are unaffected: their existing rows
+    already sit in the map keyed by their raw GUID, so this returns the same
+    raw-GUID id it always did.
+    """
+    pid = org_player_map.get(grassroots_guid)
+    if pid is not None:
+        return pid
+    # Merged away (legacy merges store the raw GUID as removed_player_id) — don't
+    # resurrect it; the caller redirects its stats to the kept player.
+    if grassroots_guid in merged_away:
+        return None
+    guid_uuid = _parse_uuid(grassroots_guid)
+    # Only mint a per-club uuid5 id when the raw GUID is ALREADY a player id in
+    # another club (the genuine shared-participant collision). Otherwise keep
+    # using the raw GUID as the id — that's the legacy scheme the game-level
+    # scorecard sync relies on (it matches scorecard participantId == player id),
+    # so ordinary single-club players are completely unaffected. Per-club uuid5
+    # players are aggregate-only until the game-level sync learns to translate
+    # participantId -> player id (a separate, testable step).
+    clash = await session.get(Player, guid_uuid) if guid_uuid else None
+    new_id = _org_player_id(org_id, grassroots_guid) if clash is not None else guid_uuid
+    if new_id is None:
+        return None
+    session.add(Player(id=new_id, name=name, organisation_id=org_id, grassroots_id=grassroots_guid))
+    org_player_map[grassroots_guid] = new_id
+    return new_id
+
+
 async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisation:
     org_id = _parse_uuid(org_data.get("id", ""))
     incoming_name = (org_data.get("name") or "").strip()
@@ -418,6 +470,19 @@ async def sync_organisation(
         seasons = await playhq_client.get_seasons(org_id_str)
         logger.info(f"Found {len(seasons)} seasons")
 
+        # grassroots_id -> player_id for this org's existing players. New players
+        # (incl. the second club of a shared CA GUID) are minted as
+        # uuid5(org, guid) and added to this map as they're seen. For a legacy
+        # single-club org every row's grassroots_id == its raw-GUID id, so this
+        # resolves to exactly the same ids sync has always used.
+        org_player_map: dict[str, uuid.UUID] = {}
+        _opm_res = await session.execute(
+            select(Player.grassroots_id, Player.id).where(Player.organisation_id == org_id)
+        )
+        for _gid, _pid in _opm_res.all():
+            if _gid:
+                org_player_map[str(_gid)] = _pid
+
         for season_data in seasons:
             raw_season_id = (season_data.get("id") or "").strip()
             if not _parse_uuid(raw_season_id):
@@ -531,14 +596,13 @@ async def sync_organisation(
                 await session.rollback()
                 merged_away = {}
 
-            # Upsert players — skip any that were merged away
+            # Resolve each CA participant GUID to this org's player id, minting a
+            # per-club player (uuid5(org, guid)) for any GUID the org hasn't seen
+            # before. Merged-away GUIDs are skipped (not resurrected).
             for pid, pdata in player_data.items():
-                if str(pid) in merged_away:
-                    continue
-                player = await session.get(Player, pid)
-                if not player:
-                    player = Player(id=pid, name=pdata["name"], organisation_id=org_id)
-                    session.add(player)
+                await _resolve_org_player(
+                    session, org_id, org_player_map, str(pid), pdata["name"], merged_away
+                )
             await session.commit()
 
             # Replace existing season stats for this season
@@ -548,8 +612,13 @@ async def sync_organisation(
 
             processed_in_season: set[uuid.UUID] = set()
             for pid, pdata in player_data.items():
-                # Redirect stats for merged-away players to the kept player
-                effective_pid = merged_away.get(str(pid), pid)
+                guid_str = str(pid)
+                # Resolve the CA GUID to this org's player id, then redirect a
+                # merged-away player to the kept one.
+                resolved = org_player_map.get(guid_str) or merged_away.get(guid_str)
+                if resolved is None:
+                    continue
+                effective_pid = merged_away.get(str(resolved), resolved)
                 if effective_pid in processed_in_season:
                     continue
                 processed_in_season.add(effective_pid)
@@ -670,7 +739,11 @@ async def sync_organisation(
 
                         seen_pids: set[uuid.UUID] = set()
                         for pid, pdata in per_grade.items():
-                            effective_pid = merged_away.get(str(pid), pid)
+                            guid_str = str(pid)
+                            resolved = org_player_map.get(guid_str) or merged_away.get(guid_str)
+                            if resolved is None:
+                                continue
+                            effective_pid = merged_away.get(str(resolved), resolved)
                             if effective_pid in seen_pids:
                                 continue
                             seen_pids.add(effective_pid)
@@ -833,7 +906,8 @@ def _norm_name(s: str) -> str:
 def extract_bowler_wickets(
     scorecard: dict,
     game_uuid: uuid.UUID,
-    known_player_ids: set,
+    gate_pids: set,
+    pid_by_guid: dict,
     merged_away: dict,
 ) -> list:
     """Return a list of BowlerWicket rows to insert from a GR scorecard.
@@ -864,15 +938,19 @@ def extract_bowler_wickets(
         if not pid_str:
             return None
         try:
-            p = uuid.UUID(pid_str)
+            g = uuid.UUID(pid_str)
         except ValueError:
             return None
-        if p in known_player_ids:
-            return p
-        p2 = merged_away.get(p)
-        if p2 is not None and p2 in known_player_ids:
-            return p2
-        return None
+        # raw participant GUID -> this org's player id (identity for legacy
+        # single-club orgs where grassroots_id == id), then merge redirect.
+        p = pid_by_guid.get(g)
+        if p is None:
+            p = merged_away.get(g)
+            if p is None:
+                return None
+        else:
+            p = merged_away.get(p, p)
+        return p if p in gate_pids else None
 
     for inn in (scorecard.get("innings") or []):
         inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
@@ -1142,6 +1220,7 @@ async def sync_grassroots_game_level_data(
     # Short-lived session: enumerate grades and known players. Read-only.
     grades: list[tuple] = []  # (grade_id, season_id, grade_name)
     known_player_ids: set[uuid.UUID] = set()
+    pid_by_guid: dict[uuid.UUID, uuid.UUID] = {}  # raw CA participant GUID -> this org's player id
     async with async_session_maker() as session:
         org = await session.get(Organisation, org_uuid)
         if not org:
@@ -1156,10 +1235,18 @@ async def sync_grassroots_game_level_data(
         grades = [(str(r[0]), r[1], r[2]) for r in grades_res.all()]
         logger.info(f"GR-sync: {len(grades)} grades for org {org_uuid}")
 
+        # participant GUID -> this org's player id. Identity for a legacy
+        # single-club org (grassroots_id == id); for a per-club player
+        # (id = uuid5(org, guid)) it maps the scorecard's raw participantId to
+        # the uuid5 id so game-level rows attach to the right record.
         player_res = await session.execute(
-            select(Player.id).where(Player.organisation_id == org_uuid)
+            select(Player.id, Player.grassroots_id).where(Player.organisation_id == org_uuid)
         )
-        known_player_ids = {r[0] for r in player_res}
+        for _pid, _gid in player_res:
+            known_player_ids.add(_pid)
+            g = _parse_uuid(_gid) if _gid else None
+            if g is not None:
+                pid_by_guid[g] = _pid
         logger.info(f"GR-sync: {len(known_player_ids)} existing players in org")
 
         # Build merged-away → kept redirect map so scorecards referencing a
@@ -1182,6 +1269,24 @@ async def sync_grassroots_game_level_data(
                 target = raw_redirects[target]
             merged_away[removed] = target
         logger.info(f"GR-sync: {len(merged_away)} merged-away player redirects loaded")
+
+    def _team_pid(guid: Optional[uuid.UUID]) -> Optional[uuid.UUID]:
+        """Translate a scorecard participantId (raw CA GUID) to this org's player
+        id, following merge redirects; None if the GUID isn't one of our players.
+
+        Identity for a legacy single-club org (grassroots_id == id), so its
+        game-level attribution is byte-for-byte unchanged. For a per-club player
+        (id = uuid5(org, guid)) it returns the uuid5 id so the scorecard's raw
+        GUID lands on the right record.
+        """
+        if guid is None:
+            return None
+        p = pid_by_guid.get(guid)
+        if p is None:
+            p = merged_away.get(guid)  # legacy merged-away GUID (removed_player_id == raw GUID)
+            if p is None:
+                return None
+        return merged_away.get(p, p)
 
     # Enumerate match IDs by fanning out across all known grades.
     # /scores/grades/{id}/matches works for all seasons including pre-2000,
@@ -1432,18 +1537,9 @@ async def sync_grassroots_game_level_data(
                 if our_team:
                     our_team_name = our_team.get("displayName") or our_team.get("name") or ""
                     for roster_p in (our_team.get("players") or []):
-                        rpid_str = roster_p.get("participantId")
-                        if not rpid_str:
-                            continue
-                        try:
-                            rpid = uuid.UUID(rpid_str)
-                        except ValueError:
-                            continue
-                        if rpid not in known_player_ids:
-                            rpid = merged_away.get(rpid)
-                            if rpid is None or rpid not in known_player_ids:
-                                continue
-                        our_team_pids.add(rpid)
+                        rpid = _team_pid(_parse_uuid(roster_p.get("participantId") or ""))
+                        if rpid is not None:
+                            our_team_pids.add(rpid)
 
                 # Roster: insert one GameAppearance per club player listed in the
                 # team-sheet. Covers selected players who didn't bat/bowl/take a
@@ -1453,17 +1549,9 @@ async def sync_grassroots_game_level_data(
                 if our_team:
                     seen_appear_pids: set[uuid.UUID] = set()
                     for roster_p in (our_team.get("players") or []):
-                        rpid_str = roster_p.get("participantId")
-                        if not rpid_str:
+                        rpid = _team_pid(_parse_uuid(roster_p.get("participantId") or ""))
+                        if rpid is None:
                             continue
-                        try:
-                            rpid = uuid.UUID(rpid_str)
-                        except ValueError:
-                            continue
-                        if rpid not in known_player_ids:
-                            rpid = merged_away.get(rpid)
-                            if rpid is None or rpid not in known_player_ids:
-                                continue
                         if rpid in seen_appear_pids:
                             continue  # multi-team appearance (shouldn't happen for one team)
                         seen_appear_pids.add(rpid)
@@ -1491,17 +1579,9 @@ async def sync_grassroots_game_level_data(
                     fow_rows = inn.get("fallOfWickets") or []
 
                     for row in batting_rows:
-                        pid_str = row.get("participantId")
-                        if not pid_str:
+                        pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
+                        if pid is None or pid not in our_team_pids:
                             continue
-                        try:
-                            pid = uuid.UUID(pid_str)
-                        except ValueError:
-                            continue
-                        if pid not in our_team_pids:
-                            pid = merged_away.get(pid)
-                            if pid is None or pid not in our_team_pids:
-                                continue
                         dt_id = row.get("dismissalTypeId") or 0
                         if dt_id == 0:
                             continue
@@ -1533,17 +1613,9 @@ async def sync_grassroots_game_level_data(
                         bat_count += 1
 
                     for row in bowling_rows:
-                        pid_str = row.get("participantId")
-                        if not pid_str:
+                        pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
+                        if pid is None or pid not in our_team_pids:
                             continue
-                        try:
-                            pid = uuid.UUID(pid_str)
-                        except ValueError:
-                            continue
-                        if pid not in our_team_pids:
-                            pid = merged_away.get(pid)
-                            if pid is None or pid not in our_team_pids:
-                                continue
                         econ = None
                         try:
                             econ_raw = row.get("economy")
@@ -1563,17 +1635,9 @@ async def sync_grassroots_game_level_data(
                         bowl_count += 1
 
                     for row in fielding_rows:
-                        pid_str = row.get("participantId")
-                        if not pid_str:
+                        pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
+                        if pid is None or pid not in our_team_pids:
                             continue
-                        try:
-                            pid = uuid.UUID(pid_str)
-                        except ValueError:
-                            continue
-                        if pid not in our_team_pids:
-                            pid = merged_away.get(pid)
-                            if pid is None or pid not in our_team_pids:
-                                continue
                         catches_wk = row.get("wicketKeeperCatches") or 0
                         catches_total = row.get("totalCatches")
                         if catches_total is None:
@@ -1595,19 +1659,9 @@ async def sync_grassroots_game_level_data(
                         # or their personal FOW history gets polluted.
                         # The row itself is still inserted so the game-level
                         # scorecard view can display both innings' wickets.
-                        pid = None
-                        pid_str = row.get("participantId")
-                        if pid_str:
-                            try:
-                                pid_try = uuid.UUID(pid_str)
-                                if pid_try in our_team_pids:
-                                    pid = pid_try
-                                else:
-                                    pid_try = merged_away.get(pid_try)
-                                    if pid_try is not None and pid_try in our_team_pids:
-                                        pid = pid_try
-                            except ValueError:
-                                pid = None
+                        pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
+                        if pid is not None and pid not in our_team_pids:
+                            pid = None
                         wkt = row.get("order")
                         if wkt is None:
                             continue
@@ -1644,13 +1698,8 @@ async def sync_grassroots_game_level_data(
                             if not _bp:
                                 continue
                             total_n += 1
-                            try:
-                                _bc = uuid.UUID(_bp)
-                            except ValueError:
-                                continue
-                            if _bc not in our_team_pids:
-                                _bc = merged_away.get(_bc)
-                            if _bc in our_team_pids:
+                            _bc = _team_pid(_parse_uuid(_bp))
+                            if _bc is not None and _bc in our_team_pids:
                                 club_n += 1
                         is_club_innings = total_n > 0 and club_n * 2 > total_n
 
@@ -1659,17 +1708,12 @@ async def sync_grassroots_game_level_data(
                         for src_key, dst in (("batter1_id", "b1"), ("batter2_id", "b2")):
                             v = p.get(src_key)
                             if v:
-                                try:
-                                    cand = uuid.UUID(v)
-                                    if cand not in our_team_pids:
-                                        cand = merged_away.get(cand)
-                                    if cand and cand in our_team_pids:
-                                        if dst == "b1":
-                                            b1_id = cand
-                                        else:
-                                            b2_id = cand
-                                except (ValueError, TypeError):
-                                    pass
+                                cand = _team_pid(_parse_uuid(v))
+                                if cand is not None and cand in our_team_pids:
+                                    if dst == "b1":
+                                        b1_id = cand
+                                    else:
+                                        b2_id = cand
                         if not b1_id and not b2_id:
                             continue
                         session.add(Partnership(
@@ -1687,7 +1731,7 @@ async def sync_grassroots_game_level_data(
                 # to one of our players. Helper builds short-name → pid maps
                 # from each innings' bowling/fielding rows and resolves through
                 # merged_away. Reused by app.scripts.rebuild_bowler_wickets.
-                for bw in extract_bowler_wickets(scorecard, match_uuid, our_team_pids, merged_away):
+                for bw in extract_bowler_wickets(scorecard, match_uuid, our_team_pids, pid_by_guid, merged_away):
                     session.add(bw)
 
                 if bat_count == 0 and bowl_count == 0 and appear_count == 0:
@@ -1728,16 +1772,22 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     for pid in player_ids:
         pid_str = str(pid)
 
+        # Scope to this org's seasons only. A CA participant GUID is shared
+        # across clubs, so a dual-club player can have player_season_stats rows
+        # under another club's seasons; counting them all would mint inflated
+        # career milestones (mirrors the v_effective view guard, migration 060).
         totals_res = await session.execute(
             text("""
                 SELECT
-                    COALESCE(SUM(runs), 0)    AS runs,
-                    COALESCE(SUM(wickets), 0) AS wickets,
-                    COALESCE(SUM(matches), 0) AS matches,
-                    COALESCE(SUM(catches), 0) AS catches
-                FROM player_season_stats WHERE player_id=:pid
+                    COALESCE(SUM(pss.runs), 0)    AS runs,
+                    COALESCE(SUM(pss.wickets), 0) AS wickets,
+                    COALESCE(SUM(pss.matches), 0) AS matches,
+                    COALESCE(SUM(pss.catches), 0) AS catches
+                FROM player_season_stats pss
+                JOIN seasons s ON s.id = pss.season_id
+                WHERE pss.player_id = :pid AND s.organisation_id = :org_id
             """),
-            {"pid": pid_str}
+            {"pid": pid_str, "org_id": str(org_id)}
         )
         totals = dict(totals_res.mappings().first() or {})
 

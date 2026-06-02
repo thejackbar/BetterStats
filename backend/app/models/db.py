@@ -180,6 +180,15 @@ class Player(Base):
     __tablename__ = "players"
     __table_args__ = (
         UniqueConstraint("organisation_id", "playhq_id", name="uq_player_org_playhq_id"),
+        # A Cricket Australia participant GUID is shared across every club a
+        # person plays for, so it can't safely be a global primary key — the
+        # second club's sync collides on the first club's row and co-mingles
+        # their stats. id is therefore a per-club derived value (uuid5(org,
+        # guid)) for players created from migration 062 on, and grassroots_id
+        # holds the raw CA GUID (used to match scorecard participantIds). Legacy
+        # rows keep their raw-GUID id; either way (org, grassroots_id) is unique.
+        # Same pattern Seasons already use (see Season.grassroots_id).
+        UniqueConstraint("organisation_id", "grassroots_id", name="uq_player_org_grassroots"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True)
@@ -187,6 +196,10 @@ class Player(Base):
     display_name_override = Column(Text, nullable=True)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"))
     playhq_id = Column(Text, nullable=True)
+    # Raw Cricket Australia participant GUID. Shared across clubs; matches the
+    # scorecard `participantId` and the aggregate feed's player `id`. For a
+    # player whose id is a per-club uuid5, this is the join key back to CA.
+    grassroots_id = Column(Text, nullable=True)
     photo_url = Column(Text, nullable=True)
     photo_data = Column(LargeBinary, nullable=True)
     photo_mime = Column(Text, nullable=True)

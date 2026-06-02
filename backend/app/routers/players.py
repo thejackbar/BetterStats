@@ -301,16 +301,27 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
 
+    # Scope the career totals to the player's own organisation's seasons. A CA
+    # participant GUID is shared across clubs, so a dual-club player can have
+    # player_season_stats rows attached under another club's seasons; summing
+    # them all would over-count (see migration 060). This query reads the base
+    # table, so it applies the same guard the v_effective view does.
+    org_clause = " AND s.organisation_id = :org_id" if player.organisation_id else ""
+    agg_params = {"pid": player_id}
+    if player.organisation_id:
+        agg_params["org_id"] = str(player.organisation_id)
     agg_res = await db.execute(
-        text("""
+        text(f"""
             SELECT
-                COALESCE(SUM(runs), 0)    AS total_runs,
-                COALESCE(SUM(wickets), 0) AS total_wickets,
-                COALESCE(SUM(matches), 0) AS total_matches,
-                COALESCE(SUM(catches), 0) AS total_catches
-            FROM player_season_stats WHERE player_id=:pid
+                COALESCE(SUM(pss.runs), 0)    AS total_runs,
+                COALESCE(SUM(pss.wickets), 0) AS total_wickets,
+                COALESCE(SUM(pss.matches), 0) AS total_matches,
+                COALESCE(SUM(pss.catches), 0) AS total_catches
+            FROM player_season_stats pss
+            JOIN seasons s ON s.id = pss.season_id
+            WHERE pss.player_id = :pid{org_clause}
         """),
-        {"pid": player_id}
+        agg_params
     )
     agg = dict(agg_res.mappings().first() or {})
     totals = {

@@ -6,8 +6,8 @@ manually match it on the Opposition screen. That association is persisted here
 so every current and future fixture with that name resolves to the chosen
 opp_key. Keyed on the lowercased alias name per org.
 
-Revision ID: 060
-Revises: 059
+Revision ID: 063
+Revises: 062
 Create Date: 2026-06-02
 
 """
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
 
-revision = '060'
-down_revision = '059'
+revision = '063'
+down_revision = '062'
 branch_labels = None
 depends_on = None
 

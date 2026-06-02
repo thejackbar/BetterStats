@@ -702,7 +702,8 @@ async def list_players(session: AsyncSession, org_id: str) -> list[dict]:
                    COALESCE(SUM(pss.matches), 0) AS matches
             FROM players p
             JOIN player_season_stats pss ON pss.player_id = p.id
-            JOIN seasons s ON s.id = pss.season_id
+            -- Only this org's seasons (shared cross-club GUID guard, main's per-club work)
+            JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID)
             LEFT JOIN teams t ON t.id = p.squad_team_id
             WHERE p.organisation_id = CAST(:org AS UUID) AND p.status = 'active'
               AND s.year = :cur
