@@ -286,6 +286,80 @@ async def _batting_pairs(session: AsyncSession, org_id: str, season_id: str | No
     return pairs
 
 
+_PACE_TYPES = ("FAST", "FAST_MEDIUM", "MEDIUM", "MEDIUM_FAST")
+_SPIN_TYPES = ("FINGER_SPIN", "WRIST_SPIN")
+
+
+async def _attack_structure(session: AsyncSession, org_id: str, season_id: str | None) -> dict | None:
+    """Bowling attack structure (brief §8.3) — pace/spin balance and each
+    frontline bowler's workload and role. Overs are stored in cricket notation
+    (10.2 = 10 overs 2 balls) so they're converted to balls before summing."""
+    season_clause = "AND s.id = CAST(:season AS UUID)" if season_id else ""
+    min_balls = 60 if season_id else 300
+    res = await session.execute(
+        text(
+            f"""
+            WITH sp AS (
+                SELECT bs.player_id AS pid,
+                       (FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10))::int AS balls,
+                       COALESCE(bs.runs, 0) AS runs, COALESCE(bs.wickets, 0) AS wkts
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org AS UUID) AND bs.overs IS NOT NULL {season_clause}
+            )
+            SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                   p.bowling_type AS bt, SUM(sp.balls) AS balls,
+                   SUM(sp.runs) AS runs, SUM(sp.wkts) AS wkts
+            FROM sp JOIN players p ON p.id = sp.pid
+            GROUP BY p.id, name, p.bowling_type
+            HAVING SUM(sp.balls) >= :min_balls
+            ORDER BY SUM(sp.balls) DESC
+            """
+        ),
+        {"org": org_id, "season": season_id, "min_balls": min_balls},
+    )
+    pace = spin = unknown = 0
+    bowlers = []
+    for r in res.mappings():
+        balls = int(r["balls"] or 0)
+        if not balls:
+            continue
+        bt = r["bt"]
+        if bt in _PACE_TYPES:
+            pace += balls
+        elif bt in _SPIN_TYPES:
+            spin += balls
+        else:
+            unknown += balls
+        wkts, runs = int(r["wkts"] or 0), int(r["runs"] or 0)
+        econ = round(runs * 6 / balls, 2)
+        sr = round(balls / wkts, 1) if wkts else None
+        avg = round(runs / wkts, 1) if wkts else None
+        if wkts and sr is not None and sr <= 30:
+            role = "Strike"
+        elif econ <= 3.8:
+            role = "Containment"
+        else:
+            role = "Stock"
+        bowlers.append({
+            "player_id": r["id"], "name": r["name"],
+            "pace": bt in _PACE_TYPES, "spin": bt in _SPIN_TYPES,
+            "overs": f"{balls // 6}.{balls % 6}", "wickets": wkts,
+            "econ": econ, "avg": avg, "sr": sr, "role": role,
+        })
+    total = pace + spin + unknown
+    if total == 0:
+        return None
+    return {
+        "pace_pct": round(100 * pace / total),
+        "spin_pct": round(100 * spin / total),
+        "unknown_pct": round(100 * unknown / total),
+        "bowlers": bowlers[:10],
+    }
+
+
 async def _collapses(session: AsyncSession, org_id: str, season_id: str | None) -> dict | None:
     """Collapse analysis (brief §7.5) — how often we lose a cluster of wickets
     cheaply. Reconstructs fall-of-wickets from stored partnership runs and finds
@@ -508,6 +582,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
     all_rounders = await _all_rounders(session, org_id, season_id)
     batting_pairs = await _batting_pairs(session, org_id, season_id)
     collapses = await _collapses(session, org_id, season_id)
+    attack = await _attack_structure(session, org_id, season_id)
     win_lose = _how_we_win_lose(record, batting, innings, partnerships)
 
     return {
@@ -520,6 +595,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
         "partnerships": partnerships,
         "batting_pairs": batting_pairs,
         "collapses": collapses,
+        "attack": attack,
         "fielding": fielding,
         "all_rounders": all_rounders,
         "how_we_win": win_lose[0],

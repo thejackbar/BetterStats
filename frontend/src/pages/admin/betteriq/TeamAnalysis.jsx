@@ -223,6 +223,46 @@ export default function TeamAnalysis() {
             </div>
           )}
 
+          {/* Bowling attack structure */}
+          {data.attack && data.attack.bowlers?.length > 0 && (
+            <div className="mt-4">
+              <Card title="Bowling attack" right={<span className="text-pb-faint text-xs">pace vs spin</span>}>
+                <div className="flex items-center gap-2 text-[11px] mb-3">
+                  <span className="text-pb-faint w-9">Mix</span>
+                  <div className="flex-1 h-3 rounded-full overflow-hidden flex bg-pb-surface2">
+                    <div className="h-full" style={{ width: `${data.attack.pace_pct}%`, background: 'var(--pb-accent)' }} title={`Pace ${data.attack.pace_pct}%`} />
+                    <div className="h-full" style={{ width: `${data.attack.spin_pct}%`, background: 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' }} title={`Spin ${data.attack.spin_pct}%`} />
+                  </div>
+                  <span className="pb-num text-pb-faint whitespace-nowrap">{data.attack.pace_pct}% pace · {data.attack.spin_pct}% spin</span>
+                </div>
+                <div className="overflow-x-auto -mx-1">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
+                      <th className="py-1 px-1 font-medium">Bowler</th>
+                      <th className="py-1 px-1 font-medium text-right">Overs</th>
+                      <th className="py-1 px-1 font-medium text-right">Wkts</th>
+                      <th className="py-1 px-1 font-medium text-right">Avg</th>
+                      <th className="py-1 px-1 font-medium text-right">Econ</th>
+                      <th className="py-1 px-1 font-medium">Role</th>
+                    </tr></thead>
+                    <tbody>
+                      {data.attack.bowlers.map(b => (
+                        <tr key={b.player_id} className="border-t pb-hairline">
+                          <td className="py-1.5 px-1 font-medium whitespace-nowrap">{b.name} {b.spin ? <span className="text-pb-faintest text-[10px]">spin</span> : b.pace ? <span className="text-pb-faintest text-[10px]">pace</span> : null}</td>
+                          <td className="py-1.5 px-1 text-right pb-num">{b.overs}</td>
+                          <td className="py-1.5 px-1 text-right pb-num">{b.wickets}</td>
+                          <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{b.avg ?? '—'}</td>
+                          <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{b.econ}</td>
+                          <td className="py-1.5 px-1 text-[11px] text-pb-faint">{b.role}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+          )}
+
           {/* Venues */}
           {data.venues?.length > 0 && (
             <div className="mt-4">
