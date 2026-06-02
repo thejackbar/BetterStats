@@ -674,6 +674,130 @@ def _partnership_insight(partnerships: list[dict]) -> str | None:
     return " ".join(bits)
 
 
+# ─── scouting synthesis (rule-based; the "digital analyst" layer) ─────────────
+# Turns the assembled numbers into per-player key-notes, team tendencies and a
+# game plan. Everything here is scorecard-derivable; sample-size drives a
+# confidence flag (brief §19.5) so we never overstate a thin read.
+
+def _confidence(samples: int) -> str:
+    if (samples or 0) >= 8:
+        return "high"
+    if (samples or 0) >= 3:
+        return "medium"
+    return "low"
+
+
+_DISMISSAL_ADVICE = {
+    "caught": "tends to hole out — keep catchers in",
+    "caught keeper": "nicks off — a tight keeper line works",
+    "c&b": "hits it back — follow through ready",
+    "bowled": "gets bowled a lot — attack the stumps",
+    "lbw": "lbw-prone — bowl straight and full",
+    "stumped": "has been stumped — spin can draw him down",
+}
+
+
+def _enrich_batter(b: dict, rank: int) -> None:
+    outs = sum((b.get("dismissals") or {}).values())
+    b["confidence"] = _confidence(b.get("innings"))
+    bits = [
+        f"Their leading run-scorer this season ({b['runs']} @ {b['average'] or '—'})."
+        if rank == 0 else f"{b['runs']} runs @ {b['average'] or '—'} this season."
+    ]
+    if b.get("form") == "hot":
+        bits.append("In hot form right now.")
+    elif b.get("form") == "cold":
+        bits.append("Out of touch lately.")
+    if (b.get("fifties") or 0) + (b.get("hundreds") or 0) >= 2:
+        bits.append("Converts starts into big scores.")
+    plan = "Remove early" if rank == 0 else "Keep quiet"
+    dism = b.get("dismissals") or {}
+    if outs >= 3 and dism:
+        top, cnt = max(dism.items(), key=lambda kv: kv[1])
+        if cnt / outs >= 0.4 and top in _DISMISSAL_ADVICE:
+            bits.append(_DISMISSAL_ADVICE[top][0].upper() + _DISMISSAL_ADVICE[top][1:] + ".")
+            plan = _DISMISSAL_ADVICE[top]
+    risk = "high" if (rank == 0 or b.get("form") == "hot") else "medium"
+    vs = b.get("vs_us")
+    if vs and vs.get("average") and (b.get("average") is None or vs["average"] >= b["average"]):
+        bits.append(f"Averages {vs['average']} against us — handle with care.")
+        risk = "high"
+    b["risk"], b["key_note"], b["plan"] = risk, " ".join(bits), plan
+
+
+def _enrich_bowler(b: dict, rank: int) -> None:
+    b["confidence"] = _confidence(b.get("matches"))
+    bits = [
+        f"Their main wicket threat ({b['wickets']} wkts @ {b['average'] or '—'})."
+        if rank == 0 else f"{b['wickets']} wkts @ {b['average'] or '—'}, econ {b['economy'] or '—'}."
+    ]
+    econ = b.get("economy")
+    tight = econ is not None and econ < 4.0
+    if tight:
+        bits.append("Hard to get away — rotate strike, don't attack.")
+    elif econ is not None and econ >= 6.0:
+        bits.append("Leaks runs — one to target.")
+    vs = b.get("vs_us")
+    if vs and vs.get("wickets"):
+        bits.append(f"Has troubled us before ({vs['wickets']}w @ {vs.get('average') or '—'}).")
+    b["risk"] = "high" if rank == 0 else "medium"
+    b["key_note"] = " ".join(bits)
+    b["plan"] = "See him off — don't take risks" if (rank == 0 or tight) else "Look to score off him"
+
+
+def _how_they_win_lose(batters, bowlers, danger_bowlers, partnerships):
+    win, lose = [], []
+    total_runs = sum(b.get("runs") or 0 for b in batters)
+    top3 = sum((b.get("runs") or 0) for b in sorted(batters, key=lambda x: x.get("runs") or 0, reverse=True)[:3])
+    if total_runs and top3 / total_runs >= 0.5:
+        pct = round(100 * top3 / total_runs)
+        win.append(f"Top-order driven — {pct}% of their runs come from their top three.")
+        lose.append(f"Early wickets choke them — {pct}% of their scoring rides on the top three.")
+    qualified = [p for p in partnerships if p["samples"] >= 3]
+    if qualified:
+        strong = max(qualified, key=lambda p: p["avg_partnership"])
+        weak = min(qualified, key=lambda p: p["avg_partnership"])
+        win.append(f"Build big partnerships — strongest is the {_ordinal(strong['wicket'])} wicket (avg {strong['avg_partnership']}).")
+        if weak["avg_partnership"] < strong["avg_partnership"] * 0.6:
+            lose.append(f"Fragile around the {_ordinal(weak['wicket'])} wicket (avg {weak['avg_partnership']}) — a strike there can trigger a slide.")
+    real_threats = [b for b in bowlers if (b.get("wickets") or 0) >= 4]
+    if len(real_threats) <= 1 and danger_bowlers:
+        lose.append(f"Thin attack — {danger_bowlers[0]['name']} is their one real threat; see him off and cash in on the rest.")
+    elif len(real_threats) >= 3:
+        win.append("Multiple wicket-taking options through the innings.")
+    return win, lose
+
+
+def _game_plan(danger_batters, danger_bowlers, bowlers):
+    remove = danger_batters[0] if danger_batters else None
+    see_off = danger_bowlers[0] if danger_bowlers else None
+    frequent = [b for b in bowlers if (b.get("overs") or 0) >= 8 and b.get("economy") is not None]
+    target = max(frequent, key=lambda b: b["economy"]) if frequent else None
+    if target and target["economy"] < 5.0:
+        target = None
+    sn = lambda p: (p["name"].split(",")[0].strip() if p else "")
+    parts = []
+    if remove:
+        parts.append(f"get {sn(remove)} early")
+    if see_off:
+        parts.append(f"see off {sn(see_off)}")
+    if target:
+        parts.append(f"cash in on {sn(target)}")
+    one_liner = (parts[0][0].upper() + parts[0][1:] + (", then " + ", ".join(parts[1:]) if len(parts) > 1 else "") + ".") if parts else None
+    warning = None
+    if remove:
+        vs = remove.get("vs_us")
+        warning = (f"{remove['name']} averages {vs['average']} against us." if vs and vs.get("average")
+                   else f"{remove['name']} is their danger man.")
+    return {
+        "remove_early": {"name": remove["name"], "why": remove.get("key_note")} if remove else None,
+        "see_off": {"name": see_off["name"], "why": see_off.get("key_note")} if see_off else None,
+        "target_bowler": {"name": target["name"], "economy": target.get("economy")} if target else None,
+        "key_warning": warning,
+        "one_liner": one_liner,
+    }
+
+
 async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: str | None,
                     grade_hint: str | None, team_grade_id: str | None) -> dict:
     opp_name = opp_name or (opp_key if not _is_uuid(opp_key) else None)
@@ -815,6 +939,14 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         })
     partnership_insight = _partnership_insight(partnerships)
 
+    # ── Scouting synthesis: per-player key-notes + how they win/lose + game plan ──
+    for rank, db in enumerate(danger_batters):
+        _enrich_batter(db, rank)
+    for rank, db in enumerate(danger_bowlers):
+        _enrich_bowler(db, rank)
+    how_they_win, how_they_lose = _how_they_win_lose(batters, bowlers, danger_bowlers, partnerships)
+    game_plan = _game_plan(danger_batters, danger_bowlers, bowlers)
+
     coverage = "rich" if season_matches else ("history_only" if h2h_games else "none")
     notes = []
     if team_grade_id and season_matches:
@@ -855,5 +987,8 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         "dismissal_breakdown": dismissal_breakdown,
         "partnerships": partnerships,
         "partnership_insight": partnership_insight,
+        "how_they_win": how_they_win,
+        "how_they_lose": how_they_lose,
+        "game_plan": game_plan,
         "built_at": datetime.now(timezone.utc).isoformat(),
     }
