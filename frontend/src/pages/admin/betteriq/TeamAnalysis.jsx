@@ -54,21 +54,37 @@ function Note({ children }) {
 
 export default function TeamAnalysis() {
   const [seasons, setSeasons] = useState([])
-  const [seasonId, setSeasonId] = useState('')
+  const [seasonId, setSeasonId] = useState(null)   // null = not chosen yet; '' = all-time
+  const [grades, setGrades] = useState([])
+  const [gradeId, setGradeId] = useState('')       // '' = all teams
   const [data, setData] = useState(null)
   const [err, setErr] = useState(false)
   const [tab, setTab] = useState('overview')
 
-  useEffect(() => { api.iqTeamSeasons().then(setSeasons).catch(() => setSeasons([])) }, [])
+  // Default to the latest season (a whole-history overview isn't very useful).
+  useEffect(() => {
+    api.iqTeamSeasons().then(ss => {
+      setSeasons(ss || [])
+      setSeasonId(prev => (prev === null ? (ss?.[0]?.season_id || '') : prev))
+    }).catch(() => { setSeasons([]); setSeasonId('') })
+  }, [])
+
+  // Teams (grades) available for the chosen season.
+  useEffect(() => {
+    if (seasonId === null) return
+    setGradeId('')
+    api.iqTeamGrades(seasonId || undefined).then(g => setGrades(g || [])).catch(() => setGrades([]))
+  }, [seasonId])
 
   useEffect(() => {
+    if (seasonId === null) return
     let alive = true
     setData(null); setErr(false)
-    api.iqTeamOverview(seasonId || undefined)
+    api.iqTeamOverview(seasonId || undefined, gradeId || undefined)
       .then(d => { if (alive) setData(d) })
       .catch(() => { if (alive) setErr(true) })
     return () => { alive = false }
-  }, [seasonId])
+  }, [seasonId, gradeId])
 
   const r = data?.record
   const b = data?.batting
@@ -77,17 +93,29 @@ export default function TeamAnalysis() {
   const maxP = Math.max(1, ...((data?.partnerships || []).map(p => p.avg_partnership || 0)))
   const ord = (k) => ({ 1: '1st', 2: '2nd', 3: '3rd' }[k] || `${k}th`)
 
-  const seasonSelect = (
-    <select value={seasonId} onChange={e => setSeasonId(e.target.value)}
-      className="bg-transparent text-sm rounded-md border px-2 py-1 text-pb-dim border-pb-hairline2 focus:outline-none focus:border-pb-accent">
-      <option value="" className="bg-pb-surface">All-time</option>
-      {seasons.map(s => <option key={s.season_id} value={s.season_id} className="bg-pb-surface">{s.name}</option>)}
-    </select>
-  )
+  const selClass = "bg-pb-surface2 text-sm font-medium rounded-lg border px-3 h-[40px] text-pb-text border-pb-hairline focus:outline-none focus:border-pb-accent"
 
   return (
-    <IQLayout title="Team analysis" actions={seasonSelect}>
+    <IQLayout title="Team analysis">
       <p className="text-pb-faint text-sm mb-4 max-w-2xl">The opposition lens, pointed at us — how we win and lose, our batting & bowling shape, and where we're strong or fragile.</p>
+
+      {/* Prominent season + team filters */}
+      <div className="flex flex-wrap items-center gap-2 mb-5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-pb-faint text-[11px] uppercase tracking-wide2">Season</span>
+          <select value={seasonId ?? ''} onChange={e => setSeasonId(e.target.value)} className={selClass}>
+            {seasons.map(s => <option key={s.season_id} value={s.season_id} className="bg-pb-surface">{s.name}</option>)}
+            <option value="" className="bg-pb-surface">All-time</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-pb-faint text-[11px] uppercase tracking-wide2">Team</span>
+          <select value={gradeId} onChange={e => setGradeId(e.target.value)} className={selClass} disabled={!grades.length}>
+            <option value="" className="bg-pb-surface">All teams</option>
+            {grades.map(g => <option key={g.grade_id} value={g.grade_id} className="bg-pb-surface">{g.name}</option>)}
+          </select>
+        </div>
+      </div>
 
       {data === null && !err && <div className="pb-card p-5 animate-pulse text-pb-faint text-sm">Crunching our games…</div>}
       {err && <div className="pb-card p-5"><Empty>Couldn't load team analysis.</Empty></div>}

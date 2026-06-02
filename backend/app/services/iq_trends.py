@@ -20,9 +20,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.aggregations import (
+    get_bowling_dismissal_breakdown,
     get_career_batting,
     get_career_bowling,
     get_career_fielding,
+    get_player_by_venue,
     get_season_by_season,
     get_upcoming_milestones_for_org,
 )
@@ -655,6 +657,14 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
 
     similar_players = await _similar_players(session, org_id, player_id)
 
+    # Full-profile depth (brief §1.10/§1.11): venues + how they take wickets.
+    venues = await get_player_by_venue(session, player_id)
+    by_venue = sorted(
+        [v for v in venues if (v.get("innings") or 0) > 0 or (v.get("wickets") or 0) > 0],
+        key=lambda v: (v.get("games") or 0), reverse=True,
+    )[:8]
+    bowling_dismissals = await get_bowling_dismissal_breakdown(session, player_id)
+
     # Scouting note (community-CricViz card §16.9).
     role = max(by_position, key=lambda x: x["innings"])["position"].lower() if by_position else "batter"
     bits = [f"Bats mostly as {('an ' if role[0] in 'aeiou' else 'a ')}{role} option."]
@@ -676,6 +686,8 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         "by_position": by_position,
         "best_position": best_pos["position"] if best_pos else None,
         "by_opposition": {"best": best_opp, "worst": worst_opp},
+        "by_venue": by_venue,
+        "bowling_dismissals": bowling_dismissals,
         "reliability": reliability,
         "selection_value": selection_value,
         "similar_players": similar_players,
