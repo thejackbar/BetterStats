@@ -954,6 +954,10 @@ export const api = {
     return request(`/iq/team/overview${s ? `?${s}` : ''}`)
   },
   iqTeamMvp: (seasonId) => request(`/iq/team/mvp${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
+
+  // ─── BetterIQ: Post-match review ────────────────────────
+  iqReviewGames: () => request('/iq/review/games'),
+  iqGameReview: (gameId) => request(`/iq/review/game/${encodeURIComponent(gameId)}`),
 }
 
 function _iqQs(opponent, fixtureId, team) {

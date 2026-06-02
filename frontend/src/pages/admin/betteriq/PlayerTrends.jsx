@@ -321,6 +321,33 @@ export default function PlayerTrends() {
                   </Card></div>
                 )}
 
+                {(deep.batting_style || deep.context) && (
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    {deep.batting_style && (
+                      <Card title="Batting style" right={deep.batting_style.profile ? <Tag tone="accent">{deep.batting_style.profile}</Tag> : null}>
+                        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                          {[['Strike rate', fmt2(deep.batting_style.strike_rate)], ['Boundary %', deep.batting_style.boundary_pct == null ? '—' : `${deep.batting_style.boundary_pct}%`], ['Balls/boundary', num(deep.batting_style.balls_per_boundary)], ['4s / 6s', `${deep.batting_style.fours}/${deep.batting_style.sixes}`]].map(([l, v]) => (
+                            <div key={l} className="text-center"><div className="font-display font-bold text-lg pb-num leading-none">{v}</div><div className="text-pb-faint text-[10px] uppercase tracking-wide2 mt-0.5">{l}</div></div>
+                          ))}
+                        </div>
+                        <div className="text-pb-faintest text-[11px] mt-2.5">Boundary % is the share of runs from 4s and 6s. Dot-ball and ball-range splits need ball-by-ball data we don't hold.</div>
+                      </Card>
+                    )}
+                    {deep.context && (
+                      <Card title="By match situation" right={<span className="text-pb-faint text-xs">batting average</span>}>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          {[['In wins', deep.context.wins], ['In losses', deep.context.losses], ['Batting first', deep.context.bat_first], ['Chasing', deep.context.chasing]].map(([l, c]) => (
+                            <div key={l} className="rounded-xl p-2.5" style={{ background: 'var(--pb-surface2)' }}>
+                              <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-0.5">{l}</div>
+                              {c ? <div className="pb-num"><span className="font-display font-bold text-lg">{c.average == null ? '—' : fmt2(c.average)}</span> <span className="text-pb-faintest text-[11px]">avg · {c.innings} inns</span></div> : <div className="text-pb-faintest text-[11px]">—</div>}
+                            </div>
+                          ))}
+                        </div>
+                      </Card>
+                    )}
+                  </div>
+                )}
+
                 {deep.selection_value && (
                   <div className="mt-4"><Card title="Selection value" right={<span className="text-pb-faint text-xs">team results</span>}>
                     <div className="grid grid-cols-2 gap-3">

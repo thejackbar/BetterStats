@@ -168,6 +168,12 @@ export default function TeamAnalysis() {
 
               {data.score_bands?.length > 0 && (
                 <Card title="What score wins" right={<span className="text-pb-faint text-xs">batting first</span>}>
+                  {inn.par?.par_score != null && (
+                    <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mb-3 pb-3 border-b pb-hairline">
+                      <div><span className="font-display font-bold text-2xl pb-num">{inn.par.par_score}</span><span className="text-pb-faint text-sm ml-2">par (median winning total)</span></div>
+                      {inn.par.lowest_defended != null && <div className="text-sm text-pb-faint">Lowest defended: <span className="pb-num font-semibold">{inn.par.lowest_defended}</span></div>}
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     {data.score_bands.map(s => (
                       <div key={s.band} className="flex items-center gap-2 text-sm">
@@ -235,6 +241,30 @@ export default function TeamAnalysis() {
                   </div>
                 )}
               </Card>
+
+              {data.starts && (
+                <Card title="Our starts" right={<span className="text-pb-faint text-xs">opening stand</span>}>
+                  <div className="flex flex-wrap items-center gap-1 sm:gap-2 mb-3">
+                    <Stat label="Avg" value={num(data.starts.avg)} />
+                    <Stat label="Median" value={num(data.starts.median)} />
+                    <Stat label="Best" value={num(data.starts.best)} />
+                    <Stat label="25+ / 50+" value={`${data.starts.over_25}/${data.starts.over_50}`} sub={`of ${data.starts.innings}`} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}>
+                      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">After a good start (≥{data.starts.good_threshold})</div>
+                      <div className="font-display font-bold text-2xl pb-num">{data.starts.after_good.win_pct == null ? '—' : `${data.starts.after_good.win_pct}%`}</div>
+                      <div className="text-pb-faintest text-[11px]">{data.starts.after_good.played} games</div>
+                    </div>
+                    <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}>
+                      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">After a poor start (&lt;{data.starts.good_threshold})</div>
+                      <div className="font-display font-bold text-2xl pb-num">{data.starts.after_poor.win_pct == null ? '—' : `${data.starts.after_poor.win_pct}%`}</div>
+                      <div className="text-pb-faintest text-[11px]">{data.starts.after_poor.played} games</div>
+                    </div>
+                  </div>
+                  <Note>Opening partnership (1st wicket) from our innings; win rate is over decided games.</Note>
+                </Card>
+              )}
 
               {data.partnerships?.length > 0 && (
                 <Card title="Our partnerships" right={<span className="text-pb-faint text-xs">avg by wicket</span>}>
@@ -383,6 +413,40 @@ export default function TeamAnalysis() {
                   <Note>Wides + no-balls per over, most disciplined first (min {seasonId || gradeId ? '10' : '50'} overs). Hidden when the scorecards don't record extras.</Note>
                 </Card>
               )}
+
+              {data.wickets_quality && (
+                <Card title="Wicket-taking" right={<span className="text-pb-faint text-xs">who we dismiss</span>}>
+                  {data.wickets_quality.top_pct != null && (
+                    <div className="mb-3">
+                      <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1.5">Which batters we remove</div>
+                      <div className="flex h-2.5 rounded-full overflow-hidden bg-pb-surface2">
+                        <div title={`Top order (1–3): ${data.wickets_quality.top}`} style={{ flexGrow: data.wickets_quality.top, background: 'var(--pb-accent)' }} />
+                        <div title={`Middle (4–7): ${data.wickets_quality.middle}`} style={{ flexGrow: data.wickets_quality.middle, background: 'var(--pb-amber)' }} />
+                        <div title={`Tail (8+): ${data.wickets_quality.tail}`} style={{ flexGrow: data.wickets_quality.tail, background: 'var(--pb-dim)' }} />
+                      </div>
+                      <div className="flex justify-between text-[11px] text-pb-faint mt-1">
+                        <span>Top {data.wickets_quality.top_pct}%</span><span>Middle</span><span>Tail {data.wickets_quality.tail_pct}%</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+                    <Stat label="Wickets" value={num(data.wickets_quality.total)} />
+                    <Stat label="Set (30+)" value={data.wickets_quality.set_pct == null ? '—' : `${data.wickets_quality.set_pct}%`} sub="of scalps" />
+                    <Stat label="New (<10)" value={data.wickets_quality.new_pct == null ? '—' : `${data.wickets_quality.new_pct}%`} sub="of scalps" />
+                  </div>
+                  {data.wickets_quality.dismissals?.length > 0 && (
+                    <div className="mt-3 pt-3 border-t pb-hairline">
+                      <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1.5">How we take them</div>
+                      <div className="flex flex-wrap gap-2">
+                        {data.wickets_quality.dismissals.map(d => (
+                          <span key={d.type} className="text-[12px] px-2 py-0.5 rounded-full capitalize" style={{ background: 'var(--pb-surface2)' }}>{d.type} <span className="pb-num text-pb-faint">{d.pct}%</span></span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <Note>From wickets credited to our bowlers; “set” = the batter had 30+ when out, “new” = under 10.</Note>
+                </Card>
+              )}
             </div>
           )}
 
@@ -416,6 +480,36 @@ export default function TeamAnalysis() {
                     </table>
                   </div>
                   <Note>Win % is over decided games (draws/ties excluded); avg score is our total in games they led. Min 3 games as captain. Toss decisions aren't in our data.</Note>
+                </Card>
+              )}
+
+              {data.role_ratings?.length > 0 && (
+                <Card title="Role-adjusted batting" right={<span className="text-pb-faint text-xs">vs same-slot avg</span>}>
+                  <div className="overflow-x-auto -mx-1">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
+                        <th className="py-1 px-1 font-medium">Batter</th>
+                        <th className="py-1 px-1 font-medium">Slot</th>
+                        <th className="py-1 px-1 font-medium text-right">Inns</th>
+                        <th className="py-1 px-1 font-medium text-right">Avg</th>
+                        <th className="py-1 px-1 font-medium text-right">Slot avg</th>
+                        <th className="py-1 px-1 font-medium text-right">+/−</th>
+                      </tr></thead>
+                      <tbody>
+                        {data.role_ratings.map(r => (
+                          <tr key={r.player_id} className="border-t pb-hairline">
+                            <td className="py-1.5 px-1 font-medium whitespace-nowrap">{r.name}</td>
+                            <td className="py-1.5 px-1 text-[11px] text-pb-faint whitespace-nowrap">{r.role}</td>
+                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{r.innings}</td>
+                            <td className="py-1.5 px-1 text-right pb-num">{r.average}</td>
+                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{r.role_average}</td>
+                            <td className="py-1.5 px-1 text-right pb-num font-semibold" style={{ color: r.delta >= 0 ? 'var(--pb-brand)' : 'var(--pb-red)' }}>{r.delta >= 0 ? '+' : ''}{r.delta}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Note>Each batter's average in their main position vs the club average for that slot — so an opener and a No. 8 aren't judged alike. Min {seasonId || gradeId ? '5' : '12'} innings.</Note>
                 </Card>
               )}
 
@@ -461,7 +555,7 @@ export default function TeamAnalysis() {
                 </div>
               )}
 
-              {!data.all_rounders?.length && !data.captaincy?.length && !(data.fielding?.fielders?.length || data.fielding?.keepers?.length) && (
+              {!data.all_rounders?.length && !data.captaincy?.length && !data.role_ratings?.length && !(data.fielding?.fielders?.length || data.fielding?.keepers?.length) && (
                 <Card><Empty>Not enough per-player data in this period.</Empty></Card>
               )}
             </div>

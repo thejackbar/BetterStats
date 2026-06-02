@@ -516,7 +516,8 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
     res = await session.execute(
         text(
             """
-            SELECT bi.runs, bi.not_out, bi.dismissal_type, bi.batting_position,
+            SELECT bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out, bi.dismissal_type,
+                   bi.batting_position, bi.innings_number, g.result,
                    COALESCE(g.opp_org_id, g.opp_club_name) AS opp_key, g.opp_club_name AS opp_name
             FROM v_effective_batting_innings bi
             JOIN v_effective_games g ON g.id = bi.game_id
@@ -531,7 +532,7 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
     inns = [dict(r) for r in res.mappings()]
     base = {"player": {"player_id": player_id, "name": p["name"]}, "innings_count": len(inns)}
     if not inns:
-        return {**base, "conversion": None, "dismissals": [], "by_position": [], "by_opposition": {"best": [], "worst": []}, "scouting_note": None}
+        return {**base, "conversion": None, "dismissals": [], "by_position": [], "by_opposition": {"best": [], "worst": []}, "batting_style": None, "context": None, "scouting_note": None}
 
     n = len(inns)
     starts = sum(1 for r in inns if r["runs"] >= 25)
@@ -671,6 +672,47 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
     bowling_profile = cb if (cb and (cb.get("total_wickets") or 0) > 0) else None
     wickets_by_position = await get_bowling_by_batter_position(session, player_id) if bowling_profile else []
 
+    # Batting style (brief §1.2, scorecard-reachable subset) — how they score,
+    # from balls + boundaries. Dot% / SR-by-ball-range need ball-by-ball: out of reach.
+    tb = sum(r["balls"] for r in inns if r["balls"])
+    tfours = sum(r["fours"] or 0 for r in inns)
+    tsixes = sum(r["sixes"] or 0 for r in inns)
+    tboundaries = tfours + tsixes
+    truns = sum(r["runs"] for r in inns)
+    batting_style = None
+    if tb > 0:
+        bpct = round(100 * (4 * tfours + 6 * tsixes) / truns) if truns else None
+        batting_style = {
+            "balls": tb,
+            "strike_rate": round(100 * truns / tb, 1),
+            "boundary_pct": bpct,                         # share of runs in boundaries
+            "balls_per_boundary": round(tb / tboundaries, 1) if tboundaries else None,
+            "fours": tfours, "sixes": tsixes,
+            "profile": (
+                ("Boundary hitter" if bpct >= 60 else "Accumulator" if bpct <= 35 else "Balanced")
+                if bpct is not None else None
+            ),
+        }
+
+    # Result & innings context (brief §1.1) — average in wins/losses and when
+    # batting first vs chasing (innings 1 vs 2+). g.result is our club's result.
+    def _ctx(rows):
+        rr = sum(x["runs"] for x in rows)
+        outs = sum(1 for x in rows if not x["not_out"] and _dism_label(x["dismissal_type"]))
+        return {"innings": len(rows), "runs": rr, "average": round(rr / outs, 1) if outs else None}
+    wins_i = [r for r in inns if r["result"] == "WIN"]
+    loss_i = [r for r in inns if r["result"] == "LOSS"]
+    bf_i = [r for r in inns if r["innings_number"] == 1]
+    ch_i = [r for r in inns if r["innings_number"] and r["innings_number"] >= 2]
+    context = {
+        "wins": _ctx(wins_i) if wins_i else None,
+        "losses": _ctx(loss_i) if loss_i else None,
+        "bat_first": _ctx(bf_i) if bf_i else None,
+        "chasing": _ctx(ch_i) if ch_i else None,
+    }
+    if not any(context.values()):
+        context = None
+
     # Scouting note (community-CricViz card §16.9).
     role = max(by_position, key=lambda x: x["innings"])["position"].lower() if by_position else "batter"
     bits = [f"Bats mostly as {('an ' if role[0] in 'aeiou' else 'a ')}{role} option."]
@@ -692,6 +734,8 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         "by_position": by_position,
         "best_position": best_pos["position"] if best_pos else None,
         "by_opposition": {"best": best_opp, "worst": worst_opp},
+        "batting_style": batting_style,
+        "context": context,
         "by_venue": by_venue,
         "bowling_dismissals": bowling_dismissals,
         "bowling_profile": bowling_profile,
