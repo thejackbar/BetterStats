@@ -943,7 +943,14 @@ export const api = {
 
   // ─── BetterIQ: Team self-analysis ───────────────────────
   iqTeamSeasons: () => request('/iq/team/seasons'),
-  iqTeamOverview: (seasonId) => request(`/iq/team/overview${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
+  iqTeamGrades: (seasonId) => request(`/iq/team/grades${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
+  iqTeamOverview: (seasonId, gradeId) => {
+    const qs = new URLSearchParams()
+    if (seasonId) qs.set('season_id', seasonId)
+    if (gradeId) qs.set('grade_id', gradeId)
+    const s = qs.toString()
+    return request(`/iq/team/overview${s ? `?${s}` : ''}`)
+  },
   iqTeamMvp: (seasonId) => request(`/iq/team/mvp${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
 }
 

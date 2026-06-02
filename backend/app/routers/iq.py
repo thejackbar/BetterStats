@@ -204,15 +204,26 @@ async def team_seasons(
     return await iq_team.team_seasons(db, str(club.id))
 
 
+@router.get("/team/grades")
+async def team_grades(
+    season_id: str | None = Query(None, description="grades (teams) fielded in this season"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Grades (teams) for the team filter on the team-analysis page."""
+    return await iq_team.team_grades(db, str(club.id), season_id)
+
+
 @router.get("/team/overview")
 async def team_overview(
     season_id: str | None = Query(None, description="filter to one season; omit for all-time"),
+    grade_id: str | None = Query(None, description="filter to one grade/team within the season"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Our own win/loss, batting & bowling profile, bat-first vs chase, score
     bands, venues, partnerships and a how-we-win/lose read."""
-    return await iq_team.team_overview(db, str(club.id), season_id=season_id)
+    return await iq_team.team_overview(db, str(club.id), season_id=season_id, grade_id=grade_id)
 
 
 @router.get("/team/mvp")
