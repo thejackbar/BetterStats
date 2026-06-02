@@ -20,6 +20,7 @@ from app.routers.auth import get_current_club
 from app.services import iq as iq_service
 from app.services import iq_opponent
 from app.services import iq_selection
+from app.services import iq_team
 from app.services import iq_trends
 
 # Every BetterIQ route requires the MANAGE_IQ capability.
@@ -161,3 +162,26 @@ async def trends_player(
     if result is None:
         raise HTTPException(status_code=404, detail="Player not found")
     return result
+
+
+# ─── Team self-analysis (analytics brief §7/§8) ──────────────────────────────
+
+
+@router.get("/team/seasons")
+async def team_seasons(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Seasons available for the team self-analysis filter."""
+    return await iq_team.team_seasons(db, str(club.id))
+
+
+@router.get("/team/overview")
+async def team_overview(
+    season_id: str | None = Query(None, description="filter to one season; omit for all-time"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Our own win/loss, batting & bowling profile, bat-first vs chase, score
+    bands, venues, partnerships and a how-we-win/lose read."""
+    return await iq_team.team_overview(db, str(club.id), season_id=season_id)

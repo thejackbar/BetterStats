@@ -937,6 +937,10 @@ export const api = {
   iqTrendsOverview: () => request('/iq/trends/overview'),
   iqTrendsPlayers: () => request('/iq/trends/players'),
   iqTrendsPlayer: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}`),
+
+  // ─── BetterIQ: Team self-analysis ───────────────────────
+  iqTeamSeasons: () => request('/iq/team/seasons'),
+  iqTeamOverview: (seasonId) => request(`/iq/team/overview${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
 }
 
 function _iqQs(opponent, fixtureId, team) {
