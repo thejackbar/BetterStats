@@ -478,15 +478,14 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
     if not seasons:
         return {"season": None, "players": []}
     resolved = (next((s for s in seasons if s["season_id"] == season_id), None) if season_id else None) or seasons[0]
-    year = resolved.get("year")
-    # Aggregate across ALL season records of the year — a club year often spans
-    # several season rows (different comps, or per-club grassroots ids). Keying
-    # on a single season_id silently drops players recorded under the others
-    # (e.g. an in-form bat whose stats sit on a sibling season row).
-    if year is not None:
-        scope, params = "AND s.organisation_id = CAST(:org AS UUID) AND s.year = :year", {"org": org_id, "year": year}
-    else:
-        scope, params = "AND s.id = CAST(:sid AS UUID)", {"org": org_id, "sid": resolved["season_id"]}
+    year, sid = resolved.get("year"), resolved["season_id"]
+    # Scope by the SEASON's org, NOT player membership — filtering
+    # players.organisation_id is the cross-club anti-pattern and emptied the
+    # board for shared-GUID players. Aggregate all season records of the year
+    # (+ the latest season id as a safety net) so a year spread across several
+    # season rows / comps is fully counted.
+    scope = "AND (s.year = :year OR s.id = CAST(:sid AS UUID))" if year is not None else "AND s.id = CAST(:sid AS UUID)"
+    params = {"org": org_id, "year": year, "sid": sid}
     res = await session.execute(
         text(
             f"""
@@ -500,8 +499,7 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
                      + COALESCE(SUM(pss.run_outs), 0) + COALESCE(SUM(pss.stumpings), 0) AS dis
             FROM players p
             JOIN player_season_stats pss ON pss.player_id = p.id
-            JOIN seasons s ON s.id = pss.season_id {scope}
-            WHERE p.organisation_id = CAST(:org AS UUID)
+            JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
             GROUP BY p.id, name
             HAVING COALESCE(SUM(pss.matches), 0) >= 3
             """

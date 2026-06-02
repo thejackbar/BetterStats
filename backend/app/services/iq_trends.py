@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.aggregations import (
+    get_bowling_by_batter_position,
     get_bowling_dismissal_breakdown,
     get_career_batting,
     get_career_bowling,
@@ -664,6 +665,11 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         key=lambda v: (v.get("games") or 0), reverse=True,
     )[:8]
     bowling_dismissals = await get_bowling_dismissal_breakdown(session, player_id)
+    # Full bowling profile (brief §2): career figures + which batting positions
+    # they take their wickets at (new-ball vs middle vs tail).
+    cb = await get_career_bowling(session, player_id)
+    bowling_profile = cb if (cb and (cb.get("total_wickets") or 0) > 0) else None
+    wickets_by_position = await get_bowling_by_batter_position(session, player_id) if bowling_profile else []
 
     # Scouting note (community-CricViz card §16.9).
     role = max(by_position, key=lambda x: x["innings"])["position"].lower() if by_position else "batter"
@@ -688,6 +694,8 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         "by_opposition": {"best": best_opp, "worst": worst_opp},
         "by_venue": by_venue,
         "bowling_dismissals": bowling_dismissals,
+        "bowling_profile": bowling_profile,
+        "wickets_by_position": wickets_by_position,
         "reliability": reliability,
         "selection_value": selection_value,
         "similar_players": similar_players,

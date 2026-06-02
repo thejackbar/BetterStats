@@ -401,15 +401,44 @@ export default function PlayerTrends() {
                   </Card></div>
                 )}
 
-                {deep.bowling_dismissals?.length > 0 && (
-                  <div className="mt-4"><Card title="How they take wickets" right={<span className="text-pb-faint text-xs">bowling</span>}>
-                    <div className="flex flex-wrap gap-2">
-                      {deep.bowling_dismissals.map((d, i) => (
-                        <span key={i} className="text-[12px] px-2 py-0.5 rounded-full capitalize" style={{ background: 'var(--pb-surface2)' }}>{d.dismissal_type} <span className="pb-num text-pb-faint">{d.count}</span></span>
-                      ))}
-                    </div>
-                  </Card></div>
-                )}
+                {deep.bowling_profile && (() => {
+                  const bp = deep.bowling_profile
+                  const wp = deep.wickets_by_position || []
+                  const sumPos = (lo, hi) => wp.filter(r => r.batting_position >= lo && r.batting_position <= hi).reduce((a, r) => a + (r.wickets || 0), 0)
+                  const top = sumPos(1, 3), mid = sumPos(4, 7), low = sumPos(8, 13), tot = top + mid + low
+                  return (
+                    <div className="mt-4"><Card title="Bowling profile" right={<span className="text-pb-faint text-xs">career</span>}>
+                      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-1">
+                        {[['Wkts', num(bp.total_wickets, 0)], ['Avg', fmt2(bp.average)], ['Econ', fmt2(bp.economy)], ['S/R', fmt2(bp.bowling_strike_rate)], ['Best', bp.best_bowling_figures || '—'], ['5wi', num(bp.five_fors, 0)], ['Maidens', num(bp.total_maidens, 0)]].map(([l, v]) => (
+                          <div key={l} className="text-center"><div className="font-display font-bold text-lg pb-num leading-none">{v}</div><div className="text-pb-faint text-[10px] uppercase tracking-wide2 mt-0.5">{l}</div></div>
+                        ))}
+                      </div>
+                      {tot > 0 && (
+                        <div className="mt-3">
+                          <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1.5">Where the wickets come</div>
+                          <div className="flex h-2.5 rounded-full overflow-hidden bg-pb-surface2">
+                            <div title={`Top order (1–3): ${top}`} style={{ flexGrow: top, background: 'var(--pb-accent)' }} />
+                            <div title={`Middle (4–7): ${mid}`} style={{ flexGrow: mid, background: 'var(--pb-amber)' }} />
+                            <div title={`Lower (8–11): ${low}`} style={{ flexGrow: low, background: 'var(--pb-dim)' }} />
+                          </div>
+                          <div className="flex justify-between text-[11px] text-pb-faint mt-1">
+                            <span>Top {Math.round(100 * top / tot)}%</span><span>Middle {Math.round(100 * mid / tot)}%</span><span>Lower {Math.round(100 * low / tot)}%</span>
+                          </div>
+                        </div>
+                      )}
+                      {deep.bowling_dismissals?.length > 0 && (
+                        <div className="mt-3 pt-3 border-t pb-hairline">
+                          <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1.5">How they take wickets</div>
+                          <div className="flex flex-wrap gap-2">
+                            {deep.bowling_dismissals.map((d, i) => (
+                              <span key={i} className="text-[12px] px-2 py-0.5 rounded-full capitalize" style={{ background: 'var(--pb-surface2)' }}>{d.dismissal_type} <span className="pb-num text-pb-faint">{d.count}</span></span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </Card></div>
+                  )
+                })()}
               </>
             )}
           </>
