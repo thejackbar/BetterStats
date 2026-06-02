@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.aggregations import (
+    get_bowling_by_batter_position,
     get_bowling_dismissal_breakdown,
     get_career_batting,
     get_career_bowling,
@@ -664,6 +665,11 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         key=lambda v: (v.get("games") or 0), reverse=True,
     )[:8]
     bowling_dismissals = await get_bowling_dismissal_breakdown(session, player_id)
+    # Full bowling profile (brief §2): career figures + which batting positions
+    # they take their wickets at (new-ball vs middle vs tail).
+    cb = await get_career_bowling(session, player_id)
+    bowling_profile = cb if (cb and (cb.get("total_wickets") or 0) > 0) else None
+    wickets_by_position = await get_bowling_by_batter_position(session, player_id) if bowling_profile else []
 
     # Scouting note (community-CricViz card §16.9).
     role = max(by_position, key=lambda x: x["innings"])["position"].lower() if by_position else "batter"
@@ -688,6 +694,8 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         "by_opposition": {"best": best_opp, "worst": worst_opp},
         "by_venue": by_venue,
         "bowling_dismissals": bowling_dismissals,
+        "bowling_profile": bowling_profile,
+        "wickets_by_position": wickets_by_position,
         "reliability": reliability,
         "selection_value": selection_value,
         "similar_players": similar_players,
@@ -712,15 +720,18 @@ async def list_players(session: AsyncSession, org_id: str) -> list[dict]:
                    COALESCE(SUM(pss.wickets), 0) AS wickets,
                    COALESCE(SUM(pss.runs_conceded), 0) AS conceded,
                    COALESCE(SUM(pss.matches), 0) AS matches
-            FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
-            -- Only this org's seasons (shared cross-club GUID guard, main's per-club work)
-            JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID)
+            FROM player_season_stats pss
+            -- Scope by the SEASON's org (not player membership) — a shared-GUID
+            -- player's org may be a different (first-synced) club while their
+            -- stats sit under THIS org's season. Filtering players.organisation_id
+            -- here is the documented cross-club anti-pattern and was hiding them.
+            JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) AND s.year = :cur
+            JOIN players p ON p.id = pss.player_id AND p.status = 'active'
             LEFT JOIN teams t ON t.id = p.squad_team_id
-            WHERE p.organisation_id = CAST(:org AS UUID) AND p.status = 'active'
-              AND s.year = :cur
             GROUP BY p.id, name, t.id, t.name
             HAVING COALESCE(SUM(pss.matches), 0) > 0
+                OR COALESCE(SUM(pss.batting_innings), 0) > 0
+                OR COALESCE(SUM(pss.wickets), 0) > 0
             ORDER BY name
             """
         ),
