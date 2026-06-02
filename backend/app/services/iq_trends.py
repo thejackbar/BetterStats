@@ -712,15 +712,18 @@ async def list_players(session: AsyncSession, org_id: str) -> list[dict]:
                    COALESCE(SUM(pss.wickets), 0) AS wickets,
                    COALESCE(SUM(pss.runs_conceded), 0) AS conceded,
                    COALESCE(SUM(pss.matches), 0) AS matches
-            FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
-            -- Only this org's seasons (shared cross-club GUID guard, main's per-club work)
-            JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID)
+            FROM player_season_stats pss
+            -- Scope by the SEASON's org (not player membership) — a shared-GUID
+            -- player's org may be a different (first-synced) club while their
+            -- stats sit under THIS org's season. Filtering players.organisation_id
+            -- here is the documented cross-club anti-pattern and was hiding them.
+            JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) AND s.year = :cur
+            JOIN players p ON p.id = pss.player_id AND p.status = 'active'
             LEFT JOIN teams t ON t.id = p.squad_team_id
-            WHERE p.organisation_id = CAST(:org AS UUID) AND p.status = 'active'
-              AND s.year = :cur
             GROUP BY p.id, name, t.id, t.name
             HAVING COALESCE(SUM(pss.matches), 0) > 0
+                OR COALESCE(SUM(pss.batting_innings), 0) > 0
+                OR COALESCE(SUM(pss.wickets), 0) > 0
             ORDER BY name
             """
         ),
