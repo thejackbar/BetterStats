@@ -139,7 +139,7 @@ export default function BetterIQHome() {
                 </button>
               ))}
             </div>
-            <div className="text-pb-faintest text-[11px] mt-3 pt-3 border-t pb-hairline">A whole-season value measure (not current form): per-match runs, wickets, economy and fielding dismissals, z-scored across the squad and scaled 0–100. See Player trends for recent form.</div>
+            <div className="text-pb-faintest text-[11px] mt-3 pt-3 border-t pb-hairline">A whole-season value measure (not current form): each player is scored on their strengths — batting (runs + average), bowling (wickets + economy) and fielding — z-scored across the squad, with no penalty for specialising, scaled 0–100. See Player trends for recent form.</div>
           </div>
         </div>
       )}
