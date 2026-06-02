@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import { Icon, Btn, Tag, Empty, Search, Segmented } from '../betterselect/ui'
@@ -496,6 +496,7 @@ function WinLose({ win, lose }) {
 
 export default function OppositionScout() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [list, setList] = useState(null)             // {opponents, upcoming}
   const [selected, setSelected] = useState(null)     // {opponent?, fixtureId?, name?}
   const [report, setReport] = useState(null)         // instant held-data report
@@ -617,9 +618,18 @@ export default function OppositionScout() {
           <div className="font-mono text-[11px] uppercase tracking-wide3" style={{ color: 'var(--pb-accent)' }}>Scouting report</div>
           <h2 className="font-display font-bold text-2xl">{oppName}</h2>
         </div>
-        <Btn variant="soft" sm icon="bolt" onClick={refresh} disabled={building}>
-          {building ? 'Building…' : 'Refresh'}
-        </Btn>
+        <div className="flex items-center gap-2">
+          <Btn variant="ghost" sm icon="share" onClick={() => {
+            const qs = new URLSearchParams()
+            if (selected.opponent) qs.set('opponent', selected.opponent)
+            if (selected.fixtureId) qs.set('fixture', selected.fixtureId)
+            if (team) qs.set('team', team)
+            navigate(`/admin/betteriq/opposition/cheatsheet?${qs}`)
+          }}>Cheat sheet</Btn>
+          <Btn variant="soft" sm icon="bolt" onClick={refresh} disabled={building}>
+            {building ? 'Building…' : 'Refresh'}
+          </Btn>
+        </div>
       </div>
 
       {unresolved && (

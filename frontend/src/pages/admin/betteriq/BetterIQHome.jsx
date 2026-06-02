@@ -13,6 +13,8 @@ const CAPABILITIES = [
     blurb: 'Form trends, batting/bowling balance of a proposed XI, who to promote or rest, fairness across grades.' },
   { key: 'trends', title: 'Player trends & development', to: '/admin/betteriq/trends', live: true,
     blurb: 'Individual trajectories, breakout / decline detection and milestone forecasting.' },
+  { key: 'team', title: 'Team analysis', to: '/admin/betteriq/team', live: true,
+    blurb: 'How we win and lose — batting & bowling shape, chasing vs defending, partnerships and venues.' },
   { key: 'qa', title: 'Natural-language Q&A', live: false,
     blurb: 'Ask your club’s data in plain English and get an answer grounded in the actual numbers.' },
 ]
