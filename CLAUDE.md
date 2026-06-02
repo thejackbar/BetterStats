@@ -168,8 +168,11 @@ GR scorecard parser was reading `isHome` from the top-level `teams` array — si
 
 **Rollout / cutover** (after deploying phases 1+2a):
 1. **Re-sync the second club** (Sync Now, or Full Rebuild) — mints the per-club player and moves his aggregate seasons onto it. The club's career number corrects (junior → 56).
-2. The old partial/duplicate registration for that player (a different CA GUID, e.g. `09ce6a6c`) is now a **same-org** row — **merge it into the new per-club player** via the existing merge tool to dedupe.
-3. (After Phase 2b) Full Rebuild the club for game-level consistency.
+2. (After Phase 2b) Full Rebuild the club for game-level consistency.
+
+**⚠️ Do NOT merge the legacy-GUID duplicate into the per-club record when their seasons OVERLAP.** Discovered Jun 2026 on Matthew Watt: the post-migration GUID's per-club record (`eddde526…`, a uuid5 — note the `5` in the 3rd group) already held the **complete** 56-match junior career (CA back-fills full history onto the post-migration PlayHQ GUID). The legacy MyCricket GUID (`09ce6a6c…`, a v4 raw GUID) was a **duplicate of the older seasons** — but under **different season records**, because MyCricket and PlayHQ assign different season GUIDs to the same real season. `merge_players` dedupes by raw `season_id` (admin.py ~205), so it didn't recognise the dup, **moved** the 30 over and the career read **86 = 56 + 30**. Recovery: **undo-merge** (restores 56). The two records can't be cleanly merged until the duplicate *seasons* are reconciled (season-alias / migration-season-dedup is the unbuilt proper fix); the merge is only safe for genuinely **disjoint** registrations.
+
+**`undo-merge` grassroots_id fix** (Jun 2026): the undo re-creates the removed player and **must** set `grassroots_id` (= `id::text`, correct for any legacy raw-GUID player), or the next sync won't find it by `(org, grassroots_id)` and will mint *another* per-club duplicate. Fixed in `admin.py::undo_merge`.
 
 **Anti-pattern reminder**: don't reintroduce a global `session.get(Player, raw_guid)` create/lookup in sync — use `_resolve_org_player`. `players.id` is no longer guaranteed to equal the CA GUID (it's `uuid5(org, guid)` for per-club rows); the raw GUID lives in `grassroots_id`.
 
