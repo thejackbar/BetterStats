@@ -728,7 +728,7 @@ async def list_players(session: AsyncSession, org_id: str) -> list[dict]:
             JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) AND s.year = :cur
             JOIN players p ON p.id = pss.player_id AND p.status = 'active'
             LEFT JOIN teams t ON t.id = p.squad_team_id
-            GROUP BY p.id, name, t.id, t.name
+            GROUP BY p.id, p.display_name_override, p.name, t.id, t.name
             HAVING COALESCE(SUM(pss.matches), 0) > 0
                 OR COALESCE(SUM(pss.batting_innings), 0) > 0
                 OR COALESCE(SUM(pss.wickets), 0) > 0

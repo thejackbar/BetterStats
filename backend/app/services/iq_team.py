@@ -189,7 +189,7 @@ async def _team_fielding(session: AsyncSession, org_id: str, season_id: str | No
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             WHERE s.organisation_id = CAST(:org AS UUID) {season_clause}
-            GROUP BY p.id, name
+            GROUP BY p.id, p.display_name_override, p.name
             """
         ),
         {"org": org_id, "season": season_id, "grade": grade_id},
@@ -500,7 +500,7 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
             FROM players p
             JOIN player_season_stats pss ON pss.player_id = p.id
             JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
-            GROUP BY p.id, name
+            GROUP BY p.id, p.display_name_override, p.name
             HAVING COALESCE(SUM(pss.matches), 0) >= 3
             """
         ),
