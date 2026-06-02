@@ -563,6 +563,15 @@ async def _their_key_players(session: AsyncSession, opp_org_uuid: str) -> dict:
                 COALESCE(SUM(pss.hundreds), 0) AS hundreds
             FROM players p
             JOIN player_season_stats pss ON pss.player_id = p.id
+                -- Only count seasons belonging to this org. A CA participant
+                -- GUID is shared across clubs, so a dual-club player can carry
+                -- season rows from another club; counting them would over-state
+                -- the opponent's totals (see migration 060).
+                AND EXISTS (
+                    SELECT 1 FROM seasons s
+                    WHERE s.id = pss.season_id
+                      AND s.organisation_id = CAST(:oid AS UUID)
+                )
             WHERE p.organisation_id = CAST(:oid AS UUID)
             GROUP BY p.id, name
             HAVING COALESCE(SUM(pss.runs), 0) > 0
@@ -583,6 +592,15 @@ async def _their_key_players(session: AsyncSession, opp_org_uuid: str) -> dict:
                 COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors
             FROM players p
             JOIN player_season_stats pss ON pss.player_id = p.id
+                -- Only count seasons belonging to this org. A CA participant
+                -- GUID is shared across clubs, so a dual-club player can carry
+                -- season rows from another club; counting them would over-state
+                -- the opponent's totals (see migration 060).
+                AND EXISTS (
+                    SELECT 1 FROM seasons s
+                    WHERE s.id = pss.season_id
+                      AND s.organisation_id = CAST(:oid AS UUID)
+                )
             WHERE p.organisation_id = CAST(:oid AS UUID)
             GROUP BY p.id, name
             HAVING COALESCE(SUM(pss.wickets), 0) > 0

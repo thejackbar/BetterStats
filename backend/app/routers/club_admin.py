@@ -2656,6 +2656,11 @@ async def list_milestones_report(
             FROM players p
             JOIN active_ids ai ON ai.player_id = p.id
             JOIN player_season_stats pss ON pss.player_id = p.id
+                -- Only this org's seasons (shared cross-club GUID guard, migration 060)
+                AND EXISTS (
+                    SELECT 1 FROM seasons s2
+                    WHERE s2.id = pss.season_id AND s2.organisation_id = :org_id
+                )
             WHERE p.organisation_id = :org_id AND p.is_player = TRUE
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY COALESCE(p.display_name_override, p.name)
