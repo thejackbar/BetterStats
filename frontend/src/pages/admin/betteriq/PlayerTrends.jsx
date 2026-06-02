@@ -276,6 +276,21 @@ export default function PlayerTrends() {
                   )}
                 </div>
 
+                {deep.reliability && (
+                  <div className="mt-4"><Card title="Reliability" right={<span className="text-pb-faint text-xs">{deep.reliability.profile}</span>}>
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                      <div><div className="text-pb-faintest text-[10px] uppercase tracking-wide2">Floor</div><div className="font-display font-bold text-xl pb-num">{deep.reliability.floor}</div></div>
+                      <div><div className="text-pb-faintest text-[10px] uppercase tracking-wide2">Median</div><div className="font-display font-bold text-xl pb-num">{deep.reliability.median}</div></div>
+                      <div><div className="text-pb-faintest text-[10px] uppercase tracking-wide2">Ceiling</div><div className="font-display font-bold text-xl pb-num">{deep.reliability.ceiling}</div></div>
+                    </div>
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-[12px] text-pb-faint">
+                      {deep.reliability.failure_rate != null && <span>Fails (&lt;10): <span className="pb-num">{deep.reliability.failure_rate}%</span></span>}
+                      <span>20+ contributions: <span className="pb-num">{deep.reliability.contribution_rate}%</span></span>
+                      {deep.reliability.variability != null && <span>Variability: <span className="pb-num">{deep.reliability.variability}</span></span>}
+                    </div>
+                  </Card></div>
+                )}
+
                 {deep.selection_value && (
                   <div className="mt-4"><Card title="Selection value" right={<span className="text-pb-faint text-xs">team results</span>}>
                     <div className="grid grid-cols-2 gap-3">

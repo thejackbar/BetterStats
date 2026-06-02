@@ -395,6 +395,13 @@ def _dism_label(dt: str | None) -> str | None:
     return _DISM_MAP.get(d, d)
 
 
+def _percentile(sorted_vals: list[int], q: float):
+    if not sorted_vals:
+        return None
+    idx = min(len(sorted_vals) - 1, max(0, int(round(q * (len(sorted_vals) - 1)))))
+    return sorted_vals[idx]
+
+
 async def _similar_players(session: AsyncSession, org_id: str, player_id: str) -> list[dict]:
     """Similar player search (brief §15.8) — club-internal nearest neighbour over
     a career stat profile (bat avg, bat SR, bowl avg, economy), z-scored across
@@ -521,6 +528,29 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         "convert_50_to_100": round(100 * hundreds / fifties_plus) if fifties_plus else None,
     }
 
+    # Reliability (brief §6.1) — floor/median/ceiling, failure rate and a
+    # boom-or-bust read, all from the runs distribution.
+    runs_list = [r["runs"] for r in inns]
+    runs_sorted = sorted(runs_list)
+    mean_runs = statistics.mean(runs_list)
+    cv = (statistics.pstdev(runs_list) / mean_runs) if mean_runs > 0 else None
+    dismissed = [r for r in inns if not r["not_out"]]
+    failures = sum(1 for r in dismissed if r["runs"] < 10)
+    reliability = {
+        "floor": _percentile(runs_sorted, 0.25),
+        "median": _percentile(runs_sorted, 0.5),
+        "ceiling": _percentile(runs_sorted, 0.9),
+        "best": runs_sorted[-1],
+        "failure_rate": round(100 * failures / len(dismissed)) if dismissed else None,
+        "contribution_rate": round(100 * sum(1 for r in inns if r["runs"] >= 20) / n),
+        "variability": round(cv, 2) if cv is not None else None,
+        "profile": (
+            "Boom or bust" if (cv is not None and cv > 1.1)
+            else "Steady" if (cv is not None and cv < 0.7)
+            else "Balanced"
+        ),
+    }
+
     # Dismissal patterns (dismissed innings only).
     dism: dict[str, int] = {}
     for r in inns:
@@ -626,6 +656,7 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         "by_position": by_position,
         "best_position": best_pos["position"] if best_pos else None,
         "by_opposition": {"best": best_opp, "worst": worst_opp},
+        "reliability": reliability,
         "selection_value": selection_value,
         "similar_players": similar_players,
         "scouting_note": scouting_note,
