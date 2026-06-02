@@ -703,6 +703,161 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
     }
 
 
+# ─── Bowler deep-dive (analytics brief §2.5 — wicket quality) ─────────────────
+
+# Dismissals where a fielder (not the bowler) effects the wicket.
+_FIELDER_DISM = ("caught", "stumped", "run out")
+
+
+async def bowler_deep_dive(session: AsyncSession, org_id: str, player_id: str) -> dict | None:
+    """Wicket-quality intel for one bowler from ``bowler_wickets`` (brief §2.5):
+    do they remove *set* batters or new ones, what their scalps were worth, which
+    fielders hold catches for them, and their extras discipline (§2.9). The mirror
+    of the batter deep-dive — complements the career bowling profile already shown
+    on the player trend rather than repeating it."""
+    prow = await session.execute(
+        text(
+            "SELECT COALESCE(display_name_override, name) AS name FROM players"
+            " WHERE id = CAST(:pid AS UUID) AND organisation_id = CAST(:org AS UUID)"
+        ),
+        {"pid": player_id, "org": org_id},
+    )
+    p = prow.mappings().first()
+    if not p:
+        return None
+
+    res = await session.execute(
+        text(
+            """
+            SELECT bw.batter_position AS pos, bw.batter_runs AS runs,
+                   bw.dismissal_type AS dt, bw.fielder_id::text AS fid,
+                   COALESCE(f.display_name_override, f.name) AS fielder
+            FROM bowler_wickets bw
+            JOIN v_effective_games g ON g.id = bw.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN players f ON f.id = bw.fielder_id
+            WHERE bw.bowler_id = CAST(:pid AS UUID) AND s.organisation_id = CAST(:org AS UUID)
+            """
+        ),
+        {"pid": player_id, "org": org_id},
+    )
+    rows = [dict(r) for r in res.mappings()]
+    base = {"player": {"player_id": player_id, "name": p["name"]}, "wickets": len(rows)}
+    if not rows:
+        return {**base, "quality": None, "fielders": [], "discipline": None, "scouting_note": None}
+
+    n = len(rows)
+    # Wicket quality by the dismissed batter's score — set (30+) vs new (<10).
+    with_runs = [r for r in rows if r["runs"] is not None]
+    kr = len(with_runs)
+    set_w = sum(1 for r in with_runs if r["runs"] >= 30)
+    start_w = sum(1 for r in with_runs if 10 <= r["runs"] < 30)
+    new_w = sum(1 for r in with_runs if r["runs"] < 10)
+    quality = {
+        "with_runs": kr,
+        "set": set_w, "started": start_w, "new": new_w,
+        "set_pct": round(100 * set_w / kr) if kr else None,
+        "new_pct": round(100 * new_w / kr) if kr else None,
+        "scalp_value": round(statistics.mean([r["runs"] for r in with_runs]), 1) if kr else None,
+        "ducks": sum(1 for r in with_runs if r["runs"] == 0),
+    } if kr else None
+
+    # Position split (top 1–3 / middle 4–7 / tail 8+) — for the scouting note.
+    def _posbucket(lo, hi):
+        return sum(1 for r in rows if r["pos"] is not None and lo <= r["pos"] <= hi)
+    top, mid, tail = _posbucket(1, 3), _posbucket(4, 7), _posbucket(8, 13)
+    tot_pos = top + mid + tail
+
+    # Dismissal split — for the scouting note.
+    dism: dict[str, int] = {}
+    for r in rows:
+        lbl = _dism_label(r["dt"])
+        if lbl:
+            dism[lbl] = dism.get(lbl, 0) + 1
+
+    # Fielder combos — who holds catches / effects run-outs for this bowler
+    # (caught & bowled excluded: the bowler is their own fielder there).
+    fmap: dict[str, dict] = {}
+    for r in rows:
+        if not r["fid"] or not r["fielder"]:
+            continue
+        if _dism_label(r["dt"]) not in _FIELDER_DISM:
+            continue
+        e = fmap.setdefault(r["fid"], {"name": r["fielder"], "count": 0})
+        e["count"] += 1
+    fielders = sorted(
+        ({"name": v["name"], "count": v["count"]} for v in fmap.values()),
+        key=lambda x: x["count"], reverse=True,
+    )[:5]
+
+    # Discipline — extras per over, from this bowler's spells (brief §2.9).
+    drow = (await session.execute(
+        text(
+            """
+            SELECT
+                COALESCE(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)), 0)::int AS balls,
+                COALESCE(SUM(bs.runs), 0) AS runs,
+                COALESCE(SUM(bs.wides), 0) AS wides,
+                COALESCE(SUM(bs.no_balls), 0) AS nb
+            FROM v_effective_bowling_spells bs
+            JOIN v_effective_games g ON g.id = bs.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE bs.player_id = CAST(:pid AS UUID) AND s.organisation_id = CAST(:org AS UUID)
+              AND bs.overs IS NOT NULL
+            """
+        ),
+        {"pid": player_id, "org": org_id},
+    )).mappings().first()
+    discipline = None
+    if drow and int(drow["balls"] or 0) >= 60 and (int(drow["wides"] or 0) + int(drow["nb"] or 0)) > 0:
+        balls = int(drow["balls"]); ov = balls / 6
+        ex = int(drow["wides"]) + int(drow["nb"])
+        discipline = {
+            "overs": f"{balls // 6}.{balls % 6}",
+            "wides": int(drow["wides"]), "no_balls": int(drow["nb"]), "extras": ex,
+            "extras_per_over": round(ex / ov, 2) if ov else None,
+            "wides_per_over": round(int(drow["wides"]) / ov, 2) if ov else None,
+        }
+
+    # Scouting note (community-CricViz card §16.9, bowling edition).
+    bits = []
+    if tot_pos >= 5:
+        if top / tot_pos >= 0.5:
+            bits.append(f"Top-order threat — {round(100 * top / tot_pos)}% of wickets are the top 3.")
+        elif tail / tot_pos >= 0.5:
+            bits.append(f"Mops up the lower order — {round(100 * tail / tot_pos)}% of wickets bat 8 or below.")
+    if quality and kr >= 5:
+        if (quality["set_pct"] or 0) >= 45:
+            bits.append(f"Removes set batters (their scalps average {quality['scalp_value']}).")
+        elif (quality["new_pct"] or 0) >= 50:
+            bits.append("Strikes early — usually gets batters before they're in.")
+    if dism:
+        topd = max(dism.items(), key=lambda x: x[1])
+        if topd[1] / n >= 0.4:
+            how = {
+                "bowled": "bowls them", "lbw": "traps them lbw",
+                "caught": "finds the edge or catcher", "stumped": "beats them in the air",
+                "caught & bowled": "catches them off his own bowling",
+            }.get(topd[0], f"takes {topd[0]} wickets")
+            bits.append(f"Mostly {how} ({round(100 * topd[1] / n)}%).")
+    if discipline and discipline["extras_per_over"] is not None:
+        if discipline["extras_per_over"] <= 0.3:
+            bits.append(f"Tidy — {discipline['extras_per_over']} extras/over.")
+        elif discipline["extras_per_over"] >= 0.8:
+            bits.append(f"Can leak extras — {discipline['extras_per_over']}/over.")
+    scouting_note = " ".join(bits) if bits else None
+
+    return {
+        **base,
+        "quality": quality,
+        "fielders": fielders,
+        "discipline": discipline,
+        "scouting_note": scouting_note,
+    }
+
+
 async def list_players(session: AsyncSession, org_id: str) -> list[dict]:
     """Current-season players (with this-season stats) for the trends picker.
     Historical-only names are excluded — the picker is for the active squad."""

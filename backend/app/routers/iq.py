@@ -192,6 +192,20 @@ async def trends_player_deep(
     return result
 
 
+@router.get("/trends/player/{player_id}/bowling-deep")
+async def trends_player_bowling_deep(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Wicket quality (set vs new batters), fielder combos, extras discipline and
+    a bowling scouting note for one bowler (analytics brief §2.5/§2.9)."""
+    result = await iq_trends.bowler_deep_dive(db, str(club.id), player_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return result
+
+
 # ─── Team self-analysis (analytics brief §7/§8) ──────────────────────────────
 
 

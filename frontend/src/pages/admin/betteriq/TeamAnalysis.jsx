@@ -347,12 +347,78 @@ export default function TeamAnalysis() {
                   <Note>Role: <b>Strike</b> takes wickets quickly · <b>Containment</b> restricts runs · <b>Stock</b> workhorse. Frontline bowlers only.</Note>
                 </Card>
               )}
+
+              {data.discipline && (
+                <Card title="Bowling discipline" right={<span className="text-pb-faint text-xs">extras conceded</span>}>
+                  <div className="flex flex-wrap items-center gap-1 sm:gap-2 mb-3">
+                    <Stat label="Extras/over" value={num(data.discipline.extras_per_over)} />
+                    <Stat label="Wides/over" value={num(data.discipline.wides_per_over)} />
+                    <Stat label="Extras" value={num(data.discipline.extras)} sub={`${data.discipline.wides}w · ${data.discipline.no_balls}nb`} />
+                    <Stat label="% of runs" value={data.discipline.extras_pct == null ? '—' : `${data.discipline.extras_pct}%`} sub="conceded" />
+                  </div>
+                  {data.discipline.bowlers?.length > 0 && (
+                    <div className="overflow-x-auto -mx-1">
+                      <table className="w-full text-sm">
+                        <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
+                          <th className="py-1 px-1 font-medium">Bowler</th>
+                          <th className="py-1 px-1 font-medium text-right">Overs</th>
+                          <th className="py-1 px-1 font-medium text-right">Wd</th>
+                          <th className="py-1 px-1 font-medium text-right">Nb</th>
+                          <th className="py-1 px-1 font-medium text-right">Extras/over</th>
+                        </tr></thead>
+                        <tbody>
+                          {data.discipline.bowlers.map(bl => (
+                            <tr key={bl.player_id} className="border-t pb-hairline">
+                              <td className="py-1.5 px-1 font-medium whitespace-nowrap">{bl.name}</td>
+                              <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{bl.overs}</td>
+                              <td className="py-1.5 px-1 text-right pb-num">{bl.wides}</td>
+                              <td className="py-1.5 px-1 text-right pb-num">{bl.no_balls}</td>
+                              <td className="py-1.5 px-1 text-right pb-num font-semibold">{num(bl.extras_per_over)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <Note>Wides + no-balls per over, most disciplined first (min {seasonId || gradeId ? '10' : '50'} overs). Hidden when the scorecards don't record extras.</Note>
+                </Card>
+              )}
             </div>
           )}
 
           {/* ── Players ──────────────────────────────────────────────────── */}
           {tab === 'players' && (
             <div className="space-y-4">
+              {data.captaincy?.length > 0 && (
+                <Card title="Captaincy" right={<span className="text-pb-faint text-xs">record as skipper</span>}>
+                  <div className="overflow-x-auto -mx-1">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
+                        <th className="py-1 px-1 font-medium">Captain</th>
+                        <th className="py-1 px-1 font-medium text-right">Led</th>
+                        <th className="py-1 px-1 font-medium text-right">W–L–D</th>
+                        <th className="py-1 px-1 font-medium text-right">Win %</th>
+                        <th className="py-1 px-1 font-medium text-right">Avg score</th>
+                        <th className="py-1 px-1 font-medium text-right">Finals</th>
+                      </tr></thead>
+                      <tbody>
+                        {data.captaincy.map(c => (
+                          <tr key={c.player_id} className="border-t pb-hairline">
+                            <td className="py-1.5 px-1 font-medium whitespace-nowrap">{c.name}</td>
+                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{c.led}</td>
+                            <td className="py-1.5 px-1 text-right pb-num">{c.wins}–{c.losses}–{c.draws}</td>
+                            <td className="py-1.5 px-1 text-right pb-num font-semibold" style={c.win_pct != null && c.win_pct >= 50 ? { color: 'var(--pb-brand)' } : undefined}>{c.win_pct == null ? '—' : `${c.win_pct}%`}</td>
+                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{num(c.avg_score)}</td>
+                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{c.finals ? `${c.finals_won}/${c.finals}` : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Note>Win % is over decided games (draws/ties excluded); avg score is our total in games they led. Min 3 games as captain. Toss decisions aren't in our data.</Note>
+                </Card>
+              )}
+
               {data.all_rounders?.length > 0 && (
                 <Card title="All-rounders" right={<span className="text-pb-faint text-xs">bat avg − bowl avg</span>}>
                   <div className="space-y-0.5">
@@ -395,7 +461,7 @@ export default function TeamAnalysis() {
                 </div>
               )}
 
-              {!data.all_rounders?.length && !(data.fielding?.fielders?.length || data.fielding?.keepers?.length) && (
+              {!data.all_rounders?.length && !data.captaincy?.length && !(data.fielding?.fielders?.length || data.fielding?.keepers?.length) && (
                 <Card><Empty>Not enough per-player data in this period.</Empty></Card>
               )}
             </div>
