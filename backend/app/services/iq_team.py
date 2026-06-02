@@ -174,6 +174,67 @@ async def _team_fielding(session: AsyncSession, org_id: str, season_id: str | No
     return {"fielders": fielders[:8], "keepers": keepers[:5], "combos": combos}
 
 
+async def _all_rounders(session: AsyncSession, org_id: str, season_id: str | None) -> list[dict]:
+    """All-rounder analysis (brief §5) — players who contribute with both bat and
+    ball, ranked by the classic batting-average − bowling-average difference."""
+    season_clause = "AND s.id = CAST(:season AS UUID)" if season_id else ""
+    min_inns, min_wkts = (4, 4) if season_id else (10, 10)
+    res = await session.execute(
+        text(
+            f"""
+            WITH bat AS (
+                SELECT bi.player_id AS pid, COUNT(*) AS inns, COALESCE(SUM(bi.runs), 0) AS runs,
+                       COALESCE(SUM(CASE WHEN bi.not_out THEN 1 ELSE 0 END), 0) AS no
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org AS UUID) AND bi.runs IS NOT NULL {season_clause}
+                GROUP BY bi.player_id
+            ),
+            bowl AS (
+                SELECT bs.player_id AS pid, COALESCE(SUM(bs.wickets), 0) AS wkts,
+                       COALESCE(SUM(bs.runs), 0) AS conceded
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org AS UUID) {season_clause}
+                GROUP BY bs.player_id
+            )
+            SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                   bat.inns, bat.runs, bat.no, bowl.wkts, bowl.conceded
+            FROM players p
+            JOIN bat ON bat.pid = p.id
+            JOIN bowl ON bowl.pid = p.id
+            WHERE p.organisation_id = CAST(:org AS UUID) AND bat.inns >= :min_inns AND bowl.wkts >= :min_wkts
+            """
+        ),
+        {"org": org_id, "season": season_id, "min_inns": min_inns, "min_wkts": min_wkts},
+    )
+    rows = []
+    for r in res.mappings():
+        outs = r["inns"] - r["no"]
+        bat_avg = round(r["runs"] / outs, 1) if outs > 0 else None
+        bowl_avg = round(r["conceded"] / r["wkts"], 1) if r["wkts"] else None
+        diff = round(bat_avg - bowl_avg, 1) if (bat_avg is not None and bowl_avg is not None) else None
+        if bat_avg is not None and bowl_avg is not None:
+            if bat_avg >= 20 and bowl_avg <= 30:
+                role = "Genuine all-rounder"
+            elif bat_avg >= bowl_avg:
+                role = "Batting all-rounder"
+            else:
+                role = "Bowling all-rounder"
+        else:
+            role = "All-rounder"
+        rows.append({
+            "player_id": r["id"], "name": r["name"], "innings": r["inns"], "runs": r["runs"],
+            "bat_avg": bat_avg, "wickets": r["wkts"], "bowl_avg": bowl_avg, "diff": diff, "role": role,
+        })
+    rows.sort(key=lambda x: (x["diff"] is not None, x["diff"] if x["diff"] is not None else -999), reverse=True)
+    return rows[:12]
+
+
 async def team_overview(session: AsyncSession, org_id: str, season_id: str | None = None) -> dict:
     games = await _per_game(session, org_id, season_id)
     decided = [g for g in games if g["result"] in ("WIN", "LOSS")]
@@ -255,6 +316,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
 
     partnerships = await _partnerships(session, org_id, season_id)
     fielding = await _team_fielding(session, org_id, season_id)
+    all_rounders = await _all_rounders(session, org_id, season_id)
     win_lose = _how_we_win_lose(record, batting, innings, partnerships)
 
     return {
@@ -266,6 +328,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
         "venues": venues[:10],
         "partnerships": partnerships,
         "fielding": fielding,
+        "all_rounders": all_rounders,
         "how_we_win": win_lose[0],
         "how_we_lose": win_lose[1],
         "coverage": {

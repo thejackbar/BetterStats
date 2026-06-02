@@ -201,6 +201,28 @@ export default function TeamAnalysis() {
             </div>
           )}
 
+          {data.all_rounders?.length > 0 && (
+            <div className="mt-4">
+              <Card title="All-rounders" right={<span className="text-pb-faint text-xs">bat avg − bowl avg</span>}>
+                <div className="space-y-0.5">
+                  {data.all_rounders.map(a => (
+                    <div key={a.player_id} className="flex items-center justify-between gap-3 text-sm py-0.5">
+                      <div className="min-w-0 flex items-baseline gap-2">
+                        <span className="truncate">{a.name}</span>
+                        <span className="text-pb-faintest text-[11px] shrink-0">{a.role}</span>
+                      </div>
+                      <div className="flex items-center gap-3 whitespace-nowrap pb-num text-pb-faint">
+                        <span>{a.runs} @ {a.bat_avg ?? '—'}</span>
+                        <span>{a.wickets}w @ {a.bowl_avg ?? '—'}</span>
+                        {a.diff != null && <span className="font-semibold w-12 text-right" style={{ color: a.diff >= 0 ? 'var(--pb-brand)' : 'var(--pb-amber)' }}>{a.diff >= 0 ? '+' : ''}{a.diff}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+
           {data.fielding && (data.fielding.fielders?.length > 0 || data.fielding.keepers?.length > 0) && (
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <Card title="Top fielders">
