@@ -510,11 +510,15 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
         keep.playhq_id = None
         await db.flush()
 
-    # Re-create removed player
+    # Re-create removed player. grassroots_id (raw CA participant GUID, added in
+    # migration 062) must be restored or the next sync won't find this row by
+    # (org, grassroots_id) and would mint a fresh per-club duplicate. The merge
+    # log predates the column, but for every legacy row the id IS the raw GUID,
+    # so id::text is the correct value (it's exactly what 062's backfill used).
     await db.execute(
         text("""
-            INSERT INTO players (id, name, organisation_id, playhq_id, claimed)
-            VALUES (:id, :name, :org_id, :playhq_id, false)
+            INSERT INTO players (id, name, organisation_id, playhq_id, grassroots_id, claimed)
+            VALUES (:id, :name, :org_id, :playhq_id, :grassroots_id, false)
             ON CONFLICT (id) DO NOTHING
         """),
         {
@@ -522,6 +526,7 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
             "name": log["removed_player_name"],
             "org_id": req.org_id,
             "playhq_id": log["removed_player_playhq_id"],
+            "grassroots_id": str(remove_id),
         },
     )
 

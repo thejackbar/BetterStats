@@ -906,7 +906,8 @@ def _norm_name(s: str) -> str:
 def extract_bowler_wickets(
     scorecard: dict,
     game_uuid: uuid.UUID,
-    known_player_ids: set,
+    gate_pids: set,
+    pid_by_guid: dict,
     merged_away: dict,
 ) -> list:
     """Return a list of BowlerWicket rows to insert from a GR scorecard.
@@ -937,15 +938,19 @@ def extract_bowler_wickets(
         if not pid_str:
             return None
         try:
-            p = uuid.UUID(pid_str)
+            g = uuid.UUID(pid_str)
         except ValueError:
             return None
-        if p in known_player_ids:
-            return p
-        p2 = merged_away.get(p)
-        if p2 is not None and p2 in known_player_ids:
-            return p2
-        return None
+        # raw participant GUID -> this org's player id (identity for legacy
+        # single-club orgs where grassroots_id == id), then merge redirect.
+        p = pid_by_guid.get(g)
+        if p is None:
+            p = merged_away.get(g)
+            if p is None:
+                return None
+        else:
+            p = merged_away.get(p, p)
+        return p if p in gate_pids else None
 
     for inn in (scorecard.get("innings") or []):
         inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
@@ -1215,6 +1220,7 @@ async def sync_grassroots_game_level_data(
     # Short-lived session: enumerate grades and known players. Read-only.
     grades: list[tuple] = []  # (grade_id, season_id, grade_name)
     known_player_ids: set[uuid.UUID] = set()
+    pid_by_guid: dict[uuid.UUID, uuid.UUID] = {}  # raw CA participant GUID -> this org's player id
     async with async_session_maker() as session:
         org = await session.get(Organisation, org_uuid)
         if not org:
@@ -1229,10 +1235,18 @@ async def sync_grassroots_game_level_data(
         grades = [(str(r[0]), r[1], r[2]) for r in grades_res.all()]
         logger.info(f"GR-sync: {len(grades)} grades for org {org_uuid}")
 
+        # participant GUID -> this org's player id. Identity for a legacy
+        # single-club org (grassroots_id == id); for a per-club player
+        # (id = uuid5(org, guid)) it maps the scorecard's raw participantId to
+        # the uuid5 id so game-level rows attach to the right record.
         player_res = await session.execute(
-            select(Player.id).where(Player.organisation_id == org_uuid)
+            select(Player.id, Player.grassroots_id).where(Player.organisation_id == org_uuid)
         )
-        known_player_ids = {r[0] for r in player_res}
+        for _pid, _gid in player_res:
+            known_player_ids.add(_pid)
+            g = _parse_uuid(_gid) if _gid else None
+            if g is not None:
+                pid_by_guid[g] = _pid
         logger.info(f"GR-sync: {len(known_player_ids)} existing players in org")
 
         # Build merged-away → kept redirect map so scorecards referencing a
@@ -1255,6 +1269,24 @@ async def sync_grassroots_game_level_data(
                 target = raw_redirects[target]
             merged_away[removed] = target
         logger.info(f"GR-sync: {len(merged_away)} merged-away player redirects loaded")
+
+    def _team_pid(guid: Optional[uuid.UUID]) -> Optional[uuid.UUID]:
+        """Translate a scorecard participantId (raw CA GUID) to this org's player
+        id, following merge redirects; None if the GUID isn't one of our players.
+
+        Identity for a legacy single-club org (grassroots_id == id), so its
+        game-level attribution is byte-for-byte unchanged. For a per-club player
+        (id = uuid5(org, guid)) it returns the uuid5 id so the scorecard's raw
+        GUID lands on the right record.
+        """
+        if guid is None:
+            return None
+        p = pid_by_guid.get(guid)
+        if p is None:
+            p = merged_away.get(guid)  # legacy merged-away GUID (removed_player_id == raw GUID)
+            if p is None:
+                return None
+        return merged_away.get(p, p)
 
     # Enumerate match IDs by fanning out across all known grades.
     # /scores/grades/{id}/matches works for all seasons including pre-2000,
@@ -1505,18 +1537,9 @@ async def sync_grassroots_game_level_data(
                 if our_team:
                     our_team_name = our_team.get("displayName") or our_team.get("name") or ""
                     for roster_p in (our_team.get("players") or []):
-                        rpid_str = roster_p.get("participantId")
-                        if not rpid_str:
-                            continue
-                        try:
-                            rpid = uuid.UUID(rpid_str)
-                        except ValueError:
-                            continue
-                        if rpid not in known_player_ids:
-                            rpid = merged_away.get(rpid)
-                            if rpid is None or rpid not in known_player_ids:
-                                continue
-                        our_team_pids.add(rpid)
+                        rpid = _team_pid(_parse_uuid(roster_p.get("participantId") or ""))
+                        if rpid is not None:
+                            our_team_pids.add(rpid)
 
                 # Roster: insert one GameAppearance per club player listed in the
                 # team-sheet. Covers selected players who didn't bat/bowl/take a
@@ -1526,17 +1549,9 @@ async def sync_grassroots_game_level_data(
                 if our_team:
                     seen_appear_pids: set[uuid.UUID] = set()
                     for roster_p in (our_team.get("players") or []):
-                        rpid_str = roster_p.get("participantId")
-                        if not rpid_str:
+                        rpid = _team_pid(_parse_uuid(roster_p.get("participantId") or ""))
+                        if rpid is None:
                             continue
-                        try:
-                            rpid = uuid.UUID(rpid_str)
-                        except ValueError:
-                            continue
-                        if rpid not in known_player_ids:
-                            rpid = merged_away.get(rpid)
-                            if rpid is None or rpid not in known_player_ids:
-                                continue
                         if rpid in seen_appear_pids:
                             continue  # multi-team appearance (shouldn't happen for one team)
                         seen_appear_pids.add(rpid)
@@ -1564,17 +1579,9 @@ async def sync_grassroots_game_level_data(
                     fow_rows = inn.get("fallOfWickets") or []
 
                     for row in batting_rows:
-                        pid_str = row.get("participantId")
-                        if not pid_str:
+                        pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
+                        if pid is None or pid not in our_team_pids:
                             continue
-                        try:
-                            pid = uuid.UUID(pid_str)
-                        except ValueError:
-                            continue
-                        if pid not in our_team_pids:
-                            pid = merged_away.get(pid)
-                            if pid is None or pid not in our_team_pids:
-                                continue
                         dt_id = row.get("dismissalTypeId") or 0
                         if dt_id == 0:
                             continue
@@ -1606,17 +1613,9 @@ async def sync_grassroots_game_level_data(
                         bat_count += 1
 
                     for row in bowling_rows:
-                        pid_str = row.get("participantId")
-                        if not pid_str:
+                        pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
+                        if pid is None or pid not in our_team_pids:
                             continue
-                        try:
-                            pid = uuid.UUID(pid_str)
-                        except ValueError:
-                            continue
-                        if pid not in our_team_pids:
-                            pid = merged_away.get(pid)
-                            if pid is None or pid not in our_team_pids:
-                                continue
                         econ = None
                         try:
                             econ_raw = row.get("economy")
@@ -1636,17 +1635,9 @@ async def sync_grassroots_game_level_data(
                         bowl_count += 1
 
                     for row in fielding_rows:
-                        pid_str = row.get("participantId")
-                        if not pid_str:
+                        pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
+                        if pid is None or pid not in our_team_pids:
                             continue
-                        try:
-                            pid = uuid.UUID(pid_str)
-                        except ValueError:
-                            continue
-                        if pid not in our_team_pids:
-                            pid = merged_away.get(pid)
-                            if pid is None or pid not in our_team_pids:
-                                continue
                         catches_wk = row.get("wicketKeeperCatches") or 0
                         catches_total = row.get("totalCatches")
                         if catches_total is None:
@@ -1668,19 +1659,9 @@ async def sync_grassroots_game_level_data(
                         # or their personal FOW history gets polluted.
                         # The row itself is still inserted so the game-level
                         # scorecard view can display both innings' wickets.
-                        pid = None
-                        pid_str = row.get("participantId")
-                        if pid_str:
-                            try:
-                                pid_try = uuid.UUID(pid_str)
-                                if pid_try in our_team_pids:
-                                    pid = pid_try
-                                else:
-                                    pid_try = merged_away.get(pid_try)
-                                    if pid_try is not None and pid_try in our_team_pids:
-                                        pid = pid_try
-                            except ValueError:
-                                pid = None
+                        pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
+                        if pid is not None and pid not in our_team_pids:
+                            pid = None
                         wkt = row.get("order")
                         if wkt is None:
                             continue
@@ -1717,13 +1698,8 @@ async def sync_grassroots_game_level_data(
                             if not _bp:
                                 continue
                             total_n += 1
-                            try:
-                                _bc = uuid.UUID(_bp)
-                            except ValueError:
-                                continue
-                            if _bc not in our_team_pids:
-                                _bc = merged_away.get(_bc)
-                            if _bc in our_team_pids:
+                            _bc = _team_pid(_parse_uuid(_bp))
+                            if _bc is not None and _bc in our_team_pids:
                                 club_n += 1
                         is_club_innings = total_n > 0 and club_n * 2 > total_n
 
@@ -1732,17 +1708,12 @@ async def sync_grassroots_game_level_data(
                         for src_key, dst in (("batter1_id", "b1"), ("batter2_id", "b2")):
                             v = p.get(src_key)
                             if v:
-                                try:
-                                    cand = uuid.UUID(v)
-                                    if cand not in our_team_pids:
-                                        cand = merged_away.get(cand)
-                                    if cand and cand in our_team_pids:
-                                        if dst == "b1":
-                                            b1_id = cand
-                                        else:
-                                            b2_id = cand
-                                except (ValueError, TypeError):
-                                    pass
+                                cand = _team_pid(_parse_uuid(v))
+                                if cand is not None and cand in our_team_pids:
+                                    if dst == "b1":
+                                        b1_id = cand
+                                    else:
+                                        b2_id = cand
                         if not b1_id and not b2_id:
                             continue
                         session.add(Partnership(
@@ -1760,7 +1731,7 @@ async def sync_grassroots_game_level_data(
                 # to one of our players. Helper builds short-name → pid maps
                 # from each innings' bowling/fielding rows and resolves through
                 # merged_away. Reused by app.scripts.rebuild_bowler_wickets.
-                for bw in extract_bowler_wickets(scorecard, match_uuid, our_team_pids, merged_away):
+                for bw in extract_bowler_wickets(scorecard, match_uuid, our_team_pids, pid_by_guid, merged_away):
                     session.add(bw)
 
                 if bat_count == 0 and bowl_count == 0 and appear_count == 0:
