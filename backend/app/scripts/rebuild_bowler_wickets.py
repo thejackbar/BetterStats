@@ -51,9 +51,17 @@ async def rebuild_for_org(org_id_str: str) -> None:
 
     async with async_session_maker() as session:
         players = await session.execute(
-            select(Player.id).where(Player.organisation_id == org_id)
+            select(Player.id, Player.grassroots_id).where(Player.organisation_id == org_id)
         )
-        known_player_ids = {r[0] for r in players.all()}
+        known_player_ids = set()
+        pid_by_guid: dict = {}  # raw CA participant GUID -> this org's player id (identity for legacy)
+        for _pid, _gid in players.all():
+            known_player_ids.add(_pid)
+            if _gid:
+                try:
+                    pid_by_guid[uuid.UUID(str(_gid))] = _pid
+                except (ValueError, TypeError):
+                    pass
 
         merged_away = await _build_merge_map(session, org_id)
 
@@ -105,15 +113,19 @@ async def rebuild_for_org(org_id_str: str) -> None:
                     if not rpid_str:
                         continue
                     try:
-                        rpid = uuid.UUID(rpid_str)
+                        g = uuid.UUID(rpid_str)
                     except ValueError:
                         continue
-                    if rpid not in known_player_ids:
-                        rpid = merged_away.get(rpid)
-                        if rpid is None or rpid not in known_player_ids:
+                    # raw participant GUID -> this org's player id (identity for legacy)
+                    p = pid_by_guid.get(g)
+                    if p is None:
+                        p = merged_away.get(g)
+                        if p is None:
                             continue
-                    our_team_pids.add(rpid)
-            rows = extract_bowler_wickets(scorecard, gid, our_team_pids, merged_away)
+                    else:
+                        p = merged_away.get(p, p)
+                    our_team_pids.add(p)
+            rows = extract_bowler_wickets(scorecard, gid, our_team_pids, pid_by_guid, merged_away)
             if rows:
                 async with async_session_maker() as session:
                     for r in rows:
