@@ -235,6 +235,55 @@ async def _all_rounders(session: AsyncSession, org_id: str, season_id: str | Non
     return rows[:12]
 
 
+async def _batting_pairs(session: AsyncSession, org_id: str, season_id: str | None) -> list[dict]:
+    """Same-team batting partnerships by player pair (brief §11.1) — which two
+    batters have the most prolific record at the crease together."""
+    season_clause = "AND s.id = CAST(:season AS UUID)" if season_id else ""
+    res = await session.execute(
+        text(
+            f"""
+            WITH pr AS (
+                SELECT LEAST(p.batter1_id, p.batter2_id) AS a,
+                       GREATEST(p.batter1_id, p.batter2_id) AS b,
+                       p.runs AS runs, p.wicket_number AS wk
+                FROM partnerships p
+                JOIN v_effective_games g ON g.id = p.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org AS UUID)
+                  AND p.is_club_innings IS TRUE
+                  AND p.batter1_id IS NOT NULL AND p.batter2_id IS NOT NULL
+                  AND p.batter1_id <> p.batter2_id
+                  AND p.runs IS NOT NULL {season_clause}
+            )
+            SELECT COALESCE(pa.display_name_override, pa.name) AS a_name,
+                   COALESCE(pb.display_name_override, pb.name) AS b_name,
+                   COUNT(*) AS stands, COALESCE(SUM(pr.runs), 0) AS total, MAX(pr.runs) AS best,
+                   COUNT(*) FILTER (WHERE pr.runs >= 50) AS fifties,
+                   COUNT(*) FILTER (WHERE pr.wk = 1) AS opening
+            FROM pr
+            JOIN players pa ON pa.id = pr.a
+            JOIN players pb ON pb.id = pr.b
+            GROUP BY pa.id, a_name, pb.id, b_name
+            HAVING COUNT(*) >= :min_stands
+            ORDER BY COALESCE(SUM(pr.runs), 0) DESC
+            LIMIT 12
+            """
+        ),
+        {"org": org_id, "season": season_id, "min_stands": 2 if season_id else 3},
+    )
+    pairs = []
+    for r in res.mappings():
+        stands = r["stands"]
+        pairs.append({
+            "a": r["a_name"], "b": r["b_name"], "stands": stands, "runs": r["total"],
+            "avg": round(r["total"] / stands, 1) if stands else None,
+            "best": r["best"], "fifties": r["fifties"],
+            "opening": bool(r["opening"] and r["opening"] >= stands / 2),
+        })
+    return pairs
+
+
 async def team_overview(session: AsyncSession, org_id: str, season_id: str | None = None) -> dict:
     games = await _per_game(session, org_id, season_id)
     decided = [g for g in games if g["result"] in ("WIN", "LOSS")]
@@ -317,6 +366,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
     partnerships = await _partnerships(session, org_id, season_id)
     fielding = await _team_fielding(session, org_id, season_id)
     all_rounders = await _all_rounders(session, org_id, season_id)
+    batting_pairs = await _batting_pairs(session, org_id, season_id)
     win_lose = _how_we_win_lose(record, batting, innings, partnerships)
 
     return {
@@ -327,6 +377,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
         "score_bands": score_bands,
         "venues": venues[:10],
         "partnerships": partnerships,
+        "batting_pairs": batting_pairs,
         "fielding": fielding,
         "all_rounders": all_rounders,
         "how_we_win": win_lose[0],

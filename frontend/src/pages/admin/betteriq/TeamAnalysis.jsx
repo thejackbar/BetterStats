@@ -173,6 +173,29 @@ export default function TeamAnalysis() {
             )}
           </div>
 
+          {/* Best batting partnerships by pair */}
+          {data.batting_pairs?.length > 0 && (
+            <div className="mt-4">
+              <Card title="Best partnerships" right={<span className="text-pb-faint text-xs">by pair</span>}>
+                <div className="space-y-0.5">
+                  {data.batting_pairs.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 text-sm py-0.5">
+                      <div className="min-w-0 flex items-baseline gap-2">
+                        <span className="truncate">{p.a} &amp; {p.b}</span>
+                        {p.opening && <span className="text-pb-faintest text-[11px] shrink-0">opening</span>}
+                      </div>
+                      <div className="flex items-center gap-3 whitespace-nowrap text-pb-faint pb-num">
+                        <span>{p.stands} stands</span>
+                        <span className="font-semibold">{p.runs} @ {p.avg ?? '—'}</span>
+                        <span className="w-20 text-right">best {p.best}{p.fifties ? ` · ${p.fifties}×50` : ''}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+
           {/* Venues */}
           {data.venues?.length > 0 && (
             <div className="mt-4">
