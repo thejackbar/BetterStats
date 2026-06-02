@@ -42,6 +42,13 @@ from app.services import grassroots_scores_client as gr
 
 logger = logging.getLogger(__name__)
 
+# Payload schema version — bump whenever the dossier shape changes (new sections,
+# new fields). A cached dossier from an older version is treated as stale and
+# rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
+# notes, …) pulls through for EVERY cache key — whole-club AND each team — without
+# waiting on the TTL or a manual refresh.
+DOSSIER_VERSION = 2
+
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
 TTL = timedelta(days=7)
@@ -404,7 +411,8 @@ async def get_or_start_dossier(
     now = datetime.now(timezone.utc)
 
     def _fresh(r):
-        return r and r.status == "ready" and r.built_at and (now - r.built_at) < TTL
+        return (r and r.status == "ready" and r.built_at and (now - r.built_at) < TTL
+                and (r.payload or {}).get("schema_v") == DOSSIER_VERSION)
 
     if _fresh(row) and not force:
         return {"status": "ready", "cached": True, **(row.payload or {})}
@@ -990,5 +998,6 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         "how_they_win": how_they_win,
         "how_they_lose": how_they_lose,
         "game_plan": game_plan,
+        "schema_v": DOSSIER_VERSION,
         "built_at": datetime.now(timezone.utc).isoformat(),
     }
