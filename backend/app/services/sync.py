@@ -78,6 +78,58 @@ def _parse_uuid(val: str) -> Optional[uuid.UUID]:
         return None
 
 
+def _org_player_id(org_id: uuid.UUID, grassroots_guid: str) -> uuid.UUID:
+    """Per-club player id derived from the org + raw CA participant GUID.
+
+    Mirrors the Season id scheme (uuid5(org, grassroots_id)). A CA participant
+    GUID is shared across every club a person plays for, so it can't be a global
+    primary key — this gives each club its own deterministic id for that person.
+    """
+    return uuid.uuid5(org_id, grassroots_guid)
+
+
+async def _resolve_org_player(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    org_player_map: dict[str, uuid.UUID],
+    grassroots_guid: str,
+    name: str,
+    merged_away: dict,
+) -> Optional[uuid.UUID]:
+    """Resolve a CA participant GUID to this org's player id, creating a per-club
+    player (id = uuid5(org, guid)) the first time the org sees that GUID.
+
+    ``org_player_map`` is a ``grassroots_id -> player_id`` cache for the org and
+    is updated in place. Returns ``None`` when the GUID belongs to a player that
+    was merged away (so the caller redirects via ``merged_away`` rather than
+    recreating it). Legacy single-club orgs are unaffected: their existing rows
+    already sit in the map keyed by their raw GUID, so this returns the same
+    raw-GUID id it always did.
+    """
+    pid = org_player_map.get(grassroots_guid)
+    if pid is not None:
+        return pid
+    # Merged away (legacy merges store the raw GUID as removed_player_id) — don't
+    # resurrect it; the caller redirects its stats to the kept player.
+    if grassroots_guid in merged_away:
+        return None
+    guid_uuid = _parse_uuid(grassroots_guid)
+    # Only mint a per-club uuid5 id when the raw GUID is ALREADY a player id in
+    # another club (the genuine shared-participant collision). Otherwise keep
+    # using the raw GUID as the id — that's the legacy scheme the game-level
+    # scorecard sync relies on (it matches scorecard participantId == player id),
+    # so ordinary single-club players are completely unaffected. Per-club uuid5
+    # players are aggregate-only until the game-level sync learns to translate
+    # participantId -> player id (a separate, testable step).
+    clash = await session.get(Player, guid_uuid) if guid_uuid else None
+    new_id = _org_player_id(org_id, grassroots_guid) if clash is not None else guid_uuid
+    if new_id is None:
+        return None
+    session.add(Player(id=new_id, name=name, organisation_id=org_id, grassroots_id=grassroots_guid))
+    org_player_map[grassroots_guid] = new_id
+    return new_id
+
+
 async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisation:
     org_id = _parse_uuid(org_data.get("id", ""))
     incoming_name = (org_data.get("name") or "").strip()
@@ -418,6 +470,19 @@ async def sync_organisation(
         seasons = await playhq_client.get_seasons(org_id_str)
         logger.info(f"Found {len(seasons)} seasons")
 
+        # grassroots_id -> player_id for this org's existing players. New players
+        # (incl. the second club of a shared CA GUID) are minted as
+        # uuid5(org, guid) and added to this map as they're seen. For a legacy
+        # single-club org every row's grassroots_id == its raw-GUID id, so this
+        # resolves to exactly the same ids sync has always used.
+        org_player_map: dict[str, uuid.UUID] = {}
+        _opm_res = await session.execute(
+            select(Player.grassroots_id, Player.id).where(Player.organisation_id == org_id)
+        )
+        for _gid, _pid in _opm_res.all():
+            if _gid:
+                org_player_map[str(_gid)] = _pid
+
         for season_data in seasons:
             raw_season_id = (season_data.get("id") or "").strip()
             if not _parse_uuid(raw_season_id):
@@ -531,14 +596,13 @@ async def sync_organisation(
                 await session.rollback()
                 merged_away = {}
 
-            # Upsert players — skip any that were merged away
+            # Resolve each CA participant GUID to this org's player id, minting a
+            # per-club player (uuid5(org, guid)) for any GUID the org hasn't seen
+            # before. Merged-away GUIDs are skipped (not resurrected).
             for pid, pdata in player_data.items():
-                if str(pid) in merged_away:
-                    continue
-                player = await session.get(Player, pid)
-                if not player:
-                    player = Player(id=pid, name=pdata["name"], organisation_id=org_id)
-                    session.add(player)
+                await _resolve_org_player(
+                    session, org_id, org_player_map, str(pid), pdata["name"], merged_away
+                )
             await session.commit()
 
             # Replace existing season stats for this season
@@ -548,8 +612,13 @@ async def sync_organisation(
 
             processed_in_season: set[uuid.UUID] = set()
             for pid, pdata in player_data.items():
-                # Redirect stats for merged-away players to the kept player
-                effective_pid = merged_away.get(str(pid), pid)
+                guid_str = str(pid)
+                # Resolve the CA GUID to this org's player id, then redirect a
+                # merged-away player to the kept one.
+                resolved = org_player_map.get(guid_str) or merged_away.get(guid_str)
+                if resolved is None:
+                    continue
+                effective_pid = merged_away.get(str(resolved), resolved)
                 if effective_pid in processed_in_season:
                     continue
                 processed_in_season.add(effective_pid)
@@ -670,7 +739,11 @@ async def sync_organisation(
 
                         seen_pids: set[uuid.UUID] = set()
                         for pid, pdata in per_grade.items():
-                            effective_pid = merged_away.get(str(pid), pid)
+                            guid_str = str(pid)
+                            resolved = org_player_map.get(guid_str) or merged_away.get(guid_str)
+                            if resolved is None:
+                                continue
+                            effective_pid = merged_away.get(str(resolved), resolved)
                             if effective_pid in seen_pids:
                                 continue
                             seen_pids.add(effective_pid)
