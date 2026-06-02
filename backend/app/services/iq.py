@@ -399,7 +399,7 @@ async def _our_performers_vs(session: AsyncSession, org_id: str, opp_key: str) -
             JOIN players p ON p.id = bi.player_id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
-            GROUP BY p.id, name, p.status
+            GROUP BY p.id, p.display_name_override, p.name, p.status
             HAVING COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) > 0
             ORDER BY runs DESC
             LIMIT 10
@@ -439,7 +439,7 @@ async def _our_performers_vs(session: AsyncSession, org_id: str, opp_key: str) -
             JOIN players p ON p.id = bs.player_id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
-            GROUP BY p.id, name, p.status
+            GROUP BY p.id, p.display_name_override, p.name, p.status
             HAVING COALESCE(SUM(bs.wickets), 0) > 0
             ORDER BY wickets DESC, runs ASC
             LIMIT 10
