@@ -286,6 +286,65 @@ async def _batting_pairs(session: AsyncSession, org_id: str, season_id: str | No
     return pairs
 
 
+async def _collapses(session: AsyncSession, org_id: str, season_id: str | None) -> dict | None:
+    """Collapse analysis (brief §7.5) — how often we lose a cluster of wickets
+    cheaply. Reconstructs fall-of-wickets from stored partnership runs and finds
+    the worst 3-consecutive-wicket span per club innings."""
+    from collections import defaultdict
+
+    season_clause = "AND s.id = CAST(:season AS UUID)" if season_id else ""
+    res = await session.execute(
+        text(
+            f"""
+            SELECT p.game_id::text AS gid, p.innings_number AS inn,
+                   p.wicket_number AS wk, p.runs AS runs
+            FROM partnerships p
+            JOIN v_effective_games g ON g.id = p.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID) AND p.is_club_innings IS TRUE
+              AND p.wicket_number BETWEEN 1 AND 10 AND p.runs IS NOT NULL {season_clause}
+            ORDER BY p.game_id, p.innings_number, p.wicket_number
+            """
+        ),
+        {"org": org_id, "season": season_id},
+    )
+    innings: dict[tuple, dict[int, int]] = defaultdict(dict)
+    for r in res.mappings():
+        innings[(r["gid"], r["inn"])][int(r["wk"])] = int(r["runs"])
+
+    THRESH = 15
+    analysed = collapse_count = 0
+    start_hist: dict[int, int] = defaultdict(int)
+    worst = None  # (runs, start_wicket)
+    for wkmap in innings.values():
+        if len(wkmap) < 3:
+            continue
+        analysed += 1
+        best_min = best_start = None
+        for k in sorted(wkmap):
+            if (k + 1) in wkmap and (k + 2) in wkmap:
+                span = wkmap[k] + wkmap[k + 1] + wkmap[k + 2]
+                if best_min is None or span < best_min:
+                    best_min, best_start = span, k
+        if best_min is not None and best_min <= THRESH:
+            collapse_count += 1
+            start_hist[best_start] += 1
+            if worst is None or best_min < worst[0]:
+                worst = (best_min, best_start)
+    if analysed == 0:
+        return None
+    by_start = [{"wicket": w, "count": c} for w, c in sorted(start_hist.items(), key=lambda x: -x[1])][:5]
+    return {
+        "innings_analysed": analysed,
+        "collapse_count": collapse_count,
+        "collapse_pct": round(100 * collapse_count / analysed, 1),
+        "threshold": THRESH,
+        "by_start_wicket": by_start,
+        "worst": {"runs": worst[0], "start_wicket": worst[1], "wickets": 3} if worst else None,
+    }
+
+
 async def player_impact(session: AsyncSession, org_id: str, season_id: str | None = None) -> dict:
     """Player Impact / club MVP board (brief §15.3) — a transparent blended rating
     from scorecard rates (runs, wickets, economy, fielding dismissals per match),
@@ -448,6 +507,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
     fielding = await _team_fielding(session, org_id, season_id)
     all_rounders = await _all_rounders(session, org_id, season_id)
     batting_pairs = await _batting_pairs(session, org_id, season_id)
+    collapses = await _collapses(session, org_id, season_id)
     win_lose = _how_we_win_lose(record, batting, innings, partnerships)
 
     return {
@@ -459,6 +519,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
         "venues": venues[:10],
         "partnerships": partnerships,
         "batting_pairs": batting_pairs,
+        "collapses": collapses,
         "fielding": fielding,
         "all_rounders": all_rounders,
         "how_we_win": win_lose[0],
