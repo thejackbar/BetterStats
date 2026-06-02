@@ -225,34 +225,101 @@ function VenueCard({ venues }) {
 
 /* ── bowler match-ups: our hold over their batters (instant report) ───────── */
 
+// Matchup advantage matrix (brief §16.5): reshape the flat pairing list into a
+// bowler × batter heatmap of dismissal counts.
+function buildMatrix(rows) {
+  const bowlerTotals = {}, batterTotals = {}, cells = {}
+  for (const r of rows) {
+    bowlerTotals[r.bowler] = (bowlerTotals[r.bowler] || 0) + r.dismissals
+    batterTotals[r.batter] = (batterTotals[r.batter] || 0) + r.dismissals
+    cells[`${r.bowler}|${r.batter}`] = r
+  }
+  const bowlers = Object.keys(bowlerTotals).sort((a, b) => bowlerTotals[b] - bowlerTotals[a]).slice(0, 6)
+  const batters = Object.keys(batterTotals).sort((a, b) => batterTotals[b] - batterTotals[a]).slice(0, 8)
+  const maxC = Math.max(1, ...rows.map(r => r.dismissals))
+  return { bowlers, batters, cells, maxC }
+}
+
+function MatchupMatrix({ rows }) {
+  const { bowlers, batters, cells, maxC } = buildMatrix(rows)
+  return (
+    <div className="overflow-x-auto -mx-1">
+      <table className="text-[11px] border-separate" style={{ borderSpacing: 2 }}>
+        <thead>
+          <tr>
+            <th className="sticky left-0" style={{ background: 'var(--pb-surface)' }} />
+            {batters.map(b => (
+              <th key={b} className="p-1 align-bottom h-20">
+                <div className="text-pb-faint font-medium whitespace-nowrap mx-auto" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>{b}</div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {bowlers.map(bw => (
+            <tr key={bw}>
+              <td className="p-1 pr-2 text-right font-medium whitespace-nowrap sticky left-0" style={{ background: 'var(--pb-surface)' }}>{bw}</td>
+              {batters.map(bt => {
+                const c = cells[`${bw}|${bt}`]
+                const n = c?.dismissals || 0
+                const intensity = n ? 0.18 + 0.72 * (n / maxC) : 0
+                return (
+                  <td key={bt} className="p-0 text-center">
+                    <div className="w-7 h-7 rounded flex items-center justify-center pb-num font-semibold mx-auto"
+                      title={c ? `${bw} dismissed ${bt} ${n}× (${c.runs_made} runs off us)` : ''}
+                      style={{ background: n ? `color-mix(in srgb, var(--pb-accent) ${Math.round(intensity * 100)}%, transparent)` : 'var(--pb-surface2)', color: intensity > 0.55 ? 'white' : 'inherit' }}>
+                      {n || ''}
+                    </div>
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function BowlerMatchups({ matchups }) {
   const rows = matchups?.bowler_dominance || []
+  const canMatrix = new Set(rows.map(r => r.bowler)).size >= 2 && new Set(rows.map(r => r.batter)).size >= 2
+  const [view, setView] = useState('matrix')
   if (!rows.length) return null
+  const showMatrix = canMatrix && view === 'matrix'
+  const segBtn = (v, label) => (
+    <button onClick={() => setView(v)} className="px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors"
+      style={view === v ? { background: 'color-mix(in srgb, var(--pb-accent) 16%, transparent)', color: 'var(--pb-accent)' } : { color: 'var(--pb-faint)' }}>{label}</button>
+  )
   return (
-    <Card title="Bowler match-ups" right={<span className="text-pb-faint text-xs">our hold over their batters</span>}>
+    <Card title="Bowler match-ups" right={canMatrix
+      ? <div className="flex items-center gap-0.5">{segBtn('matrix', 'Matrix')}{segBtn('list', 'List')}</div>
+      : <span className="text-pb-faint text-xs">our hold over their batters</span>}>
       <div className="text-pb-faintest text-[11px] mb-2">Their batters our bowlers have dismissed 2+ times — a selection edge.</div>
-      <div className="overflow-x-auto -mx-1">
-        <table className="w-full text-sm">
-          <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
-            <th className="py-1 px-1 font-medium">Our bowler</th>
-            <th className="py-1 px-1 font-medium">Their batter</th>
-            <th className="py-1 px-1 font-medium text-right">Out</th>
-            <th className="py-1 px-1 font-medium">How</th>
-            <th className="py-1 px-1 font-medium text-right">Runs off us</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((m, i) => (
-              <tr key={i} className="border-t pb-hairline">
-                <td className="py-1.5 px-1 font-medium whitespace-nowrap">{m.bowler}{!m.active && <span className="text-pb-faint" title="no longer active"> ·</span>}</td>
-                <td className="py-1.5 px-1 whitespace-nowrap">{m.batter}</td>
-                <td className="py-1.5 px-1 text-right pb-num font-semibold">{m.dismissals}×</td>
-                <td className="py-1.5 px-1 text-pb-faint text-[11px] capitalize">{(m.how || []).join(', ') || '—'}</td>
-                <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{num(m.runs_made, 0)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {showMatrix ? <MatchupMatrix rows={rows} /> : (
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full text-sm">
+            <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
+              <th className="py-1 px-1 font-medium">Our bowler</th>
+              <th className="py-1 px-1 font-medium">Their batter</th>
+              <th className="py-1 px-1 font-medium text-right">Out</th>
+              <th className="py-1 px-1 font-medium">How</th>
+              <th className="py-1 px-1 font-medium text-right">Runs off us</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((m, i) => (
+                <tr key={i} className="border-t pb-hairline">
+                  <td className="py-1.5 px-1 font-medium whitespace-nowrap">{m.bowler}{!m.active && <span className="text-pb-faint" title="no longer active"> ·</span>}</td>
+                  <td className="py-1.5 px-1 whitespace-nowrap">{m.batter}</td>
+                  <td className="py-1.5 px-1 text-right pb-num font-semibold">{m.dismissals}×</td>
+                  <td className="py-1.5 px-1 text-pb-faint text-[11px] capitalize">{(m.how || []).join(', ') || '—'}</td>
+                  <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{num(m.runs_made, 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Card>
   )
 }
