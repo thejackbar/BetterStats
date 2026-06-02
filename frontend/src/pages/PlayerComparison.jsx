@@ -34,10 +34,11 @@ const BOWLING_METRICS = [
 ]
 
 const FIELDING_METRICS = [
-  { key: 'total_catches',    label: 'CATCHES',     higher: true },
-  { key: 'total_run_outs',   label: 'RUN OUTS',    higher: true },
-  { key: 'total_stumpings',  label: 'STUMPINGS',   higher: true },
-  { key: 'total_dismissals', label: 'DISMISSALS',  higher: true },
+  { key: 'total_catches_non_wk', label: 'CAUGHT',      higher: true },
+  { key: 'total_catches_wk',     label: 'CAUGHT (WK)', higher: true },
+  { key: 'total_run_outs',       label: 'RUN OUTS',    higher: true },
+  { key: 'total_stumpings',      label: 'STUMPINGS',   higher: true },
+  { key: 'total_dismissals',     label: 'DISMISSALS',  higher: true },
 ]
 
 // Cross-discipline career overview
@@ -46,7 +47,7 @@ const GAMES_METRICS = [
   { key: 'innings',          label: 'BAT INNINGS',  higher: true, src: 'bat'   },
   { key: 'total_runs',       label: 'TOTAL RUNS',   higher: true, src: 'bat'   },
   { key: 'total_wickets',    label: 'WICKETS',      higher: true, src: 'bowl'  },
-  { key: 'total_catches',    label: 'CATCHES',      higher: true, src: 'field' },
+  { key: 'total_catches_non_wk', label: 'CAUGHT',   higher: true, src: 'field' },
   { key: 'total_dismissals', label: 'DISMISSALS',   higher: true, src: 'field' },
 ]
 
