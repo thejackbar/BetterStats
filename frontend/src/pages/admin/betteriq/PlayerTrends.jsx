@@ -286,6 +286,23 @@ export default function PlayerTrends() {
                   </Card></div>
                 )}
 
+                {deep.similar_players?.length > 0 && (
+                  <div className="mt-4"><Card title="Similar players" right={<span className="text-pb-faint text-xs">by profile</span>}>
+                    <div className="space-y-0.5">
+                      {deep.similar_players.map(s => (
+                        <div key={s.player_id} className="flex items-center justify-between gap-3 text-sm py-0.5">
+                          <span className="truncate">{s.name}</span>
+                          <div className="flex items-center gap-3 whitespace-nowrap pb-num text-pb-faint">
+                            {s.bat_avg != null && <span>bat {s.bat_avg}</span>}
+                            {s.bowl_avg != null && <span>bowl {s.bowl_avg}</span>}
+                            <span className="font-semibold w-12 text-right" style={{ color: 'var(--pb-accent)' }}>{s.similarity}%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card></div>
+                )}
+
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
                   {deep.by_position?.length > 0 && (
                     <Card title="By batting position" right={deep.best_position ? <Tag tone="accent">Best: {deep.best_position}</Tag> : null}>
