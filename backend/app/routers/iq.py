@@ -105,6 +105,20 @@ async def refresh_opposition_dossier(
     )
 
 
+@router.post("/opposition/match")
+async def match_opponent(
+    opponent_name: str = Query(..., description="the fixture's free-text opponent name"),
+    opp_key: str = Query(..., description="the chosen club's opp_key to link it to"),
+    display_name: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Persist a manual fixture-opponent → club link so it sticks for every
+    fixture with this opponent name (now and future)."""
+    await iq_service.save_opponent_alias(db, str(club.id), opponent_name, opp_key, display_name)
+    return {"ok": True}
+
+
 # ─── Selection analysis (Phase 2) ────────────────────────────────────────────
 
 

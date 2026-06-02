@@ -100,11 +100,12 @@ async def list_lineups(db: AsyncSession, club) -> list[dict]:
                    f.venue, gr.name AS grade_name, t.name AS team_name,
                    COUNT(fl.player_id) AS lineup_count
             FROM fixtures f
-            JOIN fixture_lineups fl ON fl.fixture_id = f.id
+            LEFT JOIN fixture_lineups fl ON fl.fixture_id = f.id
             LEFT JOIN grades gr ON gr.id = f.grade_id
             LEFT JOIN teams t ON t.id = f.team_id
             WHERE f.organisation_id = CAST(:org AS UUID)
             GROUP BY f.id, f.opponent_name, f.played_on, f.home_away, f.venue, gr.name, t.name
+            HAVING COUNT(fl.player_id) > 0 OR f.played_on >= CURRENT_DATE
             """
         ),
         {"org": str(club.id)},

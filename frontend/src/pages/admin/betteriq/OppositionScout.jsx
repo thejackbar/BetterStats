@@ -656,7 +656,14 @@ export default function OppositionScout() {
   const applyMatch = (opp) => {
     const m = matching
     setMatching(null)
-    if (m) pick({ fixtureId: m.fixtureId, opponent: opp.opp_key, name: opp.name })
+    if (!m) return
+    // Persist the association so it sticks for this (and future) fixtures, then
+    // refresh the picker so the fixture shows as linked.
+    if (m.name && opp.opp_key) {
+      api.iqMatchOpponent({ opponentName: m.name, oppKey: opp.opp_key, displayName: opp.name })
+        .then(() => api.iqListOpponents()).then(setList).catch(() => {})
+    }
+    pick({ fixtureId: m.fixtureId, opponent: opp.opp_key, name: opp.name })
   }
 
   const refresh = () => {

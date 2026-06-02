@@ -180,7 +180,9 @@ function LineupPicker({ rows, onPick }) {
             <div className="text-pb-faintest text-[11px] mt-0.5 flex flex-wrap gap-x-2">
               {r.played_on && <span>{r.played_on}</span>}
               {r.home_away && <span className="font-mono uppercase">{r.home_away}</span>}
-              <span>· {r.lineup_count} picked</span>
+              {r.lineup_count > 0
+                ? <span>· {r.lineup_count} picked</span>
+                : <span style={{ color: 'var(--pb-accent)' }}>· needs selecting</span>}
             </div>
           </button>
         ))}
@@ -225,7 +227,14 @@ export default function SelectionAnalysis() {
     <IQLayout title="Selection analysis" actions={<Btn variant="ghost" sm icon="back" onClick={clear}>Change fixture</Btn>}>
       {data === null && !err && <div className="pb-card p-5 animate-pulse text-pb-faint text-sm">Analysing the XI…</div>}
       {err && <div className="pb-card p-5"><Empty>Couldn't load this lineup. It may have been removed — pick another fixture.</Empty></div>}
-      {data && (
+      {data && data.players?.length === 0 && (
+        <div className="pb-card p-6">
+          <h2 className="font-display font-bold text-xl">{fx?.team_name || 'Team'} vs {fx?.opponent_name || 'TBC'}</h2>
+          <Empty>No XI saved for this fixture yet.</Empty>
+          <p className="text-pb-faint text-sm mt-2">Pick the team in BetterSelect, then come back here to analyse the balance and selection.</p>
+        </div>
+      )}
+      {data && data.players?.length > 0 && (
         <>
           <div className="mb-4">
             <div className="font-mono text-[11px] uppercase tracking-wide3" style={{ color: 'var(--pb-accent)' }}>Selection report</div>

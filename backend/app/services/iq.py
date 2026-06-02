@@ -112,6 +112,9 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
 
     # Name → opp_key lookup so upcoming fixtures can deep-link to a report.
     by_name = {(o["name"] or "").strip().lower(): o["opp_key"] for o in opponents}
+    # Manual matches saved by the user take precedence / fill the gaps.
+    for alias_nm, (akey, _dn) in (await _load_aliases(session, org_id)).items():
+        by_name[alias_nm] = akey
 
     fx_res = await session.execute(
         text(
@@ -156,6 +159,41 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
     return {"opponents": opponents, "upcoming": upcoming}
 
 
+async def _load_aliases(session: AsyncSession, org_id: str) -> dict[str, tuple[str, str | None]]:
+    """Manual fixture-opponent → club links saved by the user (opponent_aliases),
+    keyed by the lowercased alias name → (opp_key, display_name). Defensive: if
+    the table isn't there yet (migration not applied), behave as if empty."""
+    try:
+        res = await session.execute(
+            text("SELECT alias_name, opp_key, display_name FROM opponent_aliases WHERE organisation_id = CAST(:org AS UUID)"),
+            {"org": org_id},
+        )
+        return {r["alias_name"]: (r["opp_key"], r["display_name"]) for r in res.mappings()}
+    except Exception:
+        await session.rollback()
+        return {}
+
+
+async def save_opponent_alias(session: AsyncSession, org_id: str, opponent_name: str, opp_key: str, display_name: str | None) -> None:
+    """Persist a manual opponent match so every fixture with this name (now and
+    future) resolves to the chosen opp_key."""
+    alias = (opponent_name or "").strip().lower()
+    if not alias or not opp_key:
+        return
+    await session.execute(
+        text(
+            """
+            INSERT INTO opponent_aliases (organisation_id, alias_name, opp_key, display_name)
+            VALUES (CAST(:org AS UUID), :alias, :opp_key, :dn)
+            ON CONFLICT (organisation_id, alias_name)
+            DO UPDATE SET opp_key = EXCLUDED.opp_key, display_name = EXCLUDED.display_name, updated_at = NOW()
+            """
+        ),
+        {"org": org_id, "alias": alias, "opp_key": opp_key, "dn": display_name},
+    )
+    await session.commit()
+
+
 async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str | None, fixture_id: str | None) -> tuple[str | None, str | None]:
     """Resolve a request into (opp_key, display_name).
 
@@ -195,6 +233,10 @@ async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str 
         name = (row["opponent_name"] if row else None) or None
         if not name:
             return None, None
+        # A manual match saved by the user wins over name-matching history.
+        hit = (await _load_aliases(session, org_id)).get(name.strip().lower())
+        if hit:
+            return hit[0], hit[1] or name
         # Map the fixture's opponent name onto a stable opp_key from history.
         key_res = await session.execute(
             text(
