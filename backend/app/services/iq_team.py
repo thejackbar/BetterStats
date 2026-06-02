@@ -17,10 +17,28 @@ venues) comes from a single query.
 """
 from __future__ import annotations
 
+import logging
 import statistics
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+
+
+async def _safe(session: AsyncSession, factory, default):
+    """Run an optional add-on analysis; if it fails, log it and roll the session
+    back so the remaining add-ons (and the core response) still succeed. Keeps a
+    single broken query from blanking the whole Team analysis page."""
+    try:
+        return await factory()
+    except Exception:
+        logger.exception("team_overview add-on failed")
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        return default
 
 # "What score wins" bands when batting first.
 _BANDS = [(0, 120, "<120"), (120, 150, "120–149"), (150, 180, "150–179"), (180, 10_000, "180+")]
@@ -186,7 +204,7 @@ async def _all_rounders(session: AsyncSession, org_id: str, season_id: str | Non
             f"""
             WITH bat AS (
                 SELECT bi.player_id AS pid, COUNT(*) AS inns, COALESCE(SUM(bi.runs), 0) AS runs,
-                       COALESCE(SUM(CASE WHEN bi.not_out THEN 1 ELSE 0 END), 0) AS no
+                       COALESCE(SUM(CASE WHEN bi.not_out THEN 1 ELSE 0 END), 0) AS nout
                 FROM v_effective_batting_innings bi
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
@@ -205,7 +223,7 @@ async def _all_rounders(session: AsyncSession, org_id: str, season_id: str | Non
                 GROUP BY bs.player_id
             )
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
-                   bat.inns, bat.runs, bat.no, bowl.wkts, bowl.conceded
+                   bat.inns, bat.runs, bat.nout, bowl.wkts, bowl.conceded
             FROM players p
             JOIN bat ON bat.pid = p.id
             JOIN bowl ON bowl.pid = p.id
@@ -216,7 +234,7 @@ async def _all_rounders(session: AsyncSession, org_id: str, season_id: str | Non
     )
     rows = []
     for r in res.mappings():
-        outs = r["inns"] - r["no"]
+        outs = r["inns"] - r["nout"]
         bat_avg = round(r["runs"] / outs, 1) if outs > 0 else None
         bowl_avg = round(r["conceded"] / r["wkts"], 1) if r["wkts"] else None
         diff = round(bat_avg - bowl_avg, 1) if (bat_avg is not None and bowl_avg is not None) else None
@@ -492,6 +510,7 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
     lo, hi = min(raw.values()), max(raw.values())
     for p in pls:
         p["impact"] = round(100 * (raw[p["id"]] - lo) / (hi - lo)) if hi > lo else 50
+        p["player_id"] = p.pop("id")  # match the player_id convention used elsewhere in IQ
         for k in ("bat_pm", "wkt_pm", "field_pm", "econ"):
             p.pop(k, None)
     pls.sort(key=lambda x: x["impact"], reverse=True)
@@ -577,12 +596,12 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
                            "losses": v["losses"], "avg_score": _avg(v["_runs"])})
     venues.sort(key=lambda x: x["played"], reverse=True)
 
-    partnerships = await _partnerships(session, org_id, season_id)
-    fielding = await _team_fielding(session, org_id, season_id)
-    all_rounders = await _all_rounders(session, org_id, season_id)
-    batting_pairs = await _batting_pairs(session, org_id, season_id)
-    collapses = await _collapses(session, org_id, season_id)
-    attack = await _attack_structure(session, org_id, season_id)
+    partnerships = await _safe(session, lambda: _partnerships(session, org_id, season_id), [])
+    fielding = await _safe(session, lambda: _team_fielding(session, org_id, season_id), {"fielders": [], "keepers": [], "combos": []})
+    all_rounders = await _safe(session, lambda: _all_rounders(session, org_id, season_id), [])
+    batting_pairs = await _safe(session, lambda: _batting_pairs(session, org_id, season_id), [])
+    collapses = await _safe(session, lambda: _collapses(session, org_id, season_id), None)
+    attack = await _safe(session, lambda: _attack_structure(session, org_id, season_id), None)
     win_lose = _how_we_win_lose(record, batting, innings, partnerships)
 
     return {
