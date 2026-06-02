@@ -13,6 +13,17 @@ function surname(name) {
   return s || name || '?'
 }
 
+function RiskBadge({ risk }) {
+  if (!risk) return null
+  const color = risk === 'high' ? 'var(--pb-red)' : 'var(--pb-amber)'
+  return <span className="font-mono text-[9px] px-1.5 py-0.5 rounded uppercase" style={{ background: `color-mix(in srgb, ${color} 16%, transparent)`, color }}>{risk} risk</span>
+}
+
+function ConfChip({ c }) {
+  if (!c) return null
+  return <span className="font-mono text-[9px] px-1.5 py-0.5 rounded uppercase text-pb-faint border pb-hairline" title="confidence from sample size">{c} conf</span>
+}
+
 function sparkPath(values, w = 100, h = 40) {
   const vals = (values || []).filter(v => v !== null && v !== undefined)
   if (vals.length < 2) return { line: '', area: '' }
@@ -110,6 +121,17 @@ export default function KeyPlayersCard({ title, subtitle, players, kind = 'bat' 
           ? ((p.recent_scores || []).join('  ') || '—')
           : ((p.recent_wickets || []).map(w => `${w}w`).join('  ') || '—')}
       </div>
+
+      {/* scouting note — the rule-based analyst read */}
+      {p.key_note && (
+        <div className="mt-3 pt-3 border-t" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 18%, transparent)' }}>
+          <div className="text-[13px] leading-snug">{p.key_note}</div>
+          <div className="flex items-center justify-between gap-2 mt-2">
+            {p.plan && <span className="text-[12px] min-w-0 truncate"><span className="text-pb-faint">Plan:</span> <span className="font-medium">{p.plan}</span></span>}
+            <span className="flex items-center gap-1.5 shrink-0"><RiskBadge risk={p.risk} /><ConfChip c={p.confidence} /></span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

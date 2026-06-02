@@ -433,6 +433,65 @@ function Partnerships({ partnerships, insight }) {
   )
 }
 
+/* ── game plan / scouting synthesis (the "how to beat them" one-pager) ─────── */
+
+function PlanTile({ label, name, sub }) {
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}>
+      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">{label}</div>
+      <div className="font-display font-bold truncate">{name || '—'}</div>
+      {sub && <div className="text-pb-faintest text-[11px] mt-0.5">{sub}</div>}
+    </div>
+  )
+}
+
+function GamePlan({ plan, report }) {
+  if (!plan) return null
+  const h2h = report?.head_to_head
+  const ourBat = report?.our_performers?.batting?.[0]
+  const ourBowl = report?.our_performers?.bowling?.[0]
+  const bestVenue = (report?.venues || []).filter(v => v.wins > (v.losses || 0)).sort((a, b) => b.played - a.played)[0]
+  return (
+    <Card title="How to beat them" accent right={<Tag tone="accent">Game plan</Tag>}>
+      {plan.one_liner && <div className="font-display font-bold text-lg mb-3">{plan.one_liner}</div>}
+      <div className="grid sm:grid-cols-3 gap-2.5 mb-3">
+        <PlanTile label="Remove early" name={plan.remove_early?.name} sub={plan.remove_early?.why} />
+        <PlanTile label="See off" name={plan.see_off?.name} sub={plan.see_off?.why} />
+        <PlanTile label="Target" name={plan.target_bowler?.name || 'No clear weak link'} sub={plan.target_bowler ? `economy ${plan.target_bowler.economy}` : 'nobody’s really leaking'} />
+      </div>
+      <div className="space-y-1.5 text-sm">
+        {plan.key_warning && (
+          <div className="flex gap-2"><Icon name="info" size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--pb-red)' }} />
+            <span><span className="text-pb-faint">Watch:</span> {plan.key_warning}</span></div>
+        )}
+        {h2h?.meetings ? (
+          <div className="flex gap-2"><Icon name="info" size={15} className="mt-0.5 shrink-0 text-pb-faint" />
+            <span><span className="text-pb-faint">Record vs them:</span> {h2h.wins}–{h2h.losses}{bestVenue ? ` · strongest at ${bestVenue.venue}` : ''}</span></div>
+        ) : null}
+        {(ourBat || ourBowl) && (
+          <div className="flex gap-2"><Icon name="check" size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--pb-brand)' }} />
+            <span><span className="text-pb-faint">Our edge:</span> {ourBat ? `${ourBat.name} (${ourBat.runs} @ ${num(ourBat.average)})` : ''}{ourBat && ourBowl ? ', ' : ''}{ourBowl ? `${ourBowl.name} (${ourBowl.wickets}w)` : ''}</span></div>
+        )}
+      </div>
+      <div className="text-pb-faintest text-[11px] mt-3">Synthesised from scorecards — a starting plan, not gospel.</div>
+    </Card>
+  )
+}
+
+function WinLose({ win, lose }) {
+  if (!win?.length && !lose?.length) return null
+  return (
+    <div className="grid gap-4 lg:grid-cols-2 mb-4">
+      <Card title="How they win">
+        {win?.length ? <ul className="space-y-1.5 text-sm">{win.map((b, i) => <li key={i} className="flex gap-2"><span style={{ color: 'var(--pb-brand)' }}>▲</span><span>{b}</span></li>)}</ul> : <Empty>—</Empty>}
+      </Card>
+      <Card title="How they lose">
+        {lose?.length ? <ul className="space-y-1.5 text-sm">{lose.map((b, i) => <li key={i} className="flex gap-2"><span style={{ color: 'var(--pb-red)' }}>▼</span><span>{b}</span></li>)}</ul> : <Empty>—</Empty>}
+      </Card>
+    </div>
+  )
+}
+
 /* ── main ─────────────────────────────────────────────────────────────────── */
 
 export default function OppositionScout() {
@@ -613,6 +672,8 @@ export default function OppositionScout() {
 
       {ready && (
         <>
+          {dossier.game_plan && <div className="mb-4"><GamePlan plan={dossier.game_plan} report={report} /></div>}
+
           {/* Key players — flick-through showcase cards */}
           {(dossier.danger_batters?.length > 0 || dossier.danger_bowlers?.length > 0) && (
             <div className="grid gap-4 lg:grid-cols-2 mb-4">
@@ -620,6 +681,8 @@ export default function OppositionScout() {
               <KeyPlayersCard title="Danger bowlers" subtitle="their leading wicket-takers" players={dossier.danger_bowlers} kind="bowl" />
             </div>
           )}
+
+          <WinLose win={dossier.how_they_win} lose={dossier.how_they_lose} />
 
           {/* How they get out + where they wobble (from their scorecards) */}
           {(dossier.dismissal_breakdown?.length > 0 || dossier.partnerships?.length > 0) && (
