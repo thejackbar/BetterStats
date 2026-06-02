@@ -44,9 +44,23 @@ def _bat_avg(runs: int, inns: int, not_outs: int) -> float | None:
     return round(runs / outs, 2) if outs > 0 else None
 
 
-async def _batting_movers(session: AsyncSession, org_id: str) -> dict:
-    """Active players whose latest season's batting average diverges sharply
-    from their prior-career baseline."""
+async def _current_season_year(session: AsyncSession, org_id: str) -> int | None:
+    """The most recent season year for which the club actually has stats — used
+    to keep trend surfaces to *current* players only (not anyone ever active)."""
+    r = await session.execute(
+        text(
+            "SELECT MAX(s.year) FROM seasons s "
+            "JOIN player_season_stats pss ON pss.season_id = s.id "
+            "WHERE s.organisation_id = CAST(:org AS UUID)"
+        ),
+        {"org": org_id},
+    )
+    return r.scalar()
+
+
+async def _batting_movers(session: AsyncSession, org_id: str, current_year: int) -> dict:
+    """Current players (latest season = this season) whose batting average
+    diverges sharply from their prior-career baseline."""
     res = await session.execute(
         text(
             """
@@ -76,13 +90,14 @@ async def _batting_movers(session: AsyncSession, org_id: str) -> dict:
             JOIN players p ON p.id = l.player_id AND p.status = 'active'
             JOIN prior pr ON pr.player_id = l.player_id
             WHERE l.inns >= :min_recent AND pr.inns >= :min_prior AND l.avg IS NOT NULL
+              AND l.year = :cur
             """
         ),
-        {"org": org_id, "min_recent": _MIN_RECENT_BAT_INNS, "min_prior": _MIN_PRIOR_BAT_INNS},
+        {"org": org_id, "min_recent": _MIN_RECENT_BAT_INNS, "min_prior": _MIN_PRIOR_BAT_INNS, "cur": current_year},
     )
     risers, fallers = [], []
     for r in res.mappings():
-        latest = float(r["latest_avg"])
+        latest = round(float(r["latest_avg"]), 2)
         baseline = _bat_avg(r["prior_runs"], r["prior_inns"], r["prior_not_outs"])
         if not baseline:
             continue
@@ -100,9 +115,9 @@ async def _batting_movers(session: AsyncSession, org_id: str) -> dict:
     return {"risers": risers[:6], "fallers": fallers[:6]}
 
 
-async def _bowling_movers(session: AsyncSession, org_id: str) -> dict:
-    """Active players whose latest season's bowling average diverges sharply
-    from their prior-career baseline (lower is better)."""
+async def _bowling_movers(session: AsyncSession, org_id: str, current_year: int) -> dict:
+    """Current players (latest season = this season) whose bowling average
+    diverges sharply from their prior-career baseline (lower is better)."""
     res = await session.execute(
         text(
             """
@@ -130,13 +145,14 @@ async def _bowling_movers(session: AsyncSession, org_id: str) -> dict:
             JOIN players p ON p.id = l.player_id AND p.status = 'active'
             JOIN prior pr ON pr.player_id = l.player_id
             WHERE l.wkts >= :min_recent AND pr.wkts >= :min_prior AND l.avg IS NOT NULL
+              AND l.year = :cur
             """
         ),
-        {"org": org_id, "min_recent": _MIN_RECENT_WKTS, "min_prior": _MIN_PRIOR_WKTS},
+        {"org": org_id, "min_recent": _MIN_RECENT_WKTS, "min_prior": _MIN_PRIOR_WKTS, "cur": current_year},
     )
     risers, fallers = [], []
     for r in res.mappings():
-        latest = float(r["latest_avg"])
+        latest = round(float(r["latest_avg"]), 2)
         baseline = round(r["prior_runs"] / r["prior_wkts"], 2) if r["prior_wkts"] else None
         if not baseline:
             continue
@@ -154,8 +170,8 @@ async def _bowling_movers(session: AsyncSession, org_id: str) -> dict:
     return {"risers": risers[:6], "fallers": fallers[:6]}
 
 
-async def _emerging(session: AsyncSession, org_id: str) -> list[dict]:
-    """Ones to watch — active players in their first few seasons with a strong
+async def _emerging(session: AsyncSession, org_id: str, current_year: int) -> list[dict]:
+    """Ones to watch — current players in their first few seasons with a strong
     latest season (short history + meaningful recent output)."""
     res = await session.execute(
         text(
@@ -172,11 +188,12 @@ async def _emerging(session: AsyncSession, org_id: str) -> list[dict]:
                    r.year, r.runs, r.wkts, r.seasons
             FROM ranked r JOIN players p ON p.id = r.player_id AND p.status = 'active'
             WHERE r.rn = 1 AND r.seasons <= 3 AND (r.runs >= 200 OR r.wkts >= 8)
+              AND r.year = :cur
             ORDER BY (r.runs + r.wkts * 18) DESC
             LIMIT 6
             """
         ),
-        {"org": org_id},
+        {"org": org_id, "cur": current_year},
     )
     return [
         {"player_id": x["id"], "name": x["name"], "latest_year": x["year"],
@@ -260,12 +277,15 @@ def _role_evolution(seasons: list[dict]) -> str | None:
 
 
 async def trends_overview(session: AsyncSession, org_id: str) -> dict:
-    """Club-wide development snapshot: milestone watch + breakout/decline movers + emerging."""
+    """Club-wide development snapshot for *current* players: breakout/decline
+    movers + emerging. (Milestones moved to the notification bell.)"""
+    current_year = await _current_season_year(session, org_id)
     milestones = await get_upcoming_milestones_for_org(session, org_id, limit=12)
-    batting = await _batting_movers(session, org_id)
-    bowling = await _bowling_movers(session, org_id)
-    emerging = await _emerging(session, org_id)
+    batting = await _batting_movers(session, org_id, current_year)
+    bowling = await _bowling_movers(session, org_id, current_year)
+    emerging = await _emerging(session, org_id, current_year)
     return {
+        "current_year": current_year,
         "milestones": milestones,
         "batting": batting,
         "bowling": bowling,
@@ -664,27 +684,44 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
 
 
 async def list_players(session: AsyncSession, org_id: str) -> list[dict]:
-    """Active players (with a little career context) for the trends picker."""
+    """Current-season players (with this-season stats) for the trends picker.
+    Historical-only names are excluded — the picker is for the active squad."""
+    cur = await _current_season_year(session, org_id)
+    if cur is None:
+        return []
     res = await session.execute(
         text(
             """
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                   t.id::text AS squad_id, t.name AS squad_name,
                    COALESCE(SUM(pss.runs), 0) AS runs,
+                   COALESCE(SUM(pss.batting_innings), 0) AS inns,
+                   COALESCE(SUM(pss.not_outs), 0) AS not_outs,
                    COALESCE(SUM(pss.wickets), 0) AS wickets,
-                   COALESCE(SUM(pss.matches), 0) AS matches,
-                   COUNT(pss.season_id) AS seasons
+                   COALESCE(SUM(pss.runs_conceded), 0) AS conceded,
+                   COALESCE(SUM(pss.matches), 0) AS matches
             FROM players p
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN seasons s ON s.id = pss.season_id
+            LEFT JOIN teams t ON t.id = p.squad_team_id
             WHERE p.organisation_id = CAST(:org AS UUID) AND p.status = 'active'
-            GROUP BY p.id, name
-            HAVING COUNT(pss.season_id) > 0
+              AND s.year = :cur
+            GROUP BY p.id, name, t.id, t.name
+            HAVING COALESCE(SUM(pss.matches), 0) > 0
             ORDER BY name
             """
         ),
-        {"org": org_id},
+        {"org": org_id, "cur": cur},
     )
-    return [
-        {"player_id": r["id"], "name": r["name"], "runs": r["runs"],
-         "wickets": r["wickets"], "matches": r["matches"], "seasons": r["seasons"]}
-        for r in res.mappings()
-    ]
+    out = []
+    for r in res.mappings():
+        outs = r["inns"] - r["not_outs"]
+        bat_avg = round(r["runs"] / outs, 2) if outs > 0 else None
+        bowl_avg = round(r["conceded"] / r["wickets"], 2) if r["wickets"] else None
+        out.append({
+            "player_id": r["id"], "name": r["name"], "runs": r["runs"],
+            "wickets": r["wickets"], "matches": r["matches"],
+            "bat_avg": bat_avg, "bowl_avg": bowl_avg,
+            "squad_id": r["squad_id"], "squad_name": r["squad_name"],
+        })
+    return out
