@@ -244,6 +244,7 @@ export default function PlayerTrends() {
             {/* Deep dive — conversion, dismissals, position, opposition (brief §1) */}
             {deep && deep.innings_count > 0 && (
               <>
+                <h3 className="font-display font-bold text-sm uppercase tracking-wide2 text-pb-faint mt-7 mb-2 pt-5 border-t pb-hairline">Deep dive</h3>
                 {deep.scouting_note && (
                   <div className="mt-4"><Card title="Scouting note" accent><div className="text-sm">{deep.scouting_note}</div></Card></div>
                 )}
@@ -288,6 +289,7 @@ export default function PlayerTrends() {
                       <span>20+ contributions: <span className="pb-num">{deep.reliability.contribution_rate}%</span></span>
                       {deep.reliability.variability != null && <span>Variability: <span className="pb-num">{deep.reliability.variability}</span></span>}
                     </div>
+                    <div className="text-pb-faintest text-[11px] mt-2.5">Floor / median / ceiling are the 25th, 50th and 90th percentiles of their scores. Higher variability = more boom-or-bust.</div>
                   </Card></div>
                 )}
 
@@ -315,6 +317,7 @@ export default function PlayerTrends() {
                         </div>
                       ))}
                     </div>
+                    <div className="text-pb-faintest text-[11px] mt-2.5">Closeness by career batting average, strike rate, bowling average and economy across the squad.</div>
                   </Card></div>
                 )}
 
