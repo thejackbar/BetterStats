@@ -145,6 +145,7 @@ export default function BetterIQHome() {
                 </button>
               ))}
             </div>
+            <div className="text-pb-faintest text-[11px] mt-3 pt-3 border-t pb-hairline">Impact blends per-match runs, wickets, economy and fielding dismissals, z-scored across the squad and scaled 0–100.</div>
           </div>
         </div>
       )}
