@@ -176,6 +176,7 @@ export default function PlayerTrends() {
   const [playerId, setPlayerId] = useState(searchParams.get('player') || null)
   const [detail, setDetail] = useState(null)
   const [deep, setDeep] = useState(null)
+  const [bdeep, setBdeep] = useState(null)
   const [squad, setSquad] = useState('')
 
   useEffect(() => {
@@ -184,16 +185,17 @@ export default function PlayerTrends() {
   }, [])
 
   useEffect(() => {
-    if (!playerId) { setDetail(null); setDeep(null); return }
+    if (!playerId) { setDetail(null); setDeep(null); setBdeep(null); return }
     let alive = true
-    setDetail(null); setDeep(null)
+    setDetail(null); setDeep(null); setBdeep(null)
     api.iqTrendsPlayer(playerId).then(d => { if (alive) setDetail(d) }).catch(() => { if (alive) setDetail({ error: true }) })
     api.iqPlayerDeepDive(playerId).then(d => { if (alive) setDeep(d) }).catch(() => { if (alive) setDeep(null) })
+    api.iqBowlerDeepDive(playerId).then(d => { if (alive) setBdeep(d) }).catch(() => { if (alive) setBdeep(null) })
     return () => { alive = false }
   }, [playerId])
 
   const pick = (id) => { setPlayerId(id); setSearchParams({ player: id }, { replace: true }) }
-  const clear = () => { setPlayerId(null); setDetail(null); setDeep(null); setSearchParams({}, { replace: true }) }
+  const clear = () => { setPlayerId(null); setDetail(null); setDeep(null); setBdeep(null); setSearchParams({}, { replace: true }) }
 
   const squads = useMemo(() => {
     const m = new Map()
@@ -319,6 +321,33 @@ export default function PlayerTrends() {
                   </Card></div>
                 )}
 
+                {(deep.batting_style || deep.context) && (
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    {deep.batting_style && (
+                      <Card title="Batting style" right={deep.batting_style.profile ? <Tag tone="accent">{deep.batting_style.profile}</Tag> : null}>
+                        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                          {[['Strike rate', fmt2(deep.batting_style.strike_rate)], ['Boundary %', deep.batting_style.boundary_pct == null ? '—' : `${deep.batting_style.boundary_pct}%`], ['Balls/boundary', num(deep.batting_style.balls_per_boundary)], ['4s / 6s', `${deep.batting_style.fours}/${deep.batting_style.sixes}`]].map(([l, v]) => (
+                            <div key={l} className="text-center"><div className="font-display font-bold text-lg pb-num leading-none">{v}</div><div className="text-pb-faint text-[10px] uppercase tracking-wide2 mt-0.5">{l}</div></div>
+                          ))}
+                        </div>
+                        <div className="text-pb-faintest text-[11px] mt-2.5">Boundary % is the share of runs from 4s and 6s. Dot-ball and ball-range splits need ball-by-ball data we don't hold.</div>
+                      </Card>
+                    )}
+                    {deep.context && (
+                      <Card title="By match situation" right={<span className="text-pb-faint text-xs">batting average</span>}>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          {[['In wins', deep.context.wins], ['In losses', deep.context.losses], ['Batting first', deep.context.bat_first], ['Chasing', deep.context.chasing]].map(([l, c]) => (
+                            <div key={l} className="rounded-xl p-2.5" style={{ background: 'var(--pb-surface2)' }}>
+                              <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-0.5">{l}</div>
+                              {c ? <div className="pb-num"><span className="font-display font-bold text-lg">{c.average == null ? '—' : fmt2(c.average)}</span> <span className="text-pb-faintest text-[11px]">avg · {c.innings} inns</span></div> : <div className="text-pb-faintest text-[11px]">—</div>}
+                            </div>
+                          ))}
+                        </div>
+                      </Card>
+                    )}
+                  </div>
+                )}
+
                 {deep.selection_value && (
                   <div className="mt-4"><Card title="Selection value" right={<span className="text-pb-faint text-xs">team results</span>}>
                     <div className="grid grid-cols-2 gap-3">
@@ -401,7 +430,19 @@ export default function PlayerTrends() {
                   </Card></div>
                 )}
 
-                {deep.bowling_profile && (() => {
+              </>
+            )}
+
+            {/* Bowling deep dive — career profile + wicket quality, fielders, discipline (brief §2) */}
+            {((deep && deep.bowling_profile) || (bdeep && bdeep.wickets > 0)) && (
+              <>
+                <h3 className="font-display font-bold text-sm uppercase tracking-wide2 text-pb-faint mt-7 mb-2 pt-5 border-t pb-hairline">Bowling deep dive</h3>
+
+                {bdeep?.scouting_note && (
+                  <div className="mt-4"><Card title="Bowling note" accent><div className="text-sm">{bdeep.scouting_note}</div></Card></div>
+                )}
+
+                {deep?.bowling_profile && (() => {
                   const bp = deep.bowling_profile
                   const wp = deep.wickets_by_position || []
                   const sumPos = (lo, hi) => wp.filter(r => r.batting_position >= lo && r.batting_position <= hi).reduce((a, r) => a + (r.wickets || 0), 0)
@@ -439,6 +480,41 @@ export default function PlayerTrends() {
                     </Card></div>
                   )
                 })()}
+
+                {bdeep?.quality && (
+                  <div className="mt-4"><Card title="Wicket quality" right={<span className="text-pb-faint text-xs">who they dismiss</span>}>
+                    <div className="flex h-2.5 rounded-full overflow-hidden bg-pb-surface2 mb-3">
+                      {[['New (<10)', bdeep.quality.new, 'var(--pb-accent)'], ['Started (10–29)', bdeep.quality.started, 'var(--pb-amber)'], ['Set (30+)', bdeep.quality.set, 'var(--pb-dim)']].map(([l, v, c]) => (v ? <div key={l} title={`${l}: ${v}`} style={{ flexGrow: v, background: c }} /> : null))}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div><div className="font-display font-bold text-lg pb-num">{bdeep.quality.new_pct == null ? '—' : `${bdeep.quality.new_pct}%`}</div><div className="text-pb-faint text-[10px] uppercase tracking-wide2">caught new</div></div>
+                      <div><div className="font-display font-bold text-lg pb-num">{bdeep.quality.set_pct == null ? '—' : `${bdeep.quality.set_pct}%`}</div><div className="text-pb-faint text-[10px] uppercase tracking-wide2">removed set</div></div>
+                      <div><div className="font-display font-bold text-lg pb-num">{num(bdeep.quality.scalp_value)}</div><div className="text-pb-faint text-[10px] uppercase tracking-wide2">avg scalp</div></div>
+                    </div>
+                    <div className="text-pb-faintest text-[11px] mt-2.5">“Set” = the batter had 30+ when dismissed; “new” = under 10. Avg scalp is the mean score of the batters they removed{bdeep.quality.ducks ? ` · ${bdeep.quality.ducks} duck${bdeep.quality.ducks === 1 ? '' : 's'} inflicted` : ''}.</div>
+                  </Card></div>
+                )}
+
+                {bdeep?.fielders?.length > 0 && (
+                  <div className="mt-4"><Card title="Who catches for them" right={<span className="text-pb-faint text-xs">caught · stumped · run out</span>}>
+                    <div className="flex flex-wrap gap-2">
+                      {bdeep.fielders.map((f, i) => (
+                        <span key={i} className="text-[12px] px-2 py-0.5 rounded-full" style={{ background: 'var(--pb-surface2)' }}>{f.name} <span className="pb-num text-pb-faint">×{f.count}</span></span>
+                      ))}
+                    </div>
+                  </Card></div>
+                )}
+
+                {bdeep?.discipline && (
+                  <div className="mt-4"><Card title="Discipline" right={<span className="text-pb-faint text-xs">{bdeep.discipline.overs} overs</span>}>
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                      {[['Extras/over', fmt2(bdeep.discipline.extras_per_over)], ['Wides/over', fmt2(bdeep.discipline.wides_per_over)], ['Wides', num(bdeep.discipline.wides, 0)], ['No-balls', num(bdeep.discipline.no_balls, 0)]].map(([l, v]) => (
+                        <div key={l} className="text-center"><div className="font-display font-bold text-lg pb-num leading-none">{v}</div><div className="text-pb-faint text-[10px] uppercase tracking-wide2 mt-0.5">{l}</div></div>
+                      ))}
+                    </div>
+                    <div className="text-pb-faintest text-[11px] mt-2.5">Extras (wides + no-balls) per over across their spells. Only shown where the scorecards record extras.</div>
+                  </Card></div>
+                )}
               </>
             )}
           </>

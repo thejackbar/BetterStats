@@ -940,6 +940,8 @@ export const api = {
   iqTrendsPlayers: () => request('/iq/trends/players'),
   iqTrendsPlayer: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}`),
   iqPlayerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/deep`),
+  // Bowler wicket-quality deep dive (set vs new batters, fielders, discipline).
+  iqBowlerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/bowling-deep`),
 
   // ─── BetterIQ: Team self-analysis ───────────────────────
   iqTeamSeasons: () => request('/iq/team/seasons'),
@@ -952,6 +954,10 @@ export const api = {
     return request(`/iq/team/overview${s ? `?${s}` : ''}`)
   },
   iqTeamMvp: (seasonId) => request(`/iq/team/mvp${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
+
+  // ─── BetterIQ: Post-match review ────────────────────────
+  iqReviewGames: () => request('/iq/review/games'),
+  iqGameReview: (gameId) => request(`/iq/review/game/${encodeURIComponent(gameId)}`),
 }
 
 function _iqQs(opponent, fixtureId, team) {

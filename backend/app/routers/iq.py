@@ -19,6 +19,7 @@ from app.models.db import Organisation, get_db
 from app.routers.auth import get_current_club
 from app.services import iq as iq_service
 from app.services import iq_opponent
+from app.services import iq_review
 from app.services import iq_selection
 from app.services import iq_team
 from app.services import iq_trends
@@ -192,6 +193,20 @@ async def trends_player_deep(
     return result
 
 
+@router.get("/trends/player/{player_id}/bowling-deep")
+async def trends_player_bowling_deep(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Wicket quality (set vs new batters), fielder combos, extras discipline and
+    a bowling scouting note for one bowler (analytics brief §2.5/§2.9)."""
+    result = await iq_trends.bowler_deep_dive(db, str(club.id), player_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return result
+
+
 # ─── Team self-analysis (analytics brief §7/§8) ──────────────────────────────
 
 
@@ -234,3 +249,29 @@ async def team_mvp(
 ):
     """Club MVP board — a blended player-impact rating from scorecard rates."""
     return await iq_team.player_impact(db, str(club.id), season_id=season_id)
+
+
+# ─── Post-match review (analytics brief §16.8) ───────────────────────────────
+
+
+@router.get("/review/games")
+async def review_games(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Recent completed games to review (newest first)."""
+    return await iq_review.list_review_games(db, str(club.id))
+
+
+@router.get("/review/game/{game_id}")
+async def review_game(
+    game_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """One game's review — top contributions, best stand, extras, a collapse check
+    and a what-changed-the-game synthesis."""
+    result = await iq_review.game_review(db, str(club.id), game_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+    return result

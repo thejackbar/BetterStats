@@ -27,6 +27,7 @@ const NAV = [
   { to: '/admin/betteriq/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_IQ },
   { to: '/admin/betteriq/trends', label: 'Player trends', icon: 'ladders', cap: CAP.MANAGE_IQ },
   { to: '/admin/betteriq/team', label: 'Team', icon: 'teams', cap: CAP.MANAGE_IQ },
+  { to: '/admin/betteriq/review', label: 'Match review', icon: 'overview', cap: CAP.MANAGE_IQ },
 ]
 
 export default function IQLayout({ children, title, actions }) {
