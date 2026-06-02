@@ -496,6 +496,39 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
     best_opp = sorted(rated, key=lambda o: o["average"], reverse=True)[:4]
     worst_opp = sorted([o for o in rated if o["innings"] >= 3], key=lambda o: o["average"])[:4]
 
+    # Selection value (brief §6.2) — team win rate with vs without this player.
+    sv = (await session.execute(
+        text(
+            """
+            WITH og AS (
+                SELECT g.id AS gid, g.result FROM v_effective_games g
+                JOIN grades gr ON gr.id = g.grade_id JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org AS UUID) AND g.result IN ('WIN', 'LOSS')
+            ),
+            pg AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID))
+            SELECT
+                COUNT(*) FILTER (WHERE gid IN (SELECT game_id FROM pg)) AS with_g,
+                COUNT(*) FILTER (WHERE gid IN (SELECT game_id FROM pg) AND result = 'WIN') AS with_w,
+                COUNT(*) FILTER (WHERE gid NOT IN (SELECT game_id FROM pg)) AS wo_g,
+                COUNT(*) FILTER (WHERE gid NOT IN (SELECT game_id FROM pg) AND result = 'WIN') AS wo_w
+            FROM og
+            """
+        ),
+        {"org": org_id, "pid": player_id},
+    )).mappings().first()
+
+    def _wp(w, g):
+        return round(100 * w / g) if g else None
+
+    selection_value = None
+    if sv and (sv["with_g"] or sv["wo_g"]):
+        selection_value = {
+            "with": {"games": sv["with_g"], "win_pct": _wp(sv["with_w"], sv["with_g"])},
+            "without": {"games": sv["wo_g"], "win_pct": _wp(sv["wo_w"], sv["wo_g"])},
+        }
+        wp_with, wp_wo = selection_value["with"]["win_pct"], selection_value["without"]["win_pct"]
+        selection_value["swing"] = (wp_with - wp_wo) if (wp_with is not None and wp_wo is not None) else None
+
     # Scouting note (community-CricViz card §16.9).
     role = max(by_position, key=lambda x: x["innings"])["position"].lower() if by_position else "batter"
     bits = [f"Bats mostly as {('an ' if role[0] in 'aeiou' else 'a ')}{role} option."]
@@ -517,6 +550,7 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         "by_position": by_position,
         "best_position": best_pos["position"] if best_pos else None,
         "by_opposition": {"best": best_opp, "worst": worst_opp},
+        "selection_value": selection_value,
         "scouting_note": scouting_note,
     }
 

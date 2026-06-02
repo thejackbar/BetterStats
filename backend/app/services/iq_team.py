@@ -120,6 +120,60 @@ def _win_pct(w: int, dec: int) -> float | None:
     return round(100 * w / dec, 1) if dec else None
 
 
+async def _team_fielding(session: AsyncSession, org_id: str, season_id: str | None) -> dict:
+    """Top fielders, keepers and run-out specialists, plus the fielder→bowler
+    combinations that take the most catches (brief §3/§9)."""
+    season_clause = "AND s.id = CAST(:season AS UUID)" if season_id else ""
+    res = await session.execute(
+        text(
+            f"""
+            SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.catches_non_wk), 0) AS ct,
+                   COALESCE(SUM(pss.run_outs), 0) AS ro,
+                   COALESCE(SUM(pss.catches_wk), 0) AS ctwk,
+                   COALESCE(SUM(pss.stumpings), 0) AS st
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            JOIN seasons s ON s.id = pss.season_id
+            WHERE p.organisation_id = CAST(:org AS UUID) {season_clause}
+            GROUP BY p.id, name
+            """
+        ),
+        {"org": org_id, "season": season_id},
+    )
+    fielders, keepers = [], []
+    for r in res.mappings():
+        if r["ct"] or r["ro"]:
+            fielders.append({"player_id": r["id"], "name": r["name"], "catches": r["ct"], "run_outs": r["ro"], "total": r["ct"] + r["ro"]})
+        if r["ctwk"] or r["st"]:
+            keepers.append({"player_id": r["id"], "name": r["name"], "catches": r["ctwk"], "stumpings": r["st"], "total": r["ctwk"] + r["st"]})
+    fielders.sort(key=lambda x: (x["total"], x["catches"]), reverse=True)
+    keepers.sort(key=lambda x: x["total"], reverse=True)
+
+    combos_res = await session.execute(
+        text(
+            f"""
+            SELECT COALESCE(pf.display_name_override, pf.name) AS fielder,
+                   COALESCE(pb.display_name_override, pb.name) AS bowler, COUNT(*) AS n
+            FROM bowler_wickets bw
+            JOIN players pf ON pf.id = bw.fielder_id
+            JOIN players pb ON pb.id = bw.bowler_id
+            JOIN v_effective_games g ON g.id = bw.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID) AND bw.fielder_id IS NOT NULL {season_clause}
+            GROUP BY pf.id, fielder, pb.id, bowler
+            HAVING COUNT(*) >= 3
+            ORDER BY n DESC
+            LIMIT 8
+            """
+        ),
+        {"org": org_id, "season": season_id},
+    )
+    combos = [{"fielder": r["fielder"], "bowler": r["bowler"], "count": r["n"]} for r in combos_res.mappings()]
+    return {"fielders": fielders[:8], "keepers": keepers[:5], "combos": combos}
+
+
 async def team_overview(session: AsyncSession, org_id: str, season_id: str | None = None) -> dict:
     games = await _per_game(session, org_id, season_id)
     decided = [g for g in games if g["result"] in ("WIN", "LOSS")]
@@ -200,6 +254,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
     venues.sort(key=lambda x: x["played"], reverse=True)
 
     partnerships = await _partnerships(session, org_id, season_id)
+    fielding = await _team_fielding(session, org_id, season_id)
     win_lose = _how_we_win_lose(record, batting, innings, partnerships)
 
     return {
@@ -210,6 +265,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
         "score_bands": score_bands,
         "venues": venues[:10],
         "partnerships": partnerships,
+        "fielding": fielding,
         "how_we_win": win_lose[0],
         "how_we_lose": win_lose[1],
         "coverage": {

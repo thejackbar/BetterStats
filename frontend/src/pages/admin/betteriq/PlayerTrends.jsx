@@ -276,6 +276,16 @@ export default function PlayerTrends() {
                   )}
                 </div>
 
+                {deep.selection_value && (
+                  <div className="mt-4"><Card title="Selection value" right={<span className="text-pb-faint text-xs">team results</span>}>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}><div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Win % with them</div><div className="font-display font-bold text-2xl pb-num">{deep.selection_value.with.win_pct ?? '—'}%</div><div className="text-pb-faintest text-[11px]">{deep.selection_value.with.games} games</div></div>
+                      <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}><div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Win % without</div><div className="font-display font-bold text-2xl pb-num">{deep.selection_value.without.win_pct ?? '—'}%</div><div className="text-pb-faintest text-[11px]">{deep.selection_value.without.games} games</div></div>
+                    </div>
+                    {deep.selection_value.swing != null && <div className="text-[12px] mt-2" style={{ color: deep.selection_value.swing >= 0 ? 'var(--pb-brand)' : 'var(--pb-red)' }}>{deep.selection_value.swing >= 0 ? '+' : ''}{deep.selection_value.swing} pts with him in the side.</div>}
+                  </Card></div>
+                )}
+
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
                   {deep.by_position?.length > 0 && (
                     <Card title="By batting position" right={deep.best_position ? <Tag tone="accent">Best: {deep.best_position}</Tag> : null}>

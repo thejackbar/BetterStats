@@ -492,6 +492,27 @@ function WinLose({ win, lose }) {
   )
 }
 
+/* ── opposition memory: what happened last time (instant report) ──────────── */
+
+function LastMeeting({ lm }) {
+  if (!lm) return null
+  const r = lm.result
+  const color = r === 'WIN' ? 'var(--pb-brand)' : r === 'LOSS' ? 'var(--pb-red)' : 'var(--pb-amber)'
+  return (
+    <Card title="Last time we met" right={<span className="text-pb-faint text-xs">{lm.played_at || ''}</span>}>
+      <div className="flex flex-wrap items-baseline gap-2 mb-2">
+        <span className="font-display font-bold text-lg" style={{ color }}>{r || '—'}</span>
+        <span className="text-pb-faint text-sm pb-num">{lm.our_runs} vs {lm.opp_runs}</span>
+        {lm.venue && <span className="text-pb-faintest text-xs">· {lm.venue}</span>}
+      </div>
+      <div className="text-sm space-y-0.5">
+        {lm.our_top_bat && <div><span className="text-pb-faint">Top bat:</span> {lm.our_top_bat.name} <span className="pb-num">{lm.our_top_bat.runs}</span></div>}
+        {lm.our_top_bowl && <div><span className="text-pb-faint">Top bowler:</span> {lm.our_top_bowl.name} <span className="pb-num">{lm.our_top_bowl.wickets}/{lm.our_top_bowl.runs}</span></div>}
+      </div>
+    </Card>
+  )
+}
+
 /* ── main ─────────────────────────────────────────────────────────────────── */
 
 export default function OppositionScout() {
@@ -648,6 +669,11 @@ export default function OppositionScout() {
         {report === null ? <div className="pb-card p-5 animate-pulse text-pb-faint text-sm">Loading head-to-head…</div> : <HeadToHead h2h={report.head_to_head} />}
         {report && <OurRecord performers={report.our_performers} />}
       </div>
+
+      {/* Opposition memory: what happened last time */}
+      {report && !report.error && report.last_meeting && (
+        <div className="mb-4"><LastMeeting lm={report.last_meeting} /></div>
+      )}
 
       {/* Instant: venue record + bowler match-ups (from held data) */}
       {report && !report.error && (report.venues?.length > 0 || report.matchups?.bowler_dominance?.length > 0) && (

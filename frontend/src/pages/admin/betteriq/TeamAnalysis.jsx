@@ -201,6 +201,27 @@ export default function TeamAnalysis() {
             </div>
           )}
 
+          {data.fielding && (data.fielding.fielders?.length > 0 || data.fielding.keepers?.length > 0) && (
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <Card title="Top fielders">
+                {data.fielding.fielders?.length ? data.fielding.fielders.map(f => (
+                  <div key={f.player_id} className="flex justify-between gap-2 py-0.5 text-sm"><span className="truncate">{f.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{f.catches}c{f.run_outs ? ` · ${f.run_outs} ro` : ''}</span></div>
+                )) : <Empty>—</Empty>}
+                {data.fielding.combos?.length > 0 && (
+                  <div className="mt-3 pt-3 border-t pb-hairline">
+                    <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1">Catching combos</div>
+                    {data.fielding.combos.slice(0, 5).map((c, i) => <div key={i} className="text-[12px] text-pb-faint py-0.5">{c.fielder} off {c.bowler} <span className="pb-num">×{c.count}</span></div>)}
+                  </div>
+                )}
+              </Card>
+              <Card title="Wicketkeepers">
+                {data.fielding.keepers?.length ? data.fielding.keepers.map(k => (
+                  <div key={k.player_id} className="flex justify-between gap-2 py-0.5 text-sm"><span className="truncate">{k.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{k.catches}c · {k.stumpings}st</span></div>
+                )) : <Empty>No keeper data.</Empty>}
+              </Card>
+            </div>
+          )}
+
           {data.coverage?.notes?.length > 0 && (
             <div className="text-pb-faintest text-[11px] mt-3 flex items-start gap-1.5">
               <Icon name="info" size={13} className="mt-0.5 shrink-0" />
