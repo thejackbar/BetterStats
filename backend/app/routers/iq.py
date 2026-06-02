@@ -164,6 +164,20 @@ async def trends_player(
     return result
 
 
+@router.get("/trends/player/{player_id}/deep")
+async def trends_player_deep(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Conversion & starts, dismissal patterns, by-position, by-opposition and a
+    scouting note for one player (analytics brief §1)."""
+    result = await iq_trends.player_deep_dive(db, str(club.id), player_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return result
+
+
 # ─── Team self-analysis (analytics brief §7/§8) ──────────────────────────────
 
 

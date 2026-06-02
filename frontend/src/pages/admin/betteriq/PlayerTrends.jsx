@@ -151,6 +151,7 @@ export default function PlayerTrends() {
   const [players, setPlayers] = useState([])
   const [playerId, setPlayerId] = useState(searchParams.get('player') || null)
   const [detail, setDetail] = useState(null)
+  const [deep, setDeep] = useState(null)
   const [q, setQ] = useState('')
 
   useEffect(() => {
@@ -159,15 +160,16 @@ export default function PlayerTrends() {
   }, [])
 
   useEffect(() => {
-    if (!playerId) { setDetail(null); return }
+    if (!playerId) { setDetail(null); setDeep(null); return }
     let alive = true
-    setDetail(null)
+    setDetail(null); setDeep(null)
     api.iqTrendsPlayer(playerId).then(d => { if (alive) setDetail(d) }).catch(() => { if (alive) setDetail({ error: true }) })
+    api.iqPlayerDeepDive(playerId).then(d => { if (alive) setDeep(d) }).catch(() => { if (alive) setDeep(null) })
     return () => { alive = false }
   }, [playerId])
 
   const pick = (id) => { setPlayerId(id); setSearchParams({ player: id }, { replace: true }) }
-  const clear = () => { setPlayerId(null); setDetail(null); setSearchParams({}, { replace: true }) }
+  const clear = () => { setPlayerId(null); setDetail(null); setDeep(null); setSearchParams({}, { replace: true }) }
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase()
@@ -238,6 +240,68 @@ export default function PlayerTrends() {
                 <Trajectory seasons={detail.seasons} />
               </Card>
             </div>
+
+            {/* Deep dive — conversion, dismissals, position, opposition (brief §1) */}
+            {deep && deep.innings_count > 0 && (
+              <>
+                {deep.scouting_note && (
+                  <div className="mt-4"><Card title="Scouting note" accent><div className="text-sm">{deep.scouting_note}</div></Card></div>
+                )}
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  {deep.conversion && (
+                    <Card title="Starts & conversion" right={<span className="text-pb-faint text-xs">{deep.conversion.innings} innings</span>}>
+                      <div className="flex h-2.5 rounded-full overflow-hidden bg-pb-surface2 mb-3">
+                        {[['<10', deep.conversion.under_10, 'var(--pb-red)'], ['10–24', deep.conversion.b10_24, 'var(--pb-amber)'], ['25–49', deep.conversion.b25_49, 'var(--pb-dim)'], ['50+', deep.conversion.fifties + deep.conversion.hundreds, 'var(--pb-accent)']].map(([l, v, c]) => (v ? <div key={l} title={`${l}: ${v}`} style={{ flexGrow: v, background: c }} /> : null))}
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div><div className="font-display font-bold text-lg pb-num">{deep.conversion.start_pct}%</div><div className="text-pb-faint text-[10px] uppercase tracking-wide2">reach 25</div></div>
+                        <div><div className="font-display font-bold text-lg pb-num">{deep.conversion.convert_25_to_50 === null ? '—' : `${deep.conversion.convert_25_to_50}%`}</div><div className="text-pb-faint text-[10px] uppercase tracking-wide2">25→50</div></div>
+                        <div><div className="font-display font-bold text-lg pb-num">{deep.conversion.fifties}/{deep.conversion.hundreds}</div><div className="text-pb-faint text-[10px] uppercase tracking-wide2">50s/100s</div></div>
+                      </div>
+                    </Card>
+                  )}
+                  {deep.dismissals?.length > 0 && (
+                    <Card title="How they get out">
+                      <div className="space-y-1.5">
+                        {deep.dismissals.map(d => (
+                          <div key={d.type} className="flex items-center gap-2 text-sm">
+                            <span className="w-24 capitalize text-pb-faint shrink-0">{d.type}</span>
+                            <div className="flex-1 h-2 rounded-full bg-pb-surface2 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${d.pct}%`, background: 'var(--pb-accent)' }} /></div>
+                            <span className="w-10 text-right pb-num shrink-0">{d.pct}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  {deep.by_position?.length > 0 && (
+                    <Card title="By batting position" right={deep.best_position ? <Tag tone="accent">Best: {deep.best_position}</Tag> : null}>
+                      <table className="w-full text-sm">
+                        <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left"><th className="py-1 font-medium">Position</th><th className="py-1 font-medium text-right">Inns</th><th className="py-1 font-medium text-right">Runs</th><th className="py-1 font-medium text-right">Avg</th></tr></thead>
+                        <tbody>{deep.by_position.map(r => <tr key={r.position} className="border-t pb-hairline"><td className="py-1.5">{r.position}</td><td className="py-1.5 text-right pb-num text-pb-faint">{r.innings}</td><td className="py-1.5 text-right pb-num">{r.runs}</td><td className="py-1.5 text-right pb-num">{num(r.average)}</td></tr>)}</tbody>
+                      </table>
+                    </Card>
+                  )}
+                  {(deep.by_opposition?.best?.length > 0 || deep.by_opposition?.worst?.length > 0) && (
+                    <Card title="By opposition">
+                      <div className="grid sm:grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1">Dominates</div>
+                          {deep.by_opposition.best.length ? deep.by_opposition.best.map(o => <div key={o.name} className="flex justify-between gap-2 py-0.5"><span className="truncate">{o.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{o.runs} @ {num(o.average)}</span></div>) : <Empty>—</Empty>}
+                        </div>
+                        <div>
+                          <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1">Struggles vs</div>
+                          {deep.by_opposition.worst.length ? deep.by_opposition.worst.map(o => <div key={o.name} className="flex justify-between gap-2 py-0.5"><span className="truncate">{o.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{o.runs} @ {num(o.average)}</span></div>) : <Empty>—</Empty>}
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+              </>
+            )}
           </>
         )}
       </IQLayout>

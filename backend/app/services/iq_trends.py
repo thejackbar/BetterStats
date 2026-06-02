@@ -377,6 +377,150 @@ async def player_trend(session: AsyncSession, org_id: str, player_id: str) -> di
     }
 
 
+# ─── Player deep-dive (analytics brief §1.4/1.5/1.9/1.10) ─────────────────────
+
+_DISM_MAP = {
+    "caught": "caught", "caught behind": "caught", "caught keeper": "caught",
+    "c&b": "caught & bowled", "caught and bowled": "caught & bowled", "caught & bowled": "caught & bowled",
+    "bowled": "bowled", "lbw": "lbw", "leg before wicket": "lbw",
+    "run out": "run out", "stumped": "stumped", "hit wicket": "hit wicket",
+}
+_POS_BUCKETS = [("Opening", 1, 2), ("First drop", 3, 3), ("Middle order", 4, 6), ("Lower order", 7, 8), ("Tail", 9, 11)]
+
+
+def _dism_label(dt: str | None) -> str | None:
+    d = (dt or "").strip().lower()
+    if not d or "not out" in d:
+        return None
+    return _DISM_MAP.get(d, d)
+
+
+async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -> dict | None:
+    """Conversion & starts, dismissal patterns, batting-by-position and
+    by-opposition + a one-line scouting note — all from one innings pull."""
+    prow = await session.execute(
+        text(
+            "SELECT COALESCE(display_name_override, name) AS name FROM players"
+            " WHERE id = CAST(:pid AS UUID) AND organisation_id = CAST(:org AS UUID)"
+        ),
+        {"pid": player_id, "org": org_id},
+    )
+    p = prow.mappings().first()
+    if not p:
+        return None
+
+    res = await session.execute(
+        text(
+            """
+            SELECT bi.runs, bi.not_out, bi.dismissal_type, bi.batting_position,
+                   COALESCE(g.opp_org_id, g.opp_club_name) AS opp_key, g.opp_club_name AS opp_name
+            FROM v_effective_batting_innings bi
+            JOIN v_effective_games g ON g.id = bi.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE bi.player_id = CAST(:pid AS UUID) AND s.organisation_id = CAST(:org AS UUID)
+              AND bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL
+            """
+        ),
+        {"pid": player_id, "org": org_id},
+    )
+    inns = [dict(r) for r in res.mappings()]
+    base = {"player": {"player_id": player_id, "name": p["name"]}, "innings_count": len(inns)}
+    if not inns:
+        return {**base, "conversion": None, "dismissals": [], "by_position": [], "by_opposition": {"best": [], "worst": []}, "scouting_note": None}
+
+    n = len(inns)
+    starts = sum(1 for r in inns if r["runs"] >= 25)
+    fifties_plus = sum(1 for r in inns if r["runs"] >= 50)
+    hundreds = sum(1 for r in inns if r["runs"] >= 100)
+    conversion = {
+        "innings": n,
+        "under_10": sum(1 for r in inns if r["runs"] < 10),
+        "b10_24": sum(1 for r in inns if 10 <= r["runs"] < 25),
+        "b25_49": sum(1 for r in inns if 25 <= r["runs"] < 50),
+        "fifties": fifties_plus - hundreds,
+        "hundreds": hundreds,
+        "starts": starts,
+        "double_figures_pct": round(100 * sum(1 for r in inns if r["runs"] >= 10) / n),
+        "start_pct": round(100 * starts / n),
+        "convert_25_to_50": round(100 * fifties_plus / starts) if starts else None,
+        "convert_50_to_100": round(100 * hundreds / fifties_plus) if fifties_plus else None,
+    }
+
+    # Dismissal patterns (dismissed innings only).
+    dism: dict[str, int] = {}
+    for r in inns:
+        if r["not_out"]:
+            continue
+        lbl = _dism_label(r["dismissal_type"])
+        if lbl:
+            dism[lbl] = dism.get(lbl, 0) + 1
+    total_out = sum(dism.values())
+    dismissals = sorted(
+        [{"type": k, "count": v, "pct": round(100 * v / total_out)} for k, v in dism.items()],
+        key=lambda d: d["count"], reverse=True,
+    ) if total_out else []
+
+    # Batting by position bucket.
+    by_position = []
+    best_pos = None
+    for label, lo, hi in _POS_BUCKETS:
+        rows = [r for r in inns if r["batting_position"] is not None and lo <= r["batting_position"] <= hi]
+        if not rows:
+            continue
+        runs = sum(r["runs"] for r in rows)
+        outs = sum(1 for r in rows if not r["not_out"] and _dism_label(r["dismissal_type"]))
+        avg = round(runs / outs, 1) if outs else None
+        entry = {"position": label, "innings": len(rows), "runs": runs, "average": avg}
+        by_position.append(entry)
+        if avg is not None and len(rows) >= 3 and (best_pos is None or avg > (best_pos["average"] or 0)):
+            best_pos = entry
+
+    # By opposition (min 2 innings), best & worst by average.
+    opp: dict[str, dict] = {}
+    for r in inns:
+        if not r["opp_name"]:
+            continue
+        key = r["opp_key"] or r["opp_name"]
+        e = opp.setdefault(key, {"name": r["opp_name"], "innings": 0, "runs": 0, "outs": 0})
+        e["innings"] += 1
+        e["runs"] += r["runs"]
+        if not r["not_out"] and _dism_label(r["dismissal_type"]):
+            e["outs"] += 1
+    opp_rows = []
+    for e in opp.values():
+        if e["innings"] >= 2:
+            e["average"] = round(e["runs"] / e["outs"], 1) if e["outs"] else None
+            opp_rows.append({"name": e["name"], "innings": e["innings"], "runs": e["runs"], "average": e["average"]})
+    rated = [o for o in opp_rows if o["average"] is not None]
+    best_opp = sorted(rated, key=lambda o: o["average"], reverse=True)[:4]
+    worst_opp = sorted([o for o in rated if o["innings"] >= 3], key=lambda o: o["average"])[:4]
+
+    # Scouting note (community-CricViz card §16.9).
+    role = max(by_position, key=lambda x: x["innings"])["position"].lower() if by_position else "batter"
+    bits = [f"Bats mostly as {('an ' if role[0] in 'aeiou' else 'a ')}{role} option."]
+    if starts >= 4:
+        if (conversion["convert_25_to_50"] or 0) >= 45:
+            bits.append(f"Converts starts well — {fifties_plus} fifty-plus from {starts} starts.")
+        else:
+            bits.append(f"Gets in but gets out — only {fifties_plus} of {starts} starts went past 50.")
+    if dismissals:
+        bits.append(f"Most often out {dismissals[0]['type']} ({dismissals[0]['pct']}%).")
+    if best_opp:
+        bits.append(f"Enjoys facing {best_opp[0]['name']} (avg {best_opp[0]['average']}).")
+    scouting_note = " ".join(bits)
+
+    return {
+        **base,
+        "conversion": conversion,
+        "dismissals": dismissals,
+        "by_position": by_position,
+        "best_position": best_pos["position"] if best_pos else None,
+        "by_opposition": {"best": best_opp, "worst": worst_opp},
+        "scouting_note": scouting_note,
+    }
+
+
 async def list_players(session: AsyncSession, org_id: str) -> list[dict]:
     """Active players (with a little career context) for the trends picker."""
     res = await session.execute(
