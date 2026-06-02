@@ -786,8 +786,11 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
         text(
             f"""
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
-                   COALESCE(SUM(pss.matches), 0) AS m,
+                   GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
+                            COALESCE(SUM(pss.bowling_innings), 0)) AS games,
                    COALESCE(SUM(pss.runs), 0) AS runs,
+                   COALESCE(SUM(pss.batting_average * pss.batting_innings), 0) AS bavg_w,
+                   COALESCE(SUM(pss.batting_innings) FILTER (WHERE pss.batting_average IS NOT NULL), 0) AS bavg_n,
                    COALESCE(SUM(pss.wickets), 0) AS wkts,
                    COALESCE(SUM(pss.runs_conceded), 0) AS rc,
                    COALESCE(SUM(pss.bowling_balls), 0) AS bb,
@@ -797,18 +800,20 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
             JOIN player_season_stats pss ON pss.player_id = p.id
             JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
             GROUP BY p.id, p.display_name_override, p.name
-            HAVING COALESCE(SUM(pss.matches), 0) >= 3
+            HAVING GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
+                            COALESCE(SUM(pss.bowling_innings), 0)) >= 3
             """
         ),
         params,
     )
     pls = []
     for r in res.mappings():
-        m = int(r["m"]) or 1
+        g = int(r["games"]) or 1
         pls.append({
-            "id": r["id"], "name": r["name"], "matches": int(r["m"]),
+            "id": r["id"], "name": r["name"], "matches": int(r["games"]),
             "runs": int(r["runs"]), "wickets": int(r["wkts"]), "dismissals": int(r["dis"]),
-            "bat_pm": r["runs"] / m, "wkt_pm": r["wkts"] / m, "field_pm": r["dis"] / m,
+            "bat_pm": r["runs"] / g, "wkt_pm": r["wkts"] / g, "field_pm": r["dis"] / g,
+            "bat_avg": float(r["bavg_w"] / r["bavg_n"]) if r["bavg_n"] else None,
             "econ": float(r["rc"] * 6 / r["bb"]) if r["bb"] and r["bb"] >= 30 else None,
         })
     if not pls:
@@ -830,22 +835,28 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
 
     zb, zw, zf = zmap("bat_pm"), zmap("wkt_pm"), zmap("field_pm")
     ze = zmap("econ", invert=True, only_present=True)
+    za = zmap("bat_avg", only_present=True)
     raw = {}
     for p in pls:
-        bat_c = 1.0 * zb[p["id"]]
-        ball_c = 0.9 * zw[p["id"]] + 0.45 * ze[p["id"]]
-        field_c = 0.35 * zf[p["id"]]
-        raw[p["id"]] = bat_c + ball_c + field_c
-        if bat_c > 0.3 and ball_c > 0.3:
+        pid = p["id"]
+        # Each discipline contributes its POSITIVE value only — a specialist is
+        # rewarded for what they're good at and never penalised for not bowling
+        # or fielding. Batting blends per-match volume with average (quality), so
+        # in-form pure batters rank on merit, not just all-rounders.
+        bat_c = max(0.0, 0.6 * zb[pid] + 0.5 * za[pid])
+        ball_c = max(0.0, 0.9 * zw[pid] + 0.45 * ze[pid])
+        field_c = 0.35 * max(0.0, zf[pid])
+        raw[pid] = bat_c + ball_c + field_c
+        if bat_c > 0.5 and ball_c > 0.5:
             p["role"] = "All-round"
         else:
             comps = {"Batting": bat_c, "Bowling": ball_c, "Fielding": field_c}
-            p["role"] = max(comps, key=comps.get)
+            p["role"] = max(comps, key=comps.get) if max(comps.values()) > 0 else "Squad"
     lo, hi = min(raw.values()), max(raw.values())
     for p in pls:
         p["impact"] = round(100 * (raw[p["id"]] - lo) / (hi - lo)) if hi > lo else 50
         p["player_id"] = p.pop("id")  # match the player_id convention used elsewhere in IQ
-        for k in ("bat_pm", "wkt_pm", "field_pm", "econ"):
+        for k in ("bat_pm", "wkt_pm", "field_pm", "bat_avg", "econ"):
             p.pop(k, None)
     pls.sort(key=lambda x: x["impact"], reverse=True)
     return {"season": {"id": resolved["season_id"], "name": resolved["name"]}, "players": pls[:12]}
