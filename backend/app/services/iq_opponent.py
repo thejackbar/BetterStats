@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 2
+DOSSIER_VERSION = 3
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -730,6 +730,26 @@ def _enrich_batter(b: dict, rank: int) -> None:
     if vs and vs.get("average") and (b.get("average") is None or vs["average"] >= b["average"]):
         bits.append(f"Averages {vs['average']} against us — handle with care.")
         risk = "high"
+
+    # Danger vs false-threat alert (brief §16.2/16.3) — is the reputation real?
+    inns = b.get("innings") or 0
+    hs_num = int(str(b.get("high_score") or "0").rstrip("*") or 0)
+    danger_reasons, caution_reasons = [], []
+    if b.get("form") == "hot":
+        danger_reasons.append("in hot form")
+    if vs and vs.get("average") and vs["average"] >= 30 and (b.get("average") is None or vs["average"] >= b["average"]):
+        danger_reasons.append(f"averages {vs['average']} vs us")
+    if inns >= 4 and (b.get("not_outs") or 0) / inns >= 0.35 and b.get("average"):
+        caution_reasons.append("average flattered by not-outs")
+    if inns >= 4 and b.get("runs") and hs_num / b["runs"] >= 0.4:
+        caution_reasons.append("leans on one big score")
+    if b.get("confidence") == "low":
+        caution_reasons.append("small sample")
+    if b.get("strike_rate") is not None and b["strike_rate"] < 55 and inns >= 4:
+        caution_reasons.append("scores slowly, containable")
+    level = "danger" if danger_reasons else ("caution" if caution_reasons else None)
+    b["alert"] = {"level": level, "danger": danger_reasons, "caution": caution_reasons} if level else None
+
     b["risk"], b["key_note"], b["plan"] = risk, " ".join(bits), plan
 
 
@@ -751,6 +771,13 @@ def _enrich_bowler(b: dict, rank: int) -> None:
     b["risk"] = "high" if rank == 0 else "medium"
     b["key_note"] = " ".join(bits)
     b["plan"] = "See him off — don't take risks" if (rank == 0 or tight) else "Look to score off him"
+    bowl_danger, bowl_caution = [], []
+    if rank == 0 or ((b.get("wickets") or 0) >= 4 and (b.get("economy") or 99) < 4.5):
+        bowl_danger.append("main threat")
+    if b.get("confidence") == "low":
+        bowl_caution.append("small sample")
+    lvl = "danger" if bowl_danger else ("caution" if bowl_caution else None)
+    b["alert"] = {"level": lvl, "danger": bowl_danger, "caution": bowl_caution} if lvl else None
 
 
 def _how_they_win_lose(batters, bowlers, danger_bowlers, partnerships):

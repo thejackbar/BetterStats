@@ -24,6 +24,18 @@ function ConfChip({ c }) {
   return <span className="font-mono text-[9px] px-1.5 py-0.5 rounded uppercase text-pb-faint border pb-hairline" title="confidence from sample size">{c} conf</span>
 }
 
+function AlertBadge({ alert }) {
+  if (!alert?.level) return null
+  const danger = alert.level === 'danger'
+  const color = danger ? 'var(--pb-red)' : 'var(--pb-amber)'
+  const reasons = (danger ? alert.danger : alert.caution) || []
+  return (
+    <span title={reasons.join(' · ')} className="font-mono text-[9px] px-1.5 py-0.5 rounded uppercase font-bold" style={{ background: `color-mix(in srgb, ${color} 18%, transparent)`, color }}>
+      {danger ? 'Danger' : 'Paper tiger?'}
+    </span>
+  )
+}
+
 function sparkPath(values, w = 100, h = 40) {
   const vals = (values || []).filter(v => v !== null && v !== undefined)
   if (vals.length < 2) return { line: '', area: '' }
@@ -65,10 +77,13 @@ export default function KeyPlayersCard({ title, subtitle, players, kind = 'bat' 
           <div className="font-mono text-[10px] uppercase tracking-wide3" style={{ color: 'var(--pb-accent)' }}>{title}</div>
           {subtitle && <div className="text-pb-faint text-[11px] truncate">{subtitle}</div>}
         </div>
-        {formLabel && (
-          <span className="font-mono text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap"
-            style={{ background: 'color-mix(in srgb, var(--pb-accent) 16%, transparent)', color: 'var(--pb-accent)' }}>{formLabel}</span>
-        )}
+        <span className="flex items-center gap-1.5 shrink-0">
+          <AlertBadge alert={p.alert} />
+          {formLabel && (
+            <span className="font-mono text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap"
+              style={{ background: 'color-mix(in srgb, var(--pb-accent) 16%, transparent)', color: 'var(--pb-accent)' }}>{formLabel}</span>
+          )}
+        </span>
       </div>
 
       {/* segmented toggle with sliding pill */}
@@ -126,6 +141,11 @@ export default function KeyPlayersCard({ title, subtitle, players, kind = 'bat' 
       {p.key_note && (
         <div className="mt-3 pt-3 border-t" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 18%, transparent)' }}>
           <div className="text-[13px] leading-snug">{p.key_note}</div>
+          {p.alert && (
+            <div className="text-[11px] mt-1" style={{ color: p.alert.level === 'danger' ? 'var(--pb-red)' : 'var(--pb-amber)' }}>
+              {p.alert.level === 'danger' ? '⚑ ' : '⚠ '}{(p.alert.level === 'danger' ? p.alert.danger : p.alert.caution).join(' · ')}
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2 mt-2">
             {p.plan && <span className="text-[12px] min-w-0 truncate"><span className="text-pb-faint">Plan:</span> <span className="font-medium">{p.plan}</span></span>}
             <span className="flex items-center gap-1.5 shrink-0"><RiskBadge risk={p.risk} /><ConfChip c={p.confidence} /></span>
