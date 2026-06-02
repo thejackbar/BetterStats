@@ -490,7 +490,8 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
         text(
             f"""
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
-                   COALESCE(SUM(pss.matches), 0) AS m,
+                   GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
+                            COALESCE(SUM(pss.bowling_innings), 0)) AS games,
                    COALESCE(SUM(pss.runs), 0) AS runs,
                    COALESCE(SUM(pss.batting_average * pss.batting_innings), 0) AS bavg_w,
                    COALESCE(SUM(pss.batting_innings) FILTER (WHERE pss.batting_average IS NOT NULL), 0) AS bavg_n,
@@ -503,18 +504,19 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
             JOIN player_season_stats pss ON pss.player_id = p.id
             JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
             GROUP BY p.id, p.display_name_override, p.name
-            HAVING COALESCE(SUM(pss.matches), 0) >= 3
+            HAVING GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
+                            COALESCE(SUM(pss.bowling_innings), 0)) >= 3
             """
         ),
         params,
     )
     pls = []
     for r in res.mappings():
-        m = int(r["m"]) or 1
+        g = int(r["games"]) or 1
         pls.append({
-            "id": r["id"], "name": r["name"], "matches": int(r["m"]),
+            "id": r["id"], "name": r["name"], "matches": int(r["games"]),
             "runs": int(r["runs"]), "wickets": int(r["wkts"]), "dismissals": int(r["dis"]),
-            "bat_pm": r["runs"] / m, "wkt_pm": r["wkts"] / m, "field_pm": r["dis"] / m,
+            "bat_pm": r["runs"] / g, "wkt_pm": r["wkts"] / g, "field_pm": r["dis"] / g,
             "bat_avg": float(r["bavg_w"] / r["bavg_n"]) if r["bavg_n"] else None,
             "econ": float(r["rc"] * 6 / r["bb"]) if r["bb"] and r["bb"] >= 30 else None,
         })
