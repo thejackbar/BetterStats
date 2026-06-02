@@ -199,3 +199,13 @@ async def team_overview(
     """Our own win/loss, batting & bowling profile, bat-first vs chase, score
     bands, venues, partnerships and a how-we-win/lose read."""
     return await iq_team.team_overview(db, str(club.id), season_id=season_id)
+
+
+@router.get("/team/mvp")
+async def team_mvp(
+    season_id: str | None = Query(None, description="filter to one season; omit for the latest"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Club MVP board — a blended player-impact rating from scorecard rates."""
+    return await iq_team.player_impact(db, str(club.id), season_id=season_id)

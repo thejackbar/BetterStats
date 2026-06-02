@@ -546,6 +546,61 @@ async def _our_bowler_dominance(session: AsyncSession, org_id: str, opp_key: str
     return out
 
 
+async def _last_meeting(session: AsyncSession, org_id: str, opp_key: str) -> dict | None:
+    """Opposition memory (brief §16.10) — what happened last time we played them:
+    our score, their score, our top performers, from the most recent meeting."""
+    g = await session.execute(
+        text(
+            f"""
+            SELECT g.id::text AS id, g.played_at, g.result, g.winning_team, g.venue, gr.name AS grade
+            FROM v_effective_games g{_ORG_SCOPE}
+            WHERE s.organisation_id = CAST(:org_id AS UUID) AND {_OPP_KEY} = :opp_key
+              AND g.played_at IS NOT NULL
+            ORDER BY g.played_at DESC LIMIT 1
+            """
+        ),
+        {"org_id": org_id, "opp_key": opp_key},
+    )
+    row = g.mappings().first()
+    if not row:
+        return None
+    gid = row["id"]
+    our_runs = (await session.execute(
+        text("SELECT COALESCE(SUM(runs), 0) FROM v_effective_batting_innings WHERE game_id = CAST(:gid AS UUID)"),
+        {"gid": gid},
+    )).scalar() or 0
+    opp_runs = (await session.execute(
+        text("SELECT COALESCE(SUM(runs), 0) FROM v_effective_bowling_spells WHERE game_id = CAST(:gid AS UUID)"),
+        {"gid": gid},
+    )).scalar() or 0
+    tb = (await session.execute(
+        text(
+            "SELECT COALESCE(p.display_name_override, p.name) AS name, bi.runs"
+            " FROM v_effective_batting_innings bi JOIN players p ON p.id = bi.player_id"
+            " WHERE bi.game_id = CAST(:gid AS UUID) AND bi.runs IS NOT NULL"
+            " ORDER BY bi.runs DESC LIMIT 1"
+        ),
+        {"gid": gid},
+    )).mappings().first()
+    tw = (await session.execute(
+        text(
+            "SELECT COALESCE(p.display_name_override, p.name) AS name, bs.wickets, bs.runs"
+            " FROM v_effective_bowling_spells bs JOIN players p ON p.id = bs.player_id"
+            " WHERE bs.game_id = CAST(:gid AS UUID) AND bs.wickets IS NOT NULL"
+            " ORDER BY bs.wickets DESC, bs.runs ASC LIMIT 1"
+        ),
+        {"gid": gid},
+    )).mappings().first()
+    return {
+        "played_at": row["played_at"].isoformat() if row["played_at"] else None,
+        "result": row["result"], "winning_team": row["winning_team"],
+        "venue": row["venue"], "grade": row["grade"],
+        "our_runs": our_runs, "opp_runs": opp_runs,
+        "our_top_bat": {"name": tb["name"], "runs": tb["runs"]} if tb else None,
+        "our_top_bowl": {"name": tw["name"], "wickets": tw["wickets"], "runs": tw["runs"]} if tw else None,
+    }
+
+
 async def _their_key_players(session: AsyncSession, opp_org_uuid: str) -> dict:
     """Rich coverage: the opponent's own top run-scorers / wicket-takers.
 
@@ -670,6 +725,7 @@ async def opposition_report(
             "their_key_players": None,
             "venues": [],
             "matchups": {"bowler_dominance": []},
+            "last_meeting": None,
         }
 
     head_to_head = await _head_to_head(session, org_id, opp_key)
@@ -677,6 +733,7 @@ async def opposition_report(
     danger = await _their_danger_batters(session, org_id, opp_key)
     venues = await _venues_vs(session, org_id, opp_key)
     bowler_dominance = await _our_bowler_dominance(session, org_id, opp_key)
+    last_meeting = await _last_meeting(session, org_id, opp_key)
 
     # Rich coverage only if the opponent is itself a synced org we hold.
     held = await _held_org_keys(session)
@@ -716,4 +773,5 @@ async def opposition_report(
         "their_key_players": their_key_players,
         "venues": venues,
         "matchups": {"bowler_dominance": bowler_dominance},
+        "last_meeting": last_meeting,
     }

@@ -276,6 +276,48 @@ export default function PlayerTrends() {
                   )}
                 </div>
 
+                {deep.reliability && (
+                  <div className="mt-4"><Card title="Reliability" right={<span className="text-pb-faint text-xs">{deep.reliability.profile}</span>}>
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                      <div><div className="text-pb-faintest text-[10px] uppercase tracking-wide2">Floor</div><div className="font-display font-bold text-xl pb-num">{deep.reliability.floor}</div></div>
+                      <div><div className="text-pb-faintest text-[10px] uppercase tracking-wide2">Median</div><div className="font-display font-bold text-xl pb-num">{deep.reliability.median}</div></div>
+                      <div><div className="text-pb-faintest text-[10px] uppercase tracking-wide2">Ceiling</div><div className="font-display font-bold text-xl pb-num">{deep.reliability.ceiling}</div></div>
+                    </div>
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-[12px] text-pb-faint">
+                      {deep.reliability.failure_rate != null && <span>Fails (&lt;10): <span className="pb-num">{deep.reliability.failure_rate}%</span></span>}
+                      <span>20+ contributions: <span className="pb-num">{deep.reliability.contribution_rate}%</span></span>
+                      {deep.reliability.variability != null && <span>Variability: <span className="pb-num">{deep.reliability.variability}</span></span>}
+                    </div>
+                  </Card></div>
+                )}
+
+                {deep.selection_value && (
+                  <div className="mt-4"><Card title="Selection value" right={<span className="text-pb-faint text-xs">team results</span>}>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}><div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Win % with them</div><div className="font-display font-bold text-2xl pb-num">{deep.selection_value.with.win_pct ?? '—'}%</div><div className="text-pb-faintest text-[11px]">{deep.selection_value.with.games} games</div></div>
+                      <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}><div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Win % without</div><div className="font-display font-bold text-2xl pb-num">{deep.selection_value.without.win_pct ?? '—'}%</div><div className="text-pb-faintest text-[11px]">{deep.selection_value.without.games} games</div></div>
+                    </div>
+                    {deep.selection_value.swing != null && <div className="text-[12px] mt-2" style={{ color: deep.selection_value.swing >= 0 ? 'var(--pb-brand)' : 'var(--pb-red)' }}>{deep.selection_value.swing >= 0 ? '+' : ''}{deep.selection_value.swing} pts with him in the side.</div>}
+                  </Card></div>
+                )}
+
+                {deep.similar_players?.length > 0 && (
+                  <div className="mt-4"><Card title="Similar players" right={<span className="text-pb-faint text-xs">by profile</span>}>
+                    <div className="space-y-0.5">
+                      {deep.similar_players.map(s => (
+                        <div key={s.player_id} className="flex items-center justify-between gap-3 text-sm py-0.5">
+                          <span className="truncate">{s.name}</span>
+                          <div className="flex items-center gap-3 whitespace-nowrap pb-num text-pb-faint">
+                            {s.bat_avg != null && <span>bat {s.bat_avg}</span>}
+                            {s.bowl_avg != null && <span>bowl {s.bowl_avg}</span>}
+                            <span className="font-semibold w-12 text-right" style={{ color: 'var(--pb-accent)' }}>{s.similarity}%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card></div>
+                )}
+
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
                   {deep.by_position?.length > 0 && (
                     <Card title="By batting position" right={deep.best_position ? <Tag tone="accent">Best: {deep.best_position}</Tag> : null}>

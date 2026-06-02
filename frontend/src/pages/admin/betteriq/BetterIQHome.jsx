@@ -29,12 +29,16 @@ function fmtDate(iso) {
 export default function BetterIQHome() {
   const navigate = useNavigate()
   const [upcoming, setUpcoming] = useState(null)
+  const [mvp, setMvp] = useState(null)
 
   useEffect(() => {
     let alive = true
     api.iqListOpponents()
       .then(d => { if (alive) setUpcoming(Array.isArray(d?.upcoming) ? d.upcoming : []) })
       .catch(() => { if (alive) setUpcoming([]) })
+    api.iqTeamMvp()
+      .then(d => { if (alive) setMvp(d || { players: [] }) })
+      .catch(() => { if (alive) setMvp({ players: [] }) })
     return () => { alive = false }
   }, [])
 
@@ -103,6 +107,41 @@ export default function BetterIQHome() {
           </div>
         )}
       </div>
+
+      {/* Club MVPs — blended player-impact rating from scorecard data */}
+      {mvp?.players?.length > 0 && (
+        <div className="mb-7">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-display font-bold text-sm uppercase tracking-wide2 text-pb-faint">
+              Club MVPs{mvp.season?.name ? ` · ${mvp.season.name}` : ''}
+            </h3>
+            <span className="text-pb-faintest text-[11px]">blended impact rating</span>
+          </div>
+          <div className="pb-card p-4">
+            <div className="space-y-1.5">
+              {mvp.players.map((p, i) => (
+                <button key={p.player_id} onClick={() => navigate(`/admin/betteriq/trends?player=${encodeURIComponent(p.player_id)}`)}
+                  className="w-full flex items-center gap-3 text-left group">
+                  <span className="w-5 text-pb-faint font-mono text-xs shrink-0 text-right">{i + 1}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="truncate font-medium group-hover:text-pb-accent transition-colors">{p.name}</span>
+                      <span className="text-pb-faintest text-[11px] shrink-0">{p.role}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-pb-surface2 overflow-hidden mt-1">
+                      <div className="h-full rounded-full" style={{ width: `${p.impact}%`, background: 'var(--pb-accent)' }} />
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 w-24">
+                    <div className="font-display font-bold pb-num leading-none" style={{ color: 'var(--pb-accent)' }}>{p.impact}</div>
+                    <div className="text-pb-faintest text-[10px] pb-num whitespace-nowrap mt-0.5">{p.runs}r · {p.wickets}w{p.dismissals ? ` · ${p.dismissals}f` : ''}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Capability areas */}
       <h3 className="font-display font-bold text-sm uppercase tracking-wide2 text-pb-faint mb-2">Capabilities</h3>

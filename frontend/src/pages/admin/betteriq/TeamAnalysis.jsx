@@ -173,6 +173,56 @@ export default function TeamAnalysis() {
             )}
           </div>
 
+          {/* Best batting partnerships by pair */}
+          {data.batting_pairs?.length > 0 && (
+            <div className="mt-4">
+              <Card title="Best partnerships" right={<span className="text-pb-faint text-xs">by pair</span>}>
+                <div className="space-y-0.5">
+                  {data.batting_pairs.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 text-sm py-0.5">
+                      <div className="min-w-0 flex items-baseline gap-2">
+                        <span className="truncate">{p.a} &amp; {p.b}</span>
+                        {p.opening && <span className="text-pb-faintest text-[11px] shrink-0">opening</span>}
+                      </div>
+                      <div className="flex items-center gap-3 whitespace-nowrap text-pb-faint pb-num">
+                        <span>{p.stands} stands</span>
+                        <span className="font-semibold">{p.runs} @ {p.avg ?? '—'}</span>
+                        <span className="w-20 text-right">best {p.best}{p.fifties ? ` · ${p.fifties}×50` : ''}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* Collapse analysis */}
+          {data.collapses && data.collapses.innings_analysed > 0 && (
+            <div className="mt-4">
+              <Card title="Collapse analysis" right={<span className="text-pb-faint text-xs">3 wkts for ≤{data.collapses.threshold}</span>}>
+                <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+                  <div>
+                    <span className="font-display font-bold text-2xl pb-num">{data.collapses.collapse_pct}%</span>
+                    <span className="text-pb-faint text-sm ml-2">of innings ({data.collapses.collapse_count}/{data.collapses.innings_analysed})</span>
+                  </div>
+                  {data.collapses.worst && (
+                    <div className="text-sm text-pb-faint">Worst: <span className="pb-num font-semibold">3 for {data.collapses.worst.runs}</span> from the {ord(data.collapses.worst.start_wicket)} wkt</div>
+                  )}
+                </div>
+                {data.collapses.by_start_wicket?.length > 0 && (
+                  <div className="mt-3 pt-3 border-t pb-hairline">
+                    <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1.5">Where the wheels come off</div>
+                    <div className="flex flex-wrap gap-2">
+                      {data.collapses.by_start_wicket.map(w => (
+                        <span key={w.wicket} className="text-[12px] px-2 py-0.5 rounded-full" style={{ background: 'var(--pb-surface2)' }}>{ord(w.wicket)} wkt <span className="pb-num text-pb-faint">×{w.count}</span></span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </Card>
+            </div>
+          )}
+
           {/* Venues */}
           {data.venues?.length > 0 && (
             <div className="mt-4">
@@ -197,6 +247,49 @@ export default function TeamAnalysis() {
                     </tbody>
                   </table>
                 </div>
+              </Card>
+            </div>
+          )}
+
+          {data.all_rounders?.length > 0 && (
+            <div className="mt-4">
+              <Card title="All-rounders" right={<span className="text-pb-faint text-xs">bat avg − bowl avg</span>}>
+                <div className="space-y-0.5">
+                  {data.all_rounders.map(a => (
+                    <div key={a.player_id} className="flex items-center justify-between gap-3 text-sm py-0.5">
+                      <div className="min-w-0 flex items-baseline gap-2">
+                        <span className="truncate">{a.name}</span>
+                        <span className="text-pb-faintest text-[11px] shrink-0">{a.role}</span>
+                      </div>
+                      <div className="flex items-center gap-3 whitespace-nowrap pb-num text-pb-faint">
+                        <span>{a.runs} @ {a.bat_avg ?? '—'}</span>
+                        <span>{a.wickets}w @ {a.bowl_avg ?? '—'}</span>
+                        {a.diff != null && <span className="font-semibold w-12 text-right" style={{ color: a.diff >= 0 ? 'var(--pb-brand)' : 'var(--pb-amber)' }}>{a.diff >= 0 ? '+' : ''}{a.diff}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {data.fielding && (data.fielding.fielders?.length > 0 || data.fielding.keepers?.length > 0) && (
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <Card title="Top fielders">
+                {data.fielding.fielders?.length ? data.fielding.fielders.map(f => (
+                  <div key={f.player_id} className="flex justify-between gap-2 py-0.5 text-sm"><span className="truncate">{f.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{f.catches}c{f.run_outs ? ` · ${f.run_outs} ro` : ''}</span></div>
+                )) : <Empty>—</Empty>}
+                {data.fielding.combos?.length > 0 && (
+                  <div className="mt-3 pt-3 border-t pb-hairline">
+                    <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1">Catching combos</div>
+                    {data.fielding.combos.slice(0, 5).map((c, i) => <div key={i} className="text-[12px] text-pb-faint py-0.5">{c.fielder} off {c.bowler} <span className="pb-num">×{c.count}</span></div>)}
+                  </div>
+                )}
+              </Card>
+              <Card title="Wicketkeepers">
+                {data.fielding.keepers?.length ? data.fielding.keepers.map(k => (
+                  <div key={k.player_id} className="flex justify-between gap-2 py-0.5 text-sm"><span className="truncate">{k.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{k.catches}c · {k.stumpings}st</span></div>
+                )) : <Empty>No keeper data.</Empty>}
               </Card>
             </div>
           )}

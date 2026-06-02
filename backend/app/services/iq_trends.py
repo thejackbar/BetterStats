@@ -395,6 +395,87 @@ def _dism_label(dt: str | None) -> str | None:
     return _DISM_MAP.get(d, d)
 
 
+def _percentile(sorted_vals: list[int], q: float):
+    if not sorted_vals:
+        return None
+    idx = min(len(sorted_vals) - 1, max(0, int(round(q * (len(sorted_vals) - 1)))))
+    return sorted_vals[idx]
+
+
+async def _similar_players(session: AsyncSession, org_id: str, player_id: str) -> list[dict]:
+    """Similar player search (brief §15.8) — club-internal nearest neighbour over
+    a career stat profile (bat avg, bat SR, bowl avg, economy), z-scored across
+    the squad and compared only on features both players have."""
+    res = await session.execute(
+        text(
+            """
+            SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.matches), 0) AS m,
+                   COALESCE(SUM(pss.runs), 0) AS runs,
+                   COALESCE(SUM(pss.balls_faced), 0) AS bf,
+                   SUM(CASE WHEN pss.batting_average IS NOT NULL THEN pss.batting_average * pss.batting_innings ELSE 0 END) AS bavg_w,
+                   SUM(CASE WHEN pss.batting_average IS NOT NULL THEN pss.batting_innings ELSE 0 END) AS bavg_n,
+                   COALESCE(SUM(pss.wickets), 0) AS wkts,
+                   COALESCE(SUM(pss.runs_conceded), 0) AS rc,
+                   COALESCE(SUM(pss.bowling_balls), 0) AS bb
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = CAST(:org AS UUID)
+            GROUP BY p.id, name
+            HAVING COALESCE(SUM(pss.matches), 0) >= 5
+            """
+        ),
+        {"org": org_id},
+    )
+    pls: dict[str, dict] = {}
+    for r in res.mappings():
+        f = {
+            "bat_avg": float(r["bavg_w"] / r["bavg_n"]) if r["bavg_n"] else None,
+            "bat_sr": float(r["runs"] * 100 / r["bf"]) if r["bf"] else None,
+            "bowl_avg": float(r["rc"] / r["wkts"]) if r["wkts"] else None,
+            "econ": float(r["rc"] * 6 / r["bb"]) if r["bb"] else None,
+        }
+        pls[r["id"]] = {
+            "id": r["id"], "name": r["name"], "matches": int(r["m"] or 0),
+            "bat_avg": round(f["bat_avg"], 1) if f["bat_avg"] is not None else None,
+            "bowl_avg": round(f["bowl_avg"], 1) if f["bowl_avg"] is not None else None,
+            "f": f,
+        }
+    if player_id not in pls:
+        return []
+    feats = ["bat_avg", "bat_sr", "bowl_avg", "econ"]
+    popstats: dict[str, tuple[float, float]] = {}
+    for ft in feats:
+        vals = [p["f"][ft] for p in pls.values() if p["f"][ft] is not None]
+        if len(vals) >= 3:
+            popstats[ft] = (statistics.mean(vals), statistics.pstdev(vals) or 1.0)
+    target = pls[player_id]
+    out = []
+    for pid, p in pls.items():
+        if pid == player_id:
+            continue
+        shared, ss = 0, 0.0
+        for ft in feats:
+            if ft not in popstats:
+                continue
+            tv, cv = target["f"][ft], p["f"][ft]
+            if tv is None or cv is None:
+                continue
+            mu, sd = popstats[ft]
+            ss += ((tv - mu) / sd - (cv - mu) / sd) ** 2
+            shared += 1
+        if shared < 2:
+            continue
+        dist = (ss / shared) ** 0.5
+        out.append({
+            "player_id": pid, "name": p["name"], "matches": p["matches"],
+            "bat_avg": p["bat_avg"], "bowl_avg": p["bowl_avg"],
+            "similarity": round(100 / (1 + dist)),
+        })
+    out.sort(key=lambda x: x["similarity"], reverse=True)
+    return out[:5]
+
+
 async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -> dict | None:
     """Conversion & starts, dismissal patterns, batting-by-position and
     by-opposition + a one-line scouting note — all from one innings pull."""
@@ -447,6 +528,29 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         "convert_50_to_100": round(100 * hundreds / fifties_plus) if fifties_plus else None,
     }
 
+    # Reliability (brief §6.1) — floor/median/ceiling, failure rate and a
+    # boom-or-bust read, all from the runs distribution.
+    runs_list = [r["runs"] for r in inns]
+    runs_sorted = sorted(runs_list)
+    mean_runs = statistics.mean(runs_list)
+    cv = (statistics.pstdev(runs_list) / mean_runs) if mean_runs > 0 else None
+    dismissed = [r for r in inns if not r["not_out"]]
+    failures = sum(1 for r in dismissed if r["runs"] < 10)
+    reliability = {
+        "floor": _percentile(runs_sorted, 0.25),
+        "median": _percentile(runs_sorted, 0.5),
+        "ceiling": _percentile(runs_sorted, 0.9),
+        "best": runs_sorted[-1],
+        "failure_rate": round(100 * failures / len(dismissed)) if dismissed else None,
+        "contribution_rate": round(100 * sum(1 for r in inns if r["runs"] >= 20) / n),
+        "variability": round(cv, 2) if cv is not None else None,
+        "profile": (
+            "Boom or bust" if (cv is not None and cv > 1.1)
+            else "Steady" if (cv is not None and cv < 0.7)
+            else "Balanced"
+        ),
+    }
+
     # Dismissal patterns (dismissed innings only).
     dism: dict[str, int] = {}
     for r in inns:
@@ -496,6 +600,41 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
     best_opp = sorted(rated, key=lambda o: o["average"], reverse=True)[:4]
     worst_opp = sorted([o for o in rated if o["innings"] >= 3], key=lambda o: o["average"])[:4]
 
+    # Selection value (brief §6.2) — team win rate with vs without this player.
+    sv = (await session.execute(
+        text(
+            """
+            WITH og AS (
+                SELECT g.id AS gid, g.result FROM v_effective_games g
+                JOIN grades gr ON gr.id = g.grade_id JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = CAST(:org AS UUID) AND g.result IN ('WIN', 'LOSS')
+            ),
+            pg AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID))
+            SELECT
+                COUNT(*) FILTER (WHERE gid IN (SELECT game_id FROM pg)) AS with_g,
+                COUNT(*) FILTER (WHERE gid IN (SELECT game_id FROM pg) AND result = 'WIN') AS with_w,
+                COUNT(*) FILTER (WHERE gid NOT IN (SELECT game_id FROM pg)) AS wo_g,
+                COUNT(*) FILTER (WHERE gid NOT IN (SELECT game_id FROM pg) AND result = 'WIN') AS wo_w
+            FROM og
+            """
+        ),
+        {"org": org_id, "pid": player_id},
+    )).mappings().first()
+
+    def _wp(w, g):
+        return round(100 * w / g) if g else None
+
+    selection_value = None
+    if sv and (sv["with_g"] or sv["wo_g"]):
+        selection_value = {
+            "with": {"games": sv["with_g"], "win_pct": _wp(sv["with_w"], sv["with_g"])},
+            "without": {"games": sv["wo_g"], "win_pct": _wp(sv["wo_w"], sv["wo_g"])},
+        }
+        wp_with, wp_wo = selection_value["with"]["win_pct"], selection_value["without"]["win_pct"]
+        selection_value["swing"] = (wp_with - wp_wo) if (wp_with is not None and wp_wo is not None) else None
+
+    similar_players = await _similar_players(session, org_id, player_id)
+
     # Scouting note (community-CricViz card §16.9).
     role = max(by_position, key=lambda x: x["innings"])["position"].lower() if by_position else "batter"
     bits = [f"Bats mostly as {('an ' if role[0] in 'aeiou' else 'a ')}{role} option."]
@@ -517,6 +656,9 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         "by_position": by_position,
         "best_position": best_pos["position"] if best_pos else None,
         "by_opposition": {"best": best_opp, "worst": worst_opp},
+        "reliability": reliability,
+        "selection_value": selection_value,
+        "similar_players": similar_players,
         "scouting_note": scouting_note,
     }
 
