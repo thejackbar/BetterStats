@@ -13,6 +13,9 @@ the numbers match the rest of the app exactly. Org-scoping for the club-wide
 """
 from __future__ import annotations
 
+import math
+import statistics
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -151,15 +154,122 @@ async def _bowling_movers(session: AsyncSession, org_id: str) -> dict:
     return {"risers": risers[:6], "fallers": fallers[:6]}
 
 
+async def _emerging(session: AsyncSession, org_id: str) -> list[dict]:
+    """Ones to watch — active players in their first few seasons with a strong
+    latest season (short history + meaningful recent output)."""
+    res = await session.execute(
+        text(
+            """
+            WITH ranked AS (
+                SELECT pss.player_id, s.year,
+                       COALESCE(pss.runs, 0) AS runs, COALESCE(pss.wickets, 0) AS wkts,
+                       ROW_NUMBER() OVER (PARTITION BY pss.player_id ORDER BY s.year DESC NULLS LAST) AS rn,
+                       COUNT(*) OVER (PARTITION BY pss.player_id) AS seasons
+                FROM player_season_stats pss JOIN seasons s ON s.id = pss.season_id
+                WHERE s.organisation_id = CAST(:org AS UUID)
+            )
+            SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                   r.year, r.runs, r.wkts, r.seasons
+            FROM ranked r JOIN players p ON p.id = r.player_id AND p.status = 'active'
+            WHERE r.rn = 1 AND r.seasons <= 3 AND (r.runs >= 200 OR r.wkts >= 8)
+            ORDER BY (r.runs + r.wkts * 18) DESC
+            LIMIT 6
+            """
+        ),
+        {"org": org_id},
+    )
+    return [
+        {"player_id": x["id"], "name": x["name"], "latest_year": x["year"],
+         "runs": x["runs"], "wickets": x["wkts"], "seasons": x["seasons"]}
+        for x in res.mappings()
+    ]
+
+
+async def _player_recent(session: AsyncSession, player_id: str, n: int = 10) -> dict:
+    """A player's last-N innings (runs) and spells (wickets), chronological, for sparklines."""
+    bat = await session.execute(
+        text(
+            """
+            SELECT bi.runs, bi.not_out FROM v_effective_batting_innings bi
+            JOIN v_effective_games g ON g.id = bi.game_id
+            WHERE bi.player_id = CAST(:pid AS UUID) AND bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL
+            ORDER BY g.played_at DESC NULLS LAST, bi.id DESC LIMIT :n
+            """
+        ),
+        {"pid": player_id, "n": n},
+    )
+    bat_rows = list(bat.mappings())[::-1]
+    bowl = await session.execute(
+        text(
+            """
+            SELECT bs.wickets FROM v_effective_bowling_spells bs
+            JOIN v_effective_games g ON g.id = bs.game_id
+            WHERE bs.player_id = CAST(:pid AS UUID)
+            ORDER BY g.played_at DESC NULLS LAST, bs.id DESC LIMIT :n
+            """
+        ),
+        {"pid": player_id, "n": n},
+    )
+    bowl_rows = list(bowl.mappings())[::-1]
+    return {
+        "batting": [{"runs": r["runs"], "not_out": bool(r["not_out"])} for r in bat_rows],
+        "bowling": [r["wickets"] or 0 for r in bowl_rows],
+    }
+
+
+def _eta_games(needed: int, total: int | None, games: int | None) -> int | None:
+    """Estimate games until a milestone at the player's career per-game rate."""
+    if not games or not total or needed <= 0:
+        return None
+    per_game = total / games
+    return max(1, math.ceil(needed / per_game)) if per_game > 0 else None
+
+
+def _peak_and_consistency(seasons: list[dict]):
+    bat_seasons = [s for s in seasons if (s.get("batting_innings") or 0) >= 3 and s.get("batting_average") is not None]
+    bat_peak = max(seasons, key=lambda s: (s.get("total_runs") or 0), default=None)
+    bowl_peak = max(seasons, key=lambda s: (s.get("total_wickets") or 0), default=None)
+    consistency = round(statistics.pstdev([float(s["batting_average"]) for s in bat_seasons]), 1) if len(bat_seasons) >= 3 else None
+    peak = {
+        "batting": ({"season": bat_peak["season_name"], "runs": bat_peak.get("total_runs"), "average": bat_peak.get("batting_average")}
+                    if bat_peak and (bat_peak.get("total_runs") or 0) > 0 else None),
+        "bowling": ({"season": bowl_peak["season_name"], "wickets": bowl_peak.get("total_wickets"), "average": bowl_peak.get("bowling_average")}
+                    if bowl_peak and (bowl_peak.get("total_wickets") or 0) > 0 else None),
+    }
+    return peak, consistency
+
+
+def _role_evolution(seasons: list[dict]) -> str | None:
+    """Bat vs bowl contribution in the first vs most-recent third of a career."""
+    if len(seasons) < 4:
+        return None
+    third = max(1, len(seasons) // 3)
+
+    def share(rows):
+        runs = sum(s.get("total_runs") or 0 for s in rows)
+        wkt_units = sum(s.get("total_wickets") or 0 for s in rows) * 20
+        tot = runs + wkt_units
+        return (wkt_units / tot) if tot else 0.0
+
+    e, r = share(seasons[:third]), share(seasons[-third:])
+    if r - e > 0.18:
+        return "Increasingly a bowler"
+    if e - r > 0.18:
+        return "Increasingly a batter"
+    return None
+
+
 async def trends_overview(session: AsyncSession, org_id: str) -> dict:
-    """Club-wide development snapshot: milestone watch + breakout/decline movers."""
+    """Club-wide development snapshot: milestone watch + breakout/decline movers + emerging."""
     milestones = await get_upcoming_milestones_for_org(session, org_id, limit=12)
     batting = await _batting_movers(session, org_id)
     bowling = await _bowling_movers(session, org_id)
+    emerging = await _emerging(session, org_id)
     return {
         "milestones": milestones,
         "batting": batting,
         "bowling": bowling,
+        "emerging": emerging,
     }
 
 
@@ -222,6 +332,14 @@ async def player_trend(session: AsyncSession, org_id: str, player_id: str) -> di
         ] if m
     ]
     milestones.sort(key=lambda m: m["needed"])
+    games = (batting or {}).get("games") or 0
+    _totals = {
+        "runs": (batting or {}).get("total_runs"),
+        "wickets": (bowling or {}).get("total_wickets"),
+        "catches": (fielding or {}).get("total_catches"),
+    }
+    for m in milestones:
+        m["eta_games"] = m["needed"] if m["type"] == "matches" else _eta_games(m["needed"], _totals.get(m["type"]), games)
 
     # Verdict: latest season vs the prior-career baseline (needs ≥2 seasons).
     bat_verdict = bowl_verdict = None
@@ -242,12 +360,20 @@ async def player_trend(session: AsyncSession, org_id: str, player_id: str) -> di
         if (latest.get("total_wickets") or 0) >= _MIN_RECENT_WKTS and p_wkts >= _MIN_PRIOR_WKTS:
             bowl_verdict = _verdict(latest.get("bowling_average"), base_bowl, lower_better=True)
 
+    recent_form = await _player_recent(session, player_id)
+    peak, consistency = _peak_and_consistency(seasons)
+    role_evolution = _role_evolution(seasons)
+
     return {
         "player": {"player_id": player_id, "name": p["name"], "active": p["status"] == "active"},
         "seasons": seasons,
         "career": {"batting": batting, "bowling": bowling, "fielding": fielding},
         "milestones": milestones,
         "verdict": {"batting": bat_verdict, "bowling": bowl_verdict},
+        "recent_form": recent_form,
+        "peak": peak,
+        "consistency": consistency,
+        "role_evolution": role_evolution,
     }
 
 

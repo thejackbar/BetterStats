@@ -285,6 +285,46 @@ export default function SelectionAnalysis() {
             </Card>
           </div>
 
+          <div className="mt-4">
+            <Card title="Suggested best available XI" accent right={<span className="text-pb-faint text-xs">from eligible, available players</span>}>
+              {data.best_xi?.length ? (
+                <>
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {data.best_xi.map(p => (
+                      <span key={p.player_id}
+                        title={p.in_xi ? 'Already in your XI' : 'Suggested addition'}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded text-[12px]"
+                        style={p.in_xi
+                          ? { background: 'var(--pb-surface2)', color: 'var(--pb-faint)' }
+                          : { background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}>
+                        {p.name}{!p.in_xi && ' +'}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1">Consider adding</div>
+                      {data.suggest_in?.length ? data.suggest_in.map(p => (
+                        <div key={p.player_id} className="flex items-center justify-between py-0.5">
+                          <span>{p.name} <UpDown d={p.play_updown} /></span>
+                          <span className="text-pb-faintest text-[11px] pb-num">{(p.recent_scores || []).slice(-3).join(', ')}</span>
+                        </div>
+                      )) : <Empty>Your XI already matches the best available.</Empty>}
+                    </div>
+                    <div>
+                      <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1">Picked, not in best XI</div>
+                      {data.suggest_out?.length ? data.suggest_out.map(p => (
+                        <div key={p.player_id} className="flex items-center justify-between py-0.5">
+                          <span>{p.name}</span><Flags flags={p.flags} />
+                        </div>
+                      )) : <Empty>—</Empty>}
+                    </div>
+                  </div>
+                </>
+              ) : <Empty>Not enough eligible, available players to build a suggested XI.</Empty>}
+            </Card>
+          </div>
+
           {data.coverage?.notes?.length > 0 && (
             <div className="text-pb-faintest text-[11px] mt-3 flex items-start gap-1.5">
               <Icon name="info" size={13} className="mt-0.5 shrink-0" />

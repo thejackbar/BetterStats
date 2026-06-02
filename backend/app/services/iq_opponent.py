@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import statistics
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 
@@ -187,7 +188,7 @@ def _new_field(name):
 
 
 def _accumulate(scorecard: dict, match_id: str, opp_pids: dict[str, str], when: date | None,
-                bat: dict, bowl: dict, field: dict) -> None:
+                bat: dict, bowl: dict, field: dict, fow: dict | None = None) -> None:
     """Fold one scorecard's opponent rows into the accumulators (in place)."""
     when_s = when.isoformat() if when else None
     for inn in (scorecard.get("innings") or []):
@@ -254,6 +255,31 @@ def _accumulate(scorecard: dict, match_id: str, opp_pids: dict[str, str], when: 
             f["ct_wk"] += ct_wk
             f["ro"] += row.get("runOuts") or 0
             f["st"] += row.get("stumpings") or 0
+
+        # Fall of wickets → partnership-by-wicket + collapse map. Gated to the
+        # opponent's innings the same way (the falling batter is one of theirs);
+        # a partnership for wicket k = score_at_fall(k) − score_at_fall(k−1).
+        if fow is not None:
+            opp_fow = []
+            for fw in (inn.get("fallOfWickets") or []):
+                if fw.get("participantId") not in opp_pids:
+                    continue
+                order, runs_at = fw.get("order"), fw.get("runs")
+                if order is None or runs_at is None:
+                    continue
+                try:
+                    opp_fow.append((int(order), int(runs_at)))
+                except (TypeError, ValueError):
+                    continue
+            if opp_fow:
+                opp_fow.sort(key=lambda x: x[0])
+                prev = 0
+                for order, runs_at in opp_fow:
+                    e = fow.setdefault(order, {"runs": 0, "n": 0, "falls": []})
+                    e["runs"] += max(runs_at - prev, 0)
+                    e["n"] += 1
+                    e["falls"].append(runs_at)
+                    prev = runs_at
 
 
 # ─── finalisers (accumulator → analytics-ready dict) ─────────────────────────
@@ -589,7 +615,7 @@ async def _discover_opponent_teams(
 
 async def _scout_grade(
     grade_id: str, *, our_org_id: str, opp_org_id: str | None, opp_name: str | None, cap: int,
-    bat: dict, bowl: dict, field: dict, dates: list, seen: set,
+    bat: dict, bowl: dict, field: dict, dates: list, seen: set, fow: dict | None = None,
 ) -> int:
     """Fold up to ``cap`` of the opponent's most-recent matches in one grade into
     the accumulators (in place). Returns how many were scouted."""
@@ -623,9 +649,29 @@ async def _scout_grade(
         when = _match_date(sc)
         if when:
             dates.append(when)
-        _accumulate(sc, mid, roster, when, bat, bowl, field)
+        _accumulate(sc, mid, roster, when, bat, bowl, field, fow)
         scouted += 1
     return scouted
+
+
+def _ordinal(n: int) -> str:
+    return {1: "1st", 2: "2nd", 3: "3rd"}.get(n, f"{n}th")
+
+
+def _partnership_insight(partnerships: list[dict]) -> str | None:
+    """A one-line read on where the opponent's batting is strong vs fragile."""
+    qualified = [p for p in partnerships if p["samples"] >= 3 and p["avg_partnership"] is not None]
+    if len(qualified) < 3:
+        return None
+    strongest = max(qualified, key=lambda p: p["avg_partnership"])
+    weakest = min(qualified, key=lambda p: p["avg_partnership"])
+    bits = [f"Strongest stand is the {_ordinal(strongest['wicket'])} wicket (avg {strongest['avg_partnership']})."]
+    if weakest["avg_partnership"] < strongest["avg_partnership"] * 0.5:
+        bits.append(
+            f"Fragile around the {_ordinal(weakest['wicket'])} wicket (avg {weakest['avg_partnership']}) —"
+            " a wicket there tends to trigger a slide."
+        )
+    return " ".join(bits)
 
 
 async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: str | None,
@@ -662,6 +708,7 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
     season_bat: dict = {}
     season_bowl: dict = {}
     season_field: dict = {}
+    season_fow: dict = {}
     season_dates: list[date] = []
     seen_match_ids: set[str] = set()
     season_matches = 0
@@ -673,6 +720,7 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         n = await _scout_grade(
             g["grade_id"], our_org_id=org_id, opp_org_id=opp_org_id, opp_name=opp_name, cap=cap,
             bat=season_bat, bowl=season_bowl, field=season_field, dates=season_dates, seen=seen_match_ids,
+            fow=season_fow,
         )
         season_matches += n
         if n:
@@ -744,6 +792,29 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         key=lambda p: (p["runs"] or 0), reverse=True,
     )[:5]
 
+    # Team-wide dismissal breakdown — how their batters get out (catch-prone? lbw?).
+    team_dism: Counter = Counter()
+    for b in season_bat.values():
+        team_dism.update(b["dism"])
+    total_d = sum(team_dism.values())
+    dismissal_breakdown = [
+        {"type": k, "count": v, "pct": round(100 * v / total_d)} for k, v in team_dism.most_common()
+    ] if total_d else []
+
+    # Partnership / collapse map from their fall-of-wickets.
+    partnerships = []
+    for wk in sorted(season_fow):
+        e = season_fow[wk]
+        if not e["n"]:
+            continue
+        partnerships.append({
+            "wicket": wk,
+            "avg_partnership": round(e["runs"] / e["n"], 1),
+            "samples": e["n"],
+            "typical_score_at_fall": round(statistics.median(e["falls"])) if e["falls"] else None,
+        })
+    partnership_insight = _partnership_insight(partnerships)
+
     coverage = "rich" if season_matches else ("history_only" if h2h_games else "none")
     notes = []
     if team_grade_id and season_matches:
@@ -781,5 +852,8 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         "bowling": bowlers,
         "keepers": keepers,
         "historical_threats": threats_history,
+        "dismissal_breakdown": dismissal_breakdown,
+        "partnerships": partnerships,
+        "partnership_insight": partnership_insight,
         "built_at": datetime.now(timezone.utc).isoformat(),
     }

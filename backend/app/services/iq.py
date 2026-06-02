@@ -466,6 +466,33 @@ async def _their_danger_batters(session: AsyncSession, org_id: str, opp_key: str
     ]
 
 
+async def _venues_vs(session: AsyncSession, org_id: str, opp_key: str) -> list[dict]:
+    """Our win/loss record at each venue against this opponent."""
+    res = await session.execute(
+        text(
+            f"""
+            SELECT g.venue,
+                   COUNT(*) FILTER (WHERE g.result IS NOT NULL) AS played,
+                   COUNT(*) FILTER (WHERE g.result = 'WIN') AS wins,
+                   COUNT(*) FILTER (WHERE g.result = 'LOSS') AS losses
+            FROM v_effective_games g{_ORG_SCOPE}
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND {_OPP_KEY} = :opp_key
+              AND g.venue IS NOT NULL AND g.venue <> ''
+            GROUP BY g.venue
+            HAVING COUNT(*) FILTER (WHERE g.result IS NOT NULL) >= 2
+            ORDER BY played DESC
+            LIMIT 8
+            """
+        ),
+        {"org_id": org_id, "opp_key": opp_key},
+    )
+    return [
+        {"venue": r["venue"], "played": r["played"], "wins": r["wins"], "losses": r["losses"]}
+        for r in res.mappings()
+    ]
+
+
 async def _our_bowler_dominance(session: AsyncSession, org_id: str, opp_key: str) -> list[dict]:
     """Our bowler → their batter match-ups: who we've dismissed repeatedly.
 
@@ -623,12 +650,14 @@ async def opposition_report(
             "our_performers": None,
             "their_danger_batters": [],
             "their_key_players": None,
+            "venues": [],
             "matchups": {"bowler_dominance": []},
         }
 
     head_to_head = await _head_to_head(session, org_id, opp_key)
     our_performers = await _our_performers_vs(session, org_id, opp_key)
     danger = await _their_danger_batters(session, org_id, opp_key)
+    venues = await _venues_vs(session, org_id, opp_key)
     bowler_dominance = await _our_bowler_dominance(session, org_id, opp_key)
 
     # Rich coverage only if the opponent is itself a synced org we hold.
@@ -667,5 +696,6 @@ async def opposition_report(
         "our_performers": our_performers,
         "their_danger_batters": danger,
         "their_key_players": their_key_players,
+        "venues": venues,
         "matchups": {"bowler_dominance": bowler_dominance},
     }
