@@ -923,6 +923,8 @@ export const api = {
   // omit it for the whole club.
   iqOppositionDossier: ({ opponent, fixtureId, team } = {}) =>
     request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId, team)}`),
+  iqMatchOpponent: ({ opponentName, oppKey, displayName } = {}) =>
+    request(`/iq/opposition/match?opponent_name=${encodeURIComponent(opponentName)}&opp_key=${encodeURIComponent(oppKey)}${displayName ? `&display_name=${encodeURIComponent(displayName)}` : ''}`, { method: 'POST' }),
   iqRefreshDossier: ({ opponent, fixtureId, team } = {}) =>
     request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId, team)}`, { method: 'POST' }),
 

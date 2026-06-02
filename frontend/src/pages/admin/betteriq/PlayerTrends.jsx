@@ -46,38 +46,54 @@ function Sparkline({ values, max }) {
   )
 }
 
-function MilestoneList({ items }) {
-  if (!items?.length) return <Empty>No milestones in reach right now.</Empty>
+const fmt2 = (v) => (v === null || v === undefined || Number.isNaN(Number(v))) ? '—' : Number(v).toFixed(2)
+
+function Movers({ title, rows, kind, onPick }) {
   return (
-    <div className="space-y-2">
-      {items.map((m, i) => (
-        <div key={i} className="flex items-center justify-between gap-2">
-          <span className="font-medium truncate">{m.name}</span>
-          <span className="text-sm pb-num whitespace-nowrap">
-            <b>{m.needed}</b> <span className="text-pb-faint">more {TYPE_LABEL[m.type] || m.type} → {m.target}{m.eta_games ? ` · ${fmtEta(m.eta_games)}` : ''}</span>
-          </span>
+    <div>
+      <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-2">{title}</div>
+      {!rows?.length ? <div className="text-pb-faintest text-xs">—</div> : (
+        <div className="space-y-1.5">
+          {rows.map(p => {
+            const delta = Number(p.latest) - Number(p.baseline)
+            const good = kind === 'bowl' ? delta <= 0 : delta >= 0
+            return (
+              <button key={p.player_id} onClick={() => onPick(p.player_id)} className="w-full flex items-center justify-between gap-2 text-left hover:text-pb-accent transition-colors">
+                <span className="font-medium truncate">{p.name}</span>
+                <span className="text-sm pb-num whitespace-nowrap text-pb-faint">
+                  {fmt2(p.baseline)} → <span className="font-semibold text-pb-text">{fmt2(p.latest)}</span>
+                  <span className="ml-1.5" style={{ color: good ? 'var(--pb-brand)' : 'var(--pb-red)' }}>{delta >= 0 ? '+' : ''}{fmt2(delta)}</span>
+                </span>
+              </button>
+            )
+          })}
         </div>
-      ))}
+      )}
     </div>
   )
 }
 
-function Movers({ title, rows, kind, onPick }) {
-  if (!rows?.length) return null
-  const isBat = kind === 'bat'
+// Searchable current-season player picker (replaces the full grid).
+function PlayerSearch({ players, onPick }) {
+  const [q, setQ] = useState('')
+  const t = q.trim().toLowerCase()
+  const matches = t ? players.filter(p => p.name.toLowerCase().includes(t)).slice(0, 12) : []
   return (
-    <div>
-      <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-2">{title}</div>
-      <div className="space-y-1.5">
-        {rows.map(p => (
-          <button key={p.player_id} onClick={() => onPick(p.player_id)} className="w-full flex items-center justify-between gap-2 text-left hover:text-pb-accent transition-colors">
-            <span className="font-medium truncate">{p.name} <span className="text-pb-faintest text-[11px]">'{String(p.latest_year).slice(-2)}</span></span>
-            <span className="text-sm pb-num whitespace-nowrap text-pb-faint">
-              {isBat ? 'avg' : 'avg'} {p.baseline} <span style={{ color: 'var(--pb-accent)' }}>→ {p.latest}</span>
-            </span>
-          </button>
-        ))}
-      </div>
+    <div className="relative">
+      <Search value={q} onChange={setQ} placeholder="Search a player…" className="w-full" />
+      {matches.length > 0 && (
+        <div className="absolute z-20 mt-1 w-full pb-card p-1 max-h-80 overflow-auto shadow-lg" style={{ background: 'var(--pb-surface)' }}>
+          {matches.map(p => (
+            <button key={p.player_id} onClick={() => { onPick(p.player_id); setQ('') }}
+              className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
+              <span className="font-medium truncate">{p.name}</span>
+              <span className="text-pb-faintest text-[11px] pb-num whitespace-nowrap">
+                {p.matches}g{p.runs ? ` · ${p.runs}r @ ${fmt2(p.bat_avg)}` : ''}{p.wickets ? ` · ${p.wickets}w @ ${fmt2(p.bowl_avg)}` : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -115,11 +131,11 @@ function Trajectory({ seasons }) {
               <td className="py-1.5 px-1 whitespace-nowrap">{s.season_name}</td>
               <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{num(s.matches, 0)}</td>
               <td className="py-1.5 px-1 text-right pb-num font-semibold">{num(s.total_runs, 0)}</td>
-              <td className="py-1.5 px-1 text-right pb-num">{num(s.batting_average)}</td>
+              <td className="py-1.5 px-1 text-right pb-num">{fmt2(s.batting_average)}</td>
               <td className="py-1.5 px-1"><RunsBar runs={s.total_runs || 0} max={maxRuns} /></td>
               <td className="py-1.5 px-1 text-right pb-num font-semibold">{num(s.total_wickets, 0)}</td>
-              <td className="py-1.5 px-1 text-right pb-num">{num(s.bowling_average)}</td>
-              <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{num(s.economy)}</td>
+              <td className="py-1.5 px-1 text-right pb-num">{fmt2(s.bowling_average)}</td>
+              <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{fmt2(s.economy)}</td>
             </tr>
           ))}
         </tbody>
@@ -131,8 +147,8 @@ function Trajectory({ seasons }) {
 function CareerStrip({ career }) {
   const b = career?.batting || {}, bo = career?.bowling || {}, f = career?.fielding || {}
   const items = [
-    ['Runs', num(b.total_runs, 0)], ['Bat avg', num(b.average)], ['100s/50s', `${num(b.hundreds, 0)}/${num(b.fifties, 0)}`],
-    ['Wkts', num(bo.total_wickets, 0)], ['Bowl avg', num(bo.average)], ['Catches', num(f.total_catches, 0)],
+    ['Runs', num(b.total_runs, 0)], ['Bat avg', fmt2(b.average)], ['100s/50s', `${num(b.hundreds, 0)}/${num(b.fifties, 0)}`],
+    ['Wkts', num(bo.total_wickets, 0)], ['Bowl avg', fmt2(bo.average)], ['Catches', num(f.total_catches, 0)],
   ]
   return (
     <div className="flex flex-wrap gap-x-6 gap-y-2">
@@ -152,10 +168,10 @@ export default function PlayerTrends() {
   const [playerId, setPlayerId] = useState(searchParams.get('player') || null)
   const [detail, setDetail] = useState(null)
   const [deep, setDeep] = useState(null)
-  const [q, setQ] = useState('')
+  const [squad, setSquad] = useState('')
 
   useEffect(() => {
-    api.iqTrendsOverview().then(setOverview).catch(() => setOverview({ milestones: [], batting: {}, bowling: {} }))
+    api.iqTrendsOverview().then(setOverview).catch(() => setOverview({ batting: {}, bowling: {} }))
     api.iqTrendsPlayers().then(setPlayers).catch(() => setPlayers([]))
   }, [])
 
@@ -171,10 +187,12 @@ export default function PlayerTrends() {
   const pick = (id) => { setPlayerId(id); setSearchParams({ player: id }, { replace: true }) }
   const clear = () => { setPlayerId(null); setDetail(null); setDeep(null); setSearchParams({}, { replace: true }) }
 
-  const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase()
-    return t ? players.filter(p => p.name.toLowerCase().includes(t)) : players
-  }, [q, players])
+  const squads = useMemo(() => {
+    const m = new Map()
+    players.forEach(p => { if (p.squad_id) m.set(p.squad_id, p.squad_name) })
+    return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  }, [players])
+  const pickerPlayers = useMemo(() => (squad ? players.filter(p => p.squad_id === squad) : players), [squad, players])
 
   // ── Detail view ──
   if (playerId) {
@@ -215,8 +233,8 @@ export default function PlayerTrends() {
               </Card>
               <Card title="Career shape">
                 <div className="space-y-2 text-sm">
-                  {detail.peak?.batting && <div className="flex justify-between gap-2"><span className="text-pb-faint">Best batting season</span><span className="pb-num text-right">{detail.peak.batting.season} · {detail.peak.batting.runs} @ {num(detail.peak.batting.average)}</span></div>}
-                  {detail.peak?.bowling && <div className="flex justify-between gap-2"><span className="text-pb-faint">Best bowling season</span><span className="pb-num text-right">{detail.peak.bowling.season} · {detail.peak.bowling.wickets}w @ {num(detail.peak.bowling.average)}</span></div>}
+                  {detail.peak?.batting && <div className="flex justify-between gap-2"><span className="text-pb-faint">Best batting season</span><span className="pb-num text-right">{detail.peak.batting.season} · {detail.peak.batting.runs} @ {fmt2(detail.peak.batting.average)}</span></div>}
+                  {detail.peak?.bowling && <div className="flex justify-between gap-2"><span className="text-pb-faint">Best bowling season</span><span className="pb-num text-right">{detail.peak.bowling.season} · {detail.peak.bowling.wickets}w @ {fmt2(detail.peak.bowling.average)}</span></div>}
                   {detail.consistency != null && <div className="flex justify-between gap-2"><span className="text-pb-faint">Consistency (σ of season avg)</span><span className="pb-num">±{detail.consistency}</span></div>}
                   {!detail.peak?.batting && !detail.peak?.bowling && <Empty>Not enough history yet.</Empty>}
                 </div>
@@ -335,11 +353,11 @@ export default function PlayerTrends() {
                       <div className="grid sm:grid-cols-2 gap-4 text-sm">
                         <div>
                           <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1">Dominates</div>
-                          {deep.by_opposition.best.length ? deep.by_opposition.best.map(o => <div key={o.name} className="flex justify-between gap-2 py-0.5"><span className="truncate">{o.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{o.runs} @ {num(o.average)}</span></div>) : <Empty>—</Empty>}
+                          {deep.by_opposition.best.length ? deep.by_opposition.best.map(o => <div key={o.name} className="flex justify-between gap-2 py-0.5"><span className="truncate">{o.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{o.runs} @ {fmt2(o.average)}</span></div>) : <Empty>—</Empty>}
                         </div>
                         <div>
                           <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1">Struggles vs</div>
-                          {deep.by_opposition.worst.length ? deep.by_opposition.worst.map(o => <div key={o.name} className="flex justify-between gap-2 py-0.5"><span className="truncate">{o.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{o.runs} @ {num(o.average)}</span></div>) : <Empty>—</Empty>}
+                          {deep.by_opposition.worst.length ? deep.by_opposition.worst.map(o => <div key={o.name} className="flex justify-between gap-2 py-0.5"><span className="truncate">{o.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{o.runs} @ {fmt2(o.average)}</span></div>) : <Empty>—</Empty>}
                         </div>
                       </div>
                     </Card>
@@ -356,29 +374,39 @@ export default function PlayerTrends() {
   // ── Overview view ──
   return (
     <IQLayout title="Player trends">
-      <p className="text-pb-faint text-sm mb-4 max-w-2xl">Who's trending up, who's tailing off, and who's closing in on a milestone — across your active squad.</p>
+      <p className="text-pb-faint text-sm mb-4 max-w-2xl">Who's trending up and who's tailing off across your current squad. Search a player for their full trajectory and deep-dive.</p>
 
-      <div className="grid gap-4 lg:grid-cols-2 mb-4">
-        <Card title="Milestone watch" right={<Tag tone="accent">in reach</Tag>}>
-          {overview === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div> : <MilestoneList items={overview.milestones} />}
-        </Card>
-        <Card title="Form movers" right={<span className="text-pb-faint text-xs">latest season vs career</span>}>
-          {overview === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div> : (
-            <div className="grid sm:grid-cols-2 gap-4">
+      {/* Current-player picker + squad filter */}
+      <div className="flex flex-col sm:flex-row gap-2 mb-5 max-w-2xl">
+        <div className="flex-1"><PlayerSearch players={pickerPlayers} onPick={pick} /></div>
+        {squads.length > 0 && (
+          <select value={squad} onChange={e => setSquad(e.target.value)}
+            className="bg-transparent text-sm rounded-lg border px-3 h-[38px] text-pb-dim border-pb-hairline focus:outline-none focus:border-pb-accent">
+            <option value="" className="bg-pb-surface">All squads</option>
+            {squads.map(s => <option key={s.id} value={s.id} className="bg-pb-surface">{s.name}</option>)}
+          </select>
+        )}
+      </div>
+
+      {/* Form movers — current players only, this season vs career before it */}
+      <Card title="Form movers" right={<span className="text-pb-faint text-xs">this season vs career before it</span>}>
+        {overview === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div> : (
+          (!overview.batting?.risers?.length && !overview.batting?.fallers?.length && !overview.bowling?.risers?.length && !overview.bowling?.fallers?.length) ? (
+            <Empty>Not enough multi-season history among current players to spot movers yet.</Empty>
+          ) : (
+            <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
               <Movers title="Batting — rising" rows={overview.batting?.risers} kind="bat" onPick={pick} />
               <Movers title="Batting — declining" rows={overview.batting?.fallers} kind="bat" onPick={pick} />
               <Movers title="Bowling — improving" rows={overview.bowling?.risers} kind="bowl" onPick={pick} />
               <Movers title="Bowling — slipping" rows={overview.bowling?.fallers} kind="bowl" onPick={pick} />
-              {!overview.batting?.risers?.length && !overview.batting?.fallers?.length && !overview.bowling?.risers?.length && !overview.bowling?.fallers?.length && (
-                <div className="sm:col-span-2"><Empty>Not enough multi-season history to spot movers yet.</Empty></div>
-              )}
             </div>
-          )}
-        </Card>
-      </div>
+          )
+        )}
+        <div className="text-pb-faintest text-[11px] mt-3 pt-3 border-t pb-hairline">Each current player's average this season vs their career average beforehand (min sample applies). Green = improving, red = declining.</div>
+      </Card>
 
       {overview?.emerging?.length > 0 && (
-        <div className="mb-4">
+        <div className="mt-4">
           <Card title="Emerging — ones to watch" accent right={<span className="text-pb-faint text-xs">few seasons, strong form</span>}>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {overview.emerging.map(p => (
@@ -392,21 +420,6 @@ export default function PlayerTrends() {
           </Card>
         </div>
       )}
-
-      <Card title={`Players (${players.length})`}>
-        <Search value={q} onChange={setQ} placeholder="Search players…" className="mb-3 max-w-sm" />
-        {filtered.length === 0 ? <Empty>No players.</Empty> : (
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map(p => (
-              <button key={p.player_id} onClick={() => pick(p.player_id)}
-                className="pb-card px-3 py-2 text-left hover:border-pb-accent/50 transition-colors flex items-center justify-between gap-2">
-                <span className="font-medium truncate">{p.name}</span>
-                <span className="text-pb-faintest text-[11px] pb-num whitespace-nowrap">{p.runs} runs · {p.wickets} wkts</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </Card>
     </IQLayout>
   )
 }

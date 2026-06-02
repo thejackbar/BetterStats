@@ -19,8 +19,6 @@ const CAPABILITIES = [
     blurb: 'Ask your club’s data in plain English and get an answer grounded in the actual numbers.' },
 ]
 
-const MTYPE = { runs: 'runs', wickets: 'wkts', matches: 'games', catches: 'catches' }
-
 function fmtDate(iso) {
   if (!iso) return ''
   try {
@@ -32,7 +30,6 @@ export default function BetterIQHome() {
   const navigate = useNavigate()
   const [upcoming, setUpcoming] = useState(null)
   const [mvp, setMvp] = useState(null)
-  const [milestones, setMilestones] = useState(null)
 
   useEffect(() => {
     let alive = true
@@ -42,9 +39,6 @@ export default function BetterIQHome() {
     api.iqTeamMvp()
       .then(d => { if (alive) setMvp(d || { players: [] }) })
       .catch(() => { if (alive) setMvp({ players: [] }) })
-    api.iqTrendsOverview()
-      .then(d => { if (alive) setMilestones(Array.isArray(d?.milestones) ? d.milestones : []) })
-      .catch(() => { if (alive) setMilestones([]) })
     return () => { alive = false }
   }, [])
 
@@ -145,28 +139,7 @@ export default function BetterIQHome() {
                 </button>
               ))}
             </div>
-            <div className="text-pb-faintest text-[11px] mt-3 pt-3 border-t pb-hairline">Impact blends per-match runs, wickets, economy and fielding dismissals, z-scored across the squad and scaled 0–100.</div>
-          </div>
-        </div>
-      )}
-
-      {/* Milestone watch — players closing in on a round number */}
-      {milestones?.length > 0 && (
-        <div className="mb-7">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-display font-bold text-sm uppercase tracking-wide2 text-pb-faint">Milestone watch</h3>
-            <button onClick={() => navigate('/admin/betteriq/trends')} className="text-[11px] text-pb-faint hover:text-pb-accent transition-colors">All trends →</button>
-          </div>
-          <div className="pb-card p-4">
-            <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1.5">
-              {milestones.slice(0, 8).map((m, i) => (
-                <button key={i} onClick={() => navigate(`/admin/betteriq/trends?player=${encodeURIComponent(m.player_id)}`)}
-                  className="flex items-baseline justify-between gap-2 text-left group">
-                  <span className="truncate text-sm group-hover:text-pb-accent transition-colors">{m.name}</span>
-                  <span className="text-pb-faint text-[12px] whitespace-nowrap shrink-0"><span className="pb-num font-semibold">{m.needed}</span> to {m.target} {MTYPE[m.type] || m.type}</span>
-                </button>
-              ))}
-            </div>
+            <div className="text-pb-faintest text-[11px] mt-3 pt-3 border-t pb-hairline">A whole-season value measure (not current form): per-match runs, wickets, economy and fielding dismissals, z-scored across the squad and scaled 0–100. See Player trends for recent form.</div>
           </div>
         </div>
       )}
