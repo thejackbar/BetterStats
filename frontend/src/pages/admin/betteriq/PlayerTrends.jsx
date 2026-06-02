@@ -73,18 +73,22 @@ function Movers({ title, rows, kind, onPick }) {
   )
 }
 
-// Searchable current-season player picker (replaces the full grid).
+// Searchable current-season player picker (replaces the full grid). Opens on
+// focus so the squad is visible immediately; filters as you type.
 function PlayerSearch({ players, onPick }) {
   const [q, setQ] = useState('')
+  const [open, setOpen] = useState(false)
   const t = q.trim().toLowerCase()
-  const matches = t ? players.filter(p => p.name.toLowerCase().includes(t)).slice(0, 12) : []
+  const matches = (t ? players.filter(p => p.name.toLowerCase().includes(t)) : players).slice(0, 30)
   return (
-    <div className="relative">
-      <Search value={q} onChange={setQ} placeholder="Search a player…" className="w-full" />
-      {matches.length > 0 && (
-        <div className="absolute z-20 mt-1 w-full pb-card p-1 max-h-80 overflow-auto shadow-lg" style={{ background: 'var(--pb-surface)' }}>
-          {matches.map(p => (
-            <button key={p.player_id} onClick={() => { onPick(p.player_id); setQ('') }}
+    <div className="relative" onFocusCapture={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}>
+      <Search value={q} onChange={(v) => { setQ(v); setOpen(true) }} placeholder="Search a player…" className="w-full" />
+      {open && (
+        <div className="absolute z-30 mt-1 w-full pb-card p-1 max-h-80 overflow-auto shadow-lg" style={{ background: 'var(--pb-surface)' }}>
+          {matches.length === 0 ? (
+            <div className="px-2.5 py-2 text-pb-faint text-sm">{players.length === 0 ? 'No current-season players found.' : 'No match.'}</div>
+          ) : matches.map(p => (
+            <button key={p.player_id} type="button" onClick={() => { onPick(p.player_id); setQ(''); setOpen(false) }}
               className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
               <span className="font-medium truncate">{p.name}</span>
               <span className="text-pb-faintest text-[11px] pb-num whitespace-nowrap">

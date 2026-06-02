@@ -442,15 +442,21 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
     from scorecard rates (runs, wickets, economy, fielding dismissals per match),
     z-scored across the squad and scaled 0–100. Defaults to the latest season."""
     seasons = await team_seasons(session, org_id)
-    resolved = next((s for s in seasons if s["season_id"] == season_id), None) if season_id else None
-    if not resolved and seasons:
-        resolved = seasons[0]
-    if not resolved:
+    if not seasons:
         return {"season": None, "players": []}
-    sid = resolved["season_id"]
+    resolved = (next((s for s in seasons if s["season_id"] == season_id), None) if season_id else None) or seasons[0]
+    year = resolved.get("year")
+    # Aggregate across ALL season records of the year — a club year often spans
+    # several season rows (different comps, or per-club grassroots ids). Keying
+    # on a single season_id silently drops players recorded under the others
+    # (e.g. an in-form bat whose stats sit on a sibling season row).
+    if year is not None:
+        scope, params = "AND s.organisation_id = CAST(:org AS UUID) AND s.year = :year", {"org": org_id, "year": year}
+    else:
+        scope, params = "AND s.id = CAST(:sid AS UUID)", {"org": org_id, "sid": resolved["season_id"]}
     res = await session.execute(
         text(
-            """
+            f"""
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
                    COALESCE(SUM(pss.matches), 0) AS m,
                    COALESCE(SUM(pss.runs), 0) AS runs,
@@ -461,12 +467,13 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
                      + COALESCE(SUM(pss.run_outs), 0) + COALESCE(SUM(pss.stumpings), 0) AS dis
             FROM players p
             JOIN player_season_stats pss ON pss.player_id = p.id
-            WHERE p.organisation_id = CAST(:org AS UUID) AND pss.season_id = CAST(:sid AS UUID)
+            JOIN seasons s ON s.id = pss.season_id {scope}
+            WHERE p.organisation_id = CAST(:org AS UUID)
             GROUP BY p.id, name
             HAVING COALESCE(SUM(pss.matches), 0) >= 3
             """
         ),
-        {"org": org_id, "sid": sid},
+        params,
     )
     pls = []
     for r in res.mappings():
@@ -478,7 +485,7 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
             "econ": float(r["rc"] * 6 / r["bb"]) if r["bb"] and r["bb"] >= 30 else None,
         })
     if not pls:
-        return {"season": {"id": sid, "name": resolved["name"]}, "players": []}
+        return {"season": {"id": resolved["season_id"], "name": resolved["name"]}, "players": []}
 
     def zmap(key, invert=False, only_present=False):
         vals = [p[key] for p in pls if p[key] is not None] if only_present else [p[key] for p in pls]
@@ -514,7 +521,7 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
         for k in ("bat_pm", "wkt_pm", "field_pm", "econ"):
             p.pop(k, None)
     pls.sort(key=lambda x: x["impact"], reverse=True)
-    return {"season": {"id": sid, "name": resolved["name"]}, "players": pls[:12]}
+    return {"season": {"id": resolved["season_id"], "name": resolved["name"]}, "players": pls[:12]}
 
 
 async def team_overview(session: AsyncSession, org_id: str, season_id: str | None = None) -> dict:
