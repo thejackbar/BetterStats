@@ -150,10 +150,14 @@ function Trajectory({ seasons }) {
 
 function CareerStrip({ career }) {
   const b = career?.batting || {}, bo = career?.bowling || {}, f = career?.fielding || {}
+  // Outfield catches ("Caught") kept distinct from keeper catches ("Ct (wk)").
+  const ctOut = f.total_catches_non_wk ?? ((f.total_catches || 0) - (f.total_catches_wk || 0))
   const items = [
     ['Runs', num(b.total_runs, 0)], ['Bat avg', fmt2(b.average)], ['100s/50s', `${num(b.hundreds, 0)}/${num(b.fifties, 0)}`],
-    ['Wkts', num(bo.total_wickets, 0)], ['Bowl avg', fmt2(bo.average)], ['Catches', num(f.total_catches, 0)],
+    ['Wkts', num(bo.total_wickets, 0)], ['Bowl avg', fmt2(bo.average)], ['Caught', num(ctOut, 0)],
   ]
+  if (f.total_catches_wk) items.push(['Ct (wk)', num(f.total_catches_wk, 0)])
+  if (f.total_stumpings) items.push(['Stumpings', num(f.total_stumpings, 0)])
   return (
     <div className="flex flex-wrap gap-x-6 gap-y-2">
       {items.map(([l, v]) => (
@@ -348,7 +352,7 @@ export default function PlayerTrends() {
                     <Card title="By batting position" right={deep.best_position ? <Tag tone="accent">Best: {deep.best_position}</Tag> : null}>
                       <table className="w-full text-sm">
                         <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left"><th className="py-1 font-medium">Position</th><th className="py-1 font-medium text-right">Inns</th><th className="py-1 font-medium text-right">Runs</th><th className="py-1 font-medium text-right">Avg</th></tr></thead>
-                        <tbody>{deep.by_position.map(r => <tr key={r.position} className="border-t pb-hairline"><td className="py-1.5">{r.position}</td><td className="py-1.5 text-right pb-num text-pb-faint">{r.innings}</td><td className="py-1.5 text-right pb-num">{r.runs}</td><td className="py-1.5 text-right pb-num">{num(r.average)}</td></tr>)}</tbody>
+                        <tbody>{deep.by_position.map(r => <tr key={r.position} className="border-t pb-hairline"><td className="py-1.5">{r.position}</td><td className="py-1.5 text-right pb-num text-pb-faint">{r.innings}</td><td className="py-1.5 text-right pb-num">{r.runs}</td><td className="py-1.5 text-right pb-num">{fmt2(r.average)}</td></tr>)}</tbody>
                       </table>
                     </Card>
                   )}
@@ -367,6 +371,45 @@ export default function PlayerTrends() {
                     </Card>
                   )}
                 </div>
+
+                {deep.by_venue?.length > 0 && (
+                  <div className="mt-4"><Card title="At venues" right={<span className="text-pb-faint text-xs">most played</span>}>
+                    <div className="overflow-x-auto -mx-1">
+                      <table className="w-full text-sm">
+                        <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
+                          <th className="py-1 px-1 font-medium">Ground</th>
+                          <th className="py-1 px-1 font-medium text-right">M</th>
+                          <th className="py-1 px-1 font-medium text-right">Runs</th>
+                          <th className="py-1 px-1 font-medium text-right">Bat avg</th>
+                          <th className="py-1 px-1 font-medium text-right">Wkts</th>
+                          <th className="py-1 px-1 font-medium text-right">Bowl avg</th>
+                        </tr></thead>
+                        <tbody>
+                          {deep.by_venue.map((v, i) => (
+                            <tr key={i} className="border-t pb-hairline">
+                              <td className="py-1.5 px-1 truncate max-w-[200px]">{v.venue}</td>
+                              <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{v.games}</td>
+                              <td className="py-1.5 px-1 text-right pb-num">{v.total_runs}</td>
+                              <td className="py-1.5 px-1 text-right pb-num">{fmt2(v.batting_average)}</td>
+                              <td className="py-1.5 px-1 text-right pb-num">{v.wickets}</td>
+                              <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{fmt2(v.bowling_average)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card></div>
+                )}
+
+                {deep.bowling_dismissals?.length > 0 && (
+                  <div className="mt-4"><Card title="How they take wickets" right={<span className="text-pb-faint text-xs">bowling</span>}>
+                    <div className="flex flex-wrap gap-2">
+                      {deep.bowling_dismissals.map((d, i) => (
+                        <span key={i} className="text-[12px] px-2 py-0.5 rounded-full capitalize" style={{ background: 'var(--pb-surface2)' }}>{d.dismissal_type} <span className="pb-num text-pb-faint">{d.count}</span></span>
+                      ))}
+                    </div>
+                  </Card></div>
+                )}
               </>
             )}
           </>
