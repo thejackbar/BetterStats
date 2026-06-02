@@ -923,10 +923,17 @@ export const api = {
   // omit it for the whole club.
   iqOppositionDossier: ({ opponent, fixtureId, team } = {}) =>
     request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId, team)}`),
+  // Live ladder standing for an upcoming opponent (our row + theirs).
+  iqOpponentLadder: ({ opponent, fixtureId } = {}) =>
+    request(`/iq/opposition/ladder?${_iqQs(opponent, fixtureId)}`),
   iqMatchOpponent: ({ opponentName, oppKey, displayName } = {}) =>
     request(`/iq/opposition/match?opponent_name=${encodeURIComponent(opponentName)}&opp_key=${encodeURIComponent(oppKey)}${displayName ? `&display_name=${encodeURIComponent(displayName)}` : ''}`, { method: 'POST' }),
   iqRefreshDossier: ({ opponent, fixtureId, team } = {}) =>
     request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId, team)}`, { method: 'POST' }),
+  // Manual scouting tags for opponent players (handedness, bowler type, notes…).
+  iqOpponentTags: () => request('/iq/opposition/player-tags'),
+  iqSaveOpponentTag: (playerId, body) =>
+    request(`/iq/opposition/player-tags/${encodeURIComponent(playerId)}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   // ─── BetterIQ: Selection analysis ───────────────────────
   // Fixtures with a saved BetterSelect lineup, ready to analyse.

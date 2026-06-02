@@ -32,8 +32,14 @@ Org-scoping of games goes through ``grades → seasons`` (the views don't carry
 """
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.db import Organisation
+from app.services import grassroots_scores_client
+from app.services.club_match import club_match_keys
 
 
 # The opponent key + display name for a game, from our club's perspective.
@@ -192,6 +198,88 @@ async def save_opponent_alias(session: AsyncSession, org_id: str, opponent_name:
         {"org": org_id, "alias": alias, "opp_key": opp_key, "dn": display_name},
     )
     await session.commit()
+
+
+# ─── Opponent player scouting tags (manual colour/detail) ────────────────────
+# Controlled vocab mirrors the Player attributes BetterSelect uses, so the
+# opposition tag editor offers the same choices as our own players.
+_TAG_BAT_HANDS = {"LEFT", "RIGHT"}
+_TAG_BOWL_ACTIONS = {"RIGHT_ARM", "LEFT_ARM"}
+_TAG_BOWL_TYPES = {"FAST", "FAST_MEDIUM", "MEDIUM", "MEDIUM_FAST", "FINGER_SPIN", "WRIST_SPIN"}
+_TAG_ROLES = {"BAT", "BOWL", "ALL", "WK"}
+
+
+async def get_opponent_tags(session: AsyncSession, org_id: str) -> dict[str, dict]:
+    """All of an org's opponent scouting tags, keyed by participant_id (the
+    dossier's player_id). Defensive: empty if the table isn't migrated yet."""
+    try:
+        res = await session.execute(
+            text(
+                """
+                SELECT participant_id, player_name, batting_hand, bowling_action, bowling_type,
+                       player_role, is_wicket_keeper, is_danger, notes
+                FROM opponent_player_tags WHERE organisation_id = CAST(:org AS UUID)
+                """
+            ),
+            {"org": org_id},
+        )
+        return {r["participant_id"]: dict(r) for r in res.mappings()}
+    except Exception:
+        await session.rollback()
+        return {}
+
+
+async def upsert_opponent_tag(session: AsyncSession, org_id: str, participant_id: str, fields: dict, user_id: str | None = None) -> dict:
+    """Create/update one opponent player's scouting tag. Controlled-vocab fields
+    are validated (an unknown value clears to NULL rather than erroring); name and
+    notes are free text. Returns the stored tag."""
+    pid = (participant_id or "").strip()
+    if not pid:
+        return {}
+
+    def _choice(v, allowed):
+        v = (v or "").strip().upper() or None
+        return v if (v is None or v in allowed) else None
+
+    def _flag(v):
+        return bool(v) if v is not None else None
+
+    payload = {
+        "player_name": (fields.get("player_name") or "").strip() or None,
+        "batting_hand": _choice(fields.get("batting_hand"), _TAG_BAT_HANDS),
+        "bowling_action": _choice(fields.get("bowling_action"), _TAG_BOWL_ACTIONS),
+        "bowling_type": _choice(fields.get("bowling_type"), _TAG_BOWL_TYPES),
+        "player_role": _choice(fields.get("player_role"), _TAG_ROLES),
+        "is_wicket_keeper": _flag(fields.get("is_wicket_keeper")),
+        "is_danger": _flag(fields.get("is_danger")),
+        "notes": (fields.get("notes") or "").strip() or None,
+    }
+    await session.execute(
+        text(
+            """
+            INSERT INTO opponent_player_tags
+                (organisation_id, participant_id, player_name, batting_hand, bowling_action,
+                 bowling_type, player_role, is_wicket_keeper, is_danger, notes, updated_by)
+            VALUES (CAST(:org AS UUID), :pid, :player_name, :batting_hand, :bowling_action,
+                    :bowling_type, :player_role, :is_wicket_keeper, :is_danger, :notes,
+                    CAST(:uid AS UUID))
+            ON CONFLICT (organisation_id, participant_id) DO UPDATE SET
+                player_name = COALESCE(EXCLUDED.player_name, opponent_player_tags.player_name),
+                batting_hand = EXCLUDED.batting_hand,
+                bowling_action = EXCLUDED.bowling_action,
+                bowling_type = EXCLUDED.bowling_type,
+                player_role = EXCLUDED.player_role,
+                is_wicket_keeper = EXCLUDED.is_wicket_keeper,
+                is_danger = EXCLUDED.is_danger,
+                notes = EXCLUDED.notes,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = NOW()
+            """
+        ),
+        {"org": org_id, "pid": pid, "uid": user_id, **payload},
+    )
+    await session.commit()
+    return {"participant_id": pid, **payload}
 
 
 async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str | None, fixture_id: str | None) -> tuple[str | None, str | None]:
@@ -733,6 +821,100 @@ async def _their_key_players(session: AsyncSession, opp_org_uuid: str) -> dict:
             }
         )
     return {"batting": top_batting, "bowling": top_bowling}
+
+
+# ─── Opponent ladder standing (live, current-season) ─────────────────────────
+# Words to strip from a club name before token-matching it against a ladder row,
+# so "Bassendean Cricket Club" matches on "bassendean", not "cricket"/"club".
+_LADDER_STOP = {"cricket", "club", "cc", "the", "inc", "junior", "juniors", "seniors", "grade"}
+
+
+def _ladder_rows(raw) -> tuple[list[dict], str | None]:
+    """Pull the Overall ladder's rows from CA's fixturesladders payload (the
+    documented shape; see routers/ladders.py). Returns (rows, view_name)."""
+    if not isinstance(raw, dict):
+        return [], None
+    ladders = raw.get("ladders") or []
+    if not ladders:
+        return [], None
+    ladder = next(
+        (l for l in ladders if isinstance(l, dict) and (l.get("name") or "").strip().lower() in ("overall", "ladder")),
+        None,
+    ) or ladders[0]
+    rows = []
+    for pool in (ladder.get("pools") or []):
+        for t in (pool.get("teams") or []):
+            if not isinstance(t, dict):
+                continue
+            stats = {d.get("id"): d.get("val") for d in (t.get("ladderData") or []) if isinstance(d, dict)}
+            rows.append({
+                "rank": t.get("rank"),
+                "team_name": t.get("displayName") or "—",
+                "org": t.get("owningOrganisation") or {},
+                "played": stats.get("played"),
+                "won": stats.get("won"),
+                "lost": stats.get("lost"),
+                "points": stats.get("competitionPoints"),
+            })
+    rows.sort(key=lambda r: (r["rank"] is None, r["rank"] if r["rank"] is not None else 9999))
+    return rows, (ladder.get("name") or "Ladder")
+
+
+async def opponent_ladder(session: AsyncSession, org_id: str, *, opponent: str | None = None, fixture_id: str | None = None) -> dict:
+    """Current ladder standing for an upcoming opponent — fetched live from CA's
+    fixturesladders for the fixture's grade. Returns our row and the opponent's
+    row so a preview can frame the matchup ("you're 2nd, they're 5th"). Needs a
+    fixture (for the grade). Standings are *current*, so this is upcoming-opponent
+    context, not a historical 'vs top-4' split (that needs ladder snapshots we
+    don't keep)."""
+    opp_key, name, grade_id = await resolve_opponent(session, org_id, opponent=opponent, fixture_id=fixture_id)
+    base = {"opponent": {"opp_key": opp_key, "name": name}, "grade_id": grade_id}
+    if not grade_id:
+        return {**base, "available": False, "note": "Pick an upcoming fixture to see its grade ladder."}
+    raw = await grassroots_scores_client.get_grade_ladder(grade_id)
+    rows, view = _ladder_rows(raw)
+    if not rows:
+        return {**base, "available": False, "note": "No ladder published for this grade yet."}
+
+    org = await session.get(Organisation, uuid.UUID(org_id))
+    club_keys = club_match_keys(org) if org else []
+
+    def _hay(r):
+        return " ".join(str(x).lower() for x in [r["team_name"], r["org"].get("name"), r["org"].get("shortName")] if x)
+    for r in rows:
+        r["is_club"] = any(k and k in _hay(r) for k in club_keys)
+
+    our_row = next((r for r in rows if r["is_club"]), None)
+    nm = (name or "").strip().lower()
+    core = [t for t in nm.replace("-", " ").split() if len(t) > 2 and t not in _LADDER_STOP]
+    opp_row = None
+    for r in rows:
+        if r["is_club"]:
+            continue
+        h = _hay(r)
+        if (nm and nm in h) or any(t in h for t in core):
+            opp_row = r
+            break
+
+    grr = (await session.execute(
+        text("SELECT name FROM grades WHERE id = CAST(:g AS UUID)"), {"g": grade_id}
+    )).mappings().first()
+
+    def _clean(r):
+        if not r:
+            return None
+        return {"rank": r["rank"], "team_name": r["team_name"], "played": r["played"],
+                "won": r["won"], "lost": r["lost"], "points": r["points"]}
+
+    return {
+        **base,
+        "available": True,
+        "grade_name": grr["name"] if grr else None,
+        "view": view,
+        "teams": len(rows),
+        "our_row": _clean(our_row),
+        "opponent_row": _clean(opp_row),
+    }
 
 
 async def opposition_report(

@@ -11,12 +11,12 @@ analysis, player trends and NL Q&A are later phases.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_IQ, require_cap
-from app.models.db import Organisation, get_db
-from app.routers.auth import get_current_club
+from app.models.db import Organisation, User, get_db
+from app.routers.auth import get_current_club, get_current_user
 from app.services import iq as iq_service
 from app.services import iq_opponent
 from app.services import iq_review
@@ -86,6 +86,18 @@ async def opposition_dossier(
     )
 
 
+@router.get("/opposition/ladder")
+async def opposition_ladder(
+    opponent: str | None = Query(None, description="opp_key"),
+    fixture_id: str | None = Query(None, description="fixture whose grade ladder to read"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Live ladder standing for an upcoming opponent (our row + theirs) from the
+    fixture's grade. Current standings — upcoming-opponent context."""
+    return await iq_service.opponent_ladder(db, str(club.id), opponent=opponent, fixture_id=fixture_id)
+
+
 @router.post("/opposition/dossier/refresh")
 async def refresh_opposition_dossier(
     opponent: str | None = Query(None),
@@ -118,6 +130,28 @@ async def match_opponent(
     fixture with this opponent name (now and future)."""
     await iq_service.save_opponent_alias(db, str(club.id), opponent_name, opp_key, display_name)
     return {"ok": True}
+
+
+@router.get("/opposition/player-tags")
+async def opposition_player_tags(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Our saved scouting tags for opponent players, keyed by participant_id (the
+    dossier's player_id) — handedness, bowling type, role, danger flag and notes."""
+    return await iq_service.get_opponent_tags(db, str(club.id))
+
+
+@router.put("/opposition/player-tags/{player_id}")
+async def save_opposition_player_tag(
+    player_id: str,
+    body: dict = Body(..., description="batting_hand, bowling_action, bowling_type, player_role, is_wicket_keeper, is_danger, notes, player_name"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(get_current_user),
+):
+    """Add/update colour & detail on one opponent player (a manual scouting tag)."""
+    return await iq_service.upsert_opponent_tag(db, str(club.id), player_id, body, user_id=str(user.id))
 
 
 # ─── Selection analysis (Phase 2) ────────────────────────────────────────────

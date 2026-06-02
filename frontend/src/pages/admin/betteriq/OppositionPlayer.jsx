@@ -49,9 +49,16 @@ export default function OppositionPlayer() {
   const [sel, setSel] = useState(null)          // player_id
   const [clubQ, setClubQ] = useState('')
   const [playerQ, setPlayerQ] = useState('')
+  const [tags, setTags] = useState({})       // participant_id → scouting tag
   const pollRef = useRef(null)
 
   useEffect(() => { api.iqListOpponents().then(d => setOpponents(d?.opponents || [])).catch(() => setOpponents([])) }, [])
+  useEffect(() => { api.iqOpponentTags().then(d => setTags(d || {})).catch(() => setTags({})) }, [])
+  const saveTag = async (playerId, body) => {
+    const saved = await api.iqSaveOpponentTag(playerId, body)
+    setTags(t => ({ ...t, [playerId]: saved }))
+    return saved
+  }
   const stopPoll = () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
   useEffect(() => stopPoll, [])
 
@@ -123,7 +130,7 @@ export default function OppositionPlayer() {
               </>)} />
           </div>
           {selected
-            ? <Card><OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={club.name} /></Card>
+            ? <Card><OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={club.name} playerId={sel} tag={tags[sel]} onSaveTag={saveTag} /></Card>
             : <div className="pb-card p-5"><Empty>Search and pick one of {club.name}'s players for their full profile.</Empty></div>}
           {dossier?.coverage?.notes?.length > 0 && (
             <div className="text-pb-faintest text-[11px]">{dossier.coverage.notes.join(' ')}</div>

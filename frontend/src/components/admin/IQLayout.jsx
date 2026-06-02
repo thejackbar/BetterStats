@@ -22,6 +22,7 @@ function loadClubBranding() {
 // analysis, player trends and NL Q&A arrive as later tabs.
 const NAV = [
   { to: '/admin/betteriq', label: 'Overview', icon: 'overview', cap: null, exact: true },
+  { to: '/admin/betteriq/preview', label: 'Match preview', icon: 'fixtures', cap: CAP.MANAGE_IQ },
   { to: '/admin/betteriq/opposition', label: 'Opposition club', icon: 'search', cap: CAP.MANAGE_IQ, exact: true },
   { to: '/admin/betteriq/opposition-player', label: 'Opposition player', icon: 'ladders', cap: CAP.MANAGE_IQ },
   { to: '/admin/betteriq/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_IQ },
