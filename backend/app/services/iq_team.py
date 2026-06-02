@@ -17,6 +17,8 @@ venues) comes from a single query.
 """
 from __future__ import annotations
 
+import statistics
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -282,6 +284,85 @@ async def _batting_pairs(session: AsyncSession, org_id: str, season_id: str | No
             "opening": bool(r["opening"] and r["opening"] >= stands / 2),
         })
     return pairs
+
+
+async def player_impact(session: AsyncSession, org_id: str, season_id: str | None = None) -> dict:
+    """Player Impact / club MVP board (brief §15.3) — a transparent blended rating
+    from scorecard rates (runs, wickets, economy, fielding dismissals per match),
+    z-scored across the squad and scaled 0–100. Defaults to the latest season."""
+    seasons = await team_seasons(session, org_id)
+    resolved = next((s for s in seasons if s["season_id"] == season_id), None) if season_id else None
+    if not resolved and seasons:
+        resolved = seasons[0]
+    if not resolved:
+        return {"season": None, "players": []}
+    sid = resolved["season_id"]
+    res = await session.execute(
+        text(
+            """
+            SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                   COALESCE(SUM(pss.matches), 0) AS m,
+                   COALESCE(SUM(pss.runs), 0) AS runs,
+                   COALESCE(SUM(pss.wickets), 0) AS wkts,
+                   COALESCE(SUM(pss.runs_conceded), 0) AS rc,
+                   COALESCE(SUM(pss.bowling_balls), 0) AS bb,
+                   COALESCE(SUM(pss.catches_non_wk), 0) + COALESCE(SUM(pss.catches_wk), 0)
+                     + COALESCE(SUM(pss.run_outs), 0) + COALESCE(SUM(pss.stumpings), 0) AS dis
+            FROM players p
+            JOIN player_season_stats pss ON pss.player_id = p.id
+            WHERE p.organisation_id = CAST(:org AS UUID) AND pss.season_id = CAST(:sid AS UUID)
+            GROUP BY p.id, name
+            HAVING COALESCE(SUM(pss.matches), 0) >= 3
+            """
+        ),
+        {"org": org_id, "sid": sid},
+    )
+    pls = []
+    for r in res.mappings():
+        m = int(r["m"]) or 1
+        pls.append({
+            "id": r["id"], "name": r["name"], "matches": int(r["m"]),
+            "runs": int(r["runs"]), "wickets": int(r["wkts"]), "dismissals": int(r["dis"]),
+            "bat_pm": r["runs"] / m, "wkt_pm": r["wkts"] / m, "field_pm": r["dis"] / m,
+            "econ": float(r["rc"] * 6 / r["bb"]) if r["bb"] and r["bb"] >= 30 else None,
+        })
+    if not pls:
+        return {"season": {"id": sid, "name": resolved["name"]}, "players": []}
+
+    def zmap(key, invert=False, only_present=False):
+        vals = [p[key] for p in pls if p[key] is not None] if only_present else [p[key] for p in pls]
+        if len(vals) < 2:
+            return {p["id"]: 0.0 for p in pls}
+        mu, sd = statistics.mean(vals), statistics.pstdev(vals) or 1.0
+        out = {}
+        for p in pls:
+            if p[key] is None:
+                out[p["id"]] = 0.0
+            else:
+                z = (p[key] - mu) / sd
+                out[p["id"]] = -z if invert else z
+        return out
+
+    zb, zw, zf = zmap("bat_pm"), zmap("wkt_pm"), zmap("field_pm")
+    ze = zmap("econ", invert=True, only_present=True)
+    raw = {}
+    for p in pls:
+        bat_c = 1.0 * zb[p["id"]]
+        ball_c = 0.9 * zw[p["id"]] + 0.45 * ze[p["id"]]
+        field_c = 0.35 * zf[p["id"]]
+        raw[p["id"]] = bat_c + ball_c + field_c
+        if bat_c > 0.3 and ball_c > 0.3:
+            p["role"] = "All-round"
+        else:
+            comps = {"Batting": bat_c, "Bowling": ball_c, "Fielding": field_c}
+            p["role"] = max(comps, key=comps.get)
+    lo, hi = min(raw.values()), max(raw.values())
+    for p in pls:
+        p["impact"] = round(100 * (raw[p["id"]] - lo) / (hi - lo)) if hi > lo else 50
+        for k in ("bat_pm", "wkt_pm", "field_pm", "econ"):
+            p.pop(k, None)
+    pls.sort(key=lambda x: x["impact"], reverse=True)
+    return {"season": {"id": sid, "name": resolved["name"]}, "players": pls[:12]}
 
 
 async def team_overview(session: AsyncSession, org_id: str, season_id: str | None = None) -> dict:

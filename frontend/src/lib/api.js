@@ -942,6 +942,7 @@ export const api = {
   // ─── BetterIQ: Team self-analysis ───────────────────────
   iqTeamSeasons: () => request('/iq/team/seasons'),
   iqTeamOverview: (seasonId) => request(`/iq/team/overview${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
+  iqTeamMvp: (seasonId) => request(`/iq/team/mvp${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
 }
 
 function _iqQs(opponent, fixtureId, team) {
