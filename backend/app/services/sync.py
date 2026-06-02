@@ -1728,16 +1728,22 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     for pid in player_ids:
         pid_str = str(pid)
 
+        # Scope to this org's seasons only. A CA participant GUID is shared
+        # across clubs, so a dual-club player can have player_season_stats rows
+        # under another club's seasons; counting them all would mint inflated
+        # career milestones (mirrors the v_effective view guard, migration 060).
         totals_res = await session.execute(
             text("""
                 SELECT
-                    COALESCE(SUM(runs), 0)    AS runs,
-                    COALESCE(SUM(wickets), 0) AS wickets,
-                    COALESCE(SUM(matches), 0) AS matches,
-                    COALESCE(SUM(catches), 0) AS catches
-                FROM player_season_stats WHERE player_id=:pid
+                    COALESCE(SUM(pss.runs), 0)    AS runs,
+                    COALESCE(SUM(pss.wickets), 0) AS wickets,
+                    COALESCE(SUM(pss.matches), 0) AS matches,
+                    COALESCE(SUM(pss.catches), 0) AS catches
+                FROM player_season_stats pss
+                JOIN seasons s ON s.id = pss.season_id
+                WHERE pss.player_id = :pid AND s.organisation_id = :org_id
             """),
-            {"pid": pid_str}
+            {"pid": pid_str, "org_id": str(org_id)}
         )
         totals = dict(totals_res.mappings().first() or {})
 

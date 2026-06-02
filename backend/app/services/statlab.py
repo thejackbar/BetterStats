@@ -722,7 +722,11 @@ async def query_player_career(
                     COALESCE(SUM(pss.stumpings), 0)                                              AS stumpings
                 FROM player_season_stats pss
                 JOIN players p ON p.id = pss.player_id
-                WHERE p.organisation_id = :org_id
+                JOIN seasons s ON s.id = pss.season_id
+                -- Scope to this org's seasons: a CA participant GUID shared
+                -- across clubs can attach another club's season rows to the
+                -- same player (see migration 060).
+                WHERE p.organisation_id = :org_id AND s.organisation_id = :org_id
                 GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             )
             SELECT * FROM agg
@@ -880,7 +884,7 @@ async def query_player_season(
                 FROM player_season_stats pss
                 JOIN players p ON p.id = pss.player_id
                 JOIN seasons s ON s.id = pss.season_id
-                WHERE p.organisation_id = :org_id {season_filter}
+                WHERE p.organisation_id = :org_id AND s.organisation_id = :org_id {season_filter}
             )
             SELECT * FROM agg
             {where_sql}
@@ -1059,6 +1063,11 @@ async def query_family_career(
             JOIN family_members fm ON fm.family_id = f.id
             JOIN players p ON p.id = fm.player_id
             LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+                -- Only this org's seasons (shared cross-club GUID guard, migration 060)
+                AND EXISTS (
+                    SELECT 1 FROM seasons s
+                    WHERE s.id = pss.season_id AND s.organisation_id = :org_id
+                )
             WHERE f.organisation_id = :org_id
             GROUP BY f.id, f.name
         )
@@ -1114,7 +1123,7 @@ async def query_family_season(
             JOIN players p ON p.id = fm.player_id
             JOIN player_season_stats pss ON pss.player_id = p.id
             JOIN seasons s ON s.id = pss.season_id
-            WHERE f.organisation_id = :org_id {season_filter}
+            WHERE f.organisation_id = :org_id AND s.organisation_id = :org_id {season_filter}
             GROUP BY f.id, f.name, s.id, s.name, s.year
         )
         SELECT * FROM agg
@@ -3702,6 +3711,7 @@ async def derived_most_minutes_in_season(
         JOIN players p ON p.id = pss.player_id
         JOIN seasons s ON s.id = pss.season_id
         WHERE p.organisation_id = :org_id
+          AND s.organisation_id = :org_id
           AND COALESCE(pss.batting_minutes, 0) > 0
           {season_filter}
         ORDER BY pss.batting_minutes DESC NULLS LAST

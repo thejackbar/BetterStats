@@ -389,6 +389,12 @@ async def list_players(session: AsyncSession, org_id: str) -> list[dict]:
                    COUNT(pss.season_id) AS seasons
             FROM players p
             LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+                -- Only this org's seasons (shared cross-club GUID guard, migration 060)
+                AND EXISTS (
+                    SELECT 1 FROM seasons s
+                    WHERE s.id = pss.season_id
+                      AND s.organisation_id = CAST(:org AS UUID)
+                )
             WHERE p.organisation_id = CAST(:org AS UUID) AND p.status = 'active'
             GROUP BY p.id, name
             HAVING COUNT(pss.season_id) > 0
