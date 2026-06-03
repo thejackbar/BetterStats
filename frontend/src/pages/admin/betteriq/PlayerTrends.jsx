@@ -815,15 +815,20 @@ function Overview({ overview, players, squads, squad, setSquad, pickerPlayers, o
 export default function PlayerTrends() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { ctx, seasons } = useIQFilter()
+  const seasonId = ctx?.season?.to?.id || undefined
+  const gradeId = ctx?.team?.id || undefined
   const [overview, setOverview] = useState(null)
   const [players, setPlayers] = useState([])
   const [squad, setSquad] = useState('')
   const playerId = searchParams.get('player') || null
 
+  // Form movers, emerging and the player list all follow the global Season + Team
+  // filter — re-fetch whenever it changes.
   useEffect(() => {
-    api.iqTrendsOverview().then(setOverview).catch(() => setOverview({ batting: {}, bowling: {}, emerging: [] }))
-    api.iqTrendsPlayers().then(d => setPlayers(d || [])).catch(() => setPlayers([]))
-  }, [])
+    setOverview(null)
+    api.iqTrendsOverview(seasonId, gradeId).then(setOverview).catch(() => setOverview({ batting: {}, bowling: {}, emerging: [] }))
+    api.iqTrendsPlayers(seasonId, gradeId).then(d => setPlayers(d || [])).catch(() => setPlayers([]))
+  }, [seasonId, gradeId])
 
   const pick = (id) => setSearchParams({ player: id }, { replace: true })
   const clear = () => setSearchParams({}, { replace: true })

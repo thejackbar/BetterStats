@@ -951,8 +951,20 @@ export const api = {
     request(`/iq/selection/analysis?fixture_id=${encodeURIComponent(fixtureId)}`),
 
   // ─── BetterIQ: Player trends & development ──────────────
-  iqTrendsOverview: () => request('/iq/trends/overview'),
-  iqTrendsPlayers: () => request('/iq/trends/players'),
+  iqTrendsOverview: (seasonId, gradeId) => {
+    const qs = new URLSearchParams()
+    if (seasonId) qs.set('season_id', seasonId)
+    if (gradeId) qs.set('grade_id', gradeId)
+    const s = qs.toString()
+    return request(`/iq/trends/overview${s ? `?${s}` : ''}`)
+  },
+  iqTrendsPlayers: (seasonId, gradeId) => {
+    const qs = new URLSearchParams()
+    if (seasonId) qs.set('season_id', seasonId)
+    if (gradeId) qs.set('grade_id', gradeId)
+    const s = qs.toString()
+    return request(`/iq/trends/players${s ? `?${s}` : ''}`)
+  },
   iqTrendsPlayer: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}`),
   iqPlayerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/deep`),
   // 6-axis batting/bowling radar, normalised vs the squad (50 = squad average).
@@ -971,7 +983,13 @@ export const api = {
     const s = qs.toString()
     return request(`/iq/team/overview${s ? `?${s}` : ''}`)
   },
-  iqTeamMvp: (seasonId) => request(`/iq/team/mvp${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
+  iqTeamMvp: (seasonId, gradeId) => {
+    const qs = new URLSearchParams()
+    if (seasonId) qs.set('season_id', seasonId)
+    if (gradeId) qs.set('grade_id', gradeId)
+    const s = qs.toString()
+    return request(`/iq/team/mvp${s ? `?${s}` : ''}`)
+  },
   // Innings phase shape (Powerplay/Middle/Death) from ball-by-ball data — recent
   // live-scored games only. Our team's, and an opponent's.
   iqTeamPhases: (seasonId, gradeId, side) => {
@@ -986,7 +1004,13 @@ export const api = {
     request(`/iq/opposition/phases?${_iqQs(opponent, fixtureId)}`),
 
   // ─── BetterIQ: Post-match review ────────────────────────
-  iqReviewGames: () => request('/iq/review/games'),
+  iqReviewGames: (seasonId, gradeId) => {
+    const qs = new URLSearchParams()
+    if (seasonId) qs.set('season_id', seasonId)
+    if (gradeId) qs.set('grade_id', gradeId)
+    const s = qs.toString()
+    return request(`/iq/review/games${s ? `?${s}` : ''}`)
+  },
   iqGameReview: (gameId) => request(`/iq/review/game/${encodeURIComponent(gameId)}`),
 }
 
