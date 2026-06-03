@@ -1,0 +1,213 @@
+/* ───────────────────────────────────────────────────────────────────────────
+   BetterIQ — "Press Box / Premium" elevation
+   A darker, chart-forward evolution of the pb-* Press Box system. Tokens are
+   theme-aware (flip via [data-theme] on the .iq-root) and the violet "brain"
+   accent is preserved but enriched. Card surface treatment flips via
+   [data-card="hairline" | "glass"].
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* The violet "brain" identity — enriched: a deep base, a core, a bright tip */
+  --iq-violet-deep:   #5b46d6;
+  --iq-violet:        #8b7cf6;
+  --iq-violet-bright: #b3a4ff;
+
+  /* Result semantics — fixed, never themed away */
+  --iq-win:    #1fd693;
+  --iq-loss:   #ff6363;
+  --iq-draw:   #f5b542;
+
+  /* Chart series */
+  --iq-c-runs:    #1fd693;
+  --iq-c-wkts:    #4f9dff;
+  --iq-c-amber:   #f5b542;
+  --iq-c-pink:    #f472b6;
+  --iq-c-cyan:    #22d3ee;
+
+  /* Type */
+  --iq-font-display: 'Archivo', 'Archivo Expanded', system-ui, sans-serif;
+  --iq-font-body:    'Archivo', system-ui, sans-serif;
+  --iq-font-mono:    'JetBrains Mono', ui-monospace, monospace;
+
+  --iq-radius: 14px;
+  --iq-radius-sm: 10px;
+}
+
+/* ── DARK (default — the analyst's room) ──────────────────────────────────── */
+.iq-root,
+.iq-root[data-theme="dark"] {
+  --pb-bg:        #07090f;
+  --pb-bg2:       #04050a;
+  --pb-surface:   #0d1019;
+  --pb-surface2:  #141926;
+  --pb-surface3:  #1b2233;
+  --pb-hairline:  #1b2130;
+  --pb-hairline2: #2a3346;
+
+  --pb-text:     #eef0f6;
+  --pb-dim:      #9aa1b4;
+  --pb-faint:    #646b80;
+  --pb-faintest: #3d4356;
+
+  --pb-accent:        var(--iq-violet);
+  --pb-accent-bright: var(--iq-violet-bright);
+  --pb-accent-rgb:    139 124 246;
+
+  --pb-brand: var(--iq-win);
+  --pb-red:   var(--iq-loss);
+  --pb-amber: var(--iq-draw);
+
+  --iq-glow: radial-gradient(1200px 600px at 78% -8%, rgba(139,124,246,0.10), transparent 60%);
+  --iq-card-shadow: 0 1px 0 rgba(255,255,255,0.02), 0 16px 40px -28px rgba(0,0,0,0.9);
+  --iq-glass-bg: rgba(20,25,38,0.55);
+  --iq-glass-brd: rgba(255,255,255,0.07);
+  color-scheme: dark;
+}
+
+/* ── LIGHT (premium editorial paper) ──────────────────────────────────────── */
+.iq-root[data-theme="light"] {
+  --pb-bg:        #f3f3f6;
+  --pb-bg2:       #ececed;
+  --pb-surface:   #ffffff;
+  --pb-surface2:  #f4f5f8;
+  --pb-surface3:  #eceef3;
+  --pb-hairline:  #e6e7ec;
+  --pb-hairline2: #d6d8e0;
+
+  --pb-text:     #13151c;
+  --pb-dim:      #565d70;
+  --pb-faint:    #8a90a2;
+  --pb-faintest: #b4b9c6;
+
+  --pb-accent:        #6d5de6;
+  --pb-accent-bright: #8b7cf6;
+  --pb-accent-rgb:    109 93 230;
+
+  --pb-brand: #0fae73;
+  --pb-red:   #e0484b;
+  --pb-amber: #d99412;
+
+  --iq-glow: radial-gradient(1200px 600px at 78% -8%, rgba(109,93,230,0.07), transparent 60%);
+  --iq-card-shadow: 0 1px 2px rgba(16,18,28,0.04), 0 18px 40px -30px rgba(16,18,28,0.22);
+  --iq-glass-bg: rgba(255,255,255,0.6);
+  --iq-glass-brd: rgba(16,18,28,0.07);
+  color-scheme: light;
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+.iq-root {
+  background: var(--pb-bg);
+  background-image: var(--iq-glow);
+  color: var(--pb-text);
+  font-family: var(--iq-font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+}
+.iq-root *, .iq-root *::before, .iq-root *::after { box-sizing: border-box; }
+
+/* Preflight is disabled (Tailwind config) so native form controls keep UA
+   styling — notably a grey button face. Reset buttons to inherit, since most
+   set their own background via inline style / utility classes. */
+.iq-root button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+}
+.iq-root button:disabled { cursor: default; }
+
+.iq-display { font-family: var(--iq-font-display); }
+.iq-mono    { font-family: var(--iq-font-mono); }
+.iq-num     { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
+
+/* Broadcast headline: tight, slightly expanded, heavy */
+.iq-headline {
+  font-family: var(--iq-font-display);
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  font-stretch: 112%;
+  line-height: 0.98;
+}
+.iq-eyebrow {
+  font-family: var(--iq-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--pb-faint);
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+.iq-card {
+  background: var(--pb-surface);
+  border: 1px solid var(--pb-hairline);
+  border-radius: var(--iq-radius);
+  position: relative;
+}
+.iq-root[data-card="glass"] .iq-card {
+  background: var(--iq-glass-bg);
+  border-color: var(--iq-glass-brd);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: var(--iq-card-shadow);
+}
+.iq-card-2 { background: var(--pb-surface2); }
+.iq-accent-card {
+  border-color: color-mix(in srgb, var(--pb-accent) 32%, transparent);
+}
+.iq-accent-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--pb-accent) 9%, transparent), transparent 42%);
+  pointer-events: none;
+}
+
+/* Hairlines */
+.iq-hr { border: 0; border-top: 1px solid var(--pb-hairline); margin: 0; }
+
+/* Scrollbars */
+.iq-scroll::-webkit-scrollbar { width: 9px; height: 9px; }
+.iq-scroll::-webkit-scrollbar-thumb { background: var(--pb-hairline2); border-radius: 9px; }
+.iq-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* ── Motion ───────────────────────────────────────────────────────────────── */
+@keyframes iq-rise { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes iq-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes iq-draw { to { stroke-dashoffset: 0; } }
+@keyframes iq-spin { to { transform: rotate(360deg); } }
+@keyframes iq-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes iq-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.iq-rise { animation: iq-rise 620ms cubic-bezier(0.22,0.61,0.36,1) both; }
+.iq-fade { animation: iq-fade 500ms ease both; }
+.iq-spin { animation: iq-spin 0.8s linear infinite; }
+.iq-pulse { animation: iq-pulse 1.6s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .iq-rise, .iq-fade { animation: none !important; }
+}
+
+/* Focus */
+.iq-root :focus-visible {
+  outline: 2px solid var(--pb-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Selection */
+.iq-root ::selection { background: color-mix(in srgb, var(--pb-accent) 35%, transparent); }
+
+/* ── Print: isolate the cheat sheet ───────────────────────────────────────── */
+@media print {
+  body * { visibility: hidden !important; }
+  .iq-print-area, .iq-print-area * { visibility: visible !important; }
+  .iq-print-area { position: absolute !important; left: 0; top: 0; width: 100% !important; max-width: none !important; box-shadow: none !important; border-radius: 0 !important; }
+  .iq-no-print { display: none !important; }
+  .iq-cs-overlay { position: absolute !important; inset: auto !important; background: #fff !important; backdrop-filter: none !important; padding: 0 !important; overflow: visible !important; }
+  @page { size: landscape; margin: 10mm; }
+}

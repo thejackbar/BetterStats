@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BetterIQ — Analytics</title>
+
+<template id="__bundler_thumbnail">
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100" height="100" rx="20" fill="#0d1019"/>
+  <text x="50" y="44" font-family="Archivo, sans-serif" font-size="30" font-weight="800" fill="#fff" text-anchor="middle">B</text>
+  <text x="50" y="70" font-family="monospace" font-size="13" letter-spacing="2" fill="#8b7cf6" text-anchor="middle">IQ</text>
+</svg>
+</template>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..800&family=Saira:wght@400..800&family=Space+Grotesk:wght@400..700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    corePlugins: { preflight: false },
+    theme: { extend: { colors: {
+      'pb-bg': 'var(--pb-bg)', 'pb-surface': 'var(--pb-surface)', 'pb-surface2': 'var(--pb-surface2)', 'pb-surface3': 'var(--pb-surface3)',
+      'pb-hairline': 'var(--pb-hairline)', 'pb-hairline2': 'var(--pb-hairline2)',
+      'pb-text': 'var(--pb-text)', 'pb-dim': 'var(--pb-dim)', 'pb-faint': 'var(--pb-faint)', 'pb-faintest': 'var(--pb-faintest)',
+      'pb-accent': 'var(--pb-accent)', 'pb-brand': 'var(--pb-brand)', 'pb-red': 'var(--pb-red)', 'pb-amber': 'var(--pb-amber)',
+    } } }
+  };
+</script>
+<link rel="stylesheet" href="iq/iq-theme.css" />
+<style>
+  html, body { margin: 0; padding: 0; background: #07090f; }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="iq/tweaks-panel.jsx"></script>
+<script type="text/babel" src="iq/ui.jsx"></script>
+<script type="text/babel" src="iq/data.jsx"></script>
+<script type="text/babel" src="iq/data2.jsx"></script>
+<script type="text/babel" src="iq/viz.jsx"></script>
+<script type="text/babel" src="iq/Context.jsx"></script>
+<script type="text/babel" src="iq/KeyPlayers.jsx"></script>
+<script type="text/babel" src="iq/Layout.jsx"></script>
+<script type="text/babel" src="iq/Overview.jsx"></script>
+<script type="text/babel" src="iq/Scout.jsx"></script>
+<script type="text/babel" src="iq/Preview.jsx"></script>
+<script type="text/babel" src="iq/OppPlayer.jsx"></script>
+<script type="text/babel" src="iq/Selection.jsx"></script>
+<script type="text/babel" src="iq/Trends.jsx"></script>
+<script type="text/babel" src="iq/Team.jsx"></script>
+<script type="text/babel" src="iq/Review.jsx"></script>
+<script type="text/babel" src="iq/CheatSheet.jsx"></script>
+<script type="text/babel" src="iq/App.jsx"></script>
+</body>
+</html>
