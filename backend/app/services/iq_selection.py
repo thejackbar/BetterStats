@@ -264,6 +264,27 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
     form = await _recent_scores(db, str(club.id))
     load = await _season_load(db, grade_id)
 
+    # Who's already picked in OTHER upcoming fixtures (cross-fixture awareness for
+    # a multi-grade round) → player_id -> ["2nd XI vs …", …].
+    picked_elsewhere: dict[str, list[str]] = {}
+    other = await db.execute(
+        text(
+            """
+            SELECT fl.player_id::text AS pid,
+                   COALESCE(t.name, f.opponent_name, 'another fixture') AS where_
+            FROM fixture_lineups fl
+            JOIN fixtures f ON f.id = fl.fixture_id
+            LEFT JOIN teams t ON t.id = f.team_id
+            WHERE fl.organisation_id = CAST(:org AS UUID) AND f.id <> CAST(:fid AS UUID)
+              AND (f.played_on IS NULL OR f.played_on >= CURRENT_DATE)
+            ORDER BY f.played_on ASC NULLS LAST
+            """
+        ),
+        {"org": str(club.id), "fid": fixture_id},
+    )
+    for r in other.mappings():
+        picked_elsewhere.setdefault(r["pid"], []).append(r["where_"])
+
     # Opponent match-up tie-in (only if the fixture resolves to a club we've played).
     opp_key, opp_name, _ = await resolve_opponent(db, str(club.id), fixture_id=fixture_id)
     vs_opp = await _vs_opponent(db, str(club.id), opp_key) if opp_key else {}
@@ -466,6 +487,11 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
             "availability": p.get("availability"),
             "autofill_eligible": bool(p.get("autofill_eligible")),
             "play_updown": _tier_updown(p.get("tier")),
+            "squads": p.get("squads", []),
+            "squad_team_id": p.get("squad_team_id"),
+            # Other UPCOMING fixtures this player is ALSO selected in (cross-fixture
+            # awareness — so a selector can see who's already picked elsewhere).
+            "clash": picked_elsewhere.get(p["id"], []),
             "season_matches": load.get(p["id"], 0),
             "recent_scores": f.get("bat", []), "recent_wickets": f.get("bowl", []),
             "recent_avg": f.get("recent_avg"), "form_score": p.get("score"),

@@ -73,23 +73,27 @@ async def team_grades(session: AsyncSession, org_id: str, season_id: str | None)
     one "1st Grade" row per season. The filter is meant to mean "show me 1st Grade"
     across whatever seasons are in view, so we de-duplicate by NAME and key the
     filter on the name — ``_scope`` matches ``gr.name`` (scoped to the chosen
-    season when one is set). The returned ``grade_id`` IS the name."""
+    season when one is set). The returned ``grade_id`` IS the name.
+
+    Each row also carries ``season_id`` so the global Team filter can scope its
+    options to the selected season — a club only fielded a given grade in some
+    seasons, and offering one it didn't field returned an empty dashboard."""
     season_clause = "AND gr.season_id = CAST(:season AS UUID)" if season_id else ""
     res = await session.execute(
         text(
             f"""
-            SELECT gr.name AS name
+            SELECT gr.name AS name, gr.season_id::text AS season_id
             FROM grades gr
             JOIN seasons s ON s.id = gr.season_id
             WHERE s.organisation_id = CAST(:org AS UUID) {season_clause}
               AND EXISTS (SELECT 1 FROM v_effective_games g WHERE g.grade_id = gr.id)
-            GROUP BY gr.name
+            GROUP BY gr.name, gr.season_id
             ORDER BY gr.name
             """
         ),
         {"org": org_id, "season": season_id},
     )
-    return [{"grade_id": r["name"], "name": r["name"]} for r in res.mappings()]
+    return [{"grade_id": r["name"], "name": r["name"], "season_id": r["season_id"]} for r in res.mappings()]
 
 
 # Scope clause for the per-game functions. ``grade`` is a grade NAME (see

@@ -25,6 +25,17 @@ function RoleChip({ role }) {
 const sumInts = (arr) => (arr || []).reduce((a, b) => a + (parseInt(b, 10) || 0), 0)
 const AVAIL_SEED = { AVAILABLE: 'available', MAYBE: 'maybe', UNAVAILABLE: 'unavailable' }
 
+/* multi-select squad filter chip */
+function SquadChip({ label, active, onClick }) {
+  return (
+    <button onClick={onClick} className="iq-display font-semibold text-[12px] transition whitespace-nowrap"
+      style={{ padding: '5px 11px', borderRadius: 99,
+        background: active ? 'color-mix(in srgb, var(--pb-accent) 16%, transparent)' : 'var(--pb-surface2)',
+        color: active ? 'var(--pb-accent)' : 'var(--pb-dim)',
+        border: `1px solid ${active ? 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' : 'var(--pb-hairline2)'}` }}>{label}</button>
+  )
+}
+
 // Map a backend analysis player → the shape buildXI works on.
 function mapPlayer(p, src) {
   const bowlType = p.bowling_type || ''
@@ -42,6 +53,7 @@ function mapPlayer(p, src) {
     is_wicket_keeper: !!p.is_wicket_keeper, is_captain: !!p.is_captain,
     availability: p.availability, flags: p.flags, play_updown: p.play_updown,
     autofill_eligible: p.autofill_eligible !== false,
+    squads: p.squads || [], clash: p.clash || [],
     saved: src === 'pool' ? !!p.in_xi : (src === 'xi' && p.batting_order != null),
   }
 }
@@ -64,8 +76,15 @@ const allScore = p => batScore(p) * 0.55 + bowlScore(p) * 0.7
 const keeperScore = p => (p.form || 0) + (p.runs || 0) * 0.1
 const valueOf = p => p.role === 'WKT' ? keeperScore(p) : p.role === 'BWL' ? bowlScore(p) : p.role === 'ALL' ? allScore(p) : batScore(p)
 
-function buildXI(pool, availMap, includeMaybe, size = 11) {
-  const avail = pool.filter(p => availMap[p.id] === 'available' || (includeMaybe && availMap[p.id] === 'maybe'))
+function buildXI(pool, availMap, confirmedOnly, size = 11) {
+  // Only BetterSelect-ELIGIBLE players are suggested — right grade & gender,
+  // recent enough, and in a squad tier for this fixture — so a women's player,
+  // a 6th-XI name or someone who hasn't played in years never gets suggested for
+  // the 1st XI, however good their form. By default anyone not marked unavailable
+  // is a candidate (matches BetterSelect's best-XI); "confirmed only" tightens it
+  // to players who've replied available.
+  const ok = id => (confirmedOnly ? availMap[id] === 'available' : availMap[id] !== 'unavailable')
+  const avail = pool.filter(p => p.autofill_eligible && ok(p.id))
   const used = new Set()
   const take = (arr, n) => { const out = []; for (const p of arr) { if (out.length >= n) break; if (!used.has(p.id)) { out.push(p); used.add(p.id) } } return out }
   const byRole = r => avail.filter(p => p.role === r)
@@ -139,15 +158,23 @@ function Analysis({ data, fixtureId, onNavigate }) {
   const size = data.team_size_target || 11
 
   const [availMap, setAvailMap] = useState(() => Object.fromEntries(pool.map(p => [p.id, AVAIL_SEED[p.availability] || 'maybe'])))
-  const [includeMaybe, setIncludeMaybe] = useState(false)
+  const [confirmedOnly, setConfirmedOnly] = useState(false)
   const [sent, setSent] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendErr, setSendErr] = useState('')
   const [poolQ, setPoolQ] = useState('')
+  const [squadSel, setSquadSel] = useState([])   // selected squad names; [] = all
+
+  // Squads represented in the eligible pool (a player can be in several).
+  const squads = useMemo(() => {
+    const set = new Set()
+    pool.forEach(p => (p.squads || []).forEach(s => s && set.add(s)))
+    return [...set].sort((a, b) => a.localeCompare(b))
+  }, [pool])
 
   // Saved XI (from BetterSelect) and the auto-suggested best-available XI.
   const savedIds = useMemo(() => new Set(pool.filter(p => p.saved).map(p => p.id)), [pool])
-  const suggested = useMemo(() => buildXI(pool, availMap, includeMaybe, size), [pool, availMap, includeMaybe, size])
+  const suggested = useMemo(() => buildXI(pool, availMap, confirmedOnly, size), [pool, availMap, confirmedOnly, size])
   const suggestedIds = useMemo(() => suggested.map(p => p.id), [suggested])
 
   // Working XI the user edits: seed from the saved lineup, or the suggested best
@@ -210,7 +237,11 @@ function Analysis({ data, fixtureId, onNavigate }) {
   ]
 
   const pq = poolQ.trim().toLowerCase()
-  const poolView = pq ? pool.filter(p => p.name.toLowerCase().includes(pq)) : pool
+  const poolView = pool.filter(p =>
+    (!pq || p.name.toLowerCase().includes(pq)) &&
+    (squadSel.length === 0 || (p.squads || []).some(s => squadSel.includes(s)))
+  )
+  const toggleSquad = (s) => setSquadSel(sel => sel.includes(s) ? sel.filter(x => x !== s) : [...sel, s])
 
   return (
     <div className="iq-fade">
@@ -307,16 +338,23 @@ function Analysis({ data, fixtureId, onNavigate }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 mt-9 mb-4">
-        <h2 className="iq-display font-bold text-[19px]" style={{ letterSpacing: '-0.01em' }}>Squad availability <span className="text-pb-faint text-[14px] font-normal">({pool.length})</span></h2>
+      <div className="flex flex-wrap items-center justify-between gap-3 mt-9 mb-3">
+        <h2 className="iq-display font-bold text-[19px]" style={{ letterSpacing: '-0.01em' }}>Squad availability <span className="text-pb-faint text-[14px] font-normal">({poolView.length}{(squadSel.length || pq) ? ` / ${pool.length}` : ''})</span></h2>
         <div className="flex items-center gap-3">
           <Search value={poolQ} onChange={setPoolQ} placeholder="Find a player…" className="max-w-[200px]" />
           <label className="flex items-center gap-2 text-[12.5px] text-pb-dim cursor-pointer select-none whitespace-nowrap">
-            <input type="checkbox" checked={includeMaybe} onChange={e => setIncludeMaybe(e.target.checked)} style={{ accentColor: 'var(--pb-accent)', width: 15, height: 15 }} />
-            Suggest "maybe" players
+            <input type="checkbox" checked={confirmedOnly} onChange={e => setConfirmedOnly(e.target.checked)} style={{ accentColor: 'var(--pb-accent)', width: 15, height: 15 }} />
+            Confirmed available only
           </label>
         </div>
       </div>
+      {squads.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="iq-eyebrow mr-0.5" style={{ fontSize: 9 }}>Squads</span>
+          <SquadChip label="All squads" active={squadSel.length === 0} onClick={() => setSquadSel([])} />
+          {squads.map(s => <SquadChip key={s} label={s} active={squadSel.includes(s)} onClick={() => toggleSquad(s)} />)}
+        </div>
+      )}
       <Card>
         <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
           {poolView.map(p => {
@@ -332,8 +370,12 @@ function Analysis({ data, fixtureId, onNavigate }) {
                 </button>
                 <Initials name={p.name} size={30} tone={on ? 'accent' : undefined} />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2"><span className="font-medium text-[13.5px] truncate">{p.name}</span>{p.play_updown && <span className="iq-mono text-pb-faintest" style={{ fontSize: 8.5 }}>{p.play_updown === 'up' ? '↑ up' : '↓ down'}</span>}</div>
-                  <div className="text-pb-faint text-[11px] iq-num">form {a2(p.form)}{p.flags?.includes('dormant') ? ' · dormant' : ''}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-[13.5px] truncate">{p.name}</span>
+                    {p.play_updown && <span className="iq-mono text-pb-faintest" style={{ fontSize: 8.5 }}>{p.play_updown === 'up' ? '↑ up' : '↓ down'}</span>}
+                    {p.clash?.length > 0 && <span className="iq-mono whitespace-nowrap" style={{ fontSize: 9, color: 'var(--pb-amber)' }} title={`Also selected in: ${p.clash.join(', ')}`}>● also in {p.clash.length === 1 ? p.clash[0] : `${p.clash.length} fixtures`}</span>}
+                  </div>
+                  <div className="text-pb-faint text-[11px] iq-num">form {a2(p.form)}{p.squads?.length ? ` · ${p.squads.join(', ')}` : ''}{p.flags?.includes('dormant') ? ' · dormant' : ''}</div>
                 </div>
                 <RoleChip role={p.role} />
                 <AvailToggle value={availMap[p.id]} onChange={v => setAvail(p.id, v)} />
@@ -342,7 +384,7 @@ function Analysis({ data, fixtureId, onNavigate }) {
           })}
           {poolView.length === 0 && <Empty className="py-2">No players match.</Empty>}
         </div>
-        <Note>Every eligible squad player (incl. promotion / drop-down options) — availability is seeded from BetterSelect. "+XI" adds a player; availability re-ranks the suggested XI. "Send XI" writes your selected order back to BetterSelect.</Note>
+        <Note>Every eligible squad player (incl. promotion / drop-down options); filter by squad to plan across grades. Suggestions only ever include BetterSelect-eligible players (right grade & gender, recent enough) — "also picked" flags a same-day clash. "+XI" adds anyone; availability re-ranks the suggested XI; "Send XI" writes your order back to BetterSelect.</Note>
       </Card>
     </div>
   )
