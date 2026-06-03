@@ -169,7 +169,7 @@ export default function OppositionPlayer() {
                       <button key={o.opp_key} type="button" onMouseDown={e => e.preventDefault()} onClick={() => pickClub(o)}
                         className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
                         <span className="font-medium truncate">{o.name}</span>
-                        <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">{o.meetings} mtgs{o.coverage === 'rich' ? ' · rich' : ''}</span>
+                        <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">{o.shared_grade ? 'shared grade' : `${o.meetings} mtgs${o.coverage === 'rich' ? ' · rich' : ''}`}</span>
                       </button>
                     ))}
                 </div>
@@ -214,7 +214,7 @@ export default function OppositionPlayer() {
                     onMouseLeave={e => e.currentTarget.style.borderColor = ''}>
                     <div className="min-w-0">
                       <div className="iq-display font-semibold truncate">{o.name}</div>
-                      <div className="text-pb-faint text-[11.5px] mt-0.5 iq-num">{o.meetings} meetings{o.last_played ? ` · last ${o.last_played.slice(0, 4)}` : ''}</div>
+                      <div className="text-pb-faint text-[11.5px] mt-0.5 iq-num">{o.shared_grade ? 'Shared grade · scout live' : `${o.meetings} meetings${o.last_played ? ` · last ${o.last_played.slice(0, 4)}` : ''}`}</div>
                     </div>
                     {o.coverage === 'rich' && <Tag tone="accent">Synced</Tag>}
                   </button>

@@ -120,6 +120,44 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
             }
         )
 
+    # Synced *sibling* clubs (other organisations in this instance that share a
+    # grade competition with us) are scoutable via the live dossier's grade scan
+    # even with NO head-to-head rows — so a derby club we both sync, whose shared
+    # game is owned by the other club, is still findable (#16). Surface them as
+    # opponents keyed on their org id, de-duped against history by key and name.
+    existing_keys = {o["opp_key"] for o in opponents}
+    existing_names = {(o["name"] or "").strip().lower() for o in opponents}
+    sib = await session.execute(
+        text(
+            """
+            SELECT DISTINCT o.id::text AS opp_key, o.name AS name
+            FROM organisations o
+            WHERE o.id <> CAST(:org_id AS UUID)
+              AND EXISTS (
+                  SELECT 1 FROM grades g2
+                  JOIN seasons s2 ON s2.id = g2.season_id AND s2.organisation_id = o.id
+                  JOIN grades g1 ON g1.grassroots_id = g2.grassroots_id
+                  JOIN seasons s1 ON s1.id = g1.season_id AND s1.organisation_id = CAST(:org_id AS UUID)
+                  WHERE g2.grassroots_id IS NOT NULL
+              )
+            ORDER BY o.name
+            """
+        ),
+        {"org_id": org_id},
+    )
+    for r in sib.mappings():
+        nm = (r["name"] or "").strip().lower()
+        if r["opp_key"] in existing_keys or (nm and nm in existing_names):
+            continue
+        opponents.append({
+            "opp_key": r["opp_key"], "name": r["name"],
+            "meetings": 0, "last_played": None,
+            "coverage": "rich", "shared_grade": True,
+        })
+        existing_keys.add(r["opp_key"])
+        if nm:
+            existing_names.add(nm)
+
     # Name → opp_key lookup so upcoming fixtures can deep-link to a report.
     by_name = {(o["name"] or "").strip().lower(): o["opp_key"] for o in opponents}
     # Manual matches saved by the user take precedence / fill the gaps.
@@ -328,7 +366,22 @@ async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str 
             {"org_id": org_id, "opp_key": opponent},
         )
         nrow = nm_res.mappings().first()
-        return opponent, (nrow["name"] if nrow else None) or opponent
+        name = nrow["name"] if nrow else None
+        if not name:
+            # A synced sibling club (opp_key = their org id) with no head-to-head
+            # has no game name to read — use the organisation's own name so the
+            # scout shows "Applecross", not a UUID (#16).
+            try:
+                uuid.UUID(opponent)
+                orow = (await session.execute(
+                    text("SELECT name FROM organisations WHERE id = CAST(:id AS UUID)"),
+                    {"id": opponent},
+                )).first()
+                if orow:
+                    name = orow[0]
+            except (ValueError, TypeError):
+                pass
+        return opponent, name or opponent
 
     if fixture_id:
         fx = await session.execute(
