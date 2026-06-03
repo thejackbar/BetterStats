@@ -61,51 +61,59 @@ async def _current_season_year(session: AsyncSession, org_id: str) -> int | None
     return r.scalar()
 
 
-async def _batting_movers(session: AsyncSession, org_id: str, current_year: int) -> dict:
-    """Current players (latest season = this season) whose batting average
-    diverges sharply from their prior-career baseline."""
+def _movers_src(grade_id: str | None) -> str:
+    """FROM-fragment for the mover/emerging queries, aliased ``st``. Whole-club
+    reads the season-aggregate table; a grade filter reads the per-(player, season,
+    grade) table for that grade NAME. Both expose batting_innings / runs /
+    not_outs / wickets / runs_conceded, so the rest of the query is identical."""
+    if grade_id:
+        return "player_season_grade_stats st JOIN grades gr ON gr.id = st.grade_id AND gr.name = :grade"
+    return "player_season_stats st"
+
+
+async def _batting_movers(session: AsyncSession, org_id: str, target_year: int, grade_id: str | None = None) -> dict:
+    """Players whose batting average in the TARGET season diverges sharply from
+    their prior-career baseline (their record in the seasons before it)."""
     res = await session.execute(
         text(
-            """
-            WITH ranked AS (
-                SELECT pss.player_id, s.year,
-                       COALESCE(pss.batting_innings, 0) AS inns,
-                       COALESCE(pss.runs, 0) AS runs,
-                       COALESCE(pss.not_outs, 0) AS not_outs,
-                       pss.batting_average AS avg,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY pss.player_id ORDER BY s.year DESC NULLS LAST
-                       ) AS rn
-                FROM player_season_stats pss
-                JOIN seasons s ON s.id = pss.season_id
+            f"""
+            WITH rows AS (
+                SELECT st.player_id, s.year,
+                       COALESCE(st.batting_innings, 0) AS inns,
+                       COALESCE(st.runs, 0) AS runs,
+                       COALESCE(st.not_outs, 0) AS not_outs
+                FROM {_movers_src(grade_id)}
+                JOIN seasons s ON s.id = st.season_id
                 WHERE s.organisation_id = CAST(:org AS UUID)
             ),
-            latest AS (SELECT * FROM ranked WHERE rn = 1),
+            latest AS (
+                SELECT player_id, SUM(inns) AS inns, SUM(runs) AS runs, SUM(not_outs) AS not_outs
+                FROM rows WHERE year = :cur GROUP BY player_id
+            ),
             prior AS (
                 SELECT player_id, SUM(inns) AS inns, SUM(runs) AS runs, SUM(not_outs) AS not_outs
-                FROM ranked WHERE rn > 1 GROUP BY player_id
+                FROM rows WHERE year < :cur GROUP BY player_id
             )
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
-                   l.year AS latest_year, l.inns AS latest_inns,
-                   l.runs AS latest_runs, l.avg AS latest_avg,
+                   l.inns AS latest_inns, l.runs AS latest_runs, l.not_outs AS latest_not_outs,
                    pr.inns AS prior_inns, pr.runs AS prior_runs, pr.not_outs AS prior_not_outs
             FROM latest l
             JOIN players p ON p.id = l.player_id AND p.status = 'active'
             JOIN prior pr ON pr.player_id = l.player_id
-            WHERE l.inns >= :min_recent AND pr.inns >= :min_prior AND l.avg IS NOT NULL
-              AND l.year = :cur
+            WHERE l.inns >= :min_recent AND pr.inns >= :min_prior
             """
         ),
-        {"org": org_id, "min_recent": _MIN_RECENT_BAT_INNS, "min_prior": _MIN_PRIOR_BAT_INNS, "cur": current_year},
+        {"org": org_id, "cur": target_year, "grade": grade_id,
+         "min_recent": _MIN_RECENT_BAT_INNS, "min_prior": _MIN_PRIOR_BAT_INNS},
     )
     risers, fallers = [], []
     for r in res.mappings():
-        latest = round(float(r["latest_avg"]), 2)
+        latest = _bat_avg(r["latest_runs"], r["latest_inns"], r["latest_not_outs"])
         baseline = _bat_avg(r["prior_runs"], r["prior_inns"], r["prior_not_outs"])
-        if not baseline:
+        if not latest or not baseline:
             continue
         row = {
-            "player_id": r["id"], "name": r["name"], "latest_year": r["latest_year"],
+            "player_id": r["id"], "name": r["name"], "latest_year": target_year,
             "latest": latest, "baseline": baseline,
             "delta": round(latest - baseline, 2), "latest_inns": r["latest_inns"],
         }
@@ -118,49 +126,42 @@ async def _batting_movers(session: AsyncSession, org_id: str, current_year: int)
     return {"risers": risers[:6], "fallers": fallers[:6]}
 
 
-async def _bowling_movers(session: AsyncSession, org_id: str, current_year: int) -> dict:
-    """Current players (latest season = this season) whose bowling average
-    diverges sharply from their prior-career baseline (lower is better)."""
+async def _bowling_movers(session: AsyncSession, org_id: str, target_year: int, grade_id: str | None = None) -> dict:
+    """Players whose bowling average in the TARGET season diverges sharply from
+    their prior-career baseline (lower is better)."""
     res = await session.execute(
         text(
-            """
-            WITH ranked AS (
-                SELECT pss.player_id, s.year,
-                       COALESCE(pss.wickets, 0) AS wkts,
-                       COALESCE(pss.runs_conceded, 0) AS runs,
-                       pss.bowling_average AS avg,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY pss.player_id ORDER BY s.year DESC NULLS LAST
-                       ) AS rn
-                FROM player_season_stats pss
-                JOIN seasons s ON s.id = pss.season_id
+            f"""
+            WITH rows AS (
+                SELECT st.player_id, s.year,
+                       COALESCE(st.wickets, 0) AS wkts,
+                       COALESCE(st.runs_conceded, 0) AS runs
+                FROM {_movers_src(grade_id)}
+                JOIN seasons s ON s.id = st.season_id
                 WHERE s.organisation_id = CAST(:org AS UUID)
             ),
-            latest AS (SELECT * FROM ranked WHERE rn = 1),
-            prior AS (
-                SELECT player_id, SUM(wkts) AS wkts, SUM(runs) AS runs
-                FROM ranked WHERE rn > 1 GROUP BY player_id
-            )
+            latest AS (SELECT player_id, SUM(wkts) AS wkts, SUM(runs) AS runs FROM rows WHERE year = :cur GROUP BY player_id),
+            prior AS (SELECT player_id, SUM(wkts) AS wkts, SUM(runs) AS runs FROM rows WHERE year < :cur GROUP BY player_id)
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
-                   l.year AS latest_year, l.wkts AS latest_wkts, l.avg AS latest_avg,
+                   l.wkts AS latest_wkts, l.runs AS latest_runs,
                    pr.wkts AS prior_wkts, pr.runs AS prior_runs
             FROM latest l
             JOIN players p ON p.id = l.player_id AND p.status = 'active'
             JOIN prior pr ON pr.player_id = l.player_id
-            WHERE l.wkts >= :min_recent AND pr.wkts >= :min_prior AND l.avg IS NOT NULL
-              AND l.year = :cur
+            WHERE l.wkts >= :min_recent AND pr.wkts >= :min_prior
             """
         ),
-        {"org": org_id, "min_recent": _MIN_RECENT_WKTS, "min_prior": _MIN_PRIOR_WKTS, "cur": current_year},
+        {"org": org_id, "cur": target_year, "grade": grade_id,
+         "min_recent": _MIN_RECENT_WKTS, "min_prior": _MIN_PRIOR_WKTS},
     )
     risers, fallers = [], []
     for r in res.mappings():
-        latest = round(float(r["latest_avg"]), 2)
+        latest = round(r["latest_runs"] / r["latest_wkts"], 2) if r["latest_wkts"] else None
         baseline = round(r["prior_runs"] / r["prior_wkts"], 2) if r["prior_wkts"] else None
-        if not baseline:
+        if not latest or not baseline:
             continue
         row = {
-            "player_id": r["id"], "name": r["name"], "latest_year": r["latest_year"],
+            "player_id": r["id"], "name": r["name"], "latest_year": target_year,
             "latest": latest, "baseline": baseline,
             "delta": round(latest - baseline, 2), "latest_wkts": r["latest_wkts"],
         }
@@ -173,34 +174,39 @@ async def _bowling_movers(session: AsyncSession, org_id: str, current_year: int)
     return {"risers": risers[:6], "fallers": fallers[:6]}
 
 
-async def _emerging(session: AsyncSession, org_id: str, current_year: int) -> list[dict]:
-    """Ones to watch — current players in their first few seasons with a strong
-    latest season (short history + meaningful recent output)."""
+async def _emerging(session: AsyncSession, org_id: str, target_year: int, grade_id: str | None = None) -> list[dict]:
+    """Ones to watch — players in their first few seasons (≤3) with a strong
+    target season (short history + meaningful output that year)."""
     res = await session.execute(
         text(
-            """
-            WITH ranked AS (
-                SELECT pss.player_id, s.year,
-                       COALESCE(pss.runs, 0) AS runs, COALESCE(pss.wickets, 0) AS wkts,
-                       ROW_NUMBER() OVER (PARTITION BY pss.player_id ORDER BY s.year DESC NULLS LAST) AS rn,
-                       COUNT(*) OVER (PARTITION BY pss.player_id) AS seasons
-                FROM player_season_stats pss JOIN seasons s ON s.id = pss.season_id
+            f"""
+            WITH rows AS (
+                SELECT st.player_id, s.year,
+                       COALESCE(st.runs, 0) AS runs, COALESCE(st.wickets, 0) AS wkts
+                FROM {_movers_src(grade_id)}
+                JOIN seasons s ON s.id = st.season_id
                 WHERE s.organisation_id = CAST(:org AS UUID)
+            ),
+            agg AS (
+                SELECT player_id,
+                       SUM(runs) FILTER (WHERE year = :cur) AS runs,
+                       SUM(wkts) FILTER (WHERE year = :cur) AS wkts,
+                       COUNT(DISTINCT year) FILTER (WHERE year <= :cur) AS seasons
+                FROM rows GROUP BY player_id
             )
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
-                   r.year, r.runs, r.wkts, r.seasons
-            FROM ranked r JOIN players p ON p.id = r.player_id AND p.status = 'active'
-            WHERE r.rn = 1 AND r.seasons <= 3 AND (r.runs >= 200 OR r.wkts >= 8)
-              AND r.year = :cur
-            ORDER BY (r.runs + r.wkts * 18) DESC
+                   a.runs, a.wkts, a.seasons
+            FROM agg a JOIN players p ON p.id = a.player_id AND p.status = 'active'
+            WHERE a.seasons <= 3 AND (a.runs >= 200 OR a.wkts >= 8)
+            ORDER BY (COALESCE(a.runs, 0) + COALESCE(a.wkts, 0) * 18) DESC
             LIMIT 6
             """
         ),
-        {"org": org_id, "cur": current_year},
+        {"org": org_id, "cur": target_year, "grade": grade_id},
     )
     return [
-        {"player_id": x["id"], "name": x["name"], "latest_year": x["year"],
-         "runs": x["runs"], "wickets": x["wkts"], "seasons": x["seasons"]}
+        {"player_id": x["id"], "name": x["name"], "latest_year": target_year,
+         "runs": x["runs"] or 0, "wickets": x["wkts"] or 0, "seasons": x["seasons"]}
         for x in res.mappings()
     ]
 
@@ -279,16 +285,28 @@ def _role_evolution(seasons: list[dict]) -> str | None:
     return None
 
 
-async def trends_overview(session: AsyncSession, org_id: str) -> dict:
-    """Club-wide development snapshot for *current* players: breakout/decline
-    movers + emerging. (Milestones moved to the notification bell.)"""
-    current_year = await _current_season_year(session, org_id)
+async def trends_overview(session: AsyncSession, org_id: str, season_id: str | None = None, grade_id: str | None = None) -> dict:
+    """Club-wide development snapshot: breakout/decline movers + emerging for the
+    SELECTED season (default: latest with stats) and optionally one grade. Movers
+    compare that season to each player's prior-career baseline. (Milestones moved
+    to the notification bell.)"""
+    target_year = None
+    if season_id:
+        r = await session.execute(text("SELECT year FROM seasons WHERE id = CAST(:sid AS UUID)"), {"sid": season_id})
+        target_year = r.scalar()
+    if target_year is None:
+        target_year = await _current_season_year(session, org_id)
+    if target_year is None:
+        return {"current_year": None, "season_year": None, "grade": grade_id, "milestones": [],
+                "batting": {"risers": [], "fallers": []}, "bowling": {"risers": [], "fallers": []}, "emerging": []}
     milestones = await get_upcoming_milestones_for_org(session, org_id, limit=12)
-    batting = await _batting_movers(session, org_id, current_year)
-    bowling = await _bowling_movers(session, org_id, current_year)
-    emerging = await _emerging(session, org_id, current_year)
+    batting = await _batting_movers(session, org_id, target_year, grade_id)
+    bowling = await _bowling_movers(session, org_id, target_year, grade_id)
+    emerging = await _emerging(session, org_id, target_year, grade_id)
     return {
-        "current_year": current_year,
+        "current_year": target_year,
+        "season_year": target_year,
+        "grade": grade_id,
         "milestones": milestones,
         "batting": batting,
         "bowling": bowling,
@@ -902,39 +920,44 @@ async def bowler_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
     }
 
 
-async def list_players(session: AsyncSession, org_id: str) -> list[dict]:
-    """Current-season players (with this-season stats) for the trends picker.
-    Historical-only names are excluded — the picker is for the active squad."""
-    cur = await _current_season_year(session, org_id)
-    if cur is None:
+async def list_players(session: AsyncSession, org_id: str, season_id: str | None = None, grade_id: str | None = None) -> list[dict]:
+    """Players (with their stats) for the trends picker, scoped to the SELECTED
+    season (default: latest with stats) and optionally one grade. Historical-only
+    names are excluded — the picker tracks who turned out in that season/grade."""
+    target_year = None
+    if season_id:
+        r = await session.execute(text("SELECT year FROM seasons WHERE id = CAST(:sid AS UUID)"), {"sid": season_id})
+        target_year = r.scalar()
+    if target_year is None:
+        target_year = await _current_season_year(session, org_id)
+    if target_year is None:
         return []
     res = await session.execute(
         text(
-            """
+            f"""
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
                    t.id::text AS squad_id, t.name AS squad_name,
-                   COALESCE(SUM(pss.runs), 0) AS runs,
-                   COALESCE(SUM(pss.batting_innings), 0) AS inns,
-                   COALESCE(SUM(pss.not_outs), 0) AS not_outs,
-                   COALESCE(SUM(pss.wickets), 0) AS wickets,
-                   COALESCE(SUM(pss.runs_conceded), 0) AS conceded,
-                   COALESCE(SUM(pss.matches), 0) AS matches
-            FROM player_season_stats pss
+                   COALESCE(SUM(st.runs), 0) AS runs,
+                   COALESCE(SUM(st.batting_innings), 0) AS inns,
+                   COALESCE(SUM(st.not_outs), 0) AS not_outs,
+                   COALESCE(SUM(st.wickets), 0) AS wickets,
+                   COALESCE(SUM(st.runs_conceded), 0) AS conceded,
+                   COALESCE(SUM(st.matches), 0) AS matches
+            FROM {_movers_src(grade_id)}
             -- Scope by the SEASON's org (not player membership) — a shared-GUID
             -- player's org may be a different (first-synced) club while their
-            -- stats sit under THIS org's season. Filtering players.organisation_id
-            -- here is the documented cross-club anti-pattern and was hiding them.
-            JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) AND s.year = :cur
-            JOIN players p ON p.id = pss.player_id AND p.status = 'active'
+            -- stats sit under THIS org's season (the documented cross-club anti-pattern).
+            JOIN seasons s ON s.id = st.season_id AND s.organisation_id = CAST(:org AS UUID) AND s.year = :cur
+            JOIN players p ON p.id = st.player_id AND p.status = 'active'
             LEFT JOIN teams t ON t.id = p.squad_team_id
             GROUP BY p.id, p.display_name_override, p.name, t.id, t.name
-            HAVING COALESCE(SUM(pss.matches), 0) > 0
-                OR COALESCE(SUM(pss.batting_innings), 0) > 0
-                OR COALESCE(SUM(pss.wickets), 0) > 0
+            HAVING COALESCE(SUM(st.matches), 0) > 0
+                OR COALESCE(SUM(st.batting_innings), 0) > 0
+                OR COALESCE(SUM(st.wickets), 0) > 0
             ORDER BY name
             """
         ),
-        {"org": org_id, "cur": cur},
+        {"org": org_id, "cur": target_year, "grade": grade_id},
     )
     out = []
     for r in res.mappings():

@@ -174,8 +174,14 @@ const WEEK_STATE = {
   'after-match': { c: 'var(--pb-brand)', label: 'After match' },
 }
 function WeeklyLoop({ steps, onNavigate }) {
+  const idle = steps.every(s => s.state === 'upcoming')
   return (
     <Card eyebrow="your week" title="Match-week workflow" className="iq-rise" style={{ animationDelay: '60ms' }}>
+      {idle && (
+        <div className="flex items-center gap-2 mb-3 text-[12.5px]" style={{ color: 'var(--pb-faint)' }}>
+          <Icon name="check" size={14} />No action required right now — no upcoming fixture or recent match for this view.
+        </div>
+      )}
       <div className="space-y-1">
         {steps.map((s, i) => {
           const st = WEEK_STATE[s.state] || WEEK_STATE.upcoming
@@ -396,39 +402,43 @@ export default function BetterIQHome() {
   const [h2h, setH2h] = useState(undefined)
   const [lineups, setLineups] = useState(undefined)
 
-  // Filter-independent reads: fetch once. Each guarded so one failure can't blank
-  // the hub.
+  // Filter-independent reads: fetch once (fixtures + saved lineups span grades;
+  // we scope fixtures to the chosen grade client-side below).
   useEffect(() => {
     let alive = true
     api.iqListOpponents()
       .then(d => { if (alive) setOpponents(d || { upcoming: [], opponents: [] }) })
       .catch(() => { if (alive) setOpponents({ upcoming: [], opponents: [] }) })
-    api.iqTrendsOverview()
-      .then(d => { if (alive) setTrends(d || {}) })
-      .catch(() => { if (alive) setTrends({}) })
-    api.iqReviewGames()
-      .then(d => { if (alive) setReviewGames(Array.isArray(d) ? d : []) })
-      .catch(() => { if (alive) setReviewGames([]) })
     api.iqSelectionLineups()
       .then(d => { if (alive) setLineups(Array.isArray(d) ? d : []) })
       .catch(() => { if (alive) setLineups([]) })
     return () => { alive = false }
   }, [])
 
-  // Filter-dependent reads: re-fetch when the global Season/Team filter changes.
+  // Filter-dependent reads: re-fetch when the global Season/Team filter changes —
+  // MVP, team overview, form movers and recent results all follow the filter.
   useEffect(() => {
     let alive = true
-    setMvp(undefined); setOverview(undefined)
-    api.iqTeamMvp(seasonId)
+    setMvp(undefined); setOverview(undefined); setTrends(undefined); setReviewGames(undefined)
+    api.iqTeamMvp(seasonId, gradeId)
       .then(d => { if (alive) setMvp(d || { players: [] }) })
       .catch(() => { if (alive) setMvp({ players: [] }) })
     api.iqTeamOverview(seasonId, gradeId)
       .then(d => { if (alive) setOverview(d || {}) })
       .catch(() => { if (alive) setOverview({}) })
+    api.iqTrendsOverview(seasonId, gradeId)
+      .then(d => { if (alive) setTrends(d || {}) })
+      .catch(() => { if (alive) setTrends({}) })
+    api.iqReviewGames(seasonId, gradeId)
+      .then(d => { if (alive) setReviewGames(Array.isArray(d) ? d : []) })
+      .catch(() => { if (alive) setReviewGames([]) })
     return () => { alive = false }
   }, [seasonId, gradeId])
 
-  const upcoming = opponents?.upcoming || []
+  // Next fixture + scout cards scope to the selected grade (by grade name); the
+  // fixtures feed spans all grades.
+  const allUpcoming = opponents?.upcoming || []
+  const upcoming = gradeId ? allUpcoming.filter(f => f.grade_name === gradeId) : allUpcoming
   const nextFx = upcoming[0] || null
   const scoutCards = upcoming.slice(0, 4)
 

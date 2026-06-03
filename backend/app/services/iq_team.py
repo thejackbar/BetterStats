@@ -797,56 +797,95 @@ async def _role_ratings(session: AsyncSession, org_id: str, season_id: str | Non
     return out[:12] if out else None
 
 
-async def player_impact(session: AsyncSession, org_id: str, season_id: str | None = None) -> dict:
-    """Player Impact / club MVP board (brief §15.3) — a transparent blended rating
-    from scorecard rates (runs, wickets, economy, fielding dismissals per match),
-    z-scored across the squad and scaled 0–100. Defaults to the latest season."""
+async def player_impact(session: AsyncSession, org_id: str, season_id: str | None = None, grade_id: str | None = None) -> dict:
+    """Player Impact / club MVP board (brief §15.3) — a season-VALUE rating: who
+    contributed the most over the season. Built from season TOTALS (runs, wickets,
+    fielding dismissals) with average / economy as quality modifiers, z-scored
+    across the squad and min-max scaled 0–100. Defaults to the latest season; pass
+    a ``grade_id`` (a grade NAME) to rate only that grade.
+
+    Totals — not per-match rates — because the MVP is about accumulated value over
+    a season: 479 runs & 22 wickets across the year must outrank a high per-game
+    rate off three games. (The earlier per-match version let small samples win.)"""
     seasons = await team_seasons(session, org_id)
     if not seasons:
         return {"season": None, "players": []}
     resolved = (next((s for s in seasons if s["season_id"] == season_id), None) if season_id else None) or seasons[0]
     year, sid = resolved.get("year"), resolved["season_id"]
-    # Scope by the SEASON's org, NOT player membership — filtering
-    # players.organisation_id is the cross-club anti-pattern and emptied the
-    # board for shared-GUID players. Aggregate all season records of the year
-    # (+ the latest season id as a safety net) so a year spread across several
-    # season rows / comps is fully counted.
+    # Scope by the SEASON's org, NOT player membership (the cross-club anti-pattern
+    # that emptied the board for shared-GUID players). Aggregate all season records
+    # of the year (+ the latest season id) so a year split across season rows /
+    # comps is fully counted.
     scope = "AND (s.year = :year OR s.id = CAST(:sid AS UUID))" if year is not None else "AND s.id = CAST(:sid AS UUID)"
-    params = {"org": org_id, "year": year, "sid": sid}
-    res = await session.execute(
-        text(
-            f"""
-            SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
-                   GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
-                            COALESCE(SUM(pss.bowling_innings), 0)) AS games,
-                   COALESCE(SUM(pss.runs), 0) AS runs,
-                   COALESCE(SUM(pss.batting_average * pss.batting_innings), 0) AS bavg_w,
-                   COALESCE(SUM(pss.batting_innings) FILTER (WHERE pss.batting_average IS NOT NULL), 0) AS bavg_n,
-                   COALESCE(SUM(pss.wickets), 0) AS wkts,
-                   COALESCE(SUM(pss.runs_conceded), 0) AS rc,
-                   COALESCE(SUM(pss.bowling_balls), 0) AS bb,
-                   COALESCE(SUM(pss.catches_non_wk), 0) + COALESCE(SUM(pss.catches_wk), 0)
-                     + COALESCE(SUM(pss.run_outs), 0) + COALESCE(SUM(pss.stumpings), 0) AS dis
-            FROM players p
-            JOIN player_season_stats pss ON pss.player_id = p.id
-            JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
-            GROUP BY p.id, p.display_name_override, p.name
-            HAVING GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
-                            COALESCE(SUM(pss.bowling_innings), 0)) >= 3
-            """
-        ),
-        params,
-    )
-    pls = []
-    for r in res.mappings():
-        g = int(r["games"]) or 1
-        pls.append({
-            "id": r["id"], "name": r["name"], "matches": int(r["games"]),
-            "runs": int(r["runs"]), "wickets": int(r["wkts"]), "dismissals": int(r["dis"]),
-            "bat_pm": r["runs"] / g, "wkt_pm": r["wkts"] / g, "field_pm": r["dis"] / g,
-            "bat_avg": float(r["bavg_w"] / r["bavg_n"]) if r["bavg_n"] else None,
-            "econ": float(r["rc"] * 6 / r["bb"]) if r["bb"] and r["bb"] >= 30 else None,
-        })
+    params = {"org": org_id, "year": year, "sid": sid, "grade": grade_id}
+
+    if grade_id:
+        # Grade-scoped from the per-grade stats table (grade NAME → its rows in
+        # the year). No bowling balls column here, so economy is unavailable.
+        res = await session.execute(
+            text(
+                f"""
+                SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                       GREATEST(COALESCE(SUM(psg.matches), 0), COALESCE(SUM(psg.batting_innings), 0),
+                                COALESCE(SUM(psg.bowling_innings), 0)) AS games,
+                       COALESCE(SUM(psg.runs), 0) AS runs,
+                       COALESCE(SUM(psg.batting_innings), 0) - COALESCE(SUM(psg.not_outs), 0) AS bat_outs,
+                       COALESCE(SUM(psg.wickets), 0) AS wkts,
+                       COALESCE(SUM(psg.catches), 0) + COALESCE(SUM(psg.run_outs), 0)
+                         + COALESCE(SUM(psg.stumpings), 0) AS dis
+                FROM players p
+                JOIN player_season_grade_stats psg ON psg.player_id = p.id
+                JOIN grades gr ON gr.id = psg.grade_id AND gr.name = :grade
+                JOIN seasons s ON s.id = psg.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
+                GROUP BY p.id, p.display_name_override, p.name
+                HAVING GREATEST(COALESCE(SUM(psg.matches), 0), COALESCE(SUM(psg.batting_innings), 0),
+                                COALESCE(SUM(psg.bowling_innings), 0)) >= 3
+                """
+            ),
+            params,
+        )
+        pls = []
+        for r in res.mappings():
+            bat_outs = int(r["bat_outs"] or 0)
+            pls.append({
+                "id": r["id"], "name": r["name"], "matches": int(r["games"]),
+                "runs": int(r["runs"]), "wickets": int(r["wkts"]), "dismissals": int(r["dis"]),
+                "bat_avg": (int(r["runs"]) / bat_outs) if bat_outs > 0 else None,
+                "econ": None,
+            })
+    else:
+        res = await session.execute(
+            text(
+                f"""
+                SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                       GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
+                                COALESCE(SUM(pss.bowling_innings), 0)) AS games,
+                       COALESCE(SUM(pss.runs), 0) AS runs,
+                       COALESCE(SUM(pss.batting_average * pss.batting_innings), 0) AS bavg_w,
+                       COALESCE(SUM(pss.batting_innings) FILTER (WHERE pss.batting_average IS NOT NULL), 0) AS bavg_n,
+                       COALESCE(SUM(pss.wickets), 0) AS wkts,
+                       COALESCE(SUM(pss.runs_conceded), 0) AS rc,
+                       COALESCE(SUM(pss.bowling_balls), 0) AS bb,
+                       COALESCE(SUM(pss.catches_non_wk), 0) + COALESCE(SUM(pss.catches_wk), 0)
+                         + COALESCE(SUM(pss.run_outs), 0) + COALESCE(SUM(pss.stumpings), 0) AS dis
+                FROM players p
+                JOIN player_season_stats pss ON pss.player_id = p.id
+                JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
+                GROUP BY p.id, p.display_name_override, p.name
+                HAVING GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
+                                COALESCE(SUM(pss.bowling_innings), 0)) >= 3
+                """
+            ),
+            params,
+        )
+        pls = []
+        for r in res.mappings():
+            pls.append({
+                "id": r["id"], "name": r["name"], "matches": int(r["games"]),
+                "runs": int(r["runs"]), "wickets": int(r["wkts"]), "dismissals": int(r["dis"]),
+                "bat_avg": float(r["bavg_w"] / r["bavg_n"]) if r["bavg_n"] else None,
+                "econ": float(r["rc"] * 6 / r["bb"]) if r["bb"] and r["bb"] >= 30 else None,
+            })
     if not pls:
         return {"season": {"id": resolved["season_id"], "name": resolved["name"]}, "players": []}
 
@@ -864,19 +903,18 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
                 out[p["id"]] = -z if invert else z
         return out
 
-    zb, zw, zf = zmap("bat_pm"), zmap("wkt_pm"), zmap("field_pm")
+    # Volume (season totals) is the spine of the rating; average / economy add a
+    # quality bonus. Each discipline contributes its POSITIVE value only, so a
+    # specialist is rewarded for what they do and never penalised for not bowling.
+    zb, zw, zf = zmap("runs"), zmap("wickets"), zmap("dismissals")
     ze = zmap("econ", invert=True, only_present=True)
     za = zmap("bat_avg", only_present=True)
     raw = {}
     for p in pls:
         pid = p["id"]
-        # Each discipline contributes its POSITIVE value only — a specialist is
-        # rewarded for what they're good at and never penalised for not bowling
-        # or fielding. Batting blends per-match volume with average (quality), so
-        # in-form pure batters rank on merit, not just all-rounders.
-        bat_c = max(0.0, 0.6 * zb[pid] + 0.5 * za[pid])
-        ball_c = max(0.0, 0.9 * zw[pid] + 0.45 * ze[pid])
-        field_c = 0.35 * max(0.0, zf[pid])
+        bat_c = max(0.0, 0.7 * zb[pid] + 0.3 * za[pid])
+        ball_c = max(0.0, 0.8 * zw[pid] + 0.35 * ze[pid])
+        field_c = 0.3 * max(0.0, zf[pid])
         raw[pid] = bat_c + ball_c + field_c
         if bat_c > 0.5 and ball_c > 0.5:
             p["role"] = "All-round"
@@ -887,7 +925,7 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
     for p in pls:
         p["impact"] = round(100 * (raw[p["id"]] - lo) / (hi - lo)) if hi > lo else 50
         p["player_id"] = p.pop("id")  # match the player_id convention used elsewhere in IQ
-        for k in ("bat_pm", "wkt_pm", "field_pm", "bat_avg", "econ"):
+        for k in ("bat_avg", "econ"):
             p.pop(k, None)
     pls.sort(key=lambda x: x["impact"], reverse=True)
     return {"season": {"id": resolved["season_id"], "name": resolved["name"]}, "players": pls[:12]}

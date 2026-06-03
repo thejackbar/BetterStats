@@ -198,20 +198,25 @@ async def selection_analysis(
 
 @router.get("/trends/overview")
 async def trends_overview(
+    season_id: str | None = Query(None, description="season to analyse; omit for the latest"),
+    grade_id: str | None = Query(None, description="filter to one grade/team (a grade name)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """Club-wide development: milestone watch + breakout/decline movers."""
-    return await iq_trends.trends_overview(db, str(club.id))
+    """Club-wide development: breakout/decline movers + emerging, for the selected
+    season and (optionally) grade."""
+    return await iq_trends.trends_overview(db, str(club.id), season_id=season_id, grade_id=grade_id)
 
 
 @router.get("/trends/players")
 async def trends_players(
+    season_id: str | None = Query(None, description="season to list players from; omit for the latest"),
+    grade_id: str | None = Query(None, description="filter to one grade/team (a grade name)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """Active players (with career context) for the trends picker."""
-    return await iq_trends.list_players(db, str(club.id))
+    """Players (with stats) for the trends picker, scoped to the season/grade."""
+    return await iq_trends.list_players(db, str(club.id), season_id=season_id, grade_id=grade_id)
 
 
 @router.get("/trends/player/{player_id}")
@@ -304,11 +309,12 @@ async def team_overview(
 @router.get("/team/mvp")
 async def team_mvp(
     season_id: str | None = Query(None, description="filter to one season; omit for the latest"),
+    grade_id: str | None = Query(None, description="filter to one grade/team (a grade name)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """Club MVP board — a blended player-impact rating from scorecard rates."""
-    return await iq_team.player_impact(db, str(club.id), season_id=season_id)
+    """Club MVP board — a season-value player-impact rating from season totals."""
+    return await iq_team.player_impact(db, str(club.id), season_id=season_id, grade_id=grade_id)
 
 
 @router.get("/team/phases")
@@ -348,11 +354,13 @@ async def opposition_phases(
 
 @router.get("/review/games")
 async def review_games(
+    season_id: str | None = Query(None, description="filter to one season"),
+    grade_id: str | None = Query(None, description="filter to one grade/team (a grade name)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """Recent completed games to review (newest first)."""
-    return await iq_review.list_review_games(db, str(club.id))
+    """Recent completed games to review (newest first), optionally season/grade-scoped."""
+    return await iq_review.list_review_games(db, str(club.id), season_id=season_id, grade_id=grade_id)
 
 
 @router.get("/review/game/{game_id}")

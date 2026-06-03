@@ -23,22 +23,30 @@ def _ordinal(n: int) -> str:
     return {1: "1st", 2: "2nd", 3: "3rd"}.get(n, f"{n}th")
 
 
-async def list_review_games(session: AsyncSession, org_id: str, limit: int = 40) -> list[dict]:
-    """Recent completed games to review — newest first (a lightweight picker)."""
+async def list_review_games(session: AsyncSession, org_id: str, limit: int = 40,
+                            season_id: str | None = None, grade_id: str | None = None) -> list[dict]:
+    """Recent completed games to review — newest first (a lightweight picker).
+    Optionally scoped to one season and/or grade (grade matched by NAME, the IQ
+    filter convention) so the Overview's form/results follow the global filter."""
+    clauses = ""
+    if season_id:
+        clauses += " AND gr.season_id = CAST(:season AS UUID)"
+    if grade_id:
+        clauses += " AND gr.name = :grade"
     res = await session.execute(
         text(
-            """
+            f"""
             SELECT g.id::text AS id, g.played_at, g.result, g.venue, g.is_final,
                    g.opp_club_name AS opp, g.home_team, g.away_team, gr.name AS grade
             FROM v_effective_games g
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
-            WHERE s.organisation_id = CAST(:org AS UUID) AND g.played_at IS NOT NULL
+            WHERE s.organisation_id = CAST(:org AS UUID) AND g.played_at IS NOT NULL {clauses}
             ORDER BY g.played_at DESC NULLS LAST
             LIMIT :limit
             """
         ),
-        {"org": org_id, "limit": limit},
+        {"org": org_id, "limit": limit, "season": season_id, "grade": grade_id},
     )
     out = []
     for r in res.mappings():
