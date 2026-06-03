@@ -30,6 +30,26 @@ export const BOWL_AXES = [
   { key: 'top_order', label: 'Top-order' },
 ]
 
+/* buildRadar — normalise a player's metrics vs a peer group so the peer mean
+   sits on the 50 ring (values 0–100; lower-is-better axes inverted). Used for
+   OPPONENT radars, whose stats live only in the live dossier (not our DB) — our
+   own players get the same shape from the backend /radar endpoint.
+   items: peer-group array · axisDefs: [{label, value:(it)=>number, lower?}] */
+export function buildRadar(items, axisDefs, target) {
+  const axes = axisDefs.map(a => ({ key: a.label, label: a.label }))
+  const values = axisDefs.map(a => {
+    const xs = (items || []).map(a.value).filter(v => typeof v === 'number' && isFinite(v) && v > 0)
+    const mean = xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : 0
+    const v = a.value(target)
+    let score = 50
+    if (!isFinite(v) || v <= 0) score = 0
+    else if (a.lower) score = mean ? (mean / v) * 50 : 50
+    else score = mean ? (v / mean) * 50 : 50
+    return Math.max(0, Math.min(100, Math.round(score * 10) / 10))
+  })
+  return { axes, values, baseline: axisDefs.map(() => 50) }
+}
+
 /* ── Radar — multi-axis player profile vs a baseline ring ─────────────────── */
 export function Radar({ axes, values, baseline, compareValues, compareColor = 'var(--iq-c-amber)', color = 'var(--pb-accent)', size = 240, max = 100, label }) {
   const on = useMounted()

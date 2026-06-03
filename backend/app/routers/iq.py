@@ -20,6 +20,7 @@ from app.routers.auth import get_current_club, get_current_user
 from app.services import iq as iq_service
 from app.services import iq_opponent
 from app.services import iq_phases
+from app.services import iq_radar
 from app.services import iq_review
 from app.services import iq_selection
 from app.services import iq_team
@@ -240,6 +241,18 @@ async def trends_player_bowling_deep(
     if result is None:
         raise HTTPException(status_code=404, detail="Player not found")
     return result
+
+
+@router.get("/trends/player/{player_id}/radar")
+async def trends_player_radar(
+    player_id: str,
+    season_id: str | None = Query(None, description="one season; omit for career"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """A 6-axis batting/bowling radar normalised so the squad average sits on the
+    50 ring (values 0–100). Powers the Player-trends profile radar."""
+    return await iq_radar.player_radar(db, str(club.id), player_id, season_id=season_id)
 
 
 # ─── Team self-analysis (analytics brief §7/§8) ──────────────────────────────

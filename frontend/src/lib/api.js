@@ -947,6 +947,9 @@ export const api = {
   iqTrendsPlayers: () => request('/iq/trends/players'),
   iqTrendsPlayer: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}`),
   iqPlayerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/deep`),
+  // 6-axis batting/bowling radar, normalised vs the squad (50 = squad average).
+  iqPlayerRadar: (playerId, seasonId) =>
+    request(`/iq/trends/player/${encodeURIComponent(playerId)}/radar${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
   // Bowler wicket-quality deep dive (set vs new batters, fielders, discipline).
   iqBowlerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/bowling-deep`),
 
