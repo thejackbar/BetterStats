@@ -6,6 +6,7 @@ import Reveal from '../../components/marketing/Reveal'
 import CountUp from '../../components/marketing/CountUp'
 import Comparison3Way from '../../components/marketing/Comparison3Way'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
+import DotGrid from '../../components/marketing/DotGrid'
 import {
   MockHeritageCard,
   MockLeaderboard,
@@ -26,21 +27,32 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 function Hero() {
   return (
     <section className="relative pt-32 pb-20 px-4 sm:px-6 lg:px-10 overflow-hidden">
+      <div className="absolute inset-0 z-0 pointer-events-none">
+        <DotGrid
+          dotSize={4}
+          gap={26}
+          proximity={120}
+          shockRadius={220}
+          shockStrength={4}
+          baseColor="#2b3b57"
+          activeColor="#16c784"
+          className="!p-0 opacity-70"
+        />
+      </div>
       <div className="absolute inset-0 hero-glow pointer-events-none" />
 
-      <div className="max-w-[1280px] mx-auto relative grid grid-cols-12 gap-10 items-center">
+      <div className="max-w-[1280px] mx-auto relative z-10 grid grid-cols-12 gap-10 items-center">
         <div className="col-span-12 lg:col-span-6">
           <div className="pill mb-7 inline-flex">
             <span className="dot" />
             For Australian cricket clubs · Since 2026
           </div>
           <h1 className="font-display font-bold text-[52px] sm:text-[68px] lg:text-[88px] tracking-tight leading-[0.92] mb-7">
-            Every player.<br />
-            Every season.<br />
-            <span className="gradient-text">Kept forever.</span>
+            We do cricket<span className="text-pb-dim">…</span><br />
+            <span className="gradient-text">Better.</span>
           </h1>
           <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">
-            BetterStats doesn't just dig up PlayHQ or MyCricket — it also imports your spreadsheets and even old scorebooks. It keeps your stats up to date automatically and gives you a platform that does your club's history justice.
+            Better is the platform Australian cricket clubs run on. Start with automated stats and a public site worth showing off — then add selection, socials, fees and analytics, all fed straight from your PlayHQ and MyCricket data.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-7">
@@ -510,8 +522,8 @@ function FinalCTA() {
 // ─── Page ────────────────────────────────────────────────────────────────
 export default function Landing() {
   usePageMeta({
-    title: 'BetterStats — Cricket Stats Platform for Australian Clubs',
-    description: 'Automated club cricket stats, leaderboards, records and season yearbooks — built for Australian cricket clubs. Pulls from PlayHQ and MyCricket; no manual data entry.',
+    title: 'Better — We do cricket, better | Cricket club platform',
+    description: 'Better is the platform Australian cricket clubs run on: automated stats and a public club site (BetterStats), plus selection, socials, fees and BetterIQ analytics — fed straight from PlayHQ and MyCricket, with no manual data entry.',
     image: 'https://betterstats.cricket/og-image.png',
     url: 'https://betterstats.cricket/',
   })

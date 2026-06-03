@@ -12,6 +12,7 @@
     "@imgly/background-removal": "^1.7.0",
     "clsx": "^2.1.1",
     "cropperjs": "^1.6.2",
+    "gsap": "^3.15.0",
     "modern-screenshot": "^4.7.0",
     "react": "^18.3.1",
     "react-cropper": "^2.3.3",
