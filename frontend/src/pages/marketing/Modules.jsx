@@ -1,0 +1,141 @@
+import { Link } from 'react-router-dom'
+import MarketingNav from '../../components/MarketingNav'
+import MarketingFooter from '../../components/marketing/MarketingFooter'
+import Reveal from '../../components/marketing/Reveal'
+import { FORM_URL } from '../../data/marketing'
+import { CORE_MARKETING, MODULES_MARKETING, TIER_INFO } from '../../data/modules-marketing'
+import { usePageMeta } from '../../hooks/usePageMeta'
+
+function ModuleCard({ m, delay }) {
+  const isCore = m.isCore
+  const to = isCore ? m.to : `/modules/${m.slug}`
+  const badge = isCore ? 'Core · every club' : `${TIER_INFO[m.tier].label} tier`
+  return (
+    <Reveal delay={delay} className="h-full">
+      <Link to={to} className="surface p-7 h-full flex flex-col hover:border-accent/30 transition-colors group block">
+        <div className="flex items-center justify-between mb-5">
+          <span
+            className="w-11 h-11 rounded-xl flex items-center justify-center text-xl text-navy-950"
+            style={{ background: m.accent }}
+          >
+            {m.icon}
+          </span>
+          <span className="pill-neutral text-[10px]">{badge}</span>
+        </div>
+        <h3 className="text-xl font-bold mb-2 group-hover:text-accent transition-colors">{m.name}</h3>
+        <p className="text-sm text-pb-dim leading-relaxed mb-5">{m.tagline}</p>
+        {!isCore && (
+          <ul className="space-y-1.5 mb-6">
+            {m.highlights.slice(0, 3).map((h) => (
+              <li key={h} className="flex items-start gap-2 text-xs text-pb-dim"><span className="tick mt-0.5">✓</span>{h}</li>
+            ))}
+          </ul>
+        )}
+        <span className="mt-auto pt-4 border-t pb-hairline text-sm text-accent font-medium inline-flex items-center gap-1">
+          {isCore ? 'Tour the Core' : `Explore ${m.name}`} <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+        </span>
+      </Link>
+    </Reveal>
+  )
+}
+
+function Hero() {
+  return (
+    <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
+      <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
+      <div className="max-w-[1000px] mx-auto relative text-center">
+        <p className="pill mb-6 inline-flex"><span className="dot" />The Better platform</p>
+        <h1 className="font-display font-bold text-[44px] sm:text-[60px] lg:text-[78px] tracking-tight leading-[0.95] mb-6">
+          Built in modules. <span className="gradient-text">Bought in tiers.</span>
+        </h1>
+        <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed">
+          Better is an operating system for your cricket club. Every club starts with the Core —
+          BetterStats — then adds the parts that fit how the club actually runs.
+        </p>
+      </div>
+    </section>
+  )
+}
+
+function Grid() {
+  const all = [CORE_MARKETING, ...MODULES_MARKETING]
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 pb-8">
+      <div className="max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-stretch">
+        {all.map((m, i) => (
+          <ModuleCard key={m.slug} m={m} delay={(i % 3) * 80} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function TiersStrip() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline bg-black/20 mt-12">
+      <div className="max-w-[1000px] mx-auto text-center">
+        <Reveal>
+          <p className="pill-neutral inline-flex mb-5">Bundled into tiers</p>
+          <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">Good, Better, Best.</h2>
+          <p className="text-pb-dim max-w-xl mx-auto mb-10">
+            The modules are sold as three flat-rate bundles. Pick a tier, or use the calculator to match a tier to the modules you want.
+          </p>
+        </Reveal>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
+          {['good', 'better', 'best'].map((key) => {
+            const t = TIER_INFO[key]
+            const desc = key === 'good' ? 'Core only' : key === 'better' ? 'Core + Select + Socials' : 'Everything + Fees + IQ'
+            return (
+              <div key={key} className="surface p-6">
+                <p className="font-display font-bold text-xl mb-1">{t.label}</p>
+                <p className="text-sm text-pb-dim mb-4">{desc}</p>
+                <p className="text-3xl font-bold tabular-nums">${t.annual}<span className="text-sm text-pb-faint font-normal">/yr</span></p>
+              </div>
+            )
+          })}
+        </div>
+        <Link to="/pricing" className="cta-primary">See full pricing & calculator →</Link>
+      </div>
+    </section>
+  )
+}
+
+function CTA() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-24 relative overflow-hidden">
+      <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
+      <div className="max-w-[900px] mx-auto relative">
+        <div className="surface-strong p-10 lg:p-14 text-center">
+          <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">Start with the Core. <span className="gradient-text">Grow into the rest.</span></h2>
+          <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">Tell us your PlayHQ club ID and we’ll get your site live, then turn on modules whenever you’re ready.</p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
+            <Link to="/pricing" className="cta-secondary">See pricing</Link>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+export default function Modules() {
+  usePageMeta({
+    title: 'Modules — BetterSelect, BetterSocials, BetterFees & BetterIQ | Better',
+    description:
+      'The Better platform in parts: the BetterStats Core plus four bolt-on modules — BetterSelect (selection), BetterSocials (social posts), BetterFees (treasury) and BetterIQ (analytics & opposition scouting). Bundled into Good / Better / Best tiers.',
+    image: 'https://betterstats.cricket/og-image.png',
+    url: 'https://betterstats.cricket/modules',
+  })
+  return (
+    <div className="min-h-screen bg-pb-bg text-pb-text">
+      <MarketingNav />
+      <div id="main-content" tabIndex="-1">
+        <Hero />
+        <Grid />
+        <TiersStrip />
+        <CTA />
+      </div>
+      <MarketingFooter />
+    </div>
+  )
+}

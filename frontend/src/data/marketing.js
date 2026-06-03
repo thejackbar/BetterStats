@@ -105,7 +105,7 @@ export const COMPETITORS = {
   // Generic label used on embedded compare sections (home/features). The dedicated
   // /compare page can opt back into the specific competitor name via prop.
   other:  { name: 'Other Competitors', tag: 'Existing tools', sub: 'Generic stats platforms' },
-  us:     { name: 'BetterStats', tag: 'Public club site', sub: 'A complete club website' },
+  us:     { name: 'Better', tag: 'Club platform', sub: 'Core stats + modules' },
 }
 
 export const COMPARISON_3WAY = [
@@ -138,7 +138,8 @@ export const COMPARISON_3WAY = [
       { feature: 'Manual data entry required', tip: 'BetterStats pulls everything from PlayHQ — no scorer-to-spreadsheet copy work.', playhq: true, cstatz: true, us: false },
       { feature: 'Setup time', textRow: true, playhq: 'Built-in', cstatz: '2–4 weeks', us: 'Under 1 hour' },
       { feature: 'Onboarding & migration included', playhq: false, cstatz: false, us: true },
-      { feature: 'Cost for a large club', tip: 'CricketStatz figures include their highest-tier subscription plus historical data charges. BetterStats is a flat rate — same fee for one team or fifty.', textRow: true, billing: true, playhq: '—', cstatz: '~$600/yr + ~$400 historical', us: { monthly: '$59 / month', annual: '$449 / year (flat rate)' } },
+      { feature: 'Selection, socials, fees & analytics modules', tip: 'One platform for availability/selection (BetterSelect), branded social posts (BetterSocials), match fees (BetterFees) and analytics + opposition scouting (BetterIQ) — not just stats.', playhq: false, cstatz: false, us: true },
+      { feature: 'Cost for a large club', tip: 'CricketStatz figures include their highest-tier subscription plus historical data charges. Better is a flat rate per club across three tiers — same fee for one team or fifty.', textRow: true, billing: true, playhq: '—', cstatz: '~$600/yr + ~$400 historical', us: { monthly: 'From $49 / month', annual: 'From $449 / year · 3 tiers' } },
     ],
   },
 ]

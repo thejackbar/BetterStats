@@ -4,11 +4,11 @@ import betterStatsLogo from '../assets/betterstatslogo_white.png'
 import { FORM_URL } from '../data/marketing'
 
 const LINKS = [
-  { to: '/features', label: 'Features' },
+  { to: '/modules', label: 'Modules' },
+  { to: '/features', label: 'Core' },
   { to: '/pricing', label: 'Pricing' },
   { to: '/compare', label: 'Compare' },
   { to: '/about', label: 'About' },
-  { to: '/blog', label: 'Blog' },
   { to: '/faq', label: 'FAQ' },
   { to: '/contact', label: 'Contact' },
 ]
@@ -43,10 +43,10 @@ export default function MarketingNav() {
       </a>
 
       <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-10 h-16 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2.5 group" aria-label="BetterStats home">
-          <img src={betterStatsLogo} alt="BetterStats" className="w-7 h-7 object-contain" />
+        <Link to="/" className="flex items-center gap-2.5 group" aria-label="Better home">
+          <img src={betterStatsLogo} alt="Better" className="w-7 h-7 object-contain" />
           <span className="font-bold text-base tracking-tight text-pb-text group-hover:text-accent transition-colors">
-            Better<span className="text-accent">Stats</span>
+            Better<span className="text-accent">.</span>
           </span>
         </Link>
 

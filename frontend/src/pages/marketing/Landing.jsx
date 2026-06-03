@@ -19,6 +19,7 @@ import {
   FORM_URL,
   SCREENSHOT_PATHS,
 } from '../../data/marketing'
+import { MODULES_MARKETING, TIER_INFO } from '../../data/modules-marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 // ─── Hero ────────────────────────────────────────────────────────────────
@@ -287,10 +288,13 @@ function Features() {
       <div className="max-w-[1200px] mx-auto">
         <Reveal>
           <div className="text-center mb-14">
-            <p className="pill-neutral inline-flex mb-5">Everything included</p>
+            <p className="pill-neutral inline-flex mb-5">The Core · every club</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
-              No tiers. No upsells. <span className="gradient-text">Everything in.</span>
+              Every club starts with <span className="gradient-text">the Core.</span>
             </h2>
+            <p className="text-lg text-pb-dim max-w-2xl mx-auto">
+              BetterStats — your reconciled history and a public site to be proud of. Included in every plan.
+            </p>
           </div>
         </Reveal>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -307,6 +311,46 @@ function Features() {
         </div>
         <div className="text-center mt-10">
           <Link to="/features" className="cta-secondary">See all features →</Link>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─── Modules teaser ──────────────────────────────────────────────────────
+function ModulesTeaser() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-24 border-t pb-hairline">
+      <div className="max-w-[1200px] mx-auto">
+        <Reveal>
+          <div className="text-center mb-14">
+            <p className="pill-neutral inline-flex mb-5">The Better platform</p>
+            <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
+              Then add the parts that <span className="gradient-text">run your club.</span>
+            </h2>
+            <p className="text-lg text-pb-dim max-w-2xl mx-auto">
+              Four modules bolt straight onto the Core — selection, socials, fees and analytics. Turn on what you need.
+            </p>
+          </div>
+        </Reveal>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {MODULES_MARKETING.map((m, i) => (
+            <Reveal key={m.slug} delay={(i % 4) * 70} className="h-full">
+              <Link to={`/modules/${m.slug}`} className="surface p-6 h-full flex flex-col hover:border-accent/30 transition-colors group block">
+                <div className="flex items-center justify-between mb-4">
+                  <span className="w-10 h-10 rounded-xl flex items-center justify-center text-lg text-navy-950" style={{ background: m.accent }}>{m.icon}</span>
+                  <span className="pill-neutral text-[10px]">{TIER_INFO[m.tier].label}</span>
+                </div>
+                <h3 className="text-lg font-semibold mb-1.5 group-hover:text-accent transition-colors">{m.name}</h3>
+                <p className="text-sm text-pb-dim leading-relaxed mb-4 flex-1">{m.tagline}</p>
+                <span className="text-sm text-accent font-medium inline-flex items-center gap-1">Explore <span className="group-hover:translate-x-0.5 transition-transform">→</span></span>
+              </Link>
+            </Reveal>
+          ))}
+        </div>
+        <div className="text-center mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
+          <Link to="/modules" className="cta-secondary">Tour all modules →</Link>
+          <Link to="/pricing" className="text-sm text-accent hover:underline">See Good / Better / Best pricing →</Link>
         </div>
       </div>
     </section>
@@ -455,7 +499,7 @@ function FinalCTA() {
               <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
               <Link to="/pricing" className="cta-secondary">See pricing</Link>
             </div>
-            <p className="text-xs text-pb-faint">$449/yr · Flat rate, 1 team or 50 · Simple onboarding</p>
+            <p className="text-xs text-pb-faint">From $449/yr · Good · Better · Best · Flat rate per club</p>
           </div>
         </div>
       </div>
@@ -481,6 +525,7 @@ export default function Landing() {
         <StatBanner />
         <Showcase />
         <Features />
+        <ModulesTeaser />
         <Comparison3Way />
         <Testimonials />
         <HowItWorks />
