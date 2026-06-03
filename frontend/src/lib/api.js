@@ -298,6 +298,12 @@ export const api = {
     }),
   feeUnmarkMatchDayPaid: (entryId) =>
     request(`/club-admin/fees/match-days/${entryId}/mark-paid`, { method: 'DELETE' }),
+  feeWaiveMatchDay: (entryId, data = {}) =>
+    request(`/club-admin/fees/match-days/${entryId}/waive`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  feeUnwaiveMatchDay: (entryId) =>
+    request(`/club-admin/fees/match-days/${entryId}/waive`, { method: 'DELETE' }),
   feeBulkPayment: (data) =>
     request('/club-admin/fees/payments/bulk', { method: 'POST', body: JSON.stringify(data) }),
 

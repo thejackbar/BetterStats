@@ -30,7 +30,7 @@ function CreditChip({ amount }) {
   )
 }
 
-function BalanceCard({ label, payable, paid, owed, credit = 0, footer, highlight }) {
+function BalanceCard({ label, payable, paid, owed, credit = 0, waived = 0, footer, highlight }) {
   const rowCss = 'flex justify-between font-mono text-[10px] tracking-wide2'
   return (
     <div className={`pb-card px-4 py-3 ${highlight ? 'border-pb-accent/40' : ''}`}>
@@ -38,6 +38,11 @@ function BalanceCard({ label, payable, paid, owed, credit = 0, footer, highlight
       <div className="space-y-1">
         <div className={rowCss}><span className="text-pb-faint">Payable</span><span className="text-pb-dim">{money(payable)}</span></div>
         <div className={rowCss}><span className="text-pb-faint">Paid</span><span className="text-pb-dim">{money(paid)}</span></div>
+        {waived > 0 && (
+          <div className={rowCss} title="Fees forgiven — not counted as money received">
+            <span className="text-sky-300/80">Waived</span><span className="text-sky-300/80">{money(waived)}</span>
+          </div>
+        )}
         <div className={`${rowCss} pt-1 border-t pb-hairline-t mt-1`}>
           {credit > 0 ? (
             <>
@@ -198,8 +203,12 @@ function PaymentRow({ payment, onDeleted }) {
 
 // Paid / Part-paid / Unpaid is DERIVED oldest-first from the member's total
 // match-fee payments (see backend allocate_match_days) — there's no per-row
-// toggle. 'na' = the game costs nothing ($0 rate / no tier yet).
+// toggle. 'na' = the game costs nothing ($0 rate / no tier yet). 'waived' is an
+// explicit per-game forgive (settled, but never money received).
 function MatchDayStatus({ row }) {
+  if (row.status === 'waived')
+    return <span className="font-mono text-[9px] tracking-wide2 text-sky-300 bg-sky-900/30 border border-sky-600/30 rounded px-1.5 py-0.5"
+      title={row.waive_reason ? `Waived — ${row.waive_reason}` : 'Fee waived — settled, not counted as money received'}>✓ WAIVED</span>
   if (row.status === 'paid')
     return <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5">● PAID</span>
   if (row.status === 'partial')
@@ -226,6 +235,25 @@ function MatchDayRow({ row, onSaved }) {
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
 
+  async function waive() {
+    const reason = window.prompt(
+      'Waive this game’s fee? It settles the game (Paid / Financial) but is NOT recorded as money received.\n\nOptional note (e.g. fill-in, injury, comp):',
+      row.waive_reason || '')
+    if (reason === null) return  // cancelled
+    setBusy(true)
+    try {
+      await api.feeWaiveMatchDay(row.id, { reason: reason.trim() || null })
+      toast.success('Fee waived'); onSaved()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  async function unwaive() {
+    setBusy(true)
+    try {
+      await api.feeUnwaiveMatchDay(row.id)
+      toast.success('Waive removed — game is charged again'); onSaved()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
   return (
     <tr className="pb-hairline-t align-middle hover:bg-pb-surface2/40">
       <td className="py-2 pl-5 pr-3 font-mono text-[10px] text-pb-faintest whitespace-nowrap">{row.played_at || '—'}</td>
@@ -244,7 +272,16 @@ function MatchDayRow({ row, onSaved }) {
         )}
       </td>
       <td className="py-2 pr-3 text-right font-mono text-[11px] text-pb-dim whitespace-nowrap">{money(row.charge)}</td>
-      <td className="py-2 pr-5 text-right whitespace-nowrap"><MatchDayStatus row={row} /></td>
+      <td className="py-2 pr-3 text-right whitespace-nowrap"><MatchDayStatus row={row} /></td>
+      <td className="py-2 pr-5 text-right whitespace-nowrap">
+        {row.waived ? (
+          <button onClick={unwaive} disabled={busy}
+            className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors disabled:opacity-40">UN-WAIVE</button>
+        ) : (
+          <button onClick={waive} disabled={busy}
+            className="font-mono text-[9px] tracking-wide2 text-pb-faintest hover:text-sky-300 transition-colors disabled:opacity-40">WAIVE</button>
+        )}
+      </td>
     </tr>
   )
 }
@@ -331,9 +368,9 @@ export default function AdminFeeMemberDetail() {
         {/* Balance strip: payable / paid / outstanding (or credit) for membership + match-day */}
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
           <BalanceCard label="Membership" payable={f.membership_payable} paid={f.membership_paid} owed={f.membership_outstanding} credit={f.membership_credit} />
-          <BalanceCard label="Match Fees" payable={f.match_fee_payable} paid={f.match_fee_paid} owed={f.match_fee_outstanding} credit={f.match_fee_credit}
-            footer={`${f.match_days || 0} day${f.match_days === 1 ? '' : 's'} × ${money(f.match_day_rate || 0)}`} />
-          <BalanceCard label="Total" payable={f.total_payable} paid={f.total_paid} owed={f.total_outstanding} credit={f.credit} highlight />
+          <BalanceCard label="Match Fees" payable={f.match_fee_payable} paid={f.match_fee_paid} owed={f.match_fee_outstanding} credit={f.match_fee_credit} waived={f.match_fee_waived}
+            footer={`${f.match_days || 0} day${f.match_days === 1 ? '' : 's'} × ${money(f.match_day_rate || 0)}${f.waived_days ? ` · ${f.waived_days} waived` : ''}`} />
+          <BalanceCard label="Total" payable={f.total_payable} paid={f.total_paid} owed={f.total_outstanding} credit={f.credit} waived={f.match_fee_waived} highlight />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
@@ -419,6 +456,8 @@ export default function AdminFeeMemberDetail() {
           Auto-derived from appearances. Two-day games default to 2 days — drop to 1 if they only played one day.
           Record a match-fee payment below and it settles games <span className="text-pb-text">oldest-first</span>;
           anything left over becomes <span className="text-green-300">credit</span> toward their next games.
+          Use <span className="text-sky-300">Waive</span> to forgive a single game (a fill-in, injury or comp) — it settles
+          the game without counting as money received.
         </p>
         {data.match_days.length === 0 ? (
           <p className="font-mono text-[11px] text-pb-faint pb-card p-5">No match days recorded this season.</p>
@@ -440,7 +479,8 @@ export default function AdminFeeMemberDetail() {
                     <th className="font-medium py-2.5 pr-3 w-20">FORMAT</th>
                     <th className="font-medium py-2.5 pr-3 w-32 text-right">DAYS</th>
                     <th className="font-medium py-2.5 pr-3 w-20 text-right">AMOUNT</th>
-                    <th className="font-medium py-2.5 pr-5 w-28 text-right">STATUS</th>
+                    <th className="font-medium py-2.5 pr-3 w-28 text-right">STATUS</th>
+                    <th className="font-medium py-2.5 pr-5 w-20 text-right"></th>
                   </tr>
                 </thead>
                 <tbody>
