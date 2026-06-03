@@ -108,7 +108,7 @@ export default function MarketingNav() {
             </button>
             {modOpen && (
               <div className="absolute top-full left-0 pt-2 w-[440px]">
-                <div className="surface p-2 shadow-[0_24px_60px_-15px_rgba(0,0,0,0.7)]">
+                <div className="bg-pb-surface border pb-hairline rounded-xl p-2 shadow-[0_24px_60px_-15px_rgba(0,0,0,0.85)]">
                   {MODULE_LINKS.map((m) => (
                     <Link key={m.slug} to={m.to} className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-pb-surface2/50 transition-colors group">
                       <span className="w-9 h-9 rounded-lg flex items-center justify-center text-lg text-navy-950 flex-shrink-0" style={{ background: m.accent }}>{m.icon}</span>
