@@ -936,6 +936,8 @@ export const api = {
     request(`/iq/opposition/match?opponent_name=${encodeURIComponent(opponentName)}&opp_key=${encodeURIComponent(oppKey)}${displayName ? `&display_name=${encodeURIComponent(displayName)}` : ''}`, { method: 'POST' }),
   iqRefreshDossier: ({ opponent, fixtureId, team } = {}) =>
     request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId, team)}`, { method: 'POST' }),
+  // Search opposition players by name across every opponent we've faced.
+  iqSearchOpponentPlayers: (q) => request(`/iq/opposition/player-search?q=${encodeURIComponent(q)}`),
   // Manual scouting tags for opponent players (handedness, bowler type, notes…).
   iqOpponentTags: () => request('/iq/opposition/player-tags'),
   iqSaveOpponentTag: (playerId, body) =>

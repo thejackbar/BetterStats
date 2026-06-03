@@ -134,6 +134,18 @@ async def match_opponent(
     return {"ok": True}
 
 
+@router.get("/opposition/player-search")
+async def opposition_player_search(
+    q: str = Query(..., min_length=2, description="opponent player name (substring)"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Search opposition players by name across every opponent we've faced (from
+    the batters our bowlers have dismissed), so a scout can find a player without
+    first picking their club. Each hit carries its club for a deep-link."""
+    return await iq_service.search_opponent_players(db, str(club.id), q)
+
+
 @router.get("/opposition/player-tags")
 async def opposition_player_tags(
     db: AsyncSession = Depends(get_db),

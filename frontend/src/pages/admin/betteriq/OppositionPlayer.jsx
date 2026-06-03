@@ -30,8 +30,12 @@ export default function OppositionPlayer() {
   const [playerQ, setPlayerQ] = useState('')
   const [clubOpen, setClubOpen] = useState(false)
   const [tags, setTags] = useState({})          // participant_id → scouting tag
+  const [pSearch, setPSearch] = useState('')    // player-first search query
+  const [pResults, setPResults] = useState([])
+  const [pOpen, setPOpen] = useState(false)
   const pollRef = useRef(null)
   const seededRef = useRef(false)
+  const pendingNameRef = useRef(null)           // player name to select once a dossier is ready
 
   const stopPoll = () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
   useEffect(() => stopPoll, [])
@@ -65,6 +69,14 @@ export default function OppositionPlayer() {
     loadClub(c)
     const sp = { opponent: c.opp_key }
     setSearchParams(sp, { replace: true })
+  }
+  // Player-first: pick an opposition player → load their club, then select them
+  // by name once the live squad is built.
+  const pickOpponentPlayer = (r) => {
+    pendingNameRef.current = (r.name || '').trim().toLowerCase()
+    setPSearch(''); setPResults([]); setPOpen(false)
+    loadClub({ opp_key: r.opp_key, name: r.club_name })
+    setSearchParams({ opponent: r.opp_key }, { replace: true })
   }
   const pickPlayer = (id) => {
     setSel(id); setPlayerQ('')
@@ -102,6 +114,33 @@ export default function OppositionPlayer() {
     .sort((a, b) => (b.bat?.runs || 0) - (a.bat?.runs || 0) || (b.bowl?.wickets || 0) - (a.bowl?.wickets || 0)), [index])
   const selected = sel ? index.get(sel) : null
 
+  // Debounced opponent-player search (player-first entry).
+  useEffect(() => {
+    const q = pSearch.trim()
+    if (q.length < 2) { setPResults([]); return }
+    let alive = true
+    const t = setTimeout(() => {
+      api.iqSearchOpponentPlayers(q).then(d => { if (alive) setPResults(d || []) }).catch(() => { if (alive) setPResults([]) })
+    }, 250)
+    return () => { alive = false; clearTimeout(t) }
+  }, [pSearch])
+
+  // Once a club's live squad is ready, resolve a pending player name (from the
+  // player-first search) to a participant and select them.
+  useEffect(() => {
+    if (status !== 'ready' || !pendingNameRef.current || !all.length) return
+    const want = pendingNameRef.current
+    const surname = want.split(/[ ,]+/).filter(Boolean).pop() || want
+    let hit = all.find(p => p.name.toLowerCase() === want)
+      || all.find(p => p.name.toLowerCase().includes(want) || want.includes(p.name.toLowerCase()))
+      || all.find(p => p.name.toLowerCase().includes(surname))
+    pendingNameRef.current = null
+    if (hit) {
+      setSel(hit.id)
+      if (club) setSearchParams({ opponent: club.opp_key, player: hit.id }, { replace: true })
+    }
+  }, [status, all])  // eslint-disable-line react-hooks/exhaustive-deps
+
   const cq = clubQ.trim().toLowerCase()
   const clubMatches = (cq ? opponents.filter(o => (o.name || '').toLowerCase().includes(cq)) : opponents).slice(0, 40)
   const pq = playerQ.trim().toLowerCase()
@@ -131,6 +170,31 @@ export default function OppositionPlayer() {
                         className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
                         <span className="font-medium truncate">{o.name}</span>
                         <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">{o.meetings} mtgs{o.coverage === 'rich' ? ' · rich' : ''}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Player-first search — jump straight to an opposition player */}
+          <div className="flex flex-wrap items-center gap-3 mb-6">
+            <span className="iq-eyebrow">Player</span>
+            <div className="relative flex-1 min-w-[260px] max-w-md"
+              onFocusCapture={() => setPOpen(true)} onBlur={() => setTimeout(() => setPOpen(false), 150)}>
+              <Search value={pSearch} onChange={(v) => { setPSearch(v); setPOpen(true) }} placeholder="…or search an opposition player by name" className="w-full" />
+              {pOpen && pSearch.trim().length >= 2 && (
+                <div className="absolute z-30 mt-1 w-full iq-card p-1 max-h-80 overflow-auto iq-scroll shadow-lg" style={{ background: 'var(--pb-surface)' }}>
+                  {pResults.length === 0
+                    ? <div className="px-2.5 py-2 text-pb-faint text-sm">No opposition player found — we index batters our bowlers have dismissed.</div>
+                    : pResults.map((r, i) => (
+                      <button key={`${r.opp_key}-${r.name}-${i}`} type="button" onMouseDown={e => e.preventDefault()} onClick={() => pickOpponentPlayer(r)}
+                        className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
+                        <span className="min-w-0">
+                          <span className="font-medium truncate block">{r.name}</span>
+                          <span className="text-pb-faintest text-[11px] truncate block">{r.club_name}</span>
+                        </span>
+                        <span className="text-pb-faint text-[11px] iq-num whitespace-nowrap">{r.runs}r vs us</span>
                       </button>
                     ))}
                 </div>

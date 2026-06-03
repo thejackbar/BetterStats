@@ -91,7 +91,10 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
             f"""
             SELECT
                 {_OPP_KEY} AS opp_key,
-                MAX(g.opp_club_name) AS name,
+                -- Most-frequent club name for this opponent key (not MAX, which
+                -- alphabetically prefers a rare association label like "West
+                -- Australian Suburban Turf Cricket Assoc" over the real club).
+                mode() WITHIN GROUP (ORDER BY g.opp_club_name) AS name,
                 COUNT(*) AS meetings,
                 MAX(g.played_at) AS last_played
             FROM v_effective_games g{_ORG_SCOPE}
@@ -316,7 +319,7 @@ async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str 
         nm_res = await session.execute(
             text(
                 f"""
-                SELECT MAX(g.opp_club_name) AS name
+                SELECT mode() WITHIN GROUP (ORDER BY g.opp_club_name) AS name
                 FROM v_effective_games g{_ORG_SCOPE}
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
                   AND {_OPP_KEY} = :opp_key
@@ -360,7 +363,10 @@ async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str 
         )
         krow = key_res.mappings().first()
         if krow:
-            return krow["opp_key"], krow["name"]
+            # Keep the stable identity (opp_key) but display the club the user
+            # actually picked from the fixture, not MAX(opp_club_name) for the
+            # key (which can be a shared association label).
+            return krow["opp_key"], name
         return None, name  # named opponent, but no history held
 
     return None, None
@@ -505,6 +511,7 @@ async def _our_performers_vs(session: AsyncSession, org_id: str, opp_key: str) -
             JOIN players p ON p.id = bi.player_id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
+              AND p.status = 'active'
             GROUP BY p.id, p.display_name_override, p.name, p.status
             HAVING COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) > 0
             ORDER BY runs DESC
@@ -545,6 +552,7 @@ async def _our_performers_vs(session: AsyncSession, org_id: str, opp_key: str) -
             JOIN players p ON p.id = bs.player_id
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
+              AND p.status = 'active'
             GROUP BY p.id, p.display_name_override, p.name, p.status
             HAVING COALESCE(SUM(bs.wickets), 0) > 0
             ORDER BY wickets DESC, runs ASC
@@ -603,12 +611,66 @@ async def _their_danger_batters(session: AsyncSession, org_id: str, opp_key: str
         ),
         {"org_id": org_id, "opp_key": opp_key},
     )
+    out = []
+    for r in res.mappings():
+        times_out = r["times_out"] or 0
+        runs = r["runs"] or 0
+        out.append({
+            "name": r["name"],
+            "times_out": times_out,
+            "runs": runs,
+            # Runs per time we've dismissed them — a partial "average vs us" (we
+            # only see knocks our bowlers ended), but enough for the danger read
+            # the preview/scout render (they read `average`).
+            "average": round(runs / times_out, 2) if times_out else None,
+            "top_score": r["top_score"],
+        })
+    return out
+
+
+async def search_opponent_players(session: AsyncSession, org_id: str, q: str) -> list[dict]:
+    """Search opposition batters we've faced (by name) across ALL opponents, so a
+    scout can jump straight to a player without first picking the club.
+
+    Sourced from ``bowler_wickets.batter_name`` — the only opponent-player data we
+    hold without building a live dossier. Each hit carries the club (opp_key +
+    name) so the UI can open that club's dossier and pre-select the player.
+    """
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+    res = await session.execute(
+        text(
+            f"""
+            SELECT bw.batter_name AS name,
+                   {_OPP_KEY} AS opp_key,
+                   mode() WITHIN GROUP (ORDER BY g.opp_club_name) AS club_name,
+                   COUNT(*) AS times_out,
+                   COALESCE(SUM(bw.batter_runs), 0) AS runs,
+                   MAX(bw.batter_runs) AS top_score,
+                   MAX(g.played_at) AS last_played
+            FROM bowler_wickets bw
+            JOIN v_effective_games g ON g.id = bw.game_id{_ORG_SCOPE}
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+              AND bw.batter_name ILIKE :q
+              AND {_OPP_KEY} IS NOT NULL
+            GROUP BY bw.batter_name, {_OPP_KEY}
+            ORDER BY runs DESC, times_out DESC
+            LIMIT 30
+            """
+        ),
+        {"org_id": org_id, "q": f"%{q}%"},
+    )
     return [
         {
             "name": r["name"],
+            "opp_key": r["opp_key"],
+            "club_name": r["club_name"],
             "times_out": r["times_out"],
             "runs": r["runs"],
             "top_score": r["top_score"],
+            "average": round((r["runs"] or 0) / r["times_out"], 2) if r["times_out"] else None,
+            "last_played": r["last_played"].isoformat() if r["last_played"] else None,
         }
         for r in res.mappings()
     ]
@@ -911,14 +973,17 @@ async def opponent_ladder(session: AsyncSession, org_id: str, *, opponent: str |
     our_row = next((r for r in rows if r["is_club"]), None)
     nm = (name or "").strip().lower()
     core = [t for t in nm.replace("-", " ").split() if len(t) > 2 and t not in _LADDER_STOP]
-    opp_row = None
+    # Pick the BEST-matching opponent row (most name tokens in common), not the
+    # first row to share any single token — otherwise "Wembley Districts" could
+    # latch onto "Wembley Downs". A full-name substring match wins outright.
+    opp_row, best = None, 0
     for r in rows:
         if r["is_club"]:
             continue
         h = _hay(r)
-        if (nm and nm in h) or any(t in h for t in core):
-            opp_row = r
-            break
+        score = 100 if (nm and nm in h) else sum(1 for t in core if t in h)
+        if score > best:
+            best, opp_row = score, r
 
     grr = (await session.execute(
         text("SELECT name FROM grades WHERE id = CAST(:g AS UUID)"), {"g": grade_id}
