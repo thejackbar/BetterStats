@@ -439,6 +439,49 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
     suggest_out = [{"player_id": p["player_id"], "name": p["name"], "flags": p["flags"]}
                    for p in players if p["player_id"] not in best_ids]
 
+    # ── Full eligible pool (every selectable squad player, incl. promotion /
+    # drop-down candidates) so the UI can build a best XI from scratch on an empty
+    # fixture, show ALL squad availability, and let the user add/remove anyone —
+    # not just the saved XI ∪ promotes. ──
+    order_by_id = {r["player_id"]: r for r in lineup}
+    pool_out = []
+    for p in sel["pool"]:
+        f = form.get(p["id"], {})
+        skills = _skills(p.get("skill_positions"))
+        flags = []
+        if not p.get("gender_ok", True):
+            flags.append("wrong-grade")
+        if p.get("is_inactive"):
+            flags.append("inactive")
+        elif p.get("is_dormant"):
+            flags.append("dormant")
+        if p.get("availability") == "UNAVAILABLE":
+            flags.append("unavailable")
+        lrow = order_by_id.get(p["id"])
+        pool_out.append({
+            "player_id": p["id"], "name": p["display_name"],
+            "skills": sorted(skills), "bowling_type": p.get("bowling_type"),
+            "is_wicket_keeper": ("WKT" in skills) or bool(lrow and lrow["is_wicket_keeper"]),
+            "is_opener": bool(p.get("is_opening_batsman")),
+            "availability": p.get("availability"),
+            "autofill_eligible": bool(p.get("autofill_eligible")),
+            "play_updown": _tier_updown(p.get("tier")),
+            "season_matches": load.get(p["id"], 0),
+            "recent_scores": f.get("bat", []), "recent_wickets": f.get("bowl", []),
+            "recent_avg": f.get("recent_avg"), "form_score": p.get("score"),
+            "vs_opponent": vs_opp.get(p["id"]),
+            "in_xi": p["id"] in selected_ids,
+            "batting_order": lrow["batting_order"] if lrow else None,
+            "is_captain": bool(lrow["is_captain"]) if lrow else False,
+            "flags": flags,
+        })
+    # Keep any saved player who falls outside the eligibility pool (so the saved
+    # XI is preserved faithfully and they can still be removed).
+    pool_ids = {p["id"] for p in sel["pool"]}
+    for pl in players:
+        if pl["player_id"] not in pool_ids:
+            pool_out.append({**pl, "in_xi": True, "autofill_eligible": False})
+
     # ── Verdict (one-liner) ──
     warn_count = sum(1 for w in warnings if w["level"] == "warn")
     if warn_count == 0:
@@ -456,6 +499,7 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
         "verdict": verdict,
         "balance": balance,
         "players": players,
+        "pool": pool_out,
         "warnings": warnings,
         "promote": promote,
         "rest": rest,

@@ -271,7 +271,10 @@ export default function MatchPreview() {
                         <div key={d.player_id || i} className="flex items-center justify-between gap-3 py-1">
                           <div className="flex items-center gap-3 min-w-0">
                             <Initials name={d.name} size={32} />
-                            <span className="font-semibold truncate">{d.name}</span>
+                            <div className="min-w-0">
+                              <div className="font-semibold truncate">{d.name}</div>
+                              {d.times_out ? <div className="iq-mono text-pb-faintest text-[10.5px]">out to us {d.times_out}×{d.top_score != null ? ` · best ${d.top_score}` : ''}</div> : null}
+                            </div>
                           </div>
                           <PerfStat value={d.runs} unit="runs" avg={d.average} />
                         </div>

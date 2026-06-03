@@ -48,8 +48,16 @@ function _reconcile(saved) {
   const newest = _seasons[_seasons.length - 1]
   const from = _seasonById(saved.season.from?.id) || newest
   const to = _seasonById(saved.season.to?.id) || newest
+  // Grades are keyed by NAME now (de-duped across seasons). Drop a stale saved
+  // team that no longer matches a known grade name (e.g. an old raw-uuid id from
+  // a previous build) so it falls back to "All grades" instead of filtering to
+  // nothing.
+  let team = saved.team && saved.team.name ? saved.team : { id: null, name: 'All grades' }
+  if (team.id != null && !(_grades || []).some(g => g.id === team.id)) {
+    team = { id: null, name: 'All grades' }
+  }
   return {
-    team: saved.team && saved.team.name ? saved.team : { id: null, name: 'All grades' },
+    team,
     season: { mode: saved.season.mode === 'range' ? 'range' : 'single', from, to },
   }
 }
@@ -173,75 +181,95 @@ function TeamPicker({ value, grades, onChange, label = 'Team' }) {
   )
 }
 
-/* ── Season timeline (the range visualiser/selector) ─────────────────────── */
-function SeasonTimeline({ season, seasons, onChange, mode }) {
-  const [anchor, setAnchor] = useState(null)
-  if (!seasons?.length) return null
-  const idx = id => seasons.findIndex(s => s.id === id)
-  const fromI = idx(season.from?.id), toI = idx(season.to?.id)
-  const lo = Math.min(fromI, toI), hi = Math.max(fromI, toI)
-  const click = i => {
-    const s = seasons[i]
+/* ── Season list (scrollable + filterable — scales to 100+ seasons) ───────────
+   Replaces the old fixed-width dot timeline, which crammed every season onto one
+   line and became unselectable past a handful of seasons. In single mode it's a
+   plain pick list; in range mode the same list highlights the in-range span and
+   you click the two endpoints (anchor → other end). */
+function SeasonList({ seasons, season, mode, onChange, anchor, setAnchor }) {
+  const [q, setQ] = useState('')
+  const newestFirst = [...seasons].reverse()
+  const ql = q.trim().toLowerCase()
+  const list = ql ? newestFirst.filter(s => `${s.name || ''} ${s.label || ''}`.toLowerCase().includes(ql)) : newestFirst
+  const lo = Math.min(sortKey(season.from), sortKey(season.to))
+  const hi = Math.max(sortKey(season.from), sortKey(season.to))
+  const click = s => {
     if (mode === 'single') { onChange({ mode: 'single', from: s, to: s }); return }
-    if (anchor === null) { setAnchor(i); onChange({ mode: 'range', from: s, to: s }) }
-    else { const a = Math.min(anchor, i), b = Math.max(anchor, i); onChange({ mode: 'range', from: seasons[a], to: seasons[b] }); setAnchor(null) }
+    if (anchor == null) { setAnchor(s); onChange({ mode: 'range', from: s, to: s }) }
+    else {
+      const a = sortKey(anchor) <= sortKey(s) ? anchor : s
+      const b = sortKey(anchor) <= sortKey(s) ? s : anchor
+      onChange({ mode: 'range', from: a, to: b }); setAnchor(null)
+    }
   }
   return (
-    <div className="px-1 pt-2 pb-1">
-      <div className="relative flex items-center justify-between">
-        <div className="absolute left-2 right-2 top-[7px] h-[3px] rounded-full" style={{ background: 'var(--pb-surface3)' }} />
-        {mode === 'range' && hi > lo && (
-          <div className="absolute top-[7px] h-[3px] rounded-full" style={{ background: 'var(--pb-accent)',
-            left: `${(lo / (seasons.length - 1)) * 100}%`, right: `${(1 - hi / (seasons.length - 1)) * 100}%` }} />
-        )}
-        {seasons.map((s, i) => {
-          const inSpan = i >= lo && i <= hi
-          const endpoint = (mode === 'single' && i === toI) || (mode === 'range' && (i === lo || i === hi))
+    <div>
+      {seasons.length > 10 && (
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter seasons…"
+          className="w-full mb-2 outline-none" style={{ background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline)', borderRadius: 8, padding: '7px 10px', fontSize: 13, color: 'var(--pb-text)' }} />
+      )}
+      <div className="space-y-0.5 overflow-y-auto iq-scroll" style={{ maxHeight: 260 }}>
+        {list.map(s => {
+          const k = sortKey(s)
+          const endpoint = (mode === 'single' && s.id === season.to?.id) || (mode === 'range' && (s.id === season.from?.id || s.id === season.to?.id))
+          const inSpan = mode === 'range' && k >= lo && k <= hi
           return (
-            <button key={s.id} onClick={() => click(i)} className="relative flex flex-col items-center" style={{ zIndex: 1 }} title={s.name}>
-              <span style={{ width: endpoint ? 15 : 11, height: endpoint ? 15 : 11, borderRadius: 99,
-                background: endpoint ? 'var(--pb-accent)' : inSpan ? 'color-mix(in srgb, var(--pb-accent) 45%, var(--pb-surface3))' : 'var(--pb-surface3)',
-                border: `2px solid ${endpoint || inSpan ? 'var(--pb-accent)' : 'var(--pb-hairline2)'}`, transition: 'all .15s' }} />
-              <span className="iq-mono mt-2" style={{ fontSize: 9.5, color: inSpan ? 'var(--pb-text)' : 'var(--pb-faint)' }}>{s.label}</span>
+            <button key={s.id} onClick={() => click(s)}
+              className="w-full flex items-center justify-between gap-3 px-2.5 py-2 text-left transition" style={{ borderRadius: 8,
+                background: endpoint ? 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' : inSpan ? 'color-mix(in srgb, var(--pb-accent) 7%, transparent)' : 'transparent' }}
+              onMouseEnter={e => { if (!endpoint) e.currentTarget.style.background = 'var(--pb-surface2)' }}
+              onMouseLeave={e => { if (!endpoint) e.currentTarget.style.background = inSpan ? 'color-mix(in srgb, var(--pb-accent) 7%, transparent)' : 'transparent' }}>
+              <span className="font-medium text-[13.5px] truncate" style={{ color: endpoint || inSpan ? 'var(--pb-accent)' : 'var(--pb-text)' }}>{s.name || s.label}</span>
+              {endpoint && <Icon name="check" size={14} className="shrink-0" style={{ color: 'var(--pb-accent)' }} />}
             </button>
           )
         })}
+        {list.length === 0 && <div className="text-pb-faint text-[12px] px-2.5 py-3">No seasons match.</div>}
       </div>
-      {mode === 'range' && <div className="text-pb-faint text-[11px] mt-3 text-center">{anchor !== null ? 'Pick the other end of the range' : `${hi - lo + 1} season${hi - lo + 1 > 1 ? 's' : ''} selected`}</div>}
     </div>
   )
 }
 
 function SeasonPicker({ season, seasons, onChange, allowRange }) {
+  const [anchor, setAnchor] = useState(null)
   if (!seasons?.length) return null
   const newest = seasons[seasons.length - 1]
+  const mode = allowRange ? season.mode : 'single'
   const setMode = m => {
+    setAnchor(null)
     if (m === 'single') onChange({ mode: 'single', from: season.to, to: season.to })
     else { const ti = seasons.findIndex(s => s.id === season.to?.id); onChange({ mode: 'range', from: seasons[Math.max(0, ti - 1)], to: season.to }) }
   }
   const presets = [
     { label: 'This + last', range: [seasons[Math.max(0, seasons.length - 2)], newest] },
     { label: 'Last 3', range: [seasons[Math.max(0, seasons.length - 3)], newest] },
+    { label: 'Last 5', range: [seasons[Math.max(0, seasons.length - 5)], newest] },
     { label: 'All seasons', range: [seasons[0], newest] },
   ]
+  const spanCount = Math.abs(seasons.findIndex(s => s.id === season.to?.id) - seasons.findIndex(s => s.id === season.from?.id)) + 1
   return (
-    <Popover width={340} trigger={open => <PillTrigger icon="clock" sub="Season" label={season.mode === 'single' ? season.to?.label : `${season.from?.label} → ${season.to?.label}`} open={open} accent />}>
+    <Popover width={300} trigger={open => <PillTrigger icon="clock" sub="Season" label={mode === 'single' ? (season.to?.label || '—') : `${season.from?.label} → ${season.to?.label}`} open={open} accent />}>
       {() => (
         <div>
           {allowRange && (
-            <div className="mb-3"><Segmented sm value={season.mode} onChange={setMode}
-              options={[{ value: 'single', label: 'Single' }, { value: 'range', label: 'Compare' }]} /></div>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <Segmented sm value={season.mode} onChange={setMode}
+                options={[{ value: 'single', label: 'Single' }, { value: 'range', label: 'Compare' }]} />
+              {season.mode === 'range' && (
+                <span className="iq-mono text-[10px]" style={{ color: anchor != null ? 'var(--pb-accent)' : 'var(--pb-faint)' }}>
+                  {anchor != null ? 'pick the other end' : `${spanCount} season${spanCount > 1 ? 's' : ''}`}
+                </span>
+              )}
+            </div>
           )}
-          <SeasonTimeline season={season} seasons={seasons} onChange={onChange} mode={allowRange ? season.mode : 'single'} />
           {allowRange && season.mode === 'range' && (
-            <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
-              <div className="iq-eyebrow mb-2">Quick ranges</div>
-              <div className="flex flex-wrap gap-2">
+            <div className="mb-3">
+              <div className="flex flex-wrap gap-1.5">
                 {presets.map(p => {
                   const active = season.from?.id === p.range[0]?.id && season.to?.id === p.range[1]?.id
                   return (
-                    <button key={p.label} onClick={() => onChange({ mode: 'range', from: p.range[0], to: p.range[1] })}
-                      className="iq-display font-semibold text-[12px] transition" style={{ padding: '6px 11px', borderRadius: 8,
+                    <button key={p.label} onClick={() => { setAnchor(null); onChange({ mode: 'range', from: p.range[0], to: p.range[1] }) }}
+                      className="iq-display font-semibold text-[11.5px] transition" style={{ padding: '5px 9px', borderRadius: 8,
                         background: active ? 'color-mix(in srgb, var(--pb-accent) 16%, transparent)' : 'var(--pb-surface2)',
                         color: active ? 'var(--pb-accent)' : 'var(--pb-dim)', border: `1px solid ${active ? 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' : 'var(--pb-hairline2)'}` }}>{p.label}</button>
                   )
@@ -249,6 +277,7 @@ function SeasonPicker({ season, seasons, onChange, allowRange }) {
               </div>
             </div>
           )}
+          <SeasonList seasons={seasons} season={season} mode={mode} onChange={onChange} anchor={anchor} setAnchor={setAnchor} />
         </div>
       )}
     </Popover>

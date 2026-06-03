@@ -41,10 +41,15 @@ function mapPlayer(p, src) {
     bowl_avg: p.vs_opponent?.bowl?.avg ?? 30,
     is_wicket_keeper: !!p.is_wicket_keeper, is_captain: !!p.is_captain,
     availability: p.availability, flags: p.flags, play_updown: p.play_updown,
-    saved: src === 'xi' && p.batting_order != null,
+    autofill_eligible: p.autofill_eligible !== false,
+    saved: src === 'pool' ? !!p.in_xi : (src === 'xi' && p.batting_order != null),
   }
 }
 function buildPool(data) {
+  // Prefer the full eligible pool (every selectable squad player) so we can build
+  // a best XI from an empty fixture and show all availability. Fall back to the
+  // saved XI ∪ promotes ∪ rest for older backends.
+  if (data.pool?.length) return data.pool.map(p => mapPlayer(p, 'pool'))
   const seen = new Map()
   const add = (p, src) => { if (p?.player_id && !seen.has(p.player_id)) seen.set(p.player_id, mapPlayer(p, src)) }
   ;(data.players || []).forEach(p => add(p, 'xi'))
@@ -130,41 +135,63 @@ function LineupPicker({ rows, onPick }) {
 /* ── interactive analysis ──────────────────────────────────────────────────── */
 function Analysis({ data, fixtureId, onNavigate }) {
   const pool = useMemo(() => buildPool(data), [data])
+  const poolById = useMemo(() => Object.fromEntries(pool.map(p => [p.id, p])), [pool])
+  const size = data.team_size_target || 11
+
   const [availMap, setAvailMap] = useState(() => Object.fromEntries(pool.map(p => [p.id, AVAIL_SEED[p.availability] || 'maybe'])))
   const [includeMaybe, setIncludeMaybe] = useState(false)
   const [sent, setSent] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendErr, setSendErr] = useState('')
+  const [poolQ, setPoolQ] = useState('')
 
-  const size = data.team_size_target || 11
-  const counts = useMemo(() => { const c = { available: 0, maybe: 0, unavailable: 0 }; Object.values(availMap).forEach(v => { c[v] = (c[v] || 0) + 1 }); return c }, [availMap])
-  const xi = useMemo(() => buildXI(pool, availMap, includeMaybe, size), [pool, availMap, includeMaybe, size])
-  const bal = useMemo(() => balanceOf(xi), [xi])
-
+  // Saved XI (from BetterSelect) and the auto-suggested best-available XI.
   const savedIds = useMemo(() => new Set(pool.filter(p => p.saved).map(p => p.id)), [pool])
-  const autoIds = new Set(xi.map(p => p.id))
+  const suggested = useMemo(() => buildXI(pool, availMap, includeMaybe, size), [pool, availMap, includeMaybe, size])
+  const suggestedIds = useMemo(() => suggested.map(p => p.id), [suggested])
+
+  // Working XI the user edits: seed from the saved lineup, or the suggested best
+  // XI when nothing's saved — so an empty fixture still opens with a full side to
+  // tweak (helps pick a team from scratch). State is keyed by fixture (remount).
+  const [xiIds, setXiIds] = useState(() => {
+    const saved = pool.filter(p => p.saved).sort((a, b) => a.order - b.order).map(p => p.id)
+    if (saved.length) return saved
+    const seed = Object.fromEntries(pool.map(p => [p.id, AVAIL_SEED[p.availability] || 'maybe']))
+    return buildXI(pool, seed, false, size).map(p => p.id)
+  })
+
+  const inXi = useMemo(() => new Set(xiIds), [xiIds])
+  const xi = useMemo(() => xiIds.map(id => poolById[id]).filter(Boolean), [xiIds, poolById])
+  const bal = useMemo(() => balanceOf(xi), [xi])
+  const counts = useMemo(() => { const c = { available: 0, maybe: 0, unavailable: 0 }; Object.values(availMap).forEach(v => { c[v] = (c[v] || 0) + 1 }); return c }, [availMap])
+
+  const addToXi = (id) => { setXiIds(ids => ids.includes(id) ? ids : [...ids, id]); setSent(false) }
+  const removeFromXi = (id) => { setXiIds(ids => ids.filter(x => x !== id)); setSent(false) }
+  const toggleXi = (id) => (inXi.has(id) ? removeFromXi(id) : addToXi(id))
+  const useSuggested = () => { setXiIds(suggestedIds); setSent(false) }
+  const setAvail = (id, v) => { setAvailMap(m => ({ ...m, [id]: v })); setSent(false); setSendErr('') }
+
   const comingIn = xi.filter(p => !savedIds.has(p.id))
-  const droppingOut = pool.filter(p => p.saved && !autoIds.has(p.id)).map(p => ({ ...p, reason: availMap[p.id] === 'unavailable' ? 'Unavailable' : availMap[p.id] === 'maybe' ? 'Only a maybe' : 'Out-performed' }))
+  const droppingOut = pool.filter(p => p.saved && !inXi.has(p.id)).map(p => ({ ...p, reason: availMap[p.id] === 'unavailable' ? 'Unavailable' : 'Left out' }))
+  const suggestedNotPicked = suggested.filter(p => !inXi.has(p.id))
+  const fromScratch = savedIds.size === 0
 
   const warnings = []
-  if (bal.keeper < 1) warnings.push({ tone: 'red', text: 'No specialist keeper available — name one or accept a part-timer behind the stumps.' })
+  if (xi.length !== size) warnings.push({ tone: xi.length < size ? 'amber' : 'red', text: xi.length < size ? `${size - xi.length} spot${size - xi.length > 1 ? 's' : ''} still open (${xi.length}/${size}).` : `${xi.length}/${size} picked — one too many.` })
+  if (bal.keeper < 1) warnings.push({ tone: 'red', text: 'No specialist keeper in the XI — name one or accept a part-timer behind the stumps.' })
   if (bal.bowlers < 4) warnings.push({ tone: 'amber', text: `Only ${bal.bowlers} bowling options — a thin attack if a bowler has an off day.` })
-  if (bal.spin < 1) warnings.push({ tone: 'amber', text: 'No frontline spinner available in the best XI.' })
-  if (bal.openers < 2) warnings.push({ tone: 'red', text: 'Fewer than two recognised top-order openers available.' })
+  if (bal.spin < 1) warnings.push({ tone: 'amber', text: 'No frontline spinner in the XI.' })
+  if (bal.openers < 2) warnings.push({ tone: 'red', text: 'Fewer than two recognised top-order openers.' })
   if (bal.depth < 7) warnings.push({ tone: 'amber', text: 'Batting depth thins below 7 — a top-order collapse would expose the tail.' })
-
-  const setAvail = (id, v) => { setAvailMap(m => ({ ...m, [id]: v })); setSent(false); setSendErr('') }
-  const changes = comingIn.length
 
   const send = async () => {
     setSending(true); setSendErr('')
     try {
-      const savedById = Object.fromEntries((data.players || []).map(p => [p.player_id, p]))
-      const payload = xi.map((p, i) => ({
-        player_id: p.id, batting_order: i + 1,
-        is_captain: !!savedById[p.id]?.is_captain,
-        is_wicket_keeper: p.is_wicket_keeper || !!savedById[p.id]?.is_wicket_keeper,
-      }))
+      const byId = Object.fromEntries((data.players || []).map(p => [p.player_id, p]))
+      const payload = xiIds.map((id, i) => {
+        const p = poolById[id] || {}
+        return { player_id: id, batting_order: i + 1, is_captain: !!byId[id]?.is_captain, is_wicket_keeper: p.is_wicket_keeper || !!byId[id]?.is_wicket_keeper }
+      })
       await api.bsSetSelection(fixtureId, payload)
       setSent(true)
     } catch (e) {
@@ -182,13 +209,16 @@ function Analysis({ data, fixtureId, onNavigate }) {
     { label: 'Openers', value: bal.openers, warn: bal.openers < 2 },
   ]
 
+  const pq = poolQ.trim().toLowerCase()
+  const poolView = pq ? pool.filter(p => p.name.toLowerCase().includes(pq)) : pool
+
   return (
     <div className="iq-fade">
-      <PageIntro>BetterSelect holds the saved XI. Set who's available and BetterIQ rebuilds the best-available side — balanced, in-form and from the same eligibility pool — then shows exactly what changed.</PageIntro>
+      <PageIntro>Pick the XI here — start from the saved BetterSelect team or, on an empty fixture, from the suggested best available side. Add or remove anyone, set availability to re-rank, then send the XI back to BetterSelect.</PageIntro>
 
       <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
         <div>
-          <div className="flex items-center gap-2"><div className="iq-eyebrow whitespace-nowrap" style={{ color: 'var(--pb-accent)' }}>Best available XI</div><Tag tone="accent">Synced · BetterSelect</Tag></div>
+          <div className="flex items-center gap-2"><div className="iq-eyebrow whitespace-nowrap" style={{ color: 'var(--pb-accent)' }}>Selection</div><Tag tone="accent">Synced · BetterSelect</Tag></div>
           <h2 className="iq-headline mt-2" style={{ fontSize: 'clamp(22px,2.6vw,30px)' }}>{fx.team_name || 'Team'} vs {fx.opponent_name || 'TBC'}</h2>
           <div className="text-pb-faint text-[12px] mt-1 iq-mono flex flex-wrap gap-x-2">{[fx.played_on, fx.home_away, fx.grade_name, fx.venue].filter(Boolean).join(' · ')}</div>
         </div>
@@ -199,46 +229,63 @@ function Analysis({ data, fixtureId, onNavigate }) {
       </div>
       {sendErr && <div className="mb-4 text-[12.5px] flex items-center gap-2" style={{ color: 'var(--pb-red)' }}><Icon name="info" size={14} />{sendErr}</div>}
 
-      <Card accent eyebrow="the read" title={changes === 0 ? 'Saved XI is the best available' : `${changes} change${changes > 1 ? 's' : ''} suggested`} className="mb-5">
+      <Card accent eyebrow="the read" title={fromScratch ? 'Suggested XI from scratch' : (comingIn.length === 0 && droppingOut.length === 0 ? 'Saved XI is the best available' : `${comingIn.length + droppingOut.length} change${comingIn.length + droppingOut.length > 1 ? 's' : ''} vs saved`)} className="mb-5">
         <div className="iq-display font-bold leading-snug" style={{ fontSize: 'clamp(15px,1.8vw,20px)', letterSpacing: '-0.01em', maxWidth: 760 }}>
-          {changes === 0
-            ? (data.verdict || 'Everyone available is already in the best side — no changes needed.')
-            : `${droppingOut.map(p => p.name).join(' & ') || '—'} drop out; ${comingIn.map(p => p.name).join(' & ')} come in.`}
+          {fromScratch
+            ? 'No XI was saved, so we loaded the best available side from your eligible squad. Add or remove players, set availability, then send it to BetterSelect.'
+            : (comingIn.length || droppingOut.length)
+              ? `${droppingOut.map(p => p.name).join(' & ') || '—'} out; ${comingIn.map(p => p.name).join(' & ') || '—'} in.`
+              : (data.verdict || 'Everyone available is already in the best side — no changes needed.')}
         </div>
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-[1fr_360px] items-start">
-        <Card eyebrow="batting order · auto-built" title="Best available XI"
-          right={<span className="iq-mono text-pb-faint text-[11px]">{counts.available} in · {counts.maybe} maybe · {counts.unavailable} out</span>}>
-          {xi.length === 0 ? <Empty>No available players to build an XI — set some availability below.</Empty> : (
+        <Card eyebrow={`your XI · ${xi.length}/${size}`} title="Selected XI"
+          right={<Btn variant="soft" sm icon="refresh" onClick={useSuggested}>Use suggested XI</Btn>}>
+          {xi.length === 0 ? <Empty>No players picked. Use the suggested XI, or add players from availability below.</Empty> : (
             <div className="space-y-0.5">
               {xi.map((p, i) => {
                 const isNew = !savedIds.has(p.id)
+                const out = availMap[p.id] === 'unavailable'
                 return (
-                  <div key={p.id} className="flex items-center gap-3 px-2 py-2.5" style={{ borderRadius: 9, background: isNew ? 'color-mix(in srgb, var(--pb-brand) 9%, transparent)' : i % 2 ? 'transparent' : 'var(--pb-surface2)' }}>
+                  <div key={p.id} className="group flex items-center gap-3 px-2 py-2.5" style={{ borderRadius: 9, background: isNew ? 'color-mix(in srgb, var(--pb-brand) 9%, transparent)' : i % 2 ? 'transparent' : 'var(--pb-surface2)' }}>
                     <span className="iq-num text-pb-faint w-5 text-center shrink-0">{i + 1}</span>
                     <Initials name={p.name} size={32} tone={isNew ? 'accent' : undefined} />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2"><span className="font-semibold text-[14px] whitespace-nowrap">{p.name}</span>{isNew && <Tag tone="win">In</Tag>}{p.spin && <span className="iq-mono text-pb-faint" style={{ fontSize: 9 }}>spin</span>}</div>
+                      <div className="flex items-center gap-2"><span className="font-semibold text-[14px] whitespace-nowrap">{p.name}</span>{isNew && <Tag tone="win">In</Tag>}{out && <Tag tone="red">Out</Tag>}{p.spin && <span className="iq-mono text-pb-faint" style={{ fontSize: 9 }}>spin</span>}</div>
                       <div className="text-pb-faint text-[11.5px] iq-num">form {a2(p.form)}</div>
                     </div>
                     <RoleChip role={p.role} />
-                    <span className="iq-num text-pb-dim text-[12.5px] w-12 text-right shrink-0 hidden sm:block">{p.role === 'BWL' ? `${p.wkts}w` : `${p.runs}r`}</span>
+                    <span className="iq-num text-pb-dim text-[12.5px] w-10 text-right shrink-0 hidden sm:block">{p.role === 'BWL' ? `${p.wkts}w` : `${p.runs}r`}</span>
+                    <button onClick={() => removeFromXi(p.id)} title="Remove from XI" className="shrink-0 transition" style={{ color: 'var(--pb-faint)', padding: 4, borderRadius: 6 }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--pb-red)'; e.currentTarget.style.background = 'color-mix(in srgb, var(--pb-red) 12%, transparent)' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--pb-faint)'; e.currentTarget.style.background = 'transparent' }}>
+                      <Icon name="close" size={14} />
+                    </button>
                   </div>
                 )
               })}
             </div>
           )}
-          {(comingIn.length > 0 || droppingOut.length > 0) && (
-            <div className="mt-4 pt-4 grid sm:grid-cols-2 gap-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
-              <div>
-                <div className="iq-eyebrow mb-2" style={{ color: 'var(--pb-brand)' }}>Coming in</div>
-                {comingIn.length ? comingIn.map(p => <div key={p.id} className="text-[13px] py-0.5">{p.name} <span className="text-pb-faint text-[11.5px]">· {p.saved ? 'recalled' : 'in form'}</span></div>) : <Empty>—</Empty>}
+          {suggestedNotPicked.length > 0 && (
+            <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+              <div className="iq-eyebrow mb-2" style={{ color: 'var(--pb-accent)' }}>Suggested to add</div>
+              <div className="flex flex-wrap gap-2">
+                {suggestedNotPicked.map(p => (
+                  <button key={p.id} onClick={() => addToXi(p.id)}
+                    className="iq-display font-semibold text-[12px] inline-flex items-center gap-1.5 transition" style={{ padding: '5px 10px', borderRadius: 8, background: 'var(--pb-surface2)', color: 'var(--pb-dim)', border: '1px solid var(--pb-hairline2)' }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--pb-accent)'; e.currentTarget.style.color = 'var(--pb-accent)' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--pb-hairline2)'; e.currentTarget.style.color = 'var(--pb-dim)' }}>
+                    <span style={{ fontSize: 14, lineHeight: 1 }}>+</span>{p.name}
+                  </button>
+                ))}
               </div>
-              <div>
-                <div className="iq-eyebrow mb-2" style={{ color: 'var(--pb-red)' }}>Dropping out</div>
-                {droppingOut.length ? droppingOut.map(p => <div key={p.id} className="text-[13px] py-0.5">{p.name} <span className="text-pb-faint text-[11.5px]">· {p.reason}</span></div>) : <Empty>—</Empty>}
-              </div>
+            </div>
+          )}
+          {droppingOut.length > 0 && (
+            <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+              <div className="iq-eyebrow mb-2" style={{ color: 'var(--pb-red)' }}>Dropped from the saved XI</div>
+              {droppingOut.map(p => <div key={p.id} className="text-[13px] py-0.5">{p.name} <span className="text-pb-faint text-[11.5px]">· {p.reason}</span></div>)}
             </div>
           )}
         </Card>
@@ -256,41 +303,46 @@ function Analysis({ data, fixtureId, onNavigate }) {
             {warnings.length === 0
               ? <div className="flex items-center gap-2 mt-3.5 text-[13px]" style={{ color: 'var(--pb-brand)' }}><Icon name="check" size={15} />Well balanced for this fixture.</div>
               : <div className="space-y-2 mt-3.5">{warnings.map((w, i) => <div key={i} className="flex gap-2 text-[12.5px] leading-snug"><Icon name="info" size={14} className="mt-0.5 shrink-0" style={{ color: w.tone === 'red' ? 'var(--pb-red)' : 'var(--pb-amber)' }} /><span>{w.text}</span></div>)}</div>}
-            {data.warnings?.length > 0 && (
-              <div className="mt-3.5 pt-3.5" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
-                <div className="iq-eyebrow mb-1.5">From the saved XI</div>
-                {data.warnings.map((w, i) => <div key={i} className="text-pb-faint text-[12px] leading-snug py-0.5">{w.text}</div>)}
-              </div>
-            )}
           </Card>
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 mt-9 mb-4">
-        <h2 className="iq-display font-bold text-[19px]" style={{ letterSpacing: '-0.01em' }}>Availability</h2>
-        <label className="flex items-center gap-2 text-[12.5px] text-pb-dim cursor-pointer select-none">
-          <input type="checkbox" checked={includeMaybe} onChange={e => setIncludeMaybe(e.target.checked)} style={{ accentColor: 'var(--pb-accent)', width: 15, height: 15 }} />
-          Consider "maybe" players
-        </label>
+      <div className="flex flex-wrap items-center justify-between gap-3 mt-9 mb-4">
+        <h2 className="iq-display font-bold text-[19px]" style={{ letterSpacing: '-0.01em' }}>Squad availability <span className="text-pb-faint text-[14px] font-normal">({pool.length})</span></h2>
+        <div className="flex items-center gap-3">
+          <Search value={poolQ} onChange={setPoolQ} placeholder="Find a player…" className="max-w-[200px]" />
+          <label className="flex items-center gap-2 text-[12.5px] text-pb-dim cursor-pointer select-none whitespace-nowrap">
+            <input type="checkbox" checked={includeMaybe} onChange={e => setIncludeMaybe(e.target.checked)} style={{ accentColor: 'var(--pb-accent)', width: 15, height: 15 }} />
+            Suggest "maybe" players
+          </label>
+        </div>
       </div>
       <Card>
         <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
-          {pool.map(p => {
-            const inXI = autoIds.has(p.id)
+          {poolView.map(p => {
+            const on = inXi.has(p.id)
             return (
-              <div key={p.id} className="flex items-center gap-3 py-2" style={{ borderBottom: '1px solid var(--pb-hairline)' }}>
-                <Initials name={p.name} size={30} tone={inXI ? 'accent' : undefined} />
+              <div key={p.id} className="flex items-center gap-2.5 py-2" style={{ borderBottom: '1px solid var(--pb-hairline)' }}>
+                <button onClick={() => toggleXi(p.id)} title={on ? 'Remove from XI' : 'Add to XI'}
+                  className="iq-mono font-bold shrink-0 transition" style={{ fontSize: 9.5, width: 34, padding: '4px 0', textAlign: 'center', borderRadius: 7,
+                    border: `1px solid ${on ? 'var(--pb-accent)' : 'var(--pb-hairline2)'}`,
+                    color: on ? 'var(--pb-accent)' : 'var(--pb-faint)',
+                    background: on ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}>
+                  {on ? '✓XI' : '+XI'}
+                </button>
+                <Initials name={p.name} size={30} tone={on ? 'accent' : undefined} />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2"><span className="font-medium text-[13.5px] whitespace-nowrap">{p.name}</span>{inXI && <span className="iq-mono" style={{ fontSize: 8.5, color: 'var(--pb-accent)' }}>● XI</span>}</div>
-                  <div className="text-pb-faint text-[11px] iq-num">form {a2(p.form)}</div>
+                  <div className="flex items-center gap-2"><span className="font-medium text-[13.5px] truncate">{p.name}</span>{p.play_updown && <span className="iq-mono text-pb-faintest" style={{ fontSize: 8.5 }}>{p.play_updown === 'up' ? '↑ up' : '↓ down'}</span>}</div>
+                  <div className="text-pb-faint text-[11px] iq-num">form {a2(p.form)}{p.flags?.includes('dormant') ? ' · dormant' : ''}</div>
                 </div>
                 <RoleChip role={p.role} />
                 <AvailToggle value={availMap[p.id]} onChange={v => setAvail(p.id, v)} />
               </div>
             )
           })}
+          {poolView.length === 0 && <Empty className="py-2">No players match.</Empty>}
         </div>
-        <Note>Availability is seeded from BetterSelect. Change a status and the XI rebuilds instantly — eligibility (grade, registration, recency) is enforced from the same pool. "Send XI" writes the order back to BetterSelect.</Note>
+        <Note>Every eligible squad player (incl. promotion / drop-down options) — availability is seeded from BetterSelect. "+XI" adds a player; availability re-ranks the suggested XI. "Send XI" writes your selected order back to BetterSelect.</Note>
       </Card>
     </div>
   )
@@ -330,14 +382,16 @@ export default function SelectionAnalysis() {
     <IQLayout actions={<Btn variant="ghost" sm icon="back" onClick={clear}>Change fixture</Btn>}>
       {data === null && !err && <div className="iq-card p-5 iq-pulse text-pb-faint text-sm">Analysing the XI…</div>}
       {err && <div className="iq-card p-5"><Empty>Couldn't load this lineup. It may have been removed — pick another fixture.</Empty></div>}
-      {data && (data.players?.length === 0 && (!data.promote || data.promote.length === 0)) && (
+      {/* Even with nothing saved we can still help — the eligible pool lets us
+          build a best XI from scratch. Only truly empty pools dead-end. */}
+      {data && !(data.pool?.length || data.players?.length || data.promote?.length) && (
         <Card title={`${data.fixture?.team_name || 'Team'} vs ${data.fixture?.opponent_name || 'TBC'}`}>
-          <Empty>No XI saved for this fixture yet.</Empty>
-          <p className="text-pb-faint text-sm mt-2">Pick the team in BetterSelect, then come back here to analyse the balance and rebuild on availability.</p>
+          <Empty>No eligible players found for this fixture's grade.</Empty>
+          <p className="text-pb-faint text-sm mt-2">Check the squad and player registrations in BetterSelect, then come back to build the XI.</p>
         </Card>
       )}
-      {data && (data.players?.length > 0 || data.promote?.length > 0) && (
-        <Analysis data={data} fixtureId={fixtureId} onNavigate={(to) => navigate(to)} />
+      {data && !!(data.pool?.length || data.players?.length || data.promote?.length) && (
+        <Analysis key={fixtureId} data={data} fixtureId={fixtureId} onNavigate={(to) => navigate(to)} />
       )}
     </IQLayout>
   )

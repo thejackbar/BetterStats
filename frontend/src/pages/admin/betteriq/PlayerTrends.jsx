@@ -722,19 +722,57 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
 }
 
 /* ── Overview (form movers + emerging + picker) ──────────────────────────── */
+/* Squad filter chip — wraps to multiple rows (a club can field 16+ teams, which
+   a single-row Segmented can't show without squashing the search bar). */
+function SquadChip({ label, active, onClick }) {
+  return (
+    <button onClick={onClick} className="iq-display font-semibold text-[12.5px] transition whitespace-nowrap"
+      style={{ padding: '6px 12px', borderRadius: 99,
+        background: active ? 'color-mix(in srgb, var(--pb-accent) 16%, transparent)' : 'var(--pb-surface2)',
+        color: active ? 'var(--pb-accent)' : 'var(--pb-dim)',
+        border: `1px solid ${active ? 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' : 'var(--pb-hairline2)'}` }}>{label}</button>
+  )
+}
+
 function Overview({ overview, players, squads, squad, setSquad, pickerPlayers, onPick }) {
   const m = overview
   const noMovers = m && !m.batting?.risers?.length && !m.batting?.fallers?.length && !m.bowling?.risers?.length && !m.bowling?.fallers?.length
+  const activeSquad = squads.find(s => s.id === squad)
   return (
     <>
-      {/* Picker + squad filter */}
-      <div className="flex flex-col sm:flex-row gap-2 mb-7 max-w-2xl">
-        <div className="flex-1"><PlayerSearch players={pickerPlayers} onPick={onPick} /></div>
-        {squads.length > 0 && (
-          <Segmented value={squad} onChange={setSquad}
-            options={[{ value: '', label: 'All squads' }, ...squads.map(s => ({ value: s.id, label: s.name }))]} />
-        )}
-      </div>
+      {/* Search — own full-width row so it always lays out cleanly */}
+      <div className="mb-4 max-w-2xl"><PlayerSearch players={pickerPlayers} onPick={onPick} /></div>
+
+      {/* Squad filter — wrapping chips */}
+      {squads.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-6">
+          <span className="iq-eyebrow mr-0.5" style={{ fontSize: 9 }}>Squad</span>
+          <SquadChip label="All squads" active={squad === ''} onClick={() => setSquad('')} />
+          {squads.map(s => <SquadChip key={s.id} label={s.name} active={squad === s.id} onClick={() => setSquad(s.id)} />)}
+        </div>
+      )}
+
+      {/* Selected squad's players — the visible response to the squad filter */}
+      {squad !== '' && (
+        <Card className="mb-9" eyebrow={`${pickerPlayers.length} player${pickerPlayers.length === 1 ? '' : 's'} · this season`} title={activeSquad?.name || 'Squad'}>
+          {pickerPlayers.length === 0 ? <Empty>No current-season players in this squad.</Empty> : (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {pickerPlayers.map(p => (
+                <button key={p.player_id} onClick={() => onPick(p.player_id)}
+                  className="flex items-center gap-2.5 px-2.5 py-2 text-left transition" style={{ borderRadius: 10, background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline)' }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--pb-accent)' }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--pb-hairline)' }}>
+                  <Initials name={p.name} size={32} />
+                  <div className="min-w-0">
+                    <div className="font-semibold text-[13px] truncate">{p.name}</div>
+                    <div className="iq-mono text-pb-faintest text-[10.5px] truncate">{p.matches}g{p.runs ? ` · ${p.runs}r` : ''}{p.wickets ? ` · ${p.wickets}w` : ''}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Form movers — surfaced first */}
       <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr] items-start mb-9">
