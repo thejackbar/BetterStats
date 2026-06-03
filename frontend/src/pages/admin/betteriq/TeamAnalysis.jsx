@@ -9,7 +9,7 @@ import {
   Icon, Card, Stat, Note, Tag, Bar, Gauge, SplitBar, StackedBar,
   Initials, KV, Empty, Tabs, PageIntro, Delta, a2,
 } from './ui'
-import { AreaChart } from './viz'
+import { AreaChart, PhaseStrip } from './viz'
 import { useIQFilter, seasonsInRange } from './Context'
 
 const TABS = [
@@ -269,8 +269,33 @@ function Batting({ d }) {
   )
 }
 
+/* ── Innings phases (estimated, from ball-by-ball games) ──────────────────── */
+/* Only recent live-scored games carry ball-by-ball data; older games are
+   scorecard-only. The endpoint reports `available:false` when there's nothing
+   to break down, in which case we render nothing. */
+function TeamPhases({ seasonId, teamId }) {
+  const [ph, setPh] = useState(null)
+  useEffect(() => {
+    setPh(null)
+    let alive = true
+    api.iqTeamPhases(seasonId || undefined, teamId || undefined)
+      .then(d => { if (alive) setPh(d) })
+      .catch(() => { if (alive) setPh(null) })
+    return () => { alive = false }
+  }, [seasonId, teamId])
+  if (!ph?.available) return null
+  return (
+    <Card eyebrow="Estimated · ball-by-ball" title="Innings phases"
+      right={ph.innings ? <Tag tone="faint">{ph.innings}{ph.total != null ? ` · ${ph.total}` : ''}</Tag> : null}>
+      <PhaseStrip phases={ph.phases} />
+      {ph.insight && <div className="text-pb-dim text-[12.5px] mt-4 leading-relaxed">{ph.insight}</div>}
+      {ph.note && <Note>{ph.note}</Note>}
+    </Card>
+  )
+}
+
 /* ── Bowling tab ────────────────────────────────────────────────────────── */
-function Bowling({ d }) {
+function Bowling({ d, seasonId, teamId }) {
   const bw = d.bowling || {}
   const attack = d.attack
   const disc = d.discipline
@@ -279,6 +304,7 @@ function Bowling({ d }) {
 
   return (
     <div className="space-y-5">
+      <TeamPhases seasonId={seasonId} teamId={teamId} />
       <Card eyebrow="summary" title="Attack overall">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Stat label="Avg conceded" value={num(bw.avg_conceded)} count={false} />
@@ -551,7 +577,7 @@ export default function TeamAnalysis() {
             <div className="iq-fade">
               {tab === 'overview' && <Overview d={data} isRange={isRange} compareRows={compareRows} compareLoading={compareLoading} />}
               {tab === 'batting' && <Batting d={data} />}
-              {tab === 'bowling' && <Bowling d={data} />}
+              {tab === 'bowling' && <Bowling d={data} seasonId={seasonId} teamId={teamId} />}
               {tab === 'players' && <Players d={data} />}
 
               {data.coverage?.notes?.length > 0 && (

@@ -19,7 +19,7 @@ import {
   Icon, Bar, Gauge, ResultPills, SplitBar, StackedBar, Heatmap,
   Card, Stat, Note, Tag, Btn, Segmented, Search, Empty, PageIntro, a2,
 } from './ui'
-import { Radar, BAT_AXES, BOWL_AXES } from './viz'
+import { Radar, BAT_AXES, BOWL_AXES, PhaseStrip, buildRadar } from './viz'
 import KeyPlayersCard from './KeyPlayersCard'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
 
@@ -242,35 +242,79 @@ function GamePlan({ plan, report }) {
   )
 }
 
-/* ── Threat radars — render ONLY if the dossier player carries radar data ──── */
-/* Not wired yet (we hold scorecards, not the normalised 0–100 axes a radar
-   needs), so this returns null gracefully. When the backend starts attaching a
-   `radar` field, the Radar / BAT_AXES / BOWL_AXES below render it. */
-function radarFor(player, kind) {
-  const r = player?.radar
-  if (!r || !Array.isArray(r.values) || !r.values.length) return null
-  return { axes: r.axes || (kind === 'bat' ? BAT_AXES : BOWL_AXES), values: r.values, baseline: r.baseline }
+/* ── Innings phases (estimated, from ball-by-ball games) ──────────────────── */
+/* Only recent live-scored games carry ball-by-ball data; older games are
+   scorecard-only. The endpoint reports `available:false` when there's nothing
+   to break down, in which case we render nothing. */
+function InningsPhases({ selected }) {
+  const [ph, setPh] = useState(null)
+  useEffect(() => {
+    setPh(null)
+    if (!selected) return
+    let alive = true
+    api.iqOppositionPhases({ opponent: selected.opponent, fixtureId: selected.fixtureId })
+      .then(d => { if (alive) setPh(d) })
+      .catch(() => { if (alive) setPh(null) })
+    return () => { alive = false }
+  }, [selected])
+  if (!ph?.available) return null
+  return (
+    <Card eyebrow="Estimated · ball-by-ball" title="Innings phases"
+      right={ph.innings ? <Tag tone="faint">{ph.innings}{ph.total != null ? ` · ${ph.total}` : ''}</Tag> : null}>
+      <PhaseStrip phases={ph.phases} />
+      {ph.insight && <div className="text-pb-dim text-[12.5px] mt-4 leading-relaxed">{ph.insight}</div>}
+      {ph.note && <Note>{ph.note}</Note>}
+    </Card>
+  )
 }
 
+/* ── Threat radars — top danger batter & bowler, normalised vs their squad ─── */
+/* Opponent stats live only in the live dossier (not our DB), so we build the
+   0–100 axes client-side from the dossier squad arrays with buildRadar — the
+   peer group is the dossier's own batting/bowling list. */
+const surname = (name) => (name || '').trim().split(/\s+/).slice(-1)[0] || name
+
+const BAT_RADAR_AXES = [
+  { label: 'Volume', value: p => p.runs },
+  { label: 'Average', value: p => p.average },
+  { label: 'Strike rate', value: p => p.strike_rate },
+  { label: 'Conversion', value: p => ((p.fifties || 0) + (p.hundreds || 0)) / Math.max(p.innings || 1, 1) },
+  { label: 'Big score', value: p => p.high_score },
+  { label: 'vs us', value: p => p.vs_us?.runs || 0 },
+]
+const BOWL_RADAR_AXES = [
+  { label: 'Wickets', value: p => p.wickets },
+  { label: 'Average', value: p => p.average, lower: true },
+  { label: 'Economy', value: p => p.economy, lower: true },
+  { label: 'Best', value: p => parseInt(String(p.best || '0/0')) },
+  { label: 'vs us', value: p => p.vs_us?.wickets || 0 },
+  { label: 'Workload', value: p => p.overs },
+]
+
 function ThreatRadars({ dossier }) {
-  const bat = (dossier.danger_batters || [])[0]
-  const bowl = (dossier.danger_bowlers || [])[0]
-  const cards = [
-    bat && { p: bat, kind: 'bat', tag: 'Top-order bat' },
-    bowl && { p: bowl, kind: 'bowl', tag: 'Strike bowler' },
-  ].filter(Boolean).map(c => ({ ...c, radar: radarFor(c.p, c.kind) })).filter(c => c.radar)
+  const batList = dossier.batting || []
+  const bowlList = dossier.bowling || []
+  const dBat = (dossier.danger_batters || [])[0]
+  const dBowl = (dossier.danger_bowlers || [])[0]
+  const batTarget = dBat ? (batList.find(p => p.player_id === dBat.player_id) || dBat) : null
+  const bowlTarget = dBowl ? (bowlList.find(p => p.player_id === dBowl.player_id) || dBowl) : null
+
+  const cards = []
+  if (batList.length && batTarget) cards.push({ key: 'bat', name: batTarget.name, tag: 'Danger batter', radar: buildRadar(batList, BAT_RADAR_AXES, batTarget) })
+  if (bowlList.length && bowlTarget) cards.push({ key: 'bowl', name: bowlTarget.name, tag: 'Danger bowler', radar: buildRadar(bowlList, BOWL_RADAR_AXES, bowlTarget) })
   if (!cards.length) return null
+
   return (
-    <Card eyebrow="threat profiles vs grade average" title="Their biggest threats">
+    <Card eyebrow="threat profiles vs their squad" title="Threat profiles">
       <div className="grid gap-6 sm:grid-cols-2">
         {cards.map(c => (
-          <div key={c.p.player_id} className="flex flex-col items-center">
-            <div className="text-center mb-1"><div className="iq-display font-bold text-[15px]">{c.p.name}</div><div className="iq-eyebrow">{c.tag}</div></div>
-            <Radar axes={c.radar.axes} values={c.radar.values} baseline={c.radar.baseline || [50, 50, 50, 50, 50, 50]} size={236} color="var(--pb-red)" />
+          <div key={c.key} className="flex flex-col items-center">
+            <div className="text-center mb-1"><div className="iq-display font-bold text-[15px]">{surname(c.name)}</div><div className="iq-eyebrow">{c.tag}</div></div>
+            <Radar axes={c.radar.axes} values={c.radar.values} baseline={c.radar.baseline} size={236} color="var(--pb-red)" />
           </div>
         ))}
       </div>
-      <Note>Each axis normalised 0–100 against the grade average (dashed ring). The further the shape reaches, the bigger the threat.</Note>
+      <Note>Each axis normalised 0–100 against this squad's average (dashed ring). The further the shape reaches, the bigger the threat.</Note>
     </Card>
   )
 }
@@ -816,8 +860,11 @@ export default function OppositionScout() {
               </div>
             )}
 
-            {/* Threat radars — render only when the dossier carries radar axes */}
+            {/* Threat radars — top danger batter/bowler, built from the dossier squad */}
             <ThreatRadars dossier={dossier} />
+
+            {/* Innings phases — estimated from ball-by-ball games (recent only) */}
+            <InningsPhases selected={selected} />
 
             {/* Scout any of their players — full profile + record vs us + tags */}
             <OppPlayerScout dossier={dossier} tags={tags} onSaveTag={saveTag} />
