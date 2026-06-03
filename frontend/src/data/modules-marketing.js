@@ -21,6 +21,9 @@ export const CORE_MARKETING = {
   to: '/features',
 }
 
+// Showcase image for the Modules hub hero (the uploaded "Better Modules" shot).
+export const HUB_SHOWCASE = '/marketing/modules/better-modules.jpg'
+
 // ── Bolt-on modules ─────────────────────────────────────────────────────────
 export const MODULES_MARKETING = [
   {
@@ -49,7 +52,12 @@ export const MODULES_MARKETING = [
       { title: 'One filter bar everywhere', desc: 'Search, multi-select filters and removable chips on every screen — stored in the URL, so a view is shareable and survives the back button.' },
       { title: 'Wears your colours', desc: 'BetterSelect uses your accent colour, crest and club name, and remembers your default lineup size.' },
     ],
-    screenshot: '/marketing/modules/betterselect.jpg',
+    screenshot: '/marketing/modules/betterselect-selection.jpg',
+    gallery: [
+      { src: '/marketing/modules/betterselect-squads.jpg', caption: 'Drag-and-drop squad boards' },
+      { src: '/marketing/modules/betterselect-availability.jpg', caption: 'Availability grid with date-range periods' },
+      { src: '/marketing/modules/betterselect-player-profiles.jpg', caption: 'Rich, shared player profiles' },
+    ],
   },
   {
     slug: 'bettersocials',
@@ -75,7 +83,7 @@ export const MODULES_MARKETING = [
       { title: 'Share anywhere', desc: 'Export sized for Instagram, Facebook and X.' },
     ],
     comingSoon: ['Scheduled & auto-posting after a result', 'Auto-generated match summaries'],
-    screenshot: '/marketing/modules/bettersocials.jpg',
+    screenshot: '',
   },
   {
     slug: 'betterfees',
@@ -103,7 +111,11 @@ export const MODULES_MARKETING = [
       { title: 'Bulk & import', desc: 'Record payments in bulk, or import them straight from a CSV.' },
       { title: 'Financial reports', desc: 'A clean summary with waived totals and a per-tier breakdown for the committee.' },
     ],
-    screenshot: '/marketing/modules/betterfees.jpg',
+    screenshot: '/marketing/modules/betterfees-player-payments.jpg',
+    gallery: [
+      { src: '/marketing/modules/betterfees-structure.jpg', caption: 'Fee schedules & membership tiers' },
+      { src: '/marketing/modules/betterfees-reports.jpg', caption: 'Financial reports with waived totals' },
+    ],
   },
   {
     slug: 'betteriq',
@@ -133,7 +145,16 @@ export const MODULES_MARKETING = [
       { title: 'Innings phases', desc: 'Powerplay / Middle / Death splits, radars, gauges and wagon wheels — a full broadcast-style viz kit.' },
     ],
     note: 'Built entirely from your synced scorecards — no manual entry and no ball-by-ball scoring required.',
-    screenshot: '/marketing/modules/betteriq.jpg',
+    screenshot: '/marketing/modules/betteriq-overview.jpg',
+    gallery: [
+      { src: '/marketing/modules/betteriq-opposition-analysis.jpg', caption: 'Opposition scouting dossier' },
+      { src: '/marketing/modules/betteriq-danger-players.jpg', caption: 'Danger-player cards' },
+      { src: '/marketing/modules/betteriq-how-to-beat-them.jpg', caption: 'How to beat them — game plan' },
+      { src: '/marketing/modules/betteriq-how-they-win-lose.jpg', caption: 'How they win & lose' },
+      { src: '/marketing/modules/betteriq-selection-analysis.jpg', caption: 'Live best-available XI' },
+      { src: '/marketing/modules/betteriq-team-analysis.jpg', caption: 'Team analysis' },
+      { src: '/marketing/modules/betteriq-team-batting-analysis.jpg', caption: 'Team batting analysis' },
+    ],
   },
 ]
 
