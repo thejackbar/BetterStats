@@ -22,8 +22,10 @@ export default {
         stat: '#e2e8f0',
         pb: {
           bg:        "var(--pb-bg)",
+          bg2:       "var(--pb-bg2)",
           surface:   "var(--pb-surface)",
           surface2:  "var(--pb-surface2)",
+          surface3:  "var(--pb-surface3)",
           hairline:  "var(--pb-hairline)",
           hairline2: "var(--pb-hairline2)",
           text:      "var(--pb-text)",
@@ -31,6 +33,7 @@ export default {
           faint:     "var(--pb-faint)",
           faintest:  "var(--pb-faintest)",
           accent:    "var(--pb-accent)",
+          'accent-bright': "var(--pb-accent-bright)",
           brand:     "var(--pb-brand)",
           red:       "var(--pb-red)",
           amber:     "var(--pb-amber)",
