@@ -1,23 +1,42 @@
+/* BetterIQ — Match preview: a fast pre-game one-pager (instant data only).
+   Restyled to the v2 high-fidelity design; wired to the real instant report,
+   ladder and team-overview endpoints. Never calls the live dossier. */
 import { useState, useEffect } from 'react'
-import { useSearchParams, Link } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
-import { Btn, Empty, Search } from '../betterselect/ui'
+import {
+  Icon, CountUp, ResultPills, SplitBar, Card, Tag, Btn, Search, Empty,
+  Initials, PageIntro, Note, a2,
+} from './ui'
 
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
-const fmt2 = (v) => (v === null || v === undefined || Number.isNaN(Number(v))) ? '—' : Number(v).toFixed(2)
 const ord = (n) => (n == null ? '—' : ({ 1: '1st', 2: '2nd', 3: '3rd' }[n] || `${n}th`))
 
-function Card({ title, right, children, accent = false }) {
+// One-line standings read for under the ladder (mirrors the reference's context line).
+function ladderContext(ladder, oppName) {
+  const us = ladder?.our_row, them = ladder?.opponent_row
+  if (!us?.rank || !them?.rank) return null
+  const who = oppName || 'them'
+  if (us.rank < them.rank) {
+    const gap = (us.points != null && them.points != null) ? Math.abs(us.points - them.points) : null
+    return `You sit ${ord(us.rank)}, ${gap != null ? `${gap} pts ` : ''}ahead of ${who} in ${ord(them.rank)}.`
+  }
+  if (us.rank > them.rank) {
+    const gap = (us.points != null && them.points != null) ? Math.abs(them.points - us.points) : null
+    return `${who} are above you — ${ord(them.rank)} to your ${ord(us.rank)}${gap != null ? `, a ${gap} pt swing` : ''}. A win closes the gap.`
+  }
+  return `Level with ${who} on the ladder — this one's for the table.`
+}
+
+/* Clean two-line perf cell: value + unit, then "avg X.XX". */
+function PerfStat({ value, unit, avg }) {
   return (
-    <div className="pb-card p-4 md:p-5" style={accent ? { borderColor: 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' } : undefined}>
-      {(title || right) && (
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <h3 className="font-display font-bold">{title}</h3>
-          {right}
-        </div>
-      )}
-      {children}
+    <div className="text-right shrink-0">
+      <div className="iq-num font-semibold text-[15px] leading-none">
+        {num(value, 0)}<span className="text-pb-faint font-normal text-[11px] ml-1">{unit}</span>
+      </div>
+      <div className="iq-num text-pb-faint text-[11px] mt-1">avg {a2(avg)}</div>
     </div>
   )
 }
@@ -32,31 +51,59 @@ function synthesise({ report, ladder, team }) {
   }
   if (inn?.par?.par_score != null) bits.push(`A winning first-innings total is usually around ${inn.par.par_score}.`)
   const db = report?.their_danger_batters?.[0]
-  if (db?.name) bits.push(`Watch ${db.name}${db.runs ? ` (${db.runs} runs${db.average ? ` @ ${fmt2(db.average)}` : ''})` : ''} — their main threat.`)
+  if (db?.name) bits.push(`Watch ${db.name}${db.runs ? ` (${db.runs} runs${db.average ? ` @ ${a2(db.average)}` : ''})` : ''} — their main threat.`)
   const dom = report?.matchups?.bowler_dominance?.[0]
   if (dom?.bowler && dom?.batter) bits.push(`Save ${dom.bowler} for ${dom.batter} — he's dismissed him ${dom.dismissals}×.`)
   const ob = report?.our_performers?.batting?.[0]
-  if (ob?.name) bits.push(`${ob.name} is our man with the bat against them (${ob.runs} @ ${fmt2(ob.average)}).`)
+  if (ob?.name) bits.push(`${ob.name} is our man with the bat against them (${ob.runs} @ ${a2(ob.average)}).`)
   if (ladder?.available && ladder.our_row?.rank && ladder.opponent_row?.rank) {
     bits.push(`Ladder: you're ${ord(ladder.our_row.rank)}, they're ${ord(ladder.opponent_row.rank)}.`)
   }
   return bits
 }
 
-function LadderRow({ label, row, tone }) {
-  if (!row) return null
+/* Ladder table — our row + the opponent row, styled like the reference. */
+function LadderTable({ ladder, oppName }) {
+  const rows = [
+    ladder.our_row && { ...ladder.our_row, us: true },
+    ladder.opponent_row && { ...ladder.opponent_row, us: false },
+  ].filter(Boolean)
+  if (!rows.length) return <Empty>{ladder?.note || 'No ladder for this fixture.'}</Empty>
   return (
-    <div className="flex items-center justify-between gap-3 py-1.5">
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="font-display font-bold text-lg pb-num w-8 text-center" style={tone ? { color: tone } : undefined}>{ord(row.rank)}</span>
-        <span className="truncate">{row.team_name} <span className="text-pb-faintest text-[11px]">· {label}</span></span>
-      </div>
-      <span className="text-pb-faint text-[12px] pb-num whitespace-nowrap">{num(row.played, 0)}P · {num(row.won, 0)}W–{num(row.lost, 0)}L{row.points != null ? ` · ${row.points}pts` : ''}</span>
+    <div className="overflow-x-auto iq-scroll -mx-1">
+      <table className="w-full text-[13.5px]">
+        <thead>
+          <tr className="iq-eyebrow text-left" style={{ fontSize: 9.5 }}>
+            <th className="py-1.5 px-2 font-medium text-center">#</th>
+            <th className="py-1.5 px-2 font-medium">Club</th>
+            <th className="py-1.5 px-2 font-medium text-right">P</th>
+            <th className="py-1.5 px-2 font-medium text-right">W</th>
+            <th className="py-1.5 px-2 font-medium text-right">L</th>
+            <th className="py-1.5 px-2 font-medium text-right">Pts</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} style={{ borderTop: '1px solid var(--pb-hairline)', background: r.us ? 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' : 'transparent' }}>
+              <td className="py-2.5 px-2 text-center iq-num font-semibold" style={{ color: r.us ? 'var(--pb-accent)' : 'var(--pb-faint)' }}>{ord(r.rank)}</td>
+              <td className="py-2.5 px-2 font-semibold">
+                <span className="truncate">{r.team_name || (r.us ? 'Us' : oppName)}</span>
+                {r.us && <Tag tone="accent" className="ml-1.5">Us</Tag>}
+              </td>
+              <td className="py-2.5 px-2 text-right iq-num text-pb-faint">{num(r.played, 0)}</td>
+              <td className="py-2.5 px-2 text-right iq-num">{num(r.won, 0)}</td>
+              <td className="py-2.5 px-2 text-right iq-num">{num(r.lost, 0)}</td>
+              <td className="py-2.5 px-2 text-right iq-num font-bold">{num(r.points, 0)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
 
 export default function MatchPreview() {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [opp, setOpp] = useState(null)              // {opponents, upcoming}
   const [team, setTeam] = useState(null)            // team overview (par/record)
@@ -93,6 +140,15 @@ export default function MatchPreview() {
   const t = q.trim().toLowerCase()
   const oppMatches = (t ? oppList.filter(o => (o.name || '').toLowerCase().includes(t)) : oppList).slice(0, 20)
 
+  // Cross-screen navigation targets (carry the current fixture/opponent through).
+  const qs = sel ? (sel.fixtureId ? `fixture=${encodeURIComponent(sel.fixtureId)}` : sel.opponent ? `opponent=${encodeURIComponent(sel.opponent)}` : '') : ''
+  const goScout = () => navigate(`/admin/betteriq/opposition${qs ? `?${qs}` : ''}`)
+  const goCheatSheet = () => {
+    if (!sel?.opponent) return
+    navigate(`/admin/betteriq/opposition/cheatsheet?opponent=${encodeURIComponent(sel.opponent)}${sel.fixtureId ? `&fixture=${encodeURIComponent(sel.fixtureId)}` : ''}`)
+  }
+  const goSelection = () => navigate(`/admin/betteriq/selection${qs ? `?${qs}` : ''}`)
+
   // ── Detail ──
   if (sel) {
     const m = sel.meta
@@ -100,103 +156,180 @@ export default function MatchPreview() {
     const h2h = report?.head_to_head
     const lm = report?.last_meeting
     const lines = synthesise({ report, ladder, team })
+    const par = team?.innings?.par
+    const danger = (report?.their_danger_batters || []).slice(0, 3)
+    const edgeBat = (report?.our_performers?.batting || []).slice(0, 2)
+    const edgeBowl = (report?.our_performers?.bowling || []).slice(0, 1)
+    const lmTone = lm?.result === 'WIN' ? 'var(--pb-brand)' : lm?.result === 'LOSS' ? 'var(--pb-red)' : 'var(--pb-amber)'
+    const lmLabel = lm?.result === 'WIN' ? 'Won' : lm?.result === 'LOSS' ? 'Lost' : (lm?.result || '—')
+
     return (
       <IQLayout title="Match preview" actions={<Btn variant="ghost" sm icon="back" onClick={clear}>All fixtures</Btn>}>
-        <div className="flex flex-wrap items-center gap-2 mb-1">
-          <h2 className="font-display font-bold text-2xl">vs {oppName}</h2>
-          {m.home_away && <span className="text-[11px] font-mono uppercase px-1.5 py-0.5 rounded" style={{ background: 'var(--pb-surface2)' }}>{m.home_away}</span>}
-        </div>
-        <div className="text-pb-faint text-sm mb-4 flex flex-wrap gap-x-4 gap-y-1">
-          {m.played_on && <span>{m.played_on}</span>}
-          {m.grade_name && <span>{m.grade_name}</span>}
-          {m.team_name && <span>{m.team_name}</span>}
-          {m.venue && <span>{m.venue}</span>}
-        </div>
+        <div className="iq-fade">
+          <PageIntro>A 60-second read before the game — the essentials, fast. For the full dossier (danger men, match-ups, game plan) open the scout.</PageIntro>
 
-        {lines.length > 0 && (
-          <Card title="The lean" accent>
-            <ul className="space-y-1.5 text-sm">
-              {lines.map((s, i) => <li key={i} className="flex gap-2"><span style={{ color: 'var(--pb-accent)' }}>›</span><span>{s}</span></li>)}
-            </ul>
-          </Card>
-        )}
+          {/* Fixture bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+            <div className="flex items-center gap-4 flex-wrap">
+              <span className="iq-headline" style={{ fontSize: 'clamp(24px,3vw,34px)' }}>vs {oppName}</span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-pb-dim">
+                {m.played_on && <span className="inline-flex items-center gap-1.5"><Icon name="fixtures" size={14} className="text-pb-faint" />{m.played_on}</span>}
+                {(m.home_away || m.venue) && <span className="inline-flex items-center gap-1.5"><Icon name="target" size={14} className="text-pb-faint" />{[m.home_away, m.venue].filter(Boolean).join(' · ')}</span>}
+                {(m.grade_name || m.team_name) && <span className="iq-mono text-pb-faint">{[m.team_name, m.grade_name].filter(Boolean).join(' · ')}</span>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Btn variant="ghost" sm icon="print" onClick={goCheatSheet} disabled={!sel.opponent}>Cheat sheet</Btn>
+              <Btn variant="primary" sm icon="search" onClick={goScout}>Full scout</Btn>
+            </div>
+          </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <Card title="Ladder" right={ladder?.grade_name ? <span className="text-pb-faint text-xs truncate max-w-[160px]">{ladder.grade_name}</span> : null}>
-            {ladder === null ? <div className="animate-pulse text-pb-faint text-sm">Loading standings…</div>
-              : ladder.available && (ladder.our_row || ladder.opponent_row) ? (
-                <div className="divide-y pb-hairline">
-                  <LadderRow label="us" row={ladder.our_row} tone="var(--pb-accent)" />
-                  <LadderRow label={oppName} row={ladder.opponent_row} tone="var(--pb-red)" />
-                </div>
-              ) : <Empty>{ladder?.note || 'No ladder for this fixture.'}</Empty>}
-          </Card>
+          <div className="space-y-5">
+            {/* The lean */}
+            {lines.length > 0 && (
+              <Card accent eyebrow="The lean" title="What matters on the day" right={<Tag tone="accent">Synthesised</Tag>}>
+                <ul className="space-y-3">
+                  {lines.map((l, i) => (
+                    <li key={i} className="flex gap-3 text-[14.5px] leading-snug">
+                      <span className="iq-num shrink-0 font-bold" style={{ color: 'var(--pb-accent)', width: 18 }}>{i + 1}</span>
+                      <span>{l}</span>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
 
-          <Card title="Head-to-head" right={h2h?.win_pct != null ? <span className="text-pb-faint text-xs">{h2h.win_pct}% win</span> : null}>
-            {report === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div>
-              : h2h && h2h.meetings > 0 ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
-                    <div><span className="font-display font-bold text-2xl pb-num">{h2h.wins}–{h2h.losses}{h2h.draws ? `–${h2h.draws}` : ''}</span><span className="text-pb-faint text-sm ml-2">from {h2h.meetings}</span></div>
-                    <div className="text-sm text-pb-faint">Home {h2h.home?.wins}/{h2h.home?.played} · Away {h2h.away?.wins}/{h2h.away?.played}</div>
-                  </div>
-                  {h2h.recent_form?.length > 0 && (
-                    <div className="flex gap-1 mt-2">
-                      {h2h.recent_form.slice(0, 8).map((r, i) => (
-                        <span key={i} className="w-5 h-5 rounded text-[10px] font-bold flex items-center justify-center" style={{ background: r === 'W' ? 'color-mix(in srgb, var(--pb-brand) 22%, transparent)' : r === 'L' ? 'color-mix(in srgb, var(--pb-red) 22%, transparent)' : 'var(--pb-surface2)', color: r === 'W' ? 'var(--pb-brand)' : r === 'L' ? 'var(--pb-red)' : 'var(--pb-faint)' }}>{r}</span>
+            {/* Ladder + H2H */}
+            <div className="grid gap-5 lg:grid-cols-2 items-start">
+              <Card eyebrow="grade ladder" title="Where we sit" right={ladder?.grade_name ? <span className="text-pb-faint text-[11px] truncate max-w-[150px]">{ladder.grade_name}</span> : null}>
+                {ladder === null ? <div className="animate-pulse text-pb-faint text-sm">Loading standings…</div>
+                  : ladder.available ? (
+                    <>
+                      <LadderTable ladder={ladder} oppName={oppName} />
+                      {ladderContext(ladder, oppName) && (
+                        <div className="text-pb-dim text-[12.5px] mt-3">{ladderContext(ladder, oppName)}</div>
+                      )}
+                    </>
+                  ) : <Empty>{ladder?.note || 'No ladder for this fixture.'}</Empty>}
+                {ladder?.available && (ladder.our_row || ladder.opponent_row) && (
+                  <Note>Current standings for this grade — historical splits aren't kept.</Note>
+                )}
+              </Card>
+
+              <Card eyebrow={h2h?.meetings ? `${h2h.meetings} meetings` : 'head-to-head'} title="Head-to-head" right={h2h?.win_pct != null ? <Tag tone="faint">{h2h.win_pct}% win</Tag> : null}>
+                {report === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div>
+                  : h2h && h2h.meetings > 0 ? (
+                    <>
+                      <div className="flex items-end gap-6">
+                        <div>
+                          <div className="iq-headline iq-num" style={{ fontSize: 40, color: 'var(--pb-brand)' }}><CountUp value={h2h.wins} /></div>
+                          <div className="iq-eyebrow mt-1.5">Won</div>
+                        </div>
+                        <div>
+                          <div className="iq-headline iq-num" style={{ fontSize: 40, color: 'var(--pb-red)' }}><CountUp value={h2h.losses} /></div>
+                          <div className="iq-eyebrow mt-1.5">Lost</div>
+                        </div>
+                        {h2h.recent_form?.length > 0 && (
+                          <div className="ml-auto flex flex-col items-end gap-1.5">
+                            <div className="iq-eyebrow">Recent</div>
+                            <ResultPills form={h2h.recent_form.slice(0, 6)} size={20} />
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-4">
+                        <SplitBar h={10} segments={[
+                          { label: 'W', value: h2h.wins, color: 'var(--pb-brand)' },
+                          { label: 'L', value: h2h.losses, color: 'var(--pb-red)' },
+                          { label: 'D', value: (h2h.draws || 0) + (h2h.ties || 0), color: 'var(--pb-amber)' },
+                        ]} />
+                      </div>
+                      <div className="mt-4 text-[12.5px] text-pb-dim">
+                        Home <span className="iq-num font-semibold text-pb-text">{num(h2h.home?.wins, 0)}/{num(h2h.home?.played, 0)}</span>
+                        <span className="mx-2 text-pb-faintest">·</span>
+                        Away <span className="iq-num font-semibold text-pb-text">{num(h2h.away?.wins, 0)}/{num(h2h.away?.played, 0)}</span>
+                      </div>
+                      {lm && (lm.result || lm.our_runs != null) && (
+                        <div className="mt-4 pt-4 text-[13px]" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+                          <span className="text-pb-faint">Last meeting:</span>{' '}
+                          <span className="font-semibold" style={{ color: lmTone }}>{lmLabel}</span>
+                          {(lm.our_runs != null || lm.opp_runs != null) && <span className="iq-num text-pb-dim"> · {num(lm.our_runs)} vs {num(lm.opp_runs)}</span>}
+                          {lm.played_at && <span className="iq-num text-pb-faint"> · {lm.played_at}</span>}
+                        </div>
+                      )}
+                    </>
+                  ) : <Empty>No history vs {oppName} yet.</Empty>}
+              </Card>
+            </div>
+
+            {/* Danger + edge */}
+            <div className="grid gap-5 lg:grid-cols-2 items-start">
+              <Card eyebrow="watch them" title="Their danger players" right={<Btn variant="ghost" sm onClick={goScout}>Full scout</Btn>}>
+                {report === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div>
+                  : danger.length > 0 ? (
+                    <div className="space-y-2.5">
+                      {danger.map((d, i) => (
+                        <div key={d.player_id || i} className="flex items-center justify-between gap-3 py-1">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Initials name={d.name} size={32} />
+                            <span className="font-semibold truncate">{d.name}</span>
+                          </div>
+                          <PerfStat value={d.runs} unit="runs" avg={d.average} />
+                        </div>
                       ))}
                     </div>
-                  )}
-                </>
-              ) : <Empty>No history vs {oppName} yet.</Empty>}
-          </Card>
-        </div>
+                  ) : <Empty>No standout batters flagged.</Empty>}
+              </Card>
 
-        {lm && (
-          <div className="mt-4"><Card title="Last meeting" right={lm.played_at ? <span className="text-pb-faint text-xs">{lm.played_at}</span> : null}>
-            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
-              <span className="font-display font-bold text-lg" style={{ color: lm.result === 'WIN' ? 'var(--pb-brand)' : lm.result === 'LOSS' ? 'var(--pb-red)' : 'var(--pb-faint)' }}>{lm.result === 'WIN' ? 'Won' : lm.result === 'LOSS' ? 'Lost' : (lm.result || '—')}</span>
-              {(lm.our_runs != null || lm.opp_runs != null) && <span className="pb-num text-pb-faint">{num(lm.our_runs)} vs {num(lm.opp_runs)}</span>}
-              {lm.venue && <span className="text-pb-faintest text-[12px]">{lm.venue}</span>}
+              <Card eyebrow="our edge" title="Players who own this match-up">
+                {report === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div>
+                  : (edgeBat.length > 0 || edgeBowl.length > 0) ? (
+                    <div className="space-y-2.5">
+                      {edgeBat.map((e, i) => (
+                        <div key={e.player_id || `b${i}`} className="flex items-center justify-between gap-3 py-1">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Initials name={e.name} size={32} tone="accent" />
+                            <span className="font-semibold truncate">{e.name}</span>
+                          </div>
+                          <PerfStat value={e.runs} unit="runs" avg={e.average} />
+                        </div>
+                      ))}
+                      {edgeBowl.map((e, i) => (
+                        <div key={e.player_id || `w${i}`} className="flex items-center justify-between gap-3 py-1">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Initials name={e.name} size={32} tone="accent" />
+                            <span className="font-semibold truncate">{e.name}</span>
+                          </div>
+                          <PerfStat value={e.wickets} unit="wkts" avg={e.average} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : <Empty>No standout edge in the record.</Empty>}
+              </Card>
             </div>
-            {(lm.our_top_bat || lm.our_top_bowl) && (
-              <div className="text-[13px] text-pb-faint mt-1">{lm.our_top_bat ? `Top bat: ${lm.our_top_bat}. ` : ''}{lm.our_top_bowl ? `Top bowler: ${lm.our_top_bowl}.` : ''}</div>
-            )}
-          </Card></div>
-        )}
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <Card title="Their danger players">
-            {report?.their_danger_batters?.length > 0 ? (
-              <div className="space-y-1">
-                {report.their_danger_batters.slice(0, 5).map((b, i) => (
-                  <div key={i} className="flex items-center justify-between gap-3 text-sm py-0.5">
-                    <span className="truncate">{b.name}</span>
-                    <span className="pb-num text-pb-faint whitespace-nowrap">{num(b.runs)} runs{b.average != null ? ` @ ${fmt2(b.average)}` : ''}</span>
+            {/* Par callout */}
+            {par?.par_score != null && (
+              <Card eyebrow="set the target" title="Par at this level">
+                <div className="flex items-center gap-5 flex-wrap">
+                  <div className="iq-headline iq-num" style={{ fontSize: 'clamp(40px,5vw,60px)', color: 'var(--pb-accent)' }}><CountUp value={par.par_score} /></div>
+                  <div className="text-pb-dim text-[13.5px] max-w-sm leading-relaxed">
+                    Median winning first-innings score across our grounds — post that batting first and you're in the box seat.
+                    {par.lowest_defended != null && <> The lowest total we've defended is <span className="iq-num font-semibold text-pb-text">{par.lowest_defended}</span>.</>}
                   </div>
-                ))}
-              </div>
-            ) : <Empty>No standout batters flagged.</Empty>}
-          </Card>
-          <Card title="Our edge">
-            {report?.our_performers?.batting?.[0] || report?.matchups?.bowler_dominance?.length > 0 ? (
-              <div className="space-y-2 text-sm">
-                {report?.our_performers?.batting?.[0] && <div className="flex justify-between gap-2"><span className="text-pb-faint">Best with the bat</span><span className="pb-num text-right">{report.our_performers.batting[0].name} · {report.our_performers.batting[0].runs} @ {fmt2(report.our_performers.batting[0].average)}</span></div>}
-                {report?.our_performers?.bowling?.[0] && <div className="flex justify-between gap-2"><span className="text-pb-faint">Best with the ball</span><span className="pb-num text-right">{report.our_performers.bowling[0].name}</span></div>}
-                {report?.matchups?.bowler_dominance?.slice(0, 3).map((d, i) => (
-                  <div key={i} className="flex justify-between gap-2 text-[13px]"><span className="text-pb-faint truncate">{d.bowler} vs {d.batter}</span><span className="pb-num whitespace-nowrap">{d.dismissals}× out</span></div>
-                ))}
-              </div>
-            ) : <Empty>No standout edge in the record.</Empty>}
-          </Card>
-        </div>
+                </div>
+              </Card>
+            )}
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Link to={`/admin/betteriq/opposition?${sel.fixtureId ? `fixture=${encodeURIComponent(sel.fixtureId)}` : sel.opponent ? `opponent=${encodeURIComponent(sel.opponent)}` : ''}`} className="px-3 h-[36px] inline-flex items-center rounded-lg text-sm font-medium" style={{ background: 'var(--pb-surface2)' }}>Full opposition scout →</Link>
-          {sel.opponent && <Link to={`/admin/betteriq/opposition/cheatsheet?opponent=${encodeURIComponent(sel.opponent)}${sel.fixtureId ? `&fixture=${encodeURIComponent(sel.fixtureId)}` : ''}`} className="px-3 h-[36px] inline-flex items-center rounded-lg text-sm font-medium" style={{ background: 'var(--pb-surface2)' }}>Captain's cheat sheet →</Link>}
-        </div>
+            {/* Cross-links */}
+            <div className="flex flex-wrap gap-2.5">
+              <Btn variant="soft" icon="search" onClick={goScout}>Full opposition scout</Btn>
+              <Btn variant="soft" icon="selection" onClick={goSelection}>Selection analysis</Btn>
+              {sel.opponent && <Btn variant="soft" icon="print" onClick={goCheatSheet}>Captain's cheat sheet</Btn>}
+            </div>
 
-        {report?.coverage?.note && <div className="text-pb-faintest text-[11px] mt-4">{report.coverage.note}</div>}
+            {report?.coverage?.note && <Note>{report.coverage.note}</Note>}
+          </div>
+        </div>
       </IQLayout>
     )
   }
@@ -204,47 +337,59 @@ export default function MatchPreview() {
   // ── Picker ──
   return (
     <IQLayout title="Match preview">
-      <p className="text-pb-faint text-sm mb-4 max-w-2xl">A pre-game one-pager for your next match — the lean, the ladder, your head-to-head, their danger players and where your edge is. Pick an upcoming fixture, or search an opponent.</p>
+      <div className="iq-fade">
+        <PageIntro>A pre-game one-pager for your next match — the lean, the ladder, your head-to-head, their danger players and where your edge is. Pick an upcoming fixture, or search an opponent.</PageIntro>
 
-      {upcoming.length > 0 && (
-        <div className="mb-5">
-          <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-2">Upcoming fixtures</div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {upcoming.map(f => (
-              <button key={f.fixture_id} onClick={() => load(f)} className="pb-card px-4 py-3 text-left hover:border-pb-accent/50 transition-colors">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium truncate">vs {f.opponent_name}</span>
-                  {f.home_away && <span className="text-pb-faintest text-[10px] font-mono uppercase shrink-0">{f.home_away}</span>}
+        {opp === null ? (
+          <Card><div className="animate-pulse text-pb-faint text-sm">Loading fixtures…</div></Card>
+        ) : (
+          <div className="space-y-6">
+            {upcoming.length > 0 && (
+              <div>
+                <div className="iq-eyebrow mb-3">Upcoming fixtures</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {upcoming.map(f => (
+                    <button key={f.fixture_id} onClick={() => load(f)} className="iq-card text-left transition hover:brightness-110">
+                      <div className="p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="iq-display font-semibold truncate">vs {f.opponent_name}</span>
+                          {f.home_away && <Tag tone="faint">{f.home_away}</Tag>}
+                        </div>
+                        <div className="text-pb-faint text-[12px] mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                          {f.played_on && <span className="inline-flex items-center gap-1"><Icon name="fixtures" size={12} />{f.played_on}</span>}
+                          {f.grade_name && <span className="truncate iq-mono">{f.grade_name}</span>}
+                          {!f.opp_key && <span className="text-pb-faintest">no history yet</span>}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-                <div className="text-pb-faint text-[12px] mt-0.5 flex flex-wrap gap-x-3">
-                  {f.played_on && <span>{f.played_on}</span>}
-                  {f.grade_name && <span className="truncate">{f.grade_name}</span>}
-                  {!f.opp_key && <span className="text-pb-faintest">no history yet</span>}
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+              </div>
+            )}
 
-      <div className="max-w-xl">
-        <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-2">{upcoming.length > 0 ? 'Or scout any opponent' : 'Scout an opponent'}</div>
-        <Search value={q} onChange={setQ} placeholder="Search an opponent club…" className="w-full" />
-        {q && (
-          <div className="pb-card mt-1 p-1 max-h-80 overflow-auto">
-            {oppMatches.length === 0 ? <div className="px-2.5 py-2 text-pb-faint text-sm">No match.</div>
-              : oppMatches.map(o => (
-                <button key={o.opp_key} onClick={() => load({ opp_key: o.opp_key, opponent_name: o.name })}
-                  className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
-                  <span className="font-medium truncate">{o.name}</span>
-                  <span className="text-pb-faintest text-[11px] pb-num">{o.meetings} mtgs</span>
-                </button>
-              ))}
+            <div className="max-w-xl">
+              <div className="iq-eyebrow mb-3">{upcoming.length > 0 ? 'Or scout any opponent' : 'Scout an opponent'}</div>
+              <Search value={q} onChange={setQ} placeholder="Search an opponent club…" className="w-full" />
+              {q && (
+                <div className="iq-card mt-2 p-1.5 max-h-80 overflow-auto iq-scroll">
+                  {oppMatches.length === 0 ? <div className="px-2.5 py-2 text-pb-faint text-sm">No match.</div>
+                    : oppMatches.map(o => (
+                      <button key={o.opp_key} onClick={() => load({ opp_key: o.opp_key, opponent_name: o.name })}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-left transition hover:bg-pb-surface2">
+                        <span className="iq-display font-medium truncate">{o.name}</span>
+                        <span className="iq-num text-pb-faint text-[11px]">{num(o.meetings, 0)} mtgs</span>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+
+            {upcoming.length === 0 && !q && (
+              <Card><Empty>No upcoming fixtures with an opponent — search a club above to preview them.</Empty></Card>
+            )}
           </div>
         )}
       </div>
-
-      {upcoming.length === 0 && !q && <div className="pb-card p-5 mt-3"><Empty>No upcoming fixtures with an opponent — search a club above to preview them.</Empty></div>}
     </IQLayout>
   )
 }

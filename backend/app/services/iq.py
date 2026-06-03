@@ -32,6 +32,7 @@ Org-scoping of games goes through ``grades → seasons`` (the views don't carry
 """
 from __future__ import annotations
 
+import json
 import uuid
 
 from sqlalchemy import text
@@ -217,7 +218,7 @@ async def get_opponent_tags(session: AsyncSession, org_id: str) -> dict[str, dic
             text(
                 """
                 SELECT participant_id, player_name, batting_hand, bowling_action, bowling_type,
-                       player_role, is_wicket_keeper, is_danger, notes
+                       player_role, is_wicket_keeper, is_danger, notes, scoring_zones
                 FROM opponent_player_tags WHERE organisation_id = CAST(:org AS UUID)
                 """
             ),
@@ -244,6 +245,19 @@ async def upsert_opponent_tag(session: AsyncSession, org_id: str, participant_id
     def _flag(v):
         return bool(v) if v is not None else None
 
+    def _zones(v):
+        # Scout-entered wagon-wheel: up to 8 non-negative numbers (% of runs by
+        # area). Anything else clears the field. Returns a JSON string or None.
+        if not isinstance(v, (list, tuple)):
+            return None
+        out = []
+        for x in v[:8]:
+            try:
+                out.append(max(0, round(float(x), 1)))
+            except (TypeError, ValueError):
+                out.append(0)
+        return json.dumps(out) if any(out) else None
+
     payload = {
         "player_name": (fields.get("player_name") or "").strip() or None,
         "batting_hand": _choice(fields.get("batting_hand"), _TAG_BAT_HANDS),
@@ -254,15 +268,16 @@ async def upsert_opponent_tag(session: AsyncSession, org_id: str, participant_id
         "is_danger": _flag(fields.get("is_danger")),
         "notes": (fields.get("notes") or "").strip() or None,
     }
+    zones = _zones(fields.get("scoring_zones"))
     await session.execute(
         text(
             """
             INSERT INTO opponent_player_tags
                 (organisation_id, participant_id, player_name, batting_hand, bowling_action,
-                 bowling_type, player_role, is_wicket_keeper, is_danger, notes, updated_by)
+                 bowling_type, player_role, is_wicket_keeper, is_danger, notes, scoring_zones, updated_by)
             VALUES (CAST(:org AS UUID), :pid, :player_name, :batting_hand, :bowling_action,
                     :bowling_type, :player_role, :is_wicket_keeper, :is_danger, :notes,
-                    CAST(:uid AS UUID))
+                    CAST(:scoring_zones AS JSONB), CAST(:uid AS UUID))
             ON CONFLICT (organisation_id, participant_id) DO UPDATE SET
                 player_name = COALESCE(EXCLUDED.player_name, opponent_player_tags.player_name),
                 batting_hand = EXCLUDED.batting_hand,
@@ -272,14 +287,17 @@ async def upsert_opponent_tag(session: AsyncSession, org_id: str, participant_id
                 is_wicket_keeper = EXCLUDED.is_wicket_keeper,
                 is_danger = EXCLUDED.is_danger,
                 notes = EXCLUDED.notes,
+                scoring_zones = COALESCE(EXCLUDED.scoring_zones, opponent_player_tags.scoring_zones),
                 updated_by = EXCLUDED.updated_by,
                 updated_at = NOW()
             """
         ),
-        {"org": org_id, "pid": pid, "uid": user_id, **payload},
+        {"org": org_id, "pid": pid, "uid": user_id, "scoring_zones": zones, **payload},
     )
     await session.commit()
-    return {"participant_id": pid, **payload}
+    out = {"participant_id": pid, **payload}
+    out["scoring_zones"] = json.loads(zones) if zones else None
+    return out
 
 
 async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str | None, fixture_id: str | None) -> tuple[str | None, str | None]:

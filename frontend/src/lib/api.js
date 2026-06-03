@@ -953,6 +953,9 @@ export const api = {
   iqTrendsPlayers: () => request('/iq/trends/players'),
   iqTrendsPlayer: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}`),
   iqPlayerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/deep`),
+  // 6-axis batting/bowling radar, normalised vs the squad (50 = squad average).
+  iqPlayerRadar: (playerId, seasonId) =>
+    request(`/iq/trends/player/${encodeURIComponent(playerId)}/radar${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
   // Bowler wicket-quality deep dive (set vs new batters, fielders, discipline).
   iqBowlerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/bowling-deep`),
 
@@ -967,6 +970,17 @@ export const api = {
     return request(`/iq/team/overview${s ? `?${s}` : ''}`)
   },
   iqTeamMvp: (seasonId) => request(`/iq/team/mvp${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
+  // Innings phase shape (Powerplay/Middle/Death) from ball-by-ball data — recent
+  // live-scored games only. Our team's, and an opponent's.
+  iqTeamPhases: (seasonId, gradeId) => {
+    const qs = new URLSearchParams()
+    if (seasonId) qs.set('season_id', seasonId)
+    if (gradeId) qs.set('grade_id', gradeId)
+    const s = qs.toString()
+    return request(`/iq/team/phases${s ? `?${s}` : ''}`)
+  },
+  iqOppositionPhases: ({ opponent, fixtureId } = {}) =>
+    request(`/iq/opposition/phases?${_iqQs(opponent, fixtureId)}`),
 
   // ─── BetterIQ: Post-match review ────────────────────────
   iqReviewGames: () => request('/iq/review/games'),

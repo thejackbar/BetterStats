@@ -19,6 +19,8 @@ from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club, get_current_user
 from app.services import iq as iq_service
 from app.services import iq_opponent
+from app.services import iq_phases
+from app.services import iq_radar
 from app.services import iq_review
 from app.services import iq_selection
 from app.services import iq_team
@@ -241,6 +243,18 @@ async def trends_player_bowling_deep(
     return result
 
 
+@router.get("/trends/player/{player_id}/radar")
+async def trends_player_radar(
+    player_id: str,
+    season_id: str | None = Query(None, description="one season; omit for career"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """A 6-axis batting/bowling radar normalised so the squad average sits on the
+    50 ring (values 0–100). Powers the Player-trends profile radar."""
+    return await iq_radar.player_radar(db, str(club.id), player_id, season_id=season_id)
+
+
 # ─── Team self-analysis (analytics brief §7/§8) ──────────────────────────────
 
 
@@ -283,6 +297,33 @@ async def team_mvp(
 ):
     """Club MVP board — a blended player-impact rating from scorecard rates."""
     return await iq_team.player_impact(db, str(club.id), season_id=season_id)
+
+
+@router.get("/team/phases")
+async def team_phases(
+    season_id: str | None = Query(None, description="filter to one season; omit for recent"),
+    grade_id: str | None = Query(None, description="filter to one grade/team"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Our typical innings shape (Powerplay/Middle/Death) from recent ball-by-ball
+    games. Only live-scored matches carry ball data, so this covers recent games."""
+    return await iq_phases.team_phases(db, str(club.id), season_id=season_id, grade_id=grade_id)
+
+
+@router.get("/opposition/phases")
+async def opposition_phases(
+    opponent: str | None = Query(None, description="opp_key"),
+    fixture_id: str | None = Query(None, description="resolve the opponent from a fixture"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """An opponent's typical innings shape from ball-by-ball data in our recent
+    games against them (estimated; recent live-scored matches only)."""
+    opp_key, name, _grade = await iq_service.resolve_opponent(
+        db, str(club.id), opponent=opponent, fixture_id=fixture_id
+    )
+    return await iq_phases.opponent_phases(db, str(club.id), opp_key=opp_key, opp_name=name)
 
 
 # ─── Post-match review (analytics brief §16.8) ───────────────────────────────
