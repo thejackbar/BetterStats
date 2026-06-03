@@ -101,22 +101,32 @@ def _output(acc, n):
     return phases
 
 
-def _insight(phases, who):
+def _insight(phases, who, verb="score"):
+    """Build a phase read. ``who`` is the consistent subject of BOTH sentences
+    (e.g. "We" for our batting, "Opponents" for what we concede) and ``verb`` is
+    the run action ("score" when batting, "concede" / "leak" when bowling) so the
+    two halves never contradict each other (the old copy hard-coded "They")."""
     if not phases or all(p["runs"] == 0 for p in phases):
         return None
     by_rr = sorted(phases, key=lambda p: p["rr"], reverse=True)
     top, low = by_rr[0], by_rr[-1]
     death = next((p for p in phases if p["label"] == "Death"), None)
     pp = next((p for p in phases if p["label"] == "Powerplay"), None)
-    bits = [f"{who} score fastest in the {top['label'].lower()} ({top['rr']} rpo) and slowest in the {low['label'].lower()} ({low['rr']} rpo)."]
+    bits = [f"{who} {verb} fastest in the {top['label'].lower()} ({top['rr']} rpo) and slowest in the {low['label'].lower()} ({low['rr']} rpo)."]
     if death and pp and death["rr"] < pp["rr"] - 0.6:
-        bits.append("They tend to stall at the death rather than accelerate — squeeze the back end.")
+        if verb == "concede":
+            bits.append(f"{who} tighten up at the death rather than getting taken apart — the back end is a strength.")
+        else:
+            bits.append(f"{who} tend to stall at the death rather than accelerate — squeeze the back end.")
     elif death and pp and death["rr"] > pp["rr"] + 0.6:
-        bits.append("They accelerate hard at the death — hold something back for the last 10.")
+        if verb == "concede":
+            bits.append(f"{who} get away from us at the death — hold something back for the last 10.")
+        else:
+            bits.append(f"{who} accelerate hard at the death — hold something back for the last 10.")
     return " ".join(bits)
 
 
-async def _aggregate(pairs, fallback_not=None, who="They"):
+async def _aggregate(pairs, fallback_not=None, who="They", verb="score"):
     """pairs: list of (match_id, target_ca_id). Fetch balls for each, fold the
     target's innings into a typical-innings phase profile."""
     acc = {"pp": [0, 0, 0], "mid": [0, 0, 0], "death": [0, 0, 0]}
@@ -146,23 +156,31 @@ async def _aggregate(pairs, fallback_not=None, who="They"):
         "games": games_used,
         "total": sum(p["runs"] for p in phases),
         "phases": phases,
-        "insight": _insight(phases, who),
+        "insight": _insight(phases, who, verb=verb),
         "note": "Estimated from ball-by-ball data for recent live-scored matches only.",
     }
 
 
+# ``grade`` is a grade NAME (BetterIQ filters grades by name to collapse the
+# per-season/per-club grade ids — see iq_team.team_grades), scoped to the chosen
+# season when one is set.
 def _scope(season_id, grade_id):
-    if grade_id:
-        return "AND gr.id = CAST(:grade AS UUID)"
+    clauses = []
     if season_id:
-        return "AND gr.season_id = CAST(:season AS UUID)"
-    return ""
+        clauses.append("AND gr.season_id = CAST(:season AS UUID)")
+    if grade_id:
+        clauses.append("AND gr.name = :grade")
+    return " ".join(clauses)
 
 
-async def team_phases(session: AsyncSession, org_id: str, season_id=None, grade_id=None) -> dict:
-    """Our team's typical innings shape from recent ball-by-ball games."""
+async def team_phases(session: AsyncSession, org_id: str, season_id=None, grade_id=None, side="bat") -> dict:
+    """Our team's typical innings shape from recent ball-by-ball games.
+
+    ``side='bat'`` profiles OUR innings (how we score); ``side='bowl'`` profiles
+    the opponent's innings in our games (what we concede) so the Batting and
+    Bowling tabs each get their own, correctly-framed phase read."""
     rows = await session.execute(text(f"""
-        SELECT g.id::text AS id
+        SELECT g.id::text AS id, g.opp_org_id AS opp
         FROM games g
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
@@ -170,9 +188,18 @@ async def team_phases(session: AsyncSession, org_id: str, season_id=None, grade_
         ORDER BY g.played_at DESC NULLS LAST
         LIMIT :lim
     """), {"org": org_id, "season": season_id, "grade": grade_id, "lim": MAX_GAMES})
-    pairs = [(r.id, org_id) for r in rows]
-    out = await _aggregate(pairs, who="We")
-    out["scope"] = "team"
+    recs = list(rows)
+    if side == "bowl":
+        # The side that isn't us in our games = what our attack concedes by phase.
+        pairs = [(r.id, r.opp) for r in recs]
+        out = await _aggregate(pairs, fallback_not=org_id, who="Opponents", verb="score")
+        out["scope"] = "team_bowl"
+        out["side"] = "bowl"
+    else:
+        pairs = [(r.id, org_id) for r in recs]
+        out = await _aggregate(pairs, who="We", verb="score")
+        out["scope"] = "team_bat"
+        out["side"] = "bat"
     return out
 
 

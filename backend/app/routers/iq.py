@@ -302,13 +302,18 @@ async def team_mvp(
 @router.get("/team/phases")
 async def team_phases(
     season_id: str | None = Query(None, description="filter to one season; omit for recent"),
-    grade_id: str | None = Query(None, description="filter to one grade/team"),
+    grade_id: str | None = Query(None, description="filter to one grade/team (a grade name)"),
+    side: str = Query("bat", description="'bat' = our scoring shape, 'bowl' = what we concede"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Our typical innings shape (Powerplay/Middle/Death) from recent ball-by-ball
-    games. Only live-scored matches carry ball data, so this covers recent games."""
-    return await iq_phases.team_phases(db, str(club.id), season_id=season_id, grade_id=grade_id)
+    games. ``side='bat'`` profiles our batting; ``side='bowl'`` profiles what our
+    attack concedes. Only live-scored matches carry ball data, so this covers
+    recent games."""
+    return await iq_phases.team_phases(
+        db, str(club.id), season_id=season_id, grade_id=grade_id, side=("bowl" if side == "bowl" else "bat")
+    )
 
 
 @router.get("/opposition/phases")

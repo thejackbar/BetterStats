@@ -152,14 +152,18 @@ function Overview({ d, isRange, compareRows, compareLoading }) {
 }
 
 /* ── Batting tab ────────────────────────────────────────────────────────── */
-function Batting({ d }) {
+function Batting({ d, seasonId, teamId }) {
   const b = d.batting || {}
   const starts = d.starts
   const maxP = Math.max(1, ...((d.partnerships || []).map(p => p.avg_partnership || 0)))
   const c = d.collapses
+  const be = d.batting_extra
+  const dist = b.total_distribution || []
+  const maxRuns = Math.max(1, ...((be?.top_scorers || []).map(s => s.runs || 0)))
 
   return (
     <div className="space-y-5">
+      <TeamPhases seasonId={seasonId} teamId={teamId} side="bat" />
       <div className="grid gap-5 lg:grid-cols-3">
         <Card eyebrow="profile" title="Team batting">
           <div className="space-y-1">
@@ -265,6 +269,61 @@ function Batting({ d }) {
           </Card>
         )}
       </div>
+
+      {/* extra batting graphs (brief §1/§7) — total distribution, scorers,
+          by-position, dismissals, dismissal-score histogram */}
+      {(dist.length > 0 || be?.dismissal_scores?.length > 0) && (
+        <div className="grid gap-5 lg:grid-cols-2 items-start">
+          {dist.length > 0 && (
+            <Card eyebrow="how big do we bat" title="Team total distribution">
+              <MiniBars data={dist} fmt={x => `${x.pct}%`} />
+              <Note>Share of the innings we have a total for that finished in each score band.</Note>
+            </Card>
+          )}
+          {be?.dismissal_scores?.length > 0 && (
+            <Card eyebrow="when we fall" title="Score we're dismissed on">
+              <MiniBars data={be.dismissal_scores} color="var(--pb-red)" fmt={x => `${x.pct}%`} />
+              <Note>What score our batters are usually on when out — too many cheap dismissals shows in the low bands.</Note>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {be && (be.top_scorers?.length > 0 || be.by_position?.length > 0) && (
+        <div className="grid gap-5 lg:grid-cols-2 items-start">
+          {be.top_scorers?.length > 0 && (
+            <Card eyebrow="run-makers" title="Leading scorers">
+              <div className="space-y-3">
+                {be.top_scorers.map((s, i) => (
+                  <div key={s.player_id} className="flex items-center gap-3">
+                    <Initials name={s.name} size={30} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-[13.5px] truncate">{s.name}</span>
+                        <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">{s.runs} runs · {s.innings} inns{s.avg != null ? ` · ${a2(s.avg)}` : ''}</span>
+                      </div>
+                      <Bar pct={(s.runs / maxRuns) * 100} delay={i * 0.05} h={6} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+          {be.by_position?.length > 0 && (
+            <Card eyebrow="down the order" title="Average by batting position">
+              <MiniBars data={be.by_position} labelKey="position" valueKey="avg" fmt={x => a2(x.avg)} />
+              <Note>Average runs per innings at each position we've batted (1–11).</Note>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {be?.dismissals?.length > 0 && (
+        <Card eyebrow="how we get out" title="Our dismissal types">
+          <StackedBar data={be.dismissals.map(x => ({ type: x.type, count: x.pct, pct: x.pct }))} />
+          <Note>How our batters are dismissed across the period — a high caught share with cheap scores points to shot selection.</Note>
+        </Card>
+      )}
     </div>
   )
 }
@@ -273,24 +332,41 @@ function Batting({ d }) {
 /* Only recent live-scored games carry ball-by-ball data; older games are
    scorecard-only. The endpoint reports `available:false` when there's nothing
    to break down, in which case we render nothing. */
-function TeamPhases({ seasonId, teamId }) {
+function TeamPhases({ seasonId, teamId, side = 'bat' }) {
   const [ph, setPh] = useState(null)
   useEffect(() => {
     setPh(null)
     let alive = true
-    api.iqTeamPhases(seasonId || undefined, teamId || undefined)
+    api.iqTeamPhases(seasonId || undefined, teamId || undefined, side)
       .then(d => { if (alive) setPh(d) })
       .catch(() => { if (alive) setPh(null) })
     return () => { alive = false }
-  }, [seasonId, teamId])
+  }, [seasonId, teamId, side])
   if (!ph?.available) return null
+  const title = side === 'bowl' ? 'Innings phases — what we concede' : 'Innings phases — how we bat'
   return (
-    <Card eyebrow="Estimated · ball-by-ball" title="Innings phases"
+    <Card eyebrow="Estimated · ball-by-ball" title={title}
       right={ph.innings ? <Tag tone="faint">{ph.innings}{ph.total != null ? ` · ${ph.total}` : ''}</Tag> : null}>
       <PhaseStrip phases={ph.phases} />
       {ph.insight && <div className="text-pb-dim text-[12.5px] mt-4 leading-relaxed">{ph.insight}</div>}
-      {ph.note && <Note>{ph.note}</Note>}
+      {ph.note && <Note>{side === 'bowl' ? 'Runs the opposition scored against us by phase, from ' : 'Our scoring shape by phase, from '}{ph.note.replace(/^Estimated from /, '')}</Note>}
     </Card>
+  )
+}
+
+/* ── A simple labelled vertical bar histogram (10-run bands etc.) ─────────── */
+function MiniBars({ data, color = 'var(--pb-accent)', valueKey = 'count', labelKey = 'band', fmt }) {
+  const max = Math.max(1, ...data.map(d => d[valueKey] || 0))
+  return (
+    <div className="flex items-end gap-1.5" style={{ height: 120 }}>
+      {data.map((d, i) => (
+        <div key={d[labelKey] ?? i} className="flex-1 flex flex-col items-center justify-end h-full" title={`${d[labelKey]}: ${fmt ? fmt(d) : d[valueKey]}`}>
+          <span className="iq-num text-[10.5px] mb-1" style={{ color: 'var(--pb-faint)' }}>{fmt ? fmt(d) : d[valueKey]}</span>
+          <div className="w-full" style={{ height: `${((d[valueKey] || 0) / max) * 100}%`, minHeight: d[valueKey] ? 3 : 0, background: color, borderRadius: '4px 4px 0 0', transformOrigin: 'bottom', animation: `iq-grow .8s cubic-bezier(.22,.61,.36,1) ${i * 0.04}s both` }} />
+          <span className="iq-mono text-[9.5px] mt-1.5 text-center" style={{ color: 'var(--pb-faint)' }}>{d[labelKey]}</span>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -304,7 +380,7 @@ function Bowling({ d, seasonId, teamId }) {
 
   return (
     <div className="space-y-5">
-      <TeamPhases seasonId={seasonId} teamId={teamId} />
+      <TeamPhases seasonId={seasonId} teamId={teamId} side="bowl" />
       <Card eyebrow="summary" title="Attack overall">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Stat label="Avg conceded" value={num(bw.avg_conceded)} count={false} />
@@ -356,7 +432,7 @@ function Bowling({ d, seasonId, teamId }) {
               ))}
             </div>
           )}
-          <Note>Wides + no-balls per over, most disciplined first. Hidden when the scorecards don't record extras.</Note>
+          <Note>Wides + no-balls per over, <b>worst offenders first</b> so they can be identified and coached. Hidden when the scorecards don't record extras.</Note>
         </Card>
       )}
 
@@ -381,6 +457,13 @@ function Bowling({ d, seasonId, teamId }) {
             <Stat label="New (<10)" value={pctTxt(wq.new_pct)} sub="of scalps" count={false} />
             <Stat label="Wickets" value={num(wq.total)} count={false} />
           </div>
+          {wq.score_bands?.length > 0 && (
+            <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+              <div className="iq-eyebrow mb-2.5">What score we remove them on</div>
+              <MiniBars data={wq.score_bands} fmt={x => `${x.pct}%`} />
+              <Note>The score the opposition batter was on when our bowlers dismissed them (10-run bands) — lots in the low bands means we strike early.</Note>
+            </div>
+          )}
           {wq.dismissals?.length > 0 && (
             <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
               <div className="iq-eyebrow mb-2.5">How we take them</div>
@@ -576,7 +659,7 @@ export default function TeamAnalysis() {
           {data && data.record && (
             <div className="iq-fade">
               {tab === 'overview' && <Overview d={data} isRange={isRange} compareRows={compareRows} compareLoading={compareLoading} />}
-              {tab === 'batting' && <Batting d={data} />}
+              {tab === 'batting' && <Batting d={data} seasonId={seasonId} teamId={teamId} />}
               {tab === 'bowling' && <Bowling d={data} seasonId={seasonId} teamId={teamId} />}
               {tab === 'players' && <Players d={data} />}
 

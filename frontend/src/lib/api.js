@@ -972,10 +972,11 @@ export const api = {
   iqTeamMvp: (seasonId) => request(`/iq/team/mvp${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
   // Innings phase shape (Powerplay/Middle/Death) from ball-by-ball data — recent
   // live-scored games only. Our team's, and an opponent's.
-  iqTeamPhases: (seasonId, gradeId) => {
+  iqTeamPhases: (seasonId, gradeId, side) => {
     const qs = new URLSearchParams()
     if (seasonId) qs.set('season_id', seasonId)
     if (gradeId) qs.set('grade_id', gradeId)
+    if (side) qs.set('side', side)
     const s = qs.toString()
     return request(`/iq/team/phases${s ? `?${s}` : ''}`)
   },
