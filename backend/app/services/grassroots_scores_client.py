@@ -127,6 +127,39 @@ async def get_team_matches(team_id: str) -> list[dict]:
         return []
 
 
+_balls_cache: dict[str, Optional[dict]] = {}  # match_id -> ball-by-ball or None
+
+
+async def get_match_balls(match_id: str) -> Optional[dict]:
+    """Return ball-by-ball data for a match, or None if not available.
+
+    Uses /scores/matches/{id}/balls — unauthenticated, returns
+    ``{teams:[{id, owningOrganisation:{id,name}, ...}], innings:[{battingTeamId,
+    balls:[{overNumber, runsBat, wides, noBalls, legByes, byes, penaltyRuns,
+    dismissedParticipantId, ...}]}]}`` for live-scored matches (the scorecard
+    flags these ``isBallByBall: true``). Most historical games are scorecard-only
+    and 403/empty here — we treat any non-200 or empty ``innings`` as "no ball
+    data" so callers can simply skip them.
+    """
+    if match_id in _balls_cache:
+        return _balls_cache[match_id]
+    try:
+        r = await _get(f"{BASE_URL}/scores/matches/{match_id}/balls")
+        if r.status_code != 200:
+            _balls_cache[match_id] = None
+            return None
+        data = r.json()
+        if not data.get("innings"):
+            _balls_cache[match_id] = None
+            return None
+        _balls_cache[match_id] = data
+        return data
+    except Exception as e:
+        logger.warning(f"GR balls: /matches/{match_id}/balls failed: {e}")
+        _balls_cache[match_id] = None
+        return None
+
+
 async def get_match_scorecard(match_id: str) -> Optional[dict]:
     """Return full scorecard for a match, or None if not in Grassroots (204).
 
