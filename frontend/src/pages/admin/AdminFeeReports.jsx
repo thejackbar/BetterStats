@@ -18,11 +18,11 @@ function fmtMonth(key) {
   return `${MONTHS[Number(m) - 1] || m} ${y}`
 }
 
-function Kpi({ label, value, accent, warn }) {
+function Kpi({ label, value, accent, warn, sky }) {
   return (
     <div className={`pb-card px-4 py-3 ${accent ? 'border-pb-accent/40' : ''}`}>
       <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">{label}</div>
-      <div className={`font-display font-bold text-xl ${warn ? 'text-pb-amber' : 'text-pb-text'}`}
+      <div className={`font-display font-bold text-xl ${warn ? 'text-pb-amber' : sky ? 'text-sky-300' : 'text-pb-text'}`}
         style={accent && !warn ? { color: 'var(--pb-accent)' } : {}}>{value}</div>
     </div>
   )
@@ -108,12 +108,13 @@ export default function AdminFeeReports() {
         {/* KPIs */}
         {summary === null ? <PbSpinner message="Loading summary…" /> : (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 mb-6">
               <Kpi label="Members" value={overall.members ?? 0} />
               <Kpi label="Financial" value={overall.financial ?? 0} />
               <Kpi label="Non-Financial" value={overall.non_financial ?? 0} warn={(overall.non_financial ?? 0) > 0} />
               <Kpi label="Payable" value={money(overall.total_payable)} />
               <Kpi label="Paid" value={money(overall.total_paid)} />
+              <Kpi label="Waived" value={money(overall.match_fee_waived)} sky />
               <Kpi label="Outstanding" value={money(overall.total_outstanding)} accent />
             </div>
 
@@ -127,6 +128,7 @@ export default function AdminFeeReports() {
                       <th className="font-medium py-2.5 pr-3 w-20 text-right">MEMBERS</th>
                       <th className="font-medium py-2.5 pr-3 w-28 text-right">PAYABLE</th>
                       <th className="font-medium py-2.5 pr-3 w-28 text-right">PAID</th>
+                      <th className="font-medium py-2.5 pr-3 w-24 text-right">WAIVED</th>
                       <th className="font-medium py-2.5 pr-5 w-32 text-right">OUTSTANDING</th>
                     </tr>
                   </thead>
@@ -137,6 +139,7 @@ export default function AdminFeeReports() {
                         <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{b.members}</td>
                         <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(b.payable)}</td>
                         <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(b.paid)}</td>
+                        <td className={`py-2.5 pr-3 text-right font-mono text-[11px] tabular-nums ${b.waived > 0 ? 'text-sky-300/90' : 'text-pb-faintest'}`}>{money(b.waived)}</td>
                         <td className={`py-2.5 pr-5 text-right font-mono text-[11px] tabular-nums ${b.outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>{money(b.outstanding)}</td>
                       </tr>
                     ))}
