@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
@@ -25,6 +25,17 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 
 // ─── Hero ────────────────────────────────────────────────────────────────
 function Hero() {
+  // Drive the dot grid straight from the theme tokens so it always matches the
+  // site CSS — subtle hairline dots that light up the brand accent near the cursor.
+  const dots = useMemo(() => {
+    const fallback = { base: '#262d3d', active: '#16c784' }
+    if (typeof window === 'undefined') return fallback
+    const cs = getComputedStyle(document.documentElement)
+    return {
+      base: cs.getPropertyValue('--pb-hairline2').trim() || fallback.base,
+      active: cs.getPropertyValue('--pb-accent').trim() || fallback.active,
+    }
+  }, [])
   return (
     <section className="relative pt-32 pb-20 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 z-0 pointer-events-none">
@@ -34,9 +45,9 @@ function Hero() {
           proximity={120}
           shockRadius={220}
           shockStrength={4}
-          baseColor="#2b3b57"
-          activeColor="#16c784"
-          className="!p-0 opacity-70"
+          baseColor={dots.base}
+          activeColor={dots.active}
+          className="!p-0"
         />
       </div>
       <div className="absolute inset-0 hero-glow pointer-events-none" />

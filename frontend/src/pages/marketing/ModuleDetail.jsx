@@ -159,6 +159,30 @@ export default function ModuleDetail() {
           </div>
         </section>
 
+        {/* Gallery */}
+        {m.gallery && m.gallery.length > 0 && (
+          <section className="px-4 sm:px-6 lg:px-10 py-16 border-t pb-hairline">
+            <div className="max-w-[1100px] mx-auto">
+              <Reveal>
+                <div className="text-center mb-10">
+                  <p className="pill-neutral inline-flex mb-5">See it in action</p>
+                  <h2 className="font-display font-bold text-3xl md:text-5xl tracking-tight">{m.name}, on screen.</h2>
+                </div>
+              </Reveal>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {m.gallery.map((g, i) => (
+                  <Reveal key={g.src} delay={(i % 2) * 80}>
+                    <figure className="surface overflow-hidden product-shadow">
+                      <img src={g.src} alt={g.caption} loading="lazy" className="block w-full h-auto border-b pb-hairline" />
+                      <figcaption className="px-4 py-3 text-sm text-pb-dim">{g.caption}</figcaption>
+                    </figure>
+                  </Reveal>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* Tier band */}
         <section className="px-4 sm:px-6 lg:px-10 py-16 border-t pb-hairline bg-black/20">
           <div className="max-w-[900px] mx-auto surface-strong p-8 lg:p-10 text-center">

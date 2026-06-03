@@ -3,7 +3,7 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import { FORM_URL } from '../../data/marketing'
-import { CORE_MARKETING, MODULES_MARKETING, TIER_INFO } from '../../data/modules-marketing'
+import { CORE_MARKETING, MODULES_MARKETING, TIER_INFO, HUB_SHOWCASE } from '../../data/modules-marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 function ModuleCard({ m, delay }) {
@@ -52,6 +52,28 @@ function Hero() {
           Better is an operating system for your cricket club. Every club starts with the Core —
           BetterStats — then adds the parts that fit how the club actually runs.
         </p>
+      </div>
+    </section>
+  )
+}
+
+function Showcase() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 pb-12">
+      <div className="max-w-[1080px] mx-auto">
+        <Reveal>
+          <div className="relative">
+            <div className="absolute -inset-6 bg-accent/8 blur-[70px] rounded-full pointer-events-none" />
+            <div className="relative product-shadow rounded-2xl overflow-hidden border pb-hairline">
+              <img
+                src={HUB_SHOWCASE}
+                alt="The Better admin dashboard — one tile per module"
+                className="block w-full h-auto"
+                loading="lazy"
+              />
+            </div>
+          </div>
+        </Reveal>
       </div>
     </section>
   )
@@ -131,6 +153,7 @@ export default function Modules() {
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
         <Hero />
+        <Showcase />
         <Grid />
         <TiersStrip />
         <CTA />
