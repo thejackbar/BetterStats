@@ -457,7 +457,8 @@ async def _our_games_vs(session: AsyncSession, org_id: str, opp_key: str) -> lis
     res = await session.execute(
         text(
             """
-            SELECT g.id::text AS id, g.played_at, g.grade_id::text AS grade_id, g.venue
+            SELECT g.id::text AS id, g.played_at,
+                   COALESCE(gr.grassroots_id, g.grade_id::text) AS grade_id, g.venue
             FROM v_effective_games g
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -518,8 +519,12 @@ def _match_list_date(m: dict) -> date | None:
 
 
 async def _grade_name(session: AsyncSession, grade_id: str) -> str | None:
+    # grade_id in the opponent flow is the raw CA grade GUID (so it works against
+    # the grassroots API), which for a per-club grade differs from our PK — match
+    # on either form.
     res = await session.execute(
-        text("SELECT name FROM grades WHERE id = CAST(:g AS UUID)"), {"g": grade_id}
+        text("SELECT name FROM grades WHERE id::text = :g OR grassroots_id = :g LIMIT 1"),
+        {"g": grade_id},
     )
     row = res.mappings().first()
     return row["name"] if row else None
@@ -574,8 +579,14 @@ async def _target_season_grades(session: AsyncSession, org_id: str, opp_key: str
         season_id = row["sid"] if row else None
     if not season_id:
         return []
+    # gid feeds the grassroots /scores/grades/{id}/matches API, which is keyed on
+    # the shared raw CA grade GUID — use grassroots_id (== id for legacy grades),
+    # not the (possibly per-club uuid5) primary key.
     res = await session.execute(
-        text("SELECT id::text AS gid, name FROM grades WHERE season_id = CAST(:sid AS UUID)"),
+        text(
+            "SELECT COALESCE(grassroots_id, id::text) AS gid, name "
+            "FROM grades WHERE season_id = CAST(:sid AS UUID)"
+        ),
         {"sid": season_id},
     )
     return [(r["gid"], r["name"]) for r in res.mappings()]

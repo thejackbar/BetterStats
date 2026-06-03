@@ -102,13 +102,23 @@ async def _compute_team_ladders(db: AsyncSession, org: Organisation, auto_link: 
         .order_by(Team.sequence.asc(), Team.name.asc())
     )).scalars().all()
     grade_names = await _grade_name_map(db, org.id)
+    # grade_id -> raw CA grade GUID. The ladder API is keyed on the shared GUID,
+    # while Team.grade_id may be a per-club uuid5 (grassroots_id == id for legacy).
+    grade_gr = {
+        str(gid): (gg or str(gid))
+        for gid, gg in (await db.execute(
+            select(Grade.id, Grade.grassroots_id)
+            .join(Season, Grade.season_id == Season.id)
+            .where(Season.organisation_id == org.id)
+        )).all()
+    }
     club_keys = club_match_keys(org)
 
     linked = [t for t in teams if t.grade_id]
     unlinked = [{"team_id": str(t.id), "team_name": t.name} for t in teams if not t.grade_id]
 
     async def one(t: Team) -> dict:
-        raw = await grassroots_scores_client.get_grade_ladder(str(t.grade_id))
+        raw = await grassroots_scores_client.get_grade_ladder(grade_gr.get(str(t.grade_id), str(t.grade_id)))
         views = _parse_ladder_payload(raw, club_keys)
         return {
             "team_id": str(t.id),
@@ -165,7 +175,8 @@ async def grade_ladder(grade_id: str, db: AsyncSession = Depends(get_db)):
     if not org or not org.is_active:
         raise HTTPException(status_code=404, detail="Grade not found")
     club_keys = club_match_keys(org)
-    raw = await grassroots_scores_client.get_grade_ladder(str(gid))
+    # Ladder API wants the shared raw CA grade GUID, not our (possibly per-club) PK.
+    raw = await grassroots_scores_client.get_grade_ladder(grade.grassroots_id or str(gid))
     views = _parse_ladder_payload(raw, club_keys)
     return {
         "grade_id": str(gid),
