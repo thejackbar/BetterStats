@@ -311,6 +311,18 @@ async def _days_by_member_season(db: AsyncSession, season_id) -> dict:
     return {ms_id: float(days) for ms_id, days in rows}
 
 
+async def _waived_days_by_member_season(db: AsyncSession, season_id) -> dict:
+    """Sum days_played of waived games per member-season. Used to drop waived
+    fees out of match_fee_payable so a fully-waived member reads Financial."""
+    rows = (await db.execute(
+        select(FeeMatchDay.member_season_id, func.coalesce(func.sum(FeeMatchDay.days_played), 0))
+        .join(FeeMemberSeason, FeeMatchDay.member_season_id == FeeMemberSeason.id)
+        .where(FeeMemberSeason.season_id == season_id, FeeMatchDay.waived_at.isnot(None))
+        .group_by(FeeMatchDay.member_season_id)
+    )).all()
+    return {ms_id: float(days) for ms_id, days in rows}
+
+
 async def _paid_by_member_season(db: AsyncSession, season_id) -> dict:
     """Sum payments grouped by (member_season_id, kind). Returns
     {ms_id: {'membership': X, 'match_day': Y}}."""
@@ -326,7 +338,8 @@ async def _paid_by_member_season(db: AsyncSession, season_id) -> dict:
     return out
 
 
-def _financials(schedule: Optional[FeeSchedule], match_days: float, paid: Optional[dict] = None) -> dict:
+def _financials(schedule: Optional[FeeSchedule], match_days: float, paid: Optional[dict] = None,
+                waived_days: float = 0.0) -> dict:
     """Build the canonical financials dict.
 
     Status rules mirror the spreadsheet:
@@ -335,12 +348,20 @@ def _financials(schedule: Optional[FeeSchedule], match_days: float, paid: Option
       - upfront tier       → financial iff membership paid (match fee is $0)
       - standard tier      → financial iff membership + match fees paid
 
+    `waived_days` is the days_played belonging to waived games. They are removed
+    from `match_fee_payable` (so the member reads Financial without owing them)
+    and surfaced separately as `match_fee_waived` — waived fees are forgiven, NOT
+    money received, so they never touch the paid/credit pots. `match_days` stays
+    the total (incl. waived) for display.
+
     'No games played' is a derived UI flag, not a status — it only suppresses
     the follow-up nudge for someone who never showed up.
     """
     membership_payable = _f(schedule.membership_amount) if schedule else 0.0
     rate = _f(schedule.match_day_rate) if schedule else 0.0
-    match_fee_payable = round(match_days * rate, 2)
+    billable_days = max(match_days - (waived_days or 0.0), 0.0)
+    match_fee_waived = round((waived_days or 0.0) * rate, 2)
+    match_fee_payable = round(billable_days * rate, 2)
     paid = paid or {"membership": 0.0, "match_day": 0.0}
     membership_paid = float(paid.get("membership", 0.0))
     match_fee_paid = float(paid.get("match_day", 0.0))
@@ -371,6 +392,8 @@ def _financials(schedule: Optional[FeeSchedule], match_days: float, paid: Option
         "membership_payable": membership_payable,
         "match_day_rate": rate,
         "match_days": match_days,
+        "waived_days": round(waived_days or 0.0, 1),
+        "match_fee_waived": match_fee_waived,
         "match_fee_payable": match_fee_payable,
         "total_payable": round(membership_payable + match_fee_payable, 2),
         "membership_paid": round(membership_paid, 2),
@@ -406,6 +429,7 @@ async def list_members(
     )).all()
     days_map = await _days_by_member_season(db, season.id)
     paid_map = await _paid_by_member_season(db, season.id)
+    waived_map = await _waived_days_by_member_season(db, season.id)
 
     members = []
     summary = {
@@ -414,10 +438,11 @@ async def list_members(
         "membership_paid": 0.0, "match_fee_paid": 0.0, "total_paid": 0.0,
         "membership_outstanding": 0.0, "match_fee_outstanding": 0.0, "total_outstanding": 0.0,
         "membership_credit": 0.0, "match_fee_credit": 0.0, "credit": 0.0,
+        "match_fee_waived": 0.0,
         "match_days": 0.0,
     }
     for ms, member, schedule in rows:
-        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id))
+        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id), waived_map.get(ms.id, 0.0))
         members.append({
             "member_id": str(member.id),
             "member_season_id": str(ms.id),
@@ -437,7 +462,7 @@ async def list_members(
                   "membership_paid", "match_fee_paid", "total_paid",
                   "membership_outstanding", "match_fee_outstanding", "total_outstanding",
                   "membership_credit", "match_fee_credit", "credit",
-                  "match_days"):
+                  "match_fee_waived", "match_days"):
             summary[k] += fin[k]
     for k in list(summary.keys()):
         if isinstance(summary[k], float):
@@ -549,14 +574,20 @@ async def get_member(
             (_money(e.days_played) * rate) if e.days_played is not None else Decimal("0")
             for e, _game, _grade in rows
         ]
+        waived_flags = [e.waived_at is not None for e, _game, _grade in rows]
         # Auto-allocate the member's match-fee money across these games, oldest
         # first. Per-game Paid/Part-paid/Unpaid is derived from money paid — not
         # a stored flag — so it stays correct as payments are added or removed.
-        alloc, _credit = fee_service.allocate_match_days(charges, paid_totals.get("match_day", 0.0))
+        # Waived games settle for free and consume none of the money.
+        alloc, _credit = fee_service.allocate_match_days(
+            charges, paid_totals.get("match_day", 0.0), waived_flags)
 
         total_days = 0.0
+        waived_days = 0.0
         for (e, game, grade), charge, (st, covered) in zip(rows, charges, alloc):
             total_days += _f(e.days_played)
+            if e.waived_at is not None:
+                waived_days += _f(e.days_played)
             entries.append({
                 "id": str(e.id),
                 "played_at": e.played_at.isoformat() if e.played_at else None,
@@ -564,14 +595,17 @@ async def get_member(
                 "days_played": _f(e.days_played),
                 "auto_derived": e.auto_derived,
                 "charge": round(float(charge), 2),
-                "status": st,                       # paid | partial | unpaid | na
+                "status": st,                       # paid | partial | unpaid | na | waived
                 "amount_covered": round(float(covered), 2),
                 "is_paid": st == "paid",
+                "waived": e.waived_at is not None,
+                "waived_at": e.waived_at.isoformat() if e.waived_at else None,
+                "waive_reason": e.waive_reason,
                 "grade": grade.display_name if grade else None,
                 "match": f"{game.home_team} v {game.away_team}" if game else None,
             })
 
-        fin = _financials(schedule, total_days, paid_totals)
+        fin = _financials(schedule, total_days, paid_totals, waived_days)
 
     return {
         "member": {
@@ -789,6 +823,66 @@ async def unmark_match_day_paid(
     return {"id": str(e.id), "deleted": deleted}
 
 
+class WaiveRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/match-days/{entry_id}/waive")
+async def waive_match_day(
+    entry_id: str,
+    data: WaiveRequest,
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Waive a single match day: forgive its fee without recording any money.
+
+    The game settles (the row shows 'Waived' and counts toward the member being
+    Financial), but a waiver is NOT a payment — it never enters the income /
+    paid / credit totals. Stored as flags on the row, so it survives the weekly
+    recompute and is fully reversible. Re-posting updates the reason note."""
+    from datetime import datetime, timezone
+    e = await db.get(FeeMatchDay, uuid.UUID(entry_id))
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    ms = await db.get(FeeMemberSeason, e.member_season_id)
+    if not ms or ms.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if e.waived_at is None:
+        e.waived_at = datetime.now(timezone.utc)
+        e.waived_by_user_id = user.id
+    e.waive_reason = (data.reason or "").strip() or None
+    await db.commit()
+    return {
+        "id": str(e.id),
+        "waived": True,
+        "waived_at": e.waived_at.isoformat() if e.waived_at else None,
+        "waive_reason": e.waive_reason,
+    }
+
+
+@router.delete("/match-days/{entry_id}/waive")
+async def unwaive_match_day(
+    entry_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Undo a waive — the game is charged and derived as normal again."""
+    e = await db.get(FeeMatchDay, uuid.UUID(entry_id))
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    ms = await db.get(FeeMemberSeason, e.member_season_id)
+    if not ms or ms.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    was_waived = e.waived_at is not None
+    e.waived_at = None
+    e.waived_by_user_id = None
+    e.waive_reason = None
+    await db.commit()
+    return {"id": str(e.id), "waived": False, "changed": was_waived}
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # Recompute
 # ───────────────────────────────────────────────────────────────────────────
@@ -990,37 +1084,41 @@ async def report_summary(
     )).all()
     days_map = await _days_by_member_season(db, season.id)
     paid_map = await _paid_by_member_season(db, season.id)
+    waived_map = await _waived_days_by_member_season(db, season.id)
 
     by_payment_type: dict = {}
     overall = {"members": 0, "financial": 0, "non_financial": 0, "needs_tier": 0,
                "membership_payable": 0.0, "match_fee_payable": 0.0, "total_payable": 0.0,
                "membership_paid": 0.0, "match_fee_paid": 0.0, "total_paid": 0.0,
                "membership_outstanding": 0.0, "match_fee_outstanding": 0.0, "total_outstanding": 0.0,
-               "membership_credit": 0.0, "match_fee_credit": 0.0, "credit": 0.0}
+               "membership_credit": 0.0, "match_fee_credit": 0.0, "credit": 0.0,
+               "match_fee_waived": 0.0}
     for ms, schedule in rows:
-        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id))
+        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id), waived_map.get(ms.id, 0.0))
         overall["members"] += 1
         overall[fin["status"]] = overall.get(fin["status"], 0) + 1
         for k in ("membership_payable", "match_fee_payable", "total_payable",
                   "membership_paid", "match_fee_paid", "total_paid",
                   "membership_outstanding", "match_fee_outstanding", "total_outstanding",
-                  "membership_credit", "match_fee_credit", "credit"):
+                  "membership_credit", "match_fee_credit", "credit",
+                  "match_fee_waived"):
             overall[k] += fin[k]
         bucket_key = fin["payment_type"] or "unassigned"
         b = by_payment_type.setdefault(bucket_key, {
             "payment_type": bucket_key, "members": 0,
-            "payable": 0.0, "paid": 0.0, "outstanding": 0.0, "credit": 0.0,
+            "payable": 0.0, "paid": 0.0, "outstanding": 0.0, "credit": 0.0, "waived": 0.0,
         })
         b["members"] += 1
         b["payable"] += fin["total_payable"]
         b["paid"] += fin["total_paid"]
         b["outstanding"] += fin["total_outstanding"]
         b["credit"] += fin["credit"]
+        b["waived"] += fin["match_fee_waived"]
     for k in list(overall.keys()):
         if isinstance(overall[k], float):
             overall[k] = round(overall[k], 2)
     for b in by_payment_type.values():
-        for k in ("payable", "paid", "outstanding", "credit"):
+        for k in ("payable", "paid", "outstanding", "credit", "waived"):
             b[k] = round(b[k], 2)
     return {"overall": overall, "by_payment_type": list(by_payment_type.values())}
 
@@ -1042,9 +1140,10 @@ async def report_non_financial(
     )).all()
     days_map = await _days_by_member_season(db, season.id)
     paid_map = await _paid_by_member_season(db, season.id)
+    waived_map = await _waived_days_by_member_season(db, season.id)
     out = []
     for ms, member, schedule in rows:
-        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id))
+        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id), waived_map.get(ms.id, 0.0))
         if fin["status"] != "non_financial":
             continue
         out.append({
@@ -1116,6 +1215,7 @@ async def report_export(
     )).all()
     days_map = await _days_by_member_season(db, season.id)
     paid_map = await _paid_by_member_season(db, season.id)
+    waived_map = await _waived_days_by_member_season(db, season.id)
 
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -1123,18 +1223,18 @@ async def report_export(
         "Full Name", "Email", "Mobile", "Tier", "Payment Type",
         "Match Days",
         "Membership Payable", "Membership Paid", "Membership Outstanding",
-        "Match Fee Payable", "Match Fee Paid", "Match Fee Outstanding",
+        "Match Fee Payable", "Match Fee Paid", "Match Fee Waived", "Match Fee Outstanding",
         "Total Payable", "Total Paid", "Total Outstanding",
         "Status",
     ])
     for ms, member, schedule in rows:
-        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id))
+        fin = _financials(schedule, days_map.get(ms.id, 0.0), paid_map.get(ms.id), waived_map.get(ms.id, 0.0))
         w.writerow([
             member.full_name, member.email or "", member.mobile or "",
             fin["tier"] or "", fin["payment_type"] or "",
             fin["match_days"],
             fin["membership_payable"], fin["membership_paid"], fin["membership_outstanding"],
-            fin["match_fee_payable"], fin["match_fee_paid"], fin["match_fee_outstanding"],
+            fin["match_fee_payable"], fin["match_fee_paid"], fin["match_fee_waived"], fin["match_fee_outstanding"],
             fin["total_payable"], fin["total_paid"], fin["total_outstanding"],
             fin["status"],
         ])

@@ -1098,7 +1098,14 @@ class FeeMatchDay(Base):
     'Mark Paid' button creates a payment and links it here; deleting the
     payment from the Payments page nulls this out (FK ON DELETE SET NULL).
     A single bulk payment can settle multiple match-day rows, so multiple
-    rows may share the same `paid_payment_id`."""
+    rows may share the same `paid_payment_id`.
+
+    `waived_at` (when set) forgives this one game's fee: the game settles (member
+    reads 'Financial', the row shows 'Waived') but it is NOT money the club
+    received, so a waiver is stored here rather than as a FeePayment and never
+    enters the payment/income totals. Waived games are skipped by
+    allocate_match_days (they consume none of the member's match-fee money) and
+    excluded from match_fee_payable. Reversible by clearing the flag."""
     __tablename__ = "fee_match_days"
     __table_args__ = (
         UniqueConstraint("member_season_id", "game_id", name="uq_fee_match_day_member_game"),
@@ -1112,6 +1119,9 @@ class FeeMatchDay(Base):
     days_played = Column(Numeric(3, 1), nullable=False, server_default="1")
     auto_derived = Column(Boolean, nullable=False, server_default="true")
     paid_payment_id = Column(UUID(as_uuid=True), ForeignKey("fee_payments.id", ondelete="SET NULL"), nullable=True)
+    waived_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    waived_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    waive_reason = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

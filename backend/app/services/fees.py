@@ -58,7 +58,7 @@ def derive_fee_format(grade_fee_format: str | None, match_format: str | None):
     return "one_day", FORMAT_DEFAULT_DAYS["one_day"]
 
 
-def allocate_match_days(charges, match_paid):
+def allocate_match_days(charges, match_paid, waived=None):
     """Spread a member's total match-fee money across their match days, oldest
     game first — the BetterFees auto-allocation.
 
@@ -68,17 +68,25 @@ def allocate_match_days(charges, match_paid):
     the money can't fully cover is 'partial' (with whatever is left), the rest
     'unpaid'. A $0 game (rate $0 / no tier) is 'na' and never consumes money.
 
+    `waived` (optional) is a parallel list of bools — a waived game is settled
+    without money (status 'waived'), so it consumes none of `match_paid`; the
+    remaining money flows on to the next unwaived game. Waiving always wins over
+    the $0 'na' case so an explicit waive is visible.
+
     Returns (rows, credit):
       rows   — list parallel to `charges` of (status, amount_covered),
-               status ∈ {'paid', 'partial', 'unpaid', 'na'}.
+               status ∈ {'paid', 'partial', 'unpaid', 'na', 'waived'}.
       credit — money left over once every game is fully covered (the member is
                'in the Green'); Decimal('0') otherwise.
     """
     remaining = Decimal(str(match_paid or 0))
+    waived = waived or [False] * len(charges)
     rows = []
-    for charge in charges:
+    for charge, is_waived in zip(charges, waived):
         c = Decimal(str(charge or 0))
-        if c <= 0:
+        if is_waived:
+            rows.append(("waived", Decimal("0")))
+        elif c <= 0:
             rows.append(("na", Decimal("0")))
         elif remaining >= c:
             rows.append(("paid", c))

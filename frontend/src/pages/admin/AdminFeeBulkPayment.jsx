@@ -185,7 +185,9 @@ export default function AdminFeeBulkPayment() {
   const loadDays = useCallback(async (idx, memberId) => {
     try {
       const detail = await api.feeGetMember(memberId, seasonId)
-      const unpaid = (detail.match_days || []).filter(d => !d.is_paid)
+      // Waived games are already settled (no money owed) — keep them off the
+      // "needs paying" list alongside fully-paid games.
+      const unpaid = (detail.match_days || []).filter(d => !d.is_paid && d.status !== 'waived')
       setRows(rs => rs.map((r, i) => i === idx ? { ...r, unpaid_days: unpaid } : r))
     } catch (e) { toast.error(e.message) }
   }, [seasonId])
