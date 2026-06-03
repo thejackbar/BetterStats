@@ -5,7 +5,7 @@
    route changes without a shared layout route, persisted to sessionStorage.
 
    Ported from the v2 design handoff; wired to the real seasons/grades API. */
-import { useSyncExternalStore, useState, useEffect } from 'react'
+import { useSyncExternalStore, useState, useEffect, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import { Icon, Segmented, Tag } from './ui'
 
@@ -72,7 +72,7 @@ async function _ensureLoaded() {
       _seasons = seasons
         .map(s => ({ id: s.season_id || s.id, name: s.name, year: s.year, label: shortSeason(s.name) }))
         .sort((a, b) => sortKey(a) - sortKey(b))
-      _grades = (grades || []).map(g => ({ id: g.grade_id || g.id, name: g.name }))
+      _grades = (grades || []).map(g => ({ id: g.grade_id || g.id, name: g.name, season_id: g.season_id || null }))
       const newest = _seasons[_seasons.length - 1] || null
       _ctx = _reconcile(_loadCtx()) || {
         team: { id: null, name: 'All grades' },
@@ -288,6 +288,27 @@ function SeasonPicker({ season, seasons, onChange, allowRange }) {
 export function ContextBar({ route }) {
   const { ctx, setCtx, seasons, grades, ready } = useIQFilter()
   const filters = ROUTE_FILTERS[route]
+  // Grades fielded in the currently-selected season(s), de-duped by name — so the
+  // Team filter only offers grades the club actually played that season (picking
+  // an out-of-season grade returned an empty dashboard). Routes without a season
+  // picker still carry a (newest) season in ctx, so they scope to it.
+  const visibleGrades = useMemo(() => {
+    if (!ctx) return []
+    const ids = new Set(seasonIdsInRange(ctx, seasons))
+    const byName = new Map()
+    for (const g of (grades || [])) {
+      if (!ids.size || !g.season_id || ids.has(g.season_id)) {
+        if (!byName.has(g.name)) byName.set(g.name, { id: g.name, name: g.name })
+      }
+    }
+    return [...byName.values()].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+  }, [ctx, seasons, grades])
+  // Drop a selected grade that the club didn't field in the new season.
+  useEffect(() => {
+    if (ctx?.team?.id && visibleGrades.length && !visibleGrades.some(g => g.id === ctx.team.id)) {
+      setCtx({ ...ctx, team: { id: null, name: 'All grades' } })
+    }
+  }, [visibleGrades])  // eslint-disable-line react-hooks/exhaustive-deps
   if (!filters || (!filters.team && !filters.season)) return null
   if (!ready || !ctx) return null
   const isRange = ctx.season.mode === 'range'
@@ -295,7 +316,7 @@ export function ContextBar({ route }) {
     <div className="sticky z-20 flex items-center gap-3 flex-wrap px-5 md:px-8 py-3"
       style={{ top: 64, background: 'color-mix(in srgb, var(--pb-bg) 86%, transparent)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', borderBottom: '1px solid var(--pb-hairline)' }}>
       <span className="iq-eyebrow hidden sm:block" style={{ fontSize: 9 }}>Showing</span>
-      {filters.team && <TeamPicker value={ctx.team} grades={grades} onChange={t => setCtx({ ...ctx, team: t })} label={filters.teamLabel || 'Team'} />}
+      {filters.team && <TeamPicker value={ctx.team} grades={visibleGrades} onChange={t => setCtx({ ...ctx, team: t })} label={filters.teamLabel || 'Team'} />}
       {filters.season
         ? <SeasonPicker season={ctx.season} seasons={seasons} onChange={s => setCtx({ ...ctx, season: s })} allowRange={filters.season === 'range'} />
         : <div className="flex items-center gap-2 px-3" style={{ height: 38, borderRadius: 10, background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline)' }}>
