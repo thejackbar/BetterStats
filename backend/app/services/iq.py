@@ -889,7 +889,13 @@ async def opponent_ladder(session: AsyncSession, org_id: str, *, opponent: str |
     base = {"opponent": {"opp_key": opp_key, "name": name}, "grade_id": grade_id}
     if not grade_id:
         return {**base, "available": False, "note": "Pick an upcoming fixture to see its grade ladder."}
-    raw = await grassroots_scores_client.get_grade_ladder(grade_id)
+    # grade_id is our DB grade PK (a per-club uuid5 for a shared grade); the CA
+    # ladder API is keyed on the raw grade GUID (grassroots_id == id for legacy).
+    grade_gr = (await session.execute(
+        text("SELECT grassroots_id FROM grades WHERE id = CAST(:gid AS UUID)"),
+        {"gid": grade_id},
+    )).scalar_one_or_none()
+    raw = await grassroots_scores_client.get_grade_ladder(grade_gr or grade_id)
     rows, view = _ladder_rows(raw)
     if not rows:
         return {**base, "available": False, "note": "No ladder published for this grade yet."}

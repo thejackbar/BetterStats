@@ -5,15 +5,19 @@ area). CA community scoring has NO shot-direction data (verified against the
 ball-by-ball feed — runs/wickets only), so zones are necessarily scout-entered.
 Store them as an 8-number JSON array alongside the existing per-player tags.
 
-Revision ID: 065
-Revises: 064
+Revision ID: 066
+Revises: 065
+
+NOTE: originally authored as '065' in parallel with 065_fee_match_day_waive;
+re-chained onto 065 (revision -> 066) to resolve the duplicate-revision-id
+collision so later migrations have a single linear head.
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision = '065'
-down_revision = '064'
+revision = '066'
+down_revision = '065'
 branch_labels = None
 depends_on = None
 

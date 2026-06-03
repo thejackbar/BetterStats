@@ -130,6 +130,42 @@ async def _resolve_org_player(
     return new_id
 
 
+async def _resolve_org_grade(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    org_grade_map: dict[str, uuid.UUID],
+    grassroots_guid: str,
+    name: str,
+    season_id: uuid.UUID,
+) -> Optional[uuid.UUID]:
+    """Resolve a CA grade GUID to this org's grade id, creating a per-club grade
+    (id = uuid5(org, guid)) the first time the org sees that GUID.
+
+    A CA grade is competition-wide — one GUID is shared by every club in the
+    grade — so the raw GUID can't be a global primary key (only the first club to
+    sync it would ever own the row). Mirrors the Season/Player per-club id scheme:
+    keep the raw GUID in grassroots_id (what the grassroots API is keyed on), and
+    only mint a per-club uuid5 id when the raw GUID is ALREADY a grade in another
+    club (the genuine shared-grade collision). Otherwise keep the raw GUID as the
+    id — that's the legacy scheme, so every club already on the platform and the
+    game-level sync that matches grade.id == raw GUID are completely unaffected.
+
+    ``org_grade_map`` is a ``grassroots_id -> grade_id`` cache for the org, updated
+    in place; a re-sync finds the existing row here and returns it unchanged.
+    """
+    gid = org_grade_map.get(grassroots_guid)
+    if gid is not None:
+        return gid
+    guid_uuid = _parse_uuid(grassroots_guid)
+    if guid_uuid is None:
+        return None
+    clash = await session.get(Grade, guid_uuid)
+    new_id = uuid.uuid5(org_id, grassroots_guid) if clash is not None else guid_uuid
+    session.add(Grade(id=new_id, season_id=season_id, name=name, grassroots_id=grassroots_guid))
+    org_grade_map[grassroots_guid] = new_id
+    return new_id
+
+
 async def upsert_organisation(session: AsyncSession, org_data: dict) -> Organisation:
     org_id = _parse_uuid(org_data.get("id", ""))
     incoming_name = (org_data.get("name") or "").strip()
@@ -483,6 +519,22 @@ async def sync_organisation(
             if _gid:
                 org_player_map[str(_gid)] = _pid
 
+        # grassroots_id -> grade_id for this org's existing grades. Same per-club
+        # id scheme as players: a shared CA grade GUID is minted as uuid5(org, guid)
+        # the first time this org sees it (when another club already owns the raw
+        # GUID), so a club that shares grades with an earlier-synced club gets its
+        # own grade rows. Legacy single-club grades have grassroots_id == id, so
+        # this resolves to exactly the same ids sync has always used.
+        org_grade_map: dict[str, uuid.UUID] = {}
+        _ogm_res = await session.execute(
+            select(Grade.grassroots_id, Grade.id)
+            .join(Season, Grade.season_id == Season.id)
+            .where(Season.organisation_id == org_id)
+        )
+        for _ggid, _grid in _ogm_res.all():
+            if _ggid:
+                org_grade_map[str(_ggid)] = _grid
+
         for season_data in seasons:
             raw_season_id = (season_data.get("id") or "").strip()
             if not _parse_uuid(raw_season_id):
@@ -526,15 +578,18 @@ async def sync_organisation(
                 if t.get("grade"):
                     grade_objs.append(t["grade"])
                 for gd in grade_objs:
-                    grade_id = _parse_uuid((gd or {}).get("id", ""))
-                    if not grade_id:
+                    raw_grade_id = ((gd or {}).get("id") or "").strip()
+                    if not _parse_uuid(raw_grade_id):
                         continue
-                    if not await session.get(Grade, grade_id):
-                        session.add(Grade(
-                            id=grade_id,
-                            season_id=season_id,
-                            name=gd.get("name", "Unknown Grade"),
-                        ))
+                    # Per-club grade resolution: mints uuid5(org, guid) when this
+                    # grade GUID is already owned by another club, else keeps the
+                    # raw GUID. Replaces the old global session.get(Grade, guid)
+                    # skip that left shared grades attached to whichever club
+                    # synced first.
+                    await _resolve_org_grade(
+                        session, org_id, org_grade_map, raw_grade_id,
+                        gd.get("name", "Unknown Grade"), season_id,
+                    )
             await session.commit()
 
             # Fetch season-aggregate stats from grassroots API
@@ -700,9 +755,9 @@ async def sync_organisation(
             # heuristically (the org-level stats above collapse grades).
             try:
                 grades_for_season = await session.execute(
-                    select(Grade.id).where(Grade.season_id == season_id)
+                    select(Grade.id, Grade.grassroots_id).where(Grade.season_id == season_id)
                 )
-                grade_ids_this_season = [g[0] for g in grades_for_season.all()]
+                grade_ids_this_season = grades_for_season.all()
                 if grade_ids_this_season:
                     await session.execute(
                         delete(PlayerSeasonGradeStats).where(
@@ -710,8 +765,11 @@ async def sync_organisation(
                         )
                     )
                     grade_rows_written = 0
-                    for grade_uuid in grade_ids_this_season:
-                        grade_id_str = str(grade_uuid)
+                    for grade_uuid, grade_grassroots in grade_ids_this_season:
+                        # The CA stats API is keyed on the raw (shared) grade GUID;
+                        # grade_uuid may now be a per-club uuid5 id. grassroots_id
+                        # == id for legacy grades, so this is unchanged for them.
+                        grade_id_str = grade_grassroots or str(grade_uuid)
                         try:
                             gbat = await playhq_client.get_batting_stats(org_id_str, raw_season_id, grade_id_str)
                             gbowl = await playhq_client.get_bowling_stats(org_id_str, raw_season_id, grade_id_str)
@@ -1228,11 +1286,21 @@ async def sync_grassroots_game_level_data(
             return stats
 
         grades_res = await session.execute(
-            select(Grade.id, Grade.season_id, Grade.name)
+            select(Grade.id, Grade.season_id, Grade.name, Grade.grassroots_id)
             .join(Season, Grade.season_id == Season.id)
             .where(Season.organisation_id == org_uuid)
         )
-        grades = [(str(r[0]), r[1], r[2]) for r in grades_res.all()]
+        grades_rows = grades_res.all()
+        # (raw_grade_guid, season_id, grade_name, our_grade_id). The grassroots
+        # /scores/grades/{id}/matches API is keyed on the shared raw GUID, while
+        # our grade id may now be a per-club uuid5 — carry both. Identity for
+        # legacy grades (grassroots_id == id).
+        grades = [((r[3] or str(r[0])), r[1], r[2], r[0]) for r in grades_rows]
+        # raw CA grade GUID -> this org's grade id, to translate the scorecard's
+        # grade.id (always the shared raw GUID) onto the right grade row.
+        grade_id_by_guid: dict[str, uuid.UUID] = {
+            (r[3] or str(r[0])): r[0] for r in grades_rows
+        }
         logger.info(f"GR-sync: {len(grades)} grades for org {org_uuid}")
 
         # participant GUID -> this org's player id. Identity for a legacy
@@ -1299,12 +1367,12 @@ async def sync_grassroots_game_level_data(
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
     match_to_opp: dict[str, tuple[str | None, str]] = {}  # match_id → (opp_org_id, opp_club_name)
-    for grade_id, season_id, grade_name in grades:
+    for grade_guid, season_id, grade_name, _our_grade_id in grades:
         stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
         try:
-            matches = await gr.get_grade_matches(grade_id)
+            matches = await gr.get_grade_matches(grade_guid)
         except Exception as e:
-            logger.warning(f"GR-sync: grade {grade_id} ({grade_name}) matches failed: {e}")
+            logger.warning(f"GR-sync: grade {grade_name} ({grade_guid}) matches failed: {e}")
             continue
         for m in matches:
             mid = m.get("id")
@@ -1435,32 +1503,49 @@ async def sync_grassroots_game_level_data(
                 if not season_id and seasons:
                     season_id = seasons[0][0]
 
-                # Grade
+                # Grade — the scorecard's grade.id is the shared raw CA grade GUID.
+                # Map it onto this org's grade id (which may now be a per-club
+                # uuid5). The aggregate pass seeds every grade get_teams returns, so
+                # the discovery map normally has it.
                 grade_data = scorecard.get("grade") or {}
-                grade_id_str = grade_data.get("id")
-                grade_uuid = None
-                if grade_id_str:
-                    try:
-                        grade_uuid = uuid.UUID(grade_id_str)
-                    except ValueError:
-                        grade_uuid = None
-                if grade_uuid:
-                    # Check DB directly — caching across sessions is unsafe
-                    # because a rolled-back game session can leave a cached
-                    # grade ID that doesn't actually exist in the DB.
-                    existing_grade = await session.get(Grade, grade_uuid)
-                    if not existing_grade:
-                        session.add(Grade(
-                            id=grade_uuid,
-                            season_id=season_id,
-                            name=grade_data.get("name", "Unknown Grade"),
-                            playhq_id=grade_id_str,
-                        ))
-                        try:
-                            await session.flush()
-                        except Exception as e:
-                            logger.warning(f"GR-sync: grade flush failed for {grade_id_str}: {e}")
-                            continue  # session auto-rollback on context exit
+                grade_guid_str = grade_data.get("id")
+                grade_uuid = grade_id_by_guid.get(grade_guid_str) if grade_guid_str else None
+                if grade_uuid is None and grade_guid_str:
+                    # Safety net for a grade present in a scorecard but not seeded
+                    # by get_teams. Resolve against the DB directly (not the cache)
+                    # so a previously rolled-back game session can't leave a stale
+                    # id, and so we never mint a second row for a grade we already
+                    # own.
+                    raw_guid = _parse_uuid(grade_guid_str)
+                    if raw_guid is not None:
+                        existing = (await session.execute(
+                            select(Grade.id)
+                            .join(Season, Grade.season_id == Season.id)
+                            .where(
+                                Season.organisation_id == org_uuid,
+                                Grade.grassroots_id == grade_guid_str,
+                            )
+                        )).scalars().first()
+                        if existing is not None:
+                            grade_uuid = existing
+                        else:
+                            # Per-club mint only when another club already owns the
+                            # raw GUID, mirroring _resolve_org_grade.
+                            clash = await session.get(Grade, raw_guid)
+                            grade_uuid = uuid.uuid5(org_uuid, grade_guid_str) if clash is not None else raw_guid
+                            session.add(Grade(
+                                id=grade_uuid,
+                                season_id=season_id,
+                                name=grade_data.get("name", "Unknown Grade"),
+                                grassroots_id=grade_guid_str,
+                                playhq_id=grade_guid_str,
+                            ))
+                            try:
+                                await session.flush()
+                            except Exception as e:
+                                logger.warning(f"GR-sync: grade flush failed for {grade_guid_str}: {e}")
+                                continue  # session auto-rollback on context exit
+                        grade_id_by_guid[grade_guid_str] = grade_uuid
 
                 # Date
                 played_at = None

@@ -176,6 +176,22 @@ GR scorecard parser was reading `isHome` from the top-level `teams` array — si
 
 **Anti-pattern reminder**: don't reintroduce a global `session.get(Player, raw_guid)` create/lookup in sync — use `_resolve_org_player`. `players.id` is no longer guaranteed to equal the CA GUID (it's `uuid5(org, guid)` for per-club rows); the raw GUID lives in `grassroots_id`.
 
+## June 2026 Cross-Club Grade Collision Fix (v2.16.1)
+
+**Symptom**: a newly-onboarded club (High Wycombe) showed only the 3 grades *unique* to it (Year 8/9) in the dashboard Grade dropdown and BetterSelect auto-seed, even though it plays ~16 grades. Recent-matches (PlayHQ-partner, live) and the season summary (participant-stats, whole-club) looked correct, so only the grade-scoped surfaces were starved.
+
+**Root cause — grades had the SAME shared-GUID collision Seasons and Players already solved.** A CA **grade is a competition-wide entity**: one grade GUID (`/scores/grades/{id}/matches` returns every match between *all* clubs in it — verified 10 clubs share HW's "1st Grade") is returned by `get_teams` for *every* club in the grade. But `grades.id` used the raw shared GUID as a **global** primary key, and sync's `session.get(Grade, grade_id)` was a **global** lookup — so the **first club to sync a grade created the row, and every later club's sync skipped it**, leaving the grade attached to whoever synced first. Applecross was onboarded before HW, so HW's 12 shared grades (1st/3rd/5th Grade, One Day 2/3/5, Colts, RJR T20, Year 5/6/9-Central) sat on Applecross's seasons; HW only created the 3 Applecross didn't have. The aggregate season stats (`player_season_stats`) survived because they come from the **participant**-scoped stats endpoint (whole club, grade-agnostic), not from grades.
+
+**Fix — per-club grade ids, exactly mirroring the Season/Player scheme** (phased, mint-on-collision so the 50+ single-club orgs are byte-for-byte unchanged):
+- **Migration 067** — add `grades.grassroots_id` (raw CA grade GUID), backfill from `id` (which IS the raw GUID for every legacy row), + `UNIQUE (season_id, grassroots_id)`. Non-breaking; no id changes.
+- **`sync._resolve_org_grade()`** (mirrors `_resolve_org_player`) replaces the global `session.get(Grade, guid)` skip in the aggregate grade-seeding loop. Looks a grade up by `(org, grassroots_id)`; mints `id = uuid5(org, guid)` **only** when the raw GUID is already a grade in another club; else keeps the raw GUID. `org_grade_map` is built once per sync alongside `org_player_map`.
+- **The raw GUID is what every grassroots API call must use** (not the per-club PK). Switched: per-grade stats `gradeId` (sync.py), the scores pass `get_grade_matches` (uses `grassroots_id`; scorecard `grade.id` → per-club id via a `grade_id_by_guid` map so `games.grade_id` is the per-club id), `iq_opponent._target_season_grades`/`_our_games_vs`/`_grade_name`, `ladders.py` (team + grade-ladder), `iq.opponent_ladder`. Every one is `COALESCE(grassroots_id, id)` ⇒ identical for legacy grades.
+- **`rebuild_bowler_wickets.py` is unaffected** — it iterates *game* ids and only joins grades via the DB FK.
+
+**Cutover for an affected (2nd+) club**: deploy + migrate, then **Sync Now** (re-runs the aggregate grade-seeding → mints the per-club grades, so the dropdown + per-grade stats fill immediately; the scores pass then discovers the never-before-synced shared-grade games and pulls them). A **Full Rebuild** is the guaranteed-complete version. **Known residue**: a match between two *both-synced* clubs (e.g. HW vs Applecross) is one shared `games.id` (= match GUID) owned by whoever synced it first, so the 2nd club won't get its own row for that one game — pre-existing game-identity limitation, separate from grades; HW-vs-unsynced-club games (the vast majority) are unaffected.
+
+**Anti-pattern reminder**: don't reintroduce a global `session.get(Grade, raw_guid)` create/skip in sync — use `_resolve_org_grade`. `grades.id` is no longer guaranteed to equal the CA GUID (it's `uuid5(org, guid)` for per-club rows); the raw GUID lives in `grassroots_id`, which is what `/scores/grades/{id}/matches`, the ladder API, and the per-grade stats `gradeId` are keyed on.
+
 ## BetterFees — Match-Fee Auto-Allocation (v7.32.0, Jun 2026)
 
 A recorded match-fee payment settles a member's games automatically, **oldest game first**. Per-game Paid / Part-paid / Unpaid is **derived on read, not stored** — there is no per-row paid flag any more.

@@ -158,6 +158,13 @@ class Grade(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="CASCADE"))
+    # Per-club derived id (uuid5 of org id + grassroots_id) when the raw CA grade
+    # GUID is shared with another club; otherwise the raw GUID itself. A CA grade
+    # is competition-wide — one GUID is shared by every club in the grade — so it
+    # cannot be a global primary key. The raw GUID lives in grassroots_id and is
+    # what the grassroots API (grade matches / ladder / per-grade stats) is keyed
+    # on. See migration 067.
+    grassroots_id = Column(Text, nullable=True)
     name = Column(Text, nullable=False)
     display_name_override = Column(Text, nullable=True)
     playhq_id = Column(Text, nullable=True)
