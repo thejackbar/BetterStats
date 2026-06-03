@@ -66,8 +66,8 @@ const CATEGORIES = [
     title: 'Product & features',
     items: [
       {
-        q: 'What is BetterStats?',
-        a: "BetterStats is an automated cricket statistics platform for Australian club cricket. It pulls every batting, bowling and fielding stat from PlayHQ and MyCricket and turns it into a beautiful public club website — with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards.",
+        q: 'What is BetterStats? What is Better?',
+        a: "Better is a modular platform for Australian club cricket. Its Core is BetterStats — it pulls every batting, bowling and fielding stat from PlayHQ and MyCricket and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. On top of the Core you can add modules: BetterSelect (selection), BetterSocials (social posts), BetterFees (treasury) and BetterIQ (analytics & opposition scouting).",
       },
       {
         q: 'How is BetterStats different from PlayHQ or MyCricket?',
@@ -107,31 +107,43 @@ const CATEGORIES = [
   },
   {
     id: 'pricing',
-    title: 'Pricing & contracts',
+    title: 'Pricing & tiers',
     items: [
       {
-        q: 'How much does BetterStats cost?',
-        a: 'BetterStats is $59 AUD per club per month, or $449 AUD per club per year (saves $259 vs. monthly). One plan covers unlimited players, unlimited seasons, automatic data sync, the full public stats website, season yearbooks, awards & honours management and the admin panel.',
+        q: 'How much does it cost?',
+        a: 'Better is sold in three flat-rate tiers per club: Good is $449/year ($49/month), Better is $649/year ($69/month) and Best is $999/year ($99/month). Every tier covers unlimited players, seasons and teams.',
+      },
+      {
+        q: 'What’s in each tier?',
+        a: 'Good is the Core — BetterStats stats and your public club site. Better adds BetterSelect (availability + selection) and BetterSocials (branded social posts). Best adds BetterFees (treasury) and BetterIQ (analytics + opposition scouting). The pricing page has a calculator that matches a tier to the modules you want.',
+      },
+      {
+        q: 'Can I add just one module without moving up a tier?',
+        a: 'Yes — any single module can be bolted onto a lower tier à-la-carte. We price add-ons so that two of them cost more than simply moving up a tier, so for most clubs the tier is the better value. Get in touch and we’ll set it up.',
       },
       {
         q: 'Does the price change based on club size?',
-        a: "No — it's a flat rate. One team or fifty teams, juniors and seniors, men's and women's, the fee is the same. No per-team, per-player or per-grade pricing.",
+        a: "No — every tier is a flat rate. One team or fifty teams, juniors and seniors, men's and women's, the fee is the same. No per-team, per-player or per-grade pricing.",
+      },
+      {
+        q: 'Monthly or annual?',
+        a: 'Either. Annual is billed once and works out to roughly two months free — and it carries a club through the April–September off-season without a monthly bill landing when there are no fixtures.',
+      },
+      {
+        q: 'Can we change tiers or cancel?',
+        a: "Yes. Move up or down at any time and entitlements flip immediately. On monthly you can cancel any time (the public page comes down but your data isn't lost); an annual plan runs to the end of its term.",
       },
       {
         q: 'Are there setup fees?',
         a: "We don't have a flat setup fee. We do a short consultation, look at how much historical data your club has and how much clean-up it'll need, then work out a low-cost plan that fits.",
       },
       {
-        q: 'Can we cancel anytime?',
-        a: "On monthly, yes — when you cancel, the public page comes down but your data isn't lost. The annual plan runs to the end of its term.",
-      },
-      {
         q: 'Do you offer a free trial?',
-        a: "We don't run free trials — but we're happy to demo your club for you so you can see exactly what BetterStats will look like with your data.",
+        a: "We don't run free trials yet — but we're happy to demo your club for you so you can see exactly what it will look like with your data.",
       },
       {
         q: 'Do you offer discounts for junior-only clubs?',
-        a: 'Yes — junior-only clubs get a discount, but only if the senior club is already onboarded with BetterStats. Contact us for the discount code.',
+        a: 'Yes — junior-only clubs get a discount, but only if the senior club is already onboarded. Contact us for the discount code.',
       },
       {
         q: 'How do we pay?',

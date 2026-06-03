@@ -12,10 +12,11 @@ import ScrollToTop from './components/ScrollToTop'
 import { usePageView } from './hooks/usePageView'
 
 // Marketing pages have their own MarketingNav — suppress the global Navbar on those routes
-const MARKETING_PATHS = ['/', '/features', '/pricing', '/compare', '/about', '/contact', '/faq', '/terms', '/privacy', '/blog']
+const MARKETING_PATHS = ['/', '/features', '/pricing', '/compare', '/modules', '/about', '/contact', '/faq', '/terms', '/privacy', '/blog']
 function ConditionalNavbar() {
   const { pathname } = useLocation()
-  const isMarketing = MARKETING_PATHS.includes(pathname) || pathname.startsWith('/blog/')
+  const isMarketing =
+    MARKETING_PATHS.includes(pathname) || pathname.startsWith('/blog/') || pathname.startsWith('/modules/')
   return isMarketing ? null : <Navbar />
 }
 
@@ -31,6 +32,8 @@ import Landing from './pages/marketing/Landing'
 import Features from './pages/marketing/Features'
 import Pricing from './pages/marketing/Pricing'
 import Compare from './pages/marketing/Compare'
+import Modules from './pages/marketing/Modules'
+import ModuleDetail from './pages/marketing/ModuleDetail'
 import About from './pages/marketing/About'
 import Contact from './pages/marketing/Contact'
 import Terms from './pages/marketing/Terms'
@@ -140,6 +143,8 @@ export default function App() {
           <Route path="/features" element={<Features />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/compare" element={<Compare />} />
+          <Route path="/modules" element={<Modules />} />
+          <Route path="/modules/:slug" element={<ModuleDetail />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/faq" element={<FAQ />} />

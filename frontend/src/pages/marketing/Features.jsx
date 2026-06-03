@@ -11,6 +11,7 @@ import {
   MockHeritageCard,
 } from '../../components/marketing/Mockups'
 import { FORM_URL, SCREENSHOT_PATHS } from '../../data/marketing'
+import { MODULES_MARKETING, TIER_INFO } from '../../data/modules-marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 // ============================================================
@@ -136,21 +137,6 @@ const HERO_SECTIONS = [
   },
 ]
 
-const COMING_SOON = [
-  {
-    title: 'Social Posting',
-    desc: 'Over 150 customisable options for posting team lineups, fixtures, scorecards, milestones and more.',
-  },
-  {
-    title: 'Smart Selection Assistance',
-    desc: 'Use your historical data, our algorithms and AI analysis to inform your selection decisions.',
-  },
-  {
-    title: 'Availability Tracking',
-    desc: 'Using our KlubPro integration you\'ll be able to track availability, select your teams and post all within one platform — supported by your data.',
-  },
-]
-
 const SHORT_SECTIONS = [
   {
     title: 'Match Scorecards',
@@ -211,42 +197,47 @@ function Hero() {
     <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
       <div className="max-w-[900px] mx-auto relative text-center">
-        <p className="pill mb-6 inline-flex"><span className="dot" />All features · One subscription</p>
+        <p className="pill mb-6 inline-flex"><span className="dot" />The Core · in every plan</p>
         <h1 className="font-display font-bold text-[44px] sm:text-[60px] lg:text-[80px] tracking-tight leading-[0.95] mb-6">
-          Built for <span className="gradient-text">your whole club.</span>
+          The Core: <span className="gradient-text">BetterStats.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-xl mx-auto leading-relaxed">
-          A tour of everything BetterStats does. No tiers. No upsells.
+          Your club’s reconciled history and a public site to be proud of — included in every Better plan. Here’s everything it does.
         </p>
       </div>
     </section>
   )
 }
 
-// ─── Coming Soon block ──────────────────────────────────────────────────
-function ComingSoon() {
+// ─── Beyond the Core — the modules ────────────────────────────────────────
+function BeyondCore() {
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
       <div className="max-w-[1200px] mx-auto">
         <Reveal>
           <div className="text-center mb-12">
-            <p className="pill-neutral inline-flex mb-5">In development</p>
-            <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">Coming soon.</h2>
-            <p className="text-pb-dim max-w-xl mx-auto">A few things we're actively building. Tell us which one would help your club most.</p>
+            <p className="pill-neutral inline-flex mb-5">Beyond the Core</p>
+            <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">There’s more than stats.</h2>
+            <p className="text-pb-dim max-w-xl mx-auto">Everything above is the Core. Bolt on the modules that run your season and your club.</p>
           </div>
         </Reveal>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {COMING_SOON.map((s, i) => (
-            <Reveal key={s.title} delay={(i % 3) * 80}>
-              <div className="surface p-6 h-full opacity-60 border-dashed">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="pill-neutral text-[10px]">Soon</span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {MODULES_MARKETING.map((m, i) => (
+            <Reveal key={m.slug} delay={(i % 4) * 70} className="h-full">
+              <Link to={`/modules/${m.slug}`} className="surface p-6 h-full flex flex-col hover:border-accent/30 transition-colors group block">
+                <div className="flex items-center justify-between mb-4">
+                  <span className="w-10 h-10 rounded-xl flex items-center justify-center text-lg text-navy-950" style={{ background: m.accent }}>{m.icon}</span>
+                  <span className="pill-neutral text-[10px]">{TIER_INFO[m.tier].label}</span>
                 </div>
-                <h3 className="text-lg font-semibold mb-2 text-pb-text">{s.title}</h3>
-                <p className="text-sm text-pb-dim leading-relaxed">{s.desc}</p>
-              </div>
+                <h3 className="text-lg font-semibold mb-1.5 group-hover:text-accent transition-colors">{m.name}</h3>
+                <p className="text-sm text-pb-dim leading-relaxed mb-4 flex-1">{m.tagline}</p>
+                <span className="text-sm text-accent font-medium inline-flex items-center gap-1">Explore <span className="group-hover:translate-x-0.5 transition-transform">→</span></span>
+              </Link>
             </Reveal>
           ))}
+        </div>
+        <div className="text-center mt-10">
+          <Link to="/modules" className="cta-secondary">Tour all modules →</Link>
         </div>
       </div>
     </section>
@@ -318,10 +309,10 @@ function FeaturesCTA() {
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
       <div className="max-w-[900px] mx-auto relative">
         <div className="surface-strong p-10 lg:p-14 text-center">
-          <p className="pill mb-6 mx-auto"><span className="dot" />Everything in. No tiers.</p>
-          <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">All features. <span className="gradient-text">One price.</span></h2>
+          <p className="pill mb-6 mx-auto"><span className="dot" />The Good tier · the Core</p>
+          <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">The Core, <span className="gradient-text">in every plan.</span></h2>
           <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">
-            Every BetterStats club gets the whole platform. $449/year all-in, flat rate — one team or fifty, same price.
+            Everything on this page is the Good tier — from $449/year, flat rate per club. Add modules whenever you’re ready.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
@@ -350,7 +341,7 @@ export default function Features() {
           <FeatureBlock key={f.n} f={f} idx={i} />
         ))}
         <ShortFeatures />
-        <ComingSoon />
+        <BeyondCore />
         <FeaturesCTA />
       </div>
       <MarketingFooter />

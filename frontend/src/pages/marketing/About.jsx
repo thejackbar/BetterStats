@@ -74,7 +74,7 @@ function Principles() {
   const principles = [
     { n: '01', title: 'Cricketers first', desc: "Every product decision asks: what would a club statistician or committee volunteer actually want here? Built by people who keep a scorebook." },
     { n: '02', title: 'Honest with data', desc: "If a stat isn't confirmed, we say so. Older aggregates get flagged. We don't invent runs that nobody scored." },
-    { n: '03', title: 'No tiers, no upsells', desc: "Every club gets every feature. We hate the SaaS playbook of locking 'the one feature you wanted' behind a Pro tier." },
+    { n: '03', title: 'Fair, flat pricing', desc: "One flat price per club at every tier — no per-player or per-team nickel-and-diming. You only pay for the modules you actually turn on." },
     { n: '04', title: 'You own the data', desc: "Full CSV export anytime. The data belongs to your club — we just help you visualise it." },
   ]
   return (
