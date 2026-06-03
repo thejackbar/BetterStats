@@ -1,41 +1,75 @@
 import { useState, useEffect, useRef } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
+import './iq-theme.css'
+import { Icon, CountUp, ResultPills, SplitBar, Tag, Btn, Empty, a2, surname } from './ui'
 import { api } from '../../../lib/api'
 
-/* Captain's Cheat Sheet (analytics brief §16.6) — a clean, print-ready one-pager
- * composed from the opposition report + live dossier we already build. Light
- * theme on purpose (prints cleanly, looks like a proper team sheet); "Print /
- * Save as PDF" uses the browser's print dialog. */
+/* BetterIQ — Captain's Cheat Sheet (analytics brief §16.6).
+ *
+ * A self-contained, print-ready, LANDSCAPE one-pager a captain takes to the
+ * toss. Rendered in a FIXED LIGHT palette (independent of the app theme) so
+ * Print / Save-PDF is always clean on paper — the outer `.iq-root` is forced to
+ * `data-theme="light"`, so every pb-* token resolves to the light palette.
+ *
+ * Print isolation lives in iq-theme.css (@media print): everything except
+ * `.iq-print-area` is hidden, the `.iq-cs-overlay` flattens to white, and the
+ * page is set to landscape. The Print button (`.iq-no-print`) calls
+ * window.print().
+ *
+ * Standalone route (`/admin/betteriq/opposition/cheatsheet`) — NOT wrapped in
+ * IQLayout. Reads the instant opposition report + polls the live dossier we
+ * already build, keyed off the opponent / fixture / team URL params. */
 
-const INK = '#0f172a', MUTED = '#64748b', LINE = '#e2e8f0', ACCENT = '#6d28d9'
-const RED = '#dc2626', GREEN = '#16a34a'
 const POLL_MS = 2500
-const num = (v, d = '—') => (v === null || v === undefined ? d : v)
+const MAX_POLLS = 12
 
-function Section({ title, children, style }) {
+/* — small print-friendly atoms (token-classed so light/dark both resolve) — */
+
+function Eyebrow({ children, className = 'text-pb-faint', style }) {
   return (
-    <div style={{ marginBottom: 14, ...style }}>
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: ACCENT, marginBottom: 6 }}>{title}</div>
-      {children}
+    <div className={`iq-mono uppercase font-semibold whitespace-nowrap ${className}`}
+      style={{ fontSize: 8.5, letterSpacing: '0.16em', ...style }}>{children}</div>
+  )
+}
+
+function StatCell({ label, value, color, count = false, decimals = 0, suffix = '' }) {
+  return (
+    <div>
+      <Eyebrow>{label}</Eyebrow>
+      <div className="iq-display iq-num leading-none" style={{ fontWeight: 800, fontSize: 20, marginTop: 2, whiteSpace: 'nowrap', color: color || 'var(--pb-text)' }}>
+        {count && typeof value === 'number'
+          ? <CountUp value={value} decimals={decimals} suffix={suffix} />
+          : value}
+      </div>
     </div>
   )
 }
 
-function PlayerLine({ name, stat, note }) {
+function Column({ title, accent, children }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '3px 0', borderBottom: `1px solid ${LINE}`, fontSize: 12.5 }}>
-      <div style={{ minWidth: 0 }}>
-        <span style={{ fontWeight: 600 }}>{name}</span>
-        {note && <div style={{ color: MUTED, fontSize: 11, marginTop: 1 }}>{note}</div>}
+    <div className="min-w-0" style={{ flex: 1 }}>
+      <div className="iq-display font-bold" style={{ fontSize: 12.5, color: accent, paddingBottom: 6, marginBottom: 8, borderBottom: `2px solid ${accent}` }}>
+        {title}
       </div>
-      <span style={{ whiteSpace: 'nowrap', color: INK, fontVariantNumeric: 'tabular-nums' }}>{stat}</span>
+      <div className="flex flex-col" style={{ gap: 9 }}>{children}</div>
+    </div>
+  )
+}
+
+function PlayerRow({ name, line, note }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between" style={{ gap: 10 }}>
+        <span className="iq-display font-bold text-pb-text" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{name}</span>
+        <span className="iq-mono text-pb-dim" style={{ fontSize: 10.5, whiteSpace: 'nowrap' }}>{line}</span>
+      </div>
+      {note && <div className="text-pb-dim" style={{ fontSize: 10.5, lineHeight: 1.35, marginTop: 2 }}>{note}</div>}
     </div>
   )
 }
 
 export default function CheatSheet() {
   const [params] = useSearchParams()
-  const navigate = useNavigate()
   const opponent = params.get('opponent') || undefined
   const fixtureId = params.get('fixture') || undefined
   const team = params.get('team') || undefined
@@ -50,120 +84,227 @@ export default function CheatSheet() {
     const poll = () => {
       api.iqOppositionDossier({ opponent, fixtureId, team }).then(d => {
         setDossier(d)
-        if (d.status === 'building' && tries++ < 12) pollRef.current = setTimeout(poll, POLL_MS)
+        if (d?.status === 'building' && tries++ < MAX_POLLS) pollRef.current = setTimeout(poll, POLL_MS)
       }).catch(() => setDossier({ status: 'error' }))
     }
     poll()
     return () => { if (pollRef.current) clearTimeout(pollRef.current) }
-  }, []) // once
+  }, []) // run once
 
   const oppName = dossier?.opponent?.name || report?.opponent?.name || 'Opponent'
-  const ready = dossier && dossier.status !== 'building' && dossier.status !== 'error' && dossier.status !== 'unavailable'
+  const building = dossier?.status === 'building' || (!dossier && !report)
+  const ready = dossier && !['building', 'error', 'unavailable'].includes(dossier.status)
+
+  const h = report?.head_to_head
+  const lm = report?.last_meeting
   const gp = ready ? dossier.game_plan : null
-  const h2h = report?.head_to_head
-  const matchups = report?.matchups?.bowler_dominance || []
+  const dangerBat = (ready && dossier.danger_batters) || []
+  const dangerBowl = (ready && dossier.danger_bowlers) || []
   const ourBat = report?.our_performers?.batting || []
   const ourBowl = report?.our_performers?.bowling || []
-  const bestVenue = (report?.venues || []).filter(v => v.wins > (v.losses || 0)).sort((a, b) => b.played - a.played)[0]
+  const dominance = report?.matchups?.bowler_dominance || []
+
+  // "Save bowler X for batter Y" — strongest stored match-up for a danger batter.
+  const dismissPlan = (name) => {
+    const last = surname(name).split(' ').pop()
+    const rows = dominance.filter(m => surname(m.batter).split(' ').pop() === last)
+    if (!rows.length) return null
+    const best = [...rows].sort((a, b) => b.dismissals - a.dismissals)[0]
+    return `${surname(best.bowler)} has him ${best.dismissals}× — save him for this match-up`
+  }
+
+  const wins = h?.wins ?? 0
+  const losses = h?.losses ?? 0
+  const draws = (h?.draws ?? 0) + (h?.ties ?? 0)
+  const h2hLine = h ? `${wins}–${losses}–${draws}` : '—'
+  const lmResult = lm?.result ? lm.result.toUpperCase() : null
+  const lmColor = lmResult === 'WIN' ? 'var(--pb-brand)' : lmResult === 'LOSS' ? 'var(--pb-red)' : 'var(--pb-amber)'
 
   return (
-    <div style={{ background: '#f1f5f9', minHeight: '100vh' }}>
-      <style>{`@media print { .cs-noprint{display:none!important} body{background:#fff!important} .cs-sheet{box-shadow:none!important;margin:0!important;max-width:none!important} @page{margin:12mm} }`}</style>
+    <div className="iq-root iq-cs-overlay" data-theme="light" data-card="hairline"
+      style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(4,5,10,0.72)', backdropFilter: 'blur(6px)', overflow: 'auto', padding: '28px 18px' }}>
 
-      {/* toolbar */}
-      <div className="cs-noprint" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: 820, margin: '0 auto', padding: '14px 8px' }}>
-        <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: MUTED, cursor: 'pointer', fontSize: 13 }}>← Back to scout</button>
-        <button onClick={() => window.print()} style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Print / Save as PDF</button>
+      {/* toolbar — screen only */}
+      <div className="iq-no-print flex items-center justify-between" style={{ maxWidth: 1040, margin: '0 auto 14px', gap: 12 }}>
+        <div className="text-white">
+          <div className="iq-display font-bold" style={{ fontSize: 16 }}>Match cheat sheet</div>
+          <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.6)' }}>One page for the toss — prints clean on paper.</div>
+        </div>
+        <div className="flex" style={{ gap: 10 }}>
+          <Btn variant="primary" icon="print" onClick={() => window.print()}>Print / Save PDF</Btn>
+        </div>
       </div>
 
-      {/* sheet */}
-      <div className="cs-sheet" style={{ maxWidth: 820, margin: '0 auto 40px', background: '#fff', color: INK, padding: 32, borderRadius: 8, boxShadow: '0 4px 24px rgba(0,0,0,0.08)', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
-        {/* header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `2px solid ${INK}`, paddingBottom: 12, marginBottom: 16 }}>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: ACCENT }}>Captain's Cheat Sheet</div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, marginTop: 2 }}>{oppName}</div>
-            <div style={{ color: MUTED, fontSize: 12, marginTop: 3 }}>
-              {dossier?.selected_team_name ? `${dossier.selected_team_name} · ` : ''}{bestVenue ? `we're strongest at ${bestVenue.venue}` : ''}
+      {/* the printable sheet */}
+      <div className="iq-print-area iq-rise"
+        style={{ maxWidth: 1040, margin: '0 auto', background: 'var(--pb-surface)', color: 'var(--pb-text)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 30px 80px -30px rgba(0,0,0,0.7)' }}>
+        <div style={{ padding: '22px 26px' }}>
+
+          {/* header */}
+          <div className="flex items-start justify-between border-b border-pb-hairline" style={{ gap: 16, paddingBottom: 14 }}>
+            <div>
+              <Eyebrow className="text-pb-accent">Captain&rsquo;s cheat sheet</Eyebrow>
+              <div className="iq-display" style={{ fontWeight: 800, fontSize: 28, letterSpacing: '-0.01em', marginTop: 4 }}>
+                Applecross <span className="text-pb-faint" style={{ fontWeight: 600 }}>vs</span> {oppName}
+              </div>
+            </div>
+            <div className="text-right">
+              {team && <div className="text-pb-dim" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{dossier?.selected_team_name || team}</div>}
+              {lm?.grade && <div className="iq-mono text-pb-faint" style={{ fontSize: 11, marginTop: 3 }}>{lm.grade}</div>}
+              <div className="iq-display font-bold" style={{ fontSize: 13, marginTop: 6 }}>Better<span className="text-pb-accent">IQ</span></div>
+              <div className="text-pb-faint" style={{ fontSize: 10.5, marginTop: 1 }}>{new Date().toLocaleDateString()}</div>
             </div>
           </div>
-          <div style={{ textAlign: 'right', fontSize: 12, color: MUTED }}>
-            {h2h?.meetings ? <div style={{ fontSize: 18, fontWeight: 700, color: INK }}>{h2h.wins}–{h2h.losses}</div> : null}
-            {h2h?.meetings ? <div>record vs them</div> : null}
-            <div style={{ marginTop: 4 }}>BetterIQ · {new Date().toLocaleDateString()}</div>
-          </div>
-        </div>
 
-        {/* game plan banner */}
-        {gp && (
-          <div style={{ background: '#f5f3ff', border: `1px solid ${'#ddd6fe'}`, borderRadius: 8, padding: 14, marginBottom: 16 }}>
-            {gp.one_liner && <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 10 }}>{gp.one_liner}</div>}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-              {[['Remove early', gp.remove_early], ['See off', gp.see_off], ['Target', gp.target_bowler]].map(([label, v]) => (
-                <div key={label} style={{ background: '#fff', borderRadius: 6, padding: 10, border: `1px solid ${LINE}` }}>
-                  <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, color: MUTED }}>{label}</div>
-                  <div style={{ fontWeight: 700, fontSize: 14, marginTop: 2 }}>{v?.name || '—'}</div>
-                  {v?.economy != null && <div style={{ fontSize: 11, color: MUTED }}>econ {v.economy}</div>}
+          {/* H2H strip */}
+          <div className="flex flex-wrap items-end border-b border-pb-hairline" style={{ gap: 26, padding: '14px 0' }}>
+            <StatCell label="Head to head" value={h2hLine} />
+            <StatCell label="Win rate" value={h?.win_pct != null ? h.win_pct : '—'} color="var(--pb-accent)" count decimals={0} suffix="%" />
+            {h && (wins + losses + draws) > 0 && (
+              <div style={{ minWidth: 150, flex: 1, maxWidth: 230 }}>
+                <Eyebrow>Balance</Eyebrow>
+                <div style={{ marginTop: 7 }}>
+                  <SplitBar h={10} segments={[
+                    { label: 'W', value: wins, color: 'var(--pb-brand)' },
+                    { label: 'L', value: losses, color: 'var(--pb-red)' },
+                    { label: 'D', value: draws, color: 'var(--pb-amber)' },
+                  ]} />
                 </div>
-              ))}
+              </div>
+            )}
+            <div>
+              <Eyebrow>Recent (newest &rarr;)</Eyebrow>
+              <div style={{ marginTop: 4 }}>
+                {h?.recent_form?.length
+                  ? <ResultPills form={h.recent_form} size={20} />
+                  : <span className="text-pb-faintest" style={{ fontSize: 12 }}>—</span>}
+              </div>
             </div>
-            {gp.key_warning && <div style={{ marginTop: 10, fontSize: 12.5, color: RED }}>⚠ {gp.key_warning}</div>}
+            {lmResult && <StatCell label="Last meeting" value={lmResult} color={lmColor} />}
+            {lm && (lm.our_runs != null || lm.opp_runs != null) && (
+              <div>
+                <Eyebrow>Last scoreline</Eyebrow>
+                <div className="iq-mono font-semibold" style={{ fontSize: 13, marginTop: 5 }}>
+                  {lm.our_runs ?? '—'} v {lm.opp_runs ?? '—'}
+                </div>
+              </div>
+            )}
           </div>
-        )}
-        {!gp && (
-          <div className="cs-noprint" style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 12.5, color: '#9a3412' }}>
-            {dossier?.status === 'building' ? 'Building their live dossier… the game plan will fill in shortly.' : 'Live dossier not available — open the scout first to build it.'}
-          </div>
-        )}
 
-        {/* two columns */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-          <div>
-            <Section title="Danger batters">
-              {ready && dossier.danger_batters?.length
-                ? dossier.danger_batters.slice(0, 5).map(b => (
-                  <PlayerLine key={b.player_id} name={b.name} stat={`${b.runs} @ ${num(b.average)}`} note={b.plan || (b.vs_us ? `${b.vs_us.runs} vs us` : null)} />
+          {/* the plan */}
+          {gp ? (
+            <div className="flex flex-wrap items-center" style={{ background: 'color-mix(in srgb, var(--pb-accent) 9%, var(--pb-surface))', border: '1px solid color-mix(in srgb, var(--pb-accent) 28%, transparent)', borderRadius: 10, padding: '13px 16px', margin: '14px 0', gap: 18 }}>
+              <div style={{ flex: 2, minWidth: 260 }}>
+                <Eyebrow className="text-pb-accent">The plan</Eyebrow>
+                <div className="iq-display font-bold" style={{ fontSize: 16, lineHeight: 1.2, marginTop: 3 }}>
+                  {gp.one_liner || 'Stick to the basics and take your chances.'}
+                </div>
+              </div>
+              <div className="flex" style={{ gap: 18, flex: 1, minWidth: 240 }}>
+                <div>
+                  <Eyebrow className="text-pb-red">Remove early</Eyebrow>
+                  <div className="iq-display font-bold" style={{ fontSize: 13, marginTop: 3 }}>{gp.remove_early?.name ? surname(gp.remove_early.name) : '—'}</div>
+                  {gp.remove_early?.why && <div className="text-pb-faint" style={{ fontSize: 10, lineHeight: 1.3, marginTop: 1 }}>{gp.remove_early.why}</div>}
+                </div>
+                <div>
+                  <Eyebrow className="text-pb-amber">See off</Eyebrow>
+                  <div className="iq-display font-bold" style={{ fontSize: 13, marginTop: 3 }}>{gp.see_off?.name ? surname(gp.see_off.name) : '—'}</div>
+                  {gp.see_off?.why && <div className="text-pb-faint" style={{ fontSize: 10, lineHeight: 1.3, marginTop: 1 }}>{gp.see_off.why}</div>}
+                </div>
+                <div>
+                  <Eyebrow className="text-pb-brand">Target</Eyebrow>
+                  <div className="iq-display font-bold" style={{ fontSize: 13, marginTop: 3 }}>{gp.target_bowler?.name ? surname(gp.target_bowler.name) : '—'}</div>
+                  {gp.target_bowler?.economy != null && <div className="iq-mono text-pb-faint" style={{ fontSize: 10, marginTop: 1 }}>econ {a2(gp.target_bowler.economy)}</div>}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center" style={{ margin: '14px 0', gap: 8, background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline)', borderRadius: 10, padding: '12px 16px' }}>
+              <Icon name={building ? 'refresh' : 'info'} size={15} className={`text-pb-accent ${building ? 'iq-spin' : ''}`} />
+              <span className="text-pb-dim" style={{ fontSize: 12.5 }}>
+                {building
+                  ? 'Building their live dossier… the game plan and danger players will fill in shortly.'
+                  : 'Live dossier unavailable — the head-to-head below is from data we already hold.'}
+              </span>
+            </div>
+          )}
+
+          {/* three columns */}
+          <div className="flex" style={{ gap: 22 }}>
+            <Column title="Get these out" accent="var(--pb-red)">
+              {dangerBat.length
+                ? dangerBat.slice(0, 3).map((b, i) => (
+                  <PlayerRow key={b.player_id || i} name={surname(b.name)}
+                    line={`${b.runs ?? 0} @ ${a2(b.average)}`}
+                    note={dismissPlan(b.name) || b.plan || b.key_note} />
                 ))
-                : <div style={{ color: MUTED, fontSize: 12 }}>—</div>}
-            </Section>
-            <Section title="Danger bowlers">
-              {ready && dossier.danger_bowlers?.length
-                ? dossier.danger_bowlers.slice(0, 5).map(b => (
-                  <PlayerLine key={b.player_id} name={b.name} stat={`${b.wickets}w @ ${num(b.average)}`} note={b.plan} />
+                : <Empty className="text-pb-faint text-[11.5px]">{building ? 'Loading…' : 'No standout batters identified.'}</Empty>}
+            </Column>
+
+            <div style={{ width: 1, background: 'var(--pb-hairline)' }} />
+
+            <Column title="New-ball threat" accent="var(--pb-accent)">
+              {dangerBowl.length
+                ? dangerBowl.slice(0, 3).map((b, i) => (
+                  <PlayerRow key={b.player_id || i} name={surname(b.name)}
+                    line={`${b.wickets ?? 0}w @ ${a2(b.average)}`}
+                    note={b.plan || b.key_note} />
                 ))
-                : <div style={{ color: MUTED, fontSize: 12 }}>—</div>}
-            </Section>
-            {ready && dossier.partnership_insight && (
-              <Section title="Their batting shape"><div style={{ fontSize: 12.5, color: INK }}>{dossier.partnership_insight}</div></Section>
+                : <Empty className="text-pb-faint text-[11.5px]">{building ? 'Loading…' : 'No standout bowlers identified.'}</Empty>}
+            </Column>
+
+            <div style={{ width: 1, background: 'var(--pb-hairline)' }} />
+
+            <Column title="Our edge" accent="var(--pb-brand)">
+              {(ourBat.length || ourBowl.length)
+                ? <>
+                  {ourBat.slice(0, 2).map((p, i) => (
+                    <PlayerRow key={p.player_id || `b${i}`} name={surname(p.name)}
+                      line={`${p.runs ?? 0} @ ${a2(p.average)}`} note="Scores heavily against them" />
+                  ))}
+                  {ourBowl.slice(0, 2).map((p, i) => (
+                    <PlayerRow key={p.player_id || `w${i}`} name={surname(p.name)}
+                      line={`${p.wickets ?? 0}w @ ${a2(p.average)}`} note="Has their number — bowl him long" />
+                  ))}
+                </>
+                : <Empty className="text-pb-faint text-[11.5px]">No prior record against them.</Empty>}
+            </Column>
+          </div>
+
+          {/* footer — win/lose + toss */}
+          <div className="flex flex-wrap border-t border-pb-hairline" style={{ gap: 22, marginTop: 16, paddingTop: 13 }}>
+            {ready && dossier.how_they_lose?.[0] && (
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <Eyebrow className="text-pb-brand">They lose when</Eyebrow>
+                <div className="text-pb-dim" style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 4 }}>{dossier.how_they_lose[0]}</div>
+              </div>
+            )}
+            {ready && dossier.how_they_win?.[0] && (
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <Eyebrow className="text-pb-red">They win when</Eyebrow>
+                <div className="text-pb-dim" style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 4 }}>{dossier.how_they_win[0]}</div>
+              </div>
+            )}
+            {gp?.key_warning && (
+              <div style={{ minWidth: 200, flex: 1 }}>
+                <Eyebrow className="text-pb-amber">At the toss</Eyebrow>
+                <div className="flex items-start" style={{ gap: 5, marginTop: 4 }}>
+                  <Tag tone="amber">Watch</Tag>
+                  <span className="text-pb-dim" style={{ fontSize: 11.5, lineHeight: 1.4 }}>{gp.key_warning}</span>
+                </div>
+              </div>
+            )}
+            {ready && (dossier.coverage?.notes?.length > 0) && !gp?.key_warning && !dossier.how_they_win?.[0] && !dossier.how_they_lose?.[0] && (
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <Eyebrow>Coverage</Eyebrow>
+                <div className="text-pb-faint" style={{ fontSize: 11, lineHeight: 1.4, marginTop: 4 }}>{dossier.coverage.notes[0]}</div>
+              </div>
             )}
           </div>
 
-          <div>
-            {matchups.length > 0 && (
-              <Section title="Our bowler match-ups">
-                {matchups.slice(0, 6).map((m, i) => (
-                  <PlayerLine key={i} name={`${m.bowler} ▸ ${m.batter}`} stat={`${m.dismissals}×`} />
-                ))}
-                <div style={{ fontSize: 10.5, color: MUTED, marginTop: 4 }}>Save these bowlers for these batters.</div>
-              </Section>
-            )}
-            {ready && (dossier.how_they_win?.length || dossier.how_they_lose?.length) ? (
-              <Section title="Win / lose">
-                {(dossier.how_they_win || []).slice(0, 2).map((b, i) => <div key={`w${i}`} style={{ fontSize: 12, padding: '2px 0' }}><span style={{ color: GREEN }}>▲</span> {b}</div>)}
-                {(dossier.how_they_lose || []).slice(0, 2).map((b, i) => <div key={`l${i}`} style={{ fontSize: 12, padding: '2px 0' }}><span style={{ color: RED }}>▼</span> {b}</div>)}
-              </Section>
-            ) : null}
-            {(ourBat.length > 0 || ourBowl.length > 0) && (
-              <Section title="Our edge vs them">
-                {ourBat.slice(0, 3).map(p => <PlayerLine key={p.player_id} name={p.name} stat={`${p.runs} @ ${num(p.average)}`} />)}
-                {ourBowl.slice(0, 2).map(p => <PlayerLine key={p.player_id} name={p.name} stat={`${p.wickets}w @ ${num(p.average)}`} />)}
-              </Section>
-            )}
+          <div className="iq-mono text-pb-faint text-center" style={{ fontSize: 8.5, marginTop: 14 }}>
+            Generated by BetterIQ from scorecard data · {new Date().toLocaleDateString()} · a starting plan, not gospel
           </div>
-        </div>
-
-        <div style={{ borderTop: `1px solid ${LINE}`, marginTop: 12, paddingTop: 8, fontSize: 10.5, color: MUTED }}>
-          Built from scorecards — a starting plan, not gospel. {h2h?.recent_form?.length ? `Recent form vs them: ${h2h.recent_form.join(' ')}.` : ''}
         </div>
       </div>
     </div>

@@ -1,570 +1,565 @@
+/* BetterIQ — Team analysis: the opposition lens, pointed at us.
+   Reads the GLOBAL Season + Team filter (useIQFilter). Single-season pulls one
+   overview; a season RANGE additionally plots win-rate-over-time across the
+   in-range seasons. Every section is guarded — any sub-object may be null. */
 import { useState, useEffect } from 'react'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
-import { Icon, Empty } from '../betterselect/ui'
-
-const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
+import {
+  Icon, Card, Stat, Note, Tag, Bar, Gauge, SplitBar, StackedBar,
+  Initials, KV, Empty, Tabs, PageIntro, Delta, a2,
+} from './ui'
+import { AreaChart } from './viz'
+import { useIQFilter, seasonsInRange } from './Context'
 
 const TABS = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'batting', label: 'Batting' },
-  { key: 'bowling', label: 'Bowling' },
-  { key: 'players', label: 'Players' },
+  { value: 'overview', label: 'Overview' },
+  { value: 'batting', label: 'Batting' },
+  { value: 'bowling', label: 'Bowling' },
+  { value: 'players', label: 'Players' },
 ]
 
-function Card({ title, right, children, accent = false }) {
-  return (
-    <div className="pb-card p-4 md:p-5" style={accent ? { borderColor: 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' } : undefined}>
-      {(title || right) && (
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <h3 className="font-display font-bold">{title}</h3>
-          {right}
-        </div>
-      )}
-      {children}
-    </div>
-  )
-}
+const ord = (k) => ({ 1: '1st', 2: '2nd', 3: '3rd' }[k] || `${k}th`)
+const pctTxt = (v) => (v === null || v === undefined ? '—' : `${v}%`)
+const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
+const bandColor = (v) => (v >= 70 ? 'var(--pb-brand)' : v >= 45 ? 'var(--pb-amber)' : 'var(--pb-red)')
 
-function Stat({ label, value, sub, tone }) {
+/* ── How we win / lose — bullet list with up/down glyphs ─────────────────── */
+function WinLoseList({ items, tone }) {
+  if (!items?.length) return <Empty>Not enough games to read a pattern yet.</Empty>
+  const color = tone === 'win' ? 'var(--pb-brand)' : 'var(--pb-red)'
+  const glyph = tone === 'win' ? '▲' : '▼'
   return (
-    <div className="text-center px-2.5 py-1.5">
-      <div className="font-display font-bold text-xl pb-num leading-none" style={tone ? { color: tone } : undefined}>{value}</div>
-      <div className="text-pb-faint text-[10px] mt-1 uppercase tracking-wide2">{label}</div>
-      {sub && <div className="text-pb-faintest text-[10px] mt-0.5">{sub}</div>}
-    </div>
-  )
-}
-
-function Bullets({ items, dir }) {
-  if (!items?.length) return <Empty>—</Empty>
-  const sym = dir === 'win' ? '▲' : '▼'
-  const color = dir === 'win' ? 'var(--pb-brand)' : 'var(--pb-red)'
-  return (
-    <ul className="space-y-1.5 text-sm">
-      {items.map((b, i) => <li key={i} className="flex gap-2"><span style={{ color }}>{sym}</span><span>{b}</span></li>)}
+    <ul className="space-y-2.5">
+      {items.map((b, i) => (
+        <li key={i} className="flex gap-2.5 text-[13.5px] leading-snug">
+          <span style={{ color }} className="shrink-0">{glyph}</span>
+          <span>{b}</span>
+        </li>
+      ))}
     </ul>
   )
 }
 
-// A small "how this is worked out" footnote for a card.
-function Note({ children }) {
-  return <div className="text-pb-faintest text-[11px] mt-2.5 leading-snug">{children}</div>
+/* ── Win rate over time (range mode only) ───────────────────────────────── */
+function SeasonCompare({ rows, loading }) {
+  if (loading) {
+    return <div className="iq-card p-6 animate-pulse text-pb-faint text-sm">Comparing seasons…</div>
+  }
+  const usable = (rows || []).filter(r => r.win_pct !== null && r.win_pct !== undefined)
+  if (usable.length < 2) return null
+  const first = usable[0].win_pct, last = usable[usable.length - 1].win_pct
+  return (
+    <Card accent eyebrow={`comparing ${usable.length} seasons`} title="Win rate over time"
+      right={<Delta value={last - first} suffix=" pts" />}>
+      <AreaChart points={usable.map(r => r.win_pct)} labels={usable.map(r => r.label)} format={v => `${v}%`} />
+      <Note>Win % per season across the selected range — record shown is over all games that season.</Note>
+    </Card>
+  )
 }
 
-export default function TeamAnalysis() {
-  const [seasons, setSeasons] = useState([])
-  const [seasonId, setSeasonId] = useState(null)   // null = not chosen yet; '' = all-time
-  const [grades, setGrades] = useState([])
-  const [gradeId, setGradeId] = useState('')       // '' = all teams
-  const [data, setData] = useState(null)
-  const [err, setErr] = useState(false)
-  const [tab, setTab] = useState('overview')
-
-  // Default to the latest season (a whole-history overview isn't very useful).
-  useEffect(() => {
-    api.iqTeamSeasons().then(ss => {
-      setSeasons(ss || [])
-      setSeasonId(prev => (prev === null ? (ss?.[0]?.season_id || '') : prev))
-    }).catch(() => { setSeasons([]); setSeasonId('') })
-  }, [])
-
-  // Teams (grades) available for the chosen season.
-  useEffect(() => {
-    if (seasonId === null) return
-    setGradeId('')
-    api.iqTeamGrades(seasonId || undefined).then(g => setGrades(g || [])).catch(() => setGrades([]))
-  }, [seasonId])
-
-  useEffect(() => {
-    if (seasonId === null) return
-    let alive = true
-    setData(null); setErr(false)
-    api.iqTeamOverview(seasonId || undefined, gradeId || undefined)
-      .then(d => { if (alive) setData(d) })
-      .catch(() => { if (alive) setErr(true) })
-    return () => { alive = false }
-  }, [seasonId, gradeId])
-
-  const r = data?.record
-  const b = data?.batting
-  const bw = data?.bowling
-  const inn = data?.innings
-  const maxP = Math.max(1, ...((data?.partnerships || []).map(p => p.avg_partnership || 0)))
-  const ord = (k) => ({ 1: '1st', 2: '2nd', 3: '3rd' }[k] || `${k}th`)
-
-  const selClass = "bg-pb-surface2 text-sm font-medium rounded-lg border px-3 h-[40px] text-pb-text border-pb-hairline focus:outline-none focus:border-pb-accent"
-
+/* ── Overview tab ───────────────────────────────────────────────────────── */
+function Overview({ d, isRange, compareRows, compareLoading }) {
+  const r = d.record
+  const inn = d.innings
   return (
-    <IQLayout title="Team analysis">
-      <p className="text-pb-faint text-sm mb-4 max-w-2xl">The opposition lens, pointed at us — how we win and lose, our batting & bowling shape, and where we're strong or fragile.</p>
+    <div className="space-y-5">
+      {isRange && <SeasonCompare rows={compareRows} loading={compareLoading} />}
 
-      {/* Prominent season + team filters */}
-      <div className="flex flex-wrap items-center gap-2 mb-5">
-        <div className="flex items-center gap-1.5">
-          <span className="text-pb-faint text-[11px] uppercase tracking-wide2">Season</span>
-          <select value={seasonId ?? ''} onChange={e => setSeasonId(e.target.value)} className={selClass}>
-            {seasons.map(s => <option key={s.season_id} value={s.season_id} className="bg-pb-surface">{s.name}</option>)}
-            <option value="" className="bg-pb-surface">All-time</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-pb-faint text-[11px] uppercase tracking-wide2">Team</span>
-          <select value={gradeId} onChange={e => setGradeId(e.target.value)} className={selClass} disabled={!grades.length}>
-            <option value="" className="bg-pb-surface">All teams</option>
-            {grades.map(g => <option key={g.grade_id} value={g.grade_id} className="bg-pb-surface">{g.name}</option>)}
-          </select>
+      {/* record + how we win/lose */}
+      <div className="grid gap-5 lg:grid-cols-[auto_1fr] items-stretch">
+        <Card className="flex items-center justify-center">
+          <div className="flex flex-col items-center px-4 py-1">
+            {r.win_pct === null || r.win_pct === undefined
+              ? <Stat label="Win rate" value="—" />
+              : <Gauge value={r.win_pct} size={130} label="Win rate" />}
+            <div className="iq-num text-pb-faint text-[12.5px] mt-2">
+              {r.wins}–{r.losses}{r.draws ? `–${r.draws}` : ''} from {r.matches}
+            </div>
+            <div className="flex gap-2 mt-3">
+              <Tag tone="faint">H {r.home?.wins ?? 0}/{r.home?.played ?? 0}</Tag>
+              <Tag tone="faint">A {r.away?.wins ?? 0}/{r.away?.played ?? 0}</Tag>
+            </div>
+          </div>
+        </Card>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Card eyebrow="patterns" title="How we win"><WinLoseList items={d.how_we_win} tone="win" /></Card>
+          <Card eyebrow="patterns" title="How we lose"><WinLoseList items={d.how_we_lose} tone="loss" /></Card>
         </div>
       </div>
 
-      {data === null && !err && <div className="pb-card p-5 animate-pulse text-pb-faint text-sm">Crunching our games…</div>}
-      {err && <div className="pb-card p-5"><Empty>Couldn't load team analysis.</Empty></div>}
-      {data && r && (
-        <>
-          {/* Tab bar */}
-          <div className="flex items-center gap-1 mb-4 border-b pb-hairline overflow-x-auto">
-            {TABS.map(t => (
-              <button key={t.key} onClick={() => setTab(t.key)}
-                className="px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors"
-                style={tab === t.key ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : { borderColor: 'transparent', color: 'var(--pb-faint)' }}>
-                {t.label}
-              </button>
+      {/* bat first vs chase + par/score bands */}
+      <div className="grid gap-5 lg:grid-cols-2 items-start">
+        {inn && (
+          <Card eyebrow="approach" title="Bat first vs chase">
+            <div className="grid grid-cols-2 gap-5 mb-4">
+              <div>
+                <div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-brand)' }}>{pctTxt(inn.bat_first?.win_pct)}</div>
+                <div className="iq-eyebrow mt-1.5">Batting first</div>
+                <div className="text-pb-faint text-[11px] mt-1 iq-num">{inn.bat_first?.wins ?? 0}/{inn.bat_first?.played ?? 0} · avg {num(inn.bat_first?.avg_score)}</div>
+              </div>
+              <div>
+                <div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-amber)' }}>{pctTxt(inn.chasing?.win_pct)}</div>
+                <div className="iq-eyebrow mt-1.5">Chasing</div>
+                <div className="text-pb-faint text-[11px] mt-1 iq-num">{inn.chasing?.wins ?? 0}/{inn.chasing?.played ?? 0} · avg target {num(inn.chasing?.avg_target)}</div>
+              </div>
+            </div>
+            <Note>Win % over decided games for each first-innings choice.</Note>
+          </Card>
+        )}
+
+        {d.score_bands?.length > 0 && (
+          <Card eyebrow="what score wins" title={inn?.par?.par_score != null ? `Par: ${inn.par.par_score}` : 'What score wins'}
+            right={inn?.par?.lowest_defended != null ? <span className="text-pb-faint text-[12px] iq-num">defended {inn.par.lowest_defended}</span> : null}>
+            <div className="space-y-2.5">
+              {d.score_bands.map((s, i) => (
+                <div key={s.band} className="flex items-center gap-3 text-[13px]">
+                  <span className="iq-mono text-pb-faint w-16 shrink-0">{s.band}</span>
+                  <div className="flex-1"><Bar pct={s.win_pct || 0} color={bandColor(s.win_pct || 0)} delay={i * 0.06} h={10} /></div>
+                  <span className="iq-num w-16 text-right font-semibold shrink-0">{pctTxt(s.win_pct)} <span className="text-pb-faintest">({s.played})</span></span>
+                </div>
+              ))}
+            </div>
+            <Note>Win rate when we post a first-innings total in each band (count of such games in brackets).</Note>
+          </Card>
+        )}
+      </div>
+
+      {/* by venue */}
+      {d.venues?.length > 0 && (
+        <Card eyebrow="home vs away" title="By venue">
+          <div className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
+            {d.venues.map(v => {
+              const winning = v.wins > v.losses
+              return (
+                <div key={v.venue}>
+                  <div className="flex items-center justify-between mb-1.5 gap-2">
+                    <span className="text-[13.5px] truncate">{v.venue}</span>
+                    <span className="iq-num text-[13px] whitespace-nowrap" style={{ color: winning ? 'var(--pb-brand)' : 'var(--pb-red)' }}>
+                      {v.wins}–{v.losses}<span className="text-pb-faintest">/{v.played}</span>
+                    </span>
+                  </div>
+                  <Bar pct={v.played ? (v.wins / v.played) * 100 : 0} color={winning ? 'var(--pb-brand)' : 'var(--pb-red)'} h={7} />
+                  {v.avg_score != null && <div className="text-pb-faintest text-[11px] mt-1 iq-num">avg score {v.avg_score}</div>}
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+/* ── Batting tab ────────────────────────────────────────────────────────── */
+function Batting({ d }) {
+  const b = d.batting || {}
+  const starts = d.starts
+  const maxP = Math.max(1, ...((d.partnerships || []).map(p => p.avg_partnership || 0)))
+  const c = d.collapses
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-5 lg:grid-cols-3">
+        <Card eyebrow="profile" title="Team batting">
+          <div className="space-y-1">
+            <Stat label="Avg score" value={num(b.avg_score)} count={false} />
+            <div className="pt-2 mt-2" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+              <KV label="High score" value={num(b.high_score)} />
+              <KV label="Low score" value={num(b.low_score)} />
+              <KV label="Wkts lost / inns" value={num(b.avg_wickets_lost)} />
+              <KV label="Boundary %" value={pctTxt(b.boundary_pct)} />
+            </div>
+          </div>
+          {b.top_order_pct != null && (
+            <div className="mt-4">
+              <div className="iq-eyebrow mb-1.5">Where our runs come from</div>
+              <SplitBar h={12} segments={[
+                { label: `Top 3 ${b.top_order_pct}%`, value: b.top_order_pct, color: 'var(--pb-accent)' },
+                { label: `Middle ${b.middle_pct}%`, value: b.middle_pct, color: 'var(--pb-amber)' },
+                { label: `Lower ${b.lower_pct}%`, value: b.lower_pct, color: 'var(--pb-dim)' },
+              ]} />
+              <div className="flex justify-between text-[11px] text-pb-faint mt-1.5 iq-num">
+                <span>Top 3 {b.top_order_pct}%</span><span>Mid {b.middle_pct}%</span><span>Lower {b.lower_pct}%</span>
+              </div>
+            </div>
+          )}
+        </Card>
+
+        {starts ? (
+          <Card eyebrow="opening stand" title="Our starts">
+            <div className="grid grid-cols-2 gap-3">
+              <Stat label="Avg" value={num(starts.avg)} count={false} />
+              <Stat label="Best" value={num(starts.best)} count={false} />
+            </div>
+            <div className="pt-3 mt-3" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+              <KV label="Median" value={num(starts.median)} />
+              <KV label="25+ / 50+" value={`${starts.over_25 ?? 0} / ${starts.over_50 ?? 0}`} />
+              {starts.after_good && <KV label={`After good (≥${starts.good_threshold})`} value={`${pctTxt(starts.after_good.win_pct)} · ${starts.after_good.played}g`} tone="win" />}
+              {starts.after_poor && <KV label={`After poor (<${starts.good_threshold})`} value={`${pctTxt(starts.after_poor.win_pct)} · ${starts.after_poor.played}g`} tone="loss" />}
+            </div>
+            <Note>Opening (1st-wicket) partnership; win rate is over decided games.</Note>
+          </Card>
+        ) : (
+          <Card eyebrow="opening stand" title="Our starts"><Empty>No opening-stand data.</Empty></Card>
+        )}
+
+        <Card eyebrow="partnerships" title="Avg by wicket">
+          {d.partnerships?.length > 0 ? (
+            <div className="space-y-1.5">
+              {d.partnerships.map((p, i) => (
+                <div key={p.wicket} className="flex items-center gap-2 text-[12px]">
+                  <span className="iq-mono text-pb-faint w-7 shrink-0">{ord(p.wicket)}</span>
+                  <div className="flex-1"><Bar pct={(p.avg_partnership / maxP) * 100} delay={i * 0.05} h={7} /></div>
+                  <span className="iq-num w-9 text-right shrink-0">{p.avg_partnership}</span>
+                </div>
+              ))}
+            </div>
+          ) : <Empty>No partnership data.</Empty>}
+        </Card>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-2 items-start">
+        {d.batting_pairs?.length > 0 && (
+          <Card eyebrow="our most productive" title="Best partnership pairs">
+            <div className="space-y-2.5">
+              {d.batting_pairs.map((p, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 text-[13.5px]">
+                  <div className="min-w-0 flex items-baseline gap-2">
+                    <span className="font-semibold truncate">{p.a} &amp; {p.b}</span>
+                    {p.opening && <Tag tone="faint">opening</Tag>}
+                  </div>
+                  <div className="flex items-center gap-3 whitespace-nowrap text-pb-faint iq-num text-[12.5px]">
+                    <span>{p.stands} stands</span>
+                    <span className="font-semibold text-pb-text">{p.runs} @ {a2(p.avg)}</span>
+                    <span className="w-20 text-right">best {p.best}{p.fifties ? ` · ${p.fifties}×50` : ''}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Note>Average is runs per stand together (not a batting average).</Note>
+          </Card>
+        )}
+
+        {c && c.innings_analysed > 0 && (
+          <Card accent eyebrow="the recurring wobble" title="Collapse analysis"
+            right={<span className="text-pb-faint text-[12px]">3 wkts ≤{c.threshold}</span>}>
+            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+              <div>
+                <span className="iq-headline iq-num" style={{ fontSize: 28 }}>{pctTxt(c.collapse_pct)}</span>
+                <span className="text-pb-faint text-[13px] ml-2">of innings ({c.collapse_count}/{c.innings_analysed})</span>
+              </div>
+              {c.worst && <div className="text-[13px] text-pb-faint">Worst: <span className="iq-num font-semibold text-pb-text">3 for {c.worst.runs}</span> from the {ord(c.worst.start_wicket)}</div>}
+            </div>
+            {c.by_start_wicket?.length > 0 && (
+              <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+                <div className="iq-eyebrow mb-2">Where the wheels come off</div>
+                <div className="flex flex-wrap gap-2">
+                  {c.by_start_wicket.map(w => (
+                    <span key={w.wicket} className="text-[12px] px-2 py-1 rounded-lg iq-num" style={{ background: 'var(--pb-surface2)' }}>{ord(w.wicket)} wkt ×{w.count}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <Note>A collapse = losing any 3 wickets in a row for ≤{c.threshold} runs, reconstructed from stored partnerships.</Note>
+          </Card>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ── Bowling tab ────────────────────────────────────────────────────────── */
+function Bowling({ d }) {
+  const bw = d.bowling || {}
+  const attack = d.attack
+  const disc = d.discipline
+  const wq = d.wickets_quality
+  const maxShare = Math.max(1, ...((attack?.bowlers || []).map(a => a.wickets || 0)))
+
+  return (
+    <div className="space-y-5">
+      <Card eyebrow="summary" title="Attack overall">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <Stat label="Avg conceded" value={num(bw.avg_conceded)} count={false} />
+          <Stat label="Wkts / game" value={num(bw.avg_wickets_taken)} count={false} />
+          {attack && <Stat label="Pace" value={pctTxt(attack.pace_pct)} tone="accent" count={false} />}
+          {attack && <Stat label="Spin" value={pctTxt(attack.spin_pct)} count={false} />}
+        </div>
+        <Note>We concede {num(bw.avg_conceded)} on average per innings; wickets per game is across all completed games.</Note>
+      </Card>
+
+      {attack && attack.bowlers?.length > 0 && (
+        <Card eyebrow="who does what" title="Attack structure"
+          right={<span className="text-pb-faint text-[12px] iq-num">{attack.pace_pct}% pace · {attack.spin_pct}% spin</span>}>
+          <div className="space-y-3">
+            {attack.bowlers.map((a, i) => (
+              <div key={a.player_id} className="flex items-center gap-3">
+                <Initials name={a.name} size={34} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-[14px] truncate">{a.name}</span>
+                    <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">{a.wickets}w · avg {a2(a.avg)} · econ {a2(a.econ)}</span>
+                  </div>
+                  <div className="text-pb-faint text-[11.5px] mb-1">{a.role}{a.spin ? ' · spin' : a.pace ? ' · pace' : ''} · {a.overs} ov</div>
+                  <Bar pct={(a.wickets / maxShare) * 100} delay={i * 0.06} h={6} />
+                </div>
+              </div>
             ))}
           </div>
+          <Note><b>Strike</b> takes wickets quickly · <b>Containment</b> restricts runs · <b>Stock</b> workhorse. Frontline bowlers only; bar = share of wickets.</Note>
+        </Card>
+      )}
 
-          {/* ── Overview ─────────────────────────────────────────────────── */}
-          {tab === 'overview' && (
-            <div className="space-y-4">
-              <Card title="Record" right={<span className="text-pb-faint text-xs">{r.matches} matches</span>}>
-                <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-                  <Stat label="Won" value={r.wins} />
-                  <Stat label="Lost" value={r.losses} />
-                  <Stat label="Drawn" value={r.draws} />
-                  <Stat label="Win %" value={r.win_pct === null ? '—' : r.win_pct} tone="var(--pb-accent)" />
-                  <Stat label="At home" value={`${r.home.wins}/${r.home.played}`} sub="W/P" />
-                  <Stat label="Away" value={`${r.away.wins}/${r.away.played}`} sub="W/P" />
+      {disc && (
+        <Card eyebrow="discipline" title="Extras conceded"
+          right={<span className="text-pb-faint text-[12px] iq-num">{pctTxt(disc.extras_pct)} of runs</span>}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-1">
+            <Stat label="Extras / over" value={num(disc.extras_per_over)} count={false} />
+            <Stat label="Wides / over" value={num(disc.wides_per_over)} count={false} />
+            <Stat label="Total extras" value={num(disc.extras)} sub={`${disc.wides ?? 0}w · ${disc.no_balls ?? 0}nb`} count={false} />
+            <Stat label="% of runs" value={pctTxt(disc.extras_pct)} sub="conceded" count={false} />
+          </div>
+          {disc.bowlers?.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {disc.bowlers.map(bl => (
+                <div key={bl.player_id} className="flex items-center justify-between gap-3 text-[12.5px] py-0.5">
+                  <span className="font-medium truncate">{bl.name}</span>
+                  <span className="iq-num text-pb-faint whitespace-nowrap">{bl.overs} ov · {bl.wides}w · {bl.no_balls}nb · <span className="font-semibold text-pb-text">{num(bl.extras_per_over)}/ov</span></span>
                 </div>
-              </Card>
+              ))}
+            </div>
+          )}
+          <Note>Wides + no-balls per over, most disciplined first. Hidden when the scorecards don't record extras.</Note>
+        </Card>
+      )}
 
-              <div className="grid gap-4 lg:grid-cols-2">
-                <Card title="How we win"><Bullets items={data.how_we_win} dir="win" /></Card>
-                <Card title="How we lose"><Bullets items={data.how_we_lose} dir="lose" /></Card>
+      {wq && (
+        <Card eyebrow="wicket-taking" title="Quality of our wickets"
+          right={<span className="text-pb-faint text-[12px] iq-num">{num(wq.total)} wkts</span>}>
+          {wq.top_pct != null && (
+            <div className="mb-4">
+              <div className="iq-eyebrow mb-1.5">Which batters we remove</div>
+              <SplitBar h={12} segments={[
+                { label: `Top order ${wq.top}`, value: wq.top, color: 'var(--pb-accent)' },
+                { label: `Middle ${wq.middle}`, value: wq.middle, color: 'var(--pb-amber)' },
+                { label: `Tail ${wq.tail}`, value: wq.tail, color: 'var(--pb-dim)' },
+              ]} />
+              <div className="flex justify-between text-[11px] text-pb-faint mt-1.5 iq-num">
+                <span>Top {wq.top_pct}%</span><span>Middle</span><span>Tail {wq.tail_pct}%</span>
               </div>
-
-              <Card title="Bat first vs chase">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}>
-                    <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Batting first</div>
-                    <div className="font-display font-bold text-2xl pb-num">{inn.bat_first.win_pct === null ? '—' : `${inn.bat_first.win_pct}%`}</div>
-                    <div className="text-pb-faintest text-[11px]">{inn.bat_first.wins}/{inn.bat_first.played} won · avg {num(inn.bat_first.avg_score)}</div>
-                  </div>
-                  <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}>
-                    <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Chasing</div>
-                    <div className="font-display font-bold text-2xl pb-num">{inn.chasing.win_pct === null ? '—' : `${inn.chasing.win_pct}%`}</div>
-                    <div className="text-pb-faintest text-[11px]">{inn.chasing.wins}/{inn.chasing.played} won · avg target {num(inn.chasing.avg_target)}</div>
-                  </div>
-                </div>
-              </Card>
-
-              {data.score_bands?.length > 0 && (
-                <Card title="What score wins" right={<span className="text-pb-faint text-xs">batting first</span>}>
-                  {inn.par?.par_score != null && (
-                    <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mb-3 pb-3 border-b pb-hairline">
-                      <div><span className="font-display font-bold text-2xl pb-num">{inn.par.par_score}</span><span className="text-pb-faint text-sm ml-2">par (median winning total)</span></div>
-                      {inn.par.lowest_defended != null && <div className="text-sm text-pb-faint">Lowest defended: <span className="pb-num font-semibold">{inn.par.lowest_defended}</span></div>}
-                    </div>
-                  )}
-                  <div className="space-y-1.5">
-                    {data.score_bands.map(s => (
-                      <div key={s.band} className="flex items-center gap-2 text-sm">
-                        <span className="w-16 text-pb-faint shrink-0">{s.band}</span>
-                        <div className="flex-1 h-2 rounded-full bg-pb-surface2 overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${s.win_pct || 0}%`, background: 'var(--pb-accent)' }} />
-                        </div>
-                        <span className="w-20 text-right pb-num shrink-0">{s.win_pct === null ? '—' : `${s.win_pct}%`} <span className="text-pb-faintest">({s.played})</span></span>
-                      </div>
-                    ))}
-                  </div>
-                  <Note>Win rate when we post a first-innings total in each band — the count of such games in brackets.</Note>
-                </Card>
-              )}
-
-              {data.venues?.length > 0 && (
-                <Card title="By venue">
-                  <div className="overflow-x-auto -mx-1">
-                    <table className="w-full text-sm">
-                      <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
-                        <th className="py-1 px-1 font-medium">Ground</th>
-                        <th className="py-1 px-1 font-medium text-right">Played</th>
-                        <th className="py-1 px-1 font-medium text-right">W–L</th>
-                        <th className="py-1 px-1 font-medium text-right">Avg score</th>
-                      </tr></thead>
-                      <tbody>
-                        {data.venues.map(v => (
-                          <tr key={v.venue} className="border-t pb-hairline">
-                            <td className="py-1.5 px-1 truncate max-w-[220px]">{v.venue}</td>
-                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{v.played}</td>
-                            <td className="py-1.5 px-1 text-right pb-num">{v.wins}–{v.losses}</td>
-                            <td className="py-1.5 px-1 text-right pb-num">{num(v.avg_score)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
-              )}
             </div>
           )}
-
-          {/* ── Batting ──────────────────────────────────────────────────── */}
-          {tab === 'batting' && (
-            <div className="space-y-4">
-              <Card title="Batting profile">
-                <div className="flex flex-wrap items-center gap-1 sm:gap-2 mb-3">
-                  <Stat label="Avg score" value={num(b.avg_score)} />
-                  <Stat label="High" value={num(b.high_score)} />
-                  <Stat label="Low" value={num(b.low_score)} />
-                  <Stat label="Wkts lost" value={num(b.avg_wickets_lost)} sub="avg" />
-                  <Stat label="Boundary %" value={b.boundary_pct === null ? '—' : `${b.boundary_pct}%`} />
-                </div>
-                {b.top_order_pct !== null && (
-                  <div>
-                    <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1.5">Where our runs come from</div>
-                    <div className="flex h-2.5 rounded-full overflow-hidden bg-pb-surface2">
-                      <div title={`Top 3: ${b.top_order_pct}%`} style={{ flexGrow: b.top_order_pct, background: 'var(--pb-accent)' }} />
-                      <div title={`Middle: ${b.middle_pct}%`} style={{ flexGrow: b.middle_pct, background: 'var(--pb-amber)' }} />
-                      <div title={`Lower: ${b.lower_pct}%`} style={{ flexGrow: b.lower_pct, background: 'var(--pb-dim)' }} />
-                    </div>
-                    <div className="flex justify-between text-[11px] text-pb-faint mt-1">
-                      <span>Top 3 · {b.top_order_pct}%</span><span>Middle · {b.middle_pct}%</span><span>Lower · {b.lower_pct}%</span>
-                    </div>
-                  </div>
-                )}
-              </Card>
-
-              {data.starts && (
-                <Card title="Our starts" right={<span className="text-pb-faint text-xs">opening stand</span>}>
-                  <div className="flex flex-wrap items-center gap-1 sm:gap-2 mb-3">
-                    <Stat label="Avg" value={num(data.starts.avg)} />
-                    <Stat label="Median" value={num(data.starts.median)} />
-                    <Stat label="Best" value={num(data.starts.best)} />
-                    <Stat label="25+ / 50+" value={`${data.starts.over_25}/${data.starts.over_50}`} sub={`of ${data.starts.innings}`} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}>
-                      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">After a good start (≥{data.starts.good_threshold})</div>
-                      <div className="font-display font-bold text-2xl pb-num">{data.starts.after_good.win_pct == null ? '—' : `${data.starts.after_good.win_pct}%`}</div>
-                      <div className="text-pb-faintest text-[11px]">{data.starts.after_good.played} games</div>
-                    </div>
-                    <div className="rounded-xl p-3" style={{ background: 'var(--pb-surface2)' }}>
-                      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">After a poor start (&lt;{data.starts.good_threshold})</div>
-                      <div className="font-display font-bold text-2xl pb-num">{data.starts.after_poor.win_pct == null ? '—' : `${data.starts.after_poor.win_pct}%`}</div>
-                      <div className="text-pb-faintest text-[11px]">{data.starts.after_poor.played} games</div>
-                    </div>
-                  </div>
-                  <Note>Opening partnership (1st wicket) from our innings; win rate is over decided games.</Note>
-                </Card>
-              )}
-
-              {data.partnerships?.length > 0 && (
-                <Card title="Our partnerships" right={<span className="text-pb-faint text-xs">avg by wicket</span>}>
-                  <div className="space-y-1">
-                    {data.partnerships.map(p => (
-                      <div key={p.wicket} className="flex items-center gap-2 text-[12px]">
-                        <span className="w-7 text-pb-faint shrink-0">{ord(p.wicket)}</span>
-                        <div className="flex-1 h-2 rounded-full bg-pb-surface2 overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${Math.round((p.avg_partnership / maxP) * 100)}%`, background: 'var(--pb-accent)' }} />
-                        </div>
-                        <span className="w-9 text-right pb-num shrink-0">{p.avg_partnership}</span>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
-
-              {data.batting_pairs?.length > 0 && (
-                <Card title="Best partnerships" right={<span className="text-pb-faint text-xs">by pair</span>}>
-                  <div className="space-y-0.5">
-                    {data.batting_pairs.map((p, i) => (
-                      <div key={i} className="flex items-center justify-between gap-3 text-sm py-0.5">
-                        <div className="min-w-0 flex items-baseline gap-2">
-                          <span className="truncate">{p.a} &amp; {p.b}</span>
-                          {p.opening && <span className="text-pb-faintest text-[11px] shrink-0">opening</span>}
-                        </div>
-                        <div className="flex items-center gap-3 whitespace-nowrap text-pb-faint pb-num">
-                          <span>{p.stands} stands</span>
-                          <span className="font-semibold">{p.runs} @ {p.avg ?? '—'}</span>
-                          <span className="w-20 text-right">best {p.best}{p.fifties ? ` · ${p.fifties}×50` : ''}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <Note>Average is runs per stand together (not a batting average).</Note>
-                </Card>
-              )}
-
-              {data.collapses && data.collapses.innings_analysed > 0 && (
-                <Card title="Collapse analysis" right={<span className="text-pb-faint text-xs">3 wkts for ≤{data.collapses.threshold}</span>}>
-                  <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
-                    <div>
-                      <span className="font-display font-bold text-2xl pb-num">{data.collapses.collapse_pct}%</span>
-                      <span className="text-pb-faint text-sm ml-2">of innings ({data.collapses.collapse_count}/{data.collapses.innings_analysed})</span>
-                    </div>
-                    {data.collapses.worst && (
-                      <div className="text-sm text-pb-faint">Worst: <span className="pb-num font-semibold">3 for {data.collapses.worst.runs}</span> from the {ord(data.collapses.worst.start_wicket)} wkt</div>
-                    )}
-                  </div>
-                  {data.collapses.by_start_wicket?.length > 0 && (
-                    <div className="mt-3 pt-3 border-t pb-hairline">
-                      <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1.5">Where the wheels come off</div>
-                      <div className="flex flex-wrap gap-2">
-                        {data.collapses.by_start_wicket.map(w => (
-                          <span key={w.wicket} className="text-[12px] px-2 py-0.5 rounded-full" style={{ background: 'var(--pb-surface2)' }}>{ord(w.wicket)} wkt <span className="pb-num text-pb-faint">×{w.count}</span></span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <Note>A collapse = losing any 3 wickets in a row for ≤{data.collapses.threshold} runs, reconstructed from stored partnerships.</Note>
-                </Card>
-              )}
+          <div className="grid grid-cols-3 gap-3">
+            <Stat label="Set (30+)" value={pctTxt(wq.set_pct)} sub="of scalps" count={false} />
+            <Stat label="New (<10)" value={pctTxt(wq.new_pct)} sub="of scalps" count={false} />
+            <Stat label="Wickets" value={num(wq.total)} count={false} />
+          </div>
+          {wq.dismissals?.length > 0 && (
+            <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+              <div className="iq-eyebrow mb-2.5">How we take them</div>
+              <StackedBar data={wq.dismissals.map(x => ({ type: x.type, count: x.pct, pct: x.pct }))} />
             </div>
           )}
+          <Note>From wickets credited to our bowlers; “set” = the batter had 30+ when out, “new” = under 10.</Note>
+        </Card>
+      )}
+    </div>
+  )
+}
 
-          {/* ── Bowling ──────────────────────────────────────────────────── */}
-          {tab === 'bowling' && (
-            <div className="space-y-4">
-              <Card title="Bowling summary">
-                <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-                  <Stat label="Avg conceded" value={num(bw.avg_conceded)} />
-                  <Stat label="Wkts / game" value={num(bw.avg_wickets_taken)} />
+/* ── Players tab ────────────────────────────────────────────────────────── */
+function Players({ d }) {
+  const cap = d.captaincy
+  const roles = d.role_ratings
+  const ar = d.all_rounders
+  const fld = d.fielding
+  const maxRating = Math.max(1, ...((ar || []).map(a => Math.abs(a.diff || 0))))
+  const nothing = !cap?.length && !roles?.length && !ar?.length && !(fld?.fielders?.length || fld?.keepers?.length)
+
+  if (nothing) return <Card><Empty>Not enough per-player data in this period.</Empty></Card>
+
+  return (
+    <div className="space-y-5">
+      {cap?.length > 0 && (
+        <Card eyebrow="leadership" title="Captaincy" right={<span className="text-pb-faint text-[12px]">record as skipper</span>}>
+          <div className="space-y-3">
+            {cap.map(c => (
+              <div key={c.player_id} className="flex items-center gap-3">
+                <Initials name={c.name} size={34} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-semibold text-[14px] truncate">{c.name}</span>
+                    <span className="iq-num font-bold text-[14px]" style={{ color: c.win_pct != null && c.win_pct >= 50 ? 'var(--pb-brand)' : 'var(--pb-text)' }}>{pctTxt(c.win_pct)}</span>
+                  </div>
+                  <div className="text-pb-faint text-[12px] mt-0.5 iq-num">
+                    {c.wins}–{c.losses}–{c.draws} from {c.led} · avg {num(c.avg_score)}{c.finals ? ` · finals ${c.finals_won}/${c.finals}` : ''}
+                  </div>
                 </div>
-              </Card>
+              </div>
+            ))}
+          </div>
+          <Note>Win % over decided games (draws excluded); avg score is our total in games they led. Min 3 games. Toss decisions aren't in our data.</Note>
+        </Card>
+      )}
 
-              {data.attack && data.attack.bowlers?.length > 0 && (
-                <Card title="Bowling attack" right={<span className="text-pb-faint text-xs">pace vs spin</span>}>
-                  <div className="flex items-center gap-2 text-[11px] mb-3">
-                    <span className="text-pb-faint w-9">Mix</span>
-                    <div className="flex-1 h-3 rounded-full overflow-hidden flex bg-pb-surface2">
-                      <div className="h-full" style={{ width: `${data.attack.pace_pct}%`, background: 'var(--pb-accent)' }} title={`Pace ${data.attack.pace_pct}%`} />
-                      <div className="h-full" style={{ width: `${data.attack.spin_pct}%`, background: 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' }} title={`Spin ${data.attack.spin_pct}%`} />
+      <div className="grid gap-5 lg:grid-cols-2 items-start">
+        {ar?.length > 0 && (
+          <Card eyebrow="role-adjusted" title="All-rounders" right={<span className="text-pb-faint text-[12px]">bat − bowl avg</span>}>
+            <div className="space-y-3">
+              {ar.map((a, i) => (
+                <div key={a.player_id} className="flex items-center gap-3">
+                  <Initials name={a.name} size={32} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-[13.5px] truncate">{a.name}</span>
+                      {a.diff != null && <span className="iq-num font-bold text-[13px]" style={{ color: a.diff >= 0 ? 'var(--pb-brand)' : 'var(--pb-amber)' }}>{a.diff >= 0 ? '+' : ''}{a2(a.diff)}</span>}
                     </div>
-                    <span className="pb-num text-pb-faint whitespace-nowrap">{data.attack.pace_pct}% pace · {data.attack.spin_pct}% spin</span>
+                    <div className="text-pb-faint text-[11.5px] mb-1 iq-num">{a.runs} @ {a2(a.bat_avg)} · {a.wickets}w @ {a2(a.bowl_avg)} · {a.role}</div>
+                    <Bar pct={(Math.abs(a.diff || 0) / maxRating) * 100} delay={i * 0.06} h={5} color={a.diff >= 0 ? 'var(--pb-accent)' : 'var(--pb-amber)'} />
                   </div>
-                  <div className="overflow-x-auto -mx-1">
-                    <table className="w-full text-sm">
-                      <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
-                        <th className="py-1 px-1 font-medium">Bowler</th>
-                        <th className="py-1 px-1 font-medium text-right">Overs</th>
-                        <th className="py-1 px-1 font-medium text-right">Wkts</th>
-                        <th className="py-1 px-1 font-medium text-right">Avg</th>
-                        <th className="py-1 px-1 font-medium text-right">Econ</th>
-                        <th className="py-1 px-1 font-medium">Role</th>
-                      </tr></thead>
-                      <tbody>
-                        {data.attack.bowlers.map(bl => (
-                          <tr key={bl.player_id} className="border-t pb-hairline">
-                            <td className="py-1.5 px-1 font-medium whitespace-nowrap">{bl.name} {bl.spin ? <span className="text-pb-faintest text-[10px]">spin</span> : bl.pace ? <span className="text-pb-faintest text-[10px]">pace</span> : null}</td>
-                            <td className="py-1.5 px-1 text-right pb-num">{bl.overs}</td>
-                            <td className="py-1.5 px-1 text-right pb-num">{bl.wickets}</td>
-                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{bl.avg ?? '—'}</td>
-                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{bl.econ}</td>
-                            <td className="py-1.5 px-1 text-[11px] text-pb-faint">{bl.role}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <Note>Role: <b>Strike</b> takes wickets quickly · <b>Containment</b> restricts runs · <b>Stock</b> workhorse. Frontline bowlers only.</Note>
-                </Card>
-              )}
-
-              {data.discipline && (
-                <Card title="Bowling discipline" right={<span className="text-pb-faint text-xs">extras conceded</span>}>
-                  <div className="flex flex-wrap items-center gap-1 sm:gap-2 mb-3">
-                    <Stat label="Extras/over" value={num(data.discipline.extras_per_over)} />
-                    <Stat label="Wides/over" value={num(data.discipline.wides_per_over)} />
-                    <Stat label="Extras" value={num(data.discipline.extras)} sub={`${data.discipline.wides}w · ${data.discipline.no_balls}nb`} />
-                    <Stat label="% of runs" value={data.discipline.extras_pct == null ? '—' : `${data.discipline.extras_pct}%`} sub="conceded" />
-                  </div>
-                  {data.discipline.bowlers?.length > 0 && (
-                    <div className="overflow-x-auto -mx-1">
-                      <table className="w-full text-sm">
-                        <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
-                          <th className="py-1 px-1 font-medium">Bowler</th>
-                          <th className="py-1 px-1 font-medium text-right">Overs</th>
-                          <th className="py-1 px-1 font-medium text-right">Wd</th>
-                          <th className="py-1 px-1 font-medium text-right">Nb</th>
-                          <th className="py-1 px-1 font-medium text-right">Extras/over</th>
-                        </tr></thead>
-                        <tbody>
-                          {data.discipline.bowlers.map(bl => (
-                            <tr key={bl.player_id} className="border-t pb-hairline">
-                              <td className="py-1.5 px-1 font-medium whitespace-nowrap">{bl.name}</td>
-                              <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{bl.overs}</td>
-                              <td className="py-1.5 px-1 text-right pb-num">{bl.wides}</td>
-                              <td className="py-1.5 px-1 text-right pb-num">{bl.no_balls}</td>
-                              <td className="py-1.5 px-1 text-right pb-num font-semibold">{num(bl.extras_per_over)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <Note>Wides + no-balls per over, most disciplined first (min {seasonId || gradeId ? '10' : '50'} overs). Hidden when the scorecards don't record extras.</Note>
-                </Card>
-              )}
-
-              {data.wickets_quality && (
-                <Card title="Wicket-taking" right={<span className="text-pb-faint text-xs">who we dismiss</span>}>
-                  {data.wickets_quality.top_pct != null && (
-                    <div className="mb-3">
-                      <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1.5">Which batters we remove</div>
-                      <div className="flex h-2.5 rounded-full overflow-hidden bg-pb-surface2">
-                        <div title={`Top order (1–3): ${data.wickets_quality.top}`} style={{ flexGrow: data.wickets_quality.top, background: 'var(--pb-accent)' }} />
-                        <div title={`Middle (4–7): ${data.wickets_quality.middle}`} style={{ flexGrow: data.wickets_quality.middle, background: 'var(--pb-amber)' }} />
-                        <div title={`Tail (8+): ${data.wickets_quality.tail}`} style={{ flexGrow: data.wickets_quality.tail, background: 'var(--pb-dim)' }} />
-                      </div>
-                      <div className="flex justify-between text-[11px] text-pb-faint mt-1">
-                        <span>Top {data.wickets_quality.top_pct}%</span><span>Middle</span><span>Tail {data.wickets_quality.tail_pct}%</span>
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-                    <Stat label="Wickets" value={num(data.wickets_quality.total)} />
-                    <Stat label="Set (30+)" value={data.wickets_quality.set_pct == null ? '—' : `${data.wickets_quality.set_pct}%`} sub="of scalps" />
-                    <Stat label="New (<10)" value={data.wickets_quality.new_pct == null ? '—' : `${data.wickets_quality.new_pct}%`} sub="of scalps" />
-                  </div>
-                  {data.wickets_quality.dismissals?.length > 0 && (
-                    <div className="mt-3 pt-3 border-t pb-hairline">
-                      <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1.5">How we take them</div>
-                      <div className="flex flex-wrap gap-2">
-                        {data.wickets_quality.dismissals.map(d => (
-                          <span key={d.type} className="text-[12px] px-2 py-0.5 rounded-full capitalize" style={{ background: 'var(--pb-surface2)' }}>{d.type} <span className="pb-num text-pb-faint">{d.pct}%</span></span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <Note>From wickets credited to our bowlers; “set” = the batter had 30+ when out, “new” = under 10.</Note>
-                </Card>
-              )}
+                </div>
+              ))}
             </div>
-          )}
+            <Note>Ranked by batting average − bowling average; a positive figure leans batting.</Note>
+          </Card>
+        )}
 
-          {/* ── Players ──────────────────────────────────────────────────── */}
-          {tab === 'players' && (
-            <div className="space-y-4">
-              {data.captaincy?.length > 0 && (
-                <Card title="Captaincy" right={<span className="text-pb-faint text-xs">record as skipper</span>}>
-                  <div className="overflow-x-auto -mx-1">
-                    <table className="w-full text-sm">
-                      <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
-                        <th className="py-1 px-1 font-medium">Captain</th>
-                        <th className="py-1 px-1 font-medium text-right">Led</th>
-                        <th className="py-1 px-1 font-medium text-right">W–L–D</th>
-                        <th className="py-1 px-1 font-medium text-right">Win %</th>
-                        <th className="py-1 px-1 font-medium text-right">Avg score</th>
-                        <th className="py-1 px-1 font-medium text-right">Finals</th>
-                      </tr></thead>
-                      <tbody>
-                        {data.captaincy.map(c => (
-                          <tr key={c.player_id} className="border-t pb-hairline">
-                            <td className="py-1.5 px-1 font-medium whitespace-nowrap">{c.name}</td>
-                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{c.led}</td>
-                            <td className="py-1.5 px-1 text-right pb-num">{c.wins}–{c.losses}–{c.draws}</td>
-                            <td className="py-1.5 px-1 text-right pb-num font-semibold" style={c.win_pct != null && c.win_pct >= 50 ? { color: 'var(--pb-brand)' } : undefined}>{c.win_pct == null ? '—' : `${c.win_pct}%`}</td>
-                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{num(c.avg_score)}</td>
-                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{c.finals ? `${c.finals_won}/${c.finals}` : '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+        {roles?.length > 0 && (
+          <Card eyebrow="role-adjusted batting" title="Vs same-slot average">
+            <div className="space-y-2.5">
+              {roles.map(rr => (
+                <div key={rr.player_id} className="flex items-center justify-between gap-3 text-[13px]">
+                  <div className="min-w-0">
+                    <span className="font-semibold truncate">{rr.name}</span>
+                    <span className="text-pb-faint text-[11px] ml-2">{rr.role} · {rr.innings} inns</span>
                   </div>
-                  <Note>Win % is over decided games (draws/ties excluded); avg score is our total in games they led. Min 3 games as captain. Toss decisions aren't in our data.</Note>
-                </Card>
-              )}
-
-              {data.role_ratings?.length > 0 && (
-                <Card title="Role-adjusted batting" right={<span className="text-pb-faint text-xs">vs same-slot avg</span>}>
-                  <div className="overflow-x-auto -mx-1">
-                    <table className="w-full text-sm">
-                      <thead><tr className="text-pb-faint text-[11px] uppercase tracking-wide2 text-left">
-                        <th className="py-1 px-1 font-medium">Batter</th>
-                        <th className="py-1 px-1 font-medium">Slot</th>
-                        <th className="py-1 px-1 font-medium text-right">Inns</th>
-                        <th className="py-1 px-1 font-medium text-right">Avg</th>
-                        <th className="py-1 px-1 font-medium text-right">Slot avg</th>
-                        <th className="py-1 px-1 font-medium text-right">+/−</th>
-                      </tr></thead>
-                      <tbody>
-                        {data.role_ratings.map(r => (
-                          <tr key={r.player_id} className="border-t pb-hairline">
-                            <td className="py-1.5 px-1 font-medium whitespace-nowrap">{r.name}</td>
-                            <td className="py-1.5 px-1 text-[11px] text-pb-faint whitespace-nowrap">{r.role}</td>
-                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{r.innings}</td>
-                            <td className="py-1.5 px-1 text-right pb-num">{r.average}</td>
-                            <td className="py-1.5 px-1 text-right pb-num text-pb-faint">{r.role_average}</td>
-                            <td className="py-1.5 px-1 text-right pb-num font-semibold" style={{ color: r.delta >= 0 ? 'var(--pb-brand)' : 'var(--pb-red)' }}>{r.delta >= 0 ? '+' : ''}{r.delta}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="flex items-center gap-3 whitespace-nowrap iq-num text-pb-faint text-[12.5px]">
+                    <span>{a2(rr.average)} <span className="text-pb-faintest">vs {a2(rr.role_average)}</span></span>
+                    <span className="font-semibold w-14 text-right" style={{ color: rr.delta >= 0 ? 'var(--pb-brand)' : 'var(--pb-red)' }}>{rr.delta >= 0 ? '+' : ''}{a2(rr.delta)}</span>
                   </div>
-                  <Note>Each batter's average in their main position vs the club average for that slot — so an opener and a No. 8 aren't judged alike. Min {seasonId || gradeId ? '5' : '12'} innings.</Note>
-                </Card>
-              )}
+                </div>
+              ))}
+            </div>
+            <Note>Each batter's average in their main position vs the club average for that slot — so an opener and a No. 8 aren't judged alike.</Note>
+          </Card>
+        )}
+      </div>
 
-              {data.all_rounders?.length > 0 && (
-                <Card title="All-rounders" right={<span className="text-pb-faint text-xs">bat avg − bowl avg</span>}>
-                  <div className="space-y-0.5">
-                    {data.all_rounders.map(a => (
-                      <div key={a.player_id} className="flex items-center justify-between gap-3 text-sm py-0.5">
-                        <div className="min-w-0 flex items-baseline gap-2">
-                          <span className="truncate">{a.name}</span>
-                          <span className="text-pb-faintest text-[11px] shrink-0">{a.role}</span>
-                        </div>
-                        <div className="flex items-center gap-3 whitespace-nowrap pb-num text-pb-faint">
-                          <span>{a.runs} @ {a.bat_avg ?? '—'}</span>
-                          <span>{a.wickets}w @ {a.bowl_avg ?? '—'}</span>
-                          {a.diff != null && <span className="font-semibold w-12 text-right" style={{ color: a.diff >= 0 ? 'var(--pb-brand)' : 'var(--pb-amber)' }}>{a.diff >= 0 ? '+' : ''}{a.diff}</span>}
-                        </div>
-                      </div>
-                    ))}
+      {fld && (fld.fielders?.length > 0 || fld.keepers?.length > 0) && (
+        <div className="grid gap-5 lg:grid-cols-2 items-start">
+          <Card eyebrow="in the field" title="Top fielders">
+            {fld.fielders?.length ? (
+              <div className="space-y-1.5">
+                {fld.fielders.map(f => (
+                  <div key={f.player_id} className="flex justify-between gap-2 text-[13.5px] py-0.5">
+                    <span className="truncate">{f.name}</span>
+                    <span className="iq-num text-pb-faint whitespace-nowrap">{f.catches}c{f.run_outs ? ` · ${f.run_outs} ro` : ''}</span>
                   </div>
-                  <Note>Ranked by batting average − bowling average; a positive figure leans batting.</Note>
-                </Card>
-              )}
+                ))}
+              </div>
+            ) : <Empty>—</Empty>}
+            {fld.combos?.length > 0 && (
+              <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+                <div className="iq-eyebrow mb-1.5">Catching combos</div>
+                {fld.combos.slice(0, 5).map((c, i) => (
+                  <div key={i} className="text-[12px] text-pb-faint py-0.5 iq-num">{c.fielder} off {c.bowler} ×{c.count}</div>
+                ))}
+              </div>
+            )}
+          </Card>
+          <Card eyebrow="behind the stumps" title="Wicketkeepers">
+            {fld.keepers?.length ? (
+              <div className="space-y-1.5">
+                {fld.keepers.map(k => (
+                  <div key={k.player_id} className="flex justify-between gap-2 text-[13.5px] py-0.5">
+                    <span className="truncate">{k.name}</span>
+                    <span className="iq-num text-pb-faint whitespace-nowrap">{k.catches}c · {k.stumpings}st</span>
+                  </div>
+                ))}
+              </div>
+            ) : <Empty>No keeper data.</Empty>}
+          </Card>
+        </div>
+      )}
+    </div>
+  )
+}
 
-              {data.fielding && (data.fielding.fielders?.length > 0 || data.fielding.keepers?.length > 0) && (
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <Card title="Top fielders">
-                    {data.fielding.fielders?.length ? data.fielding.fielders.map(f => (
-                      <div key={f.player_id} className="flex justify-between gap-2 py-0.5 text-sm"><span className="truncate">{f.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{f.catches}c{f.run_outs ? ` · ${f.run_outs} ro` : ''}</span></div>
-                    )) : <Empty>—</Empty>}
-                    {data.fielding.combos?.length > 0 && (
-                      <div className="mt-3 pt-3 border-t pb-hairline">
-                        <div className="text-pb-faint text-[11px] uppercase tracking-wide2 mb-1">Catching combos</div>
-                        {data.fielding.combos.slice(0, 5).map((c, i) => <div key={i} className="text-[12px] text-pb-faint py-0.5">{c.fielder} off {c.bowler} <span className="pb-num">×{c.count}</span></div>)}
-                      </div>
-                    )}
-                  </Card>
-                  <Card title="Wicketkeepers">
-                    {data.fielding.keepers?.length ? data.fielding.keepers.map(k => (
-                      <div key={k.player_id} className="flex justify-between gap-2 py-0.5 text-sm"><span className="truncate">{k.name}</span><span className="pb-num text-pb-faint whitespace-nowrap">{k.catches}c · {k.stumpings}st</span></div>
-                    )) : <Empty>No keeper data.</Empty>}
-                  </Card>
+/* ── Page ───────────────────────────────────────────────────────────────── */
+export default function TeamAnalysis() {
+  const { ctx, seasons } = useIQFilter()
+  const [tab, setTab] = useState('overview')
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState(false)
+
+  // win-rate-over-time (range mode only)
+  const [compareRows, setCompareRows] = useState([])
+  const [compareLoading, setCompareLoading] = useState(false)
+
+  const seasonId = ctx?.season?.to?.id || null
+  const teamId = ctx?.team?.id || null
+  const isRange = ctx?.season?.mode === 'range'
+
+  // Single-season / headline overview (always for the chosen "to" season).
+  useEffect(() => {
+    if (!ctx) return
+    let alive = true
+    setData(null); setErr(false)
+    api.iqTeamOverview(seasonId || undefined, teamId || undefined)
+      .then(d => { if (alive) setData(d) })
+      .catch(() => { if (alive) setErr(true) })
+    return () => { alive = false }
+  }, [ctx, seasonId, teamId])
+
+  // Win-rate-over-time across the in-range seasons (range mode only).
+  useEffect(() => {
+    if (!ctx || !isRange) { setCompareRows([]); setCompareLoading(false); return }
+    const inRange = seasonsInRange(ctx, seasons)
+    if (inRange.length < 2) { setCompareRows([]); setCompareLoading(false); return }
+    let alive = true
+    setCompareLoading(true)
+    Promise.all(inRange.map(s =>
+      api.iqTeamOverview(s.id, teamId || undefined)
+        .then(d => ({ label: s.label, win_pct: d?.record?.win_pct ?? null }))
+        .catch(() => ({ label: s.label, win_pct: null }))
+    )).then(rows => {
+      if (!alive) return
+      setCompareRows(rows)
+      setCompareLoading(false)
+    })
+    return () => { alive = false }
+    // key on the concrete range + team so a filter change cancels the stale fetch
+  }, [ctx, isRange, teamId, seasonsInRange(ctx, seasons).map(s => s.id).join(',')])
+
+  const ready = !!ctx
+
+  return (
+    <IQLayout title="Team analysis">
+      <PageIntro>The opposition lens, pointed at us — how we win and lose, our batting & bowling shape, and where we're strong or fragile. Use the filter above to focus a season or compare across years.</PageIntro>
+
+      {!ready && <div className="iq-card p-6 animate-pulse text-pb-faint text-sm">Loading…</div>}
+
+      {ready && (
+        <>
+          <div className="mb-6"><Tabs value={tab} onChange={setTab} tabs={TABS} /></div>
+
+          {data === null && !err && <div className="iq-card p-6 animate-pulse text-pb-faint text-sm">Crunching our games…</div>}
+          {err && <div className="iq-card p-6"><Empty>Couldn't load team analysis.</Empty></div>}
+
+          {data && data.record && (
+            <div className="iq-fade">
+              {tab === 'overview' && <Overview d={data} isRange={isRange} compareRows={compareRows} compareLoading={compareLoading} />}
+              {tab === 'batting' && <Batting d={data} />}
+              {tab === 'bowling' && <Bowling d={data} />}
+              {tab === 'players' && <Players d={data} />}
+
+              {data.coverage?.notes?.length > 0 && (
+                <div className="text-pb-faintest text-[11px] mt-6 flex items-start gap-1.5">
+                  <Icon name="info" size={13} className="mt-0.5 shrink-0" />
+                  <span>{data.coverage.notes.join(' ')}</span>
                 </div>
               )}
-
-              {!data.all_rounders?.length && !data.captaincy?.length && !data.role_ratings?.length && !(data.fielding?.fielders?.length || data.fielding?.keepers?.length) && (
-                <Card><Empty>Not enough per-player data in this period.</Empty></Card>
-              )}
-            </div>
-          )}
-
-          {data.coverage?.notes?.length > 0 && (
-            <div className="text-pb-faintest text-[11px] mt-3 flex items-start gap-1.5">
-              <Icon name="info" size={13} className="mt-0.5 shrink-0" />
-              <span>{data.coverage.notes.join(' ')}</span>
             </div>
           )}
         </>
