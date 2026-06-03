@@ -2336,6 +2336,80 @@ async def get_club_summary(
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
 ) -> dict:
+    base = {
+        "total_games": 0,
+        "wins": 0,
+        "losses": 0,
+        "draws": 0,
+        "win_rate": 0,
+        "total_runs": 0,
+        "total_wickets": 0,
+        "highest_score": 0,
+        "total_players": 0,
+        "seasons": 0,
+    }
+
+    # When a specific grade is selected, the headline runs/wickets/players must
+    # come from the per-game tables (batting_innings / bowling_spells /
+    # fielding_stats joined to games.grade_id). The aggregate
+    # player_season_stats feed is participant-level / whole-club and carries no
+    # grade dimension, so filtering it by grade is impossible — it would just
+    # return the whole-club totals unchanged. This mirrors the grade_id branch
+    # of the batting / bowling leaderboards (g.grade_id = :grade_id), so the
+    # headline matches the Top Batters / Top Bowlers lists shown beside it.
+    # A grade is season-specific, so season_id is implied by the grade.
+    if grade_id:
+        res = await session.execute(
+            text("""
+                WITH gg AS (
+                    SELECT id FROM v_effective_games
+                    WHERE grade_id = CAST(:grade_id AS UUID)
+                ),
+                bat AS (
+                    SELECT bi.player_id, bi.runs
+                    FROM v_effective_batting_innings bi
+                    JOIN gg ON gg.id = bi.game_id
+                    JOIN players p ON p.id = bi.player_id
+                        AND p.organisation_id = CAST(:org_id AS UUID)
+                    WHERE NOT COALESCE(bi.did_not_bat, FALSE)
+                      AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                ),
+                bowl AS (
+                    SELECT bs.player_id, bs.wickets
+                    FROM v_effective_bowling_spells bs
+                    JOIN gg ON gg.id = bs.game_id
+                    JOIN players p ON p.id = bs.player_id
+                        AND p.organisation_id = CAST(:org_id AS UUID)
+                ),
+                fld AS (
+                    SELECT fs.player_id
+                    FROM v_effective_fielding_stats fs
+                    JOIN gg ON gg.id = fs.game_id
+                    JOIN players p ON p.id = fs.player_id
+                        AND p.organisation_id = CAST(:org_id AS UUID)
+                )
+                SELECT
+                    (SELECT COALESCE(SUM(runs), 0) FROM bat)     AS total_runs,
+                    (SELECT MAX(runs) FROM bat)                  AS highest_score,
+                    (SELECT COALESCE(SUM(wickets), 0) FROM bowl) AS total_wickets,
+                    (SELECT COUNT(*) FROM (
+                        SELECT player_id FROM bat
+                        UNION SELECT player_id FROM bowl
+                        UNION SELECT player_id FROM fld
+                     ) u)                                        AS total_players
+            """),
+            {"org_id": org_id, "grade_id": grade_id},
+        )
+        row = dict(res.mappings().first() or {})
+        base.update({
+            "total_runs": int(row.get("total_runs") or 0),
+            "total_wickets": int(row.get("total_wickets") or 0),
+            "highest_score": int(row.get("highest_score") or 0),
+            "total_players": int(row.get("total_players") or 0),
+            "seasons": 1,
+        })
+        return base
+
     where = "WHERE p.organisation_id = :org_id"
     params: dict = {"org_id": org_id}
     season_ids = await resolve_season_filter(session, org_id, season_id)
@@ -2358,18 +2432,14 @@ async def get_club_summary(
         params
     )
     row = dict(res.mappings().first() or {})
-    return {
-        "total_games": 0,
-        "wins": 0,
-        "losses": 0,
-        "draws": 0,
-        "win_rate": 0,
+    base.update({
         "total_runs": int(row.get("total_runs") or 0),
         "total_wickets": int(row.get("total_wickets") or 0),
         "highest_score": int(row.get("highest_score") or 0),
         "total_players": int(row.get("total_players") or 0),
         "seasons": int(row.get("seasons") or 0),
-    }
+    })
+    return base
 
 
 async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dict]:
