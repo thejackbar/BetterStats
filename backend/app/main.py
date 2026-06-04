@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -63,6 +63,47 @@ async def lifespan(app: FastAPI):
         ))
         await conn.execute(text(
             "ALTER TABLE player_availability ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'admin'"
+        ))
+        # BetterSelect → Net Manager: net/practice attendance + batting-queue
+        # sessions. Defensive idempotent creates so the API boots even if a
+        # numbered migration hasn't run yet (mirrors the self-service block).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS net_sessions (
+                id UUID PRIMARY KEY,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                session_date DATE NOT NULL,
+                label TEXT,
+                notes TEXT,
+                settings JSONB,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_net_sessions_org_date "
+            "ON net_sessions(organisation_id, session_date DESC)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS net_attendance (
+                id UUID PRIMARY KEY,
+                session_id UUID NOT NULL REFERENCES net_sessions(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                player_id UUID REFERENCES players(id) ON DELETE CASCADE,
+                guest_name TEXT,
+                batted BOOLEAN NOT NULL DEFAULT false,
+                position INTEGER,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                CONSTRAINT uq_net_attendance_session_player UNIQUE (session_id, player_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_net_attendance_player "
+            "ON net_attendance(player_id) WHERE player_id IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS net_settings JSONB"
         ))
         await conn.execute(text(
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS playhq_id TEXT"
@@ -627,6 +668,7 @@ app.include_router(fixtures.router, dependencies=[Depends(require_module("select
 app.include_router(teams.router, dependencies=[Depends(require_module("select"))])        # BetterSelect
 app.include_router(availability.router, dependencies=[Depends(require_module("select"))]) # BetterSelect
 app.include_router(selection.router, dependencies=[Depends(require_module("select"))])    # BetterSelect
+app.include_router(net_manager.router, dependencies=[Depends(require_module("select"))])  # BetterSelect (Net Manager)
 # Player-facing self-service availability (magic link + PIN). Unauthenticated by
 # design — it resolves the club from the link token and enforces entitlement +
 # enabled-flag itself, so it is NOT wrapped in require_module.

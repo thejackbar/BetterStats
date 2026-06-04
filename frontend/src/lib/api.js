@@ -931,6 +931,28 @@ export const api = {
   // powers the cross-screen "Selected" filter.
   bsSelectedPlayers: (on) => request(`/selection/selected-players?on=${encodeURIComponent(on)}`),
 
+  // ─── BetterSelect: Net Manager ──────────────────────────
+  // Active roster to check players in from (same pool as availability).
+  nmRoster: () => request('/nets/roster'),
+  // Club default timer/rotation settings.
+  nmGetSettings: () => request('/nets/settings'),
+  nmSetSettings: (data) =>
+    request('/nets/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  // Sessions (training days).
+  nmListSessions: (limit = 40) => request(`/nets/sessions?limit=${limit}`),
+  nmCreateSession: (data = {}) =>
+    request('/nets/sessions', { method: 'POST', body: JSON.stringify(data) }),
+  nmGetSession: (id) => request(`/nets/sessions/${id}`),
+  nmUpdateSession: (id, data) =>
+    request(`/nets/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  nmDeleteSession: (id) => request(`/nets/sessions/${id}`, { method: 'DELETE' }),
+  // Replace a session's attendance snapshot (checked-in players + guests, who batted).
+  nmSetAttendance: (id, attendees) =>
+    request(`/nets/sessions/${id}/attendance`, { method: 'PUT', body: JSON.stringify({ attendees }) }),
+  // Reports.
+  nmAttendanceReport: (days = 120) => request(`/nets/reports/attendance?days=${days}`),
+  nmPlayerAttendance: (playerId) => request(`/nets/players/${playerId}/attendance`),
+
   // ─── BetterSelect: Player profile ───────────────────────
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),
   bsUpdatePlayerProfile: (id, data) =>

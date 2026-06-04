@@ -89,6 +89,8 @@ const BsAvailability = lazy(() => import('./pages/admin/betterselect/AdminAvaila
 const BsSelection = lazy(() => import('./pages/admin/betterselect/AdminSelection'))
 const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminSelectionOverview'))
 const BsLadders = lazy(() => import('./pages/admin/betterselect/AdminLadders'))
+const BsNets = lazy(() => import('./pages/admin/betterselect/Nets'))
+const BsNetSession = lazy(() => import('./pages/admin/betterselect/NetSession'))
 const BetterIQHome = lazy(() => import('./pages/admin/betteriq/BetterIQHome'))
 const IqOpposition = lazy(() => import('./pages/admin/betteriq/OppositionScout'))
 const IqOppositionPlayer = lazy(() => import('./pages/admin/betteriq/OppositionPlayer'))
@@ -207,6 +209,8 @@ export default function App() {
           <Route path="/admin/betterselect/availability" element={<ProtectedRoute requireModule="select"><BsAvailability /></ProtectedRoute>} />
           <Route path="/admin/betterselect/selection" element={<ProtectedRoute requireModule="select"><BsSelectionOverview /></ProtectedRoute>} />
           <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute requireModule="select"><BsSelection /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/nets" element={<ProtectedRoute requireModule="select"><BsNets /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/nets/:id" element={<ProtectedRoute requireModule="select"><BsNetSession /></ProtectedRoute>} />
           <Route path="/admin/betterselect/ladders" element={<ProtectedRoute requireModule="select"><BsLadders /></ProtectedRoute>} />
 
           {/* BetterIQ module */}
