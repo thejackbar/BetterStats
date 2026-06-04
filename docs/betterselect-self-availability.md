@@ -1,5 +1,39 @@
 # Self-service availability — design note
 
+_Status: **built** (Phase 1 + the cheap Phase 2 wins). Owner: BetterSelect.
+Drafted May 2026, shipped June 2026 (v8.1)._
+
+## What shipped (June 2026, v8.1)
+
+Phase 1 in full, plus the low-cost Phase 2 niceties:
+
+- **Data** — migration `068`: `organisations.availability_link_token` (unique,
+  nullable, rotatable) + `availability_self_service_enabled` +
+  `availability_require_pin`; `player_availability.source` ('admin' | 'self').
+- **Public API** (`routers/public_availability.py`, prefix `/public/availability`,
+  unauthenticated — resolves the club from the token, checks the `select`
+  entitlement + enabled flag itself, so it's *not* wrapped in `require_module`):
+  `GET /{token}` (branding + active-player names), `POST /{token}/verify`
+  (last-4 PIN → signed HttpOnly `bs_avail` cookie, ~30d), `GET|POST /{token}/me`
+  (this player's dates + answers / upsert with `source='self'`),
+  `POST /{token}/switch`. Lockout after 5 wrong PINs / 15 min per player+IP plus
+  a per-IP throttle (`services/rate_limit.FailureTracker`).
+- **Admin API** (on the gated `availability` router): `GET /availability/self-service`,
+  `POST /availability/self-service` (enable + PIN toggle, mints a token on first
+  enable), `POST /availability/self-service/regenerate`. Returns a phone-coverage
+  count.
+- **Frontend** — public route `/avail/:token` (`pages/PublicAvailability.jsx`),
+  outside `ProtectedRoute`, own minimal header (global nav suppressed). Admin
+  panel `SelfServiceLinkPanel.jsx` on the Availability screen: enable/PIN
+  toggles, link, copy-link, copy-message, **client-side QR** (`qrcode`),
+  regenerate, phone-coverage nudge. Self-reported matrix cells get a corner dot.
+- **PIN default**: required, with a per-club off switch (resolves the open
+  decision). **Scope**: per-club link (v1). **Session**: 30 days.
+
+The rest of this note is the original design (kept for the rationale).
+
+---
+
 _Status: proposed (not built). Owner: BetterSelect. Drafted May 2026._
 
 ## Goal

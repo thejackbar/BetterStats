@@ -17,7 +17,10 @@ function ConditionalNavbar() {
   const { pathname } = useLocation()
   const isMarketing =
     MARKETING_PATHS.includes(pathname) || pathname.startsWith('/blog/') || pathname.startsWith('/modules/')
-  return isMarketing ? null : <Navbar />
+  // The public self-service availability page is a standalone, white-labelled
+  // mobile page — it renders its own minimal header, no club nav.
+  const isStandalone = pathname.startsWith('/avail/')
+  return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
 // Mounted once at the App root; pings /api/usage/event whenever the
@@ -114,6 +117,9 @@ const PlayHQScorecard = lazy(() => import('./pages/PlayHQScorecard'))
 const ClubInactive = lazy(() => import('./pages/ClubInactive'))
 const Onboard = lazy(() => import('./pages/Onboard'))
 
+// Public, login-free self-service availability (BetterSelect magic link + PIN)
+const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
+
 const PageLoader = () => (
   <div className="flex justify-center py-24">
     <LoadingSpinner size="lg" />
@@ -155,6 +161,9 @@ export default function App() {
 
           {/* Auth */}
           <Route path="/login" element={<Login />} />
+
+          {/* Public self-service availability (no login — magic link + PIN) */}
+          <Route path="/avail/:token" element={<PublicAvailability />} />
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />

@@ -900,6 +900,24 @@ export const api = {
   bsDeleteAvailabilityPeriod: (id) =>
     request(`/availability/periods/${id}`, { method: 'DELETE' }),
 
+  // ─── BetterSelect: self-service availability link (admin) ───
+  bsGetSelfService: () => request('/availability/self-service'),
+  bsSetSelfService: (data) =>
+    request('/availability/self-service', { method: 'POST', body: JSON.stringify(data) }),
+  bsRegenerateSelfService: () =>
+    request('/availability/self-service/regenerate', { method: 'POST' }),
+
+  // ─── Public: self-service availability (no admin auth; player cookie) ───
+  // Outside the admin surface — players reach these via the magic link + PIN.
+  availPublicLanding: (token) => request(`/public/availability/${token}`),
+  availPublicVerify: (token, player_id, pin) =>
+    request(`/public/availability/${token}/verify`, { method: 'POST', body: JSON.stringify({ player_id, pin }) }),
+  availPublicSwitch: (token) =>
+    request(`/public/availability/${token}/switch`, { method: 'POST' }),
+  availPublicMe: (token) => request(`/public/availability/${token}/me`),
+  availPublicSet: (token, data) =>
+    request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
+
   // ─── BetterSelect: Selection (lineups) ──────────────────
   bsSelectionOverview: () => request('/selection/overview'),
   bsGetSelection: (fixtureId) => request(`/selection/${fixtureId}`),

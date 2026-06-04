@@ -235,6 +235,16 @@ export default function Navbar() {
           <NavbarPlayerSearch orgId={club?.id} club={club} />
           <ThemeToggle />
 
+          {/* Admin entry — players/visitors on the public site can jump to the
+              club admin. Shows "Admin" once you're signed in, else "Admin Login". */}
+          <Link
+            to={user ? '/admin' : '/login'}
+            className="shrink-0 ml-2 hidden sm:inline-flex items-center font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-2.5 py-1.5"
+            title={user ? 'Go to admin' : 'Club admin login'}
+          >
+            {user ? 'ADMIN' : 'ADMIN LOGIN'}
+          </Link>
+
           {customLogo && (
             <Link
               to="/"

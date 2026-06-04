@@ -90,6 +90,15 @@ class Organisation(Base):
     subscription_status = Column(Text, nullable=False, server_default="active", default="active")
     renewal_date = Column(Date, nullable=True)
     billing_cycle = Column(Text, nullable=True)  # 'monthly' | 'annual' | None
+    # ─── BetterSelect: self-service player availability (migration 068) ───────
+    # Players set their own availability via one per-club magic link + a
+    # last-4-of-phone PIN — no accounts, no app. The token is the link's only
+    # secret; it's pinned publicly (group chat / QR) so it's low-trust by design
+    # and rotatable. require_pin lets a club drop the PIN gate (anyone who picks
+    # their name is trusted) — the spec's optional per-club toggle.
+    availability_link_token = Column(Text, nullable=True)
+    availability_self_service_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
+    availability_require_pin = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -392,6 +401,10 @@ class PlayerAvailability(Base):
     avail_date = Column(Date, nullable=False)
     status = Column(Text, nullable=False, server_default="NO_RESPONSE")  # AVAILABLE|UNAVAILABLE|MAYBE|NO_RESPONSE
     note = Column(Text, nullable=True)
+    # 'admin' (set in the matrix) | 'self' (the player, via the magic-link page).
+    # recorded_by is NULL for self-service, so source is what audits and badges a
+    # player-reported answer apart from an admin one (migration 068).
+    source = Column(Text, nullable=False, server_default="admin", default="admin")
     recorded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     recorded_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

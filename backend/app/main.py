@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, usage, fees, fixtures, teams, availability, selection, ladders, iq
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -43,6 +43,26 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_player_org_playhq_id "
             "ON players(organisation_id, playhq_id) WHERE playhq_id IS NOT NULL"
+        ))
+        # BetterSelect self-service availability (migration 068) — defensive
+        # idempotent adds so the API boots even if alembic hasn't run yet.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS availability_link_token TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "availability_self_service_enabled BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "availability_require_pin BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_org_availability_token "
+            "ON organisations(availability_link_token) WHERE availability_link_token IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE player_availability ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'admin'"
         ))
         await conn.execute(text(
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS playhq_id TEXT"
@@ -607,6 +627,10 @@ app.include_router(fixtures.router, dependencies=[Depends(require_module("select
 app.include_router(teams.router, dependencies=[Depends(require_module("select"))])        # BetterSelect
 app.include_router(availability.router, dependencies=[Depends(require_module("select"))]) # BetterSelect
 app.include_router(selection.router, dependencies=[Depends(require_module("select"))])    # BetterSelect
+# Player-facing self-service availability (magic link + PIN). Unauthenticated by
+# design — it resolves the club from the link token and enforces entitlement +
+# enabled-flag itself, so it is NOT wrapped in require_module.
+app.include_router(public_availability.router)                                            # BetterSelect (public)
 app.include_router(ladders.router)  # standings power public club pages — not gated
 app.include_router(iq.router, dependencies=[Depends(require_module("iq"))])               # BetterIQ
 

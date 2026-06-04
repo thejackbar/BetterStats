@@ -201,6 +201,59 @@ A recorded match-fee payment settles a member's games automatically, **oldest ga
 - Because status is derived, adding/removing a payment or editing `days_played` re-allocates automatically — **no migration, no stored flag to keep in sync**.
 - **Legacy, still live**: the `paid_payment_id` column and the `mark-paid` / `unmark` / `payments/bulk` endpoints still exist and still create `match_day` payments (which feed allocation), but no longer drive the per-row display. The old per-row MARK PAID / UNMARK buttons were removed from the member page in favour of a single "Record match-fee payment" box (`RecordMatchFeeForm`). The bulk-payment page still works (it reads the derived `is_paid` and creates payments).
 
+## BetterSelect — Self-service player availability (v8.1, Jun 2026)
+
+Players set their own availability with **no account, no app, no Facebook** — one
+per-club magic link + a last-4-of-phone PIN, shared by QR / group chat. Full
+design note: `docs/betterselect-self-availability.md`.
+
+- **Migration 068**: `organisations.availability_link_token` (unique, nullable,
+  **rotatable** — `secrets.token_urlsafe(24)`), `availability_self_service_enabled`,
+  `availability_require_pin` (default true). `player_availability.source`
+  (`'admin' | 'self'`) — `recorded_by` is NULL for self answers, so `source` is
+  the audit/badge signal. Idempotent ALTERs mirrored in `main.py` lifespan.
+- **Public router** `routers/public_availability.py` (prefix `/public/availability`,
+  **unauthenticated** — NOT wrapped in `require_module`; it resolves the club from
+  the token and checks `org_has_module(club, "select")` + the enabled flag itself,
+  so a disabled/downgraded club's link 404s). Endpoints: `GET /{token}` (branding
+  + active-player names), `POST /{token}/verify` ({player_id, pin} → signed
+  HttpOnly **`bs_avail`** cookie {club, pid, typ:'avail', ~30d}), `GET|POST
+  /{token}/me` (this player's dates + answers / upsert `source='self'`,
+  `recorded_by=NULL`), `POST /{token}/switch` (clear cookie). PIN gate =
+  last-4-of-`Player.phone` (strip non-digits). **Lockout** after 5 wrong / 15 min
+  per (token, player, IP) via new `services/rate_limit.FailureTracker`
+  (`assert_not_locked`/`record_failure`/`clear_failures`) + a coarse per-IP
+  `enforce` throttle. Unknown-player and wrong-PIN both count as a failure so the
+  link can't enumerate the roster.
+- **Admin** (on the gated `availability` router, cap `MANAGE_SELECTIONS`):
+  `GET /availability/self-service`, `POST /availability/self-service`
+  ({enabled?, require_pin?} — mints a token on first enable),
+  `POST /availability/self-service/regenerate`. Returns a phone-coverage count
+  (active players with a usable last-4). The admin matrix now returns the real
+  `source` (was hardcoded `'manual'`) so self cells get a corner-dot badge; an
+  admin override re-stamps `source='admin'`.
+- **Shared helpers** in `routers/availability.py`: `phone_last4`,
+  `active_self_service_players` (non-dormant active roster — same recency rule as
+  the matrix), `upcoming_fixtures_by_date` (the matrix's date grouping, extracted
+  so the public page and matrix agree on valid dates). The matrix was refactored
+  to call it (pure extraction).
+- **Frontend**: public route `/avail/:token` (`pages/PublicAvailability.jsx`,
+  outside `ProtectedRoute`, global Navbar suppressed in `App.jsx` — own minimal
+  white-labelled header, club accent via inline `--pb-accent`). 3 steps: pick
+  name → last-4 PIN → tap Available/Maybe/Unavailable (date-keyed; cookie resume
+  jumps straight to step 3). Admin `SelfServiceLinkPanel.jsx` on the Availability
+  screen: enable/PIN segmented toggles, link, copy-link, copy-message
+  (`🏏 Set your availability: {link}`), **client-side QR** (`qrcode` npm dep —
+  `QRCode.toDataURL`), regenerate, phone-coverage nudge. New `api.js` methods:
+  `bsGetSelfService`/`bsSetSelfService`/`bsRegenerateSelfService` +
+  `availPublicLanding`/`Verify`/`Switch`/`Me`/`Set`.
+- **Cross-feature**: self answers are plain `player_availability` rows, so they
+  flow into the Selection pool automatically. `/auth/me` + `/auth/login` now
+  return `club_slug` (powers the admin "View Public Page" button).
+- **Navbar buttons** (separate small ask, shipped same release): "Admin Login" on
+  the public club `Navbar.jsx` (→ `/login`, or "Admin" → `/admin` when signed in);
+  "View Public Page" in `AdminLayout.jsx` header (→ `/{club_slug}`).
+
 ## BetterIQ — Opposition, Selection & Player Trends (v2.1.0, June 2026)
 
 Best-tier analytics module (master-plan Phase 4). Gated by `require_module("iq")` + the `MANAGE_IQ` cap. Module surface mirrors BetterSelect — own `IQLayout` (violet `--pb-accent` override), dashboard tile + sidebar entry flip on automatically once `MODULE_INFO`/`MODULE_META` have `built: true`. Routes under `/admin/betteriq` (Overview + Opposition + Selection + Player trends). **NL Q&A is the one remaining phase** (still needs an LLM-provider decision — open in the spec).

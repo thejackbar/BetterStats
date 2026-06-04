@@ -165,6 +165,18 @@ export default function AdminLayout({ children }) {
           </div>
 
           <div className="flex items-center gap-3">
+            {user?.club_slug && (
+              <Link
+                to={`/${user.club_slug}`}
+                className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-3 py-1.5"
+                title="Open your public club site"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14 5h5v5M19 5l-7 7M11 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4" />
+                </svg>
+                VIEW PUBLIC PAGE
+              </Link>
+            )}
             <NotificationBell onOpen={openBell} refreshTrigger={bellRefresh} />
             <span className="hidden sm:block font-mono text-[11px] text-pb-faint">
               {user?.display_name || user?.username}

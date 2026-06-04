@@ -10,6 +10,8 @@ All endpoints are scoped to the caller's club via get_current_club.
 from __future__ import annotations
 
 import calendar
+import re
+import secrets
 import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
@@ -23,9 +25,63 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import (
     Fixture, PlayerAvailability, PlayerAvailabilityPeriod, Organisation, Player, User, get_db,
 )
-from app.routers.auth import get_current_club
+from app.routers.auth import get_current_club, get_current_user
 
 router = APIRouter(prefix="/availability", tags=["availability"])
+
+
+def phone_last4(phone: Optional[str]) -> Optional[str]:
+    """Last 4 digits of a phone number, ignoring formatting (+61 / 0 / spaces).
+
+    The self-service PIN. Returns None when there aren't 4 digits to compare —
+    such a player can't self-verify and the admin sets them manually.
+    """
+    digits = re.sub(r"\D", "", phone or "")
+    return digits[-4:] if len(digits) >= 4 else None
+
+
+async def active_self_service_players(db: AsyncSession, club: Organisation) -> list[Player]:
+    """Active (non-dormant) real players for the club — the self-service name
+    list and the admin phone-coverage denominator.
+
+    "Active" = a real player not manually marked inactive and not dormant (last
+    appeared inside the club's dormancy window). Never-played players (freshly
+    added) are kept — they're current additions, not dormant history. Mirrors
+    the matrix's recency rule so the public name list matches the admin roster.
+    """
+    months = club.dormancy_months if club.dormancy_months else DEFAULT_DORMANCY_MONTHS
+    cutoff = months_ago(date.today(), months)
+    res = await db.execute(
+        select(Player)
+        .where(
+            Player.organisation_id == club.id,
+            Player.is_player.is_(True),
+            Player.status != "inactive",
+        )
+        .order_by(func.coalesce(Player.display_name_override, Player.name))
+    )
+    players = res.scalars().all()
+    last_played: dict[uuid.UUID, date] = {}
+    lp_res = await db.execute(
+        text(
+            "SELECT ga.player_id, MAX(g.played_at) AS last_played "
+            "FROM game_appearances ga "
+            "JOIN games g ON ga.game_id = g.id "
+            "JOIN players p ON ga.player_id = p.id "
+            "WHERE p.organisation_id = :org "
+            "GROUP BY ga.player_id"
+        ),
+        {"org": club.id},
+    )
+    for pid, lp in lp_res.fetchall():
+        last_played[pid] = lp
+    out = []
+    for p in players:
+        lp = last_played.get(p.id)
+        if lp and lp < cutoff:
+            continue  # dormant
+        out.append(p)
+    return out
 
 VALID_STATUSES = {"AVAILABLE", "UNAVAILABLE", "MAYBE", "NO_RESPONSE"}
 # A period asserts a state, so NO_RESPONSE (the absence of an answer) isn't valid.
@@ -72,6 +128,39 @@ async def _owned_player_ids(db: AsyncSession, club_id) -> set:
     return {r[0] for r in res.fetchall()}
 
 
+async def upcoming_fixtures_by_date(db: AsyncSession, club_id) -> dict[str, list[dict]]:
+    """{date_iso: [fixture entries]} for every upcoming club fixture.
+
+    Dates are the union of each fixture's played_on and end_on; a two-day game
+    appears under both its dates (role 'day1'/'day2'), a one-day game under its
+    single date ('single'). Shared by the admin matrix and the player-facing
+    self-service page so both agree on which dates are collectable.
+    """
+    fx_res = await db.execute(
+        select(Fixture)
+        .where(Fixture.organisation_id == club_id, Fixture.played_on >= date.today())
+        .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
+    )
+    fixtures = fx_res.scalars().all()
+    by_date: dict[str, list[dict]] = {}
+    for f in fixtures:
+        spans = []
+        if f.played_on:
+            spans.append((f.played_on, "day1" if f.end_on and f.end_on != f.played_on else "single"))
+        if f.end_on and f.end_on != f.played_on:
+            spans.append((f.end_on, "day2"))
+        for d, role in spans:
+            by_date.setdefault(d.isoformat(), []).append({
+                "id": str(f.id),
+                "label": f.label,
+                "opponent_name": f.opponent_name,
+                "home_away": f.home_away,
+                "role": role,
+                "two_day": role in ("day1", "day2"),
+            })
+    return by_date
+
+
 async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, player_ids: set) -> None:
     if item.status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {item.status}")
@@ -88,6 +177,7 @@ async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, pla
     if row:
         row.status = item.status
         row.note = item.note
+        row.source = "admin"  # an admin override re-stamps a self-reported row
         row.recorded_by = user_id
         row.recorded_at = datetime.now(timezone.utc)
     else:
@@ -97,6 +187,7 @@ async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, pla
             avail_date=item.date,
             status=item.status,
             note=item.note,
+            source="admin",
             recorded_by=user_id,
         ))
 
@@ -157,30 +248,7 @@ async def availability_matrix(
     date lists the fixtures occurring that day; a two-day game appears under
     both its dates (role 'day1'/'day2'), a one-day game under its single date.
     """
-    fx_res = await db.execute(
-        select(Fixture)
-        .where(Fixture.organisation_id == club.id, Fixture.played_on >= date.today())
-        .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
-    )
-    fixtures = fx_res.scalars().all()
-
-    # date -> [fixture entries]
-    by_date: dict[str, list[dict]] = {}
-    for f in fixtures:
-        spans = []
-        if f.played_on:
-            spans.append((f.played_on, "day1" if f.end_on and f.end_on != f.played_on else "single"))
-        if f.end_on and f.end_on != f.played_on:
-            spans.append((f.end_on, "day2"))
-        for d, role in spans:
-            by_date.setdefault(d.isoformat(), []).append({
-                "id": str(f.id),
-                "label": f.label,
-                "opponent_name": f.opponent_name,
-                "home_away": f.home_away,
-                "role": role,
-                "two_day": role in ("day1", "day2"),
-            })
+    by_date = await upcoming_fixtures_by_date(db, club.id)
 
     # All real players (not just status=active): the frontend filter bar decides
     # what to show. We hand back enough per-player signal — manual status, plus
@@ -263,7 +331,8 @@ async def availability_matrix(
             avail_map.setdefault(str(a.player_id), {})[a.avail_date.isoformat()] = {
                 "status": a.status,
                 "note": a.note,
-                "source": "manual",
+                # 'admin' | 'self' — so the matrix can badge player-reported cells.
+                "source": a.source or "admin",
             }
 
         # Layer covering availability periods UNDER the explicit answers above: a
@@ -367,7 +436,7 @@ async def list_for_date(
     )
     rows = res.scalars().all()
     out = [
-        {"player_id": str(a.player_id), "status": a.status, "note": a.note, "source": "manual"}
+        {"player_id": str(a.player_id), "status": a.status, "note": a.note, "source": a.source or "admin"}
         for a in rows
     ]
     seen = {str(a.player_id) for a in rows}
@@ -473,3 +542,70 @@ async def delete_period(
     await db.delete(period)
     await db.commit()
     return {"status": "ok"}
+
+
+# ─── Self-service availability link (admin side) ─────────────────────────────
+# The player-facing public endpoints live in routers/public_availability.py.
+# These admin endpoints manage the per-club link: enable/disable, the optional
+# PIN toggle, the rotatable token, and a phone-coverage nudge (how many active
+# players can actually self-serve).
+
+class SelfServiceUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    require_pin: Optional[bool] = None
+
+
+async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
+    players = await active_self_service_players(db, club)
+    with_phone = sum(1 for p in players if phone_last4(p.phone))
+    return {
+        "enabled": bool(club.availability_self_service_enabled),
+        "require_pin": bool(club.availability_require_pin),
+        "token": club.availability_link_token,
+        # The link is a frontend route; the admin UI prefixes its own origin.
+        "path": f"/avail/{club.availability_link_token}" if club.availability_link_token else None,
+        "phone_coverage": {"with_phone": with_phone, "total": len(players)},
+    }
+
+
+@router.get("/self-service")
+async def get_self_service(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(get_current_user),
+):
+    """Current self-service link config + a phone-coverage count."""
+    return await _self_service_payload(db, club)
+
+
+@router.post("/self-service")
+async def update_self_service(
+    body: SelfServiceUpdate,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Enable/disable the link and/or flip the PIN requirement. Enabling for the
+    first time mints a token if the club doesn't have one yet."""
+    if body.require_pin is not None:
+        club.availability_require_pin = bool(body.require_pin)
+    if body.enabled is not None:
+        club.availability_self_service_enabled = bool(body.enabled)
+        if body.enabled and not club.availability_link_token:
+            club.availability_link_token = secrets.token_urlsafe(24)
+    await db.commit()
+    await db.refresh(club)
+    return await _self_service_payload(db, club)
+
+
+@router.post("/self-service/regenerate")
+async def regenerate_self_service(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Rotate the token — the old link/QR stops working immediately."""
+    club.availability_link_token = secrets.token_urlsafe(24)
+    await db.commit()
+    await db.refresh(club)
+    return await _self_service_payload(db, club)

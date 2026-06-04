@@ -13,6 +13,7 @@ import {
   RecencySelect, playedWithinYears,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
+import SelfServiceLinkPanel from './SelfServiceLinkPanel'
 
 const ROLE_OPTS = [
   { value: 'Batter', label: 'Batter' }, { value: 'Bowler', label: 'Bowler' },
@@ -281,6 +282,9 @@ export default function AdminAvailability() {
         <Btn variant="primary" sm icon="selection" onClick={() => navigate('/admin/betterselect/selection')}>Pick this weekend</Btn>
       )}
     >
+      {/* Self-service: players set their own availability via link + PIN */}
+      {canEdit && <SelfServiceLinkPanel />}
+
       {/* Filter bar — shared FilterBar (facets) + quiet view controls */}
       <FilterBar
         filters={filters} facets={facets} searchPlaceholder="Search players…"
@@ -430,30 +434,44 @@ export default function AdminAvailability() {
                   const st = cell?.status || 'NO_RESPONSE'
                   const meta = AVAILABILITY[st]
                   const fromPeriod = cell?.source === 'period'
+                  const fromSelf = cell?.source === 'self'
                   const empty = st === 'NO_RESPONSE'
                   const sel = d.date === selDate
                   const title = fromPeriod
                     ? `${meta.label}${cell.note ? ' · ' + cell.note : ''} — from a period${canEdit ? ' (click to override)' : ''}`
-                    : meta.label
+                    : fromSelf
+                      ? `${meta.label}${cell.note ? ' · ' + cell.note : ''} — set by the player${canEdit ? ' (click to override)' : ''}`
+                      : meta.label
                   return (
                     <td key={d.date} className="text-center border-b border-l pb-hairline"
                       style={{
                         padding: '6px 0',
                         background: sel ? 'color-mix(in srgb, var(--pb-accent) 4%, transparent)' : 'transparent',
                       }}>
-                      <button
-                        onClick={() => canEdit && setModal({ pid: p.id, date: d.date })}
-                        disabled={!canEdit}
-                        title={title}
-                        className={`inline-flex items-center justify-center font-mono text-sm transition-transform active:scale-90 ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
-                        style={{
-                          width: 38, height: 30, borderRadius: 7, fontWeight: 600,
-                          color: empty ? 'var(--pb-faintest)' : meta.cssVar,
-                          background: empty ? 'transparent' : `color-mix(in srgb, ${meta.cssVar} 14%, transparent)`,
-                          border: fromPeriod ? `1.5px dashed ${meta.cssVar}` : `1px solid ${empty ? 'var(--pb-hairline)' : 'transparent'}`,
-                        }}>
-                        {meta.glyph}
-                      </button>
+                      <span className="relative inline-block">
+                        <button
+                          onClick={() => canEdit && setModal({ pid: p.id, date: d.date })}
+                          disabled={!canEdit}
+                          title={title}
+                          className={`inline-flex items-center justify-center font-mono text-sm transition-transform active:scale-90 ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
+                          style={{
+                            width: 38, height: 30, borderRadius: 7, fontWeight: 600,
+                            color: empty ? 'var(--pb-faintest)' : meta.cssVar,
+                            background: empty ? 'transparent' : `color-mix(in srgb, ${meta.cssVar} 14%, transparent)`,
+                            border: fromPeriod ? `1.5px dashed ${meta.cssVar}` : `1px solid ${empty ? 'var(--pb-hairline)' : 'transparent'}`,
+                          }}>
+                          {meta.glyph}
+                        </button>
+                        {/* A player-reported answer gets a small corner dot so the
+                            admin can tell self-service cells from ones they set. */}
+                        {fromSelf && (
+                          <span title="Set by the player" style={{
+                            position: 'absolute', top: -1, right: -1, width: 7, height: 7,
+                            borderRadius: '50%', background: 'var(--pb-accent)',
+                            border: '1.5px solid var(--pb-surface)',
+                          }} />
+                        )}
+                      </span>
                     </td>
                   )
                 })}

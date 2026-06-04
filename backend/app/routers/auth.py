@@ -159,6 +159,7 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
         "username": user.username,
         "display_name": user.display_name,
         "role": role,
+        "club_slug": club.slug if club else None,
         "capabilities": caps,
         "entitlements": entitlement_summary(club, role),
     }
@@ -193,6 +194,7 @@ async def me(
         "display_name": current_user.display_name,
         "role": role,
         "club_id": club_id,
+        "club_slug": club.slug if club else None,
         "capabilities": caps,
         "entitlements": entitlement_summary(club, role),
     }
