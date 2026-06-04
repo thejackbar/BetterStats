@@ -14,30 +14,51 @@ import { useRef, useState, useLayoutEffect } from 'react'
 // the measure runs synchronously via useLayoutEffect before the capture clones
 // the DOM (the computed fontSize is inlined on the node).
 // ─────────────────────────────────────────────────────────────────────────────
-function AutoFitText({ text, children, max, min = 8, lines = 1, style = {}, measureDeps = [], ...rest }) {
+function AutoFitText({ text, children, max, min = 8, lines = 1, pad = 0, style = {}, measureDeps = [], ...rest }) {
   const ref = useRef(null)
   const [size, setSize] = useState(max)
 
   useLayoutEffect(() => {
     const el = ref.current
-    if (!el) return
-    const parent = el.parentElement
-    if (!parent) return
+    if (!el || !el.parentElement) return
+    let cancelled = false
     // Always measure from the design size down, so growing the box (or
-    // shortening the text) lets the size recover. Manipulate the inline style
-    // directly during measurement, then commit the final value once.
-    let next = max
-    el.style.fontSize = next + 'px'
-    let guard = 0
-    while (guard++ < 200 && next > min) {
-      const overflowW = el.scrollWidth > parent.clientWidth + 0.5
-      const overflowH = lines > 1 && el.scrollHeight > parent.clientHeight + 0.5
-      if (!overflowW && !overflowH) break
-      next -= 1
-      el.style.fontSize = next + 'px'
+    // shortening the text) lets the size recover.
+    const fit = () => {
+      const node = ref.current
+      const parent = node && node.parentElement
+      if (cancelled || !node || !parent) return
+      // For multi-line (clamped) text, measure against a plain block. A
+      // -webkit-box clamps its own scrollWidth to the box width, so a wide
+      // unbreakable word ("SQUAD") never trips the width-overflow check and the
+      // headline renders at full size, clipped on the edge. Flip to a block for
+      // the measurement only; the render style restores the clamp.
+      const prevDisplay = node.style.display
+      const prevClamp = node.style.webkitLineClamp
+      if (lines > 1) { node.style.display = 'block'; node.style.webkitLineClamp = 'unset' }
+      let next = max
+      node.style.fontSize = next + 'px'
+      let guard = 0
+      while (guard++ < 400 && next > min) {
+        const overflowW = node.scrollWidth > parent.clientWidth + 0.5
+        const overflowH = lines > 1 && node.scrollHeight > parent.clientHeight + 0.5
+        if (!overflowW && !overflowH) break
+        next -= 1
+        node.style.fontSize = next + 'px'
+      }
+      if (lines > 1) { node.style.display = prevDisplay; node.style.webkitLineClamp = prevClamp }
+      setSize(next)
     }
-    setSize(next)
-  }, [text, max, min, lines, ...measureDeps])
+    fit()
+    // Custom display fonts (Anton, Caveat, …) frequently load AFTER first
+    // layout; their glyphs are wider than the fallback, so the first pass can
+    // commit a size that then overflows once the real face swaps in. Re-fit once
+    // the fonts are ready.
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.status !== 'loaded') {
+      document.fonts.ready.then(fit)
+    }
+    return () => { cancelled = true }
+  }, [text, max, min, lines, pad, ...measureDeps])
 
   return (
     <div
@@ -49,6 +70,10 @@ function AutoFitText({ text, children, max, min = 8, lines = 1, style = {}, meas
         WebkitLineClamp: lines > 1 ? lines : undefined,
         WebkitBoxOrient: lines > 1 ? 'vertical' : undefined,
         overflow: 'hidden',
+        // border-box + a touch of right padding gives slanted/cursive faces room
+        // so the final glyph's overhang isn't sheared off by overflow:hidden.
+        boxSizing: 'border-box',
+        paddingRight: pad || undefined,
         ...style,
       }}
       {...rest}
@@ -187,8 +212,15 @@ export function PlayerImage({ player, team, palette, fit = 'contain', size = 200
   )
 }
 
-export function featuredOf(players) {
+// Picks the player shown in the hero image slot. An explicit `featuredId`
+// (the chosen player's id) wins; otherwise it falls back to the captain, then
+// the first player in the order.
+export function featuredOf(players, featuredId) {
   if (!players || !players.length) return null
+  if (featuredId != null && featuredId !== '') {
+    const chosen = players.find(p => p._id === featuredId)
+    if (chosen) return chosen
+  }
   return players.find(p => p.captain) || players[0]
 }
 
@@ -252,8 +284,11 @@ export function orgToPalette(org) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 1 — Hero cutout + bold name list
 // ─────────────────────────────────────────────────────────────────────────────
-export function T1_HeroList({ team, opponent, match, players, palette, heroImage, headline }) {
+export function T1_HeroList({ team, opponent, match, players, palette, heroImage, headline, featuredId }) {
   const P = players.slice(0, 13)
+  // Size the name rows down as the squad grows so a full 13 never runs past the
+  // footer / off the bottom edge.
+  const rowMax = P.length >= 13 ? 30 : P.length >= 11 ? 34 : P.length >= 9 ? 38 : 42
   return (
     <div style={{
       width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
@@ -290,7 +325,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
           background: `radial-gradient(circle at 45% 45%, ${palette.accent}33 0%, transparent 60%)`,
         }} />
         {(() => {
-          const featured = featuredOf(players)
+          const featured = featuredOf(players, featuredId)
           const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
           return (
             <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
@@ -312,7 +347,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
         <div style={{ marginTop: 10, fontSize: 16 }}>{match.venue.toUpperCase()}</div>
         <div style={{ opacity: 0.65, marginTop: 2, fontSize: 14, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5 }}>{match.date} · {match.time}</div>
       </div>
-      <div style={{ position: 'absolute', right: 40, top: 56, width: 480 }}>
+      <div style={{ position: 'absolute', right: 40, top: 56, bottom: 100, width: 480, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start' }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{
@@ -327,7 +362,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
         </div>
         <div style={{ height: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', marginTop: 20, overflow: 'hidden' }}>
           <AutoFitText
-            text={(headline || 'SQUAD').toUpperCase()} max={180} min={48} lines={2}
+            text={(headline || 'SQUAD').toUpperCase()} max={180} min={48} lines={2} pad={14}
             style={{
               fontFamily: "var(--social-display-font, 'Anton', sans-serif)", lineHeight: 0.85,
               letterSpacing: -2, color: palette.ink, textAlign: 'right', width: '100%',
@@ -348,13 +383,13 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
             <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 1.5, lineHeight: 1 }}>{opponent.name}</div>
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'right' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'right', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           {P.map((p, i) => {
             const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
             return (
               <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, width: '100%' }}>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
-                  <AutoFitText max={40} min={18} lines={1} measureDeps={[chip ? 1 : 0]}
+                  <AutoFitText max={rowMax} min={16} lines={1} pad={8} measureDeps={[chip ? 1 : 0]}
                     style={{
                       fontFamily: "var(--social-display-font, 'Anton', sans-serif)", lineHeight: 1.05,
                       letterSpacing: 0.5, color: palette.ink,
@@ -416,7 +451,6 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
         background: palette.accent, opacity: 0.9,
         clipPath: 'polygon(0% 30%, 100% 0%, 100% 70%, 18% 100%)',
       }} />
-      <div style={{ position: 'absolute', top: 30, right: 60, width: 4, height: 80, background: palette.primary }} />
       <svg style={{ position: 'absolute', left: 40, top: 16, width: 220, height: 60, opacity: 0.55 }}>
         {Array.from({ length: 36 }).map((_, i) => (
           <circle key={i} cx={(i % 12) * 18 + 6} cy={Math.floor(i / 12) * 18 + 6} r={2.4} fill={palette.accent} />
@@ -497,8 +531,12 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 3 — Side image + numbered XI
 // ─────────────────────────────────────────────────────────────────────────────
-export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage }) {
+export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage, headline, featuredId }) {
   const P = players.slice(0, 11)
+  // The vertical spine label echoes the post headline (defaults to STARTING XI).
+  // Scale it down for longer headlines so it never runs off the top edge.
+  const spine = (headline || 'STARTING XI').toUpperCase()
+  const spineSize = Math.max(34, Math.min(80, Math.floor(1000 / Math.max(spine.length, 1))))
   return (
     <div style={{
       width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
@@ -523,7 +561,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
         <Halftone color={palette.ink} opacity={0.1} size={8} />
         <div style={{ position: 'absolute', left: -120, bottom: -120, width: 600, height: 600, background: `radial-gradient(circle at center, ${palette.accent}33 0%, transparent 60%)` }} />
         {(() => {
-          const featured = featuredOf(players)
+          const featured = featuredOf(players, featuredId)
           const hasHead = !!(heroImage || (featured && featured.headshot))
           const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
           return (
@@ -539,7 +577,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
         })()}
         <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 240, background: `linear-gradient(180deg, transparent 0%, ${palette.primary}ee 100%)` }} />
         {(() => {
-          const featured = featuredOf(players)
+          const featured = featuredOf(players, featuredId)
           if (!featured) return null
           const chip = featured.captain ? 'C' : featured.viceCaptain ? 'VC' : featured.keeper ? 'WK' : null
           return (
@@ -556,10 +594,10 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
       <div style={{
         position: 'absolute', left: 360, top: 540,
         transform: 'rotate(-90deg)', transformOrigin: 'left top',
-        fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 80, letterSpacing: 4,
+        fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: spineSize, letterSpacing: 4,
         color: 'transparent', WebkitTextStroke: `2px ${palette.accent}`,
         whiteSpace: 'nowrap', lineHeight: 0.8,
-      }}>STARTING XI</div>
+      }}>{spine}</div>
       <div style={{ position: 'absolute', left: 460, top: 60, right: 40, bottom: 40, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28, marginBottom: 28 }}>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={110} shape="circle" />
@@ -579,7 +617,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${palette.ink}1c` }}>
                 <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 42, color: palette.accent, lineHeight: 1, width: 50, textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
-                  <AutoFitText max={38} min={16} lines={1}
+                  <AutoFitText max={38} min={16} lines={1} pad={8}
                     style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>
                     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.26em', whiteSpace: 'nowrap' }}>
                       <span style={{ opacity: 0.65, fontWeight: 300, fontSize: '0.74em' }}>{p.first.toUpperCase()}</span>
@@ -744,7 +782,7 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 6 — Diagonal poster
 // ─────────────────────────────────────────────────────────────────────────────
-export function T6_Diagonal({ team, opponent, match, players, palette, heroImage }) {
+export function T6_Diagonal({ team, opponent, match, players, palette, heroImage, featuredId }) {
   const P = players.slice(0, 11)
   return (
     <div style={{
@@ -774,7 +812,7 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
         </div>
         <div style={{ flex: 1, height: 370, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'hidden' }}>
           {(() => {
-            const featured = featuredOf(players)
+            const featured = featuredOf(players, featuredId)
             const hasHead = !!(heroImage || (featured && featured.headshot))
             const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
             return (
