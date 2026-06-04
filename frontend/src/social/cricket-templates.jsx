@@ -286,9 +286,10 @@ export function orgToPalette(org) {
 // ─────────────────────────────────────────────────────────────────────────────
 export function T1_HeroList({ team, opponent, match, players, palette, heroImage, headline, featuredId }) {
   const P = players.slice(0, 13)
-  // Size the name rows down as the squad grows so a full 13 never runs past the
-  // footer / off the bottom edge.
-  const rowMax = P.length >= 13 ? 30 : P.length >= 11 ? 34 : P.length >= 9 ? 38 : 42
+  // Size the name rows down as the squad grows so a full 13 always fits the
+  // available space (sized for the worst case: a tall headline + a wrapped vs
+  // row). Rows are then distributed to fill the column for larger squads.
+  const rowMax = P.length >= 13 ? 28 : P.length >= 11 ? 32 : P.length >= 9 ? 36 : 42
   return (
     <div style={{
       width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
@@ -360,7 +361,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
             }}>{match.season}</div>
           </div>
         </div>
-        <div style={{ height: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', marginTop: 20, overflow: 'hidden' }}>
+        <div style={{ maxHeight: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', marginTop: 20, overflow: 'hidden' }}>
           <AutoFitText
             text={(headline || 'SQUAD').toUpperCase()} max={180} min={48} lines={2} pad={14}
             style={{
@@ -383,7 +384,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
             <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 1.5, lineHeight: 1 }}>{opponent.name}</div>
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'right', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'right', flex: 1, minHeight: 0, overflow: 'hidden', justifyContent: P.length >= 9 ? 'space-between' : 'flex-start' }}>
           {P.map((p, i) => {
             const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
             return (
