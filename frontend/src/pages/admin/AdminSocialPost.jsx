@@ -323,6 +323,9 @@ export default function AdminSocialPost() {
 
   const [heroImage, setHeroImage] = useState({ blobUrl: null })
   const [heroMode, setHeroMode] = useState('player')
+  // Which selected player's photo fills the hero slot on lineup templates
+  // (T1 / T3 / T6). '' = auto (captain, else first in the order).
+  const [heroPlayerId, setHeroPlayerId] = useState('')
 
   const [scorecardMatch, setScorecardMatch] = useState(DEFAULT_SCORECARD)
   const [scUrlInput, setScUrlInput] = useState('')
@@ -703,6 +706,9 @@ export default function AdminSocialPost() {
   if (['T1', 'T3', 'T6', 'T7'].includes(templateId) && heroImage.blobUrl) {
     extraProps.heroImage = heroImage.blobUrl
   }
+  if (['T1', 'T3', 'T6'].includes(templateId) && heroPlayerId) {
+    extraProps.featuredId = heroPlayerId
+  }
   if (templateId === 'C4') {
     extraProps.result = {
       winner: result.winner, margin: result.margin, teamScore: result.teamScore,
@@ -742,6 +748,7 @@ export default function AdminSocialPost() {
     setSelectedPlayers([])
     setHeroImage({ blobUrl: null })
     setHeroMode('player')
+    setHeroPlayerId('')
     setMilestone({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
     setAnnouncement({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: 'FOR THE 2025-26 SEASON', playerIdx: 0 })
     setToss({ winner: 'TEAM', decision: 'BAT' })
@@ -1023,6 +1030,26 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Hero Image</h2>
                 <p className="text-[11px] text-pb-faint mb-3">Transparent PNG recommended for best results.</p>
+                {['T1', 'T3', 'T6'].includes(templateId) && selectedPlayers.length > 0 && (
+                  <div className="mb-3">
+                    <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Hero Player</label>
+                    <select
+                      value={heroPlayerId}
+                      onChange={e => setHeroPlayerId(e.target.value)}
+                      className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text"
+                    >
+                      <option value="">Auto — captain, else 1st in order</option>
+                      {selectedPlayers.map(sp => (
+                        <option key={sp.player.id} value={sp.player.id}>
+                          {(sp.player.display_name || sp.player.name)}{sp.player.photo_url ? '' : ' · no photo'}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-pb-faintest mt-1">
+                      {heroImage.blobUrl ? 'Uploaded Hero Image below overrides this.' : 'Pick whose photo fills the hero slot. Upload below to override.'}
+                    </p>
+                  </div>
+                )}
                 {['C1', 'C3'].includes(templateId) && (
                   <div className="flex gap-2 mb-3">
                     <button
