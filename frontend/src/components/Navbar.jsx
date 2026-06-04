@@ -126,7 +126,6 @@ export default function Navbar() {
     stats: [
       { label: "Leaderboard", href: `/${slug}/leaderboard` },
       { label: "Records",     href: `/${slug}/records` },
-      { label: "Teams",       href: `/${slug}/teams` },
       { label: "Stat Lab",    href: `/${slug}/statlab` },
     ],
     games: [
@@ -135,7 +134,7 @@ export default function Navbar() {
     ],
   } : {};
 
-  const statsActive = slug && ['leaderboard', 'records', 'teams', 'statlab'].some(s =>
+  const statsActive = slug && ['leaderboard', 'records', 'statlab'].some(s =>
     pathname === `/${slug}/${s}` || pathname.startsWith(`/${slug}/${s}/`)
   );
   const gamesActive = slug && ['games', 'ladders'].some(s =>
