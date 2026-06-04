@@ -99,6 +99,10 @@ class Organisation(Base):
     availability_link_token = Column(Text, nullable=True)
     availability_self_service_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
     availability_require_pin = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Net Manager: club default timer/rotation config (batting_minutes, nets,
+    # auto_roll, sound, alerts[]). New net sessions seed from this; NULL falls
+    # back to net_manager.DEFAULT_NET_SETTINGS.
+    net_settings = Column(JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -430,6 +434,68 @@ class PlayerAvailabilityPeriod(Base):
     recorded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     recorded_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class NetSession(Base):
+    """BetterSelect → Net Manager: one net/practice session.
+
+    A net session is a training day, keyed on a date + optional label (e.g.
+    "Tuesday senior nets"). Attendance rows hang off it (who turned up, who
+    batted) and feed the attendance reports + per-player profile stat. The live
+    batting-queue + timer that the net manager runs pitch-side is purely
+    client-side (single device); only the durable bits — the session, its timer
+    settings and the attendance list — are persisted here. Club-wide; created_by
+    tracks which admin opened it.
+    """
+    __tablename__ = "net_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    session_date = Column(Date, nullable=False)
+    label = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    # The timer/rotation config this session ran with (batting_minutes, nets,
+    # auto_roll, sound, alerts[]). Per-session so a tweak mid-season doesn't
+    # rewrite history; new sessions seed from the club default (Organisation
+    # carries no net column — the default lives in the most recent session).
+    settings = Column(JSONB, nullable=True)
+    status = Column(Text, nullable=False, server_default="active")  # active | done
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    organisation = relationship("Organisation")
+    attendees = relationship("NetAttendance", back_populates="session", cascade="all, delete-orphan")
+
+
+class NetAttendance(Base):
+    """BetterSelect → Net Manager: one attendee of a net session.
+
+    A row is the check-in — its presence means "turned up". player_id is set for
+    a real club player; guest_name carries an ad-hoc attendee (trialist / junior
+    / newcomer not yet in the system) and leaves player_id NULL so guests never
+    pollute the player tables or reports keyed on player_id. `batted` records
+    whether they completed a batting turn (a nice-to-have for the report on top
+    of raw attendance). `position` preserves the manager's queue order.
+    """
+    __tablename__ = "net_attendance"
+    __table_args__ = (
+        # A real player appears at most once per session; guest rows (player_id
+        # NULL) are exempt from the constraint and de-duped by the app layer.
+        UniqueConstraint("session_id", "player_id", name="uq_net_attendance_session_player"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("net_sessions.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
+    guest_name = Column(Text, nullable=True)
+    batted = Column(Boolean, nullable=False, server_default="false")
+    position = Column(Integer, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    session = relationship("NetSession", back_populates="attendees")
+    player = relationship("Player")
 
 
 class BattingInnings(Base):

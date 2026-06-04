@@ -9,7 +9,7 @@
 // Atoms come from the BetterSelect kit (Avatar/Tag/Btn/Dot); the attribute
 // option-sets + labels come from lib/playerAttributes so the public profile
 // shares the same vocabulary.
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { validateImageFile } from '../../lib/validation'
@@ -128,6 +128,31 @@ function PhotoRow({ playerId, photoUrl, onPhotoChange }) {
   )
 }
 
+/* ── Net attendance (BetterSelect → Net Manager) ──────────────────────────────
+ * A quiet line under the snapshot showing how often this player turns up to
+ * nets. Self-contained fetch; renders nothing until there's something to show
+ * (so clubs not running the Net Manager never see it), and swallows the 402 a
+ * non-BetterSelect club would get. */
+function NetAttendanceStat({ playerId }) {
+  const [data, setData] = useState(null)
+  useEffect(() => {
+    let alive = true
+    api.nmPlayerAttendance(playerId).then((r) => { if (alive) setData(r) }).catch(() => {})
+    return () => { alive = false }
+  }, [playerId])
+  if (!data || !data.attended) return null
+  return (
+    <div className="mt-[18px] pt-[18px] border-t border-pb-hairline">
+      <div className="text-xs text-pb-faint mb-2">Net attendance</div>
+      <div className="flex items-center gap-4">
+        <span><b className="pb-num font-display font-bold text-base text-pb-text">{data.attended}</b> <span className="text-[11.5px] text-pb-faintest">session{data.attended === 1 ? '' : 's'}</span></span>
+        <span><b className="pb-num font-display font-bold text-base text-pb-accent">{data.batted}</b> <span className="text-[11.5px] text-pb-faintest">batted</span></span>
+        {data.last_attended && <span className="text-[11.5px] text-pb-faintest ml-auto">last {new Date(data.last_attended + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>}
+      </div>
+    </div>
+  )
+}
+
 /* ── Selection snapshot (right column, left half) ─────────────────────────── */
 function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail }) {
   const snap = snapshot || {}
@@ -227,6 +252,8 @@ function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail })
         <div className="text-xs text-pb-faint mb-1">Last picked</div>
         <div className={`text-[13.5px] ${lastPicked ? 'text-pb-text' : 'text-pb-faint'}`}>{lastPicked || 'Not recently'}</div>
       </div>
+
+      {player?.id && <NetAttendanceStat playerId={player.id} />}
     </div>
   )
 }
