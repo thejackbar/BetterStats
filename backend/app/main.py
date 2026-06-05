@@ -511,6 +511,7 @@ async def lifespan(app: FastAPI):
             ("hero_image_mime", "TEXT"),
             ("website_hero_all_pages", "BOOLEAN NOT NULL DEFAULT false"),
             ("website_committee", "JSONB"),
+            ("website_honours_columns", "INTEGER NOT NULL DEFAULT 1"),
         ]:
             await conn.execute(text(
                 f"ALTER TABLE organisations ADD COLUMN IF NOT EXISTS {_col} {_type}"

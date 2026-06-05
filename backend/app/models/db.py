@@ -127,6 +127,8 @@ class Organisation(Base):
     website_hero_all_pages = Column(Boolean, nullable=False, server_default="false", default=False)
     # Committee auto-pull config: {"enabled": bool, "groups": [subcategory, ...]}.
     website_committee = Column(JSONB, nullable=True)
+    # How many columns to lay the honour *boards* out in on the public page (1–3).
+    website_honours_columns = Column(Integer, nullable=False, server_default="1", default=1)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

@@ -535,7 +535,11 @@ async def get_website_honours(slug: str, db: AsyncSession = Depends(get_db)):
             "entries": merged,
         })
     office_bearers = await _latest_office_bearers(org.id, db)
-    return {"office_bearers": office_bearers, "boards": out}
+    return {
+        "office_bearers": office_bearers,
+        "boards": out,
+        "layout_columns": org.website_honours_columns or 1,
+    }
 
 
 @public_router.get("/{slug}/website/committee")
@@ -624,6 +628,7 @@ async def get_settings(
         "social": _clean_social(club.website_social),
         "hero_image_url": club.hero_image_url,
         "hero_all_pages": bool(club.website_hero_all_pages),
+        "honours_columns": club.website_honours_columns or 1,
         "slug": club.slug,
     }
 
@@ -634,6 +639,7 @@ class SettingsPatch(BaseModel):
     intro: Optional[str] = None
     social: Optional[dict] = None
     hero_all_pages: Optional[bool] = None
+    honours_columns: Optional[int] = None
 
 
 @admin_router.put("/settings")
@@ -653,6 +659,8 @@ async def update_settings(
         club.website_social = _clean_social(data.social)
     if data.hero_all_pages is not None:
         club.website_hero_all_pages = bool(data.hero_all_pages)
+    if data.honours_columns is not None:
+        club.website_honours_columns = min(3, max(1, int(data.honours_columns)))
     await db.commit()
     return await get_settings(_=None, club=club)
 
