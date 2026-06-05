@@ -57,7 +57,7 @@ export function WebsiteHero({ site, club }) {
     <div className="relative overflow-hidden">
       {hero ? (
         <>
-          <img src={hero} alt="" className="w-full h-[42vh] min-h-[280px] max-h-[520px] object-cover" />
+          <img src={hero} alt="" className="w-full aspect-[8/3] object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
         </>
       ) : (
