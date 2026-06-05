@@ -22,7 +22,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_WEBSITE, require_cap
@@ -102,6 +102,62 @@ def _clean_social(raw: Optional[dict]) -> dict:
         if isinstance(val, str) and val.strip():
             out[key] = val.strip()[:300]
     return out
+
+
+def _season_year(year: Optional[int], name: Optional[str]) -> int:
+    """Resolve a season's start year (from the column, else the name)."""
+    if year is not None:
+        return year
+    m = re.search(r"(\d{4})", name or "")
+    return int(m.group(1)) if m else -1
+
+
+async def _latest_office_bearers(org_id, db: AsyncSession) -> Optional[dict]:
+    """The most recent season's office bearers from the yearbook honour board.
+
+    Clubs already maintain President/Secretary/Captain etc. per season on the
+    yearbook honour board — surface the latest season's set on the website so
+    it isn't entered twice. Linked players carry their id so we can deep-link.
+    """
+    rows = (await db.execute(text("""
+        SELECT s.id::text AS season_id, s.name AS season_name, s.year AS season_year,
+               h.position_title, h.sort_order, h.id AS hid,
+               h.player_id::text AS player_id,
+               COALESCE(p.display_name_override, p.name, h.name_override) AS name
+        FROM yearbook_honour_board h
+        JOIN yearbooks y ON y.id = h.yearbook_id
+        JOIN seasons s ON s.id = y.season_id
+        LEFT JOIN players p ON p.id = h.player_id
+        WHERE y.org_id = :org
+    """), {"org": str(org_id)})).mappings().all()
+    if not rows:
+        return None
+
+    by_season: dict[str, dict] = {}
+    for r in rows:
+        slot = by_season.setdefault(r["season_id"], {
+            "name": r["season_name"],
+            "key": _season_year(r["season_year"], r["season_name"]),
+            "rows": [],
+        })
+        slot["rows"].append(r)
+
+    latest = max(by_season.values(), key=lambda s: s["key"])
+    entries = [
+        {"position_title": r["position_title"], "name": r["name"], "player_id": r["player_id"]}
+        for r in sorted(latest["rows"], key=lambda r: (r["sort_order"], r["hid"]))
+        if r["name"]
+    ]
+    if not entries:
+        return None
+    return {"season": latest["name"], "entries": entries}
+
+
+async def _has_office_bearers(org_id, db: AsyncSession) -> bool:
+    return (await db.execute(text(
+        "SELECT 1 FROM yearbook_honour_board h JOIN yearbooks y ON y.id = h.yearbook_id "
+        "WHERE y.org_id = :org LIMIT 1"
+    ), {"org": str(org_id)})).first() is not None
 
 
 # ─── serialisers ─────────────────────────────────────────────────────────────
@@ -209,6 +265,7 @@ async def get_website(slug: str, db: AsyncSession = Depends(get_db)):
     boards = await _count(ClubHonourBoard, ClubHonourBoard.organisation_id == org.id)
     committee = await _count(ClubCommitteeMember, ClubCommitteeMember.organisation_id == org.id)
     albums = await _count(ClubGalleryAlbum, ClubGalleryAlbum.organisation_id == org.id)
+    has_office_bearers = await _has_office_bearers(org.id, db)
 
     return {
         "slug": org.slug,
@@ -224,7 +281,7 @@ async def get_website(slug: str, db: AsyncSession = Depends(get_db)):
         "news": [_news_card(n) for n in news],
         "sections": {
             "news": len(news) > 0,
-            "honours": boards > 0,
+            "honours": boards > 0 or has_office_bearers,
             "committee": committee > 0,
             "gallery": albums > 0,
         },
@@ -315,7 +372,8 @@ async def get_website_honours(slug: str, db: AsyncSession = Depends(get_db)):
             "description": b.description,
             "entries": [_entry(e) for e in entries],
         })
-    return {"boards": out}
+    office_bearers = await _latest_office_bearers(org.id, db)
+    return {"office_bearers": office_bearers, "boards": out}
 
 
 @public_router.get("/{slug}/website/committee")
