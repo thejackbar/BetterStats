@@ -19,6 +19,7 @@ import {
   ROLE_OPTS, ROLE_TO_SKILLS, BAT_HANDS, GENDER_OPTS, BOWLING_OPTS,
   bowlingLabel, bowlingFromLabel, bowls, normalizeGender,
 } from '../../lib/playerAttributes'
+import { splitDisplayName, joinDisplayName } from '../../lib/nameFormat'
 
 const ROLE_LABEL = { '': '—' }
 
@@ -266,8 +267,12 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
       <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-faint mb-3.5">Details</div>
       <div className="flex flex-wrap gap-3">
         <Field label="Display name (blank = synced)">
-          <PInput value={draft.display_name_override} onChange={(v) => set('display_name_override', v)}
-            placeholder={playerName || 'Synced name'} />
+          <div className="grid grid-cols-2 gap-2">
+            <PInput value={draft.display_first} onChange={(v) => set('display_first', v)}
+              placeholder="First" />
+            <PInput value={draft.display_last} onChange={(v) => set('display_last', v)}
+              placeholder="Last" />
+          </div>
         </Field>
         <Field label="Squad (selection pool)" half>
           <PSelect value={draft.squad_team_id || ''} onChange={(v) => set('squad_team_id', v || null)}
@@ -388,8 +393,13 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
 
 /* ── Build the editable draft from a profile payload ─────────────────────── */
 export function draftFromProfile(p) {
+  // Edit the override as separate first/last fields so it can be stored
+  // canonically as "Last, First" (sorts by surname, respects the club name
+  // format). Legacy free-text overrides are best-effort split for editing.
+  const dn = splitDisplayName(p.display_name_override)
   return {
-    display_name_override: p.display_name_override || '',
+    display_first: dn.first,
+    display_last: dn.last,
     player_role: p.player_role || '',
     batting_hand: p.batting_hand || '',
     bowling_action: p.bowling_action || null,
@@ -413,7 +423,7 @@ export function draftFromProfile(p) {
 export function patchFromDraft(d) {
   const norm = (v) => (v === '' ? null : v)
   return {
-    display_name_override: norm(d.display_name_override),
+    display_name_override: norm(joinDisplayName(d.display_first, d.display_last)),
     playhq_id: norm(d.playhq_id),
     player_role: norm(d.player_role),
     batting_hand: norm(d.batting_hand),

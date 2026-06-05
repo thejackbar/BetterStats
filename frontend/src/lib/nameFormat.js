@@ -35,6 +35,49 @@ export function useNameFormat(club) {
 }
 
 /**
+ * Split a stored display value into { first, last } for editing in two fields.
+ * Accepts the canonical "Last, First" shape and best-effort-parses a legacy
+ * free-text override ("First Last" -> first/last; a single token -> first).
+ * The inverse of joinDisplayName for values it produced.
+ */
+export function splitDisplayName(value) {
+  const s = (value || '').trim()
+  if (!s) return { first: '', last: '' }
+  const comma = s.indexOf(',')
+  if (comma !== -1) {
+    return { first: s.slice(comma + 1).trim(), last: s.slice(0, comma).trim() }
+  }
+  const words = s.split(/\s+/).filter(Boolean)
+  if (words.length <= 1) return { first: s, last: '' }
+  return { first: words.slice(0, -1).join(' '), last: words[words.length - 1] }
+}
+
+/**
+ * Join first + last into the canonical "Last, First" string used for storage,
+ * so a display-name override sorts by surname AND flows through formatPlayerName
+ * (i.e. respects the club's name-format setting) exactly like a synced name.
+ * Returns '' when both are blank → clears the override.
+ */
+export function joinDisplayName(first, last) {
+  const f = (first || '').trim()
+  const l = (last || '').trim()
+  if (f && l) return `${l}, ${f}`
+  return f || l || ''
+}
+
+/**
+ * Surname-first, case-insensitive sort key for a player name in either the
+ * "Last, First" or free-text shape — mirrors the backend name_sort_key so
+ * client-side ordering matches the API.
+ */
+export function nameSortKey(name) {
+  const { first, last } = splitDisplayName(name)
+  const surname = (last || first).trim()
+  const given = (last ? first : '').trim()
+  return `${surname} ${given}`.toLowerCase()
+}
+
+/**
  * Tokenized search: returns true if every word in the query appears somewhere
  * in the name (case-insensitive), regardless of order.
  * Handles searching "John Smith" against "Smith, John" by checking each token.
