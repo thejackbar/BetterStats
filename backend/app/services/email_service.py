@@ -24,8 +24,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from email.message import EmailMessage as MIMEMessage
+from email.utils import make_msgid
 from typing import Optional
 
+import aiosmtplib
 import httpx
 
 from app.config.settings import settings
@@ -152,11 +155,66 @@ class ResendEmailProvider(EmailProvider):
             return SendResult(ok=False, error=f"resend error: {e}")
 
 
+class SMTPEmailProvider(EmailProvider):
+    """Generic SMTP sender — the path to high-volume / pay-as-you-go delivery.
+
+    This is how you escape the free-tier daily caps for 500+-recipient club
+    blasts. Point it at:
+      * **Amazon SES** — ~$0.10 per 1,000 emails, no per-day cap (out of the
+        sandbox), scales to every club from one account.
+      * a **self-hosted MTA** (Postal, Listmonk's relay, Maddy) — no per-email
+        fee at all, at the cost of running it + owning deliverability.
+      * a club's **own Workspace** mailbox (BYO), later.
+
+    Builds a proper multipart/alternative (text + HTML) MIME message so the
+    List-Unsubscribe headers and plain-text fallback survive.
+    """
+    name = "smtp"
+
+    def __init__(self, host: str, port: int, user: str, password: str):
+        self.host = host
+        self.port = int(port or 587)
+        self.user = user or ""
+        self.password = password or ""
+
+    async def send(self, msg: EmailMessage) -> SendResult:
+        mime = MIMEMessage()
+        mime["From"] = f"{msg.from_name} <{msg.from_email}>" if msg.from_name else (msg.from_email or "")
+        mime["To"] = f"{msg.to_name} <{msg.to_email}>" if msg.to_name else msg.to_email
+        mime["Subject"] = msg.subject
+        if msg.reply_to:
+            mime["Reply-To"] = msg.reply_to
+        mid = make_msgid()
+        mime["Message-ID"] = mid
+        for k, v in (msg.headers or {}).items():
+            mime[k] = v
+        mime.set_content(msg.text or " ")
+        mime.add_alternative(msg.html or "", subtype="html")
+
+        kwargs: dict = {
+            "hostname": self.host,
+            "port": self.port,
+            "timeout": 30,
+            "username": self.user or None,
+            "password": self.password or None,
+        }
+        # Port 465 = implicit TLS; everything else (587/25) = STARTTLS.
+        if self.port == 465:
+            kwargs["use_tls"] = True
+        else:
+            kwargs["start_tls"] = True
+        try:
+            await aiosmtplib.send(mime, **kwargs)
+            return SendResult(ok=True, message_id=mid)
+        except Exception as e:
+            return SendResult(ok=False, error=f"smtp error: {e}")
+
+
 def get_email_provider() -> EmailProvider:
     """Resolve the active provider from settings, falling back to console.
 
-    A configured provider with no API key falls back to console (fail-safe) so
-    we never attempt an unauthenticated send.
+    A provider that's selected but not fully configured falls back to console
+    (fail-safe) so we never attempt an unauthenticated / misconfigured send.
     """
     name = (settings.email_provider or "console").strip().lower()
     key = (settings.email_api_key or "").strip()
@@ -164,7 +222,9 @@ def get_email_provider() -> EmailProvider:
         return BrevoEmailProvider(key)
     if name == "resend" and key:
         return ResendEmailProvider(key)
-    if name not in ("console", "brevo", "resend"):
+    if name == "smtp" and (settings.smtp_host or "").strip():
+        return SMTPEmailProvider(settings.smtp_host, settings.smtp_port, settings.smtp_user, settings.smtp_password)
+    if name not in ("console", "brevo", "resend", "smtp"):
         logger.warning("Unknown email_provider %r — using console", name)
     return ConsoleEmailProvider()
 
