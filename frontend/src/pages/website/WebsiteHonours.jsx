@@ -48,6 +48,7 @@ function HonoursBody({ slug }) {
   const { site } = useWebsite()
   const [boards, setBoards] = useState([])
   const [office, setOffice] = useState(null)
+  const [layout, setLayout] = useState(1)
   const [loading, setLoading] = useState(true)
 
   usePageMeta({ title: `Honours — ${site.name}`, url: `https://betterstats.cricket/${slug}/website/honours` })
@@ -55,15 +56,17 @@ function HonoursBody({ slug }) {
   useEffect(() => {
     let cancelled = false
     api.webGetHonours(slug)
-      .then(d => { if (!cancelled) { setBoards(d.boards || []); setOffice(d.office_bearers || null); setLoading(false) } })
+      .then(d => { if (!cancelled) { setBoards(d.boards || []); setOffice(d.office_bearers || null); setLayout(d.layout_columns || 1); setLoading(false) } })
       .catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [slug])
 
   if (loading) return <div className="max-w-3xl mx-auto px-4 py-16"><PbSpinner message="Loading…" /></div>
 
+  // Boards side by side when layout > 1 (masonry via CSS columns), else stacked.
+  const multi = layout > 1
   return (
-    <div className="max-w-3xl mx-auto px-4 py-10">
+    <div className={`${multi ? 'max-w-5xl' : 'max-w-3xl'} mx-auto px-4 py-10`}>
       <h1 className="font-display font-extrabold text-3xl text-pb-text mb-1">Honours</h1>
       <p className="text-pb-faint text-sm mb-8">{site.name}</p>
 
@@ -72,9 +75,12 @@ function HonoursBody({ slug }) {
       {boards.length === 0 && !office ? (
         <p className="text-pb-faint py-12 text-center">No honour boards yet.</p>
       ) : (
-        <div className="space-y-8">
+        <div
+          className={multi ? 'max-sm:!columns-1' : 'space-y-8'}
+          style={multi ? { columnCount: layout, columnGap: '2rem' } : undefined}
+        >
           {boards.map(board => (
-            <section key={board.id} className="rounded-xl border pb-hairline bg-pb-surface p-5 sm:p-6">
+            <section key={board.id} className={`rounded-xl border pb-hairline bg-pb-surface p-5 sm:p-6 ${multi ? 'mb-8 break-inside-avoid' : ''}`}>
               <h2 className="font-display font-bold text-xl text-pb-text">{board.title}</h2>
               {board.description && <p className="text-pb-faint text-sm mt-1 mb-3">{board.description}</p>}
               <div

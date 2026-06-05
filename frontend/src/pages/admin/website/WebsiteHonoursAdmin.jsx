@@ -223,6 +223,7 @@ export default function WebsiteHonoursAdmin() {
   const [boards, setBoards] = useState([])
   const [players, setPlayers] = useState([])
   const [categories, setCategories] = useState([])
+  const [layout, setLayout] = useState(1)
   const [loading, setLoading] = useState(true)
   const [newTitle, setNewTitle] = useState('')
   const [newCat, setNewCat] = useState(null)
@@ -233,14 +234,21 @@ export default function WebsiteHonoursAdmin() {
   async function load() {
     setLoading(true)
     try {
-      const [b, p, c] = await Promise.all([
+      const [b, p, c, s] = await Promise.all([
         api.webAdminListHonours(),
         api.adminListPlayers().catch(() => []),
         api.webAdminHonourCategories().catch(() => []),
+        api.webAdminSettings().catch(() => ({})),
       ])
-      setBoards(b); setPlayers(p); setCategories(c)
+      setBoards(b); setPlayers(p); setCategories(c); setLayout(s.honours_columns || 1)
     } catch (e) { toast.error(e.message) }
     finally { setLoading(false) }
+  }
+
+  async function saveLayout(n) {
+    setLayout(n)
+    try { await api.webAdminSaveSettings({ honours_columns: n }) }
+    catch (e) { toast.error(e.message) }
   }
 
   async function addBoard() {
@@ -269,6 +277,19 @@ export default function WebsiteHonoursAdmin() {
         💡 <span className="text-pb-dim">Office bearers</span> (President, Secretary, Captain…) are pulled automatically
         from the <span className="text-pb-dim">current season's yearbook honour board</span> and shown at the top of your
         public Honours page — maintain those under <span className="font-mono">Yearbooks → Honour board</span>.
+      </div>
+
+      {/* Page layout: how many boards sit side by side */}
+      <div className="pb-card p-4 mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <div className="font-medium text-pb-text">Boards side by side</div>
+          <p className="text-pb-faint text-sm mt-0.5">Lay whole boards out in columns — e.g. Life Members next to Hall of Fame. Stacks to one column on mobile.</p>
+        </div>
+        <select value={layout} onChange={e => saveLayout(Number(e.target.value))} className={`${inputCls} sm:w-44`}>
+          <option value={1}>1 — stacked</option>
+          <option value={2}>2 columns</option>
+          <option value={3}>3 columns</option>
+        </select>
       </div>
 
       {loading ? <p className="text-pb-faint text-sm">Loading…</p> : (
