@@ -1052,6 +1052,45 @@ export const api = {
     return request(`/iq/review/games${s ? `?${s}` : ''}`)
   },
   iqGameReview: (gameId) => request(`/iq/review/game/${encodeURIComponent(gameId)}`),
+
+  // ─── BetterComms (BetterAdmin module) — bulk email ──────────────────────────
+  commsListContacts: ({ query = '', subscribed } = {}) => {
+    const qs = new URLSearchParams()
+    if (query) qs.set('query', query)
+    if (subscribed != null) qs.set('subscribed', String(subscribed))
+    const s = qs.toString()
+    return request(`/club-admin/comms/contacts${s ? `?${s}` : ''}`)
+  },
+  commsCreateContact: (email, name) =>
+    request('/club-admin/comms/contacts', { method: 'POST', body: JSON.stringify({ email, name }) }),
+  commsUpdateContact: (id, patch) =>
+    request(`/club-admin/comms/contacts/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  commsDeleteContact: (id) =>
+    request(`/club-admin/comms/contacts/${id}`, { method: 'DELETE' }),
+  commsImportContacts: (text) =>
+    request('/club-admin/comms/contacts/import', { method: 'POST', body: JSON.stringify({ text }) }),
+  commsSyncFromClub: () =>
+    request('/club-admin/comms/contacts/sync-from-club', { method: 'POST' }),
+  commsAudiencePreview: (audience) =>
+    request('/club-admin/comms/audience/preview', { method: 'POST', body: JSON.stringify(audience) }),
+
+  commsListCampaigns: () => request('/club-admin/comms/campaigns'),
+  commsCreateCampaign: (data) =>
+    request('/club-admin/comms/campaigns', { method: 'POST', body: JSON.stringify(data) }),
+  commsGetCampaign: (id) => request(`/club-admin/comms/campaigns/${id}`),
+  commsUpdateCampaign: (id, data) =>
+    request(`/club-admin/comms/campaigns/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  commsDeleteCampaign: (id) =>
+    request(`/club-admin/comms/campaigns/${id}`, { method: 'DELETE' }),
+  commsTestCampaign: (id, email) =>
+    request(`/club-admin/comms/campaigns/${id}/test`, { method: 'POST', body: JSON.stringify({ email }) }),
+  commsSendCampaign: (id) =>
+    request(`/club-admin/comms/campaigns/${id}/send`, { method: 'POST' }),
+  commsCampaignStatus: (id) => request(`/club-admin/comms/campaigns/${id}/status`),
+
+  commsGetSettings: () => request('/club-admin/comms/settings'),
+  commsSetSettings: (data) =>
+    request('/club-admin/comms/settings', { method: 'PUT', body: JSON.stringify(data) }),
 }
 
 function _iqQs(opponent, fixtureId, team) {

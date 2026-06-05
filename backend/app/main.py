@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, comms, public_comms
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -499,6 +499,80 @@ async def lifespan(app: FastAPI):
                 UNIQUE (organisation_id, surname_key)
             )
         """))
+        # BetterComms (BetterAdmin module) — bulk email (migration 069). Defensive
+        # idempotent creates so the API boots even if the numbered migration
+        # hasn't run yet (mirrors the BetterSelect / Net Manager blocks above).
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_from_name TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_reply_to TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS comms_sender_footer TEXT"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS comms_contacts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                email TEXT NOT NULL,
+                name TEXT,
+                source TEXT NOT NULL DEFAULT 'manual',
+                player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                subscribed BOOLEAN NOT NULL DEFAULT true,
+                unsubscribed_at TIMESTAMPTZ,
+                bounced BOOLEAN NOT NULL DEFAULT false,
+                bounced_at TIMESTAMPTZ,
+                tags JSONB NOT NULL DEFAULT '[]',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_comms_contact_org_email UNIQUE (organisation_id, email)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_comms_contacts_org ON comms_contacts(organisation_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS comms_campaigns (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                subject TEXT NOT NULL DEFAULT '',
+                preheader TEXT,
+                body_html TEXT,
+                body_text TEXT,
+                audience JSONB NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                sent_at TIMESTAMPTZ,
+                stats JSON NOT NULL DEFAULT '{}',
+                error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_comms_campaigns_org ON comms_campaigns(organisation_id, created_at DESC)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS comms_recipients (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                campaign_id UUID NOT NULL REFERENCES comms_campaigns(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                contact_id UUID REFERENCES comms_contacts(id) ON DELETE SET NULL,
+                email TEXT NOT NULL,
+                name TEXT,
+                status TEXT NOT NULL DEFAULT 'queued',
+                provider_message_id TEXT,
+                error TEXT,
+                sent_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_comms_recipient_campaign_email UNIQUE (campaign_id, email)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_comms_recipients_campaign ON comms_recipients(campaign_id)"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
@@ -663,7 +737,8 @@ app.include_router(usage.router)
 # (with an upsell payload) when the caller's club isn't entitled. Core routers
 # above are always on. BetterSocials' backend surface is gated per-route in
 # admin.py (it shares the admin router). See app/auth/modules.py.
-app.include_router(fees.router, dependencies=[Depends(require_module("fees"))])           # BetterFees
+app.include_router(fees.router, dependencies=[Depends(require_module("fees"))])           # BetterFees (BetterAdmin)
+app.include_router(comms.router, dependencies=[Depends(require_module("comms"))])         # BetterComms (BetterAdmin)
 app.include_router(fixtures.router, dependencies=[Depends(require_module("select"))])     # BetterSelect
 app.include_router(teams.router, dependencies=[Depends(require_module("select"))])        # BetterSelect
 app.include_router(availability.router, dependencies=[Depends(require_module("select"))]) # BetterSelect
@@ -673,6 +748,7 @@ app.include_router(net_manager.router, dependencies=[Depends(require_module("sel
 # design — it resolves the club from the link token and enforces entitlement +
 # enabled-flag itself, so it is NOT wrapped in require_module.
 app.include_router(public_availability.router)                                            # BetterSelect (public)
+app.include_router(public_comms.router)                                                   # BetterComms (public unsubscribe)
 app.include_router(ladders.router)  # standings power public club pages — not gated
 app.include_router(iq.router, dependencies=[Depends(require_module("iq"))])               # BetterIQ
 
