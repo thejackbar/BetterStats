@@ -13,6 +13,7 @@ from app.models.db import (
 from app.routers.auth import get_current_user
 from app.auth.capabilities import require_cap, MANAGE_PLAYERS
 from app.services.squad_membership import sync_squad_membership
+from app.services.name_format import name_sort_key
 from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
     get_career_batting_from_innings, get_career_bowling_from_spells, get_career_fielding_from_stats,
@@ -71,11 +72,13 @@ async def list_players(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Player)
-        .where(Player.organisation_id == uuid.UUID(org_id))
-        .order_by(func.coalesce(Player.display_name_override, Player.name))
+        select(Player).where(Player.organisation_id == uuid.UUID(org_id))
     )
-    players = result.scalars().all()
+    # Sort by surname for everyone — a display_name_override is free text (often
+    # "First Last", no comma) which an alphabetical DB sort would order by first
+    # name, unlike the "Last, First" synced names. name_sort_key extracts the
+    # surname from either shape so the list stays consistently surname-ordered.
+    players = sorted(result.scalars().all(), key=lambda p: name_sort_key(p.display_name))
     return [
         {
             "id": str(p.id),

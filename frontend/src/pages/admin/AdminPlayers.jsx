@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
-import { nameMatchesSearch, formatPlayerName } from '../../lib/nameFormat'
+import { nameMatchesSearch, formatPlayerName, joinDisplayName, nameSortKey } from '../../lib/nameFormat'
 import { countryFlagUrl } from '../../data/countries'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
@@ -127,7 +127,7 @@ export default function AdminPlayers() {
   const [msg, setMsg] = useState('')
   const [nameFormat, setNameFormat] = useState('last_first')
   const [showCreate, setShowCreate] = useState(false)
-  const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', playhq_id: '', display_name_override: '' })
+  const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', playhq_id: '', display_first: '', display_last: '' })
   const [creating, setCreating] = useState(false)
   const [createMsg, setCreateMsg] = useState('')
   const [editingId, setEditingId] = useState(null) // player id or null
@@ -168,11 +168,13 @@ export default function AdminPlayers() {
         first_name: createForm.first_name.trim(),
         last_name: createForm.last_name.trim(),
         playhq_id: createForm.playhq_id.trim() || null,
-        display_name_override: createForm.display_name_override.trim() || null,
+        // Stored canonically as "Last, First" so the override sorts by surname
+        // and follows the club's name-format setting, like a synced name.
+        display_name_override: joinDisplayName(createForm.display_first, createForm.display_last) || null,
       }
       const created = await api.adminCreatePlayer(payload)
-      setPlayers(ps => [...ps, created].sort((a, b) => a.name.localeCompare(b.name)))
-      setCreateForm({ first_name: '', last_name: '', playhq_id: '', display_name_override: '' })
+      setPlayers(ps => [...ps, created].sort((a, b) => nameSortKey(a.display_name || a.name).localeCompare(nameSortKey(b.display_name || b.name))))
+      setCreateForm({ first_name: '', last_name: '', playhq_id: '', display_first: '', display_last: '' })
       setShowCreate(false)
       setMsg('Player created')
       setTimeout(() => setMsg(''), 2500)
@@ -238,28 +240,36 @@ export default function AdminPlayers() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="font-mono text-[10px] text-pb-faintest block mb-1">PlayHQ ID (optional)</label>
+            <div className="mb-3">
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">PlayHQ ID (optional)</label>
+              <input
+                type="text"
+                value={createForm.playhq_id}
+                onChange={e => setCreateForm(f => ({ ...f, playhq_id: e.target.value }))}
+                className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none focus:border-pb-amber"
+                style={{ '--tw-border-opacity': 1 }}
+                placeholder="e.g. a1b2c3d4-e5f6-..."
+              />
+            </div>
+            <div className="mb-3">
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Display name override (optional)</label>
+              <div className="grid grid-cols-2 gap-3">
                 <input
                   type="text"
-                  value={createForm.playhq_id}
-                  onChange={e => setCreateForm(f => ({ ...f, playhq_id: e.target.value }))}
-                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none focus:border-pb-amber"
-                  style={{ '--tw-border-opacity': 1 }}
-                  placeholder="e.g. a1b2c3d4-e5f6-..."
-                />
-              </div>
-              <div>
-                <label className="font-mono text-[10px] text-pb-faintest block mb-1">Display name override (optional)</label>
-                <input
-                  type="text"
-                  value={createForm.display_name_override}
-                  onChange={e => setCreateForm(f => ({ ...f, display_name_override: e.target.value }))}
+                  value={createForm.display_first}
+                  onChange={e => setCreateForm(f => ({ ...f, display_first: e.target.value }))}
                   className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-                  placeholder="Custom display name"
+                  placeholder="Display first name"
+                />
+                <input
+                  type="text"
+                  value={createForm.display_last}
+                  onChange={e => setCreateForm(f => ({ ...f, display_last: e.target.value }))}
+                  className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
+                  placeholder="Display last name"
                 />
               </div>
+              <p className="font-mono text-[10px] text-pb-faintest mt-1">Leave blank to show the synced name. Sorted by surname.</p>
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -330,7 +340,7 @@ export default function AdminPlayers() {
                 )}
                 <div>
                   <p className="text-pb-text text-sm font-medium">
-                    {p.display_name_override || fmt(p.name)}
+                    {fmt(p.display_name_override || p.name)}
                     {p.display_name_override && (
                       <span className="ml-2 font-mono text-[10px] text-pb-faint">(raw: {p.name})</span>
                     )}

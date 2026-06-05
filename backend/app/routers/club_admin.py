@@ -29,6 +29,7 @@ from app.auth.modules import (
 )
 from datetime import date as _date
 from app.services import playhq_client
+from app.services.name_format import name_sort_key
 
 # Keep strong references to background tasks so they aren't GC'd before completing
 _background_tasks: set = set()
@@ -49,11 +50,12 @@ async def list_players(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Player).where(Player.organisation_id == club.id).order_by(
-            func.coalesce(Player.display_name_override, Player.name)
-        )
+        select(Player).where(Player.organisation_id == club.id)
     )
-    players = result.scalars().all()
+    # Surname-first order for everyone, including free-text display overrides
+    # (which a plain alphabetical sort would order by first name). See
+    # name_sort_key — mirrors the public squad list in routers/players.py.
+    players = sorted(result.scalars().all(), key=lambda p: name_sort_key(p.display_name))
 
     # Last appearance per player (most recent game date) — lets the selection
     # surfaces filter out players who haven't played in N years. One grouped
