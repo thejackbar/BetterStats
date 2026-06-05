@@ -126,6 +126,16 @@ const PlayHQScorecard = lazy(() => import('./pages/PlayHQScorecard'))
 const ClubInactive = lazy(() => import('./pages/ClubInactive'))
 const Onboard = lazy(() => import('./pages/Onboard'))
 
+// Front-end Website (public club site) — lazy loaded
+const WebsiteHome = lazy(() => import('./pages/website/WebsiteHome'))
+const WebsiteNews = lazy(() => import('./pages/website/WebsiteNews'))
+const WebsiteArticle = lazy(() => import('./pages/website/WebsiteArticle'))
+const WebsitePage = lazy(() => import('./pages/website/WebsitePage'))
+const WebsiteHonours = lazy(() => import('./pages/website/WebsiteHonours'))
+const WebsiteCommittee = lazy(() => import('./pages/website/WebsiteCommittee'))
+const WebsiteGallery = lazy(() => import('./pages/website/WebsiteGallery'))
+const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
+
 // Public, login-free self-service availability (BetterSelect magic link + PIN)
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
 
@@ -201,6 +211,7 @@ export default function App() {
           <Route path="/admin/fees/member/:memberId" element={<ProtectedRoute requireModule="fees"><AdminFeeMemberDetail /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
+          <Route path="/admin/website" element={<ProtectedRoute><AdminWebsite /></ProtectedRoute>} />
           <Route path="/admin/social-post" element={<ProtectedRoute requireModule="socials"><AdminSocialPost /></ProtectedRoute>} />
           <Route path="/admin/yearbook" element={<ProtectedRoute><AdminYearbook /></ProtectedRoute>} />
           <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute><AdminYearbookDetail /></ProtectedRoute>} />
@@ -257,6 +268,16 @@ export default function App() {
           <Route path="/:clubSlug/statlab/r/:reportSlug" element={<StatLab />} />
           <Route path="/:clubSlug/games" element={<GamesPage />} />
           <Route path="/:clubSlug/yearbook" element={<Yearbook />} />
+
+          {/* Front-end Website (public club site) */}
+          <Route path="/:clubSlug/website" element={<WebsiteHome />} />
+          <Route path="/:clubSlug/website/news" element={<WebsiteNews />} />
+          <Route path="/:clubSlug/website/news/:newsSlug" element={<WebsiteArticle />} />
+          <Route path="/:clubSlug/website/page/:pageSlug" element={<WebsitePage />} />
+          <Route path="/:clubSlug/website/honours" element={<WebsiteHonours />} />
+          <Route path="/:clubSlug/website/committee" element={<WebsiteCommittee />} />
+          <Route path="/:clubSlug/website/gallery" element={<WebsiteGallery />} />
+          <Route path="/:clubSlug/website/gallery/:albumId" element={<WebsiteGallery />} />
           <Route path="/:clubSlug/yearbook/:seasonSlug" element={<Yearbook />} />
           <Route path="/players/:playerId" element={<PlayerProfile />} />
           <Route path="/players/:playerId/share" element={<ShareCard />} />

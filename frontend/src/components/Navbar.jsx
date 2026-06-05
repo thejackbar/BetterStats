@@ -36,7 +36,7 @@ function ThemeToggle() {
   );
 }
 
-const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games', 'fixtures', 'teams'];
+const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games', 'fixtures', 'teams', 'website'];
 // Single-segment paths that are NOT club slugs (must stay in sync with App.jsx routes)
 const RESERVED_ROOT_SEGMENTS = new Set([
   'login', 'admin', 'onboard', 'club-inactive',
@@ -148,6 +148,8 @@ export default function Navbar() {
     { type: 'dropdown', label: "Games",   key: 'games', isActive: gamesActive },
     { type: 'link',     label: "Compare", href: `/${slug}/compare` },
     { type: 'link',     label: "Yearbook",href: `/${slug}/yearbook` },
+    // The full club website (news, pages, honours, …) — only once the club enables it.
+    ...(club?.website_enabled ? [{ type: 'link', label: "Website", href: `/${slug}/website` }] : []),
   ] : [];
 
   const navItemClass = (isActive) =>

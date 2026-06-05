@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, comms, public_comms
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -499,6 +499,143 @@ async def lifespan(app: FastAPI):
                 UNIQUE (organisation_id, surname_key)
             )
         """))
+        # ─── Front-end Website (migration 070) ───────────────────────────────
+        # Per-club public website: news, editable pages, honour rolls,
+        # committee and photo galleries under /{slug}/website. Off by default.
+        for _col, _type in [
+            ("website_enabled", "BOOLEAN NOT NULL DEFAULT false"),
+            ("website_tagline", "TEXT"),
+            ("website_intro", "TEXT"),
+            ("website_social", "JSONB"),
+            ("hero_image_data", "BYTEA"),
+            ("hero_image_mime", "TEXT"),
+        ]:
+            await conn.execute(text(
+                f"ALTER TABLE organisations ADD COLUMN IF NOT EXISTS {_col} {_type}"
+            ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_news (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                summary TEXT,
+                body TEXT,
+                cover_image_data BYTEA,
+                cover_image_mime TEXT,
+                cover_image_url TEXT,
+                author TEXT,
+                is_published BOOLEAN NOT NULL DEFAULT true,
+                is_pinned BOOLEAN NOT NULL DEFAULT false,
+                published_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (organisation_id, slug)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_news_org "
+            "ON club_news(organisation_id, is_published, published_at DESC)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_pages (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                body TEXT,
+                nav_label TEXT,
+                show_in_nav BOOLEAN NOT NULL DEFAULT true,
+                is_published BOOLEAN NOT NULL DEFAULT true,
+                display_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (organisation_id, slug)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_pages_org ON club_pages(organisation_id, display_order)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_honour_boards (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                description TEXT,
+                display_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_honour_boards_org "
+            "ON club_honour_boards(organisation_id, display_order)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_honour_entries (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                board_id UUID NOT NULL REFERENCES club_honour_boards(id) ON DELETE CASCADE,
+                year INTEGER,
+                name TEXT NOT NULL,
+                detail TEXT,
+                player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                display_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_honour_entries_board "
+            "ON club_honour_entries(board_id, display_order)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_committee (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                name TEXT NOT NULL,
+                email TEXT,
+                phone TEXT,
+                bio TEXT,
+                photo_data BYTEA,
+                photo_mime TEXT,
+                photo_url TEXT,
+                display_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_committee_org "
+            "ON club_committee(organisation_id, display_order)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_gallery_albums (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                description TEXT,
+                display_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_gallery_albums_org "
+            "ON club_gallery_albums(organisation_id, display_order)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_gallery_images (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                album_id UUID NOT NULL REFERENCES club_gallery_albums(id) ON DELETE CASCADE,
+                image_data BYTEA,
+                image_mime TEXT,
+                image_url TEXT,
+                caption TEXT,
+                display_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_gallery_images_album "
+            "ON club_gallery_images(album_id, display_order)"
+        ))
         # BetterComms (BetterAdmin module) — bulk email (migration 069). Defensive
         # idempotent creates so the API boots even if the numbered migration
         # hasn't run yet (mirrors the BetterSelect / Net Manager blocks above).
@@ -713,6 +850,8 @@ app.add_middleware(UsageTrackingMiddleware)
 
 app.include_router(auth.router)
 app.include_router(clubs.router)
+app.include_router(website.public_router)   # Front-end Website (public, Core)
+app.include_router(website.admin_router)    # Front-end Website (admin CRUD)
 app.include_router(club_admin.router)
 app.include_router(organisations.router)
 app.include_router(players.router)

@@ -111,6 +111,18 @@ class Organisation(Base):
     comms_from_name = Column(Text, nullable=True)
     comms_reply_to = Column(Text, nullable=True)
     comms_sender_footer = Column(Text, nullable=True)
+    # ─── Front-end Website (Core, migration 070) ─────────────────────────────
+    # The full public club website that can replace a club's existing site:
+    # news, editable pages, honour rolls, committee and photo galleries, all
+    # under /{slug}/website. Off by default — a club opts in. hero_image_data/
+    # _mime persist the homepage hero in the DB (the /uploads volume isn't
+    # guaranteed across deploys); website_social is a {network: url} map.
+    website_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
+    website_tagline = Column(Text, nullable=True)
+    website_intro = Column(Text, nullable=True)  # sanitised HTML — homepage welcome
+    website_social = Column(JSONB, nullable=True)
+    hero_image_data = Column(LargeBinary, nullable=True)
+    hero_image_mime = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -131,6 +143,129 @@ class Sponsor(Base):
     logo_mime = Column(Text, nullable=True)
     display_order = Column(Integer, default=0, nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+# ─── Front-end Website CMS (migration 069) ───────────────────────────────────
+# All website content is org-scoped and Core (every club gets the website; the
+# MANAGE_WEBSITE capability gates editing). Images persist as DB blobs so they
+# survive container recreation — same approach as club logos / yearbook images.
+
+class ClubNews(Base):
+    """A news article / announcement on the club website."""
+    __tablename__ = "club_news"
+    __table_args__ = (UniqueConstraint("organisation_id", "slug", name="uq_club_news_slug"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    slug = Column(Text, nullable=False)
+    summary = Column(Text, nullable=True)
+    body = Column(Text, nullable=True)  # sanitised HTML
+    cover_image_data = Column(LargeBinary, nullable=True)
+    cover_image_mime = Column(Text, nullable=True)
+    cover_image_url = Column(Text, nullable=True)
+    author = Column(Text, nullable=True)
+    is_published = Column(Boolean, nullable=False, server_default="true", default=True)
+    is_pinned = Column(Boolean, nullable=False, server_default="false", default=False)
+    published_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class ClubPage(Base):
+    """A free-form rich-text info page (About, History, Join Us, ...)."""
+    __tablename__ = "club_pages"
+    __table_args__ = (UniqueConstraint("organisation_id", "slug", name="uq_club_pages_slug"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    slug = Column(Text, nullable=False)
+    body = Column(Text, nullable=True)  # sanitised HTML
+    nav_label = Column(Text, nullable=True)
+    show_in_nav = Column(Boolean, nullable=False, server_default="true", default=True)
+    is_published = Column(Boolean, nullable=False, server_default="true", default=True)
+    display_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class ClubHonourBoard(Base):
+    """A grouped honour roll (Life Members, Hall of Fame, Past Presidents, ...)."""
+    __tablename__ = "club_honour_boards"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    display_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    entries = relationship("ClubHonourEntry", back_populates="board", cascade="all, delete-orphan")
+
+
+class ClubHonourEntry(Base):
+    """A single line on an honour board (a year, a name, an optional detail)."""
+    __tablename__ = "club_honour_entries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    board_id = Column(UUID(as_uuid=True), ForeignKey("club_honour_boards.id", ondelete="CASCADE"), nullable=False)
+    year = Column(Integer, nullable=True)
+    name = Column(Text, nullable=False)
+    detail = Column(Text, nullable=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    display_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    board = relationship("ClubHonourBoard", back_populates="entries")
+
+
+class ClubCommitteeMember(Base):
+    """A committee / contact entry (role, name, contact details, photo)."""
+    __tablename__ = "club_committee"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    role = Column(Text, nullable=False)
+    name = Column(Text, nullable=False)
+    email = Column(Text, nullable=True)
+    phone = Column(Text, nullable=True)
+    bio = Column(Text, nullable=True)
+    photo_data = Column(LargeBinary, nullable=True)
+    photo_mime = Column(Text, nullable=True)
+    photo_url = Column(Text, nullable=True)
+    display_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class ClubGalleryAlbum(Base):
+    """A photo gallery album."""
+    __tablename__ = "club_gallery_albums"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    display_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    images = relationship("ClubGalleryImage", back_populates="album", cascade="all, delete-orphan")
+
+
+class ClubGalleryImage(Base):
+    """A single photo inside a gallery album (blob stored in the DB)."""
+    __tablename__ = "club_gallery_images"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    album_id = Column(UUID(as_uuid=True), ForeignKey("club_gallery_albums.id", ondelete="CASCADE"), nullable=False)
+    image_data = Column(LargeBinary, nullable=True)
+    image_mime = Column(Text, nullable=True)
+    image_url = Column(Text, nullable=True)
+    caption = Column(Text, nullable=True)
+    display_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    album = relationship("ClubGalleryAlbum", back_populates="images")
 
 
 class ClubMembership(Base):

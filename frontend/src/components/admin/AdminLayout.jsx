@@ -41,6 +41,7 @@ const NAV_SECTIONS = [
       { to: '/admin/award-definitions', label: 'Award Types', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/awards', label: 'Awards', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/sponsors', label: 'Sponsors', cap: CAP.MANAGE_SPONSORS },
+      { to: '/admin/website', label: 'Website', cap: CAP.MANAGE_WEBSITE },
       { to: '/admin/yearbook', label: 'Yearbooks', cap: CAP.MANAGE_YEARBOOKS },
     ],
   },

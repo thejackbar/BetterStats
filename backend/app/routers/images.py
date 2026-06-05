@@ -10,7 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, Player, Sponsor, get_db
+from app.models.db import (
+    ClubCommitteeMember, ClubGalleryImage, ClubNews, Organisation, Player, Sponsor, get_db,
+)
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -34,6 +36,54 @@ async def get_org_logo(org_id: str, db: AsyncSession = Depends(get_db)):
     return Response(
         content=org.logo_data,
         media_type=org.logo_mime or "image/png",
+        headers=_CACHE_HEADERS,
+    )
+
+
+@router.get("/organisations/{org_id}/hero")
+async def get_org_hero(org_id: str, db: AsyncSession = Depends(get_db)):
+    org = await db.get(Organisation, _parse_uuid(org_id))
+    if not org or not org.hero_image_data:
+        raise HTTPException(404, "No hero image")
+    return Response(
+        content=org.hero_image_data,
+        media_type=org.hero_image_mime or "image/jpeg",
+        headers=_CACHE_HEADERS,
+    )
+
+
+@router.get("/news/{news_id}/cover")
+async def get_news_cover(news_id: str, db: AsyncSession = Depends(get_db)):
+    article = await db.get(ClubNews, _parse_uuid(news_id))
+    if not article or not article.cover_image_data:
+        raise HTTPException(404, "No cover image")
+    return Response(
+        content=article.cover_image_data,
+        media_type=article.cover_image_mime or "image/jpeg",
+        headers=_CACHE_HEADERS,
+    )
+
+
+@router.get("/committee/{member_id}/photo")
+async def get_committee_photo(member_id: str, db: AsyncSession = Depends(get_db)):
+    member = await db.get(ClubCommitteeMember, _parse_uuid(member_id))
+    if not member or not member.photo_data:
+        raise HTTPException(404, "No photo")
+    return Response(
+        content=member.photo_data,
+        media_type=member.photo_mime or "image/png",
+        headers=_CACHE_HEADERS,
+    )
+
+
+@router.get("/gallery/{image_id}")
+async def get_gallery_image(image_id: str, db: AsyncSession = Depends(get_db)):
+    img = await db.get(ClubGalleryImage, _parse_uuid(image_id))
+    if not img or not img.image_data:
+        raise HTTPException(404, "No image")
+    return Response(
+        content=img.image_data,
+        media_type=img.image_mime or "image/jpeg",
         headers=_CACHE_HEADERS,
     )
 

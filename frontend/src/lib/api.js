@@ -21,6 +21,19 @@ async function request(path, options = {}) {
   return res.json()
 }
 
+// POST a single file as multipart/form-data and return the parsed JSON.
+// Used by the image-upload endpoints (logos, hero, news covers, gallery, etc.).
+async function uploadFile(path, file, field = 'file') {
+  const form = new FormData()
+  form.append(field, file)
+  const res = await fetch(`${BASE}${path}`, { method: 'POST', body: form, credentials: 'include' })
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}))
+    throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 // Encode a StatLab context dict into URLSearchParams. Arrays are repeated
 // (?key=a&key=b) so the backend's `qp.getlist(k)` reads them as a list.
 // Scalars (string / number / true) become a single value; null / undefined /
@@ -778,6 +791,84 @@ export const api = {
     request(`/club-admin/sponsors/${id}`, { method: 'DELETE' }),
   adminReorderSponsors: (items) =>
     request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+
+  // ─── Front-end Website (public) ───────────────────────────────────────────
+  webGetSite: (slug) => request(`/clubs/${slug}/website`),
+  webListNews: (slug, { limit = 24, offset = 0 } = {}) =>
+    request(`/clubs/${slug}/website/news?limit=${limit}&offset=${offset}`),
+  webGetArticle: (slug, newsSlug) => request(`/clubs/${slug}/website/news/${newsSlug}`),
+  webGetPage: (slug, pageSlug) => request(`/clubs/${slug}/website/pages/${pageSlug}`),
+  webGetHonours: (slug) => request(`/clubs/${slug}/website/honours`),
+  webGetCommittee: (slug) => request(`/clubs/${slug}/website/committee`),
+  webGetGallery: (slug) => request(`/clubs/${slug}/website/gallery`),
+  webGetAlbum: (slug, albumId) => request(`/clubs/${slug}/website/gallery/${albumId}`),
+
+  // ─── Front-end Website (admin) ────────────────────────────────────────────
+  webAdminSettings: () => request('/club-admin/website/settings'),
+  webAdminSaveSettings: (data) =>
+    request('/club-admin/website/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  webAdminUploadHero: (file) => uploadFile('/club-admin/website/hero', file),
+  webAdminDeleteHero: () => request('/club-admin/website/hero', { method: 'DELETE' }),
+  // News
+  webAdminListNews: () => request('/club-admin/website/news'),
+  webAdminGetNews: (id) => request(`/club-admin/website/news/${id}`),
+  webAdminCreateNews: (data) =>
+    request('/club-admin/website/news', { method: 'POST', body: JSON.stringify(data) }),
+  webAdminUpdateNews: (id, data) =>
+    request(`/club-admin/website/news/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  webAdminDeleteNews: (id) => request(`/club-admin/website/news/${id}`, { method: 'DELETE' }),
+  webAdminUploadNewsCover: (id, file) => uploadFile(`/club-admin/website/news/${id}/cover`, file),
+  webAdminDeleteNewsCover: (id) =>
+    request(`/club-admin/website/news/${id}/cover`, { method: 'DELETE' }),
+  // Pages
+  webAdminListPages: () => request('/club-admin/website/pages'),
+  webAdminCreatePage: (data) =>
+    request('/club-admin/website/pages', { method: 'POST', body: JSON.stringify(data) }),
+  webAdminUpdatePage: (id, data) =>
+    request(`/club-admin/website/pages/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  webAdminDeletePage: (id) => request(`/club-admin/website/pages/${id}`, { method: 'DELETE' }),
+  webAdminReorderPages: (ids) =>
+    request('/club-admin/website/pages/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+  // Honours
+  webAdminListHonours: () => request('/club-admin/website/honours'),
+  webAdminCreateBoard: (data) =>
+    request('/club-admin/website/honours/boards', { method: 'POST', body: JSON.stringify(data) }),
+  webAdminUpdateBoard: (id, data) =>
+    request(`/club-admin/website/honours/boards/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  webAdminDeleteBoard: (id) =>
+    request(`/club-admin/website/honours/boards/${id}`, { method: 'DELETE' }),
+  webAdminCreateEntry: (boardId, data) =>
+    request(`/club-admin/website/honours/boards/${boardId}/entries`, { method: 'POST', body: JSON.stringify(data) }),
+  webAdminUpdateEntry: (id, data) =>
+    request(`/club-admin/website/honours/entries/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  webAdminDeleteEntry: (id) =>
+    request(`/club-admin/website/honours/entries/${id}`, { method: 'DELETE' }),
+  // Committee
+  webAdminListCommittee: () => request('/club-admin/website/committee'),
+  webAdminCreateCommittee: (data) =>
+    request('/club-admin/website/committee', { method: 'POST', body: JSON.stringify(data) }),
+  webAdminUpdateCommittee: (id, data) =>
+    request(`/club-admin/website/committee/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  webAdminDeleteCommittee: (id) =>
+    request(`/club-admin/website/committee/${id}`, { method: 'DELETE' }),
+  webAdminUploadCommitteePhoto: (id, file) =>
+    uploadFile(`/club-admin/website/committee/${id}/photo`, file),
+  webAdminDeleteCommitteePhoto: (id) =>
+    request(`/club-admin/website/committee/${id}/photo`, { method: 'DELETE' }),
+  // Gallery
+  webAdminListGallery: () => request('/club-admin/website/gallery'),
+  webAdminCreateAlbum: (data) =>
+    request('/club-admin/website/gallery/albums', { method: 'POST', body: JSON.stringify(data) }),
+  webAdminUpdateAlbum: (id, data) =>
+    request(`/club-admin/website/gallery/albums/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  webAdminDeleteAlbum: (id) =>
+    request(`/club-admin/website/gallery/albums/${id}`, { method: 'DELETE' }),
+  webAdminAddGalleryImage: (albumId, file) =>
+    uploadFile(`/club-admin/website/gallery/albums/${albumId}/images`, file),
+  webAdminUpdateGalleryImage: (id, data) =>
+    request(`/club-admin/website/gallery/images/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  webAdminDeleteGalleryImage: (id) =>
+    request(`/club-admin/website/gallery/images/${id}`, { method: 'DELETE' }),
 
   // Records
   getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender } = {}) => {

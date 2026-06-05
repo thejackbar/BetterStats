@@ -33,6 +33,7 @@ async def get_club_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
         "theme_config": org.theme_config or {},
         "contact_email": org.contact_email,
         "player_name_format": org.player_name_format or "last_first",
+        "website_enabled": bool(org.website_enabled),
     }
 
 

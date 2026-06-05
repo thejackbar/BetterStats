@@ -304,3 +304,51 @@
   50%      { opacity: 0.7; transform: scale(1.05); }
 }
 .glow-pulse { animation: pulseGlow 6s ease-in-out infinite; }
+
+/* ── Rich text (website CMS content + WYSIWYG editor body) ─────────────────
+   Tailwind preflight strips default heading/list styling, so the HTML our
+   club admins author needs explicit rules. Shared by the editor and the
+   public render so what they type matches what visitors see. */
+.pb-richtext {
+  color: var(--pb-text);
+  line-height: 1.7;
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+.pb-richtext > :first-child { margin-top: 0; }
+.pb-richtext > :last-child { margin-bottom: 0; }
+.pb-richtext p { margin: 0 0 1rem; }
+.pb-richtext h2 { font-size: 1.5rem; font-weight: 700; margin: 1.8rem 0 0.8rem; line-height: 1.25; }
+.pb-richtext h3 { font-size: 1.2rem; font-weight: 700; margin: 1.4rem 0 0.6rem; line-height: 1.3; }
+.pb-richtext h4 { font-size: 1.02rem; font-weight: 700; margin: 1.2rem 0 0.5rem; }
+.pb-richtext ul,
+.pb-richtext ol { margin: 0 0 1rem; padding-left: 1.5rem; }
+.pb-richtext ul { list-style: disc; }
+.pb-richtext ol { list-style: decimal; }
+.pb-richtext li { margin: 0.25rem 0; }
+.pb-richtext a { color: var(--pb-accent); text-decoration: underline; }
+.pb-richtext strong, .pb-richtext b { font-weight: 700; }
+.pb-richtext em, .pb-richtext i { font-style: italic; }
+.pb-richtext u { text-decoration: underline; }
+.pb-richtext s, .pb-richtext strike { text-decoration: line-through; }
+.pb-richtext blockquote {
+  margin: 0 0 1rem; padding: 0.5rem 0 0.5rem 1rem;
+  border-left: 3px solid var(--pb-accent);
+  color: var(--pb-dim); font-style: italic;
+}
+.pb-richtext img { max-width: 100%; height: auto; border-radius: 0.5rem; margin: 0.5rem 0; }
+.pb-richtext code {
+  font-family: ui-monospace, monospace; font-size: 0.85em;
+  background: var(--pb-surface2); padding: 0.1rem 0.35rem; border-radius: 0.25rem;
+}
+.pb-richtext pre {
+  background: var(--pb-surface2); padding: 0.75rem 1rem; border-radius: 0.5rem;
+  overflow-x: auto; margin: 0 0 1rem;
+}
+/* Placeholder for the empty editor */
+.pb-richtext-editor:empty:before {
+  content: attr(data-placeholder);
+  color: var(--pb-faintest);
+  pointer-events: none;
+}
+.pb-richtext-editor:focus { outline: none; }
