@@ -173,6 +173,11 @@ async def _auto_entries(org_id, category, subcategory, db: AsyncSession) -> list
     """Entries auto-pulled from an achievements category (e.g. "Hall of Fame")."""
     if not category:
         return []
+    params = {"org": str(org_id), "cat": category}
+    sub_clause = ""
+    if subcategory:
+        sub_clause = " AND pa.subcategory = :sub"
+        params["sub"] = subcategory
     rows = (await db.execute(text("""
         SELECT pa.player_id::text AS player_id,
                COALESCE(p.display_name_override, p.name, pa.player_name) AS name,
@@ -181,9 +186,8 @@ async def _auto_entries(org_id, category, subcategory, db: AsyncSession) -> list
         FROM player_achievements pa
         LEFT JOIN players p ON p.id = pa.player_id
     """ + _ACH_SEASON_JOIN + """
-        WHERE pa.org_id = :org AND pa.category = :cat
-          AND (:sub::text IS NULL OR pa.subcategory = :sub)
-    """), {"org": str(org_id), "cat": category, "sub": subcategory})).mappings().all()
+        WHERE pa.org_id = :org AND pa.category = :cat""" + sub_clause + """
+    """), params)).mappings().all()
 
     cat_l = (category or "").strip().lower()
     out: list[dict] = []
@@ -208,10 +212,14 @@ async def _auto_entries(org_id, category, subcategory, db: AsyncSession) -> list
 async def _auto_count(org_id, category, subcategory, db: AsyncSession) -> int:
     if not category:
         return 0
+    params = {"org": str(org_id), "cat": category}
+    sub_clause = ""
+    if subcategory:
+        sub_clause = " AND subcategory = :sub"
+        params["sub"] = subcategory
     return (await db.execute(text(
-        "SELECT COUNT(*) FROM player_achievements WHERE org_id = :org AND category = :cat "
-        "AND (:sub::text IS NULL OR subcategory = :sub)"
-    ), {"org": str(org_id), "cat": category, "sub": subcategory})).scalar() or 0
+        "SELECT COUNT(*) FROM player_achievements WHERE org_id = :org AND category = :cat" + sub_clause
+    ), params)).scalar() or 0
 
 
 # ─── serialisers ─────────────────────────────────────────────────────────────
