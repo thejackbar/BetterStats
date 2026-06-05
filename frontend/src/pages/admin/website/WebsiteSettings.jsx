@@ -104,7 +104,7 @@ export default function WebsiteSettings() {
       <div className="pb-card p-4">
         <h3 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-1">Hero image</h3>
         <p className="text-pb-faintest text-[11px] mb-3">
-          Recommended <span className="text-pb-faint font-medium">1600 × 600 px</span> (wide landscape, e.g. your ground). You'll crop to fit. Max 6 MB.
+          Use a wide landscape photo (e.g. your ground) — at least <span className="text-pb-faint font-medium">1600 × 600 px</span>, bigger is sharper. You'll crop to a 8:3 banner, shown exactly as cropped. Max 6 MB.
         </p>
         <div className="aspect-[8/3] rounded-lg overflow-hidden bg-pb-surface2 mb-3 flex items-center justify-center">
           {heroUrl
@@ -198,6 +198,7 @@ export default function WebsiteSettings() {
         aspect={HERO_ASPECT}
         outputType="image/jpeg"
         outputName="hero.jpg"
+        maxOutputSize={2400}
         onCancel={() => setHeroEditorSource(null)}
         onApply={async (file) => { setHeroEditorSource(null); await uploadHero(file) }}
       />
