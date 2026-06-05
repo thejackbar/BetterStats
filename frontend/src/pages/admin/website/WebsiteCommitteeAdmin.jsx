@@ -68,6 +68,68 @@ function MemberRow({ m, onChange, onDelete }) {
   )
 }
 
+// Auto-committee config: toggle + per-group on/off (Executive / General / …).
+function CommitteeAutoConfig() {
+  const toast = useToast()
+  const [cfg, setCfg] = useState(null)  // { enabled, groups: [{name, count, on}] }
+
+  useEffect(() => { api.webAdminCommitteeConfig().then(setCfg).catch(() => {}) }, [])
+
+  async function persist(next) {
+    setCfg(next)
+    try {
+      await api.webAdminSaveCommitteeConfig({
+        enabled: next.enabled,
+        groups: next.groups.filter(g => g.on).map(g => g.name),
+      })
+    } catch (e) { toast.error(e.message) }
+  }
+
+  if (!cfg) return null
+  return (
+    <div className="pb-card p-4 mb-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="font-medium text-pb-text">Pull current committee from Office Bearer records</div>
+          <p className="text-pb-faint text-sm mt-0.5">
+            Auto-show this season's office bearers, grouped by Executive / General / Other. Maintain them under
+            {' '}<span className="font-mono">Awards → Achievements</span> (category <span className="font-mono">Office Bearer</span>).
+          </p>
+        </div>
+        <button
+          type="button" onClick={() => persist({ ...cfg, enabled: !cfg.enabled })} aria-pressed={cfg.enabled}
+          className={`shrink-0 w-12 h-7 rounded-full transition-colors relative ${cfg.enabled ? '' : 'bg-pb-surface2'}`}
+          style={cfg.enabled ? { background: 'var(--pb-accent)' } : {}}
+        >
+          <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-all ${cfg.enabled ? 'left-6' : 'left-1'}`} />
+        </button>
+      </div>
+      {cfg.enabled && (
+        cfg.groups.length === 0 ? (
+          <p className="mt-3 pt-3 border-t pb-hairline-t text-pb-faintest text-[12px]">
+            No Office Bearer records found for the current season yet.
+          </p>
+        ) : (
+          <div className="mt-3 pt-3 border-t pb-hairline-t">
+            <div className="text-[10px] font-mono tracking-wide2 uppercase text-pb-faintest mb-2">Show groups</div>
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
+              {cfg.groups.map(g => (
+                <label key={g.name} className="flex items-center gap-2 text-sm text-pb-dim cursor-pointer">
+                  <input
+                    type="checkbox" checked={g.on}
+                    onChange={() => persist({ ...cfg, groups: cfg.groups.map(x => x.name === g.name ? { ...x, on: !x.on } : x) })}
+                  />
+                  {g.name} <span className="text-pb-faintest">({g.count})</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )
+      )}
+    </div>
+  )
+}
+
 export default function WebsiteCommitteeAdmin() {
   const toast = useToast()
   const [flash, showFlash] = useFlash()
@@ -101,8 +163,12 @@ export default function WebsiteCommitteeAdmin() {
       <Flash msg={flash} />
       <p className="text-pb-faint text-sm mb-4">The people who run the club — shown on your Committee page.</p>
 
+      <CommitteeAutoConfig />
+
+      <h3 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-2">Manual members</h3>
+      <p className="text-pb-faintest text-[11px] mb-3">Add anyone with a photo/bio, or people not in your Office Bearer records. These show below the auto groups.</p>
       {loading ? <p className="text-pb-faint text-sm">Loading…</p> : list.length === 0 ? (
-        <div className="pb-card px-4 py-10 text-center text-pb-faint text-sm">No committee members yet.</div>
+        <div className="pb-card px-4 py-10 text-center text-pb-faint text-sm">No manual members.</div>
       ) : (
         <div className="pb-card overflow-hidden mb-5">
           {list.map(m => <MemberRow key={m.id} m={m} onChange={update} onDelete={del} />)}

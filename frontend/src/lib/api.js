@@ -845,6 +845,9 @@ export const api = {
   webAdminDeleteEntry: (id) =>
     request(`/club-admin/website/honours/entries/${id}`, { method: 'DELETE' }),
   // Committee
+  webAdminCommitteeConfig: () => request('/club-admin/website/committee-config'),
+  webAdminSaveCommitteeConfig: (data) =>
+    request('/club-admin/website/committee-config', { method: 'PUT', body: JSON.stringify(data) }),
   webAdminListCommittee: () => request('/club-admin/website/committee'),
   webAdminCreateCommittee: (data) =>
     request('/club-admin/website/committee', { method: 'POST', body: JSON.stringify(data) }),

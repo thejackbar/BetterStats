@@ -122,6 +122,7 @@ function Board({ board, players, categories, onChange, onDelete }) {
   const [description, setDescription] = useState(board.description || '')
   const [srcCat, setSrcCat] = useState(board.source_category || null)
   const [srcSub, setSrcSub] = useState(board.source_subcategory || null)
+  const [cols, setCols] = useState(board.columns || 1)
   // new-entry form
   const [ny, setNy] = useState('')
   const [nname, setNname] = useState('')
@@ -132,7 +133,7 @@ function Board({ board, players, categories, onChange, onDelete }) {
 
   async function saveBoard() {
     try {
-      const b = await api.webAdminUpdateBoard(board.id, { title, description, source_category: srcCat, source_subcategory: srcSub })
+      const b = await api.webAdminUpdateBoard(board.id, { title, description, source_category: srcCat, source_subcategory: srcSub, columns: cols })
       onChange({ ...board, ...b }); setEditing(false)
     } catch (e) { toast.error(e.message) }
   }
@@ -155,6 +156,12 @@ function Board({ board, players, categories, onChange, onDelete }) {
             <FieldLabel>Populate from</FieldLabel>
             <CategorySelect categories={categories} srcCat={srcCat} srcSub={srcSub} onChange={(c, s) => { setSrcCat(c); setSrcSub(s) }} />
             <p className="text-pb-faintest text-[11px] mt-1">Pick a category to auto-list everyone with that achievement, or keep it manual.</p>
+          </div>
+          <div className="sm:w-40">
+            <FieldLabel>Columns</FieldLabel>
+            <select value={cols} onChange={e => setCols(Number(e.target.value))} className={inputCls}>
+              {[1, 2, 3, 4].map(n => <option key={n} value={n}>{n} column{n > 1 ? 's' : ''}</option>)}
+            </select>
           </div>
           <div className="flex gap-2">
             <button onClick={saveBoard} className="px-3 py-1.5 text-xs rounded bg-pb-accent text-white">Save board</button>
@@ -220,6 +227,7 @@ export default function WebsiteHonoursAdmin() {
   const [newTitle, setNewTitle] = useState('')
   const [newCat, setNewCat] = useState(null)
   const [newSub, setNewSub] = useState(null)
+  const [newCols, setNewCols] = useState(1)
 
   useEffect(() => { load() }, [])
   async function load() {
@@ -239,8 +247,8 @@ export default function WebsiteHonoursAdmin() {
     const title = newTitle.trim() || (newCat ? (newSub ? `${newCat} — ${newSub}` : newCat) : '')
     if (!title) { toast.error('Give the board a title (or pick a category)'); return }
     try {
-      const b = await api.webAdminCreateBoard({ title, source_category: newCat, source_subcategory: newSub })
-      setBoards(prev => [...prev, b]); setNewTitle(''); setNewCat(null); setNewSub(null); showFlash('Board added')
+      const b = await api.webAdminCreateBoard({ title, source_category: newCat, source_subcategory: newSub, columns: newCols })
+      setBoards(prev => [...prev, b]); setNewTitle(''); setNewCat(null); setNewSub(null); setNewCols(1); showFlash('Board added')
     } catch (e) { toast.error(e.message) }
   }
   async function deleteBoard(id) {
@@ -276,6 +284,12 @@ export default function WebsiteHonoursAdmin() {
           <div>
             <FieldLabel>Populate from</FieldLabel>
             <CategorySelect categories={categories} srcCat={newCat} srcSub={newSub} onChange={(c, s) => { setNewCat(c); setNewSub(s) }} />
+          </div>
+          <div className="sm:w-40">
+            <FieldLabel>Columns</FieldLabel>
+            <select value={newCols} onChange={e => setNewCols(Number(e.target.value))} className={inputCls}>
+              {[1, 2, 3, 4].map(n => <option key={n} value={n}>{n} column{n > 1 ? 's' : ''}</option>)}
+            </select>
           </div>
           <button onClick={addBoard} className={btnPrimary}>Add board</button>
         </div>
