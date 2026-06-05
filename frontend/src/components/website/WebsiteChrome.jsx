@@ -6,10 +6,11 @@
 // via context so the homepage doesn't have to re-fetch it. If the club hasn't
 // enabled its website, we bounce to the stats dashboard.
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Link, NavLink, Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useClub } from '../../hooks/useClub'
 import { useClubTheme } from '../../hooks/useClubTheme'
+import WebsiteNav from './WebsiteNav'
 import { PbSpinner } from '../../lib/presskit'
 
 const WebsiteContext = createContext(null)
@@ -39,25 +40,6 @@ function SocialLink({ network, url }) {
         <path d={meta.path} />
       </svg>
     </a>
-  )
-}
-
-function SubNavLink({ to, children, end }) {
-  return (
-    <NavLink
-      to={to}
-      end={end}
-      className={({ isActive }) =>
-        `px-3 py-2 text-[12px] font-mono font-semibold tracking-wide2 whitespace-nowrap border-b-2 transition-colors ${
-          isActive
-            ? 'text-pb-text border-pb-accent'
-            : 'text-pb-faint border-transparent hover:text-pb-text'
-        }`
-      }
-      style={({ isActive }) => (isActive ? { borderColor: 'var(--pb-accent)' } : {})}
-    >
-      {children}
-    </NavLink>
   )
 }
 
@@ -91,26 +73,8 @@ export default function WebsiteChrome({ slug, active, children }) {
 
   return (
     <WebsiteContext.Provider value={{ slug, club, site }}>
-      {/* Website sub-navigation */}
-      <div className="border-b pb-hairline-b bg-pb-surface sticky top-14 z-40">
-        <div className="max-w-5xl mx-auto px-4 flex items-center gap-1 overflow-x-auto">
-          <SubNavLink to={`/${slug}/website`} end>Home</SubNavLink>
-          {sections.news && <SubNavLink to={`/${slug}/website/news`}>News</SubNavLink>}
-          {pages.map(p => (
-            <SubNavLink key={p.slug} to={`/${slug}/website/page/${p.slug}`}>{p.label}</SubNavLink>
-          ))}
-          {sections.honours && <SubNavLink to={`/${slug}/website/honours`}>Honours</SubNavLink>}
-          {sections.committee && <SubNavLink to={`/${slug}/website/committee`}>Committee</SubNavLink>}
-          {sections.gallery && <SubNavLink to={`/${slug}/website/gallery`}>Gallery</SubNavLink>}
-          <span className="flex-1" />
-          <Link
-            to={`/${slug}`}
-            className="px-3 py-2 text-[11px] font-mono tracking-wide2 text-pb-faint hover:text-pb-accent whitespace-nowrap"
-          >
-            CRICKET &amp; STATS →
-          </Link>
-        </div>
-      </div>
+      {/* Website sub-navigation (with dropdown menu groups) */}
+      <WebsiteNav slug={slug} pages={pages} sections={sections} />
 
       {/* Hero banner on sub-pages (homepage renders its own full hero) */}
       {site.hero_all_pages && site.hero_image_url && active !== 'home' && (

@@ -559,6 +559,14 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_club_pages_org ON club_pages(organisation_id, display_order)"
         ))
+        # Nav hierarchy: a page can sit under a parent, and a "header" page is a
+        # dropdown group with no page of its own (e.g. Teams → Mens/Womens).
+        await conn.execute(text(
+            "ALTER TABLE club_pages ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES club_pages(id) ON DELETE SET NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE club_pages ADD COLUMN IF NOT EXISTS is_header BOOLEAN NOT NULL DEFAULT false"
+        ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS club_honour_boards (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
