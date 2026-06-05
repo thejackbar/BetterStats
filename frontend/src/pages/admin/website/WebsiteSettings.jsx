@@ -1,8 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
+import { validateImageFile } from '../../../lib/validation'
+import ImageEditorModal from '../../../components/ImageEditorModal'
 import RichTextEditor from '../../../components/website/RichTextEditor'
-import { useFlash, Flash, UploadButton, inputCls, btnPrimary } from './adminParts'
+import { useFlash, Flash, inputCls, btnPrimary } from './adminParts'
+
+// Hero banner crop ratio — wide landscape; matches the public hero layout.
+const HERO_ASPECT = 8 / 3  // 1600 × 600 px
 
 const SOCIAL_FIELDS = [
   ['facebook', 'Facebook URL'],
@@ -22,7 +27,10 @@ export default function WebsiteSettings() {
   const [intro, setIntro] = useState('')
   const [social, setSocial] = useState({})
   const [heroUrl, setHeroUrl] = useState(null)
+  const [heroAllPages, setHeroAllPages] = useState(false)
   const [heroUploading, setHeroUploading] = useState(false)
+  const [heroEditorSource, setHeroEditorSource] = useState(null)
+  const heroFileRef = useRef(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -32,6 +40,7 @@ export default function WebsiteSettings() {
       setIntro(s.intro || '')
       setSocial(s.social || {})
       setHeroUrl(s.hero_image_url || null)
+      setHeroAllPages(!!s.hero_all_pages)
       setLoaded(true)
     }).catch(e => toast.error(e.message))
   }, [])
@@ -39,7 +48,7 @@ export default function WebsiteSettings() {
   async function save() {
     setSaving(true)
     try {
-      await api.webAdminSaveSettings({ enabled, tagline, intro, social })
+      await api.webAdminSaveSettings({ enabled, tagline, intro, social, hero_all_pages: heroAllPages })
       showFlash('Website settings saved')
     } catch (e) {
       toast.error(e.message)
@@ -93,21 +102,59 @@ export default function WebsiteSettings() {
 
       {/* Hero */}
       <div className="pb-card p-4">
-        <h3 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-3">Homepage hero image</h3>
-        <div className="aspect-[16/7] rounded-lg overflow-hidden bg-pb-surface2 mb-3 flex items-center justify-center">
+        <h3 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-1">Hero image</h3>
+        <p className="text-pb-faintest text-[11px] mb-3">
+          Recommended <span className="text-pb-faint font-medium">1600 × 600 px</span> (wide landscape, e.g. your ground). You'll crop to fit. Max 6 MB.
+        </p>
+        <div className="aspect-[8/3] rounded-lg overflow-hidden bg-pb-surface2 mb-3 flex items-center justify-center">
           {heroUrl
             ? <img src={heroUrl} alt="Hero" className="w-full h-full object-cover" />
             : <span className="text-pb-faintest font-mono text-[11px]">NO HERO IMAGE</span>}
         </div>
         <div className="flex items-center gap-2">
-          <UploadButton label={heroUrl ? 'REPLACE IMAGE' : 'UPLOAD IMAGE'} uploading={heroUploading} onFile={uploadHero} />
+          <button
+            onClick={() => heroFileRef.current?.click()}
+            disabled={heroUploading}
+            className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-1.5 disabled:opacity-50"
+          >
+            {heroUploading ? 'UPLOADING…' : (heroUrl ? 'REPLACE & CROP' : 'UPLOAD & CROP')}
+          </button>
+          {heroUrl && (
+            <button onClick={() => setHeroEditorSource(heroUrl)} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-1.5">
+              RE-CROP
+            </button>
+          )}
           {heroUrl && (
             <button onClick={removeHero} className="font-mono text-[10px] tracking-wide2 text-red-400 hover:text-red-300 border border-red-400/30 rounded px-3 py-1.5">
               REMOVE
             </button>
           )}
         </div>
-        <p className="text-pb-faintest text-[11px] mt-2">Wide landscape photo works best (e.g. your ground). Max 6 MB.</p>
+        <input
+          ref={heroFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
+          onChange={e => {
+            const f = e.target.files?.[0]; e.target.value = ''
+            if (!f) return
+            const err = validateImageFile(f)
+            if (err) { toast.error(err); return }
+            setHeroEditorSource(f)
+          }}
+        />
+
+        {/* Hero on every page */}
+        <label className="flex items-center justify-between gap-4 mt-4 pt-4 border-t pb-hairline-t cursor-pointer">
+          <span>
+            <span className="block text-sm text-pb-text">Show hero on every page</span>
+            <span className="block text-pb-faint text-[12px]">Use it as a banner across News, Pages, Honours, etc. — not just the homepage.</span>
+          </span>
+          <button
+            type="button" onClick={() => setHeroAllPages(v => !v)} aria-pressed={heroAllPages}
+            className={`shrink-0 w-12 h-7 rounded-full transition-colors relative ${heroAllPages ? '' : 'bg-pb-surface2'}`}
+            style={heroAllPages ? { background: 'var(--pb-accent)' } : {}}
+          >
+            <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-all ${heroAllPages ? 'left-6' : 'left-1'}`} />
+          </button>
+        </label>
       </div>
 
       {/* Tagline + intro */}
@@ -143,6 +190,17 @@ export default function WebsiteSettings() {
       <div className="flex justify-end">
         <button onClick={save} disabled={saving} className={btnPrimary}>{saving ? 'Saving…' : 'Save settings'}</button>
       </div>
+
+      <ImageEditorModal
+        open={!!heroEditorSource}
+        source={heroEditorSource}
+        title="Crop hero image"
+        aspect={HERO_ASPECT}
+        outputType="image/jpeg"
+        outputName="hero.jpg"
+        onCancel={() => setHeroEditorSource(null)}
+        onApply={async (file) => { setHeroEditorSource(null); await uploadHero(file) }}
+      />
     </div>
   )
 }

@@ -112,6 +112,14 @@ export default function WebsiteChrome({ slug, active, children }) {
         </div>
       </div>
 
+      {/* Hero banner on sub-pages (homepage renders its own full hero) */}
+      {site.hero_all_pages && site.hero_image_url && active !== 'home' && (
+        <div className="relative h-32 sm:h-44 overflow-hidden">
+          <img src={site.hero_image_url} alt="" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-black/10" />
+        </div>
+      )}
+
       <main className="min-h-[60vh]">{children}</main>
 
       {/* Branded website footer */}

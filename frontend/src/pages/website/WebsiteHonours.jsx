@@ -10,7 +10,7 @@ function EntryRow({ entry, slug }) {
     ? <Link to={`/players/${entry.player_id}`} className="text-pb-text hover:text-pb-accent">{entry.name}</Link>
     : <span className="text-pb-text">{entry.name}</span>
   return (
-    <div className="flex items-baseline gap-3 py-2 pb-hairline-t first:border-t-0">
+    <div className="flex items-baseline gap-3 py-2 pb-hairline-t break-inside-avoid">
       {entry.year != null && (
         <span className="font-mono text-[12px] text-pb-faint w-12 shrink-0 tabular-nums">{entry.year}</span>
       )}
@@ -77,7 +77,10 @@ function HonoursBody({ slug }) {
             <section key={board.id} className="rounded-xl border pb-hairline bg-pb-surface p-5 sm:p-6">
               <h2 className="font-display font-bold text-xl text-pb-text">{board.title}</h2>
               {board.description && <p className="text-pb-faint text-sm mt-1 mb-3">{board.description}</p>}
-              <div className="mt-3">
+              <div
+                className={`mt-3 ${board.columns > 1 ? 'max-sm:!columns-1' : ''}`}
+                style={board.columns > 1 ? { columnCount: board.columns, columnGap: '1.75rem' } : undefined}
+              >
                 {board.entries.length === 0
                   ? <p className="text-pb-faintest text-sm py-2">No entries yet.</p>
                   : board.entries.map((e, i) => <EntryRow key={e.id || `a${i}`} entry={e} slug={slug} />)}

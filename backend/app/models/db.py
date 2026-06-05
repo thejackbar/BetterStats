@@ -123,6 +123,10 @@ class Organisation(Base):
     website_social = Column(JSONB, nullable=True)
     hero_image_data = Column(LargeBinary, nullable=True)
     hero_image_mime = Column(Text, nullable=True)
+    # Show the hero as a banner on every website page (not just the homepage).
+    website_hero_all_pages = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Committee auto-pull config: {"enabled": bool, "groups": [subcategory, ...]}.
+    website_committee = Column(JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -202,6 +206,8 @@ class ClubHonourBoard(Base):
     # category (optionally narrowed by subcategory) instead of manual entries.
     source_category = Column(Text, nullable=True)
     source_subcategory = Column(Text, nullable=True)
+    # How many columns to lay the entries out in on the public site (1–4).
+    columns = Column(Integer, nullable=False, server_default="1", default=1)
     display_order = Column(Integer, nullable=False, server_default="0", default=0)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

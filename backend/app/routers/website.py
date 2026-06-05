@@ -222,6 +222,82 @@ async def _auto_count(org_id, category, subcategory, db: AsyncSession) -> int:
     ), params)).scalar() or 0
 
 
+# ─── Committee, auto-pulled from "Office Bearer" achievements ─────────────────
+# Office Bearer achievements are sub-categorised (Executive Committee / General
+# Committee / Captains / Coaches / Other Roles) and carry a season range, so we
+# can show the *current* season's committee grouped by those subcategories.
+_COMMITTEE_GROUP_ORDER = ["Executive Committee", "General Committee", "Captains", "Coaches", "Other Roles"]
+_ROLE_PRIORITY = {
+    "president": 0, "chairman": 0, "chairperson": 0, "vice president": 1,
+    "secretary": 2, "treasurer": 3, "operations": 4,
+}
+
+
+def _role_key(role: Optional[str]) -> int:
+    return _ROLE_PRIORITY.get((role or "").strip().lower(), 50)
+
+
+def _committee_config(org: Organisation) -> dict:
+    cfg = org.website_committee if isinstance(org.website_committee, dict) else {}
+    return {"enabled": bool(cfg.get("enabled")), "groups": cfg.get("groups")}  # groups None ⇒ all
+
+
+async def _committee_groups(org_id, db: AsyncSession) -> list[dict]:
+    """Current-season office bearers grouped by subcategory."""
+    rows = (await db.execute(text("""
+        SELECT pa.subcategory, pa.achievement AS role, pa.player_id::text AS player_id,
+               COALESCE(p.display_name_override, p.name, pa.player_name) AS name,
+               COALESCE(s.name, pa.season) AS season_name,
+               COALESCE(se.name, pa.season_end) AS season_end_name
+        FROM player_achievements pa
+        LEFT JOIN players p ON p.id = pa.player_id
+        LEFT JOIN seasons s ON s.id = CASE
+            WHEN pa.season ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            THEN pa.season::uuid ELSE NULL END
+        LEFT JOIN seasons se ON se.id = CASE
+            WHEN pa.season_end ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            THEN pa.season_end::uuid ELSE NULL END
+        WHERE pa.org_id = :org AND pa.category = 'Office Bearer'
+    """), {"org": str(org_id)})).mappings().all()
+    if not rows:
+        return []
+
+    def _yr(name):
+        v = _season_year(None, name) if name else None
+        return v if v and v > 0 else None
+
+    starts = [y for y in (_yr(r["season_name"]) for r in rows) if y]
+    ref = max(starts) if starts else None
+
+    def _active(r) -> bool:
+        sy, ey = _yr(r["season_name"]), _yr(r["season_end_name"])
+        ongoing = not (r["season_end_name"] or "").strip()
+        if ref is None or sy is None:
+            return True
+        if ongoing:
+            return sy <= ref
+        if ey is None:
+            return sy == ref
+        lo, hi = (sy, ey) if sy <= ey else (ey, sy)
+        return lo <= ref <= hi
+
+    grouped: dict[str, list] = {}
+    for r in rows:
+        if not r["name"] or not _active(r):
+            continue
+        sub = (r["subcategory"] or "").strip() or "Other Roles"
+        grouped.setdefault(sub, []).append(
+            {"role": r["role"], "name": r["name"], "player_id": r["player_id"]}
+        )
+
+    ordered = []
+    for g in _COMMITTEE_GROUP_ORDER + [k for k in grouped if k not in _COMMITTEE_GROUP_ORDER]:
+        if g in grouped:
+            members = sorted(grouped[g], key=lambda m: (_role_key(m["role"]), (m["name"] or "").lower()))
+            ordered.append({"group": g, "members": members})
+    return ordered
+
+
 # ─── serialisers ─────────────────────────────────────────────────────────────
 
 def _news_card(n: ClubNews) -> dict:
@@ -328,6 +404,7 @@ async def get_website(slug: str, db: AsyncSession = Depends(get_db)):
     committee = await _count(ClubCommitteeMember, ClubCommitteeMember.organisation_id == org.id)
     albums = await _count(ClubGalleryAlbum, ClubGalleryAlbum.organisation_id == org.id)
     has_office_bearers = await _has_office_bearers(org.id, db)
+    committee_cfg = _committee_config(org)
 
     return {
         "slug": org.slug,
@@ -335,6 +412,7 @@ async def get_website(slug: str, db: AsyncSession = Depends(get_db)):
         "short_name": org.short_name,
         "logo_url": org.logo_url,
         "hero_image_url": org.hero_image_url,
+        "hero_all_pages": bool(org.website_hero_all_pages),
         "tagline": org.website_tagline,
         "intro": org.website_intro,
         "social": _clean_social(org.website_social),
@@ -344,7 +422,7 @@ async def get_website(slug: str, db: AsyncSession = Depends(get_db)):
         "sections": {
             "news": len(news) > 0,
             "honours": boards > 0 or has_office_bearers,
-            "committee": committee > 0,
+            "committee": committee > 0 or committee_cfg["enabled"],
             "gallery": albums > 0,
         },
     }
@@ -437,6 +515,7 @@ async def get_website_honours(slug: str, db: AsyncSession = Depends(get_db)):
             "id": str(b.id),
             "title": b.title,
             "description": b.description,
+            "columns": b.columns or 1,
             "entries": merged,
         })
     office_bearers = await _latest_office_bearers(org.id, db)
@@ -451,7 +530,14 @@ async def get_website_committee(slug: str, db: AsyncSession = Depends(get_db)):
         .where(ClubCommitteeMember.organisation_id == org.id)
         .order_by(ClubCommitteeMember.display_order, ClubCommitteeMember.role)
     )).scalars().all()
-    return {"members": [_committee(m) for m in members]}
+    # Auto groups from Office Bearer records (current season), filtered to the
+    # groups the club enabled.
+    cfg = _committee_config(org)
+    groups = []
+    if cfg["enabled"]:
+        sel = cfg["groups"]
+        groups = [g for g in await _committee_groups(org.id, db) if sel is None or g["group"] in sel]
+    return {"members": [_committee(m) for m in members], "groups": groups}
 
 
 @public_router.get("/{slug}/website/gallery")
@@ -521,6 +607,7 @@ async def get_settings(
         "intro": club.website_intro,
         "social": _clean_social(club.website_social),
         "hero_image_url": club.hero_image_url,
+        "hero_all_pages": bool(club.website_hero_all_pages),
         "slug": club.slug,
     }
 
@@ -530,6 +617,7 @@ class SettingsPatch(BaseModel):
     tagline: Optional[str] = None
     intro: Optional[str] = None
     social: Optional[dict] = None
+    hero_all_pages: Optional[bool] = None
 
 
 @admin_router.put("/settings")
@@ -547,6 +635,8 @@ async def update_settings(
         club.website_intro = sanitize_html(data.intro) or None
     if data.social is not None:
         club.website_social = _clean_social(data.social)
+    if data.hero_all_pages is not None:
+        club.website_hero_all_pages = bool(data.hero_all_pages)
     await db.commit()
     return await get_settings(_=None, club=club)
 
@@ -877,9 +967,16 @@ async def admin_list_honours(
 def _board_admin(b: ClubHonourBoard) -> dict:
     return {
         "id": str(b.id), "title": b.title, "description": b.description,
-        "display_order": b.display_order,
+        "display_order": b.display_order, "columns": b.columns or 1,
         "source_category": b.source_category, "source_subcategory": b.source_subcategory,
     }
+
+
+def _clamp_columns(v) -> int:
+    try:
+        return min(4, max(1, int(v)))
+    except (TypeError, ValueError):
+        return 1
 
 
 @admin_router.get("/honour-categories")
@@ -907,6 +1004,7 @@ class BoardBody(BaseModel):
     description: Optional[str] = None
     source_category: Optional[str] = None
     source_subcategory: Optional[str] = None
+    columns: Optional[int] = None
 
 
 @admin_router.post("/honours/boards")
@@ -927,6 +1025,7 @@ async def admin_create_board(
         description=(data.description or "").strip() or None, display_order=max_order + 1,
         source_category=(data.source_category or "").strip() or None,
         source_subcategory=(data.source_subcategory or "").strip() or None,
+        columns=_clamp_columns(data.columns) if data.columns is not None else 1,
     )
     db.add(board)
     await db.commit()
@@ -950,6 +1049,8 @@ async def admin_update_board(
     b.description = (data.description or "").strip() or None
     b.source_category = (data.source_category or "").strip() or None
     b.source_subcategory = (data.source_subcategory or "").strip() or None
+    if data.columns is not None:
+        b.columns = _clamp_columns(data.columns)
     await db.commit()
     return {**_board_admin(b),
             "auto_count": await _auto_count(club.id, b.source_category, b.source_subcategory, db)}
@@ -1058,6 +1159,42 @@ async def admin_delete_entry(
 # ════════════════════════════════════════════════════════════════════════════
 #  ADMIN — committee
 # ════════════════════════════════════════════════════════════════════════════
+
+@admin_router.get("/committee-config")
+async def get_committee_config(
+    _: object = Depends(require_cap(MANAGE_WEBSITE)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Auto-committee toggle + the Office Bearer groups available this season."""
+    cfg = _committee_config(club)
+    sel = cfg["groups"]
+    groups = await _committee_groups(club.id, db)
+    return {
+        "enabled": cfg["enabled"],
+        "groups": [
+            {"name": g["group"], "count": len(g["members"]), "on": (sel is None or g["group"] in sel)}
+            for g in groups
+        ],
+    }
+
+
+class CommitteeConfigBody(BaseModel):
+    enabled: bool
+    groups: Optional[list[str]] = None  # None ⇒ all groups
+
+
+@admin_router.put("/committee-config")
+async def put_committee_config(
+    data: CommitteeConfigBody,
+    _: object = Depends(require_cap(MANAGE_WEBSITE)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    club.website_committee = {"enabled": bool(data.enabled), "groups": data.groups}
+    await db.commit()
+    return {"ok": True}
+
 
 @admin_router.get("/committee")
 async def admin_list_committee(
