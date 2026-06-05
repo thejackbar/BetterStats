@@ -21,7 +21,9 @@ class Settings(BaseSettings):
     # verify the sending domain's SPF/DKIM/DMARC so mail isn't flagged as spam.
     #   brevo  — free 300 emails/day (~9k/mo), best free burst volume
     #   resend — free 3k/mo (100/day), cleanest API
-    email_provider: str = "console"  # console | brevo | resend
+    #   smtp   — any SMTP host: Amazon SES (high volume, ~$0.10/1k, no daily cap),
+    #            a self-hosted MTA (Postal/Listmonk), or a club's own Workspace.
+    email_provider: str = "console"  # console | brevo | resend | smtp
     email_api_key: str = ""
     email_from_address: str = "noreply@betterstats.cricket"
     email_from_name: str = "BetterStats"
@@ -30,6 +32,13 @@ class Settings(BaseSettings):
     # nginx strips the /api prefix, so the public route resolves at
     # {public_base_url}/api/public/comms/unsubscribe/{token}.
     public_base_url: str = "https://betterstats.cricket"
+    # SMTP (used when email_provider == "smtp"). SES example:
+    #   smtp_host = email-smtp.ap-southeast-2.amazonaws.com  smtp_port = 587
+    # Port 465 → implicit TLS; anything else → STARTTLS.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
 
     @property
     def cors_origins_list(self) -> List[str]:
