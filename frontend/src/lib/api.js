@@ -831,6 +831,7 @@ export const api = {
     request('/club-admin/website/pages/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
   // Honours
   webAdminListHonours: () => request('/club-admin/website/honours'),
+  webAdminHonourCategories: () => request('/club-admin/website/honour-categories'),
   webAdminCreateBoard: (data) =>
     request('/club-admin/website/honours/boards', { method: 'POST', body: JSON.stringify(data) }),
   webAdminUpdateBoard: (id, data) =>

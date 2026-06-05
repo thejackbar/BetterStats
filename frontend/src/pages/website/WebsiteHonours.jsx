@@ -80,7 +80,7 @@ function HonoursBody({ slug }) {
               <div className="mt-3">
                 {board.entries.length === 0
                   ? <p className="text-pb-faintest text-sm py-2">No entries yet.</p>
-                  : board.entries.map(e => <EntryRow key={e.id} entry={e} slug={slug} />)}
+                  : board.entries.map((e, i) => <EntryRow key={e.id || `a${i}`} entry={e} slug={slug} />)}
               </div>
             </section>
           ))}

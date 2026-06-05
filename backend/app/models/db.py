@@ -198,6 +198,10 @@ class ClubHonourBoard(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     title = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
+    # When set, the board auto-populates from player_achievements of this
+    # category (optionally narrowed by subcategory) instead of manual entries.
+    source_category = Column(Text, nullable=True)
+    source_subcategory = Column(Text, nullable=True)
     display_order = Column(Integer, nullable=False, server_default="0", default=0)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
