@@ -22,7 +22,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_WEBSITE, require_cap
@@ -102,6 +102,116 @@ def _clean_social(raw: Optional[dict]) -> dict:
         if isinstance(val, str) and val.strip():
             out[key] = val.strip()[:300]
     return out
+
+
+def _season_year(year: Optional[int], name: Optional[str]) -> int:
+    """Resolve a season's start year (from the column, else the name)."""
+    if year is not None:
+        return year
+    m = re.search(r"(\d{4})", name or "")
+    return int(m.group(1)) if m else -1
+
+
+async def _latest_office_bearers(org_id, db: AsyncSession) -> Optional[dict]:
+    """The most recent season's office bearers from the yearbook honour board.
+
+    Clubs already maintain President/Secretary/Captain etc. per season on the
+    yearbook honour board — surface the latest season's set on the website so
+    it isn't entered twice. Linked players carry their id so we can deep-link.
+    """
+    rows = (await db.execute(text("""
+        SELECT s.id::text AS season_id, s.name AS season_name, s.year AS season_year,
+               h.position_title, h.sort_order, h.id AS hid,
+               h.player_id::text AS player_id,
+               COALESCE(p.display_name_override, p.name, h.name_override) AS name
+        FROM yearbook_honour_board h
+        JOIN yearbooks y ON y.id = h.yearbook_id
+        JOIN seasons s ON s.id = y.season_id
+        LEFT JOIN players p ON p.id = h.player_id
+        WHERE y.org_id = :org
+    """), {"org": str(org_id)})).mappings().all()
+    if not rows:
+        return None
+
+    by_season: dict[str, dict] = {}
+    for r in rows:
+        slot = by_season.setdefault(r["season_id"], {
+            "name": r["season_name"],
+            "key": _season_year(r["season_year"], r["season_name"]),
+            "rows": [],
+        })
+        slot["rows"].append(r)
+
+    latest = max(by_season.values(), key=lambda s: s["key"])
+    entries = [
+        {"position_title": r["position_title"], "name": r["name"], "player_id": r["player_id"]}
+        for r in sorted(latest["rows"], key=lambda r: (r["sort_order"], r["hid"]))
+        if r["name"]
+    ]
+    if not entries:
+        return None
+    return {"season": latest["name"], "entries": entries}
+
+
+async def _has_office_bearers(org_id, db: AsyncSession) -> bool:
+    return (await db.execute(text(
+        "SELECT 1 FROM yearbook_honour_board h JOIN yearbooks y ON y.id = h.yearbook_id "
+        "WHERE y.org_id = :org LIMIT 1"
+    ), {"org": str(org_id)})).first() is not None
+
+
+# Resolve a UUID-or-text `season` column to the season's name (mirrors the
+# achievements router) so we can read an induction year off it.
+_ACH_SEASON_JOIN = """
+    LEFT JOIN seasons s ON s.id = CASE
+        WHEN pa.season ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        THEN pa.season::uuid ELSE NULL END
+"""
+
+
+async def _auto_entries(org_id, category, subcategory, db: AsyncSession) -> list[dict]:
+    """Entries auto-pulled from an achievements category (e.g. "Hall of Fame")."""
+    if not category:
+        return []
+    rows = (await db.execute(text("""
+        SELECT pa.player_id::text AS player_id,
+               COALESCE(p.display_name_override, p.name, pa.player_name) AS name,
+               COALESCE(s.name, pa.season) AS season_name,
+               pa.detail, pa.achievement
+        FROM player_achievements pa
+        LEFT JOIN players p ON p.id = pa.player_id
+    """ + _ACH_SEASON_JOIN + """
+        WHERE pa.org_id = :org AND pa.category = :cat
+          AND (:sub::text IS NULL OR pa.subcategory = :sub)
+    """), {"org": str(org_id), "cat": category, "sub": subcategory})).mappings().all()
+
+    cat_l = (category or "").strip().lower()
+    out: list[dict] = []
+    for r in rows:
+        if not r["name"]:
+            continue
+        yr = _season_year(None, r["season_name"]) if r["season_name"] else -1
+        ach = (r["achievement"] or "").strip()
+        # Avoid echoing the board's own name ("Hall of Fame — Hall of Fame").
+        detail = r["detail"] or (ach if ach and ach.lower() != cat_l else None)
+        out.append({
+            "name": r["name"],
+            "player_id": r["player_id"],
+            "year": yr if yr and yr > 0 else None,
+            "detail": detail,
+            "auto": True,
+        })
+    out.sort(key=lambda e: (-(e["year"] or 0), (e["name"] or "").lower()))
+    return out
+
+
+async def _auto_count(org_id, category, subcategory, db: AsyncSession) -> int:
+    if not category:
+        return 0
+    return (await db.execute(text(
+        "SELECT COUNT(*) FROM player_achievements WHERE org_id = :org AND category = :cat "
+        "AND (:sub::text IS NULL OR subcategory = :sub)"
+    ), {"org": str(org_id), "cat": category, "sub": subcategory})).scalar() or 0
 
 
 # ─── serialisers ─────────────────────────────────────────────────────────────
@@ -209,6 +319,7 @@ async def get_website(slug: str, db: AsyncSession = Depends(get_db)):
     boards = await _count(ClubHonourBoard, ClubHonourBoard.organisation_id == org.id)
     committee = await _count(ClubCommitteeMember, ClubCommitteeMember.organisation_id == org.id)
     albums = await _count(ClubGalleryAlbum, ClubGalleryAlbum.organisation_id == org.id)
+    has_office_bearers = await _has_office_bearers(org.id, db)
 
     return {
         "slug": org.slug,
@@ -224,7 +335,7 @@ async def get_website(slug: str, db: AsyncSession = Depends(get_db)):
         "news": [_news_card(n) for n in news],
         "sections": {
             "news": len(news) > 0,
-            "honours": boards > 0,
+            "honours": boards > 0 or has_office_bearers,
             "committee": committee > 0,
             "gallery": albums > 0,
         },
@@ -309,13 +420,19 @@ async def get_website_honours(slug: str, db: AsyncSession = Depends(get_db)):
             .where(ClubHonourEntry.board_id == b.id)
             .order_by(ClubHonourEntry.display_order, ClubHonourEntry.year.desc().nullslast())
         )).scalars().all()
+        merged = [_entry(e) for e in entries]
+        if b.source_category:
+            merged += await _auto_entries(org.id, b.source_category, b.source_subcategory, db)
+        if not merged:
+            continue  # hide an empty auto board (e.g. category with no winners yet)
         out.append({
             "id": str(b.id),
             "title": b.title,
             "description": b.description,
-            "entries": [_entry(e) for e in entries],
+            "entries": merged,
         })
-    return {"boards": out}
+    office_bearers = await _latest_office_bearers(org.id, db)
+    return {"office_bearers": office_bearers, "boards": out}
 
 
 @public_router.get("/{slug}/website/committee")
@@ -742,15 +859,46 @@ async def admin_list_honours(
             .order_by(ClubHonourEntry.display_order, ClubHonourEntry.year.desc().nullslast())
         )).scalars().all()
         out.append({
-            "id": str(b.id), "title": b.title, "description": b.description,
-            "display_order": b.display_order, "entries": [_entry(e) for e in entries],
+            **_board_admin(b),
+            "entries": [_entry(e) for e in entries],
+            "auto_count": await _auto_count(club.id, b.source_category, b.source_subcategory, db),
         })
     return out
+
+
+def _board_admin(b: ClubHonourBoard) -> dict:
+    return {
+        "id": str(b.id), "title": b.title, "description": b.description,
+        "display_order": b.display_order,
+        "source_category": b.source_category, "source_subcategory": b.source_subcategory,
+    }
+
+
+@admin_router.get("/honour-categories")
+async def admin_honour_categories(
+    _: object = Depends(require_cap(MANAGE_WEBSITE)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Achievements categories (with counts) a board can auto-populate from."""
+    rows = (await db.execute(text("""
+        SELECT category, subcategory, COUNT(*) AS n
+        FROM player_achievements
+        WHERE org_id = :org AND category IS NOT NULL AND category <> ''
+        GROUP BY category, subcategory
+        ORDER BY category, subcategory NULLS FIRST
+    """), {"org": str(club.id)})).mappings().all()
+    return [
+        {"category": r["category"], "subcategory": r["subcategory"], "count": r["n"]}
+        for r in rows
+    ]
 
 
 class BoardBody(BaseModel):
     title: str
     description: Optional[str] = None
+    source_category: Optional[str] = None
+    source_subcategory: Optional[str] = None
 
 
 @admin_router.post("/honours/boards")
@@ -769,10 +917,13 @@ async def admin_create_board(
     board = ClubHonourBoard(
         organisation_id=club.id, title=title[:120],
         description=(data.description or "").strip() or None, display_order=max_order + 1,
+        source_category=(data.source_category or "").strip() or None,
+        source_subcategory=(data.source_subcategory or "").strip() or None,
     )
     db.add(board)
     await db.commit()
-    return {"id": str(board.id), "title": board.title, "description": board.description, "entries": []}
+    return {**_board_admin(board), "entries": [],
+            "auto_count": await _auto_count(club.id, board.source_category, board.source_subcategory, db)}
 
 
 @admin_router.put("/honours/boards/{board_id}")
@@ -789,8 +940,11 @@ async def admin_update_board(
     if data.title.strip():
         b.title = data.title.strip()[:120]
     b.description = (data.description or "").strip() or None
+    b.source_category = (data.source_category or "").strip() or None
+    b.source_subcategory = (data.source_subcategory or "").strip() or None
     await db.commit()
-    return {"id": str(b.id), "title": b.title, "description": b.description}
+    return {**_board_admin(b),
+            "auto_count": await _auto_count(club.id, b.source_category, b.source_subcategory, db)}
 
 
 @admin_router.delete("/honours/boards/{board_id}")

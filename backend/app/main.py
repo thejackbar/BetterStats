@@ -570,6 +570,12 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_club_honour_boards_org "
             "ON club_honour_boards(organisation_id, display_order)"
         ))
+        # An honour board can auto-populate from an achievements category
+        # (e.g. "Hall of Fame") instead of manual entries.
+        for _col in ("source_category", "source_subcategory"):
+            await conn.execute(text(
+                f"ALTER TABLE club_honour_boards ADD COLUMN IF NOT EXISTS {_col} TEXT"
+            ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS club_honour_entries (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
