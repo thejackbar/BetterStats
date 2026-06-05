@@ -28,6 +28,7 @@ MANAGE_MERGES = "manage_merges"               # player + grade + season merges (
 MANAGE_YEARBOOKS = "manage_yearbooks"         # yearbooks, sections, honour board
 MANAGE_AWARDS = "manage_awards"               # awards + achievements + award defs
 MANAGE_SPONSORS = "manage_sponsors"           # sponsors
+MANAGE_WEBSITE = "manage_website"             # public club website: news, pages, honours, committee, galleries
 MANAGE_SOCIAL = "manage_social"               # social posts
 MANAGE_MILESTONES = "manage_milestones"       # milestones (definitions, manual entry)
 RUN_SYNC = "run_sync"                         # Sync Now + Fix Missing Totals
@@ -48,6 +49,7 @@ ALL_CAPABILITIES = (
     MANAGE_YEARBOOKS,
     MANAGE_AWARDS,
     MANAGE_SPONSORS,
+    MANAGE_WEBSITE,
     MANAGE_SOCIAL,
     MANAGE_MILESTONES,
     RUN_SYNC,
