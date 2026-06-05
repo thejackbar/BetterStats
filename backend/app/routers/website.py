@@ -268,24 +268,40 @@ async def _committee_groups(org_id, db: AsyncSession) -> list[dict]:
 
     starts = [y for y in (_yr(r["season_name"]) for r in rows) if y]
     ref = max(starts) if starts else None
+    if ref is None:
+        return []  # can't tell which season is current → show nothing rather than everything
 
     def _active(r) -> bool:
-        sy, ey = _yr(r["season_name"]), _yr(r["season_end_name"])
-        ongoing = not (r["season_end_name"] or "").strip()
-        if ref is None or sy is None:
-            return True
-        if ongoing:
-            return sy <= ref
-        if ey is None:
+        # A row counts as "current" only if it belongs to the latest season (ref).
+        # Office bearers are recorded per season: NO end-date means a single-season
+        # record (that season only) — NOT an open-ended "from here on" role, which
+        # is why showing every past President was wrong. An explicit, non-year end
+        # (e.g. "Present") is treated as genuinely ongoing.
+        sy = _yr(r["season_name"])
+        if sy is None:
+            return False
+        end_raw = (r["season_end_name"] or "").strip()
+        if not end_raw:                       # single-season record
             return sy == ref
+        ey = _yr(r["season_end_name"])
+        if ey is None:                        # ongoing ("Present") → active to date
+            return sy <= ref
         lo, hi = (sy, ey) if sy <= ey else (ey, sy)
         return lo <= ref <= hi
 
     grouped: dict[str, list] = {}
+    seen: set = set()
     for r in rows:
         if not r["name"] or not _active(r):
             continue
         sub = (r["subcategory"] or "").strip() or "Other Roles"
+        # The current "season" can span several season rows (Summer/Winter, or
+        # per-club grassroots ids) that share a year — dedupe the same person in
+        # the same role so they aren't listed twice.
+        key = (sub, (r["role"] or "").strip().lower(), r["player_id"] or (r["name"] or "").strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
         grouped.setdefault(sub, []).append(
             {"role": r["role"], "name": r["name"], "player_id": r["player_id"]}
         )
