@@ -41,7 +41,6 @@ const NAV_SECTIONS = [
       { to: '/admin/award-definitions', label: 'Award Types', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/awards', label: 'Awards', cap: CAP.MANAGE_AWARDS },
       { to: '/admin/sponsors', label: 'Sponsors', cap: CAP.MANAGE_SPONSORS },
-      { to: '/admin/website', label: 'Website', cap: CAP.MANAGE_WEBSITE },
       { to: '/admin/yearbook', label: 'Yearbooks', cap: CAP.MANAGE_YEARBOOKS },
     ],
   },
@@ -220,7 +219,7 @@ export default function AdminLayout({ children }) {
             <div className="pb-2 mb-1 border-b pb-hairline-b">
               <div className="pb-1 px-2 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Modules</div>
               {dashboardTiles().map(mod => {
-                const entitled = mod.isGroup ? mod.members.some(m => hasModule(m.key)) : hasModule(mod.key)
+                const entitled = mod.alwaysOpen || (mod.isGroup ? mod.members.some(m => hasModule(m.key)) : hasModule(mod.key))
                 if (mod.built && entitled) {
                   return (
                     <Link

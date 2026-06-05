@@ -339,8 +339,35 @@ def _news_full(n: ClubNews, *, admin: bool = False) -> dict:
     return out
 
 
-def _page_nav(p: ClubPage) -> dict:
-    return {"slug": p.slug, "label": p.nav_label or p.title, "title": p.title}
+def _nav_tree(pages: list) -> list[dict]:
+    """Build the website nav as top-level items, each with optional children.
+
+    A page nests under its parent (a submenu item); a header has no page of its
+    own (slug=None) and is just a dropdown group. Headers with no children are
+    dropped.
+    """
+    nav_pages = [p for p in pages if p.show_in_nav]
+    by_id = {p.id: p for p in nav_pages}
+    children: dict = {}
+    tops = []
+    for p in nav_pages:
+        if p.parent_id and p.parent_id in by_id and not p.is_header:
+            children.setdefault(p.parent_id, []).append(p)
+        else:
+            tops.append(p)
+    tops.sort(key=lambda p: (p.display_order, p.title))
+    out = []
+    for p in tops:
+        kids = sorted(children.get(p.id, []), key=lambda c: (c.display_order, c.title))
+        item = {
+            "label": p.nav_label or p.title,
+            "slug": None if p.is_header else p.slug,
+            "children": [{"label": c.nav_label or c.title, "slug": c.slug} for c in kids],
+        }
+        if p.is_header and not item["children"]:
+            continue  # an empty menu group has nothing to show
+        out.append(item)
+    return out
 
 
 def _page_full(p: ClubPage, *, admin: bool = False) -> dict:
@@ -352,6 +379,8 @@ def _page_full(p: ClubPage, *, admin: bool = False) -> dict:
         "body": p.body,
         "show_in_nav": p.show_in_nav,
         "display_order": p.display_order,
+        "parent_id": str(p.parent_id) if p.parent_id else None,
+        "is_header": bool(p.is_header),
     }
     if admin:
         out["is_published"] = p.is_published
@@ -433,7 +462,7 @@ async def get_website(slug: str, db: AsyncSession = Depends(get_db)):
         "intro": org.website_intro,
         "social": _clean_social(org.website_social),
         "contact_email": org.contact_email,
-        "pages": [_page_nav(p) for p in pages if p.show_in_nav],
+        "pages": _nav_tree(pages),
         "news": [_news_card(n) for n in news],
         "sections": {
             "news": len(news) > 0,
@@ -498,6 +527,7 @@ async def get_website_page(slug: str, page_slug: str, db: AsyncSession = Depends
             ClubPage.organisation_id == org.id,
             ClubPage.slug == page_slug,
             ClubPage.is_published == True,  # noqa: E712
+            ClubPage.is_header == False,  # noqa: E712  — headers are menu groups, not pages
         )
     )).scalar_one_or_none()
     if not page:
@@ -872,6 +902,27 @@ class PageBody(BaseModel):
     body: Optional[str] = None
     show_in_nav: bool = True
     is_published: bool = True
+    parent_id: Optional[str] = None
+    is_header: bool = False
+
+
+async def _resolve_parent(db, club, parent_id, page_id=None):
+    """A valid parent is one of the club's own top-level pages (not itself)."""
+    if not parent_id:
+        return None
+    pid = _uuid(parent_id)
+    if page_id is not None and pid == page_id:
+        return None
+    parent = await db.get(ClubPage, pid)
+    if not parent or parent.organisation_id != club.id or parent.parent_id is not None:
+        return None  # must exist, be ours, and be top-level (no deep nesting)
+    return pid
+
+
+async def _has_children(db, page_id) -> bool:
+    return (await db.execute(
+        select(func.count()).select_from(ClubPage).where(ClubPage.parent_id == page_id)
+    )).scalar() > 0
 
 
 @admin_router.post("/pages")
@@ -887,6 +938,8 @@ async def admin_create_page(
     max_order = (await db.execute(
         select(func.max(ClubPage.display_order)).where(ClubPage.organisation_id == club.id)
     )).scalar() or 0
+    is_header = bool(data.is_header)
+    parent_id = None if is_header else await _resolve_parent(db, club, data.parent_id)
     page = ClubPage(
         organisation_id=club.id,
         title=title[:120],
@@ -895,6 +948,8 @@ async def admin_create_page(
         body=sanitize_html(data.body) or None,
         show_in_nav=data.show_in_nav,
         is_published=data.is_published,
+        parent_id=parent_id,
+        is_header=is_header,
         display_order=max_order + 1,
     )
     db.add(page)
@@ -921,6 +976,12 @@ async def admin_update_page(
     p.body = sanitize_html(data.body) or None
     p.show_in_nav = data.show_in_nav
     p.is_published = data.is_published
+    p.is_header = bool(data.is_header)
+    # Headers are top-level; a page that already has children can't itself nest.
+    if p.is_header or (data.parent_id and await _has_children(db, p.id)):
+        p.parent_id = None
+    else:
+        p.parent_id = await _resolve_parent(db, club, data.parent_id, page_id=p.id)
     p.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return _page_full(p, admin=True)

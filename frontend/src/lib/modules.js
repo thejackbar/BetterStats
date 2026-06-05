@@ -51,6 +51,7 @@ export const MODULE_INFO = [
     requiredTier: TIER.BETTER,
     built: true,
     caps: [CAP.MANAGE_SOCIAL],
+    group: 'socials',  // shown under the BetterSocials umbrella (with the Website)
   },
   {
     key: MODULE.FEES,
@@ -87,6 +88,17 @@ export const MODULE_INFO = [
 // presented together as one **BetterAdmin** umbrella tile on the dashboard /
 // sidebar — the club's back office in one place.
 export const MODULE_GROUPS = {
+  // BetterSocials is an umbrella too: the Post Designer (Better tier) plus the
+  // club Website (Core — every club). alwaysOpen keeps the hub reachable for
+  // every club so the Core website is never gated behind the socials module.
+  socials: {
+    key: 'bettersocials',
+    name: 'BetterSocials',
+    blurb: 'Your public website plus auto-posts for lineups, scorecards and milestones.',
+    to: '/admin/bettersocials',
+    requiredTier: TIER.BETTER,
+    alwaysOpen: true,
+  },
   admin: {
     key: 'admin',
     name: 'BetterAdmin',

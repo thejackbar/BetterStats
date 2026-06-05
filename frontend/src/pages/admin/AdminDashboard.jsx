@@ -147,7 +147,7 @@ export default function AdminDashboard() {
             <ModuleTile
               key={tile.key}
               mod={tile}
-              entitled={tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key)}
+              entitled={tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key))}
             />
           ))}
         </div>

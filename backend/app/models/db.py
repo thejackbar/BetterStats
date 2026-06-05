@@ -189,6 +189,10 @@ class ClubPage(Base):
     slug = Column(Text, nullable=False)
     body = Column(Text, nullable=True)  # sanitised HTML
     nav_label = Column(Text, nullable=True)
+    # Nav hierarchy: parent_id nests this page under another (a submenu item);
+    # is_header marks a dropdown group that has no page of its own (e.g. "Teams").
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("club_pages.id", ondelete="SET NULL"), nullable=True)
+    is_header = Column(Boolean, nullable=False, server_default="false", default=False)
     show_in_nav = Column(Boolean, nullable=False, server_default="true", default=True)
     is_published = Column(Boolean, nullable=False, server_default="true", default=True)
     display_order = Column(Integer, nullable=False, server_default="0", default=0)
