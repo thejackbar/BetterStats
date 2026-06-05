@@ -101,6 +101,13 @@ const IqReview = lazy(() => import('./pages/admin/betteriq/MatchReview'))
 const IqPreview = lazy(() => import('./pages/admin/betteriq/MatchPreview'))
 const IqCheatSheet = lazy(() => import('./pages/admin/betteriq/CheatSheet'))
 
+// BetterAdmin umbrella (BetterFees + BetterComms + future BetterMerch)
+const BetterAdminHome = lazy(() => import('./pages/admin/BetterAdminHome'))
+const CommsCampaigns = lazy(() => import('./pages/admin/bettercomms/CommsCampaigns'))
+const CommsCompose = lazy(() => import('./pages/admin/bettercomms/CommsCompose'))
+const CommsContacts = lazy(() => import('./pages/admin/bettercomms/CommsContacts'))
+const CommsSettings = lazy(() => import('./pages/admin/bettercomms/CommsSettings'))
+
 // Public club pages — lazy loaded (not needed for marketing visitors)
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Players = lazy(() => import('./pages/Players'))
@@ -223,6 +230,13 @@ export default function App() {
           <Route path="/admin/betteriq/team" element={<ProtectedRoute requireModule="iq"><IqTeam /></ProtectedRoute>} />
           <Route path="/admin/betteriq/review" element={<ProtectedRoute requireModule="iq"><IqReview /></ProtectedRoute>} />
           <Route path="/admin/betteriq/preview" element={<ProtectedRoute requireModule="iq"><IqPreview /></ProtectedRoute>} />
+
+          {/* BetterAdmin umbrella + BetterComms (bulk email) */}
+          <Route path="/admin/betteradmin" element={<ProtectedRoute><BetterAdminHome /></ProtectedRoute>} />
+          <Route path="/admin/comms" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />
+          <Route path="/admin/comms/contacts" element={<ProtectedRoute requireModule="comms"><CommsContacts /></ProtectedRoute>} />
+          <Route path="/admin/comms/settings" element={<ProtectedRoute requireModule="comms"><CommsSettings /></ProtectedRoute>} />
+          <Route path="/admin/comms/:id" element={<ProtectedRoute requireModule="comms"><CommsCompose /></ProtectedRoute>} />
 
           {/* Game-level pages */}
           <Route path="/games/:gameId" element={<MatchScorecard />} />

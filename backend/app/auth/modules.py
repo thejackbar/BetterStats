@@ -28,9 +28,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 MODULE_SELECT = "select"     # BetterSelect  — availability + smart team selection
 MODULE_SOCIALS = "socials"   # BetterSocials — auto social posts
 MODULE_FEES = "fees"         # BetterFees    — fee schedules + payment tracking
-MODULE_IQ = "iq"             # BetterIQ      — AI + stats deep-dive (not built yet)
+MODULE_IQ = "iq"             # BetterIQ      — AI + stats deep-dive
+MODULE_COMMS = "comms"       # BetterComms   — bulk email to the member database
 
-ALL_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ)
+# BetterFees + BetterComms (+ future BetterMerch) are presented together on the
+# admin dashboard under the **BetterAdmin** umbrella (see frontend modules.js),
+# but stay separate entitlement keys here so they can be granted à la carte.
+ALL_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ, MODULE_COMMS)
 
 # Display metadata, surfaced to the admin module-tile dashboard. ``built`` flags
 # whether the module exists yet. BetterIQ Phase 1 (opposition analysis) is now
@@ -40,6 +44,7 @@ MODULE_META: dict[str, dict] = {
     MODULE_SOCIALS: {"name": "BetterSocials", "blurb": "Auto-post lineups, scorecards & milestones", "built": True},
     MODULE_FEES: {"name": "BetterFees", "blurb": "Fee schedules & payment tracking", "built": True},
     MODULE_IQ: {"name": "BetterIQ", "blurb": "AI + stats deep-dive — opposition scouting & selection analysis", "built": True},
+    MODULE_COMMS: {"name": "BetterComms", "blurb": "Bulk email to your member database", "built": True},
 }
 
 
@@ -56,7 +61,7 @@ DEFAULT_TIER = TIER_GOOD
 TIER_MODULES: dict[str, frozenset[str]] = {
     TIER_GOOD: frozenset(),
     TIER_BETTER: frozenset({MODULE_SELECT, MODULE_SOCIALS}),
-    TIER_BEST: frozenset({MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ}),
+    TIER_BEST: frozenset({MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ, MODULE_COMMS}),
 }
 
 # The lowest tier each module appears in — drives the upsell ("Upgrade to …").
@@ -65,6 +70,7 @@ MODULE_REQUIRED_TIER: dict[str, str] = {
     MODULE_SOCIALS: TIER_BETTER,
     MODULE_FEES: TIER_BEST,
     MODULE_IQ: TIER_BEST,
+    MODULE_COMMS: TIER_BEST,
 }
 
 

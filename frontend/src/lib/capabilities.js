@@ -19,6 +19,7 @@ export const CAP = {
   MANAGE_FIXTURES: 'manage_fixtures',
   MANAGE_SELECTIONS: 'manage_selections',
   MANAGE_IQ: 'manage_iq',
+  MANAGE_COMMS: 'manage_comms',
 }
 
 // Display metadata for the user-management UI checkboxes.
@@ -41,4 +42,5 @@ export const CAPABILITY_INFO = [
   { key: CAP.MANAGE_FIXTURES, label: 'Manage fixtures', hint: 'BetterSelect: sync + manually add upcoming fixtures' },
   { key: CAP.MANAGE_SELECTIONS, label: 'Manage selections', hint: 'BetterSelect: teams, availability and team selection' },
   { key: CAP.MANAGE_IQ, label: 'Manage BetterIQ', hint: 'BetterIQ: opposition scouting + analytics' },
+  { key: CAP.MANAGE_COMMS, label: 'Manage BetterComms', hint: 'BetterComms: contacts + bulk email campaigns' },
 ]
