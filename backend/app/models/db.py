@@ -103,7 +103,15 @@ class Organisation(Base):
     # auto_roll, sound, alerts[]). New net sessions seed from this; NULL falls
     # back to net_manager.DEFAULT_NET_SETTINGS.
     net_settings = Column(JSONB, nullable=True)
-    # ─── Front-end Website (Core, migration 069) ─────────────────────────────
+    # ─── BetterComms: outbound email sender identity (migration 069) ──────────
+    # from_name / reply_to fall back to the club name / contact_email when NULL.
+    # sender_footer carries the Spam Act 2003 sender identification (legal name /
+    # ABN / a postal or contact line) appended to every campaign alongside the
+    # mandatory unsubscribe link.
+    comms_from_name = Column(Text, nullable=True)
+    comms_reply_to = Column(Text, nullable=True)
+    comms_sender_footer = Column(Text, nullable=True)
+    # ─── Front-end Website (Core, migration 070) ─────────────────────────────
     # The full public club website that can replace a club's existing site:
     # news, editable pages, honour rolls, committee and photo galleries, all
     # under /{slug}/website. Off by default — a club opts in. hero_image_data/
@@ -1371,3 +1379,85 @@ class FeePayment(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     member_season = relationship("FeeMemberSeason", back_populates="payments")
+
+
+# ─── BetterComms (BetterAdmin module) — bulk email ───────────────────────────
+
+class CommsContact(Base):
+    """A single emailable contact in a club's audience.
+
+    The canonical recipient list, deduped per club by ``email`` (stored
+    lowercased + trimmed). Sourced from players, fee members, CSV/paste import
+    or manual entry (``source``). ``subscribed`` is the suppression gate: a
+    one-click unsubscribe or a hard bounce flips it false and every send skips
+    the address (Spam Act 2003 mandates a working, no-login unsubscribe).
+    Re-importing a suppressed address keeps it suppressed because the upsert
+    lands on the same (org, email) row.
+    """
+    __tablename__ = "comms_contacts"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "email", name="uq_comms_contact_org_email"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    email = Column(Text, nullable=False)
+    name = Column(Text, nullable=True)
+    source = Column(Text, nullable=False, server_default="manual")  # player | member | import | manual
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    subscribed = Column(Boolean, nullable=False, server_default="true", default=True)
+    unsubscribed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    bounced = Column(Boolean, nullable=False, server_default="false", default=False)
+    bounced_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    tags = Column(JSONB, nullable=False, server_default="[]", default=list)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommsCampaign(Base):
+    """One email send (draft → sending → sent/error).
+
+    ``body_html`` is the editor content; ``body_text`` is the plain-text
+    alternative (auto-derived when NULL). ``audience`` records the segment the
+    admin chose, and ``stats`` accumulates the per-send tallies for the history
+    view (recipients / sent / failed / skipped).
+    """
+    __tablename__ = "comms_campaigns"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    subject = Column(Text, nullable=False, server_default="")
+    preheader = Column(Text, nullable=True)
+    body_html = Column(Text, nullable=True)
+    body_text = Column(Text, nullable=True)
+    audience = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    status = Column(Text, nullable=False, server_default="draft")  # draft | sending | sent | error
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    stats = Column(JSON, nullable=False, default=dict)
+    error = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommsRecipient(Base):
+    """Per-recipient delivery row for a campaign send — the audit of who got
+    what. ``provider_message_id`` is the id the email provider returned (lets a
+    future webhook reconcile delivered/opened/bounced)."""
+    __tablename__ = "comms_recipients"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "email", name="uq_comms_recipient_campaign_email"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    campaign_id = Column(UUID(as_uuid=True), ForeignKey("comms_campaigns.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("comms_contacts.id", ondelete="SET NULL"), nullable=True)
+    email = Column(Text, nullable=False)
+    name = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="queued")  # queued | sent | failed | skipped
+    provider_message_id = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

@@ -41,6 +41,7 @@ MANAGE_FEES = "manage_fees"                   # fee tracking: members, schedule,
 MANAGE_FIXTURES = "manage_fixtures"           # BetterSelect: fixtures (partner sync + manual create/edit)
 MANAGE_SELECTIONS = "manage_selections"       # BetterSelect: teams, availability, team selection
 MANAGE_IQ = "manage_iq"                       # BetterIQ: opposition analysis + scouting dossiers
+MANAGE_COMMS = "manage_comms"                 # BetterComms: contacts + bulk email campaigns
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -62,6 +63,7 @@ ALL_CAPABILITIES = (
     MANAGE_FIXTURES,
     MANAGE_SELECTIONS,
     MANAGE_IQ,
+    MANAGE_COMMS,
 )
 
 

@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
-import { MODULE_INFO, tierLabel } from '../../lib/modules'
+import { dashboardTiles, tierLabel } from '../../lib/modules'
 import { api } from '../../lib/api'
 import { SITE_VERSION } from '../../version'
 import { CHANGELOG } from '../../data/changelog'
@@ -219,8 +219,9 @@ export default function AdminLayout({ children }) {
                 that unlocks them); BetterIQ shows "Soon". */}
             <div className="pb-2 mb-1 border-b pb-hairline-b">
               <div className="pb-1 px-2 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Modules</div>
-              {MODULE_INFO.map(mod => {
-                if (mod.built && hasModule(mod.key)) {
+              {dashboardTiles().map(mod => {
+                const entitled = mod.isGroup ? mod.members.some(m => hasModule(m.key)) : hasModule(mod.key)
+                if (mod.built && entitled) {
                   return (
                     <Link
                       key={mod.key}

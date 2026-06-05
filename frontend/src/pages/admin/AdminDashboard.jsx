@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
-import { MODULE_INFO, tierInfo, tierLabel, statusLabel, statusIsLive, TIER } from '../../lib/modules'
+import { dashboardTiles, tierInfo, tierLabel, statusLabel, statusIsLive, TIER } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
 
 // Render "BetterX" with the suffix in the club accent colour, matching the
@@ -143,8 +143,12 @@ export default function AdminDashboard() {
         {/* Better modules — entitled tiles open; locked tiles upsell. */}
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Modules</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
-          {MODULE_INFO.map(mod => (
-            <ModuleTile key={mod.key} mod={mod} entitled={hasModule(mod.key)} />
+          {dashboardTiles().map(tile => (
+            <ModuleTile
+              key={tile.key}
+              mod={tile}
+              entitled={tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key)}
+            />
           ))}
         </div>
 

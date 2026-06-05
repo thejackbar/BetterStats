@@ -12,6 +12,7 @@ export const MODULE = {
   SOCIALS: 'socials',
   FEES: 'fees',
   IQ: 'iq',
+  COMMS: 'comms',
 }
 
 export const TIER = { GOOD: 'good', BETTER: 'better', BEST: 'best' }
@@ -59,6 +60,17 @@ export const MODULE_INFO = [
     requiredTier: TIER.BEST,
     built: true,
     caps: [CAP.MANAGE_FEES],
+    group: 'admin',  // shown under the BetterAdmin umbrella tile
+  },
+  {
+    key: MODULE.COMMS,
+    name: 'BetterComms',
+    blurb: 'Bulk email to your member database — newsletters and announcements.',
+    to: '/admin/comms',
+    requiredTier: TIER.BEST,
+    built: true,
+    caps: [CAP.MANAGE_COMMS],
+    group: 'admin',
   },
   {
     key: MODULE.IQ,
@@ -70,6 +82,41 @@ export const MODULE_INFO = [
     caps: [CAP.MANAGE_IQ],
   },
 ]
+
+// BetterFees + BetterComms (+ future BetterMerch) are sold separately but
+// presented together as one **BetterAdmin** umbrella tile on the dashboard /
+// sidebar — the club's back office in one place.
+export const MODULE_GROUPS = {
+  admin: {
+    key: 'admin',
+    name: 'BetterAdmin',
+    blurb: 'Run the back office — fees, comms and merch in one place.',
+    to: '/admin/betteradmin',
+    requiredTier: TIER.BEST,
+  },
+}
+
+// What the dashboard + sidebar render: grouped modules collapse into a single
+// umbrella tile (with its `members`), ungrouped modules pass through unchanged.
+// Order follows MODULE_INFO; a group lands where its first member appears.
+export function dashboardTiles() {
+  const tiles = []
+  const at = {}
+  for (const mod of MODULE_INFO) {
+    const g = mod.group && MODULE_GROUPS[mod.group]
+    if (g) {
+      if (at[g.key] == null) {
+        at[g.key] = tiles.length
+        tiles.push({ ...g, isGroup: true, built: true, members: [mod] })
+      } else {
+        tiles[at[g.key]].members.push(mod)
+      }
+    } else {
+      tiles.push({ ...mod, isGroup: false })
+    }
+  }
+  return tiles
+}
 
 export function tierLabel(tier) {
   return TIER_INFO[tier]?.label || TIER_INFO[TIER.GOOD].label
