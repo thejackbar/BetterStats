@@ -1302,87 +1302,100 @@ async def super_overview(
     last sync, last admin login) so staff can see, at a glance, which clubs are
     healthy and which are stale. Read-only.
     """
-    orgs = (await db.execute(select(Organisation).order_by(Organisation.name))).scalars().all()
+    from types import SimpleNamespace
+    try:
+        # Select ONLY the columns we need (raw), NOT select(Organisation): the
+        # ORM load demands every model column, so any column the live DB hasn't
+        # had added yet (migration drift) would 500 the whole endpoint. The
+        # grouped per-table aggregates below replace the old per-club correlated
+        # subqueries that tripped a statement timeout at fleet scale.
+        org_rows = (await db.execute(_text(
+            "SELECT id::text AS id, name, slug, tier, subscription_status, is_active, "
+            "module_overrides, created_at FROM organisations ORDER BY name"
+        ))).mappings().all()
 
-    # Grouped aggregates — ONE scan per table, merged in Python. The previous
-    # version used a correlated COUNT(*) subquery per club, which re-scans
-    # players/games once for every club and trips a statement timeout at fleet
-    # scale (the cause of the 500). A single GROUP BY per table is ~N× cheaper.
-    # Key every map by the org id as TEXT so it can't miss on a UUID-vs-str
-    # type mismatch between the ORM object and the raw-SQL rows.
-    players_by = {r["org"]: r["n"] for r in (await db.execute(_text(
-        "SELECT organisation_id::text AS org, COUNT(*) AS n FROM players GROUP BY organisation_id"
-    ))).mappings().all()}
-    games_by = {r["org"]: r["n"] for r in (await db.execute(_text(
-        "SELECT organisation_id::text AS org, COUNT(*) AS n FROM games GROUP BY organisation_id"
-    ))).mappings().all()}
-    sync_by = {r["org"]: r["t"] for r in (await db.execute(_text(
-        "SELECT organisation_id::text AS org, MAX(synced_at) AS t FROM seasons GROUP BY organisation_id"
-    ))).mappings().all()}
-    member_rows = (await db.execute(_text(
-        "SELECT cm.club_id::text AS org, COUNT(*) AS n, MAX(u.last_login_at) AS last_login "
-        "FROM club_memberships cm JOIN users u ON u.id = cm.user_id GROUP BY cm.club_id"
-    ))).mappings().all()
-    members_by = {r["org"]: r["n"] for r in member_rows}
-    login_by = {r["org"]: r["last_login"] for r in member_rows}
+        players_by = {r["org"]: r["n"] for r in (await db.execute(_text(
+            "SELECT organisation_id::text AS org, COUNT(*) AS n FROM players GROUP BY organisation_id"
+        ))).mappings().all()}
+        games_by = {r["org"]: r["n"] for r in (await db.execute(_text(
+            "SELECT organisation_id::text AS org, COUNT(*) AS n FROM games GROUP BY organisation_id"
+        ))).mappings().all()}
+        sync_by = {r["org"]: r["t"] for r in (await db.execute(_text(
+            "SELECT organisation_id::text AS org, MAX(synced_at) AS t FROM seasons GROUP BY organisation_id"
+        ))).mappings().all()}
+        member_rows = (await db.execute(_text(
+            "SELECT cm.club_id::text AS org, COUNT(*) AS n, MAX(u.last_login_at) AS last_login "
+            "FROM club_memberships cm JOIN users u ON u.id = cm.user_id GROUP BY cm.club_id"
+        ))).mappings().all()
+        members_by = {r["org"]: r["n"] for r in member_rows}
+        login_by = {r["org"]: r["last_login"] for r in member_rows}
 
-    clubs = []
-    by_tier: dict[str, int] = {}
-    by_status: dict[str, int] = {}
-    module_adoption: dict[str, int] = {}
-    active_clubs = total_players = total_games = 0
-    for o in orgs:
-        tier = o.tier or "good"
-        status_ = o.subscription_status or "active"
-        by_tier[tier] = by_tier.get(tier, 0) + 1
-        by_status[status_] = by_status.get(status_, 0) + 1
-        mods = sorted(org_entitled_modules(o))
-        for m in mods:
-            module_adoption[m] = module_adoption.get(m, 0) + 1
-        oid = str(o.id)
-        p = players_by.get(oid, 0) or 0
-        g = games_by.get(oid, 0) or 0
-        total_players += p
-        total_games += g
-        if o.is_active:
-            active_clubs += 1
-        ls = sync_by.get(oid)
-        ll = login_by.get(oid)
-        clubs.append({
-            "id": str(o.id),
-            "name": o.name,
-            "slug": o.slug,
-            "tier": tier,
-            "subscription_status": status_,
-            "is_active": o.is_active,
-            "modules": mods,
-            "players": p,
-            "games": g,
-            "members": members_by.get(oid, 0) or 0,
-            "last_sync": ls.isoformat() if ls else None,
-            "last_login": ll.isoformat() if ll else None,
-            "created_at": o.created_at.isoformat() if o.created_at else None,
-        })
+        clubs = []
+        by_tier: dict[str, int] = {}
+        by_status: dict[str, int] = {}
+        module_adoption: dict[str, int] = {}
+        active_clubs = total_players = total_games = 0
+        for r in org_rows:
+            oid = r["id"]
+            tier = r["tier"] or "good"
+            status_ = r["subscription_status"] or "active"
+            by_tier[tier] = by_tier.get(tier, 0) + 1
+            by_status[status_] = by_status.get(status_, 0) + 1
+            # Reuse the entitlement helper on a lightweight stand-in (raw values),
+            # so we don't need a full ORM object.
+            mods = sorted(org_entitled_modules(SimpleNamespace(
+                tier=tier, subscription_status=status_, module_overrides=r["module_overrides"] or [],
+            )))
+            for m in mods:
+                module_adoption[m] = module_adoption.get(m, 0) + 1
+            p = players_by.get(oid, 0) or 0
+            g = games_by.get(oid, 0) or 0
+            total_players += p
+            total_games += g
+            if r["is_active"]:
+                active_clubs += 1
+            ls = sync_by.get(oid)
+            ll = login_by.get(oid)
+            clubs.append({
+                "id": oid,
+                "name": r["name"],
+                "slug": r["slug"],
+                "tier": tier,
+                "subscription_status": status_,
+                "is_active": r["is_active"],
+                "modules": mods,
+                "players": p,
+                "games": g,
+                "members": members_by.get(oid, 0) or 0,
+                "last_sync": ls.isoformat() if ls else None,
+                "last_login": ll.isoformat() if ll else None,
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            })
 
-    total_users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
-    super_admins = (await db.execute(
-        select(func.count()).select_from(ClubMembership).where(ClubMembership.role == "super_admin")
-    )).scalar() or 0
+        total_users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
+        super_admins = (await db.execute(
+            select(func.count()).select_from(ClubMembership).where(ClubMembership.role == "super_admin")
+        )).scalar() or 0
 
-    return {
-        "totals": {
-            "clubs": len(clubs),
-            "active_clubs": active_clubs,
-            "users": total_users,
-            "super_admins": super_admins,
-            "players": total_players,
-            "games": total_games,
-            "by_tier": by_tier,
-            "by_status": by_status,
-            "module_adoption": module_adoption,
-        },
-        "clubs": clubs,
-    }
+        return {
+            "totals": {
+                "clubs": len(clubs),
+                "active_clubs": active_clubs,
+                "users": total_users,
+                "super_admins": super_admins,
+                "players": total_players,
+                "games": total_games,
+                "by_tier": by_tier,
+                "by_status": by_status,
+                "module_adoption": module_adoption,
+            },
+            "clubs": clubs,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:  # surface the real cause to the (super-admin-only) UI
+        _logging.getLogger(__name__).exception("super_overview failed")
+        raise HTTPException(status_code=500, detail=f"Overview failed: {type(e).__name__}: {e}")
 
 
 @router.get("/super/clubs")

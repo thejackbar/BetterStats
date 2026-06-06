@@ -232,6 +232,35 @@ export default function AdminLayout({ children }) {
           w-full md:w-40 shrink-0 border-r pb-hairline-r pt-3 pb-6 px-1.5
         `}>
           <nav>
+            {/* Better HQ — staff-only platform tools. Pinned to the TOP because
+                for a super admin this is their primary surface (the club admin
+                sections below are whichever club they're acting as). */}
+            {user?.role === 'super_admin' && (
+              <div
+                className="pb-2 mb-1 border-b pb-hairline-b rounded"
+                style={{ background: 'color-mix(in srgb, var(--pb-accent) 7%, transparent)' }}
+              >
+                <div className="pb-1 px-2 pt-1 font-mono text-[10px] tracking-wide3 uppercase" style={{ color: 'var(--pb-accent)' }}>
+                  Better HQ
+                </div>
+                {SUPER_LINKS.map(link => (
+                  <Link
+                    key={link.to}
+                    to={link.to}
+                    onClick={() => setMobileOpen(false)}
+                    className={`block px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
+                      isActive(link.to, link.exact)
+                        ? 'bg-pb-surface2 text-pb-text'
+                        : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
+                    }`}
+                    style={isActive(link.to, link.exact) ? { color: 'var(--pb-accent)' } : {}}
+                  >
+                    {link.label.toUpperCase()}
+                  </Link>
+                ))}
+              </div>
+            )}
+
             {/* Modules — the headline Better products. Bolder + on top of the
                 admin sections below; each opens its own module surface. Modules
                 the club's plan doesn't include are greyed out (with the plan
@@ -298,27 +327,6 @@ export default function AdminLayout({ children }) {
                 ))}
               </div>
             ))}
-
-            {user?.role === 'super_admin' && (
-              <div className="mt-3 pt-3 border-t pb-hairline-t">
-                <div className="pb-1 px-2 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Super Admin</div>
-                {SUPER_LINKS.map(link => (
-                  <Link
-                    key={link.to}
-                    to={link.to}
-                    onClick={() => setMobileOpen(false)}
-                    className={`block px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
-                      isActive(link.to, link.exact)
-                        ? 'bg-pb-surface2'
-                        : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
-                    }`}
-                    style={isActive(link.to, link.exact) ? { color: 'var(--pb-accent)' } : {}}
-                  >
-                    {link.label.toUpperCase()}
-                  </Link>
-                ))}
-              </div>
-            )}
           </nav>
         </aside>
 
