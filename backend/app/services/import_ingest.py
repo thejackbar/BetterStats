@@ -401,13 +401,13 @@ def match_seasons(labels: list, seasons: list, threshold: float = 0.84) -> dict:
         if label in out:
             continue
         if not str(label).strip() or _PRIOR_RE.search(label or ""):
-            out[label] = {"season_id": None, "is_prior": True, "status": "prior", "candidates": []}
+            out[label] = {"season_id": None, "is_prior": True, "status": "prior", "auto_status": "prior", "candidates": []}
             continue
         ln = _norm_season(label)
         if ln in name_map:
             sid, nm = name_map[ln]
             out[label] = {"season_id": str(sid), "matched_name": nm, "status": "exact",
-                          "is_prior": False, "confidence": 1.0, "candidates": []}
+                          "auto_status": "exact", "is_prior": False, "confidence": 1.0, "candidates": []}
             continue
         yrs = _season_years(label)
         scored = []
@@ -422,8 +422,8 @@ def match_seasons(labels: list, seasons: list, threshold: float = 0.84) -> dict:
         cands = [{"season_id": str(sid), "name": nm, "confidence": round(sc, 2)} for sc, sid, nm in top if sc >= 0.5]
         if top and top[0][0] >= threshold:
             out[label] = {"season_id": str(top[0][1]), "matched_name": top[0][2],
-                          "status": "matched", "is_prior": False,
+                          "status": "matched", "auto_status": "matched", "is_prior": False,
                           "confidence": round(top[0][0], 2), "candidates": cands}
         else:
-            out[label] = {"season_id": None, "status": "none", "is_prior": False, "candidates": cands}
+            out[label] = {"season_id": None, "status": "none", "auto_status": "none", "is_prior": False, "candidates": cands}
     return out

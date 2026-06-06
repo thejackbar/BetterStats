@@ -126,6 +126,21 @@ export default function AdminImport() {
     })
   }, [resolved?.players])
 
+  // Seasons we couldn't match to a club season default to the "Career summary"
+  // bucket (the adjustment residual) — a single place to dump unmatched history.
+  useEffect(() => {
+    const ss = resolved?.seasons
+    if (!ss) return
+    setSeasonOverrides(prev => {
+      let changed = false
+      const next = { ...prev }
+      for (const s of ss) {
+        if (s.auto_status === 'none' && !(s.raw_label in next)) { next[s.raw_label] = '__prior__'; changed = true }
+      }
+      return changed ? next : prev
+    })
+  }, [resolved?.seasons])
+
   async function runParse() {
     if (!file) return
     setParsing(true); setParsed(null); setResolved(null); setCommitted(null)
@@ -300,7 +315,7 @@ export default function AdminImport() {
         {/* ── Step: Match seasons ── */}
         {step === 'seasons' && (
           <MatchTable
-            title="Match seasons" subtitle="Match each season label to one of your seasons. A catch-all row like “Prior Seasons & Adjustments” should be the Prior/Historical bucket — it becomes the residual that fills in everything online data doesn't have."
+            title="Match seasons" subtitle="Match each season label to one of your seasons. Anything we can't match (and catch-all rows like “Prior Seasons & Adjustments”) defaults to Career summary (no season) — a single adjustment bucket that fills in everything online data doesn't already hold."
             rows={(resolved?.seasons) || []} kind="season" allOptions={allSeasons.map(s => ({ id: s.id, name: s.name }))}
             loading={resolving}
             valueFor={(r) => {
@@ -362,7 +377,7 @@ function valueLabel(value, idName, kind) {
   if (!value) return '— Unresolved (skipped) —'
   if (value === '__new__') return '+ Create new player'
   if (value === '__skip__') return 'Skip'
-  if (value === '__prior__') return '↪ Prior / Historical bucket'
+  if (value === '__prior__') return '↪ Career summary (no season)'
   return idName.get(value) || '(selected)'
 }
 
@@ -394,7 +409,7 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
       {open && (
         <div className="absolute z-30 mt-1 w-72 max-h-72 overflow-auto bg-pb-surface border pb-hairline rounded shadow-xl p-1">
           <button className={item} onClick={() => pick(kind === 'player' ? '__new__' : '__prior__')}>
-            {kind === 'player' ? '+ Create new player' : '↪ Prior / Historical bucket'}
+            {kind === 'player' ? '+ Create new player' : '↪ Career summary (no season)'}
           </button>
           <button className={item} onClick={() => pick('__skip__')}>Skip this {kind}</button>
           {(candidates || []).length > 0 && <div className="px-2 pt-2 pb-1 font-mono text-[9px] tracking-wide2 text-pb-faint">SUGGESTED</div>}
