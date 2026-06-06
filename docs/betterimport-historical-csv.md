@@ -146,6 +146,23 @@ scenarios and asserts that the effective career total (GR + emitted season delta
 | E — player left before GR (no GR) | 27 | 0 | 27, all as season deltas |
 | F — GR grows 225→230 after import | 473 | 230 | still **473**, residual self-shrinks 248→243 |
 
-**Before production:** run a real reconcile on a **data copy** and confirm a normal
-single-club org's career numbers are byte-for-byte unchanged (no `imported_stats`
-⇒ empty delta branch ⇒ identical reads), per the standing CLAUDE.md rule.
+### Validated against real PostgreSQL 16
+
+Beyond the pure-math verifier, the full stack was exercised on a throwaway
+PostgreSQL 16 instance with synthetic fixtures (not committed — no DB in CI):
+
+- **Migration 070** `upgrade()` **and** `downgrade()` run cleanly through a real
+  Alembic operations context: the three tables + the `uq_imported_stats_key`
+  expression index are created/dropped, and the view gains/loses its `import`
+  branch (verified via `pg_get_viewdef`).
+- The **real reconciler** (`reconcile_imported_totals`) + the **real aggregation
+  readers** (`get_career_batting`/`bowling`/`fielding`) over the **real view**
+  produced: Wayne 473 games / 14 576 runs / HS 200 / 333 wkts / 340 ct (not 698);
+  a GR-only player with no import **unchanged** and zero deltas written; a no-GR
+  player's full career via season deltas; and self-heal (GR 225→235 ⇒ residual
+  248→238, total stays 473).
+
+**Before production on real club data:** still run one reconcile on a **data copy**
+and confirm a normal single-club org's career numbers are byte-for-byte unchanged
+(no `imported_stats` ⇒ empty delta branch ⇒ identical reads), per the standing
+CLAUDE.md rule.
