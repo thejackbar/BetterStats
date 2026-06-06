@@ -167,6 +167,11 @@ class MatchDecision(BaseModel):
     klubpro_player_nickname: Optional[str] = None
     decision: str  # 'approve' | 'reject' | 'skip'
     notes: Optional[str] = None
+    migrate_fields: Optional[dict] = None  # per-field selections (approve only)
+
+
+def _operator_name(user) -> Optional[str]:
+    return getattr(user, "display_name", None) or getattr(user, "username", None)
 
 
 @router.post("/clubs/{club_mapping_id}/players/match")
@@ -192,11 +197,36 @@ async def set_match(
         klubpro_player_firstname=body.klubpro_player_firstname,
         klubpro_player_lastname=body.klubpro_player_lastname,
         klubpro_player_nickname=body.klubpro_player_nickname,
-        match_status=body.decision,
+        match_status="approved" if body.decision == "approve" else body.decision,
         approved=(body.decision == "approve"),
         notes=body.notes,
+        migrate_fields=body.migrate_fields if body.decision == "approve" else {},
+        reviewed_by=_operator_name(current_user),
     )
     return {"ok": True}
+
+
+class BulkApproveBody(BaseModel):
+    items: list[dict] = []  # [{betterstats_player_id, klubpro_player_id?, migrate_fields}]
+
+
+@router.post("/clubs/{club_mapping_id}/players/bulk-approve")
+async def bulk_approve(
+    club_mapping_id: str,
+    body: BulkApproveBody,
+    current_user: User = Depends(require_super_admin),
+    bs: AsyncSession = Depends(get_db),
+    kp: AsyncSession = Depends(get_klubpro_db),
+):
+    _require_configured()
+    cm, _ = await _resolve_club(kp, bs, club_mapping_id)
+    if not body.items:
+        raise HTTPException(status_code=400, detail="No players to approve")
+    results = await svc.bulk_approve_matches(
+        kp, _parse_uuid(cm["id"]), body.items, reviewed_by=_operator_name(current_user)
+    )
+    approved = sum(1 for r in results if r["ok"])
+    return {"approved": approved, "failed": len(results) - approved, "results": results}
 
 
 @router.get("/clubs/{club_mapping_id}/players/dry-run")
@@ -215,14 +245,14 @@ async def player_dry_run(
     previews = []
     players_changing = 0
     field_writes = 0
+    images_replacing = 0
     for m in approved:
         current = bs_players.get(m["betterstats_player_id"])
         if not current:
             previews.append({
                 "betterstats_player_id": m["betterstats_player_id"],
                 "betterstats_player_name": m.get("betterstats_player_name"),
-                "error": "BetterStats player no longer exists",
-                "diffs": [],
+                "error": "BetterStats player no longer exists", "diffs": [],
             })
             continue
         cand = await svc.fetch_player_candidate(kp, m["klubpro_player_id"])
@@ -230,29 +260,29 @@ async def player_dry_run(
             previews.append({
                 "betterstats_player_id": m["betterstats_player_id"],
                 "betterstats_player_name": current["name"],
-                "error": "KlubPro candidate no longer staged",
-                "diffs": [],
+                "error": "KlubPro candidate no longer staged", "diffs": [],
             })
             continue
-        diffs = svc.diff_player(current, cand)
-        row_changes = sum(1 for d in diffs if d["change"])
-        if row_changes:
+        plans = svc.plan_player(current, cand, m.get("migrate_fields"))
+        applied = [p for p in plans if p["change"]]
+        if applied:
             players_changing += 1
-            field_writes += row_changes
+            field_writes += len(applied)
+            if any(p["field"] == "profile_image" for p in applied):
+                images_replacing += 1
         previews.append({
             "betterstats_player_id": m["betterstats_player_id"],
             "betterstats_player_name": current["name"],
             "klubpro_player_id": m["klubpro_player_id"],
-            "klubpro_name": " ".join(
-                x for x in [cand.get("firstname"), cand.get("lastname")] if x
-            ),
-            "diffs": diffs,
-            "row_changes": row_changes,
+            "klubpro_name": " ".join(x for x in [cand.get("firstname"), cand.get("lastname")] if x),
+            "diffs": plans,
+            "row_changes": len(applied),
         })
     return {
         "approved_count": len(approved),
         "players_changing": players_changing,
         "field_writes": field_writes,
+        "images_replacing": images_replacing,
         "previews": previews,
     }
 
