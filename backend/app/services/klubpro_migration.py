@@ -35,9 +35,12 @@ from app.models.db import (
     Sponsor,
 )
 
-# The exact ten BetterStats player columns the handoff says to fill, mapped from
-# the candidate view's already-derived columns. (bowling_action is intentionally
-# absent — the staged view doesn't derive it, so we leave it untouched.)
+# The migratable BetterStats player fields, mapped from the candidate view's
+# already-derived columns. `profile_image` → photo_data/photo_mime. These keys
+# are the canonical `migrate_fields` keys stored on each match mapping.
+# (bowling_action is intentionally absent — the staged view doesn't derive it;
+#  first/last/nickname are NOT migratable — BetterStats has a single `name`
+#  field, so name parts are shown for context only, never written.)
 PLAYER_FIELD_LABELS = {
     "gender": "Gender",
     "email": "Email",
@@ -47,8 +50,108 @@ PLAYER_FIELD_LABELS = {
     "bowling_type": "Bowling type",
     "is_opening_batsman": "Opening batter",
     "skill_positions": "Skills",
-    "photo": "Photo",
+    "profile_image": "Profile image",
 }
+MIGRATABLE_FIELDS = tuple(PLAYER_FIELD_LABELS.keys())
+
+
+def _incoming_map(candidate: dict) -> dict:
+    """The 9 migratable values as staged in KlubPro for one candidate."""
+    return {
+        "gender": candidate.get("gender"),
+        "email": candidate.get("email"),
+        "phone": candidate.get("mobile"),
+        "player_role": candidate.get("betterstats_player_role"),
+        "batting_hand": candidate.get("betterstats_batting_hand"),
+        "bowling_type": candidate.get("betterstats_bowling_type"),
+        "is_opening_batsman": candidate.get("betterstats_is_opening_batsman"),
+        "skill_positions": _as_list(candidate.get("betterstats_skill_positions")),
+        "profile_image": "image" if candidate.get("profile_image_found") else None,
+    }
+
+
+def _current_map(current: dict) -> dict:
+    """The same 9 fields as they currently stand on the BetterStats player."""
+    return {
+        "gender": current.get("gender"),
+        "email": current.get("email"),
+        "phone": current.get("phone"),
+        "player_role": current.get("player_role"),
+        "batting_hand": current.get("batting_hand"),
+        "bowling_type": current.get("bowling_type"),
+        "is_opening_batsman": current.get("is_opening_batsman"),
+        "skill_positions": list(current.get("skill_positions") or []),
+        "profile_image": "image" if current.get("has_photo") else None,
+    }
+
+
+def _field_empty(field: str, inc: Any) -> bool:
+    """Is the incoming KlubPro value one we must not write for this field?"""
+    if field == "is_opening_batsman":
+        # The staged view returns False rather than NULL — False == "no info".
+        return inc is not True
+    return _empty(inc)
+
+
+def recommended_fields(current: dict, candidate: dict) -> dict:
+    """Safe-default checkbox state per the brief's smart-default rules.
+
+    - KlubPro empty/missing → unchecked (can't, and won't, blank a value).
+    - profile_image → checked only when filling a gap (BetterStats has none) so it
+      matches the conservative default (an existing photo is preserved unless the
+      operator opts in).
+    - everything else with a non-empty KlubPro value → checked (incl. both-differ).
+    """
+    inc = _incoming_map(candidate)
+    cur = _current_map(current)
+    out = {}
+    for f in MIGRATABLE_FIELDS:
+        if f == "profile_image":
+            out[f] = (inc[f] is not None) and (cur[f] is None)
+        else:
+            out[f] = not _field_empty(f, inc[f])
+    return out
+
+
+def _differ(field: str, a: Any, b: Any) -> bool:
+    if field == "skill_positions":
+        return _skills_differ(a, b)
+    return a != b
+
+
+def plan_player(current: dict, candidate: dict, migrate_fields: Optional[dict]) -> list[dict]:
+    """Per-field migration plan honouring the stored `migrate_fields` selections.
+
+    Returns one row per migratable field with: current, incoming, recommended,
+    selected (what the operator chose, defaulting to recommended for any field a
+    legacy/empty `migrate_fields` omits), differ (BetterStats vs KlubPro), and
+    will_apply (what the import will actually write). The import and the dry-run
+    both read this so they always agree.
+    """
+    inc = _incoming_map(candidate)
+    cur = _current_map(current)
+    rec = recommended_fields(current, candidate)
+    mf = migrate_fields or {}
+    plans = []
+    for f, label in PLAYER_FIELD_LABELS.items():
+        selected = bool(mf.get(f, rec[f]))
+        empty = _field_empty(f, inc[f])
+        differ = _differ(f, inc[f], cur[f])
+        if f == "profile_image":
+            # Opt-in replace: when selected and KlubPro has an image, apply it
+            # (overwrite allowed — the operator ticked it); byte-diff can't be
+            # previewed so we apply whenever it differs in presence or selected.
+            will_apply = selected and (inc[f] is not None)
+        else:
+            will_apply = selected and (not empty) and differ
+        plans.append({
+            "field": f, "label": label,
+            "current": cur[f], "incoming": inc[f],
+            "recommended": rec[f], "selected": selected,
+            "differ": differ, "skipped_empty": empty,
+            "change": will_apply,
+        })
+    return plans
 
 
 # ── small value helpers ──────────────────────────────────────────────────────
@@ -293,12 +396,41 @@ async def fetch_player_image(kp: AsyncSession, klubpro_player_id: str, thumb: bo
     return bytes(r["data"]), (r["mime"] or "image/png")
 
 
+_match_columns_ensured = False
+
+
+async def ensure_match_columns(kp: AsyncSession) -> None:
+    """Idempotently add the field-level-approval columns to the KlubPro match
+    table. KlubPro is external (not in our Alembic), so we run defensive ALTERs
+    once per process the first time a migration endpoint touches the table."""
+    global _match_columns_ensured
+    if _match_columns_ensured:
+        return
+    await kp.execute(text(
+        "ALTER TABLE klubpro_migration.player_match_mappings "
+        "ADD COLUMN IF NOT EXISTS migrate_fields jsonb NOT NULL DEFAULT '{}'::jsonb"
+    ))
+    for col, typ in (
+        ("reviewed_at", "timestamptz"), ("reviewed_by", "text"),
+        ("imported_at", "timestamptz"), ("imported_by", "text"),
+    ):
+        await kp.execute(text(
+            f"ALTER TABLE klubpro_migration.player_match_mappings "
+            f"ADD COLUMN IF NOT EXISTS {col} {typ}"
+        ))
+    await kp.commit()
+    _match_columns_ensured = True
+
+
 async def fetch_match_mappings(kp: AsyncSession, club_mapping_id: uuid.UUID) -> list[dict]:
+    await ensure_match_columns(kp)
     rows = await kp.execute(text("""
         SELECT betterstats_player_id, betterstats_player_name, klubpro_player_id,
                klubpro_player_firstname, klubpro_player_lastname,
                klubpro_player_nickname, match_status, match_score,
-               COALESCE(approved, false) AS approved, notes
+               COALESCE(approved, false) AS approved, notes,
+               COALESCE(migrate_fields, '{}'::jsonb) AS migrate_fields,
+               reviewed_at, reviewed_by, imported_at, imported_by
         FROM klubpro_migration.player_match_mappings
         WHERE club_mapping_id = :cmid
     """), {"cmid": str(club_mapping_id)})
@@ -307,6 +439,10 @@ async def fetch_match_mappings(kp: AsyncSession, club_mapping_id: uuid.UUID) -> 
         d = dict(r)
         d["betterstats_player_id"] = str(d["betterstats_player_id"]) if d["betterstats_player_id"] else None
         d["match_score"] = float(d["match_score"]) if d["match_score"] is not None else None
+        mf = d.get("migrate_fields")
+        d["migrate_fields"] = mf if isinstance(mf, dict) else (json.loads(mf) if isinstance(mf, str) and mf else {})
+        for k in ("reviewed_at", "imported_at"):
+            d[k] = d[k].isoformat() if d.get(k) else None
         out.append(d)
     return out
 
@@ -324,8 +460,14 @@ async def upsert_match_mapping(
     match_status: str,
     approved: bool,
     notes: Optional[str],
+    migrate_fields: Optional[dict] = None,
+    reviewed_by: Optional[str] = None,
+    commit: bool = True,
 ) -> None:
-    """Record an operator decision. Keyed on (club_mapping_id, betterstats_player_id)."""
+    """Record an operator decision (incl. field-level selections on approve).
+    Keyed on (club_mapping_id, betterstats_player_id)."""
+    await ensure_match_columns(kp)
+    reviewed = approved or match_status in ("approve", "approved", "reject", "skip")
     await kp.execute(text("""
         DELETE FROM klubpro_migration.player_match_mappings
         WHERE club_mapping_id = :cmid AND betterstats_player_id = :bpid
@@ -334,19 +476,61 @@ async def upsert_match_mapping(
         INSERT INTO klubpro_migration.player_match_mappings
             (id, club_mapping_id, betterstats_player_id, betterstats_player_name,
              klubpro_player_id, klubpro_player_firstname, klubpro_player_lastname,
-             klubpro_player_nickname, match_status, approved, notes,
-             created_at, updated_at)
+             klubpro_player_nickname, match_status, approved, notes, migrate_fields,
+             reviewed_at, reviewed_by, created_at, updated_at)
         VALUES
             (gen_random_uuid(), :cmid, :bpid, :bname, :kpid, :kfn, :kln, :knn,
-             :status, :approved, :notes, NOW(), NOW())
+             :status, :approved, :notes, CAST(:mf AS jsonb),
+             CASE WHEN :reviewed THEN NOW() ELSE NULL END, :rby, NOW(), NOW())
     """), {
         "cmid": str(club_mapping_id), "bpid": str(betterstats_player_id),
         "bname": betterstats_player_name, "kpid": klubpro_player_id,
         "kfn": klubpro_player_firstname, "kln": klubpro_player_lastname,
         "knn": klubpro_player_nickname, "status": match_status,
         "approved": approved, "notes": notes,
+        "mf": json.dumps(migrate_fields or {}),
+        "reviewed": reviewed, "rby": reviewed_by,
     })
-    await kp.commit()
+    if commit:
+        await kp.commit()
+
+
+async def bulk_approve_matches(kp: AsyncSession, club_mapping_id: uuid.UUID, items: list[dict],
+                               reviewed_by: Optional[str]) -> list[dict]:
+    """Approve many matches at once, each with its own field selections. Existing
+    rows supply the descriptive KlubPro name columns. Returns item-level results."""
+    await ensure_match_columns(kp)
+    existing = {m["betterstats_player_id"]: m for m in await fetch_match_mappings(kp, club_mapping_id)}
+    results = []
+    for it in items:
+        bpid = it.get("betterstats_player_id")
+        kpid = it.get("klubpro_player_id") or (existing.get(bpid) or {}).get("klubpro_player_id")
+        if not bpid or not kpid or _uuid(bpid) is None:
+            results.append({"betterstats_player_id": bpid, "ok": False,
+                            "error": "needs a betterstats_player_id and a matched klubpro_player_id"})
+            continue
+        prev = existing.get(bpid) or {}
+        try:
+            # commit per item so a DB failure on one can't poison the others
+            # (a failed statement aborts the whole asyncpg transaction).
+            await upsert_match_mapping(
+                kp,
+                club_mapping_id=club_mapping_id,
+                betterstats_player_id=_uuid(bpid),
+                betterstats_player_name=prev.get("betterstats_player_name") or it.get("betterstats_player_name"),
+                klubpro_player_id=kpid,
+                klubpro_player_firstname=prev.get("klubpro_player_firstname") or it.get("klubpro_player_firstname"),
+                klubpro_player_lastname=prev.get("klubpro_player_lastname") or it.get("klubpro_player_lastname"),
+                klubpro_player_nickname=prev.get("klubpro_player_nickname") or it.get("klubpro_player_nickname"),
+                match_status="approved", approved=True, notes=prev.get("notes"),
+                migrate_fields=it.get("migrate_fields") or {}, reviewed_by=reviewed_by,
+                commit=True,
+            )
+            results.append({"betterstats_player_id": bpid, "ok": True})
+        except Exception as e:  # item-level error reporting; keep the rest going
+            await kp.rollback()
+            results.append({"betterstats_player_id": bpid, "ok": False, "error": str(e)})
+    return results
 
 
 # ── KlubPro reads (sponsors) ─────────────────────────────────────────────────
@@ -429,56 +613,6 @@ async def fetch_bs_sponsors(bs: AsyncSession, org_id: uuid.UUID) -> list[dict]:
     return out
 
 
-# ── dry-run diff (pure, per approved match) ──────────────────────────────────
-
-def diff_player(current: dict, candidate: dict) -> list[dict]:
-    """Per-field {field,label,current,incoming,change,skipped_empty} for one match.
-
-    `current` is a fetch_bs_players row; `candidate` a fetch_player_candidate row.
-    """
-    incoming = {
-        "gender": candidate.get("gender"),
-        "email": candidate.get("email"),
-        "phone": candidate.get("mobile"),
-        "player_role": candidate.get("betterstats_player_role"),
-        "batting_hand": candidate.get("betterstats_batting_hand"),
-        "bowling_type": candidate.get("betterstats_bowling_type"),
-        "is_opening_batsman": candidate.get("betterstats_is_opening_batsman"),
-        "skill_positions": _as_list(candidate.get("betterstats_skill_positions")),
-        "photo": "image" if candidate.get("profile_image_found") else None,
-    }
-    cur = {
-        "gender": current.get("gender"),
-        "email": current.get("email"),
-        "phone": current.get("phone"),
-        "player_role": current.get("player_role"),
-        "batting_hand": current.get("batting_hand"),
-        "bowling_type": current.get("bowling_type"),
-        "is_opening_batsman": current.get("is_opening_batsman"),
-        "skill_positions": list(current.get("skill_positions") or []),
-        "photo": "image" if current.get("has_photo") else None,
-    }
-    diffs = []
-    for field, label in PLAYER_FIELD_LABELS.items():
-        inc = incoming.get(field)
-        now = cur.get(field)
-        skipped = _empty(inc)
-        # is_opening_batsman: the staged view returns False rather than NULL, so
-        # we only treat True as a value worth writing (False = "no info").
-        if field == "is_opening_batsman" and inc is False:
-            skipped = True
-        if field == "skill_positions":
-            change = (not skipped) and _skills_differ(inc, now)
-        else:
-            change = (not skipped) and (inc != now)
-        diffs.append({
-            "field": field, "label": label,
-            "current": now, "incoming": inc,
-            "change": change, "skipped_empty": skipped,
-        })
-    return diffs
-
-
 # ── backup helpers ───────────────────────────────────────────────────────────
 
 def _player_before(player: Player) -> dict:
@@ -496,6 +630,50 @@ def _player_before(player: Player) -> dict:
 
 # ── import execution ─────────────────────────────────────────────────────────
 
+def _bs_player_dict(player: Player) -> dict:
+    """A Player ORM row in the shape plan_player / _current_map expect."""
+    return {
+        "gender": player.gender, "email": player.email, "phone": player.phone,
+        "player_role": player.player_role, "batting_hand": player.batting_hand,
+        "bowling_type": player.bowling_type,
+        "is_opening_batsman": player.is_opening_batsman,
+        "skill_positions": list(player.skill_positions or []),
+        "has_photo": player.photo_data is not None,
+    }
+
+
+def _apply_plan(player: Player, candidate: dict, plans: list[dict]) -> tuple[list[str], list[str]]:
+    """Write the will_apply fields onto the player.
+
+    Returns (applied, skipped). `skipped` = fields the operator excluded or that
+    had no usable KlubPro value; a selected field whose value already matches is
+    neither (it's in sync). A populated value is never blanked.
+    """
+    incoming = _incoming_map(candidate)
+    applied, skipped_fields = [], []
+    for p in plans:
+        f = p["field"]
+        if not p["change"]:
+            if (not p["selected"]) or p["skipped_empty"]:
+                skipped_fields.append(f)
+            continue
+        if f == "profile_image":
+            if candidate.get("profile_image_data"):
+                player.photo_data = bytes(candidate["profile_image_data"])
+                player.photo_mime = candidate.get("profile_image_mime") or "image/png"
+                applied.append(f)
+        elif f == "skill_positions":
+            player.skill_positions = _as_list(candidate.get("betterstats_skill_positions"))
+            applied.append(f)
+        elif f == "is_opening_batsman":
+            player.is_opening_batsman = True
+            applied.append(f)
+        else:
+            setattr(player, f, incoming[f])
+            applied.append(f)
+    return applied, skipped_fields
+
+
 async def execute_player_import(
     bs: AsyncSession,
     kp: AsyncSession,
@@ -504,20 +682,21 @@ async def execute_player_import(
     club_mapping: dict,
     operator,  # User
 ) -> dict:
-    """Apply every approved, mapped match for the club. Backs up each row first.
+    """Apply every approved match, honouring each one's stored migrate_fields.
 
-    Returns {batch_id, updated, skipped, field_writes}. Idempotent-ish: only
-    non-empty values overwrite, so re-running fills nothing new.
+    Backs up each row first. Only fields the operator selected (and that have a
+    non-empty KlubPro value) are written — a populated BetterStats value is never
+    blanked. Returns {batch_id, updated, skipped, field_writes}.
     """
     club_mapping_id = _uuid(club_mapping["id"])
     matches = await fetch_match_mappings(kp, club_mapping_id)
     approved = [m for m in matches if m.get("approved") and m.get("klubpro_player_id")]
+    operator_name = getattr(operator, "display_name", None) or getattr(operator, "username", None)
 
     batch = KlubproMigrationBatch(
         kind="player", organisation_id=org_id, club_mapping_id=club_mapping_id,
         klubpro_club_id=club_mapping.get("klubpro_club_id"), status="imported",
-        operator_user_id=getattr(operator, "id", None),
-        operator_name=getattr(operator, "display_name", None) or getattr(operator, "username", None),
+        operator_user_id=getattr(operator, "id", None), operator_name=operator_name,
     )
     bs.add(batch)
     await bs.flush()  # get batch.id
@@ -525,6 +704,7 @@ async def execute_player_import(
     updated = 0
     skipped = 0
     field_writes = 0
+    imported_pids = []
     for m in approved:
         player = await bs.get(Player, _uuid(m["betterstats_player_id"]))
         if not player or player.organisation_id != org_id:
@@ -535,53 +715,44 @@ async def execute_player_import(
             skipped += 1
             continue
 
+        current = _bs_player_dict(player)
+        plans = plan_player(current, cand, m.get("migrate_fields"))
         before = _player_before(player)
-        changed_any = False
+        applied, skipped_fields = _apply_plan(player, cand, plans)
 
-        def _set(field, value):
-            nonlocal changed_any, field_writes
-            if _empty(value):
-                return
-            if getattr(player, field) != value:
-                setattr(player, field, value)
-                changed_any = True
-                field_writes += 1
-
-        _set("gender", cand.get("gender"))
-        _set("email", cand.get("email"))
-        _set("phone", cand.get("mobile"))
-        _set("player_role", cand.get("betterstats_player_role"))
-        _set("batting_hand", cand.get("betterstats_batting_hand"))
-        _set("bowling_type", cand.get("betterstats_bowling_type"))
-        if cand.get("betterstats_is_opening_batsman") is True:
-            _set("is_opening_batsman", True)
-        skills = _as_list(cand.get("betterstats_skill_positions"))
-        if skills and _skills_differ(skills, player.skill_positions):
-            player.skill_positions = skills
-            changed_any = True
-            field_writes += 1
-        # Photo is fill-only: a player with no photo gets the KlubPro one; an
-        # existing (often hand-curated) photo is kept. This keeps the dry-run
-        # exact — we can't preview a byte-level photo diff — and is the safe
-        # default. (Scalars above let a non-empty KlubPro value win.)
-        if cand.get("profile_image_found") and cand.get("profile_image_data") and not player.photo_data:
-            player.photo_data = bytes(cand["profile_image_data"])
-            player.photo_mime = cand.get("profile_image_mime") or "image/png"
-            changed_any = True
-            field_writes += 1
-
-        if not changed_any:
+        if not applied:
             skipped += 1
             continue
 
+        field_writes += len(applied)
         bs.add(KlubproMigrationBackup(
             batch_id=batch.id, target_table="players", target_id=player.id,
-            action="update", before_data=before, after_data=_player_before(player),
+            action="update", before_data=before,
+            after_data={**_player_before(player),
+                        "_player_name": m.get("betterstats_player_name") or player.name,
+                        "_klubpro_player_id": m.get("klubpro_player_id"),
+                        "_applied_fields": applied, "_skipped_fields": skipped_fields},
         ))
+        imported_pids.append(m["betterstats_player_id"])
         updated += 1
 
     batch.counts = {"updated": updated, "skipped": skipped, "field_writes": field_writes}
     await bs.commit()
+
+    # Stamp imported_at/by on the KlubPro mappings we wrote (audit trail). The BS
+    # import already committed above, so a stamping hiccup must never fail it.
+    if imported_pids:
+        try:
+            for pid in imported_pids:
+                await kp.execute(text("""
+                    UPDATE klubpro_migration.player_match_mappings
+                    SET imported_at = NOW(), imported_by = :by
+                    WHERE club_mapping_id = :cmid AND betterstats_player_id = :pid
+                """), {"by": operator_name, "cmid": str(club_mapping_id), "pid": pid})
+            await kp.commit()
+        except Exception:
+            await kp.rollback()
+
     return {"batch_id": str(batch.id), "updated": updated, "skipped": skipped, "field_writes": field_writes}
 
 

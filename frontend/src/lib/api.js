@@ -322,6 +322,8 @@ export const api = {
   kpPlayers: (cm) => request(`/club-admin/klubpro/clubs/${cm}/players`),
   kpSetMatch: (cm, payload) =>
     request(`/club-admin/klubpro/clubs/${cm}/players/match`, { method: 'POST', body: JSON.stringify(payload) }),
+  kpBulkApprove: (cm, items) =>
+    request(`/club-admin/klubpro/clubs/${cm}/players/bulk-approve`, { method: 'POST', body: JSON.stringify({ items }) }),
   kpPlayerDryRun: (cm) => request(`/club-admin/klubpro/clubs/${cm}/players/dry-run`),
   kpPlayerImport: (cm) =>
     request(`/club-admin/klubpro/clubs/${cm}/players/import`, { method: 'POST', body: JSON.stringify({ confirm: true }) }),

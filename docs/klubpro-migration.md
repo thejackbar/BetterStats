@@ -66,6 +66,41 @@ KlubPro is later decommissioned and rollback is a pure BetterStats operation):
   stores the old field values (incl. the old photo as base64) to restore on undo;
   a sponsor `insert` stores just the new id so undo deletes it.
 
+## Field-level approval
+
+Approving a match approves the **relationship** between a BetterStats player and a
+KlubPro player — it does **not** force every field across. Each match shows the 9
+migratable fields side by side (BetterStats current vs KlubPro staged) with a
+checkbox each; only ticked fields migrate.
+
+- **Migratable fields** (the `migrate_fields` keys, = backend `MIGRATABLE_FIELDS`):
+  `gender, email, phone, player_role, batting_hand, bowling_type,
+  is_opening_batsman, skill_positions, profile_image`. First/last/nickname are
+  **not** migratable — BetterStats has a single `name` field, so they're shown for
+  context only and never written.
+- **Smart defaults** (`recommended_fields`): a field is pre-ticked when KlubPro has
+  a usable value; `profile_image` is pre-ticked only when BetterStats has **no**
+  photo (an existing photo is preserved unless the operator opts in to replace it);
+  a KlubPro empty/missing value is unticked and can never blank a BetterStats value.
+- **Per-row actions**: Approve / Re-approve · Reject · Skip · Change (pick a
+  different KlubPro player) · Check all · Uncheck all · Reset to recommended.
+- **Persistence** (`klubpro_migration.player_match_mappings`, columns added at
+  runtime via `ensure_match_columns` since KlubPro is external): `migrate_fields
+  jsonb`, `reviewed_at/by`, `imported_at/by`. The single approve
+  (`POST .../players/match` with `migrate_fields`) and **Bulk Approve**
+  (`POST .../players/bulk-approve` `{items:[{betterstats_player_id,
+  klubpro_player_id, migrate_fields}]}`, item-level results, per-item commit so one
+  failure can't poison the batch) both store the selections.
+- **Import & dry-run** read the stored `migrate_fields` (`plan_player`): a field is
+  written only when selected, non-empty, and actually different; `profile_image`
+  overwrites an existing photo only when explicitly ticked. The import stamps
+  `imported_at/by` and records per-player applied/skipped fields in the backup
+  row's `after_data` (audit). The dry-run reflects the **saved** approvals, so
+  approve (or bulk-approve) first, then dry-run, then import.
+- **Filters**: all · unreviewed · reviewed · approved · rejected · skipped · image
+  replacement selected/deselected · has field differences · has missing KlubPro
+  values.
+
 ## Safety invariants (enforced in `services/klubpro_migration.py`)
 
 - **Fills gaps, never clobbers with empties.** A scalar field is only overwritten

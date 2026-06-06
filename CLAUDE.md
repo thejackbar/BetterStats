@@ -405,6 +405,22 @@ BetterStats players by name — KlubPro has no CA ids) + **sponsors**. Full guid
   then retries with `force`. `fetch_dashboard` LEFT JOINs `club_mappings` so each
   summary row carries its mapping. Mapping is repeatable/update-safe and needs no
   manual SQL for future clubs. Candidate matching is **not** auto-run on map.
+- **Field-level approval** (v8.4): approving a match approves the *relationship*,
+  not a blanket field overwrite. Each match shows the 9 migratable fields
+  (`MIGRATABLE_FIELDS` = gender/email/phone/player_role/batting_hand/bowling_type/
+  is_opening_batsman/skill_positions/profile_image) side-by-side with a checkbox;
+  only ticked fields migrate. `recommended_fields` pre-ticks: any non-empty KlubPro
+  value, except `profile_image` (ticked only when BS has no photo — existing photo
+  preserved unless the operator opts in to *replace*). Selections persist to
+  `player_match_mappings.migrate_fields jsonb` (+ `reviewed_at/by`, `imported_at/by`)
+  — columns added at runtime by `ensure_match_columns` since KlubPro is external
+  (not in Alembic). `plan_player` is the single source the dry-run AND import share
+  (apply = selected ∧ non-empty ∧ differs; photo overwrites only when ticked).
+  **Bulk Approve** (`POST .../players/bulk-approve`) approves all eligible rows
+  honouring each one's field selections (per-item commit + item-level errors so one
+  bad row can't poison the batch). first/last/nickname are NOT migratable (BS has a
+  single `name`). The dry-run reflects **saved** approvals — approve → dry-run →
+  import.
 - **Deploy**: set `KLUBPRO_DATABASE_URL` (never commit the pw) AND ensure
   `betterstats-backend` shares a Docker network with `klubpro-postgres`.
 
