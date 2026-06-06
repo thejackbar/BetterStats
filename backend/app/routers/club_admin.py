@@ -1317,8 +1317,12 @@ async def super_overview(
         players_by = {r["org"]: r["n"] for r in (await db.execute(_text(
             "SELECT organisation_id::text AS org, COUNT(*) AS n FROM players GROUP BY organisation_id"
         ))).mappings().all()}
+        # games have no organisation_id — they hang off a grade, which hangs off
+        # a season, which is org-scoped.
         games_by = {r["org"]: r["n"] for r in (await db.execute(_text(
-            "SELECT organisation_id::text AS org, COUNT(*) AS n FROM games GROUP BY organisation_id"
+            "SELECT s.organisation_id::text AS org, COUNT(*) AS n "
+            "FROM games g JOIN grades gr ON gr.id = g.grade_id "
+            "JOIN seasons s ON s.id = gr.season_id GROUP BY s.organisation_id"
         ))).mappings().all()}
         sync_by = {r["org"]: r["t"] for r in (await db.execute(_text(
             "SELECT organisation_id::text AS org, MAX(synced_at) AS t FROM seasons GROUP BY organisation_id"
