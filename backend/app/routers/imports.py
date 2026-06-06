@@ -147,22 +147,14 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     is_season = req.granularity == "season" and bool(season_col)
     rounding = set()
     skipped_rows = 0
-    # Per matched player, collect reconcile inputs.
-    items_by_player: dict = {}
+    items_by_player: dict = {}       # matched-player id -> reconcile items
+    new_items_by_name: dict = {}     # create-new name  -> reconcile items
     name_by_pid: dict = {}
-    for r in req.rows:
-        nm = str(r.get(name_col, "")).strip()
-        if not nm:
-            continue
-        pm = pmatch.get(nm) or {}
-        pid = pm.get("player_id")
-        if not pid or pm.get("status") in ("ambiguous", "skip"):
-            skipped_rows += 1
-            continue
+
+    def build_item(r, nm):
         truth, notes = ingest.row_to_truth(_row_values(r, req.mapping))
-        for n in notes:
-            rounding.add(f"{nm}: {n}")
-        metrics = _truth_metrics(truth)
+        for nt in notes:
+            rounding.add(f"{nm}: {nt}")
         scope, season_id, is_prior = "career", None, False
         if is_season:
             lb = str(r.get(season_col, "")).strip()
@@ -173,13 +165,27 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
                 scope, season_id = "season", sm["season_id"]
             else:
                 scope, season_id = "season", None  # unmatched → folds into residual
-        items_by_player.setdefault(pid, []).append(
-            {"scope": scope, "season_id": (uuid.UUID(season_id) if season_id else None),
-             "is_prior_bucket": is_prior, "metrics": metrics,
-             "season_label": (str(r.get(season_col, "")).strip() if season_col else None),
-             "grade_label": (str(r.get(grade_col, "")).strip() if grade_col else None),
-             "truth": truth})
-        name_by_pid[pid] = nm
+        return {
+            "scope": scope, "season_id": (uuid.UUID(season_id) if season_id else None),
+            "is_prior_bucket": is_prior, "metrics": _truth_metrics(truth),
+            "season_label": (str(r.get(season_col, "")).strip() if season_col else None),
+            "grade_label": (str(r.get(grade_col, "")).strip() if grade_col else None),
+            "truth": truth,
+        }
+
+    for r in req.rows:
+        nm = str(r.get(name_col, "")).strip()
+        if not nm:
+            continue
+        pm = pmatch.get(nm) or {}
+        pid = pm.get("player_id")
+        if pid:
+            items_by_player.setdefault(pid, []).append(build_item(r, nm))
+            name_by_pid[pid] = nm
+        elif pm.get("status") == "new":
+            new_items_by_name.setdefault(nm, []).append(build_item(r, nm))
+        else:
+            skipped_rows += 1
 
     pids = [uuid.UUID(p) for p in items_by_player.keys()]
     gr_by_player = await recon.fetch_gr_by_player(db, org_id, pids)
@@ -193,6 +199,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         preview.append({
             "player_id": pid_str,
             "player_name": name_by_pid.get(pid_str),
+            "new": False,
             "club_games": club.get("matches", 0),
             "club_runs": club.get("runs", 0),
             "gr_games": s["gr"]["matches"],
@@ -202,6 +209,17 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             "final_runs": s["final"]["runs"],
             "season_deltas": s["season_delta_count"],
             "gr_exceeds": s["gr_exceeds"],
+        })
+    # Create-new players have no GR — their full club totals are added as-is.
+    for nm, items in new_items_by_name.items():
+        club, import_seasons = recon.assemble_club_inputs(items)
+        preview.append({
+            "player_id": None, "player_name": nm, "new": True,
+            "club_games": club.get("matches", 0), "club_runs": club.get("runs", 0),
+            "gr_games": 0, "gr_runs": 0,
+            "residual_games": club.get("matches", 0),
+            "final_games": club.get("matches", 0), "final_runs": club.get("runs", 0),
+            "season_deltas": len(import_seasons), "gr_exceeds": False,
         })
     preview.sort(key=lambda x: x["final_games"], reverse=True)
 
@@ -231,6 +249,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         "totals": {
             "rows": len(req.rows),
             "players_matched": len(items_by_player),
+            "players_new": len(new_items_by_name),
             "players_unresolved": len(unresolved),
             "rows_skipped": skipped_rows,
         },

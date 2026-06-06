@@ -320,10 +320,20 @@ def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> 
 
     status: 'exact' (auto-accept), 'ambiguous' (two records share the name —
     merge first), 'fuzzy' (needs confirmation), 'none' (pick or create new).
+    ``auto_status`` mirrors the natural status and is left untouched when an
+    override is later applied, so the UI can keep stable name buckets.
+
+    Performance: normalised player names are computed once, and fuzzy matching
+    is blocked by the first character of the normalised name — so an N-name sheet
+    against an M-player roster is roughly N×(M/26) ratio calls, not N×M. That's
+    the difference between a snappy preview and a frozen tab on a 1,600-name club.
     """
     norm_map: dict = {}
+    blocks: dict = {}
     for pid, pname in players:
-        norm_map.setdefault(_normalise_name(pname), []).append((pid, pname))
+        nn = _normalise_name(pname)
+        norm_map.setdefault(nn, []).append((pid, pname))
+        blocks.setdefault(nn[:1], []).append((pid, pname, nn))
 
     out: dict = {}
     for name in names:
@@ -333,23 +343,25 @@ def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> 
         exact = norm_map.get(n, [])
         if len(exact) == 1:
             out[name] = {"player_id": str(exact[0][0]), "matched_name": exact[0][1],
-                         "confidence": 1.0, "status": "exact", "candidates": []}
+                         "confidence": 1.0, "status": "exact", "auto_status": "exact", "candidates": []}
         elif len(exact) > 1:
-            out[name] = {"player_id": None, "confidence": 1.0, "status": "ambiguous",
+            out[name] = {"player_id": None, "confidence": 1.0, "status": "ambiguous", "auto_status": "ambiguous",
                          "note": "Two players share this name — merge them first, then re-import.",
                          "candidates": [{"player_id": str(pid), "name": pn} for pid, pn in exact]}
         else:
+            pool = blocks.get(n[:1], [])
             scored = sorted(
-                ((SequenceMatcher(None, n, _normalise_name(pn)).ratio(), pid, pn) for pid, pn in players),
+                ((SequenceMatcher(None, n, nn).ratio(), pid, pn) for pid, pn, nn in pool),
                 key=lambda t: t[0], reverse=True,
             )[:5]
             top = scored[0][0] if scored else 0.0
             cands = [{"player_id": str(pid), "name": pn, "confidence": round(sc, 2)}
                      for sc, pid, pn in scored if sc >= 0.5]
+            st = "fuzzy" if top >= fuzzy_threshold else "none"
             out[name] = {
                 "player_id": None,
                 "confidence": round(top, 2),
-                "status": "fuzzy" if top >= fuzzy_threshold else "none",
+                "status": st, "auto_status": st,
                 "candidates": cands,
             }
     return out
