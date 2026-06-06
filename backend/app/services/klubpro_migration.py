@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import (
     KlubproMigrationBackup,
     KlubproMigrationBatch,
+    Organisation,
     Player,
     Sponsor,
 )
@@ -94,15 +95,28 @@ def _uuid(v: Any) -> Optional[uuid.UUID]:
 # ── KlubPro reads (dashboard / mappings) ─────────────────────────────────────
 
 async def fetch_dashboard(kp: AsyncSession) -> list[dict]:
+    # LEFT JOIN club_mappings so every staged club row carries its current
+    # mapping (or NULL) — drives the editable "Mapped To" column.
     rows = await kp.execute(text("""
-        SELECT klubpro_club_id, klubpro_club_name, stage_status,
-               staged_players, players_with_skills, players_with_email,
-               players_with_mobile, players_with_gender, players_with_image,
-               players_with_all_required_data, staged_sponsors, sponsors_with_logo
-        FROM klubpro_migration.onboarding_staging_summary
-        ORDER BY klubpro_club_name
+        SELECT s.klubpro_club_id, s.klubpro_club_name, s.stage_status,
+               s.staged_players, s.players_with_skills, s.players_with_email,
+               s.players_with_mobile, s.players_with_gender, s.players_with_image,
+               s.players_with_all_required_data, s.staged_sponsors, s.sponsors_with_logo,
+               cm.betterstats_organisation_id, cm.betterstats_organisation_name,
+               cm.migration_status
+        FROM klubpro_migration.onboarding_staging_summary s
+        LEFT JOIN klubpro_migration.club_mappings cm
+          ON cm.klubpro_club_id = s.klubpro_club_id
+        ORDER BY s.klubpro_club_name
     """))
-    return [dict(r) for r in rows.mappings().all()]
+    out = []
+    for r in rows.mappings().all():
+        d = dict(r)
+        d["betterstats_organisation_id"] = (
+            str(d["betterstats_organisation_id"]) if d["betterstats_organisation_id"] else None
+        )
+        out.append(d)
+    return out
 
 
 async def fetch_club_mappings(kp: AsyncSession) -> list[dict]:
@@ -141,7 +155,90 @@ async def fetch_club_mapping(kp: AsyncSession, club_mapping_id: uuid.UUID) -> Op
     return d
 
 
-# ── KlubPro reads (players) ──────────────────────────────────────────────────
+async def fetch_target_club(kp: AsyncSession, klubpro_club_id: str) -> Optional[dict]:
+    """The KlubPro onboarding target — the authoritative name for a club id."""
+    row = await kp.execute(text("""
+        SELECT klubpro_club_id, klubpro_club_name
+        FROM klubpro_migration.onboarding_targets
+        WHERE klubpro_club_id = :cid
+    """), {"cid": klubpro_club_id})
+    r = row.mappings().first()
+    return dict(r) if r else None
+
+
+async def org_mapped_elsewhere(kp: AsyncSession, org_id: str, klubpro_club_id: str) -> Optional[dict]:
+    """If this BetterStats org is already mapped to a DIFFERENT KlubPro club,
+    return that other mapping (so the caller can warn before overwriting)."""
+    row = await kp.execute(text("""
+        SELECT klubpro_club_id, klubpro_club_name
+        FROM klubpro_migration.club_mappings
+        WHERE betterstats_organisation_id = :org AND klubpro_club_id <> :cid
+        LIMIT 1
+    """), {"org": str(org_id), "cid": klubpro_club_id})
+    r = row.mappings().first()
+    return dict(r) if r else None
+
+
+async def upsert_club_mapping(
+    kp: AsyncSession,
+    *,
+    klubpro_club_id: str,
+    klubpro_club_name: str,
+    betterstats_organisation_id: str,
+    betterstats_organisation_name: str,
+) -> dict:
+    """Map a KlubPro club to a BetterStats org — repeatable / update-safe.
+
+    UPDATE-or-INSERT (never DELETE) so an existing mapping's row id is preserved
+    and the player_match_mappings FK that references it stays valid. Then bumps
+    the onboarding target's stage_status to 'mapped' (keeping 'validated').
+    """
+    existing = await kp.execute(text("""
+        SELECT id FROM klubpro_migration.club_mappings WHERE klubpro_club_id = :cid
+    """), {"cid": klubpro_club_id})
+    row = existing.mappings().first()
+    params = {
+        "org": str(betterstats_organisation_id),
+        "oname": betterstats_organisation_name,
+        "cid": klubpro_club_id,
+        "kname": klubpro_club_name,
+    }
+    if row:
+        await kp.execute(text("""
+            UPDATE klubpro_migration.club_mappings
+            SET betterstats_organisation_id = :org,
+                betterstats_organisation_name = :oname,
+                klubpro_club_name = :kname,
+                klubpro_club_deleted = false,
+                migration_status = 'mapped',
+                updated_at = now()
+            WHERE klubpro_club_id = :cid
+        """), params)
+        mapping_id = str(row["id"])
+    else:
+        ins = await kp.execute(text("""
+            INSERT INTO klubpro_migration.club_mappings
+                (id, betterstats_organisation_id, betterstats_organisation_name,
+                 klubpro_club_id, klubpro_club_name, klubpro_club_deleted,
+                 migration_status, created_at, updated_at)
+            VALUES
+                (gen_random_uuid(), :org, :oname, :cid, :kname, false,
+                 'mapped', now(), now())
+            RETURNING id
+        """), params)
+        mapping_id = str(ins.scalar())
+
+    # Keep the onboarding target's lifecycle in step (don't downgrade 'validated').
+    await kp.execute(text("""
+        UPDATE klubpro_migration.onboarding_targets
+        SET stage_status = CASE WHEN stage_status = 'validated' THEN 'validated' ELSE 'mapped' END,
+            updated_at = now()
+        WHERE klubpro_club_id = :cid
+    """), {"cid": klubpro_club_id})
+    await kp.commit()
+    return {"id": mapping_id, "klubpro_club_id": klubpro_club_id,
+            "betterstats_organisation_id": str(betterstats_organisation_id),
+            "betterstats_organisation_name": betterstats_organisation_name}
 
 async def fetch_player_candidates(kp: AsyncSession, klubpro_club_id: str) -> list[dict]:
     """Candidate metadata for the review grid — no image bytes."""
@@ -289,6 +386,12 @@ async def fetch_sponsor_logo(kp: AsyncSession, klubpro_sponsor_id: str) -> Optio
 
 
 # ── BetterStats reads ────────────────────────────────────────────────────────
+
+async def fetch_all_orgs(bs: AsyncSession) -> list[dict]:
+    """Every BetterStats organisation (id + name) — the mapping dropdown source."""
+    rows = await bs.execute(select(Organisation.id, Organisation.name).order_by(Organisation.name))
+    return [{"id": str(r.id), "name": r.name} for r in rows.all()]
+
 
 async def fetch_bs_players(bs: AsyncSession, org_id: uuid.UUID) -> list[dict]:
     rows = await bs.execute(

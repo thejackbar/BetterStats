@@ -21,6 +21,7 @@ export default function KlubproMigration() {
   const [loading, setLoading] = useState(true)
   const [configured, setConfigured] = useState(true)
   const [dash, setDash] = useState(null)        // { summary, club_mappings }
+  const [orgs, setOrgs] = useState([])          // all BetterStats organisations
   const [tab, setTab] = useState('dashboard')
   const [cmId, setCmId] = useState('')          // selected club_mapping id
 
@@ -30,8 +31,9 @@ export default function KlubproMigration() {
       const st = await api.kpStatus()
       setConfigured(st.configured)
       if (!st.configured) { setLoading(false); return }
-      const d = await api.kpDashboard()
+      const [d, o] = await Promise.all([api.kpDashboard(), api.kpOrganisations()])
       setDash(d)
+      setOrgs(o.organisations || [])
       // default to the first mapped club with a BetterStats org
       const firstMapped = (d.club_mappings || []).find(c => c.betterstats_organisation_id)
       setCmId(prev => prev || (firstMapped ? firstMapped.id : ''))
@@ -92,7 +94,7 @@ export default function KlubproMigration() {
 
         <TabBar tabs={TABS} active={tab} onChange={setTab} />
 
-        {tab === 'dashboard' && <Dashboard dash={dash} />}
+        {tab === 'dashboard' && <Dashboard dash={dash} orgs={orgs} onReload={load} />}
 
         {tab === 'players' && (
           selected
@@ -122,13 +124,37 @@ function NeedClub() {
   return <Card><p className="text-pb-faint text-sm">Select a mapped club above to begin.</p></Card>
 }
 
-function Dashboard({ dash }) {
+function Dashboard({ dash, orgs, onReload }) {
+  const toast = useToast()
   const summary = dash?.summary || []
-  const mapByClub = useMemo(() => {
-    const m = {}
-    for (const c of (dash?.club_mappings || [])) m[c.klubpro_club_id] = c
-    return m
-  }, [dash])
+  const [busyId, setBusyId] = useState(null)
+
+  const map = async (row, orgId, force = false) => {
+    const org = orgs.find(o => o.id === orgId)
+    if (!org) return
+    if (!force && !window.confirm(
+      `Map KlubPro club ${row.klubpro_club_name} to BetterStats organisation ${org.name}?`
+    )) return
+    setBusyId(row.klubpro_club_id)
+    try {
+      const res = await api.kpSetClubMapping({
+        klubpro_club_id: row.klubpro_club_id,
+        betterstats_organisation_id: orgId,
+        force,
+      })
+      if (res.status === 'conflict') {
+        setBusyId(null)
+        if (window.confirm(res.message)) return map(row, orgId, true)
+        return
+      }
+      toast.success(`Mapped ${row.klubpro_club_name} → ${org.name}`)
+      await onReload()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   return (
     <Card title="Staging summary — all target clubs">
@@ -137,7 +163,7 @@ function Dashboard({ dash }) {
           <thead>
             <tr className="text-pb-faint font-mono text-[10px] uppercase tracking-wide2 text-left">
               <th className="py-1.5 pr-3">Club</th>
-              <th className="py-1.5 pr-3">Mapped to</th>
+              <th className="py-1.5 pr-3 min-w-[220px]">Mapped to</th>
               <th className="py-1.5 pr-3 text-right">Players</th>
               <th className="py-1.5 pr-3 text-right">Complete</th>
               <th className="py-1.5 pr-3 text-right">w/ image</th>
@@ -147,26 +173,28 @@ function Dashboard({ dash }) {
             </tr>
           </thead>
           <tbody>
-            {summary.map(r => {
-              const cm = mapByClub[r.klubpro_club_id]
-              const mapped = cm && cm.betterstats_organisation_id
-              return (
-                <tr key={r.klubpro_club_id} className="pb-hairline-t">
-                  <td className="py-1.5 pr-3 text-pb-text">{r.klubpro_club_name}</td>
-                  <td className="py-1.5 pr-3">
-                    {mapped
-                      ? <span style={{ color: 'var(--pb-accent)' }}>{cm.betterstats_organisation_name}</span>
-                      : <span className="text-pb-faintest">— not mapped —</span>}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right text-pb-dim">{num(r.staged_players)}</td>
-                  <td className="py-1.5 pr-3 text-right text-pb-dim">{num(r.players_with_all_required_data)}</td>
-                  <td className="py-1.5 pr-3 text-right text-pb-dim">{num(r.players_with_image)}</td>
-                  <td className="py-1.5 pr-3 text-right text-pb-dim">{num(r.staged_sponsors)}</td>
-                  <td className="py-1.5 pr-3 text-right text-pb-dim">{num(r.sponsors_with_logo)}</td>
-                  <td className="py-1.5 pr-3 font-mono text-[10px] text-pb-faint uppercase">{r.stage_status || '—'}</td>
-                </tr>
-              )
-            })}
+            {summary.map(r => (
+              <tr key={r.klubpro_club_id} className="pb-hairline-t">
+                <td className="py-1.5 pr-3 text-pb-text">{r.klubpro_club_name}</td>
+                <td className="py-1.5 pr-3">
+                  <Select
+                    value={r.betterstats_organisation_id || ''}
+                    disabled={busyId === r.klubpro_club_id}
+                    onChange={e => { if (e.target.value && e.target.value !== r.betterstats_organisation_id) map(r, e.target.value) }}
+                    className={r.betterstats_organisation_id ? '' : 'text-pb-faint'}
+                  >
+                    <option value="">— select BetterStats club —</option>
+                    {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </Select>
+                </td>
+                <td className="py-1.5 pr-3 text-right text-pb-dim">{num(r.staged_players)}</td>
+                <td className="py-1.5 pr-3 text-right text-pb-dim">{num(r.players_with_all_required_data)}</td>
+                <td className="py-1.5 pr-3 text-right text-pb-dim">{num(r.players_with_image)}</td>
+                <td className="py-1.5 pr-3 text-right text-pb-dim">{num(r.staged_sponsors)}</td>
+                <td className="py-1.5 pr-3 text-right text-pb-dim">{num(r.sponsors_with_logo)}</td>
+                <td className="py-1.5 pr-3 font-mono text-[10px] text-pb-faint uppercase">{r.stage_status || '—'}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

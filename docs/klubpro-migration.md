@@ -84,6 +84,29 @@ KlubPro is later decommissioned and rollback is a pure BetterStats operation):
   `confirm: true`; the UI only enables Import after a dry-run; each row is backed
   up in the same transaction as its write.
 
+## Mapping clubs (editable, from the dashboard)
+
+The dashboard's **Mapped to** column is a dropdown of every BetterStats
+organisation (`GET /club-admin/klubpro/organisations`). Pick one for any staged
+club → confirm `Map KlubPro club <name> to BetterStats organisation <org>?` →
+`PATCH /club-admin/klubpro/club-mapping` `{klubpro_club_id,
+betterstats_organisation_id, force}`:
+
+- Validates the org (BetterStats) and the target club (KlubPro
+  `onboarding_targets`), then **UPDATE-or-INSERT** into `club_mappings` (never
+  DELETE, so the row id and any `player_match_mappings` FK survive) with
+  `migration_status='mapped'`, and bumps the onboarding target's `stage_status`
+  to `mapped` (keeping `validated`). Repeatable / update-safe — no manual SQL,
+  works for clubs added to BetterStats later.
+- If the chosen org is already mapped to a **different** KlubPro club, the
+  endpoint returns `{status:'conflict', message}` (HTTP 200) instead of writing;
+  the UI shows the warning and only proceeds with `force:true` on confirm.
+- On success the dashboard + the top **Mapped club** selector both refresh (the
+  selector reads `club_mappings`, so a newly mapped club appears immediately).
+- Candidate matching is **not** auto-generated on map — newly mapped clubs start
+  with an empty `player_match_mappings`; match them in the **Players** tab
+  (suggested rows appear for clubs that already have generated candidates).
+
 ## Operator flow
 
 1. Pick a **mapped club** in the selector (only `club_mappings` rows with a
