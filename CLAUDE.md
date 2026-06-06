@@ -423,6 +423,20 @@ BetterStats players by name — KlubPro has no CA ids) + **sponsors**. Full guid
   bad row can't poison the batch). first/last/nickname are NOT migratable (BS has a
   single `name`). The dry-run reflects **saved** approvals — approve → dry-run →
   import.
+- **Approve ≠ import** (UX gotcha, fixed v8.4): Approve/Bulk-approve only write the
+  *decision* (+`migrate_fields`) to `player_match_mappings`; **`Import` is the only
+  step that writes BetterStats `players`**. Cards show `APPROVED · NOT IMPORTED`
+  (blue) vs `IMPORTED ✓` (green, from `imported_at`); the header carries
+  approved/imported/pending counts; `Import` is enabled on the approved-but-not-yet-
+  imported count (no longer requires a prior dry-run) with an amber "click Import to
+  apply" nudge. Was reported as "approved but data not pulled across" — the import
+  had simply never been run.
+- **Reject/skip persistence** (fixed v8.4): `upsert_match_mapping` **UPDATEs the
+  existing mapping in place** for reject/skip (never nulls `klubpro_player_id` — the
+  column may be NOT NULL) and normalises `match_status` to past-tense
+  (`approved`/`rejected`/`skipped`); sending the imperative `reject`/`skip` + a NULL
+  match id was erroring on the external table's constraints. Approve still
+  DELETE+INSERTs (match id always present).
 - **Deploy**: set `KLUBPRO_DATABASE_URL` (never commit the pw) AND ensure
   `betterstats-backend` shares a Docker network with `klubpro-postgres`.
 

@@ -463,13 +463,54 @@ async def upsert_match_mapping(
     commit: bool = True,
 ) -> None:
     """Record an operator decision (incl. field-level selections on approve).
-    Keyed on (club_mapping_id, betterstats_player_id)."""
+    Keyed on (club_mapping_id, betterstats_player_id).
+
+    Reject/skip **UPDATE the existing row in place** rather than re-inserting, so
+    we never null an existing ``klubpro_player_id`` (the column may be NOT NULL)
+    and never re-insert a row that could trip a constraint. ``match_status`` is
+    normalised to the past-tense lifecycle values (approved/rejected/skipped) the
+    KlubPro schema uses — sending the imperative 'reject'/'skip' was the cause of
+    the reject error.
+    """
     await ensure_match_columns(kp)
-    reviewed = approved or match_status in ("approve", "approved", "reject", "skip")
-    await kp.execute(text("""
-        DELETE FROM klubpro_migration.player_match_mappings
-        WHERE club_mapping_id = :cmid AND betterstats_player_id = :bpid
-    """), {"cmid": str(club_mapping_id), "bpid": str(betterstats_player_id)})
+    status = {"approve": "approved", "reject": "rejected", "skip": "skipped"}.get(match_status, match_status)
+    base = {"cmid": str(club_mapping_id), "bpid": str(betterstats_player_id)}
+
+    if not approved:
+        # reject / skip — flip the existing decision without touching the match id
+        existing = await kp.execute(text(
+            "SELECT id FROM klubpro_migration.player_match_mappings "
+            "WHERE club_mapping_id = :cmid AND betterstats_player_id = :bpid"
+        ), base)
+        if existing.first():
+            await kp.execute(text("""
+                UPDATE klubpro_migration.player_match_mappings
+                SET approved = false, match_status = :status, migrate_fields = '{}'::jsonb,
+                    reviewed_at = NOW(), reviewed_by = :rby, updated_at = NOW()
+                WHERE club_mapping_id = :cmid AND betterstats_player_id = :bpid
+            """), {**base, "status": status, "rby": reviewed_by})
+        elif klubpro_player_id:
+            await kp.execute(text("""
+                INSERT INTO klubpro_migration.player_match_mappings
+                    (id, club_mapping_id, betterstats_player_id, betterstats_player_name,
+                     klubpro_player_id, klubpro_player_firstname, klubpro_player_lastname,
+                     klubpro_player_nickname, match_status, approved, notes, migrate_fields,
+                     reviewed_at, reviewed_by, created_at, updated_at)
+                VALUES (gen_random_uuid(), :cmid, :bpid, :bname, :kpid, :kfn, :kln, :knn,
+                        :status, false, :notes, '{}'::jsonb, NOW(), :rby, NOW(), NOW())
+            """), {**base, "bname": betterstats_player_name, "kpid": klubpro_player_id,
+                   "kfn": klubpro_player_firstname, "kln": klubpro_player_lastname,
+                   "knn": klubpro_player_nickname, "status": status, "notes": notes, "rby": reviewed_by})
+        # else: nothing matched to reject/skip — no-op
+        if commit:
+            await kp.commit()
+        return
+
+    # approve — replace the row with the approved decision (klubpro_player_id present)
+    await kp.execute(text(
+        "DELETE FROM klubpro_migration.player_match_mappings "
+        "WHERE club_mapping_id = :cmid AND betterstats_player_id = :bpid"
+    ), base)
     await kp.execute(text("""
         INSERT INTO klubpro_migration.player_match_mappings
             (id, club_mapping_id, betterstats_player_id, betterstats_player_name,
@@ -478,16 +519,12 @@ async def upsert_match_mapping(
              reviewed_at, reviewed_by, created_at, updated_at)
         VALUES
             (gen_random_uuid(), :cmid, :bpid, :bname, :kpid, :kfn, :kln, :knn,
-             :status, :approved, :notes, CAST(:mf AS jsonb),
-             CASE WHEN :reviewed THEN NOW() ELSE NULL END, :rby, NOW(), NOW())
+             :status, true, :notes, CAST(:mf AS jsonb), NOW(), :rby, NOW(), NOW())
     """), {
-        "cmid": str(club_mapping_id), "bpid": str(betterstats_player_id),
-        "bname": betterstats_player_name, "kpid": klubpro_player_id,
+        **base, "bname": betterstats_player_name, "kpid": klubpro_player_id,
         "kfn": klubpro_player_firstname, "kln": klubpro_player_lastname,
-        "knn": klubpro_player_nickname, "status": match_status,
-        "approved": approved, "notes": notes,
-        "mf": json.dumps(migrate_fields or {}),
-        "reviewed": reviewed, "rby": reviewed_by,
+        "knn": klubpro_player_nickname, "status": status, "notes": notes,
+        "mf": json.dumps(migrate_fields or {}), "rby": reviewed_by,
     })
     if commit:
         await kp.commit()
