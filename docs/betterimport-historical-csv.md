@@ -1,7 +1,7 @@
 # BetterImport — overlap-safe historical CSV import
 
-**Status:** data layer + reconciler shipped (P0 + P1). Import endpoints (P2) and
-the upload wizard (P3) to follow.
+**Status:** shipped end to end — data layer (P0), reconciler (P1), import
+endpoints (P2), upload wizard (P3), changelog (P4).
 **Branch:** `claude/jolly-cori-mpdav`
 
 ## The problem
@@ -137,10 +137,16 @@ unchanged** — same read-time, non-destructive philosophy as migration 060.
   fixes matches). Commit writes `imported_stats` (latest-upload-wins per player),
   runs the reconciler, and audit-logs to `manual_edit_logs`; `undo` removes a
   batch's truth and re-reconciles.
-- **P3:** the upload wizard UI (Upload → Map columns → Match players → Match
-  seasons → Review & reconcile → Commit), provenance badges.
-- **P4:** changelog entry + final polish. (Deferred until the UI ships — no point
-  announcing a feature clubs can't yet use.)
+- **P3 (done):** the upload wizard at `Admin → Import Stats` (`/admin/import`,
+  `frontend/src/pages/admin/AdminImport.jsx`). Steps: Upload → Map columns
+  (auto-mapped, editable, career/season toggle) → Match players (status badges,
+  fuzzy candidates, create-new/skip, "merge first" for ambiguous) → Match seasons
+  (incl. the Prior/Historical bucket) → Review & reconcile (live "your sheet +
+  online = final" table, rounding notes, warnings) → Commit. Past-imports panel
+  with one-click undo. New `api.js` methods `import{Preview,Resolve,Commit,List,
+  Undo}`; route + sidebar entry under "Cricket Data → Tools" (cap
+  `MANAGE_MANUAL_ENTRIES`).
+- **P4 (done):** changelog `v1.3.0 Beta`.
 
 ## Verification
 

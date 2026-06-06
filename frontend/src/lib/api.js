@@ -304,6 +304,15 @@ export const api = {
     request('/club-admin/fees/payments/import/commit', {
       method: 'POST', body: JSON.stringify({ items }),
     }),
+  // ─── BetterImport — overlap-safe historical CSV/XLSX import ──────────────────
+  importPreview: (file) => uploadFile('/club-admin/imports/preview', file),
+  importResolve: (payload) =>
+    request('/club-admin/imports/resolve', { method: 'POST', body: JSON.stringify(payload) }),
+  importCommit: (payload) =>
+    request('/club-admin/imports/commit', { method: 'POST', body: JSON.stringify(payload) }),
+  importList: () => request('/club-admin/imports'),
+  importUndo: (batchId) =>
+    request(`/club-admin/imports/${batchId}/undo`, { method: 'POST' }),
   // Phase 3.1 — Per-match-day Mark Paid + bulk payment
   feeMarkMatchDayPaid: (entryId, data = {}) =>
     request(`/club-admin/fees/match-days/${entryId}/mark-paid`, {
