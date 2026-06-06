@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, klubpro_migration
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -730,6 +730,53 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_comms_recipients_campaign ON comms_recipients(campaign_id)"
         ))
+        # KlubPro → BetterStats migration (migration 072) — sponsor contact
+        # columns + audit/rollback bookkeeping. Idempotent defensive creates so
+        # the API boots even if alembic hasn't run yet (mirrors the blocks above).
+        await conn.execute(text("ALTER TABLE org_sponsors ADD COLUMN IF NOT EXISTS contact_name TEXT"))
+        await conn.execute(text("ALTER TABLE org_sponsors ADD COLUMN IF NOT EXISTS email TEXT"))
+        await conn.execute(text("ALTER TABLE org_sponsors ADD COLUMN IF NOT EXISTS klubpro_sponsor_id TEXT"))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_org_sponsor_klubpro "
+            "ON org_sponsors(organisation_id, klubpro_sponsor_id) "
+            "WHERE klubpro_sponsor_id IS NOT NULL"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS klubpro_migration_batches (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                kind TEXT NOT NULL,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                club_mapping_id UUID,
+                klubpro_club_id TEXT,
+                status TEXT NOT NULL DEFAULT 'imported',
+                counts JSONB,
+                operator_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                operator_name TEXT,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                rolled_back_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_kp_batches_org "
+            "ON klubpro_migration_batches(organisation_id, created_at DESC)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS klubpro_migration_backups (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                batch_id UUID NOT NULL REFERENCES klubpro_migration_batches(id) ON DELETE CASCADE,
+                target_table TEXT NOT NULL,
+                target_id UUID NOT NULL,
+                action TEXT NOT NULL,
+                before_data JSONB,
+                after_data JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_kp_backups_batch "
+            "ON klubpro_migration_backups(batch_id)"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
@@ -891,6 +938,7 @@ app.include_router(seo.router)
 app.include_router(families.router)
 app.include_router(manual_entries.router)
 app.include_router(imports.router)  # BetterImport — overlap-safe historical CSV import
+app.include_router(klubpro_migration.router)  # KlubPro → BetterStats migration (super-admin onboarding)
 app.include_router(usage.router)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402

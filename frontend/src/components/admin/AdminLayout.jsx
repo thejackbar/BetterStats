@@ -73,6 +73,7 @@ const SUPER_LINKS = [
   { to: '/admin/super/clubs', label: 'All Clubs' },
   { to: '/admin/super/users', label: 'Users' },
   { to: '/admin/usage', label: 'Usage' },
+  { to: '/admin/super/migration', label: 'KlubPro Migration' },
 ]
 
 export default function AdminLayout({ children }) {

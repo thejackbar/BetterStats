@@ -149,6 +149,12 @@ class Sponsor(Base):
     logo_mime = Column(Text, nullable=True)
     display_order = Column(Integer, default=0, nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    # KlubPro migration (migration 072): contact details carried over from the
+    # KlubPro sponsor record + the source id, used to skip re-importing a sponsor
+    # already brought across (unique per org, NULL for non-migrated sponsors).
+    contact_name = Column(Text, nullable=True)
+    email = Column(Text, nullable=True)
+    klubpro_sponsor_id = Column(Text, nullable=True)
 
 
 # ─── Front-end Website CMS (migration 069) ───────────────────────────────────
@@ -1609,4 +1615,49 @@ class CommsRecipient(Base):
     provider_message_id = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ─── KlubPro → BetterStats migration audit + rollback (migration 072) ─────────
+# These live in BetterStats (not KlubPro) so the before-images and the audit
+# survive even if the KlubPro database is later decommissioned, and a rollback
+# is a pure BetterStats operation. One batch per executed import; one backup row
+# per BetterStats row the import touched (a player UPDATE keeps the old field
+# values; a sponsor INSERT just records the new id so rollback can delete it).
+
+class KlubproMigrationBatch(Base):
+    """One executed KlubPro import (player or sponsor) — the unit of rollback."""
+    __tablename__ = "klubpro_migration_batches"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kind = Column(Text, nullable=False)                # 'player' | 'sponsor'
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    # The klubpro_migration.club_mappings.id this import ran for. No FK — it lives
+    # in the external KlubPro database.
+    club_mapping_id = Column(UUID(as_uuid=True), nullable=True)
+    klubpro_club_id = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="imported")  # imported | rolled_back
+    counts = Column(JSONB, nullable=True)              # {"updated": n, "inserted": n, "skipped": n}
+    operator_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    operator_name = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    rolled_back_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+
+class KlubproMigrationBackup(Base):
+    """Before/after image of a single BetterStats row touched by an import.
+
+    ``action`` 'update' carries ``before_data`` (the field values to restore on
+    rollback); 'insert' carries only ``after_data`` (rollback deletes the row).
+    """
+    __tablename__ = "klubpro_migration_backups"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey("klubpro_migration_batches.id", ondelete="CASCADE"), nullable=False)
+    target_table = Column(Text, nullable=False)        # 'players' | 'org_sponsors'
+    target_id = Column(UUID(as_uuid=True), nullable=False)
+    action = Column(Text, nullable=False)              # 'update' | 'insert'
+    before_data = Column(JSONB, nullable=True)         # NULL for inserts
+    after_data = Column(JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
