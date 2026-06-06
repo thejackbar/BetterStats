@@ -80,6 +80,65 @@ async def dashboard(
     }
 
 
+@router.get("/organisations")
+async def organisations(
+    current_user: User = Depends(require_super_admin),
+    bs: AsyncSession = Depends(get_db),
+):
+    """Every BetterStats organisation — populates the per-row mapping dropdown."""
+    return {"organisations": await svc.fetch_all_orgs(bs)}
+
+
+class ClubMappingBody(BaseModel):
+    klubpro_club_id: str
+    betterstats_organisation_id: str
+    force: bool = False  # overwrite even if the org is mapped to another KlubPro club
+
+
+@router.patch("/club-mapping")
+async def upsert_club_mapping(
+    body: ClubMappingBody,
+    current_user: User = Depends(require_super_admin),
+    bs: AsyncSession = Depends(get_db),
+    kp: AsyncSession = Depends(get_klubpro_db),
+):
+    """Map (or remap) a staged KlubPro club to a BetterStats organisation.
+
+    Returns {status:'conflict', ...} (HTTP 200) when the chosen org is already
+    mapped to a different KlubPro club and `force` is not set — the UI confirms,
+    then retries with force=true. Repeatable / update-safe.
+    """
+    _require_configured()
+    org = await bs.get(Organisation, _parse_uuid(body.betterstats_organisation_id, "betterstats_organisation_id"))
+    if not org:
+        raise HTTPException(status_code=404, detail="BetterStats organisation not found")
+    target = await svc.fetch_target_club(kp, body.klubpro_club_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="KlubPro target club not found")
+
+    if not body.force:
+        other = await svc.org_mapped_elsewhere(kp, body.betterstats_organisation_id, body.klubpro_club_id)
+        if other:
+            return {
+                "status": "conflict",
+                "other_klubpro_club_name": other["klubpro_club_name"],
+                "message": (
+                    f"{org.name} is already mapped to KlubPro club "
+                    f"\"{other['klubpro_club_name']}\". Map it to "
+                    f"\"{target['klubpro_club_name']}\" as well?"
+                ),
+            }
+
+    mapping = await svc.upsert_club_mapping(
+        kp,
+        klubpro_club_id=body.klubpro_club_id,
+        klubpro_club_name=target["klubpro_club_name"],
+        betterstats_organisation_id=body.betterstats_organisation_id,
+        betterstats_organisation_name=org.name,
+    )
+    return {"status": "ok", "mapping": mapping}
+
+
 # ── players: review data ─────────────────────────────────────────────────────
 
 @router.get("/clubs/{club_mapping_id}/players")

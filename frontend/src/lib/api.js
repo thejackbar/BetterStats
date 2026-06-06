@@ -316,6 +316,9 @@ export const api = {
   // ─── KlubPro → BetterStats migration (super-admin onboarding) ────────────────
   kpStatus: () => request('/club-admin/klubpro/status'),
   kpDashboard: () => request('/club-admin/klubpro/dashboard'),
+  kpOrganisations: () => request('/club-admin/klubpro/organisations'),
+  kpSetClubMapping: (payload) =>
+    request('/club-admin/klubpro/club-mapping', { method: 'PATCH', body: JSON.stringify(payload) }),
   kpPlayers: (cm) => request(`/club-admin/klubpro/clubs/${cm}/players`),
   kpSetMatch: (cm, payload) =>
     request(`/club-admin/klubpro/clubs/${cm}/players/match`, { method: 'POST', body: JSON.stringify(payload) }),

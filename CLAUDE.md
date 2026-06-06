@@ -394,6 +394,17 @@ BetterStats players by name — KlubPro has no CA ids) + **sponsors**. Full guid
   enforced on the BetterStats side instead of guessing that schema. The other
   KlubPro tables (`player_match_mappings` etc.) have documented columns and are
   used directly.
+- **Editable club mapping** (from the dashboard): the "Mapped to" column is a
+  dropdown of all orgs (`GET /club-admin/klubpro/organisations`); `PATCH
+  /club-admin/klubpro/club-mapping {klubpro_club_id, betterstats_organisation_id,
+  force}` does an **UPDATE-or-INSERT** on `club_mappings` (never DELETE → row id
+  + `player_match_mappings` FK preserved), keyed by `klubpro_club_id`, and bumps
+  the onboarding target to `mapped` (keeps `validated`). Returns
+  `{status:'conflict'}` (HTTP 200, not an error — the api client doesn't surface
+  status) when the org is already mapped to another KlubPro club; the UI confirms
+  then retries with `force`. `fetch_dashboard` LEFT JOINs `club_mappings` so each
+  summary row carries its mapping. Mapping is repeatable/update-safe and needs no
+  manual SQL for future clubs. Candidate matching is **not** auto-run on map.
 - **Deploy**: set `KLUBPRO_DATABASE_URL` (never commit the pw) AND ensure
   `betterstats-backend` shares a Docker network with `klubpro-postgres`.
 
