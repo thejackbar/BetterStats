@@ -244,7 +244,7 @@ async def get_player_seasons(player_id: str, db: AsyncSession = Depends(get_db))
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_season_by_season(db, player_id)
+    return await get_season_by_season(db, player_id, include_prior=True)
 
 
 @router.get("/{player_id}/milestones")

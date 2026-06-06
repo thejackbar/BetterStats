@@ -527,7 +527,10 @@ async def get_fielding_leaderboard(
             SUM(pss.catches + pss.run_outs + pss.stumpings) AS total_dismissals
         FROM v_effective_player_season_stats pss
         JOIN players p ON p.id = pss.player_id
-        JOIN seasons s ON s.id = pss.season_id
+        -- No seasons join: career-level (NULL-season) import / manual-career rows
+        -- (the "Prior Seasons & Adjustments" bucket) belong in the all-seasons
+        -- total. A specific-season filter below still excludes them (a NULL
+        -- season never matches the season filter). Org scope is the player join.
         WHERE p.organisation_id = :org_id
     """
     if season_ids:
@@ -1063,7 +1066,7 @@ async def get_player_team_breakdown(
     }
 
 
-async def get_season_by_season(session: AsyncSession, player_id: str) -> list[dict]:
+async def get_season_by_season(session: AsyncSession, player_id: str, include_prior: bool = False) -> list[dict]:
     # Merge-aware: if Summer 25/26 + Winter 25/26 are aliased into one canonical
     # season, sum their stats into a single row keyed on the canonical season.
     # Non-aliased seasons map to themselves so the GROUP BY collapses to one
@@ -1120,7 +1123,61 @@ async def get_season_by_season(session: AsyncSession, player_id: str) -> list[di
         """),
         {"pid": player_id}
     )
-    return [dict(r) for r in result.mappings()]
+    rows = [dict(r) for r in result.mappings()]
+
+    # Career-level (NULL-season) import / manual-career rows can't be attached to
+    # a season, so the JOIN above drops them. On the player profile (include_prior)
+    # surface them as a single "Prior Seasons & Adjustments" row at the bottom, so
+    # the per-season rows + this row reconcile to the career totals in the header.
+    # Off by default so season-trajectory consumers (BetterIQ) get real seasons only.
+    if not include_prior:
+        return rows
+    prior_res = await session.execute(
+        text("""
+            SELECT
+                SUM(matches) AS matches,
+                SUM(batting_innings) AS batting_innings,
+                SUM(runs) AS total_runs,
+                MAX(high_score) AS high_score,
+                ROUND(SUM(runs)::numeric / NULLIF(SUM(batting_innings) - SUM(not_outs), 0), 2) AS batting_average,
+                ROUND(SUM(runs)::numeric / NULLIF(SUM(balls_faced), 0) * 100, 2) AS strike_rate,
+                SUM(fifties) AS fifties,
+                SUM(hundreds) AS hundreds,
+                SUM(not_outs) AS not_outs,
+                SUM(ducks) AS ducks,
+                SUM(fours) AS total_fours,
+                SUM(sixes) AS total_sixes,
+                SUM(wickets) AS total_wickets,
+                SUM(runs_conceded) AS bowling_runs_conceded,
+                SUM(overs) AS total_overs,
+                ROUND(SUM(runs_conceded)::numeric / NULLIF(SUM(wickets), 0), 2) AS bowling_average,
+                ROUND(SUM(runs_conceded)::numeric / NULLIF(SUM(bowling_balls), 0) * 6, 2) AS economy,
+                MAX(best_bowling_wickets) AS best_bowling_wickets,
+                (ARRAY_AGG(best_bowling_figures
+                    ORDER BY best_bowling_wickets DESC NULLS LAST,
+                             NULLIF(SPLIT_PART(best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
+                 ) FILTER (WHERE best_bowling_figures IS NOT NULL AND best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_bowling_figures,
+                SUM(five_wicket_innings) AS five_fors,
+                SUM(maidens) AS total_maidens,
+                SUM(catches) AS total_catches,
+                SUM(catches_wk) AS total_catches_wk,
+                SUM(catches_non_wk) AS total_catches_non_wk,
+                SUM(run_outs) AS total_run_outs,
+                SUM(stumpings) AS total_stumpings
+            FROM v_effective_player_season_stats
+            WHERE player_id = :pid AND season_id IS NULL
+        """),
+        {"pid": player_id}
+    )
+    prior = dict(prior_res.mappings().first() or {})
+    if (prior.get("matches") or prior.get("total_runs") or prior.get("total_wickets")
+            or prior.get("total_catches")):
+        prior["season_id"] = None
+        prior["season_name"] = "Prior Seasons & Adjustments"
+        prior["year"] = None
+        rows.append(prior)
+
+    return rows
 
 
 async def get_player_milestones(session: AsyncSession, player_id: str) -> list[dict]:
@@ -1723,7 +1780,10 @@ async def get_batting_leaderboard_extended(
             SUM(pss.matches) AS games
         FROM v_effective_player_season_stats pss
         JOIN players p ON p.id = pss.player_id
-        JOIN seasons s ON s.id = pss.season_id
+        -- No seasons join: career-level (NULL-season) import / manual-career rows
+        -- (the "Prior Seasons & Adjustments" bucket) belong in the all-seasons
+        -- total. A specific-season filter below still excludes them (a NULL
+        -- season never matches the season filter). Org scope is the player join.
         WHERE p.organisation_id = :org_id
     """
     if season_ids:
@@ -2019,7 +2079,10 @@ async def get_bowling_leaderboard_extended(
             COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors
         FROM v_effective_player_season_stats pss
         JOIN players p ON p.id = pss.player_id
-        JOIN seasons s ON s.id = pss.season_id
+        -- No seasons join: career-level (NULL-season) import / manual-career rows
+        -- (the "Prior Seasons & Adjustments" bucket) belong in the all-seasons
+        -- total. A specific-season filter below still excludes them (a NULL
+        -- season never matches the season filter). Org scope is the player join.
         WHERE p.organisation_id = :org_id
     """
     if season_ids:
