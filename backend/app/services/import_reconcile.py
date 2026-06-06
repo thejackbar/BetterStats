@@ -121,6 +121,33 @@ def resolve_club_totals(career_metrics: Optional[dict], detail_sum: Optional[dic
     return out
 
 
+def assemble_club_inputs(items) -> tuple:
+    """Group a player's import rows into (club_totals, import_seasons).
+
+    Each item: {"scope", "season_id", "is_prior_bucket", "metrics"}. Shared by
+    the commit-time reconciler and the read-only preview so they agree exactly.
+    A prior-bucket row (or a 'season' row with no matched season) is additive
+    disjoint truth → it counts toward the club total but emits no season delta.
+    """
+    season_rows: dict = {}
+    detail_sum: Optional[dict] = None
+    career_metrics: Optional[dict] = None
+    for it in items:
+        m = it["metrics"]
+        if it.get("is_prior_bucket"):
+            detail_sum = accumulate(detail_sum, m)
+        elif it.get("scope") == "season" and it.get("season_id") is not None:
+            sid = it["season_id"]
+            season_rows[sid] = accumulate(season_rows.get(sid), m)
+            detail_sum = accumulate(detail_sum, m)
+        elif it.get("scope") == "career":
+            career_metrics = accumulate(career_metrics, m)
+        else:
+            detail_sum = accumulate(detail_sum, m)
+    club = resolve_club_totals(career_metrics, detail_sum)
+    return club, list(season_rows.items())
+
+
 def reconcile_player(club: dict, gr: dict, import_seasons, gr_season_ids) -> tuple:
     """The core of the guarantee. Returns (season_deltas, career_residual).
 
@@ -157,6 +184,59 @@ def reconcile_player(club: dict, gr: dict, import_seasons, gr_season_ids) -> tup
         career["best_bowling_wickets"] = club.get("best_bowling_wickets")
         career["best_bowling_figures"] = club.get("best_bowling_figures")
     return season_deltas, career
+
+
+def summarize(club: dict, gr: dict, import_seasons, gr_season_ids) -> dict:
+    """Read-only preview of what a commit would produce — powers the wizard's
+    "GR + residual = final" review without writing anything.
+
+    Returns the season deltas, the career residual, and the effective career
+    total the view would show (``final`` = GR + emitted + residual). A
+    ``gr_exceeds`` flag marks where GR already holds more than the club's book
+    (residual clamps to 0, GR wins, final > club).
+    """
+    season_deltas, career = reconcile_player(club, gr, import_seasons, gr_season_ids)
+    emitted = {k: sum((m.get(k, 0) or 0) for _s, m in season_deltas) for k in COUNT_METRICS}
+    final = {k: (gr.get(k, 0) or 0) + emitted[k] + ((career or {}).get(k, 0) or 0) for k in COUNT_METRICS}
+    gr_exceeds = any((gr.get(k, 0) or 0) > (club.get(k, 0) or 0) for k in _MEANINGFUL)
+    return {
+        "gr": {k: (gr.get(k, 0) or 0) for k in COUNT_METRICS},
+        "emitted": emitted,
+        "residual": career,
+        "final": final,
+        "season_delta_count": len(season_deltas),
+        "gr_exceeds": gr_exceeds,
+    }
+
+
+async def fetch_gr_by_player(session, org_uuid, pids) -> dict:
+    """Per-player GR coverage for an org: {pid: {"season_ids": set, "totals": dict}}.
+
+    Scoped exactly like the effective view's ``api`` branch (player's org ==
+    season's org, or a NULL-org player), so the preview and the commit agree
+    with what the profile actually reads.
+    """
+    from sqlalchemy import select, or_
+    from app.models.db import Player, Season, PlayerSeasonStats
+
+    if not pids:
+        return {}
+    rows = (
+        await session.execute(
+            select(PlayerSeasonStats)
+            .join(Season, Season.id == PlayerSeasonStats.season_id)
+            .join(Player, Player.id == PlayerSeasonStats.player_id)
+            .where(Season.organisation_id == org_uuid)
+            .where(or_(Player.organisation_id.is_(None), Player.organisation_id == Season.organisation_id))
+            .where(PlayerSeasonStats.player_id.in_(list(pids)))
+        )
+    ).scalars().all()
+    out: dict = {}
+    for pss in rows:
+        g = out.setdefault(pss.player_id, {"season_ids": set(), "totals": None})
+        g["season_ids"].add(pss.season_id)
+        g["totals"] = accumulate(g["totals"], pss_to_metrics(pss))
+    return out
 
 
 # ── column maps between the stored tables and the canonical metric dict ───────
@@ -234,11 +314,8 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
     """
     import uuid as _uuid
 
-    from sqlalchemy import select, delete, or_
-    from app.models.db import (
-        Player, Season, PlayerSeasonStats,
-        ImportedStat, ImportEffectiveDelta, async_session_maker,
-    )
+    from sqlalchemy import select, delete
+    from app.models.db import ImportedStat, ImportEffectiveDelta, async_session_maker
 
     try:
         org_uuid = _uuid.UUID(str(org_id_str))
@@ -268,52 +345,20 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
             by_player.setdefault(r.player_id, []).append(r)
 
         pids = list(by_player.keys())
-
-        # GR coverage for these players, scoped exactly like the view's api
-        # branch (player's org == season's org, or NULL-org player).
-        gr_rows = (
-            await session.execute(
-                select(PlayerSeasonStats)
-                .join(Season, Season.id == PlayerSeasonStats.season_id)
-                .join(Player, Player.id == PlayerSeasonStats.player_id)
-                .where(Season.organisation_id == org_uuid)
-                .where(or_(Player.organisation_id.is_(None), Player.organisation_id == Season.organisation_id))
-                .where(PlayerSeasonStats.player_id.in_(pids))
-            )
-        ).scalars().all()
-
-        gr_by_player: dict = {}
-        for pss in gr_rows:
-            g = gr_by_player.setdefault(pss.player_id, {"season_ids": set(), "totals": None})
-            g["season_ids"].add(pss.season_id)
-            g["totals"] = accumulate(g["totals"], pss_to_metrics(pss))
+        gr_by_player = await fetch_gr_by_player(session, org_uuid, pids)
 
         written = 0
         for pid, rows in by_player.items():
-            season_rows: dict = {}     # season_id -> accumulated metrics
-            detail_sum: Optional[dict] = None
-            career_metrics: Optional[dict] = None
-
-            for r in rows:
-                m = imported_to_metrics(r)
-                if r.is_prior_bucket:
-                    # Explicit pre-GR / adjustments lump: additive disjoint truth.
-                    detail_sum = accumulate(detail_sum, m)
-                elif r.scope == "season" and r.season_id is not None:
-                    season_rows[r.season_id] = accumulate(season_rows.get(r.season_id), m)
-                    detail_sum = accumulate(detail_sum, m)
-                elif r.scope == "career":
-                    career_metrics = accumulate(career_metrics, m)
-                else:
-                    # season scope but unmatched season → fold into the residual.
-                    detail_sum = accumulate(detail_sum, m)
-
-            club = resolve_club_totals(career_metrics, detail_sum)
+            club, import_seasons = assemble_club_inputs([
+                {"scope": r.scope, "season_id": r.season_id,
+                 "is_prior_bucket": r.is_prior_bucket, "metrics": imported_to_metrics(r)}
+                for r in rows
+            ])
             gr = gr_by_player.get(pid, {"season_ids": set(), "totals": None})
             gr_totals = gr["totals"] if gr["totals"] is not None else _blank()
 
             season_deltas, career = reconcile_player(
-                club, gr_totals, list(season_rows.items()), gr["season_ids"]
+                club, gr_totals, import_seasons, gr["season_ids"]
             )
 
             for season_id, metrics in season_deltas:

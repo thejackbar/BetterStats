@@ -86,8 +86,16 @@ unchanged** — same read-time, non-destructive philosophy as migration 060.
   the 5th view branch (and a 4-branch downgrade copy).
 - `backend/app/models/db.py` — `ImportBatch`, `ImportedStat`, `ImportEffectiveDelta`.
 - `backend/app/services/import_reconcile.py` — the reconciler. A **pure, DB-free**
-  arithmetic core (`reconcile_player`, `resolve_club_totals`, `accumulate`,
-  `balls_to_overs`) plus the DB orchestrator `reconcile_imported_totals(org_id)`.
+  arithmetic core (`reconcile_player`, `summarize`, `assemble_club_inputs`,
+  `resolve_club_totals`, `accumulate`, `balls_to_overs`) plus the DB pieces
+  `fetch_gr_by_player` and the orchestrator `reconcile_imported_totals(org_id)`.
+- `backend/app/services/import_ingest.py` — DB-free ingest: CSV/XLSX parsing,
+  column auto-mapping (synonyms + fuzzy), the derived→raw inversion, and
+  player/season matching (`match_players`/`match_seasons`).
+- `backend/app/routers/imports.py` — the endpoints: `preview` (parse + auto-map),
+  `resolve` (match + reconciliation preview), `commit` (write `imported_stats` +
+  reconcile + audit), `GET ""` (list), `{batch}/undo`, `template.csv`. Gated by
+  `MANAGE_MANUAL_ENTRIES`; registered un-gated by module in `main.py`.
 - `backend/app/services/sync.py` — calls `reconcile_imported_totals` as the final
   pass of `sync_organisation` (next to `_backfill_missing_season_stats`).
 - `backend/scripts/verify_import_reconcile.py` — headless proof of the guarantee.
@@ -122,10 +130,13 @@ unchanged** — same read-time, non-destructive philosophy as migration 060.
 
 - **P0 (done):** migration 070 + models + this doc.
 - **P1 (done):** reconcile engine + sync hook + headless verifier.
-- **P2:** import endpoints (`preview` / `mapping` / `player-matches` /
-  `season-matches` / `commit` / `undo` / `template`), the derived→raw inversion,
-  the column/player/season matching services, and writing `imported_stats` +
-  calling the reconciler on commit.
+- **P2 (done):** import endpoints (`preview` / `resolve` / `commit` / list /
+  `{batch}/undo` / `template.csv`), the derived→raw inversion, and the
+  column/player/season matching services. Stateless until commit (the client
+  holds the parsed rows and re-calls `resolve` as the user adjusts the mapping or
+  fixes matches). Commit writes `imported_stats` (latest-upload-wins per player),
+  runs the reconciler, and audit-logs to `manual_edit_logs`; `undo` removes a
+  batch's truth and re-reconciles.
 - **P3:** the upload wizard UI (Upload → Map columns → Match players → Match
   seasons → Review & reconcile → Commit), provenance badges.
 - **P4:** changelog entry + final polish. (Deferred until the UI ships — no point
@@ -161,6 +172,13 @@ PostgreSQL 16 instance with synthetic fixtures (not committed — no DB in CI):
   a GR-only player with no import **unchanged** and zero deltas written; a no-GR
   player's full career via season deltas; and self-heal (GR 225→235 ⇒ residual
   248→238, total stays 473).
+
+The **P2 flow** was likewise exercised on real Postgres with the MUMCC screenshot
+values: auto-mapping screenshot headers (`M`/`Inns`/`HS`/`Avg`/`Wkts`/…),
+reconstructing not-outs from average, parsing `186*`, matching `Giles, Wayne`
+exactly and the prior row to the residual bucket — then `commit` produced a
+career of **293** (GR 45 + prior lump 248), **not** 45+293=338, with HS surfacing
+the club's career-best; `undo` returned the career to GR-only 45.
 
 **Before production on real club data:** still run one reconcile on a **data copy**
 and confirm a normal single-club org's career numbers are byte-for-byte unchanged
