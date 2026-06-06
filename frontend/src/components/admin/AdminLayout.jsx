@@ -8,6 +8,7 @@ import { SITE_VERSION } from '../../version'
 import { CHANGELOG } from '../../data/changelog'
 import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
+import ClubSwitcher from './ClubSwitcher'
 import betterStatsLogo from '../../assets/betterstatslogo_white.png'
 
 function compareVersions(a, b) {
@@ -70,6 +71,7 @@ const NAV_SECTIONS = [
 ]
 
 const SUPER_LINKS = [
+  { to: '/admin/super', label: 'Platform Overview', exact: true },
   { to: '/admin/super/clubs', label: 'All Clubs' },
   { to: '/admin/super/users', label: 'Users' },
   { to: '/admin/usage', label: 'Usage' },
@@ -77,7 +79,7 @@ const SUPER_LINKS = [
 ]
 
 export default function AdminLayout({ children }) {
-  const { user, logout, hasCapability, hasModule, justLoggedIn, clearJustLoggedIn } = useAuth()
+  const { user, logout, switchClub, hasCapability, hasModule, justLoggedIn, clearJustLoggedIn } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -167,6 +169,7 @@ export default function AdminLayout({ children }) {
           </div>
 
           <div className="flex items-center gap-3">
+            <ClubSwitcher />
             {user?.club_slug && (
               <Link
                 to={`/${user.club_slug}`}
@@ -206,6 +209,21 @@ export default function AdminLayout({ children }) {
           </div>
         </div>
       </header>
+
+      {/* Acting-as banner — a persistent reminder that a Better staff member is
+          scoped to a club other than their own, so changes land on the right
+          club. */}
+      {user?.acting_as_club && (
+        <div
+          className="text-center font-mono text-[10px] tracking-wide2 py-1.5 px-4"
+          style={{ background: 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: 'var(--pb-text)' }}
+        >
+          MANAGING <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{(user.club_name || user.club_slug || '').toUpperCase()}</span> AS SUPER ADMIN ·{' '}
+          <button onClick={() => switchClub(null)} className="underline hover:no-underline">
+            return to {user.home_club_name || 'home club'}
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-1 max-w-7xl mx-auto w-full">
         {/* Sidebar */}
@@ -290,11 +308,11 @@ export default function AdminLayout({ children }) {
                     to={link.to}
                     onClick={() => setMobileOpen(false)}
                     className={`block px-2 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 ${
-                      isActive(link.to)
+                      isActive(link.to, link.exact)
                         ? 'bg-pb-surface2'
                         : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
                     }`}
-                    style={isActive(link.to) ? { color: 'var(--pb-accent)' } : {}}
+                    style={isActive(link.to, link.exact) ? { color: 'var(--pb-accent)' } : {}}
                   >
                     {link.label.toUpperCase()}
                   </Link>

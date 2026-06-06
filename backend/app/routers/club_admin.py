@@ -1290,6 +1290,87 @@ class ClubCreate(BaseModel):
     accent_color: str = "#243352"
 
 
+@router.get("/super/overview")
+async def super_overview(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Platform-wide fleet snapshot for the Better staff dashboard.
+
+    Fleet KPIs (clubs / active / users / players / games + tier & status
+    breakdowns) plus a per-club rollup (data volume, members, last sync, last
+    admin login) so staff can see, at a glance, which clubs are healthy and
+    which are stale. Read-only; everything is one round-trip of aggregates.
+    """
+    # Per-club rollup. Correlated subqueries keep it to a single statement and
+    # are cheap at fleet scale (~dozens of clubs).
+    club_rows = (await db.execute(_text(
+        """
+        SELECT o.id, o.name, o.slug, o.tier, o.subscription_status, o.is_active,
+               o.created_at,
+               (SELECT COUNT(*) FROM players p  WHERE p.organisation_id = o.id) AS players,
+               (SELECT COUNT(*) FROM games   g  WHERE g.organisation_id = o.id) AS games,
+               (SELECT COUNT(*) FROM club_memberships cm WHERE cm.club_id = o.id) AS members,
+               (SELECT MAX(s.synced_at) FROM seasons s WHERE s.organisation_id = o.id) AS last_sync,
+               (SELECT MAX(u.last_login_at)
+                  FROM club_memberships cm2
+                  JOIN users u ON u.id = cm2.user_id
+                 WHERE cm2.club_id = o.id) AS last_login
+          FROM organisations o
+         ORDER BY o.name
+        """
+    ))).mappings().all()
+
+    clubs = []
+    by_tier: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    active_clubs = 0
+    total_players = 0
+    total_games = 0
+    for r in club_rows:
+        tier = r["tier"] or "good"
+        status_ = r["subscription_status"] or "active"
+        by_tier[tier] = by_tier.get(tier, 0) + 1
+        by_status[status_] = by_status.get(status_, 0) + 1
+        if r["is_active"]:
+            active_clubs += 1
+        total_players += r["players"] or 0
+        total_games += r["games"] or 0
+        clubs.append({
+            "id": str(r["id"]),
+            "name": r["name"],
+            "slug": r["slug"],
+            "tier": tier,
+            "subscription_status": status_,
+            "is_active": r["is_active"],
+            "players": r["players"] or 0,
+            "games": r["games"] or 0,
+            "members": r["members"] or 0,
+            "last_sync": r["last_sync"].isoformat() if r["last_sync"] else None,
+            "last_login": r["last_login"].isoformat() if r["last_login"] else None,
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        })
+
+    total_users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
+    super_admins = (await db.execute(
+        select(func.count()).select_from(ClubMembership).where(ClubMembership.role == "super_admin")
+    )).scalar() or 0
+
+    return {
+        "totals": {
+            "clubs": len(clubs),
+            "active_clubs": active_clubs,
+            "users": total_users,
+            "super_admins": super_admins,
+            "players": total_players,
+            "games": total_games,
+            "by_tier": by_tier,
+            "by_status": by_status,
+        },
+        "clubs": clubs,
+    }
+
+
 @router.get("/super/clubs")
 async def list_all_clubs(
     _: User = Depends(require_super_admin),

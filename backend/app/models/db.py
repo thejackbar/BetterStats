@@ -37,6 +37,13 @@ class User(Base):
     locked_until = Column(TIMESTAMP(timezone=True), nullable=True)
     last_notification_seen_at = Column(TIMESTAMP(timezone=True), nullable=True)
     last_seen_app_version = Column(Text, nullable=True)
+    # Super admins (Better staff) manage every club, not just one. active_club_id
+    # is the club they are currently "acting as" — every club-scoped request
+    # resolves to it instead of their home membership club. NULL = act as the
+    # membership club. Only honoured for super_admin memberships
+    # (see auth._effective_club_id). ON DELETE SET NULL so deleting a club never
+    # strands the staff account (migration 073).
+    active_club_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
