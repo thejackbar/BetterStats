@@ -94,20 +94,18 @@ def _field_empty(field: str, inc: Any) -> bool:
 
 
 def recommended_fields(current: dict, candidate: dict) -> dict:
-    """Safe-default checkbox state per the brief's smart-default rules.
+    """Safe-default checkbox state: every field KlubPro has a value for is ticked.
 
-    - KlubPro empty/missing → unchecked (can't, and won't, blank a value).
-    - profile_image → checked only when filling a gap (BetterStats has none) so it
-      matches the conservative default (an existing photo is preserved unless the
-      operator opts in).
-    - everything else with a non-empty KlubPro value → checked (incl. both-differ).
+    - Any non-empty KlubPro value → checked (incl. when it differs from BS).
+    - profile_image → checked whenever KlubPro has an image (the operator can
+      untick it to keep a newer BetterStats photo).
+    - KlubPro empty/missing → unchecked (and a populated BS value is never blanked).
     """
     inc = _incoming_map(candidate)
-    cur = _current_map(current)
     out = {}
     for f in MIGRATABLE_FIELDS:
         if f == "profile_image":
-            out[f] = (inc[f] is not None) and (cur[f] is None)
+            out[f] = inc[f] is not None
         else:
             out[f] = not _field_empty(f, inc[f])
     return out

@@ -409,9 +409,11 @@ BetterStats players by name — KlubPro has no CA ids) + **sponsors**. Full guid
   not a blanket field overwrite. Each match shows the 9 migratable fields
   (`MIGRATABLE_FIELDS` = gender/email/phone/player_role/batting_hand/bowling_type/
   is_opening_batsman/skill_positions/profile_image) side-by-side with a checkbox;
-  only ticked fields migrate. `recommended_fields` pre-ticks: any non-empty KlubPro
-  value, except `profile_image` (ticked only when BS has no photo — existing photo
-  preserved unless the operator opts in to *replace*). Selections persist to
+  only ticked fields migrate. `recommended_fields` pre-ticks every field KlubPro has
+  a value for, **including `profile_image` whenever KlubPro has an image** (untick to
+  keep a newer BS photo; applying overwrites the BS photo, old one saved in the
+  backup for rollback). The collapsed card keeps the rich side-by-side summary (both
+  images + details); "Fields" toggles the checkbox panel. Selections persist to
   `player_match_mappings.migrate_fields jsonb` (+ `reviewed_at/by`, `imported_at/by`)
   — columns added at runtime by `ensure_match_columns` since KlubPro is external
   (not in Alembic). `plan_player` is the single source the dry-run AND import share

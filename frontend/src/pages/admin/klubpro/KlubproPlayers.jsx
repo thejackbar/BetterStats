@@ -26,6 +26,12 @@ const sameSet = (a, b) => {
   const A = new Set(a || []), B = new Set(b || [])
   return A.size === B.size && [...A].every(x => B.has(x))
 }
+// "gender · role · batting · bowling [· opener]" — empties dropped.
+const summaryLine = (vals, opener) => {
+  const parts = vals.filter(v => v !== null && v !== undefined && v !== '').map(String)
+  if (opener === true) parts.push('opener')
+  return parts.length ? parts.join(' · ') : '—'
+}
 
 // Per-field comparison for one matched pair (mirrors backend recommended_fields).
 function compareFields(bs, cand) {
@@ -36,7 +42,7 @@ function compareFields(bs, cand) {
       return {
         ...f, current: bsHasPhoto ? 'image' : null, incoming: kpHasPhoto ? 'image' : null,
         emptyIncoming: !kpHasPhoto, differ: kpHasPhoto !== bsHasPhoto,
-        recommended: kpHasPhoto && !bsHasPhoto,
+        recommended: kpHasPhoto,  // checked whenever KlubPro has an image (untick to keep a newer BS photo)
       }
     }
     const cur = f.bs(bs), inc = f.kp(cand)
@@ -388,20 +394,55 @@ function PlayerRow({ bs, row, cand, expanded, onToggle, onField, onCheckAll, onU
 
   return (
     <Card pad="p-3">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+      {/* Rich side-by-side summary — always visible (no need to open Fields) */}
+      <div className="grid grid-cols-1 md:grid-cols-[1fr,auto,1fr] gap-3 items-start">
+        {/* Left: BetterStats current */}
         <div className="flex gap-3 min-w-0">
           <Avatar url={bs.has_photo ? api.bsPlayerPhotoUrl(bs.id) : null} name={bs.name} />
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm text-pb-text font-medium">{bs.name}</span>
               <StatusBadge status={row?.status} score={row?.status === 'pending' ? row?.score : null} />
-              {cand && <span className="text-pb-faint text-[12px]">↔ {[cand.firstname, cand.lastname].filter(Boolean).join(' ')}{cand.nickname ? ` “${cand.nickname}”` : ''}</span>}
             </div>
-            <div className="text-[11px] text-pb-faint mt-0.5">
-              {cand ? `${selCount} field${selCount === 1 ? '' : 's'} selected${imgSel ? ' · image replace' : ''}` : 'No KlubPro match'}
+            <div className="text-[11px] text-pb-faint mt-0.5 leading-snug">
+              {summaryLine([bs.gender, bs.player_role, bs.batting_hand, bs.bowling_type], bs.is_opening_batsman)}
             </div>
+            <div className="text-[11px] text-pb-faint leading-snug">{fmt(bs.email)} · {fmt(bs.phone)}</div>
+            <div className="text-[11px] text-pb-faint leading-snug">{bs.skill_positions?.length ? bs.skill_positions.join(', ') : 'no skills'}</div>
           </div>
         </div>
+        {/* divider */}
+        <div className="hidden md:flex items-center text-pb-faintest self-center">↔</div>
+        {/* Right: KlubPro staged */}
+        <div className="flex gap-3 min-w-0 pt-2 md:pt-0 border-t md:border-t-0 border-pb-hairline2">
+          {cand ? (
+            <>
+              <Avatar url={(cand.profile_image_found || cand.thumbnail_image_found)
+                ? api.kpPlayerImageUrl(cand.klubpro_player_id, cand.thumbnail_image_found) : null}
+                name={`${cand.firstname || ''} ${cand.lastname || ''}`} />
+              <div className="min-w-0">
+                <span className="text-sm text-pb-text">
+                  {[cand.firstname, cand.lastname].filter(Boolean).join(' ')}
+                  {cand.nickname ? <span className="text-pb-faint"> “{cand.nickname}”</span> : null}
+                </span>
+                <div className="text-[11px] text-pb-faint mt-0.5 leading-snug">
+                  {summaryLine([cand.gender, cand.betterstats_player_role, cand.betterstats_batting_hand, cand.betterstats_bowling_type], cand.betterstats_is_opening_batsman)}
+                </div>
+                <div className="text-[11px] text-pb-faint leading-snug">{fmt(cand.email)} · {fmt(cand.mobile)}</div>
+                <div className="text-[11px] text-pb-faint leading-snug">{cand.betterstats_skill_positions?.length ? cand.betterstats_skill_positions.join(', ') : 'no skills'}</div>
+              </div>
+            </>
+          ) : (
+            <div className="text-pb-faintest text-[13px] self-center">No KlubPro match selected</div>
+          )}
+        </div>
+      </div>
+
+      {/* secondary detail + actions */}
+      <div className="flex items-center justify-between gap-2 flex-wrap mt-2.5">
+        <span className="text-[11px] text-pb-faintest">
+          {cand ? `${selCount} field${selCount === 1 ? '' : 's'} selected${imgSel ? ' · image replace' : ''}` : ''}
+        </span>
         <div className="flex gap-2 flex-wrap justify-end">
           {cand && <Btn sm onClick={onToggle}>{expanded ? 'Hide fields' : 'Fields'}</Btn>}
           <Btn sm onClick={onChange}>{cand ? 'Change' : 'Find match'}</Btn>

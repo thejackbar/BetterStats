@@ -78,10 +78,13 @@ checkbox each; only ticked fields migrate.
   is_opening_batsman, skill_positions, profile_image`. First/last/nickname are
   **not** migratable — BetterStats has a single `name` field, so they're shown for
   context only and never written.
-- **Smart defaults** (`recommended_fields`): a field is pre-ticked when KlubPro has
-  a usable value; `profile_image` is pre-ticked only when BetterStats has **no**
-  photo (an existing photo is preserved unless the operator opts in to replace it);
-  a KlubPro empty/missing value is unticked and can never blank a BetterStats value.
+- **Smart defaults** (`recommended_fields`): every field KlubPro has a value for is
+  pre-ticked, including `profile_image` whenever KlubPro has an image (untick it to
+  keep a newer BetterStats photo); a KlubPro empty/missing value is unticked and can
+  never blank a BetterStats value.
+- **Collapsed card** keeps the rich side-by-side summary (both images + name, score,
+  gender/role/hands/bowling/opener/contact/skills) so the operator can compare
+  without opening Fields; "Fields" toggles the detailed checkbox panel.
 - **Per-row actions**: Approve / Re-approve · Reject · Skip · Change (pick a
   different KlubPro player) · Check all · Uncheck all · Reset to recommended.
 - **Persistence** (`klubpro_migration.player_match_mappings`, columns added at
@@ -103,11 +106,13 @@ checkbox each; only ticked fields migrate.
 
 ## Safety invariants (enforced in `services/klubpro_migration.py`)
 
-- **Fills gaps, never clobbers with empties.** A scalar field is only overwritten
-  when the KlubPro value is non-empty (a non-empty KlubPro value wins; an empty
-  one can't blank an existing value). **Photos are fill-only** — a player with no
-  photo gets the KlubPro one, an existing photo is kept (keeps the dry-run exact,
-  since a byte-level photo diff can't be previewed). (Verified.)
+- **Never clobbers with empties.** A field is only written when its checkbox is
+  ticked AND the KlubPro value is non-empty — an empty KlubPro value can never blank
+  an existing BetterStats value, regardless of the checkbox. (Verified.)
+- **Profile image** defaults to ticked whenever KlubPro has an image and overwrites
+  the BetterStats photo when applied; the operator unticks it to keep a newer
+  BetterStats photo. The old photo is captured in the backup so a rollback restores
+  it.
 - **`is_opening_batsman = False` is "no info"**, not a value to write (the staged
   view returns False rather than NULL). Only `True` is applied.
 - **Skills compare as a set** — same skills in a different order is not a change,
