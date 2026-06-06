@@ -43,6 +43,24 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
+  // Super-admin club switching. Persists the acted-as club server-side, then
+  // hard-reloads into the admin dashboard so every page refetches under the new
+  // club scope (a soft context update would leave already-mounted pages showing
+  // the previous club's data). Pass null to return to the home club.
+  const switchClub = useCallback(async (clubId) => {
+    const res = await fetch('/api/auth/switch-club', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ club_id: clubId ?? null }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Could not switch club' }))
+      throw new Error(err.detail || 'Could not switch club')
+    }
+    window.location.assign('/admin')
+  }, [])
+
   const clearJustLoggedIn = useCallback(() => setJustLoggedIn(false), [])
 
   // super_admin / club_admin implicitly have everything (backend sends the
@@ -71,7 +89,7 @@ export function AuthProvider({ children }) {
   }, [user])
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule }}>
+    <AuthContext.Provider value={{ user, login, logout, switchClub, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule }}>
       {children}
     </AuthContext.Provider>
   )

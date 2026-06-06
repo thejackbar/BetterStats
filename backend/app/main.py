@@ -35,6 +35,13 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS playhq_id TEXT"
         ))
+        # Super-admin club switching (migration 073) — the acted-as club for a
+        # Better staff account. Defensive idempotent add so the API boots even
+        # if alembic hasn't run yet.
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS active_club_id UUID "
+            "REFERENCES organisations(id) ON DELETE SET NULL"
+        ))
         # BetterSelect: player → selection-pool team assignment (migration 053).
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS squad_team_id UUID "

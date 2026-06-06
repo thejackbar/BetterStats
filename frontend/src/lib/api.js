@@ -596,6 +596,11 @@ export const api = {
   },
 
   // Super admin
+  superOverview: () => request('/club-admin/super/overview'),
+  // Re-scope the admin app to another club (super admin only). Pass null to
+  // return to the staff member's home club. Returns the fresh /auth/me payload.
+  switchClub: (clubId) =>
+    request('/auth/switch-club', { method: 'POST', body: JSON.stringify({ club_id: clubId }) }),
   superListClubs: () => request('/club-admin/super/clubs'),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),

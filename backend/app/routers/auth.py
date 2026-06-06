@@ -75,6 +75,21 @@ async def require_super_admin(
     return current_user
 
 
+def _effective_club_id(membership: ClubMembership | None, user: User) -> uuid.UUID | None:
+    """The club a request is scoped to.
+
+    Super admins are Better staff who manage every club, so they can "act as"
+    any club via ``User.active_club_id`` (set through ``POST /auth/switch-club``).
+    Everyone else is pinned to the single club on their membership — the override
+    is ignored for non-super roles, so it can never widen a club admin's reach.
+    """
+    if membership is None:
+        return None
+    if membership.role == "super_admin" and getattr(user, "active_club_id", None):
+        return user.active_club_id
+    return membership.club_id
+
+
 async def get_current_club(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -85,7 +100,12 @@ async def get_current_club(
     membership = result.scalar_one_or_none()
     if not membership:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No club membership found")
-    club = await db.get(Organisation, membership.club_id)
+    eff_id = _effective_club_id(membership, current_user)
+    club = await db.get(Organisation, eff_id) if eff_id else None
+    # A dangling active_club_id (e.g. the acted-as club was deleted) falls back
+    # to the staff member's home membership club rather than 403-ing them out.
+    if club is None and eff_id != membership.club_id:
+        club = await db.get(Organisation, membership.club_id)
     if not club:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club not found")
     return club
@@ -150,19 +170,7 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
     token = _create_token(str(user.id))
     _set_session_cookie(response, token)
 
-    role = membership.role if membership else None
-    from app.auth.capabilities import effective_capabilities
-    from app.auth.modules import entitlement_summary
-    caps = effective_capabilities(role, membership.capabilities if membership else None) if role else []
-    return {
-        "id": str(user.id),
-        "username": user.username,
-        "display_name": user.display_name,
-        "role": role,
-        "club_slug": club.slug if club else None,
-        "capabilities": caps,
-        "entitlements": entitlement_summary(club, role),
-    }
+    return await _build_me(user, db)
 
 
 @router.post("/logout")
@@ -171,11 +179,13 @@ async def logout(response: Response):
     return {"status": "logged_out"}
 
 
-@router.get("/me")
-async def me(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
+async def _build_me(current_user: User, db: AsyncSession) -> dict:
+    """The shared identity payload returned by /login, /me and /switch-club.
+
+    For a super admin this resolves to whichever club they're currently acting
+    as (``active_club_id``), and also carries the home-club + acting flags the
+    frontend club switcher needs.
+    """
     from app.auth.capabilities import effective_capabilities
     from app.auth.modules import entitlement_summary
 
@@ -184,17 +194,83 @@ async def me(
     )
     membership = membership_res.scalar_one_or_none()
     role = membership.role if membership else None
-    club_id = str(membership.club_id) if membership else None
     caps = effective_capabilities(role, membership.capabilities if membership else None) if role else []
-    club = await db.get(Organisation, membership.club_id) if membership else None
+
+    home_club = await db.get(Organisation, membership.club_id) if membership else None
+    eff_id = _effective_club_id(membership, current_user)
+    club = await db.get(Organisation, eff_id) if eff_id else None
+    # active_club_id may dangle (acted-as club deleted) — fall back to home.
+    if club is None and membership is not None:
+        club = home_club
+        eff_id = membership.club_id
+
+    is_super = role == "super_admin"
+    acting = bool(is_super and home_club and club and club.id != home_club.id)
 
     return {
         "id": str(current_user.id),
         "username": current_user.username,
         "display_name": current_user.display_name,
         "role": role,
-        "club_id": club_id,
+        "club_id": str(eff_id) if eff_id else None,
         "club_slug": club.slug if club else None,
+        "club_name": club.name if club else None,
         "capabilities": caps,
         "entitlements": entitlement_summary(club, role),
+        # Super-admin club-switch context. can_switch_clubs gates the UI switcher;
+        # acting_as_club is true only while scoped to a club other than home.
+        "can_switch_clubs": is_super,
+        "home_club_id": str(membership.club_id) if membership else None,
+        "home_club_name": home_club.name if home_club else None,
+        "acting_as_club": acting,
     }
+
+
+@router.get("/me")
+async def me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _build_me(current_user, db)
+
+
+class SwitchClubRequest(BaseModel):
+    # None / omitted resets the super admin back to their home club.
+    club_id: str | None = None
+
+
+@router.post("/switch-club")
+async def switch_club(
+    data: SwitchClubRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Super-admin-only: re-scope the whole admin app to another club.
+
+    Persists the choice on the user row so every subsequent club-scoped request
+    (and a page reload) resolves to the acted-as club until they switch again.
+    """
+    result = await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )
+    membership = result.scalar_one_or_none()
+    if not membership or membership.role != "super_admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only super admins can switch clubs")
+
+    if not data.club_id:
+        current_user.active_club_id = None
+    else:
+        try:
+            target_id = uuid.UUID(data.club_id)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid club id")
+        target = await db.get(Organisation, target_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="Club not found")
+        # Acting as the home club is just the cleared state — keep it NULL so
+        # acting_as_club reads false.
+        current_user.active_club_id = None if target_id == membership.club_id else target_id
+
+    await db.commit()
+    await db.refresh(current_user)
+    return await _build_me(current_user, db)
