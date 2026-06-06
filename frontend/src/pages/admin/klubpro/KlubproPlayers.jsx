@@ -73,9 +73,12 @@ function Avatar({ url, name }) {
     className="w-12 h-12 rounded-full object-cover border border-pb-hairline2 shrink-0" />
 }
 
-function StatusBadge({ status, score }) {
+function StatusBadge({ status, score, imported }) {
+  if (imported) {
+    return <span className="font-mono text-[10px] px-1.5 py-0.5 rounded border text-green-300 border-green-400/30">IMPORTED ✓</span>
+  }
   const map = {
-    approved: ['APPROVED', 'text-green-300 border-green-400/30'],
+    approved: ['APPROVED · NOT IMPORTED', 'text-blue-300 border-blue-400/30'],
     rejected: ['REJECTED', 'text-pb-red/70 border-pb-red/30'],
     skipped: ['SKIPPED', 'text-pb-faint border-pb-faint/30'],
   }
@@ -122,6 +125,7 @@ export default function KlubproPlayers({ clubMapping }) {
           candId,
           score: m?.match_score ?? null,
           status,
+          imported: !!m?.imported_at,
           fields: cand ? (hasStored ? { ...recommendedMap(p, cand), ...m.migrate_fields } : recommendedMap(p, cand)) : {},
         }
       }
@@ -207,6 +211,9 @@ export default function KlubproPlayers({ clubMapping }) {
     return {
       total: all.length,
       approved: all.filter(r => r.status === 'approved').length,
+      imported: all.filter(r => r.imported).length,
+      // approved decisions whose data hasn't been written to BetterStats yet
+      toImport: all.filter(r => r.status === 'approved' && !r.imported).length,
       pending: all.filter(r => r.candId && r.status === 'pending').length,
       eligible: eligible.length,
     }
@@ -287,7 +294,9 @@ export default function KlubproPlayers({ clubMapping }) {
     } catch (e) { toast.error(e.message) }
   }
   const runImport = async () => {
-    if (!window.confirm(`Import ${dry.players_changing} player update(s) using the saved field selections? A backup is taken so this can be rolled back.`)) return
+    // Approve only records the decision; this is the step that writes to BetterStats.
+    const n = counts.toImport || dry?.players_changing || 0
+    if (!window.confirm(`Import ${n} approved player${n === 1 ? '' : 's'} into BetterStats now? Only the ticked fields are written, a backup is taken, and you can roll back from History.`)) return
     setBusy(true)
     try {
       const r = await api.kpPlayerImport(cm)
@@ -302,19 +311,27 @@ export default function KlubproPlayers({ clubMapping }) {
     <div className="space-y-4">
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex gap-4 text-[13px]">
+          <div className="flex gap-4 text-[13px] flex-wrap">
             <span className="text-pb-dim">{counts.total} players</span>
-            <span className="text-green-300">{counts.approved} approved</span>
+            <span className="text-blue-300">{counts.approved} approved</span>
+            <span className="text-green-300">{counts.imported} imported</span>
             <span className="text-pb-amber">{counts.pending} pending</span>
           </div>
           <div className="flex gap-2 flex-wrap">
             <Btn onClick={bulkApprove} disabled={!counts.eligible || busy}>Bulk approve ({counts.eligible})</Btn>
             <Btn onClick={runDryRun}>Dry run</Btn>
-            <Btn primary disabled={!dry || !dry.players_changing || busy} onClick={runImport}>
-              {busy ? 'Working…' : `Import${dry?.players_changing ? ` ${dry.players_changing}` : ''}`}
+            <Btn primary disabled={!counts.toImport || busy} onClick={runImport}>
+              {busy ? 'Working…' : `Import${counts.toImport ? ` ${counts.toImport}` : ''}`}
             </Btn>
           </div>
         </div>
+        {counts.toImport > 0 && (
+          <div className="mt-2 text-[12px] text-pb-amber">
+            {counts.toImport} approved player{counts.toImport === 1 ? ' is' : 's are'} not written to BetterStats yet —
+            approving only records your choices. Click <span className="font-semibold">Import</span> to apply them
+            (run <span className="font-semibold">Dry run</span> first to preview).
+          </div>
+        )}
         <div className="flex flex-wrap gap-2 mt-3 items-center">
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search players…"
             className="bg-pb-surface2 border border-pb-hairline2 rounded px-3 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
@@ -402,7 +419,7 @@ function PlayerRow({ bs, row, cand, expanded, onToggle, onField, onCheckAll, onU
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm text-pb-text font-medium">{bs.name}</span>
-              <StatusBadge status={row?.status} score={row?.status === 'pending' ? row?.score : null} />
+              <StatusBadge status={row?.status} score={row?.status === 'pending' ? row?.score : null} imported={row?.imported} />
             </div>
             <div className="text-[11px] text-pb-faint mt-0.5 leading-snug">
               {summaryLine([bs.gender, bs.player_role, bs.batting_hand, bs.bowling_type], bs.is_opening_batsman)}
