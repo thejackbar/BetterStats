@@ -874,6 +874,19 @@ async def sync_organisation(
             import traceback as _tb3
             logger.error(f"Aggregate backfill failed for {org_id_str}: {e}\n{_tb3.format_exc()}")
 
+        # BetterImport: re-derive the non-GR remainder of any uploaded historical
+        # summaries against the GR data we just (re)synced. Runs last so the
+        # residual shrinks automatically as GR coverage grows — no re-import. A
+        # no-op for orgs that have never imported (migration 070).
+        try:
+            from app.services.import_reconcile import reconcile_imported_totals
+            stats["import_reconciled"] = await reconcile_imported_totals(org_id_str)
+            if run_id:
+                await update_sync_run(run_id, stats)
+        except Exception as e:
+            import traceback as _tb4
+            logger.error(f"Import reconcile failed for {org_id_str}: {e}\n{_tb4.format_exc()}")
+
         logger.info(f"Sync complete: {stats}")
         if run_id and owns_run:
             await finish_sync_run(run_id, stats)

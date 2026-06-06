@@ -1096,6 +1096,139 @@ class ManualEditLog(Base):
     undone_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
+# ─── BetterImport — overlap-safe historical CSV import (migration 070) ────────
+#
+# A club's uploaded summary is stored as *authoritative truth* in
+# ``imported_stats``; the reconciler (services/import_reconcile.py) derives only
+# the non-GR remainder into ``import_effective_deltas`` (read by the effective
+# view's 5th branch). The only thing ever added to GR is ``max(0, club − GR)``,
+# so the career total is pinned to the club's figure and can't double-count.
+
+
+class ImportBatch(Base):
+    __tablename__ = "import_batches"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    filename = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="draft")  # draft | committed | undone
+    granularity = Column(Text, nullable=True)  # career | season | grade | unknown
+    column_mapping = Column(JSONB, nullable=False, server_default="{}")
+    row_count = Column(Integer, nullable=False, server_default="0")
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    committed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    undone_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    organisation = relationship("Organisation")
+
+
+class ImportedStat(Base):
+    """Immutable record of what a club uploaded — the source of truth.
+
+    Column names mirror ManualCareerAdjustment. ``scope`` is 'career' (a
+    whole-career total) or 'season' (one season). The ``provided_*`` columns
+    hold the derived figures the club literally gave (avg/SR/econ); the raw
+    component columns are reconstructed from them at import time when absent.
+    """
+
+    __tablename__ = "imported_stats"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    import_batch_id = Column(UUID(as_uuid=True), ForeignKey("import_batches.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    scope = Column(Text, nullable=False)
+    season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="SET NULL"), nullable=True)
+    season_label = Column(Text, nullable=True)
+    grade_label = Column(Text, nullable=True)
+    is_prior_bucket = Column(Boolean, server_default="false", nullable=False)
+    games_played = Column(Integer, server_default="0", nullable=False)
+    batting_innings = Column(Integer, server_default="0", nullable=False)
+    batting_runs = Column(Integer, server_default="0", nullable=False)
+    batting_not_outs = Column(Integer, server_default="0", nullable=False)
+    batting_balls = Column(Integer, server_default="0", nullable=False)
+    batting_fours = Column(Integer, server_default="0", nullable=False)
+    batting_sixes = Column(Integer, server_default="0", nullable=False)
+    batting_fifties = Column(Integer, server_default="0", nullable=False)
+    batting_hundreds = Column(Integer, server_default="0", nullable=False)
+    batting_ducks = Column(Integer, server_default="0", nullable=False)
+    batting_high_score = Column(Integer, nullable=True)
+    batting_high_score_not_out = Column(Boolean, server_default="false", nullable=False)
+    bowling_innings = Column(Integer, server_default="0", nullable=False)
+    bowling_overs = Column(Numeric(8, 1), server_default="0", nullable=False)
+    bowling_balls = Column(Integer, server_default="0", nullable=False)
+    bowling_maidens = Column(Integer, server_default="0", nullable=False)
+    bowling_runs = Column(Integer, server_default="0", nullable=False)
+    bowling_wickets = Column(Integer, server_default="0", nullable=False)
+    bowling_wides = Column(Integer, server_default="0", nullable=False)
+    bowling_no_balls = Column(Integer, server_default="0", nullable=False)
+    bowling_five_wicket_innings = Column(Integer, server_default="0", nullable=False)
+    bowling_best_wickets = Column(Integer, nullable=True)
+    bowling_best_figures = Column(Text, nullable=True)
+    fielding_catches = Column(Integer, server_default="0", nullable=False)
+    fielding_catches_wk = Column(Integer, server_default="0", nullable=False)
+    fielding_run_outs = Column(Integer, server_default="0", nullable=False)
+    fielding_stumpings = Column(Integer, server_default="0", nullable=False)
+    provided_batting_average = Column(Numeric(8, 2), nullable=True)
+    provided_batting_strike_rate = Column(Numeric(8, 2), nullable=True)
+    provided_bowling_average = Column(Numeric(8, 2), nullable=True)
+    provided_bowling_economy = Column(Numeric(6, 2), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    organisation = relationship("Organisation")
+    player = relationship("Player")
+    season = relationship("Season")
+    batch = relationship("ImportBatch")
+
+
+class ImportEffectiveDelta(Base):
+    """Derived, regenerable: the non-GR remainder the reconciler emits.
+
+    Read by ``v_effective_player_season_stats``'s ``'import'`` branch. Wiped and
+    rebuilt per org on every reconcile, so it never goes stale and never touches
+    the hand-entered manual_* tables. Column names match the view's output.
+    """
+
+    __tablename__ = "import_effective_deltas"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    scope = Column(Text, nullable=False)  # season | career
+    season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="SET NULL"), nullable=True)
+    grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
+    matches = Column(Integer, server_default="0", nullable=False)
+    batting_innings = Column(Integer, server_default="0", nullable=False)
+    runs = Column(Integer, server_default="0", nullable=False)
+    not_outs = Column(Integer, server_default="0", nullable=False)
+    balls_faced = Column(Integer, server_default="0", nullable=False)
+    fifties = Column(Integer, server_default="0", nullable=False)
+    hundreds = Column(Integer, server_default="0", nullable=False)
+    ducks = Column(Integer, server_default="0", nullable=False)
+    fours = Column(Integer, server_default="0", nullable=False)
+    sixes = Column(Integer, server_default="0", nullable=False)
+    high_score = Column(Integer, nullable=True)
+    is_hs_not_out = Column(Boolean, server_default="false", nullable=False)
+    bowling_innings = Column(Integer, server_default="0", nullable=False)
+    wickets = Column(Integer, server_default="0", nullable=False)
+    overs = Column(Numeric(8, 1), server_default="0", nullable=False)
+    bowling_balls = Column(Integer, server_default="0", nullable=False)
+    runs_conceded = Column(Integer, server_default="0", nullable=False)
+    maidens = Column(Integer, server_default="0", nullable=False)
+    best_bowling_wickets = Column(Integer, nullable=True)
+    best_bowling_figures = Column(Text, nullable=True)
+    five_wicket_innings = Column(Integer, server_default="0", nullable=False)
+    wides = Column(Integer, server_default="0", nullable=False)
+    no_balls = Column(Integer, server_default="0", nullable=False)
+    catches = Column(Integer, server_default="0", nullable=False)
+    catches_wk = Column(Integer, server_default="0", nullable=False)
+    run_outs = Column(Integer, server_default="0", nullable=False)
+    stumpings = Column(Integer, server_default="0", nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class PlayerSyncRequest(Base):
     __tablename__ = "player_sync_requests"
 
