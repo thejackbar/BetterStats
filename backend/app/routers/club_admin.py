@@ -1297,58 +1297,71 @@ async def super_overview(
 ):
     """Platform-wide fleet snapshot for the Better staff dashboard.
 
-    Fleet KPIs (clubs / active / users / players / games + tier & status
-    breakdowns) plus a per-club rollup (data volume, members, last sync, last
-    admin login) so staff can see, at a glance, which clubs are healthy and
-    which are stale. Read-only; everything is one round-trip of aggregates.
+    Fleet KPIs (clubs / active / users / players / games + tier, status and
+    module-adoption breakdowns) plus a per-club rollup (data volume, members,
+    last sync, last admin login) so staff can see, at a glance, which clubs are
+    healthy and which are stale. Read-only.
     """
-    # Per-club rollup. Correlated subqueries keep it to a single statement and
-    # are cheap at fleet scale (~dozens of clubs).
-    club_rows = (await db.execute(_text(
-        """
-        SELECT o.id, o.name, o.slug, o.tier, o.subscription_status, o.is_active,
-               o.created_at,
-               (SELECT COUNT(*) FROM players p  WHERE p.organisation_id = o.id) AS players,
-               (SELECT COUNT(*) FROM games   g  WHERE g.organisation_id = o.id) AS games,
-               (SELECT COUNT(*) FROM club_memberships cm WHERE cm.club_id = o.id) AS members,
-               (SELECT MAX(s.synced_at) FROM seasons s WHERE s.organisation_id = o.id) AS last_sync,
-               (SELECT MAX(u.last_login_at)
-                  FROM club_memberships cm2
-                  JOIN users u ON u.id = cm2.user_id
-                 WHERE cm2.club_id = o.id) AS last_login
-          FROM organisations o
-         ORDER BY o.name
-        """
+    orgs = (await db.execute(select(Organisation).order_by(Organisation.name))).scalars().all()
+
+    # Grouped aggregates — ONE scan per table, merged in Python. The previous
+    # version used a correlated COUNT(*) subquery per club, which re-scans
+    # players/games once for every club and trips a statement timeout at fleet
+    # scale (the cause of the 500). A single GROUP BY per table is ~N× cheaper.
+    # Key every map by the org id as TEXT so it can't miss on a UUID-vs-str
+    # type mismatch between the ORM object and the raw-SQL rows.
+    players_by = {r["org"]: r["n"] for r in (await db.execute(_text(
+        "SELECT organisation_id::text AS org, COUNT(*) AS n FROM players GROUP BY organisation_id"
+    ))).mappings().all()}
+    games_by = {r["org"]: r["n"] for r in (await db.execute(_text(
+        "SELECT organisation_id::text AS org, COUNT(*) AS n FROM games GROUP BY organisation_id"
+    ))).mappings().all()}
+    sync_by = {r["org"]: r["t"] for r in (await db.execute(_text(
+        "SELECT organisation_id::text AS org, MAX(synced_at) AS t FROM seasons GROUP BY organisation_id"
+    ))).mappings().all()}
+    member_rows = (await db.execute(_text(
+        "SELECT cm.club_id::text AS org, COUNT(*) AS n, MAX(u.last_login_at) AS last_login "
+        "FROM club_memberships cm JOIN users u ON u.id = cm.user_id GROUP BY cm.club_id"
     ))).mappings().all()
+    members_by = {r["org"]: r["n"] for r in member_rows}
+    login_by = {r["org"]: r["last_login"] for r in member_rows}
 
     clubs = []
     by_tier: dict[str, int] = {}
     by_status: dict[str, int] = {}
-    active_clubs = 0
-    total_players = 0
-    total_games = 0
-    for r in club_rows:
-        tier = r["tier"] or "good"
-        status_ = r["subscription_status"] or "active"
+    module_adoption: dict[str, int] = {}
+    active_clubs = total_players = total_games = 0
+    for o in orgs:
+        tier = o.tier or "good"
+        status_ = o.subscription_status or "active"
         by_tier[tier] = by_tier.get(tier, 0) + 1
         by_status[status_] = by_status.get(status_, 0) + 1
-        if r["is_active"]:
+        mods = sorted(org_entitled_modules(o))
+        for m in mods:
+            module_adoption[m] = module_adoption.get(m, 0) + 1
+        oid = str(o.id)
+        p = players_by.get(oid, 0) or 0
+        g = games_by.get(oid, 0) or 0
+        total_players += p
+        total_games += g
+        if o.is_active:
             active_clubs += 1
-        total_players += r["players"] or 0
-        total_games += r["games"] or 0
+        ls = sync_by.get(oid)
+        ll = login_by.get(oid)
         clubs.append({
-            "id": str(r["id"]),
-            "name": r["name"],
-            "slug": r["slug"],
+            "id": str(o.id),
+            "name": o.name,
+            "slug": o.slug,
             "tier": tier,
             "subscription_status": status_,
-            "is_active": r["is_active"],
-            "players": r["players"] or 0,
-            "games": r["games"] or 0,
-            "members": r["members"] or 0,
-            "last_sync": r["last_sync"].isoformat() if r["last_sync"] else None,
-            "last_login": r["last_login"].isoformat() if r["last_login"] else None,
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "is_active": o.is_active,
+            "modules": mods,
+            "players": p,
+            "games": g,
+            "members": members_by.get(oid, 0) or 0,
+            "last_sync": ls.isoformat() if ls else None,
+            "last_login": ll.isoformat() if ll else None,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
         })
 
     total_users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
@@ -1366,6 +1379,7 @@ async def super_overview(
             "games": total_games,
             "by_tier": by_tier,
             "by_status": by_status,
+            "module_adoption": module_adoption,
         },
         "clubs": clubs,
     }

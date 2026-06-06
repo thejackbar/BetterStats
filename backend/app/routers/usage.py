@@ -385,6 +385,136 @@ async def by_role(
     ]
 
 
+@router.get("/club-admin/usage/by-club")
+async def by_club(
+    days: int = 7,
+    role: Optional[list[str]] = Query(None),
+    event_type: Optional[str] = None,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Usage attributed to each club.
+
+    Two attribution paths, both query-time (so it works on existing data, no
+    backfill): an event's explicit ``org_id`` when set, else — for public SPA
+    page views — the club slug parsed out of the path (``/{slug}/…``). Events
+    that resolve to neither (marketing pages, admin pages, API calls with no
+    org context) are bucketed as ``Unattributed`` so the totals reconcile.
+    """
+    days = max(1, min(days, 365))
+    roles = _normalise_roles(role)
+    params: dict = {"days": days, **_role_params(roles)}
+    type_clause = ""
+    if event_type:
+        type_clause = "AND ue.event_type = :etype"
+        params["etype"] = event_type
+    rows = await db.execute(
+        text(
+            f"""
+            SELECT
+                COALESCE(o_org.id::text, o_slug.id::text)       AS club_id,
+                COALESCE(o_org.name, o_slug.name)               AS club_name,
+                COALESCE(o_org.slug, o_slug.slug)               AS club_slug,
+                COUNT(*)                                        AS hits,
+                COUNT(*) FILTER (WHERE ue.event_type = 'page_view') AS page_views,
+                COUNT(DISTINCT ue.ip_hash) FILTER (WHERE ue.ip_hash IS NOT NULL) AS unique_ips
+            FROM usage_events ue
+            {_USER_ROLE_JOIN}
+            LEFT JOIN organisations o_org  ON o_org.id = ue.org_id
+            LEFT JOIN organisations o_slug ON ue.org_id IS NULL
+                                          AND ue.event_type = 'page_view'
+                                          AND o_slug.slug = split_part(split_part(ue.path, '?', 1), '/', 2)
+            WHERE ue.created_at >= NOW() - (:days * INTERVAL '1 day')
+            {type_clause}
+            {_role_filter(roles)}
+            GROUP BY 1, 2, 3
+            ORDER BY hits DESC
+            """
+        ),
+        params,
+    )
+    out = []
+    for r in rows.mappings().all():
+        out.append({
+            "club_id": r["club_id"],
+            "club_name": r["club_name"] or "Unattributed (marketing / admin / API)",
+            "club_slug": r["club_slug"],
+            "hits": int(r["hits"] or 0),
+            "page_views": int(r["page_views"] or 0),
+            "unique_ips": int(r["unique_ips"] or 0),
+        })
+    # Keep the attributed clubs first; the single Unattributed bucket sinks last.
+    out.sort(key=lambda x: (x["club_id"] is None, -x["hits"]))
+    return out
+
+
+@router.get("/club-admin/usage/visitors")
+async def visitors(
+    days: int = 7,
+    event_type: Optional[str] = None,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return-visitor analytics from the (privacy-preserving) IP hash.
+
+    We never store raw IPs — only a truncated SHA-256 — but that's enough to
+    count distinct visitors and tell new from returning:
+      - visitors:          distinct IP hashes seen in the window
+      - returning:         visitors whose first-ever hit predates the window
+      - new:               visitors − returning
+      - multi_day:         visitors active on ≥2 distinct days in the window
+      - avg_hits:          hits per visitor
+    """
+    days = max(1, min(days, 365))
+    params: dict = {"days": days}
+    type_clause = ""
+    if event_type:
+        type_clause = "AND ue.event_type = :etype"
+        params["etype"] = event_type
+    row = (await db.execute(
+        text(
+            f"""
+            WITH win AS (
+                SELECT ue.ip_hash,
+                       COUNT(*) AS hits,
+                       COUNT(DISTINCT date_trunc('day', ue.created_at)) AS active_days
+                FROM usage_events ue
+                WHERE ue.ip_hash IS NOT NULL
+                  AND ue.created_at >= NOW() - (:days * INTERVAL '1 day')
+                  {type_clause}
+                GROUP BY ue.ip_hash
+            ),
+            first_seen AS (
+                SELECT ip_hash, MIN(created_at) AS first_ever
+                FROM usage_events
+                WHERE ip_hash IN (SELECT ip_hash FROM win)
+                GROUP BY ip_hash
+            )
+            SELECT
+                (SELECT COUNT(*) FROM win)                                  AS visitors,
+                (SELECT COUNT(*) FROM win WHERE active_days >= 2)           AS multi_day,
+                (SELECT COALESCE(SUM(hits), 0) FROM win)                    AS total_hits,
+                (SELECT COUNT(*) FROM first_seen
+                  WHERE first_ever < NOW() - (:days * INTERVAL '1 day'))    AS returning
+            """
+        ),
+        params,
+    )).mappings().first()
+    visitors_n = int(row["visitors"] or 0)
+    returning_n = int(row["returning"] or 0)
+    total_hits = int(row["total_hits"] or 0)
+    return {
+        "days": days,
+        "visitors": visitors_n,
+        "returning": returning_n,
+        "new": max(visitors_n - returning_n, 0),
+        "multi_day": int(row["multi_day"] or 0),
+        "total_hits": total_hits,
+        "avg_hits": round(total_hits / visitors_n, 1) if visitors_n else 0.0,
+        "returning_pct": round(100 * returning_n / visitors_n) if visitors_n else 0,
+    }
+
+
 @router.get("/club-admin/usage/top-routes")
 async def top_routes(
     days: int = 7,

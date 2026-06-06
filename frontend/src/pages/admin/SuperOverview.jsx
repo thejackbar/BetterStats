@@ -2,40 +2,99 @@ import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
-import { tierLabel, statusLabel, statusIsLive } from '../../lib/modules'
+import { tierLabel, statusLabel, statusIsLive, TIER_INFO, TIER_ORDER, MODULE } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
 
-// Better-staff platform dashboard: fleet KPIs + a per-club health table. The
-// table doubles as the launchpad for club switching — "Manage" re-scopes the
-// whole admin app into that club (super-admin only, served by /auth/switch-club).
+// Better HQ — the internal staff control room. Fleet KPIs, the platform tools
+// laid out as module-style tiles, a "needs attention" worklist, subscription /
+// module-adoption rollups, and a per-club health table that doubles as the club
+// switcher (Manage re-scopes the whole admin app into that club).
 
-function Kpi({ label, value, sub }) {
+const STALE_SYNC_DAYS = 30
+const DORMANT_LOGIN_DAYS = 30
+
+// HQ tool tiles — same visual language as the dashboard module cards.
+const HQ_TOOLS = [
+  { to: '/admin/super/clubs', name: 'All Clubs', blurb: 'Onboard, edit plans & subscriptions, sync or remove clubs.' },
+  { to: '/admin/super/users', name: 'Users & Access', blurb: 'Staff and club-admin accounts, roles and password resets.' },
+  { to: '/admin/usage', name: 'Usage Analytics', blurb: 'Traffic, features, visitors and per-club engagement.' },
+  { to: '/admin/super/migration', name: 'KlubPro Migration', blurb: 'Import player profiles & sponsors from a legacy KlubPro club.' },
+]
+
+const ADOPTION = [
+  { key: MODULE.SELECT, name: 'BetterSelect' },
+  { key: MODULE.SOCIALS, name: 'BetterSocials' },
+  { key: MODULE.FEES, name: 'BetterFees' },
+  { key: MODULE.IQ, name: 'BetterIQ' },
+  { key: MODULE.COMMS, name: 'BetterComms' },
+]
+
+function daysSince(iso) {
+  if (!iso) return Infinity
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
+}
+
+function relativeDays(iso) {
+  const d = daysSince(iso)
+  if (d === Infinity) return 'never'
+  if (d <= 0) return 'today'
+  if (d === 1) return 'yesterday'
+  if (d < 30) return `${d}d ago`
+  if (d < 365) return `${Math.floor(d / 30)}mo ago`
+  return `${Math.floor(d / 365)}y ago`
+}
+
+function fmtMoney(n) {
+  return '$' + Math.round(n).toLocaleString('en-AU')
+}
+
+function Kpi({ label, value, sub, accent }) {
   return (
     <div className="pb-card p-4">
       <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{label}</div>
-      <div className="font-display font-bold text-2xl text-pb-text mt-1 tabular-nums">{value}</div>
+      <div className="font-display font-bold text-2xl mt-1 tabular-nums" style={accent ? { color: 'var(--pb-accent)' } : { color: 'var(--pb-text)' }}>{value}</div>
       {sub && <div className="font-mono text-[10px] text-pb-faintest mt-0.5">{sub}</div>}
     </div>
   )
 }
 
-function relativeDays(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  const days = Math.floor((Date.now() - d.getTime()) / 86400000)
-  if (days <= 0) return 'today'
-  if (days === 1) return 'yesterday'
-  if (days < 30) return `${days}d ago`
-  if (days < 365) return `${Math.floor(days / 30)}mo ago`
-  return `${Math.floor(days / 365)}y ago`
+function ToolTile({ to, name, blurb }) {
+  return (
+    <Link
+      to={to}
+      className="block pb-card p-5 border-pb-accent/30 hover:border-pb-accent/50 transition-colors group"
+      style={{ background: 'color-mix(in srgb, var(--pb-accent) 6%, transparent)' }}
+    >
+      <div className="flex items-center justify-between gap-4">
+        <span className="font-display font-bold text-lg text-pb-text">{name}</span>
+        <span className="text-2xl group-hover:translate-x-1 transition-transform" style={{ color: 'var(--pb-accent)' }}>→</span>
+      </div>
+      <div className="text-pb-faint text-sm mt-1">{blurb}</div>
+    </Link>
+  )
+}
+
+function Bar({ label, value, max, hint }) {
+  const pct = max > 0 ? Math.round((value / max) * 100) : 0
+  return (
+    <div>
+      <div className="flex items-center justify-between font-mono text-[10px] mb-1">
+        <span className="text-pb-faint uppercase tracking-wide2">{label}</span>
+        <span className="text-pb-text tabular-nums">{value}{hint ? ` ${hint}` : ''}</span>
+      </div>
+      <div className="h-1.5 rounded bg-pb-surface2 overflow-hidden">
+        <div className="h-full rounded" style={{ width: `${pct}%`, background: 'var(--pb-accent)' }} />
+      </div>
+    </div>
+  )
 }
 
 const SORTS = {
   name: (a, b) => (a.name || '').localeCompare(b.name || ''),
   players: (a, b) => (b.players || 0) - (a.players || 0),
   games: (a, b) => (b.games || 0) - (a.games || 0),
-  last_sync: (a, b) => new Date(b.last_sync || 0) - new Date(a.last_sync || 0),
-  last_login: (a, b) => new Date(b.last_login || 0) - new Date(a.last_login || 0),
+  last_sync: (a, b) => daysSince(a.last_sync) - daysSince(b.last_sync),
+  last_login: (a, b) => daysSince(a.last_login) - daysSince(b.last_login),
 }
 
 export default function SuperOverview() {
@@ -51,60 +110,157 @@ export default function SuperOverview() {
   }, [])
 
   const t = data?.totals
+  const allClubs = data?.clubs || []
+
+  // Estimated ARR — annual list price of every club on a live subscription.
+  const arr = useMemo(
+    () => allClubs.filter(c => statusIsLive(c.subscription_status))
+      .reduce((sum, c) => sum + (TIER_INFO[c.tier]?.annual || 0), 0),
+    [allClubs]
+  )
+
+  // Worklist: clubs that need a human to look at them, with the reasons why.
+  const attention = useMemo(() => {
+    const rows = []
+    for (const c of allClubs) {
+      const reasons = []
+      let severity = 0
+      if (!statusIsLive(c.subscription_status)) { reasons.push(statusLabel(c.subscription_status)); severity += 3 }
+      if (!c.is_active) { reasons.push('Hidden'); severity += 2 }
+      if (daysSince(c.last_sync) > STALE_SYNC_DAYS) { reasons.push(c.last_sync ? `No sync ${relativeDays(c.last_sync)}` : 'Never synced'); severity += 1 }
+      if (daysSince(c.last_login) > DORMANT_LOGIN_DAYS) { reasons.push(c.last_login ? `No login ${relativeDays(c.last_login)}` : 'No admin logins'); severity += 1 }
+      if (reasons.length) rows.push({ ...c, reasons, severity })
+    }
+    return rows.sort((a, b) => b.severity - a.severity).slice(0, 12)
+  }, [allClubs])
+
   const clubs = useMemo(() => {
-    if (!data?.clubs) return []
     const q = query.trim().toLowerCase()
     const filtered = q
-      ? data.clubs.filter(c => (c.name || '').toLowerCase().includes(q) || (c.slug || '').toLowerCase().includes(q))
-      : data.clubs.slice()
+      ? allClubs.filter(c => (c.name || '').toLowerCase().includes(q) || (c.slug || '').toLowerCase().includes(q))
+      : allClubs.slice()
     return filtered.sort(SORTS[sort] || SORTS.name)
-  }, [data, query, sort])
+  }, [allClubs, query, sort])
 
   const manage = async (clubId) => {
     setBusyId(clubId)
     try {
-      await switchClub(clubId) // hard-reloads into /admin under the new scope
+      await switchClub(clubId)
     } catch (e) {
       setError(e?.message || 'Could not switch club')
       setBusyId(null)
     }
   }
 
-  const tierBreakdown = t ? ['best', 'better', 'good'].map(k => `${(t.by_tier?.[k] || 0)} ${tierLabel(k)}`).join(' · ') : ''
+  const adoptionMax = t ? Math.max(1, ...ADOPTION.map(m => t.module_adoption?.[m.key] || 0)) : 1
 
   return (
     <AdminLayout>
-      <div className="max-w-5xl">
+      <div className="max-w-6xl">
         <div className="flex items-center justify-between mb-1">
-          <h1 className="font-display font-bold text-2xl text-pb-text">Platform Overview</h1>
+          <h1 className="font-display font-bold text-2xl text-pb-text">
+            Better<span style={{ color: 'var(--pb-accent)' }}>HQ</span>
+          </h1>
           <Link to="/admin/usage" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-1.5">
             USAGE ANALYTICS →
           </Link>
         </div>
-        <p className="text-pb-faint text-sm mb-5">Fleet health across every Better club. Pick a club's <strong>Manage</strong> to jump straight into administering it.</p>
+        <p className="text-pb-faint text-sm mb-5">Platform control room. Pick any club's <strong>Manage</strong> to jump straight into administering it.</p>
 
         {error && <div className="font-mono text-[11px] text-pb-red mb-4">{error}</div>}
         {!data && !error && <div className="font-mono text-[11px] text-pb-faint">Loading…</div>}
 
         {t && (
           <>
+            {/* KPI strip */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
               <Kpi label="Clubs" value={t.clubs} sub={`${t.active_clubs} active`} />
-              <Kpi label="Users" value={t.users} sub={`${t.super_admins} super`} />
+              <Kpi label="Est. ARR" value={fmtMoney(arr)} sub="live subs · list price" accent />
+              <Kpi label="Users" value={t.users} sub={`${t.super_admins} staff`} />
               <Kpi label="Players" value={t.players.toLocaleString()} />
               <Kpi label="Games" value={t.games.toLocaleString()} />
-              <Kpi label="By tier" value={t.by_tier?.best || 0} sub={tierBreakdown} />
-              <Kpi label="Live subs" value={Object.entries(t.by_status || {}).filter(([k]) => statusIsLive(k)).reduce((n, [, v]) => n + v, 0)} sub={`of ${t.clubs}`} />
+              <Kpi label="Best tier" value={t.by_tier?.best || 0} sub={TIER_ORDER.map(k => `${t.by_tier?.[k] || 0} ${tierLabel(k)}`).join(' · ')} />
             </div>
 
+            {/* HQ tools — module-style tiles */}
+            <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">Platform Tools</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-7">
+              {HQ_TOOLS.map(tool => <ToolTile key={tool.to} {...tool} />)}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-7">
+              {/* Needs attention */}
+              <div className="lg:col-span-2 pb-card p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="font-display font-bold text-sm text-pb-text">Needs attention</h2>
+                  <span className="font-mono text-[10px] text-pb-faintest">{attention.length} flagged</span>
+                </div>
+                {attention.length === 0 && (
+                  <div className="font-mono text-[11px] text-pb-faint py-4 text-center">All clubs healthy ✓</div>
+                )}
+                <div className="space-y-1.5">
+                  {attention.map(c => (
+                    <div key={c.id} className="flex items-center justify-between gap-3 py-1.5 px-2 rounded hover:bg-pb-surface2">
+                      <div className="min-w-0">
+                        <span className="text-pb-text text-sm">{c.name}</span>
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {c.reasons.map((r, i) => (
+                            <span key={i} className="font-mono text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-pb-red/30 text-pb-red/90">{r}</span>
+                          ))}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => manage(c.id)}
+                        disabled={busyId === c.id}
+                        className="font-mono text-[10px] tracking-wide2 px-2.5 py-1 rounded text-pb-bg shrink-0 disabled:opacity-50"
+                        style={{ background: 'var(--pb-accent)' }}
+                      >
+                        {busyId === c.id ? '…' : 'MANAGE'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Subscriptions + module adoption */}
+              <div className="space-y-5">
+                <div className="pb-card p-4">
+                  <h2 className="font-display font-bold text-sm text-pb-text mb-3">Subscriptions</h2>
+                  <div className="space-y-2.5">
+                    {TIER_ORDER.map(k => (
+                      <Bar key={k} label={tierLabel(k)} value={t.by_tier?.[k] || 0} max={t.clubs} hint="clubs" />
+                    ))}
+                  </div>
+                  <div className="mt-3 pt-3 border-t pb-hairline-t flex flex-wrap gap-x-3 gap-y-1">
+                    {Object.entries(t.by_status || {}).map(([k, v]) => (
+                      <span key={k} className={`font-mono text-[10px] ${statusIsLive(k) ? 'text-pb-faint' : 'text-pb-red'}`}>
+                        {v} {statusLabel(k)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pb-card p-4">
+                  <h2 className="font-display font-bold text-sm text-pb-text mb-3">Module adoption</h2>
+                  <div className="space-y-2.5">
+                    {ADOPTION.map(m => (
+                      <Bar key={m.key} label={m.name} value={t.module_adoption?.[m.key] || 0} max={adoptionMax} hint="clubs" />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Fleet table */}
             <div className="flex items-center gap-3 mb-2">
+              <h2 className="font-display font-bold text-sm text-pb-text mr-auto">All clubs</h2>
               <input
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 placeholder="Search clubs…"
                 className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent w-56"
               />
-              <span className="font-mono text-[10px] text-pb-faintest">{clubs.length} club{clubs.length === 1 ? '' : 's'}</span>
+              <span className="font-mono text-[10px] text-pb-faintest">{clubs.length}</span>
             </div>
 
             <div className="pb-card overflow-hidden">

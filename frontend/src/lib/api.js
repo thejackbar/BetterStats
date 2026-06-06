@@ -433,6 +433,17 @@ export const api = {
     if (eventType) params.set('event_type', eventType)
     return request(`/club-admin/usage/by-location?${params}`)
   },
+  adminUsageByClub: ({ days = 7, roles = [], eventType = null } = {}) => {
+    const params = new URLSearchParams({ days: String(days) })
+    ;(roles || []).forEach(r => params.append('role', r))
+    if (eventType) params.set('event_type', eventType)
+    return request(`/club-admin/usage/by-club?${params}`)
+  },
+  adminUsageVisitors: ({ days = 7, eventType = null } = {}) => {
+    const params = new URLSearchParams({ days: String(days) })
+    if (eventType) params.set('event_type', eventType)
+    return request(`/club-admin/usage/visitors?${params}`)
+  },
   // Notification centre (bell icon)
   getNotificationsCount: () => request('/club-admin/notifications/count'),
   getNotificationsSummary: () => request('/club-admin/notifications/summary'),
