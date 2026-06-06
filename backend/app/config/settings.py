@@ -14,6 +14,16 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     cors_origins: str = "http://localhost:3000"
 
+    # ─── KlubPro → BetterStats migration tooling (super-admin onboarding only) ──
+    # Connection to the *separate* KlubPro Postgres holding the staged migration
+    # data (the `klubpro_migration` schema). Empty in normal operation — the
+    # migration admin page returns a clear "not configured" error until an
+    # operator sets it. On the box both DBs live in the same Docker project, so
+    # this resolves over the internal network, e.g.:
+    #   postgresql+asyncpg://klubpro_admin:<pw>@klubpro-postgres:5432/klubpro
+    # NEVER hardcode the password — supply it via the .env / Docker secret.
+    klubpro_database_url: str = ""
+
     # ─── BetterComms — outbound email (part of the BetterAdmin module) ─────────
     # Provider-pluggable so the platform runs zero-cost on a provider's free tier
     # and can switch later with no code change. "console" only logs (the dev

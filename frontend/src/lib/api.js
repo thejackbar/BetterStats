@@ -313,6 +313,29 @@ export const api = {
   importList: () => request('/club-admin/imports'),
   importUndo: (batchId) =>
     request(`/club-admin/imports/${batchId}/undo`, { method: 'POST' }),
+  // ─── KlubPro → BetterStats migration (super-admin onboarding) ────────────────
+  kpStatus: () => request('/club-admin/klubpro/status'),
+  kpDashboard: () => request('/club-admin/klubpro/dashboard'),
+  kpPlayers: (cm) => request(`/club-admin/klubpro/clubs/${cm}/players`),
+  kpSetMatch: (cm, payload) =>
+    request(`/club-admin/klubpro/clubs/${cm}/players/match`, { method: 'POST', body: JSON.stringify(payload) }),
+  kpPlayerDryRun: (cm) => request(`/club-admin/klubpro/clubs/${cm}/players/dry-run`),
+  kpPlayerImport: (cm) =>
+    request(`/club-admin/klubpro/clubs/${cm}/players/import`, { method: 'POST', body: JSON.stringify({ confirm: true }) }),
+  kpSponsors: (cm) => request(`/club-admin/klubpro/clubs/${cm}/sponsors`),
+  kpSponsorDryRun: (cm, ids) =>
+    request(`/club-admin/klubpro/clubs/${cm}/sponsors/dry-run`, { method: 'POST', body: JSON.stringify({ selected_ids: ids }) }),
+  kpSponsorImport: (cm, ids) =>
+    request(`/club-admin/klubpro/clubs/${cm}/sponsors/import`, { method: 'POST', body: JSON.stringify({ selected_ids: ids, confirm: true }) }),
+  kpBatches: (orgId) => request(`/club-admin/klubpro/batches${orgId ? `?org_id=${orgId}` : ''}`),
+  kpRollback: (batchId) =>
+    request(`/club-admin/klubpro/batches/${batchId}/rollback`, { method: 'POST' }),
+  // Image URLs (used directly in <img src>; cookie auth travels with the request)
+  kpPlayerImageUrl: (klubproPlayerId, thumb = false) =>
+    `${BASE}/club-admin/klubpro/images/player/${klubproPlayerId}${thumb ? '?thumb=1' : ''}`,
+  kpSponsorImageUrl: (klubproSponsorId) =>
+    `${BASE}/club-admin/klubpro/images/sponsor/${klubproSponsorId}`,
+  bsPlayerPhotoUrl: (playerId) => `${BASE}/images/players/${playerId}/photo`,
   // Phase 3.1 — Per-match-day Mark Paid + bulk payment
   feeMarkMatchDayPaid: (entryId, data = {}) =>
     request(`/club-admin/fees/match-days/${entryId}/mark-paid`, {

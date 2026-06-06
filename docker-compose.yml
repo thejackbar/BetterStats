@@ -24,6 +24,9 @@ services:
       PLAYHQ_API_KEY: ${PLAYHQ_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3002}
+      # KlubPro migration tooling — empty unless an operator is onboarding clubs.
+      # On the box, ensure this backend shares a Docker network with klubpro-postgres.
+      KLUBPRO_DATABASE_URL: ${KLUBPRO_DATABASE_URL:-}
     volumes:
       - uploads:/app/uploads
     ports:

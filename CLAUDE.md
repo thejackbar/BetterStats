@@ -358,6 +358,45 @@ More scorecard-reachable brief items, no schema change:
 
 **Bounds** (CA-proxy politeness + latency): `MAX_OPP_SEASON_MATCHES=18`, `MAX_HEAD_TO_HEAD_GAMES=25`; reuses `grassroots_scores_client`'s in-process scorecard cache + semaphore(6). First build ~10–40s, then cached. Overs maths: `_overs_to_balls(10.2)=62` (10 overs + 2 balls).
 
+## KlubPro → BetterStats Migration Tooling (v8.4, Jun 2026)
+
+Super-admin-only onboarding wizard (integrated into the admin app, **not** a
+standalone tool) that reviews data staged in the **external KlubPro Postgres**
+(`klubpro_migration` schema) and imports **player profiles** (matched to existing
+BetterStats players by name — KlubPro has no CA ids) + **sponsors**. Full guide:
+`docs/klubpro-migration.md`.
+
+- **Two DBs.** BetterStats uses the normal `get_db`. KlubPro gets a **lazy**
+  second engine in `app/services/klubpro_db.py` (`get_klubpro_db`, built from
+  `KLUBPRO_DATABASE_URL`) — only instantiated when an operator hits a migration
+  endpoint, so the app boots/runs normally with it unset (the page shows "not
+  configured"). KlubPro is **never ORM-mapped** — schema-qualified raw SQL only,
+  so it never enters Alembic.
+- **Gating.** Router `routers/klubpro_migration.py` (prefix `/club-admin/klubpro`)
+  is `require_super_admin` (cross-club platform tooling, not a per-club cap). UI
+  at `/admin/super/migration` (`pages/admin/klubpro/`), `requireRole="super_admin"`,
+  linked from `AdminLayout` `SUPER_LINKS`.
+- **Migration 072** (+ mirrored idempotent lifespan creates): adds
+  `org_sponsors.contact_name/.email/.klubpro_sponsor_id` (the handoff's sponsor
+  insert targets these three — the repo's `org_sponsors` lacked them) + partial
+  unique `(organisation_id, klubpro_sponsor_id)`; and two **BetterStats-side**
+  bookkeeping tables `klubpro_migration_batches` / `klubpro_migration_backups`
+  (so backups/audit survive even if KlubPro is decommissioned and rollback is a
+  pure BetterStats op).
+- **Safety invariants** (`services/klubpro_migration.py`): fills gaps but **never
+  clobbers with empties**; `is_opening_batsman=False` = "no info" (only `True`
+  applied); **skills compare as a set**; only the **ten profile fields** are ever
+  written (no stats/games/ids/org). Sponsor import is dedup-safe on the unique
+  index. Flow is **dry-run → confirm → per-row backup → write**, every batch
+  **rollback-able** from the History tab.
+- **`sponsor_import_selections` is intentionally NOT the source of truth** — its
+  columns weren't in the handoff, so selection is client-side and de-dup is
+  enforced on the BetterStats side instead of guessing that schema. The other
+  KlubPro tables (`player_match_mappings` etc.) have documented columns and are
+  used directly.
+- **Deploy**: set `KLUBPRO_DATABASE_URL` (never commit the pw) AND ensure
+  `betterstats-backend` shares a Docker network with `klubpro-postgres`.
+
 ## Notification Centre (v7.7.3, May 2026)
 
 Bell icon in the AdminLayout header + drop-down panel that auto-opens on login when there's something new.
