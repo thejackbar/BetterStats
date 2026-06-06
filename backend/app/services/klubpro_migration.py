@@ -497,7 +497,20 @@ async def ensure_match_columns(kp: AsyncSession) -> None:
             f"ALTER TABLE klubpro_migration.player_match_mappings "
             f"ADD COLUMN IF NOT EXISTS {col} {typ}"
         ))
-    await kp.commit()
+    await kp.commit()  # persist columns before the (separate) constraint change
+    # Allow NULL klubpro_player_id so a KP player can be UNLINKED from a
+    # BetterStats player (freed for re-matching) without deleting the row — the
+    # external table may have shipped this column NOT NULL. Separate txn so a
+    # failure here can't roll back the columns above. Idempotent (no-op if already
+    # nullable).
+    try:
+        await kp.execute(text(
+            "ALTER TABLE klubpro_migration.player_match_mappings "
+            "ALTER COLUMN klubpro_player_id DROP NOT NULL"
+        ))
+        await kp.commit()
+    except Exception:
+        await kp.rollback()
     _match_columns_ensured = True
 
 
@@ -587,7 +600,19 @@ async def upsert_match_mapping(
             await kp.commit()
         return
 
-    # approve — replace the row with the approved decision (klubpro_player_id present)
+    # approve — replace the row with the approved decision (klubpro_player_id present).
+    # First free this KP player from any OTHER BetterStats player in the club: a KP
+    # participant can only be linked once (the table has a unique on the KP id), and
+    # a previous (e.g. rejected) match would otherwise block this one. Unlink by
+    # nulling the id rather than deleting, so that row keeps its rejected status.
+    if klubpro_player_id:
+        await kp.execute(text("""
+            UPDATE klubpro_migration.player_match_mappings
+            SET klubpro_player_id = NULL, approved = false, match_status = 'rejected',
+                migrate_fields = '{}'::jsonb, updated_at = NOW()
+            WHERE club_mapping_id = :cmid AND klubpro_player_id = :kpid
+              AND betterstats_player_id <> :bpid
+        """), {"cmid": str(club_mapping_id), "kpid": klubpro_player_id, "bpid": str(betterstats_player_id)})
     await kp.execute(text(
         "DELETE FROM klubpro_migration.player_match_mappings "
         "WHERE club_mapping_id = :cmid AND betterstats_player_id = :bpid"

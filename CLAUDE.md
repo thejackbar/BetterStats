@@ -437,6 +437,22 @@ BetterStats players by name — KlubPro has no CA ids) + **sponsors**. Full guid
   (`approved`/`rejected`/`skipped`); sending the imperative `reject`/`skip` + a NULL
   match id was erroring on the external table's constraints. Approve still
   DELETE+INSERTs (match id always present).
+- **Re-matching a rejected KP player** (fixed v8.4): the KP table has a unique on
+  the KP id, so a rejected match still holding `klubpro_player_id` blocked
+  approving that KP player to a *different* BetterStats player (symptom: reject
+  Jnr, then approving Snr errors). Fix: the approve path first **frees the KP id
+  from any other BetterStats player** in the club (`UPDATE … SET
+  klubpro_player_id=NULL, approved=false, match_status='rejected' WHERE
+  klubpro_player_id=:kpid AND betterstats_player_id<>:bpid`), so the rejected row
+  keeps its status but releases the id. Requires the id to be nullable —
+  `ensure_match_columns` now also `ALTER COLUMN klubpro_player_id DROP NOT NULL`
+  (separate txn so it can't roll back the added columns).
+- **Name matching** (fixed v8.4): the candidate picker is whitespace/​suffix/​order
+  tolerant — `normName` collapses double spaces (an empty middle-name slot renders
+  as "First  Last") and strips Jnr/Snr/Jr/Sr; matching is token-AND over the
+  normalised KlubPro name, so "Eadon-Clarke Jnr, Chas" finds "Chas Eadon-Clarke".
+  (A genuinely *different* middle name still needs the operator to edit the
+  search.)
 - **Value normalisation** (fixed v8.4 — was importing display labels verbatim):
   KlubPro stages `betterstats_*` as **human labels** ("Right handed", "Right-arm
   fast-medium", "Male") but BetterStats stores **codes** (`batting_hand` 'RIGHT';
