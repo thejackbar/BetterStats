@@ -220,7 +220,9 @@ function DismissalDonut({ dismissals }) {
 
 function SeasonChart({ data }) {
   if (!data?.length) return null
-  const chartData = [...data].reverse()
+  // Drop the career-level "Prior Seasons & Adjustments" row (no season_id) —
+  // it belongs in the table totals, not as a labelled bar on a season chart.
+  const chartData = [...data].filter(s => s.season_id).reverse()
   return (
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -240,7 +242,7 @@ function SeasonChart({ data }) {
 function CumulativeRunsChart({ seasonStats }) {
   if (!seasonStats?.length) return null
   let cumulative = 0
-  const chartData = [...seasonStats].reverse().map(s => {
+  const chartData = [...seasonStats].filter(s => s.season_id).reverse().map(s => {
     cumulative += (s.total_runs ?? 0)
     return { season: s.season_name?.replace('Summer ', '') ?? '', total: cumulative, season_runs: s.total_runs ?? 0 }
   })
@@ -260,7 +262,7 @@ function CumulativeRunsChart({ seasonStats }) {
 
 function AveragesChart({ seasonStats }) {
   if (!seasonStats?.length) return null
-  const chartData = [...seasonStats].reverse()
+  const chartData = [...seasonStats].filter(s => s.season_id).reverse()
     .filter(s => s.batting_average != null || s.bowling_average != null)
     .map(s => ({
       season: s.season_name?.replace('Summer ', '') ?? '',
@@ -1322,7 +1324,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           {seasonStats?.some(s => (s.total_wickets ?? 0) > 0) && (
             <Card title="WICKETS BY SEASON">
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={[...seasonStats].reverse()} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <BarChart data={[...seasonStats].filter(s => s.season_id).reverse()} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
                   <XAxis dataKey="season_name" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
@@ -1370,7 +1372,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
               <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Bowling average (left axis) and economy rate (right axis) season by season — each scales independently so economy movement is readable.</p>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart
-                  data={[...seasonStats].reverse().filter(s => s.bowling_average != null || s.economy != null).map(s => ({
+                  data={[...seasonStats].filter(s => s.season_id).reverse().filter(s => s.bowling_average != null || s.economy != null).map(s => ({
                     season: s.season_name?.replace('Summer ', '') ?? '',
                     bowl_avg: s.bowling_average != null ? Number(Number(s.bowling_average).toFixed(1)) : null,
                     economy: s.economy != null ? Number(Number(s.economy).toFixed(2)) : null,

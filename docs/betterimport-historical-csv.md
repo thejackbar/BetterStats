@@ -100,6 +100,25 @@ unchanged** — same read-time, non-destructive philosophy as migration 060.
   pass of `sync_organisation` (next to `_backfill_missing_season_stats`).
 - `backend/scripts/verify_import_reconcile.py` — headless proof of the guarantee.
 
+## Displaying the career residual (leaderboards + season-by-season)
+
+The career residual ("Prior Seasons & Adjustments") is a `season_id = NULL` row
+in the effective view, so anything that aggregates **per season** drops it. The
+player-profile *career* header and the club-dashboard *totals* don't join
+seasons, so they already include it; but the **leaderboard lists** (the public
+ladder + dashboard top batters/bowlers/fielders) carried an unused
+`JOIN seasons s ON s.id = pss.season_id` that silently excluded it, so a player
+read low there (Wayne 7,941 / 225 instead of 14,576 / 473). Fixed in
+`aggregations.py` by dropping that inner join from the three leaderboard
+all-seasons branches — a specific-season filter still excludes the residual (a
+NULL season never matches), org scope is the player join. The same applies to
+any `manual_career_adjustments`, which now also surface in all-seasons ladders.
+
+`get_season_by_season(include_prior=True)` (player profile only — off for the
+BetterIQ trajectory consumers) appends a single **"Prior Seasons & Adjustments"**
+row so the per-season rows + the residual reconcile to the career header. The
+profile charts filter it out (it has no `season_id`) so there's no phantom bar.
+
 ## The eight settled decisions
 
 1. **Storage:** A2 (above).
