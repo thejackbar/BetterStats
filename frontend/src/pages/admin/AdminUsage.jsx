@@ -145,9 +145,11 @@ export default function AdminUsage() {
   const [roles, setRoles] = useState([])
 
   const [summary, setSummary] = useState(null)
+  const [visitors, setVisitors] = useState(null)
   const [series, setSeries] = useState({ bucket: 'day', points: [] })
   const [byFeature, setByFeature] = useState([])
   const [byRole, setByRole] = useState([])
+  const [byClub, setByClub] = useState([])
   const [byLocation, setByLocation] = useState({ by_country: [], by_city: [] })
   const [topRoutes, setTopRoutes] = useState([])
   const [topUsers, setTopUsers] = useState([])
@@ -171,21 +173,25 @@ export default function AdminUsage() {
       roles,
     }
     try {
-      const [s, ts, feat, brole, bloc, r, u, e] = await Promise.all([
+      const [s, vis, ts, feat, brole, bclub, bloc, r, u, e] = await Promise.all([
         api.adminUsageSummary(opts),
+        api.adminUsageVisitors({ days, eventType: eventType || null }),
         api.adminUsageTimeseries(opts),
         api.adminUsageByFeature(opts),
         // by-role chart shows the overall split, ignores the role filter
         api.adminUsageByRole({ days, eventType: eventType || null }),
+        api.adminUsageByClub(opts),
         api.adminUsageByLocation(opts),
         api.adminUsageTopRoutes({ ...opts, limit: 20 }),
         api.adminUsageTopUsers({ days, roles, limit: 20 }),
         api.adminUsageRecent({ ...opts, limit: 100 }),
       ])
       setSummary(s)
+      setVisitors(vis)
       setSeries(ts)
       setByFeature(feat)
       setByRole(brole)
+      setByClub(bclub)
       setByLocation(bloc)
       setTopRoutes(r)
       setTopUsers(u)
@@ -299,7 +305,7 @@ export default function AdminUsage() {
 
         {/* Summary cards */}
         {summary && (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
             {[
               { label: 'Total events', value: summary.total },
               { label: 'API hits',     value: summary.api_hits },
@@ -310,6 +316,25 @@ export default function AdminUsage() {
               <div key={s.label} className="pb-card px-3 py-2">
                 <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">{s.label}</div>
                 <div className="font-display text-xl text-pb-text">{fmtNum(s.value)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Visitors — new vs returning, derived from the (hashed) IP. */}
+        {visitors && (
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+            {[
+              { label: 'Visitors', value: visitors.visitors, hint: 'unique IPs' },
+              { label: 'Returning', value: visitors.returning, hint: `${visitors.returning_pct}% · seen before` },
+              { label: 'New', value: visitors.new, hint: 'first time' },
+              { label: 'Multi-day', value: visitors.multi_day, hint: '≥2 days active' },
+              { label: 'Hits / visitor', value: visitors.avg_hits, hint: 'avg', raw: true },
+            ].map(s => (
+              <div key={s.label} className="pb-card px-3 py-2" style={{ background: 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' }}>
+                <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">{s.label}</div>
+                <div className="font-display text-xl text-pb-text">{s.raw ? s.value : fmtNum(s.value)}</div>
+                {s.hint && <div className="font-mono text-[9px] text-pb-faintest mt-0.5">{s.hint}</div>}
               </div>
             ))}
           </div>
@@ -404,6 +429,45 @@ export default function AdminUsage() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* By club — usage attributed to each club (page views via the slug in
+            the URL; everything else lands in "Unattributed"). */}
+        <div className="pb-card p-4 mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide">By club</h2>
+            <span className="font-mono text-[9px] text-pb-faintest">page views attributed via the public URL</span>
+          </div>
+          {byClub.length === 0 ? (
+            <div className="py-6 text-center font-mono text-[11px] text-pb-faint">{loading ? 'Loading…' : 'No data.'}</div>
+          ) : (
+            <div className="space-y-1.5">
+              {(() => {
+                const max = Math.max(1, ...byClub.map(c => c.hits || 0))
+                return byClub.slice(0, 15).map((c) => {
+                  const pct = Math.round((c.hits / max) * 100)
+                  const unattributed = !c.club_id
+                  return (
+                    <div key={c.club_id || 'none'} className="flex items-center gap-3">
+                      <div className="w-40 shrink-0 truncate text-sm" title={c.club_name}>
+                        {c.club_slug ? (
+                          <span className="text-pb-text">{c.club_name}</span>
+                        ) : (
+                          <span className="text-pb-faintest italic">{c.club_name}</span>
+                        )}
+                      </div>
+                      <div className="flex-1 h-4 rounded bg-pb-surface2 overflow-hidden">
+                        <div className="h-full rounded" style={{ width: `${pct}%`, background: unattributed ? 'var(--pb-faint)' : 'var(--pb-accent)', opacity: unattributed ? 0.4 : 1 }} />
+                      </div>
+                      <div className="w-28 shrink-0 text-right font-mono text-[10px] text-pb-faint">
+                        {fmtNum(c.hits)} · {fmtNum(c.unique_ips)} IPs
+                      </div>
+                    </div>
+                  )
+                })
+              })()}
+            </div>
+          )}
         </div>
 
         {/* Top routes + top users tables */}

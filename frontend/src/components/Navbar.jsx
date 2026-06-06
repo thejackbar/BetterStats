@@ -70,9 +70,14 @@ function ChevronDown({ open }) {
 
 export default function Navbar() {
   const { user } = useAuth();
-  const slug = useSlug();
-  const { club } = useClub(slug);
   const { pathname } = useLocation();
+  const urlSlug = useSlug();
+  // On admin routes the URL carries no club slug, so the public navbar would
+  // otherwise fall back to the last public club visited (sessionStorage) — which
+  // is wrong for a super admin who has switched into another club. Reflect the
+  // club they're actually managing (user.club_slug = the acted-as club).
+  const slug = (pathname.startsWith('/admin') && user?.club_slug) ? user.club_slug : urlSlug;
+  const { club } = useClub(slug);
 
   const [openMenu, setOpenMenu] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });

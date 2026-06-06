@@ -58,6 +58,12 @@ export function AuthProvider({ children }) {
       const err = await res.json().catch(() => ({ detail: 'Could not switch club' }))
       throw new Error(err.detail || 'Could not switch club')
     }
+    // Keep slug-derived UI (the public navbar's club fallback) in step with the
+    // club we just switched into.
+    const data = await res.json().catch(() => null)
+    if (data?.club_slug) {
+      try { sessionStorage.setItem('bs_last_slug', data.club_slug) } catch {}
+    }
     window.location.assign('/admin')
   }, [])
 
