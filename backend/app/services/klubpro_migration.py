@@ -56,16 +56,25 @@ MIGRATABLE_FIELDS = tuple(PLAYER_FIELD_LABELS.keys())
 
 
 def _incoming_map(candidate: dict) -> dict:
-    """The 9 migratable values as staged in KlubPro for one candidate."""
+    """The 9 migratable values, **normalised to BetterStats canonical codes**.
+
+    KlubPro stages these as human labels ("Right handed", "Right-arm fast-medium",
+    "Male"); BetterStats stores codes ('RIGHT', bowling_type 'FAST_MEDIUM' +
+    bowling_action 'RIGHT_ARM', 'male'). We normalise here so comparison and the
+    write both use codes (otherwise the admin dropdowns can't match the value).
+    `player_role` is stored as its label in BetterStats, so it's normalised to the
+    canonical label. An unrecognised value normalises to None (treated as empty —
+    never written, never blanks an existing value).
+    """
     return {
-        "gender": candidate.get("gender"),
+        "gender": _norm_gender(candidate.get("gender")),
         "email": candidate.get("email"),
         "phone": candidate.get("mobile"),
-        "player_role": candidate.get("betterstats_player_role"),
-        "batting_hand": candidate.get("betterstats_batting_hand"),
-        "bowling_type": candidate.get("betterstats_bowling_type"),
+        "player_role": _norm_role(candidate.get("betterstats_player_role")),
+        "batting_hand": _norm_batting_hand(candidate.get("betterstats_batting_hand")),
+        "bowling_type": _norm_bowling(candidate.get("betterstats_bowling_type"))[1],
         "is_opening_batsman": candidate.get("betterstats_is_opening_batsman"),
-        "skill_positions": _as_list(candidate.get("betterstats_skill_positions")),
+        "skill_positions": [str(s).upper() for s in _as_list(candidate.get("betterstats_skill_positions"))],
         "profile_image": "image" if candidate.get("profile_image_found") else None,
     }
 
@@ -191,6 +200,78 @@ def _uuid(v: Any) -> Optional[uuid.UUID]:
         return uuid.UUID(str(v))
     except (ValueError, TypeError):
         return None
+
+
+# ── value normalisation: KlubPro labels → BetterStats canonical codes ─────────
+# Mirrors frontend/src/lib/playerAttributes.js (the editor's source of truth). The
+# staged betterstats_* columns hold display labels; the player columns hold codes.
+
+def _norm_gender(v: Any) -> Optional[str]:
+    s = (str(v).strip().lower() if v is not None else "")
+    if s in ("m", "male"):
+        return "male"
+    if s in ("f", "female"):
+        return "female"
+    return None
+
+
+def _norm_batting_hand(v: Any) -> Optional[str]:
+    s = (str(v).strip().lower() if v is not None else "")
+    if s in ("right", "right handed", "right-handed", "rhb", "r"):
+        return "RIGHT"
+    if s in ("left", "left handed", "left-handed", "lhb", "l"):
+        return "LEFT"
+    return None
+
+
+# label → (bowling_action, bowling_type). Keys lower-cased for tolerant matching.
+_BOWLING_LABELS = {
+    "right-arm fast": ("RIGHT_ARM", "FAST"),
+    "right-arm fast-medium": ("RIGHT_ARM", "FAST_MEDIUM"),
+    "right-arm medium-fast": ("RIGHT_ARM", "MEDIUM_FAST"),
+    "right-arm medium": ("RIGHT_ARM", "MEDIUM"),
+    "off spin": ("RIGHT_ARM", "FINGER_SPIN"),
+    "right-arm off spin": ("RIGHT_ARM", "FINGER_SPIN"),
+    "leg spin": ("RIGHT_ARM", "WRIST_SPIN"),
+    "right-arm leg spin": ("RIGHT_ARM", "WRIST_SPIN"),
+    "left-arm fast": ("LEFT_ARM", "FAST"),
+    "left-arm fast-medium": ("LEFT_ARM", "FAST_MEDIUM"),
+    "left-arm medium-fast": ("LEFT_ARM", "MEDIUM_FAST"),
+    "left-arm medium": ("LEFT_ARM", "MEDIUM"),
+    "left-arm orthodox": ("LEFT_ARM", "FINGER_SPIN"),
+    "left-arm wrist spin": ("LEFT_ARM", "WRIST_SPIN"),
+    "left-arm chinaman": ("LEFT_ARM", "WRIST_SPIN"),
+}
+_BOWLING_TYPES = {"FAST", "FAST_MEDIUM", "MEDIUM", "MEDIUM_FAST", "FINGER_SPIN", "WRIST_SPIN"}
+
+
+def _norm_bowling(v: Any) -> tuple[Optional[str], Optional[str]]:
+    """A KlubPro bowling label/code → (bowling_action, bowling_type)."""
+    if v is None:
+        return (None, None)
+    s = str(v).strip().lower()
+    if s in _BOWLING_LABELS:
+        return _BOWLING_LABELS[s]
+    up = str(v).strip().upper().replace("-", "_").replace(" ", "_")
+    if up in _BOWLING_TYPES:
+        return (None, up)
+    return (None, None)
+
+
+_ROLE_LABELS = {
+    "batter": "Batter", "batsman": "Batter", "bat": "Batter",
+    "bowler": "Bowler", "bowl": "Bowler",
+    "all rounder": "All Rounder", "all-rounder": "All Rounder", "allrounder": "All Rounder",
+    "wicketkeeper": "Wicketkeeper", "wicket keeper": "Wicketkeeper", "keeper": "Wicketkeeper", "wk": "Wicketkeeper",
+    "wicketkeeper-batter": "Wicketkeeper-Batter", "wicketkeeper batter": "Wicketkeeper-Batter",
+    "wicket keeper batter": "Wicketkeeper-Batter", "wk-batter": "Wicketkeeper-Batter",
+}
+
+
+def _norm_role(v: Any) -> Optional[str]:
+    if v is None or str(v).strip() == "":
+        return None
+    return _ROLE_LABELS.get(str(v).strip().lower(), str(v).strip())
 
 
 # ── KlubPro reads (dashboard / mappings) ─────────────────────────────────────
@@ -617,7 +698,8 @@ async def fetch_bs_players(bs: AsyncSession, org_id: uuid.UUID) -> list[dict]:
         select(
             Player.id, Player.name, Player.gender, Player.email, Player.phone,
             Player.player_role, Player.batting_hand, Player.bowling_type,
-            Player.skill_positions, Player.is_opening_batsman, Player.photo_mime,
+            Player.bowling_action, Player.skill_positions, Player.is_opening_batsman,
+            Player.photo_mime,
         ).where(Player.organisation_id == org_id).order_by(Player.name)
     )
     out = []
@@ -626,6 +708,7 @@ async def fetch_bs_players(bs: AsyncSession, org_id: uuid.UUID) -> list[dict]:
             "id": str(r.id), "name": r.name, "gender": r.gender, "email": r.email,
             "phone": r.phone, "player_role": r.player_role,
             "batting_hand": r.batting_hand, "bowling_type": r.bowling_type,
+            "bowling_action": r.bowling_action,
             "skill_positions": list(r.skill_positions or []),
             "is_opening_batsman": r.is_opening_batsman,
             "has_photo": r.photo_mime is not None,
@@ -655,10 +738,10 @@ def _player_before(player: Player) -> dict:
     return {
         "gender": player.gender, "email": player.email, "phone": player.phone,
         "player_role": player.player_role, "batting_hand": player.batting_hand,
-        "bowling_type": player.bowling_type,
+        "bowling_type": player.bowling_type, "bowling_action": player.bowling_action,
         "is_opening_batsman": player.is_opening_batsman,
         "skill_positions": list(player.skill_positions or []),
-        "photo_mime": player.photo_mime,
+        "photo_mime": player.photo_mime, "photo_url": player.photo_url,
         "photo_b64": base64.b64encode(player.photo_data).decode() if player.photo_data else None,
     }
 
@@ -696,13 +779,25 @@ def _apply_plan(player: Player, candidate: dict, plans: list[dict]) -> tuple[lis
             if candidate.get("profile_image_data"):
                 player.photo_data = bytes(candidate["profile_image_data"])
                 player.photo_mime = candidate.get("profile_image_mime") or "image/png"
+                # BetterSelect's avatar renders from photo_url; point it at the
+                # blob endpoint (same as a normal upload) so the admin shows it.
+                player.photo_url = f"/api/images/players/{player.id}/photo?v={uuid.uuid4().hex[:8]}"
                 applied.append(f)
         elif f == "skill_positions":
-            player.skill_positions = _as_list(candidate.get("betterstats_skill_positions"))
+            player.skill_positions = incoming["skill_positions"]
             applied.append(f)
         elif f == "is_opening_batsman":
             player.is_opening_batsman = True
             applied.append(f)
+        elif f == "bowling_type":
+            # KlubPro stages a combined label ("Right-arm fast-medium"); BetterStats
+            # splits it into bowling_action + bowling_type, so set both.
+            action, btype = _norm_bowling(candidate.get("betterstats_bowling_type"))
+            if btype:
+                player.bowling_type = btype
+                if action:
+                    player.bowling_action = action
+                applied.append(f)
         else:
             setattr(player, f, incoming[f])
             applied.append(f)
@@ -885,9 +980,11 @@ async def rollback_batch(bs: AsyncSession, batch: KlubproMigrationBatch) -> dict
             player.player_role = bd.get("player_role")
             player.batting_hand = bd.get("batting_hand")
             player.bowling_type = bd.get("bowling_type")
+            player.bowling_action = bd.get("bowling_action")
             player.is_opening_batsman = bd.get("is_opening_batsman")
             player.skill_positions = list(bd.get("skill_positions") or [])
             player.photo_mime = bd.get("photo_mime")
+            player.photo_url = bd.get("photo_url")
             player.photo_data = base64.b64decode(bd["photo_b64"]) if bd.get("photo_b64") else None
             restored += 1
         elif b.action == "insert" and b.target_table == "org_sponsors":

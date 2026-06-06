@@ -2,19 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import { PbSpinner, Card, Btn, Label, Select } from '../../../lib/presskit'
-
-// The 9 migratable fields (must match backend MIGRATABLE_FIELDS / migrate_fields keys).
-const FIELDS = [
-  { key: 'gender', label: 'Gender', bs: p => p.gender, kp: c => c.gender },
-  { key: 'email', label: 'Email', bs: p => p.email, kp: c => c.email },
-  { key: 'phone', label: 'Phone', bs: p => p.phone, kp: c => c.mobile },
-  { key: 'player_role', label: 'Role', bs: p => p.player_role, kp: c => c.betterstats_player_role },
-  { key: 'batting_hand', label: 'Batting hand', bs: p => p.batting_hand, kp: c => c.betterstats_batting_hand },
-  { key: 'bowling_type', label: 'Bowling type', bs: p => p.bowling_type, kp: c => c.betterstats_bowling_type },
-  { key: 'is_opening_batsman', label: 'Opening batter', bs: p => p.is_opening_batsman, kp: c => c.betterstats_is_opening_batsman, bool: true },
-  { key: 'skill_positions', label: 'Skills', bs: p => p.skill_positions, kp: c => c.betterstats_skill_positions, list: true },
-  { key: 'profile_image', label: 'Profile image', photo: true },
-]
+import { battingHandLabel, bowlingLabel, bowlingFromLabel, genderLabel, normalizeGender, bowls } from '../../../lib/playerAttributes'
 
 const fmt = (v) => {
   if (v === null || v === undefined || v === '') return '—'
@@ -33,25 +21,54 @@ const summaryLine = (vals, opener) => {
   return parts.length ? parts.join(' · ') : '—'
 }
 
-// Per-field comparison for one matched pair (mirrors backend recommended_fields).
+// KlubPro stages display labels; BetterStats stores codes. Normalise both to a
+// comparable code so e.g. 'RIGHT' (stored) and "Right handed" (staged) match, and
+// render BetterStats codes back to labels so the card reads cleanly.
+const battingCode = (v) => {
+  const s = (v == null ? '' : String(v)).trim().toLowerCase()
+  if (['right', 'right handed', 'right-handed', 'rhb', 'r'].includes(s)) return 'RIGHT'
+  if (['left', 'left handed', 'left-handed', 'lhb', 'l'].includes(s)) return 'LEFT'
+  return null
+}
+const bowlingType = (v) => {
+  if (v == null || v === '') return null
+  const fromLabel = bowlingFromLabel(String(v).trim())
+  if (fromLabel.bowling_type) return fromLabel.bowling_type
+  const up = String(v).trim().toUpperCase().replace(/[ -]/g, '_')
+  return ['FAST', 'FAST_MEDIUM', 'MEDIUM', 'MEDIUM_FAST', 'FINGER_SPIN', 'WRIST_SPIN'].includes(up) ? up : null
+}
+const roleCode = (v) => (v == null ? '' : String(v).trim().toLowerCase())
+const bsBattingLabel = (bs) => battingHandLabel(bs.batting_hand) || bs.batting_hand || null
+const bsBowlingLabel = (bs) => {
+  const lbl = bowls(bs.bowling_action, bs.bowling_type) ? bowlingLabel(bs.bowling_action, bs.bowling_type) : null
+  return (lbl && lbl !== '—') ? lbl : (bs.bowling_type || null)
+}
+
+// Per-field comparison for one matched pair (label display + normalised compare).
 function compareFields(bs, cand) {
   const kpHasPhoto = !!(cand.profile_image_found || cand.thumbnail_image_found)
   const bsHasPhoto = !!bs.has_photo
-  return FIELDS.map(f => {
-    if (f.photo) {
-      return {
-        ...f, current: bsHasPhoto ? 'image' : null, incoming: kpHasPhoto ? 'image' : null,
-        emptyIncoming: !kpHasPhoto, differ: kpHasPhoto !== bsHasPhoto,
-        recommended: kpHasPhoto,  // checked whenever KlubPro has an image (untick to keep a newer BS photo)
-      }
-    }
-    const cur = f.bs(bs), inc = f.kp(cand)
-    let emptyIncoming, differ
-    if (f.list) { emptyIncoming = !(inc && inc.length); differ = !sameSet(inc, cur) }
-    else if (f.bool) { emptyIncoming = inc !== true; differ = inc !== cur }
-    else { emptyIncoming = inc === null || inc === undefined || inc === ''; differ = inc !== cur }
-    return { ...f, current: cur, incoming: inc, emptyIncoming, differ, recommended: !emptyIncoming }
-  })
+  const out = []
+  const row = (key, label, current, incoming, emptyIncoming, differ) =>
+    out.push({ key, label, current, incoming, emptyIncoming, differ, recommended: !emptyIncoming })
+
+  const gI = normalizeGender(cand.gender) || null, gC = normalizeGender(bs.gender) || null
+  row('gender', 'Gender', genderLabel(bs.gender), cand.gender ? genderLabel(cand.gender) : null, !gI, gI !== gC)
+  row('email', 'Email', bs.email, cand.email, !cand.email, (cand.email || '') !== (bs.email || ''))
+  row('phone', 'Phone', bs.phone, cand.mobile, !cand.mobile, (cand.mobile || '') !== (bs.phone || ''))
+  const rI = cand.betterstats_player_role
+  row('player_role', 'Role', bs.player_role, rI, !rI, roleCode(rI) !== roleCode(bs.player_role))
+  const bI = battingCode(cand.betterstats_batting_hand)
+  row('batting_hand', 'Batting hand', bsBattingLabel(bs), cand.betterstats_batting_hand || null, !bI, bI !== battingCode(bs.batting_hand))
+  const wI = bowlingType(cand.betterstats_bowling_type)
+  row('bowling_type', 'Bowling type', bsBowlingLabel(bs), cand.betterstats_bowling_type || null, !wI, wI !== bowlingType(bs.bowling_type))
+  const oI = cand.betterstats_is_opening_batsman
+  out.push({ key: 'is_opening_batsman', label: 'Opening batter', current: bs.is_opening_batsman, incoming: oI, emptyIncoming: oI !== true, differ: oI !== bs.is_opening_batsman, recommended: oI === true })
+  const sI = cand.betterstats_skill_positions
+  out.push({ key: 'skill_positions', label: 'Skills', current: bs.skill_positions, incoming: sI, emptyIncoming: !(sI && sI.length), differ: !sameSet(sI, bs.skill_positions), recommended: !!(sI && sI.length) })
+  // profile image: checked whenever KlubPro has one (untick to keep a newer BS photo)
+  out.push({ key: 'profile_image', label: 'Profile image', photo: true, current: bsHasPhoto ? 'image' : null, incoming: kpHasPhoto ? 'image' : null, emptyIncoming: !kpHasPhoto, differ: kpHasPhoto !== bsHasPhoto, recommended: kpHasPhoto })
+  return out
 }
 function recommendedMap(bs, cand) {
   const m = {}
@@ -422,7 +439,7 @@ function PlayerRow({ bs, row, cand, expanded, onToggle, onField, onCheckAll, onU
               <StatusBadge status={row?.status} score={row?.status === 'pending' ? row?.score : null} imported={row?.imported} />
             </div>
             <div className="text-[11px] text-pb-faint mt-0.5 leading-snug">
-              {summaryLine([bs.gender, bs.player_role, bs.batting_hand, bs.bowling_type], bs.is_opening_batsman)}
+              {summaryLine([genderLabel(bs.gender), bs.player_role, bsBattingLabel(bs), bsBowlingLabel(bs)], bs.is_opening_batsman)}
             </div>
             <div className="text-[11px] text-pb-faint leading-snug">{fmt(bs.email)} · {fmt(bs.phone)}</div>
             <div className="text-[11px] text-pb-faint leading-snug">{bs.skill_positions?.length ? bs.skill_positions.join(', ') : 'no skills'}</div>
@@ -443,7 +460,7 @@ function PlayerRow({ bs, row, cand, expanded, onToggle, onField, onCheckAll, onU
                   {cand.nickname ? <span className="text-pb-faint"> “{cand.nickname}”</span> : null}
                 </span>
                 <div className="text-[11px] text-pb-faint mt-0.5 leading-snug">
-                  {summaryLine([cand.gender, cand.betterstats_player_role, cand.betterstats_batting_hand, cand.betterstats_bowling_type], cand.betterstats_is_opening_batsman)}
+                  {summaryLine([genderLabel(cand.gender), cand.betterstats_player_role, cand.betterstats_batting_hand, cand.betterstats_bowling_type], cand.betterstats_is_opening_batsman)}
                 </div>
                 <div className="text-[11px] text-pb-faint leading-snug">{fmt(cand.email)} · {fmt(cand.mobile)}</div>
                 <div className="text-[11px] text-pb-faint leading-snug">{cand.betterstats_skill_positions?.length ? cand.betterstats_skill_positions.join(', ') : 'no skills'}</div>

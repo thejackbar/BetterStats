@@ -437,6 +437,23 @@ BetterStats players by name — KlubPro has no CA ids) + **sponsors**. Full guid
   (`approved`/`rejected`/`skipped`); sending the imperative `reject`/`skip` + a NULL
   match id was erroring on the external table's constraints. Approve still
   DELETE+INSERTs (match id always present).
+- **Value normalisation** (fixed v8.4 — was importing display labels verbatim):
+  KlubPro stages `betterstats_*` as **human labels** ("Right handed", "Right-arm
+  fast-medium", "Male") but BetterStats stores **codes** (`batting_hand` 'RIGHT';
+  bowling split into `bowling_action` 'RIGHT_ARM' + `bowling_type` 'FAST_MEDIUM';
+  gender 'male'). `_norm_batting_hand`/`_norm_bowling`/`_norm_gender`/`_norm_role`
+  (mirroring `frontend/src/lib/playerAttributes.js`) convert on import in
+  `_incoming_map`; the `bowling_type` checkbox sets **both** bowling columns. Role
+  happens to be stored as its label so it always worked. Unrecognised value →
+  None → treated as empty (never written). The frontend card now displays codes
+  as labels + compares normalised so 'RIGHT' vs "Right handed" isn't a false diff.
+  **Photo**: a normal upload sets `photo_url=/api/images/players/{id}/photo?v=…`
+  and BetterSelect's avatar renders from `photo_url` — the import now sets it too
+  (it had set only `photo_data`/`photo_mime`, so the public profile showed the
+  photo but the admin avatar didn't). `_player_before`/rollback now also carry
+  `bowling_action` + `photo_url`. **A club imported before this fix (e.g. Murdoch)
+  must be re-Imported** — the normalised value differs from the stored bad label,
+  so a re-run repairs every row.
 - **Deploy**: set `KLUBPRO_DATABASE_URL` (never commit the pw) AND ensure
   `betterstats-backend` shares a Docker network with `klubpro-postgres`.
 
