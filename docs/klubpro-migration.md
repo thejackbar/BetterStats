@@ -88,9 +88,15 @@ checkbox each; only ticked fields migrate.
 - **Per-row actions**: Approve / Re-approve · Reject · Skip · Change (pick a
   different KlubPro player) · Check all · Uncheck all · Reset to recommended.
   Reject/skip **update the mapping in place** (the match is marked
-  rejected/skipped, excluded from import — `klubpro_player_id` is preserved, never
-  nulled, so the external table's constraints aren't tripped); `match_status` is
-  stored past-tense (`approved`/`rejected`/`skipped`).
+  rejected/skipped, excluded from import); `match_status` is stored past-tense
+  (`approved`/`rejected`/`skipped`). Approving a KP player **frees it from any
+  other BetterStats player** in the club first (the KP table has a unique on the KP
+  id), so a wrong match you rejected on player A can be approved on player B —
+  `ensure_match_columns` drops the NOT NULL on `klubpro_player_id` so the freed
+  row keeps its rejected status with a null id.
+- **Name search** is double-space / suffix / order tolerant (`normName` +
+  token-AND): an empty middle-name slot ("First  Last") and Jnr/Snr suffixes no
+  longer stop a candidate being found.
 - **Approve ≠ import.** Approving (or Bulk Approve) only records the decision +
   field selections. **Import** is the step that writes BetterStats `players`. Cards
   show `APPROVED · NOT IMPORTED` (blue) until imported, then `IMPORTED ✓` (green);

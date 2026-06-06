@@ -21,6 +21,12 @@ const summaryLine = (vals, opener) => {
   return parts.length ? parts.join(' · ') : '—'
 }
 
+// Name matching tolerant of double spaces (empty middle name), suffixes and word
+// order — "Eadon-Clarke Jnr, Chas" should still find KlubPro's "Chas Eadon-Clarke".
+const _SUFFIXES = new Set(['jnr', 'snr', 'jr', 'sr', 'ii', 'iii', 'iv'])
+const normName = (s) => (s || '').toString().toLowerCase().replace(/[,]/g, ' ').replace(/\s+/g, ' ').trim()
+const nameTokens = (s) => normName(s).split(' ').filter(t => t && !_SUFFIXES.has(t))
+
 // KlubPro stages display labels; BetterStats stores codes. Normalise both to a
 // comparable code so e.g. 'RIGHT' (stored) and "Right handed" (staged) match, and
 // render BetterStats codes back to labels so the card reads cleanly.
@@ -237,9 +243,9 @@ export default function KlubproPlayers({ clubMapping }) {
   }, [rows, eligible])
 
   const visible = useMemo(() => {
-    const term = q.trim().toLowerCase()
+    const term = normName(q)
     return (data?.betterstats_players || []).filter(p => {
-      if (term && !p.name?.toLowerCase().includes(term)) return false
+      if (term && !normName(p.name).includes(term)) return false
       const r = rows[p.id]; if (!r) return false
       const cand = r.candId ? candById[r.candId] : null
       switch (filter) {
@@ -534,14 +540,17 @@ function PlayerRow({ bs, row, cand, expanded, onToggle, onField, onCheckAll, onU
 }
 
 function CandidatePicker({ bs, candidates, onPick, onClose }) {
-  const [q, setQ] = useState(() => (bs.name || '').replace(',', ' '))
-  const term = q.trim().toLowerCase()
+  // Seed with the cleaned name (no comma, no suffix, single spaces).
+  const [q, setQ] = useState(() => nameTokens(bs.name).join(' '))
   const list = useMemo(() => {
-    const arr = term
-      ? candidates.filter(c => `${c.firstname || ''} ${c.lastname || ''} ${c.nickname || ''}`.toLowerCase().includes(term))
-      : candidates
+    const tokens = nameTokens(q)
+    const arr = candidates.filter(c => {
+      const hay = normName(`${c.firstname || ''} ${c.lastname || ''} ${c.nickname || ''}`)
+      // every search token must appear — order/middle-name/double-space tolerant
+      return tokens.every(t => hay.includes(t))
+    })
     return arr.slice(0, 60)
-  }, [candidates, term])
+  }, [candidates, q])
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
