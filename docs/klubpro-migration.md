@@ -113,6 +113,32 @@ checkbox each; only ticked fields migrate.
   replacement selected/deselected · has field differences · has missing KlubPro
   values.
 
+## Value normalisation (labels → codes)
+
+KlubPro stages `betterstats_*` as **human labels**; BetterStats stores **codes**.
+The import normalises on write (`_incoming_map` + `_norm_*`, mirroring
+`frontend/src/lib/playerAttributes.js`):
+
+| Field | KlubPro staged | BetterStats stored |
+|---|---|---|
+| batting_hand | "Right handed" | `RIGHT` |
+| bowling | "Right-arm fast-medium" | `bowling_action='RIGHT_ARM'` + `bowling_type='FAST_MEDIUM'` (the checkbox sets both) |
+| gender | "Male" | `male` |
+| player_role | "All Rounder" | `All Rounder` (BetterStats stores the label — always worked) |
+
+An unrecognised value normalises to None → treated as empty (never written, never
+blanks an existing value). The wizard displays codes back as labels and compares
+normalised, so `RIGHT` vs "Right handed" isn't shown as a difference.
+
+**Photo:** a normal upload sets `photo_url = /api/images/players/{id}/photo?v=…`
+and BetterSelect's avatar renders from `photo_url`; the import sets it too (not
+just `photo_data`/`photo_mime`), so the photo shows in the admin editor as well as
+the public profile. `_player_before`/rollback carry `bowling_action` + `photo_url`.
+
+> **Clubs imported before this fix** stored the raw labels (the admin dropdowns
+> showed "—" and the admin avatar was blank). Just **re-Import** the club — the
+> normalised value differs from the stored label, so the re-run repairs every row.
+
 ## Safety invariants (enforced in `services/klubpro_migration.py`)
 
 - **Never clobbers with empties.** A field is only written when its checkbox is
