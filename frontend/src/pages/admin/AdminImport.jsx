@@ -40,6 +40,34 @@ const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text te
 const cell = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent'
 const num = n => Number(n || 0).toLocaleString()
 
+// Compact "era · games · runs · wkts" lines used in the close-match review, so two
+// same-surname players can be told apart by their career (and you can eyeball what
+// merging the sheet into one of them looks like).
+function fmtSpan(first, last) {
+  if (!first) return null
+  return last && last !== first ? `${first}–${last}` : `${first}`
+}
+function candStatLine(s) {
+  if (!s) return null
+  const bits = []
+  const era = fmtSpan(s.first_year, s.last_year)
+  if (era) bits.push(era)
+  if (s.matches) bits.push(`${num(s.matches)} mts`)
+  if (s.runs) bits.push(`${num(s.runs)} runs`)
+  if (s.wickets) bits.push(`${num(s.wickets)} wkts`)
+  return bits.length ? bits.join(' · ') : 'no stats at this club yet'
+}
+function sheetStatLine(s) {
+  if (!s) return null
+  const bits = []
+  const era = fmtSpan(s.first_year, s.last_year)
+  if (era) bits.push(era)
+  if (s.games) bits.push(`${num(s.games)} games`)
+  if (s.runs) bits.push(`${num(s.runs)} runs`)
+  if (s.wickets) bits.push(`${num(s.wickets)} wkts`)
+  return bits.length ? bits.join(' · ') : null
+}
+
 function Pct({ score }) {
   if (score == null) return null
   const tone = score >= 0.85 ? 'text-green-300' : score >= 0.6 ? 'text-pb-amber' : 'text-pb-red/60'
@@ -478,8 +506,12 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
           <button className={item} onClick={() => pick('__skip__')}>Skip this {kind}</button>
           {(candidates || []).length > 0 && <div className="px-2 pt-2 pb-1 font-mono text-[9px] tracking-wide2 text-pb-faint">SUGGESTED</div>}
           {(candidates || []).map(c => (
-            <button key={c.id} className={item} onClick={() => pick(c.id)}>
-              {c.name}{c.confidence != null ? <span className="text-pb-faint"> ({Math.round(c.confidence * 100)}%)</span> : ''}
+            <button key={c.id} className={`${item} leading-tight py-1.5`} onClick={() => pick(c.id)}>
+              <span className="flex items-center justify-between gap-2">
+                <span className="truncate">{c.name}</span>
+                {c.confidence != null && <span className="text-pb-faint shrink-0">{Math.round(c.confidence * 100)}%</span>}
+              </span>
+              {kind === 'player' && c.stats && <span className="block text-[10px] text-pb-faint mt-0.5">{candStatLine(c.stats)}</span>}
             </button>
           ))}
           <div className="px-1 pt-2 pb-1 sticky top-0">
@@ -732,11 +764,13 @@ function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverridesBul
                 </thead>
                 <tbody>
                   {pageRows.map((r, i) => {
-                    const candidates = (r.candidates || []).map(c => ({ id: c.player_id, name: c.name, confidence: c.confidence }))
+                    const candidates = (r.candidates || []).map(c => ({ id: c.player_id, name: c.name, confidence: c.confidence, stats: c.stats }))
+                    const sheet = sheetStatLine(r.sheet)
                     return (
                       <tr key={r.raw_name + i} className="pb-hairline-t align-middle">
                         <td className="py-2 pr-2 text-pb-text">
                           {r.raw_name}
+                          {sheet && <div className="text-[10px] text-pb-faint mt-0.5">sheet: {sheet}</div>}
                           {r.note && <div className="text-[10px] text-pb-red/60 mt-0.5">{r.note}</div>}
                         </td>
                         <td className="py-2 pr-2"><StatusBadge status={r.status} /></td>
