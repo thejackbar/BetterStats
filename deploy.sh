@@ -42,13 +42,13 @@ export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 export LANGFLOW_SUPERUSER="${LANGFLOW_SUPERUSER:-}"
 export LANGFLOW_SUPERUSER_PASSWORD="${LANGFLOW_SUPERUSER_PASSWORD:-}"
 
-echo "==> [1/3] Pulling latest main into /srv/docker/betterstats"
+echo "==> [1/4] Pulling latest main into /srv/docker/betterstats"
 git -C /srv/docker/betterstats pull origin main
 
-echo "==> [2/3] Rebuilding betterstats images (no cache)"
+echo "==> [2/4] Rebuilding betterstats images (no cache)"
 docker compose build --no-cache betterstats-backend betterstats-frontend
 
-echo "==> [3/3] Recreating betterstats only (db + other services untouched)"
+echo "==> [3/4] Recreating betterstats only (db + other services untouched)"
 # Why rm+up instead of `up --force-recreate`:
 # The central file pins fixed container_names (betterstats-frontend / -backend).
 # With a fixed name, `--force-recreate` does a fragile rename dance — it renames
@@ -66,8 +66,39 @@ echo "==> [3/3] Recreating betterstats only (db + other services untouched)"
 docker compose rm -sf betterstats-backend betterstats-frontend || true
 docker compose up -d --no-deps betterstats-backend betterstats-frontend
 
+echo "==> [4/4] Refreshing nginx-proxy-manager so it resolves the frontend's NEW IP"
+# Recreating betterstats-frontend gives it a NEW Docker IP. nginx-proxy-manager
+# caches the old DNS result per worker and then 502s with
+#   "betterstats-frontend could not be resolved (2: Server failure)"
+# — the Jun 2026 admin outage (see CLAUDE.md post-mortem). A graceful reload
+# spins fresh workers that re-resolve; if the site is still down we fall back to
+# a full restart (a few seconds' blip across all proxied apps, but reliable —
+# a reload alone did NOT clear it during the incident).
+#
+# Everything below uses `docker compose` (NOT bare `docker exec/restart/ps`) so it
+# stays inside the pinned COMPOSE_PROJECT_NAME project. Bare `docker` commands are
+# banned on this box — they spawn duplicate stacks that are a nightmare to
+# untangle. We discover the proxy's SERVICE name from the project so we never
+# hardcode a container name.
+NPM_SVC="$(docker compose ps --services 2>/dev/null | grep -iE 'proxy|npm|manager' | head -1)"
+health() { for i in 1 2 3; do curl -s -o /dev/null -w '%{http_code} ' "https://betterstats.cricket/" || printf '000 '; done; }
+if [ -n "$NPM_SVC" ]; then
+  docker compose exec -T "$NPM_SVC" nginx -s reload 2>/dev/null || true
+  sleep 3
+  codes="$(health)"; echo "    after reload: $codes"
+  case "$codes" in
+    *50[0-9]*|*000*)
+      echo "    still failing — restarting $NPM_SVC to flush its DNS resolver (brief blip)"
+      docker compose restart "$NPM_SVC" >/dev/null; sleep 4
+      echo "    after restart: $(health)" ;;
+    *) echo "    frontend reachable via the proxy ✓" ;;
+  esac
+else
+  echo "    no proxy service found in this compose project — skipping proxy refresh"
+fi
+
 echo "==> Status:"
-docker ps --filter name=betterstats --format 'table {{.Names}}\t{{.Status}}'
+docker compose ps betterstats-backend betterstats-frontend
 
 cat <<'NOTE'
 
