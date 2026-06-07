@@ -635,6 +635,17 @@ function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverridesBul
   const pageRows = list.slice(safe * PAGE_SIZE, safe * PAGE_SIZE + PAGE_SIZE)
   const valueFor = r => { const ov = overrides[r.raw_name]; if (ov) return ov; if (r.player_id) return r.player_id; return '' }
 
+  // Rows whose only suggestion is a single player are the safe bulk-confirm: one
+  // click sends them all to "Confirm matched" and leaves the genuinely-ambiguous
+  // (more than one suggestion) rows for a manual pick.
+  const uniqueClose = useMemo(() => buckets.close.filter(r => (r.candidates || []).length === 1), [buckets.close])
+  const multiCount = buckets.close.length - uniqueClose.length
+
+  function confirmUniqueSuggested() {
+    const patch = {}
+    uniqueClose.forEach(r => { patch[r.raw_name] = r.candidates[0].player_id })
+    setOverridesBulk(patch)
+  }
   function confirmAllSuggested() {
     const patch = {}
     buckets.close.forEach(r => { const c = (r.candidates || [])[0]; if (c) patch[r.raw_name] = c.player_id })
@@ -677,12 +688,29 @@ function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverridesBul
               </p>
             )}
             {active === 'close' && buckets.close.length > 0 && (
-              <div className="flex items-center gap-3 mb-3 flex-wrap">
-                <p className="text-[12px] text-pb-amber">Pick the right player, or leave it to become a new one.</p>
-                <button onClick={confirmAllSuggested}
-                  className="ml-auto font-mono text-[10px] tracking-wide2 border border-pb-accent/40 text-pb-accent rounded px-3 py-1.5 hover:bg-pb-accent/10">
-                  CONFIRM ALL SUGGESTED
-                </button>
+              <div className="mb-3">
+                <div className="flex items-center gap-3 mb-2 flex-wrap">
+                  <p className="text-[12px] text-pb-amber">Pick the right player, or leave it to become a new one.</p>
+                  <div className="ml-auto flex items-center gap-2 flex-wrap">
+                    {uniqueClose.length > 0 && (
+                      <button onClick={confirmUniqueSuggested}
+                        title="Confirm every row that has exactly one suggested player. Rows with more than one suggestion are left for you to choose."
+                        className="font-mono text-[10px] tracking-wide2 rounded px-3 py-1.5 font-semibold text-pb-bg" style={{ background: 'var(--pb-accent)' }}>
+                        CONFIRM {uniqueClose.length} SINGLE MATCH{uniqueClose.length === 1 ? '' : 'ES'}
+                      </button>
+                    )}
+                    <button onClick={confirmAllSuggested}
+                      className="font-mono text-[10px] tracking-wide2 border border-pb-accent/40 text-pb-accent rounded px-3 py-1.5 hover:bg-pb-accent/10">
+                      CONFIRM ALL TOP ({buckets.close.length})
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-pb-faint leading-relaxed max-w-3xl">
+                  {uniqueClose.length > 0 && (
+                    <><span className="text-pb-dim">Confirm single matches</span> accepts only the {uniqueClose.length} row{uniqueClose.length === 1 ? '' : 's'} with exactly one suggestion (the safe ones){multiCount > 0 ? `, leaving ${multiCount} with more than one option for you to pick` : ''}. </>
+                  )}
+                  Confirmed players move to <button className="text-pb-accent hover:underline" onClick={() => setTab('matched')}>Confirm matched</button>, where you can still change or skip any.
+                </p>
               </div>
             )}
             {active === 'nomatch' && buckets.nomatch.length > 0 && (
