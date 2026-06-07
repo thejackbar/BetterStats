@@ -6,8 +6,10 @@ import AdminLayout from '../../components/admin/AdminLayout'
 import { PbSpinner } from '../../lib/presskit'
 
 // ── field metadata for the column-mapping step ───────────────────────────────
+// Season is handled on its own (below Identity) because it only applies to a
+// season-by-season sheet — for career totals there's no season column to map.
 const FIELD_GROUPS = [
-  ['Identity', ['player_name', 'season_label', 'grade_label']],
+  ['Identity', ['player_name', 'grade_label']],
   ['Batting', ['games_played', 'batting_innings', 'batting_runs', 'batting_not_outs', 'batting_balls',
     'batting_high_score', 'batting_average', 'batting_strike_rate', 'batting_fours', 'batting_sixes',
     'batting_fifties', 'batting_hundreds', 'batting_ducks']],
@@ -16,19 +18,23 @@ const FIELD_GROUPS = [
     'bowling_best_figures', 'bowling_wides', 'bowling_no_balls']],
   ['Fielding', ['fielding_catches', 'fielding_catches_wk', 'fielding_run_outs', 'fielding_stumpings']],
 ]
+// Full, spelled-out names — the dropdown is hard to scan with abbreviations, so a
+// short code is only ever kept in parentheses to make the column match obvious.
 const FIELD_LABEL = {
   player_name: 'Player name', season_label: 'Season', grade_label: 'Grade / Team',
-  games_played: 'Games', batting_innings: 'Innings', batting_runs: 'Runs', batting_not_outs: 'Not outs',
-  batting_balls: 'Balls faced', batting_high_score: 'High score', batting_average: 'Bat average',
-  batting_strike_rate: 'Strike rate', batting_fours: '4s', batting_sixes: '6s', batting_fifties: '50s',
-  batting_hundreds: '100s', batting_ducks: 'Ducks', bowling_innings: 'Bowl innings', bowling_overs: 'Overs',
-  bowling_balls: 'Bowl balls', bowling_maidens: 'Maidens', bowling_runs: 'Runs conceded',
-  bowling_wickets: 'Wickets', bowling_average: 'Bowl average', bowling_economy: 'Economy',
-  bowling_five_wicket_innings: '5WI', bowling_best_figures: 'Best bowling', bowling_wides: 'Wides',
-  bowling_no_balls: 'No balls', fielding_catches: 'Catches', fielding_catches_wk: 'Catches (wk)',
+  games_played: 'Games played', batting_innings: 'Batting innings', batting_runs: 'Runs scored',
+  batting_not_outs: 'Not outs', batting_balls: 'Balls faced', batting_high_score: 'High score',
+  batting_average: 'Batting average', batting_strike_rate: 'Strike rate',
+  batting_fours: 'Fours (4s)', batting_sixes: 'Sixes (6s)', batting_fifties: 'Fifties (50s)',
+  batting_hundreds: 'Hundreds (100s)', batting_ducks: 'Ducks',
+  bowling_innings: 'Bowling innings', bowling_overs: 'Overs bowled', bowling_balls: 'Balls bowled',
+  bowling_maidens: 'Maidens', bowling_runs: 'Runs conceded', bowling_wickets: 'Wickets',
+  bowling_average: 'Bowling average', bowling_economy: 'Economy rate',
+  bowling_five_wicket_innings: 'Five-wicket innings (5WI)', bowling_best_figures: 'Best bowling figures',
+  bowling_wides: 'Wides', bowling_no_balls: 'No balls',
+  fielding_catches: 'Catches (outfield)', fielding_catches_wk: 'Catches (wicketkeeper)',
   fielding_run_outs: 'Run outs', fielding_stumpings: 'Stumpings',
 }
-const REQUIRED = ['player_name']
 
 const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 const cell = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent'
@@ -57,6 +63,25 @@ function StatusBadge({ status }) {
 }
 
 const STEP_LABELS = { upload: 'Upload', map: 'Columns', players: 'Players', seasons: 'Seasons', review: 'Review' }
+
+// One column-mapping row. Reads left-to-right as "BetterStats field ← your
+// column": the field name is green (what we hold), the picker is white (your
+// sheet). A green border marks a row that's been matched.
+function FieldRow({ field, label, required, value, headers, conf, onMap, cell }) {
+  return (
+    <div className={`flex items-center gap-2 rounded px-2 py-1.5 border ${value ? 'border-green-300/30' : 'pb-hairline'}`}>
+      <span className="text-[11px] font-semibold text-green-300 w-32 shrink-0 leading-tight">
+        {label}{required && <span className="text-pb-red/70 ml-0.5">*</span>}
+      </span>
+      <span className="text-pb-faintest text-[11px] shrink-0" aria-hidden>←</span>
+      <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={value || ''} onChange={e => onMap(field, e.target.value)}>
+        <option value="">— not in my file —</option>
+        {headers.map(h => <option key={h} value={h}>{h}</option>)}
+      </select>
+      {conf != null && <Pct score={conf} />}
+    </div>
+  )
+}
 
 export default function AdminImport() {
   const toast = useToast()
@@ -167,7 +192,10 @@ export default function AdminImport() {
     setSeasonOverrides(o => { const n = { ...o }; if (val === '') delete n[label]; else n[label] = val; return n })
   }
 
-  const mapReady = REQUIRED.every(f => mapping[f])
+  // Season is only required when the sheet is season-by-season — career totals
+  // have no season column to map.
+  const required = useMemo(() => granularity === 'season' ? ['player_name', 'season_label'] : ['player_name'], [granularity])
+  const mapReady = required.every(f => mapping[f])
   const unresolved = (resolved?.totals?.players_unresolved) || 0
 
   async function commit() {
@@ -263,35 +291,71 @@ export default function AdminImport() {
                       <button key={g} onClick={() => setGranularity(g)}
                         className={`font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded border ${granularity === g ? 'text-pb-bg border-transparent' : 'text-pb-faint pb-hairline hover:text-pb-text'}`}
                         style={granularity === g ? { background: 'var(--pb-accent)' } : undefined}>
-                        {g === 'career' ? 'CAREER TOTALS' : 'SEASON-BY-SEASON'}
+                        {g === 'career' ? 'CAREER TOTALS (OVERALL)' : 'SEASON BY SEASON'}
                       </button>
                     ))}
                   </div>
                 </div>
                 <span className="font-mono text-[10px] text-pb-faint">{parsed.row_count} rows · {parsed.headers.length} columns</span>
               </div>
+
+              {/* Legend — each row reads "BetterStats field ← your column". */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-4 pb-3 pb-hairline-b">
+                <span className="flex items-center gap-1.5 font-mono text-[10px] text-pb-faint">
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-300/80"></span>BetterStats field
+                </span>
+                <span className="text-pb-faintest text-[11px]" aria-hidden>←</span>
+                <span className="flex items-center gap-1.5 font-mono text-[10px] text-pb-faint">
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm bg-pb-text/80 border pb-hairline"></span>your column
+                </span>
+                <span className="text-pb-faintest text-[10px] sm:ml-1">Match each BetterStats field to a column from your file — leave it blank if your sheet doesn't have it.</span>
+              </div>
+
               {FIELD_GROUPS.map(([group, fields]) => (
-                <div key={group} className="mb-4">
+                <div key={group} className="mb-5">
                   <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2">{group.toUpperCase()}</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                     {fields.map(f => (
-                      <div key={f} className="flex items-center gap-2">
-                        <label className="text-[11px] text-pb-dim w-24 shrink-0">
-                          {FIELD_LABEL[f]}{REQUIRED.includes(f) && <span className="text-pb-red/70">*</span>}
-                        </label>
-                        <select className={`${cell} flex-1`} value={mapping[f] || ''} onChange={e => setMap(f, e.target.value)}>
-                          <option value="">—</option>
-                          {parsed.headers.map(h => <option key={h} value={h}>{h}</option>)}
-                        </select>
-                        {confByField[f] != null && <Pct score={confByField[f]} />}
-                      </div>
+                      <FieldRow key={f} field={f} label={FIELD_LABEL[f]} required={required.includes(f)}
+                        value={mapping[f]} headers={parsed.headers} conf={confByField[f]} onMap={setMap} cell={cell} />
                     ))}
                   </div>
+
+                  {/* Season sits under Identity and only applies season-by-season. */}
+                  {group === 'Identity' && (
+                    <div className="mt-3">
+                      <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2 flex items-center gap-2 flex-wrap">
+                        SEASON
+                        <span className={`font-mono text-[9px] tracking-wide2 border rounded px-1.5 py-0.5 ${granularity === 'season' ? 'text-pb-accent border-pb-accent/40' : 'text-pb-faint border-pb-faint/30'}`}>
+                          {granularity === 'season' ? 'NEEDED FOR SEASON BY SEASON' : 'NOT USED FOR CAREER TOTALS'}
+                        </span>
+                      </div>
+                      {granularity === 'season' ? (
+                        <div className="max-w-md">
+                          <FieldRow field="season_label" label={FIELD_LABEL.season_label} required
+                            value={mapping.season_label} headers={parsed.headers} conf={confByField.season_label} onMap={setMap} cell={cell} />
+                          <p className="text-[11px] text-pb-faint mt-1.5 leading-relaxed">
+                            One row per player per season — we'll match these season labels to your seasons in the next step.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="max-w-md rounded border border-dashed pb-hairline px-3 py-2 text-[11px] text-pb-faint leading-relaxed">
+                          Career totals are one row per player, so there's no season column to map.{' '}
+                          <button onClick={() => setGranularity('season')} className="text-pb-accent hover:underline">Switch to season by season</button>{' '}
+                          if your sheet has a separate row for each season.
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
             <div className="flex items-center gap-3">
-              {!mapReady && <span className="font-mono text-[10px] text-pb-red/70">Map the Player name column to continue.</span>}
+              {!mapReady && (
+                <span className="font-mono text-[10px] text-pb-red/70">
+                  Map the {required.filter(f => !mapping[f]).map(f => FIELD_LABEL[f]).join(' & ')} column to continue.
+                </span>
+              )}
               <button onClick={() => setStep('players')} disabled={!mapReady}
                 className="ml-auto px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
                 NEXT: MATCH PLAYERS →
