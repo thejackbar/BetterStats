@@ -261,6 +261,46 @@ it.
 Net: the UK can launch with **zero dependency on an ECB relationship** and
 graduate into one later.
 
+### Rejected: one shared club key for all English clubs
+
+A tempting shortcut is to hold **one** `api_token` (tied to a single English
+club we control) and reuse it for *every* onboarded club — relying on the fact
+that the token authenticates *us* while the `site_id`/`match_id` selects whose
+data, plus a directory of every club's `site_id` — so one key serves the whole
+UK product. **Don't.** It's the unauthorised, fragile version of league/partner
+access, and it fails on every axis that matters:
+
+- **Unverified technically.** It rests entirely on the assumption that the
+  server serves arbitrary clubs' published data to a foreign token (§4/§8) —
+  untested, trivially lockable server-side, and the ECB say they've been
+  tightening. The premise may simply not hold.
+- **Clear contractual breach.** The key authorises access to **that one club's**
+  data (the club's committee member signed for it). Using it to extract every
+  other club's data breaches *their* agreement and puts **our host club** in
+  breach — we'd be hanging a customer out to dry. It's exactly the third-party
+  aggregation the policy declines without an exception.
+- **Single point of nationwide failure.** The entire UK product runs on one key.
+  One ECB suspension (volume flags, or the host club asking why their key pulls
+  thousands of clubs) takes **every** English club dark at once. BYO-token /
+  league tokens contain a suspension to one club/league.
+- **UK GDPR problem (the serious one).** Play-Cricket data is named amateur
+  cricketers, **including children**. The data-controller model is the ECB's
+  lawful-basis structure: each club controls its members' data and authorises us
+  (a processor) for **theirs**. Harvesting other clubs' members via one club's
+  key = processing personal data with **no lawful basis and no controller
+  relationship** — unlawful processing, with extra exposure for minors. The
+  FAQ's *"minimise the data you retain in line with UK Law"* points straight at
+  this.
+- **High detectability.** One token hitting thousands of `site_id`s in patterns
+  no single club would ever produce is the textbook *"irregular or dangerous
+  pattern"* they police.
+
+**The legitimate way to get the same breadth** is already above: **league-site
+tokens** (one *authorised* token → every member club + full in-competition
+opponent dossiers) now, and **partner access** later (literally "one credential,
+the whole feed", pitched on the AU customer base). Use those — not a shared club
+key.
+
 ## 7. Architectural deltas vs the Australian pipeline
 
 | | Australia (current) | UK (Play-Cricket) |
