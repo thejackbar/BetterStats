@@ -97,6 +97,14 @@ checkbox each; only ticked fields migrate.
 - **Name search** is double-space / suffix / order tolerant (`normName` +
   token-AND): an empty middle-name slot ("First  Last") and Jnr/Snr suffixes no
   longer stop a candidate being found.
+- **Auto-suggest for newly-mapped clubs**: the external candidate generation only
+  ran for the four pilot clubs, so other clubs' `player_match_mappings` is empty
+  and every player would otherwise read NO MATCH. The wizard name-matches
+  client-side for any player with no pre-generated row — a unique normalised-name
+  match is **suggested** (ready to approve / bulk-approve); **two+ same-name
+  candidates** are flagged **REVIEW · N MATCHES** (never auto-picked, so e.g. two
+  "Grace Abbott" KlubPro entries are left for the operator to choose in the
+  picker). Existing generated/decided matches are untouched.
 - **Approve ≠ import.** Approving (or Bulk Approve) only records the decision +
   field selections. **Import** is the step that writes BetterStats `players`. Cards
   show `APPROVED · NOT IMPORTED` (blue) until imported, then `IMPORTED ✓` (green);
