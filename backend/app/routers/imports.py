@@ -144,6 +144,16 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     smatch = ingest.match_seasons(labels, seasons) if season_col else {}
     _apply_season_overrides(smatch, req.season_overrides)
 
+    # Columns + names we'll summarise straight from the sheet, so the close-review
+    # can show "this is what your sheet holds for this name" next to each
+    # candidate's existing career (era + totals) and tell two same-surname players
+    # apart (e.g. "Ferris, Mitchell" vs "Ferris, Martyn").
+    games_col = _col(req.mapping, "games_played")
+    sheet_runs_col = _col(req.mapping, "batting_runs")
+    sheet_wkts_col = _col(req.mapping, "bowling_wickets")
+    need_sheet = {n for n, m in pmatch.items() if m.get("status") in ("fuzzy", "ambiguous", "none")}
+    sheet_by_name: dict = {}
+
     is_season = req.granularity == "season" and bool(season_col)
     rounding = set()
     skipped_rows = 0
@@ -177,6 +187,16 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         nm = str(r.get(name_col, "")).strip()
         if not nm:
             continue
+        if nm in need_sheet:
+            sm = sheet_by_name.setdefault(nm, {"games": 0, "runs": 0, "wickets": 0, "years": set()})
+            if games_col:
+                sm["games"] += ingest.to_int(r.get(games_col)) or 0
+            if sheet_runs_col:
+                sm["runs"] += ingest.to_int(r.get(sheet_runs_col)) or 0
+            if sheet_wkts_col:
+                sm["wickets"] += ingest.to_int(r.get(sheet_wkts_col)) or 0
+            if season_col:
+                sm["years"] |= ingest._season_years(str(r.get(season_col, "")))
         pm = pmatch.get(nm) or {}
         pid = pm.get("player_id")
         if pid:
@@ -222,6 +242,37 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             "season_deltas": len(import_seasons), "gr_exceeds": False,
         })
     preview.sort(key=lambda x: x["final_games"], reverse=True)
+
+    # Enrich every candidate with its career-at-this-club (seasons span + totals)
+    # and attach the sheet's own summary per unresolved name — the raw material the
+    # review screen shows so you can pick the right player from just "Ferris M".
+    cand_ids = {c["player_id"] for m in pmatch.values()
+                for c in (m.get("candidates") or []) if c.get("player_id")}
+    cand_stats = await recon.fetch_gr_by_player(db, org_id, [uuid.UUID(i) for i in cand_ids]) if cand_ids else {}
+    year_by_season = {sid: yr for sid, _n, yr in seasons}
+
+    def _cand_summary(pid_str):
+        g = cand_stats.get(uuid.UUID(pid_str))
+        tot = g["totals"] if (g and g["totals"]) else {}
+        yrs = sorted(y for y in (year_by_season.get(str(s)) for s in (g["season_ids"] if g else ())) if y)
+        return {
+            "seasons": len(g["season_ids"]) if g else 0,
+            "matches": tot.get("matches", 0), "runs": tot.get("runs", 0), "wickets": tot.get("wickets", 0),
+            "first_year": (yrs[0] if yrs else None), "last_year": (yrs[-1] if yrs else None),
+        }
+
+    for m in pmatch.values():
+        for c in (m.get("candidates") or []):
+            if c.get("player_id"):
+                c["stats"] = _cand_summary(c["player_id"])
+    for n in need_sheet:
+        sm = sheet_by_name.get(n)
+        if sm:
+            pmatch[n]["sheet"] = {
+                "games": sm["games"], "runs": sm["runs"], "wickets": sm["wickets"],
+                "first_year": (min(sm["years"]) if sm["years"] else None),
+                "last_year": (max(sm["years"]) if sm["years"] else None),
+            }
 
     warnings = []
     unresolved = [n for n, m in pmatch.items()
