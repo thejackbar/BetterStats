@@ -18,6 +18,7 @@ docker compose up -d --no-deps --force-recreate betterstats-frontend betterstats
 - Run from `/srv/docker` so `.env` (secrets) + the override file load — matches how systemd runs it. Don't pass `-f` (it skips the override and drifts the config hash).
 - `--no-deps` + naming only the two services ⇒ the database (`betterstats-db`) and the other ~24 apps on the box are never touched. **Never recreate `betterstats-db`** — the data lives in the `bltbox_docker_app_betterstats_pgdata` volume.
 - `--no-cache` on the build avoids stale Docker layer cache.
+- **Operate containers ONLY via `docker compose …` (from `/srv/docker`, with `COMPOSE_PROJECT_NAME` set) — never bare `docker run/restart/exec/ps`.** Bare `docker` commands fall outside the pinned project and spawn/leave duplicate stacks/containers that are a nightmare to tell apart (same root cause as the project-split outage below). To act on another app on the box (e.g. nginx-proxy-manager), discover its compose **service** name (`docker compose ps --services`) and use `docker compose exec/restart <service>` — don't hardcode a container name or shell out to `docker <verb>`.
 - Ignore `POSTGRES_PASSWORD` / `LANGFLOW_*` "not set" warnings (other services' vars). **NEVER add `--remove-orphans`** — it would delete `klubpro-mongo` / `restreamer` (other people's apps).
 - nginx-proxy-manager routes `betterstats.cricket` → `betterstats-frontend` on `docker-shared-net` (apex is canonical; `www.betterstats.cricket` 301-redirects to it). The frontend `nginx.conf` MUST proxy `/api` to **`betterstats-backend`** — never the bare `backend`, which on the shared network resolves to a *different app's* API (that was bug #2 below).
 
@@ -37,6 +38,26 @@ docker compose up -d --no-deps --force-recreate betterstats-frontend betterstats
 2. `docker volume ls | grep pgdata`, then `docker run --rm -v <vol>:/v postgres:15 du -sh /v` — which pgdata volume holds the data (the big one)?
 3. `curl -s https://betterstats.cricket/api/openapi.json | head` — is `/api` answered by **"BetterStats API"** (title) or a different app?
 4. `docker exec betterstats-frontend grep -rn proxy_pass /etc/nginx/` — does `/api` point at `betterstats-backend`?
+
+## June 2026 Admin Outage #2 — Post-Mortem (NPM can't resolve betterstats-frontend)
+
+**Symptom**: `/admin` died with **"Failed to fetch dynamically imported module: …/assets/AdminDashboard-H0O_EwuY.js"** and an intermittent 502 on that chunk. Looked like a stale/corrupt asset or poisoned cache — it was **neither**.
+
+**Root cause**: after `betterstats-frontend` was recreated (a deploy, then a manual `--force-recreate`), it got a **new Docker IP**, and **nginx-proxy-manager could not reliably DNS-resolve the `betterstats-frontend` name** — error log: `betterstats-frontend could not be resolved (2: Server failure)` (a DNS SERVFAIL) for `server: betterstats.cricket`. NPM resolves the upstream **per worker** at request time, so some workers had a good resolution (→ 200) and some a cached SERVFAIL (→ 502). That per-worker split is why it looked like **one specific file/URL**: `?v=2`, `/api/openapi.json` and most assets happened to hit "good" workers, while the bare admin chunk kept hitting a "bad" one. The file was fine all along.
+
+**Misleading signals that wasted time (don't repeat the chase)**:
+- `?v=2` on the chunk → 200, bare URL → 502. *Looked* like a URL-keyed cache; was actually per-worker DNS luck.
+- The file on disk in the container was byte-perfect (`sha256` matched a clean local build) and served **200 directly** (`docker compose exec betterstats-frontend wget -qO- localhost/assets/<chunk>`), proving the origin was healthy.
+- There was **no cached object** for the asset in any NPM cache zone — purging did nothing. Not a cache bug.
+
+**The tell is in the NPM error logs, not the app logs**: `docker compose exec <npm-service> sh -c 'grep -RhiE "could not be resolved|betterstats-frontend" /data/logs/*error*.log | tail'`. The per-host access log also lives in `/data/logs/proxy-host-*_access.log` (`[Sent-to betterstats-frontend]`).
+
+**Fix (what actually worked)**: restart NPM so all workers re-resolve the frontend's current IP. **Do it the compose way** (bare `docker` is banned — see deploy rules): discover the proxy service then
+`docker compose restart "$(docker compose ps --services | grep -iE 'proxy|npm|manager' | head -1)"`. A graceful `nginx -s reload` was tried first and did **NOT** clear it during the incident — a full restart was required.
+
+**Prevention (shipped)**: `deploy.sh` now has a `[4/4]` step that, after recreating the frontend, reloads NPM, health-checks `https://betterstats.cricket/` 3×, and restarts the proxy service only if any check is non-200 — so every deploy self-heals this. The frontend also reloads once on a chunk-load failure (`vite:preloadError` in `main.jsx` + chunk-aware `ErrorBoundary`), turning a transient 502/stale-chunk into a silent retry instead of the "Something went wrong" dead-end.
+
+**If it recurs**: 1) NPM error log for `could not be resolved`; 2) confirm the two containers still share a network (`docker compose exec <npm> getent hosts betterstats-frontend`); 3) if the name resolves from NPM but the site still 502s, it's stale per-worker resolver state → restart the proxy **service** via `docker compose restart`.
 
 ## Public Domain
 
