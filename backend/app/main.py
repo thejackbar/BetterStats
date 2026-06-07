@@ -140,9 +140,23 @@ async def lifespan(app: FastAPI):
                 batter1_partnership_ids JSONB DEFAULT '[]',
                 batter2_partnership_ids JSONB DEFAULT '[]',
                 milestone_ids JSONB DEFAULT '[]',
+                bowler_wicket_ids JSONB DEFAULT '[]',
+                fielder_wicket_ids JSONB DEFAULT '[]',
+                grade_stat_ids JSONB DEFAULT '[]',
+                appearance_game_ids JSONB DEFAULT '[]',
                 undone_at TIMESTAMPTZ
             )
         """))
+        # Backfill the merge-undo columns added for bowler_wickets,
+        # player_season_grade_stats and game_appearances reassignment (the merge
+        # used to silently cascade-delete those when removing the merged-away
+        # player). Idempotent so existing merge_logs tables pick them up.
+        for _col in (
+            "bowler_wicket_ids", "fielder_wicket_ids", "grade_stat_ids", "appearance_game_ids",
+        ):
+            await conn.execute(text(
+                f"ALTER TABLE merge_logs ADD COLUMN IF NOT EXISTS {_col} JSONB DEFAULT '[]'"
+            ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS merge_pair_ignores (
                 id SERIAL PRIMARY KEY,

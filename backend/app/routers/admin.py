@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, text
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 import uuid
 import re
@@ -176,107 +177,209 @@ async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db), c
     def _ids(rows) -> list:
         return [r.id for r in rows]
 
-    batting_rows = (await db.execute(select(BattingInnings).where(BattingInnings.player_id == remove_id))).scalars().all()
-    bowling_rows = (await db.execute(select(BowlingSpell).where(BowlingSpell.player_id == remove_id))).scalars().all()
-    fielding_rows = (await db.execute(select(FieldingStat).where(FieldingStat.player_id == remove_id))).scalars().all()
-    fow_rows = (await db.execute(select(FallOfWicket).where(FallOfWicket.player_id == remove_id))).scalars().all()
-    batter1_rows = (await db.execute(select(Partnership).where(Partnership.batter1_id == remove_id))).scalars().all()
-    batter2_rows = (await db.execute(select(Partnership).where(Partnership.batter2_id == remove_id))).scalars().all()
-    milestone_rows = (await db.execute(select(Milestone).where(Milestone.player_id == remove_id))).scalars().all()
+    try:
+        batting_rows = (await db.execute(select(BattingInnings).where(BattingInnings.player_id == remove_id))).scalars().all()
+        bowling_rows = (await db.execute(select(BowlingSpell).where(BowlingSpell.player_id == remove_id))).scalars().all()
+        fielding_rows = (await db.execute(select(FieldingStat).where(FieldingStat.player_id == remove_id))).scalars().all()
+        fow_rows = (await db.execute(select(FallOfWicket).where(FallOfWicket.player_id == remove_id))).scalars().all()
+        batter1_rows = (await db.execute(select(Partnership).where(Partnership.batter1_id == remove_id))).scalars().all()
+        batter2_rows = (await db.execute(select(Partnership).where(Partnership.batter2_id == remove_id))).scalars().all()
+        milestone_rows = (await db.execute(select(Milestone).where(Milestone.player_id == remove_id))).scalars().all()
 
-    remove_stats_res = await db.execute(select(PlayerSeasonStats).where(PlayerSeasonStats.player_id == remove_id))
-    remove_stats = remove_stats_res.scalars().all()
-    keep_stats_res = await db.execute(select(PlayerSeasonStats).where(PlayerSeasonStats.player_id == keep_id))
-    keep_season_ids = {s.season_id for s in keep_stats_res.scalars().all()}
+        # bowler_wickets is keyed on bowler_id (wicket-taker) and fielder_id
+        # (catcher / run-out fielder). Both must follow the player or they're lost:
+        # the FK is ON DELETE CASCADE / SET NULL, so deleting the removed player
+        # used to silently drop these rows (the removed player's whole wicket-
+        # dismissal record). Capture the surrogate ids for the undo log.
+        bowler_wkt_ids = (await db.execute(
+            text("SELECT id FROM bowler_wickets WHERE bowler_id = :rid"), {"rid": str(remove_id)}
+        )).scalars().all()
+        fielder_wkt_ids = (await db.execute(
+            text("SELECT id FROM bowler_wickets WHERE fielder_id = :rid"), {"rid": str(remove_id)}
+        )).scalars().all()
 
-    moved_pss_ids = [s.id for s in remove_stats if s.season_id not in keep_season_ids]
+        remove_stats_res = await db.execute(select(PlayerSeasonStats).where(PlayerSeasonStats.player_id == remove_id))
+        remove_stats = remove_stats_res.scalars().all()
+        keep_stats_res = await db.execute(select(PlayerSeasonStats).where(PlayerSeasonStats.player_id == keep_id))
+        keep_season_ids = {s.season_id for s in keep_stats_res.scalars().all()}
 
-    # --- Reassign game-level records ---
-    await db.execute(update(BattingInnings).where(BattingInnings.player_id == remove_id).values(player_id=keep_id))
-    await db.execute(update(BowlingSpell).where(BowlingSpell.player_id == remove_id).values(player_id=keep_id))
-    await db.execute(update(FieldingStat).where(FieldingStat.player_id == remove_id).values(player_id=keep_id))
-    await db.execute(update(FallOfWicket).where(FallOfWicket.player_id == remove_id).values(player_id=keep_id))
-    await db.execute(update(Partnership).where(Partnership.batter1_id == remove_id).values(batter1_id=keep_id))
-    await db.execute(update(Partnership).where(Partnership.batter2_id == remove_id).values(batter2_id=keep_id))
-    await db.execute(update(Milestone).where(Milestone.player_id == remove_id).values(player_id=keep_id))
+        moved_pss_ids = [s.id for s in remove_stats if s.season_id not in keep_season_ids]
 
-    # --- Handle PlayerSeasonStats ---
-    for stat in remove_stats:
-        if stat.season_id not in keep_season_ids:
+        # --- batting_innings: de-duplicate before reassigning ----------------------
+        # batting_innings has UNIQUE(game_id, innings_number, player_id) (migration
+        # 030). When the two records are the same physical player (the cross-club
+        # shared-GUID case — e.g. a uuid5 per-club id and the raw CA GUID), both can
+        # hold a row for the same (game, innings). Blindly moving them onto keep
+        # would violate that constraint → IntegrityError → a bare 500. So delete the
+        # removed player's duplicate rows first, then move what's left. Mirrors the
+        # player_season_stats handling below.
+        colliding_bat_ids = (await db.execute(
+            text(
+                "SELECT r.id FROM batting_innings r "
+                "JOIN batting_innings k "
+                "  ON k.game_id = r.game_id AND k.innings_number = r.innings_number "
+                "WHERE r.player_id = :rid AND k.player_id = :kid"
+            ),
+            {"rid": str(remove_id), "kid": str(keep_id)},
+        )).scalars().all()
+        if colliding_bat_ids:
             await db.execute(
-                update(PlayerSeasonStats).where(PlayerSeasonStats.id == stat.id).values(player_id=keep_id)
+                text("DELETE FROM batting_innings WHERE id = ANY(:ids)"),
+                {"ids": list(colliding_bat_ids)},
             )
-        else:
-            await db.execute(delete(PlayerSeasonStats).where(PlayerSeasonStats.id == stat.id))
+        _coll_bat = set(colliding_bat_ids)
+        moved_bat_ids = [i for i in _ids(batting_rows) if i not in _coll_bat]
 
-    # Save data needed for undo log before player is deleted
-    keep_original_playhq_id = keep.playhq_id
-    removed_playhq_id = remove.playhq_id
-    removed_name = remove.name
-
-    # --- Delete remove player FIRST (avoids unique constraint violation on playhq_id) ---
-    await db.execute(delete(Player).where(Player.id == remove_id))
-
-    # --- Now safe to copy playhq_id to keep (remove is deleted in this transaction) ---
-    if not keep.playhq_id and removed_playhq_id:
-        keep.playhq_id = removed_playhq_id
-
-    # --- Write merge log ---
-    await db.execute(
-        text("""
-            INSERT INTO merge_logs (
-                org_id, keep_player_id, keep_player_name,
-                removed_player_id, removed_player_name, removed_player_playhq_id,
-                keep_original_playhq_id,
-                moved_season_stat_ids, batting_innings_ids, bowling_spell_ids,
-                fielding_stat_ids, fall_of_wicket_ids,
-                batter1_partnership_ids, batter2_partnership_ids, milestone_ids
-            ) VALUES (
-                :org_id, :keep_id, :keep_name,
-                :remove_id, :remove_name, :remove_playhq_id,
-                :keep_orig_playhq_id,
-                :pss_ids, :bat_ids, :bowl_ids,
-                :field_ids, :fow_ids,
-                :b1_ids, :b2_ids, :mil_ids
+        # --- player_season_grade_stats: de-dup then reassign -----------------------
+        # UNIQUE(player_id, season_id, grade_id); same collision shape. (Also
+        # previously cascade-deleted with the removed player.)
+        all_grade_stat_ids = (await db.execute(
+            text("SELECT id FROM player_season_grade_stats WHERE player_id = :rid"), {"rid": str(remove_id)}
+        )).scalars().all()
+        colliding_grade_ids = (await db.execute(
+            text(
+                "SELECT r.id FROM player_season_grade_stats r "
+                "JOIN player_season_grade_stats k "
+                "  ON k.season_id = r.season_id AND k.grade_id = r.grade_id "
+                "WHERE r.player_id = :rid AND k.player_id = :kid"
+            ),
+            {"rid": str(remove_id), "kid": str(keep_id)},
+        )).scalars().all()
+        if colliding_grade_ids:
+            await db.execute(
+                text("DELETE FROM player_season_grade_stats WHERE id = ANY(:ids)"),
+                {"ids": list(colliding_grade_ids)},
             )
-        """),
-        {
-            "org_id": str(org_id),
-            "keep_id": str(keep_id),
-            "keep_name": keep.name,
-            "remove_id": str(remove_id),
-            "remove_name": removed_name,
-            "remove_playhq_id": removed_playhq_id,
-            "keep_orig_playhq_id": keep_original_playhq_id,
-            "pss_ids": json.dumps(moved_pss_ids),
-            "bat_ids": json.dumps(_ids(batting_rows)),
-            "bowl_ids": json.dumps(_ids(bowling_rows)),
-            "field_ids": json.dumps(_ids(fielding_rows)),
-            "fow_ids": json.dumps(_ids(fow_rows)),
-            "b1_ids": json.dumps(_ids(batter1_rows)),
-            "b2_ids": json.dumps(_ids(batter2_rows)),
-            "mil_ids": json.dumps(_ids(milestone_rows)),
-        },
-    )
+        _coll_grade = set(colliding_grade_ids)
+        moved_grade_stat_ids = [i for i in all_grade_stat_ids if i not in _coll_grade]
 
-    from app.services.audit_log import log_activity
-    await log_activity(
-        db, org_id=org_id, user_id=current_user.id,
-        action="merge_players", target_type="player", target_id=str(keep_id),
-        details={
-            "kept_player": {"id": str(keep_id), "name": keep.name},
-            "removed_player": {"id": str(remove_id), "name": removed_name},
-            "rows_moved": {
-                "season_stats": len(moved_pss_ids),
-                "batting": len(_ids(batting_rows)),
-                "bowling": len(_ids(bowling_rows)),
-                "fielding": len(_ids(fielding_rows)),
-                "milestones": len(_ids(milestone_rows)),
+        # --- game_appearances: de-dup (composite PK game_id, player_id) ------------
+        # Record only the game_ids actually moved (where keep has no appearance yet)
+        # so the undo can put them back, then drop the removed player's duplicates.
+        moved_appearance_game_ids = (await db.execute(
+            text(
+                "SELECT ga.game_id FROM game_appearances ga "
+                "WHERE ga.player_id = :rid AND NOT EXISTS ("
+                "  SELECT 1 FROM game_appearances k WHERE k.player_id = :kid AND k.game_id = ga.game_id)"
+            ),
+            {"rid": str(remove_id), "kid": str(keep_id)},
+        )).scalars().all()
+        await db.execute(
+            text(
+                "DELETE FROM game_appearances ga USING game_appearances k "
+                "WHERE ga.player_id = :rid AND k.player_id = :kid AND k.game_id = ga.game_id"
+            ),
+            {"rid": str(remove_id), "kid": str(keep_id)},
+        )
+
+        # --- Reassign game-level records ---
+        await db.execute(update(BattingInnings).where(BattingInnings.player_id == remove_id).values(player_id=keep_id))
+        await db.execute(update(BowlingSpell).where(BowlingSpell.player_id == remove_id).values(player_id=keep_id))
+        await db.execute(update(FieldingStat).where(FieldingStat.player_id == remove_id).values(player_id=keep_id))
+        await db.execute(update(FallOfWicket).where(FallOfWicket.player_id == remove_id).values(player_id=keep_id))
+        await db.execute(update(Partnership).where(Partnership.batter1_id == remove_id).values(batter1_id=keep_id))
+        await db.execute(update(Partnership).where(Partnership.batter2_id == remove_id).values(batter2_id=keep_id))
+        await db.execute(update(Milestone).where(Milestone.player_id == remove_id).values(player_id=keep_id))
+        await db.execute(text("UPDATE bowler_wickets SET bowler_id = :kid WHERE bowler_id = :rid"), {"kid": str(keep_id), "rid": str(remove_id)})
+        await db.execute(text("UPDATE bowler_wickets SET fielder_id = :kid WHERE fielder_id = :rid"), {"kid": str(keep_id), "rid": str(remove_id)})
+        await db.execute(text("UPDATE player_season_grade_stats SET player_id = :kid WHERE player_id = :rid"), {"kid": str(keep_id), "rid": str(remove_id)})
+        await db.execute(text("UPDATE game_appearances SET player_id = :kid WHERE player_id = :rid"), {"kid": str(keep_id), "rid": str(remove_id)})
+
+        # --- Handle PlayerSeasonStats ---
+        for stat in remove_stats:
+            if stat.season_id not in keep_season_ids:
+                await db.execute(
+                    update(PlayerSeasonStats).where(PlayerSeasonStats.id == stat.id).values(player_id=keep_id)
+                )
+            else:
+                await db.execute(delete(PlayerSeasonStats).where(PlayerSeasonStats.id == stat.id))
+
+        # Save data needed for undo log before player is deleted
+        keep_original_playhq_id = keep.playhq_id
+        removed_playhq_id = remove.playhq_id
+        removed_name = remove.name
+
+        # --- Delete remove player FIRST (avoids unique constraint violation on playhq_id) ---
+        await db.execute(delete(Player).where(Player.id == remove_id))
+
+        # --- Now safe to copy playhq_id to keep (remove is deleted in this transaction) ---
+        if not keep.playhq_id and removed_playhq_id:
+            keep.playhq_id = removed_playhq_id
+
+        # --- Write merge log ---
+        await db.execute(
+            text("""
+                INSERT INTO merge_logs (
+                    org_id, keep_player_id, keep_player_name,
+                    removed_player_id, removed_player_name, removed_player_playhq_id,
+                    keep_original_playhq_id,
+                    moved_season_stat_ids, batting_innings_ids, bowling_spell_ids,
+                    fielding_stat_ids, fall_of_wicket_ids,
+                    batter1_partnership_ids, batter2_partnership_ids, milestone_ids,
+                    bowler_wicket_ids, fielder_wicket_ids, grade_stat_ids, appearance_game_ids
+                ) VALUES (
+                    :org_id, :keep_id, :keep_name,
+                    :remove_id, :remove_name, :remove_playhq_id,
+                    :keep_orig_playhq_id,
+                    :pss_ids, :bat_ids, :bowl_ids,
+                    :field_ids, :fow_ids,
+                    :b1_ids, :b2_ids, :mil_ids,
+                    :bw_ids, :fw_ids, :grade_ids, :appear_ids
+                )
+            """),
+            {
+                "org_id": str(org_id),
+                "keep_id": str(keep_id),
+                "keep_name": keep.name,
+                "remove_id": str(remove_id),
+                "remove_name": removed_name,
+                "remove_playhq_id": removed_playhq_id,
+                "keep_orig_playhq_id": keep_original_playhq_id,
+                "pss_ids": json.dumps(moved_pss_ids),
+                "bat_ids": json.dumps(moved_bat_ids),
+                "bowl_ids": json.dumps(_ids(bowling_rows)),
+                "field_ids": json.dumps(_ids(fielding_rows)),
+                "fow_ids": json.dumps(_ids(fow_rows)),
+                "b1_ids": json.dumps(_ids(batter1_rows)),
+                "b2_ids": json.dumps(_ids(batter2_rows)),
+                "mil_ids": json.dumps(_ids(milestone_rows)),
+                "bw_ids": json.dumps(list(bowler_wkt_ids)),
+                "fw_ids": json.dumps(list(fielder_wkt_ids)),
+                "grade_ids": json.dumps(moved_grade_stat_ids),
+                "appear_ids": json.dumps([str(g) for g in moved_appearance_game_ids]),
             },
-        },
-    )
+        )
 
-    await db.commit()
+        from app.services.audit_log import log_activity
+        await log_activity(
+            db, org_id=org_id, user_id=current_user.id,
+            action="merge_players", target_type="player", target_id=str(keep_id),
+            details={
+                "kept_player": {"id": str(keep_id), "name": keep.name},
+                "removed_player": {"id": str(remove_id), "name": removed_name},
+                "rows_moved": {
+                    "season_stats": len(moved_pss_ids),
+                    "batting": len(moved_bat_ids),
+                    "bowling": len(_ids(bowling_rows)),
+                    "fielding": len(_ids(fielding_rows)),
+                    "bowler_wickets": len(bowler_wkt_ids),
+                    "appearances": len(moved_appearance_game_ids),
+                    "milestones": len(_ids(milestone_rows)),
+                },
+            },
+        )
+
+        await db.commit()
+    except IntegrityError as e:
+        # A data conflict (e.g. both records hold the same physical row under a
+        # unique constraint) — surface a clear 409 instead of a bare 500 so the
+        # operator knows the merge was blocked, not silently corrupted.
+        await db.rollback()
+        log.warning("merge_players conflict org=%s keep=%s remove=%s: %s", org_id, keep_id, remove_id, getattr(e, "orig", e))
+        raise HTTPException(
+            status_code=409,
+            detail=f"Couldn't merge these players — a data conflict blocked it: {getattr(e, 'orig', e)}",
+        )
 
     return {"status": "merged", "kept_player_id": str(keep_id), "removed_player_id": str(remove_id)}
 
@@ -586,6 +689,40 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
         await db.execute(
             text("UPDATE player_season_stats SET player_id = :pid WHERE id = ANY(:ids)"),
             {"pid": str(remove_id), "ids": pss_ids},
+        )
+
+    # Newer merges also reassign bowler_wickets, player_season_grade_stats and
+    # game_appearances. Older merge logs predate these columns; the idempotent
+    # ALTERs in main.py backfill them to '[]', so _jlist yields an empty list and
+    # these are no-ops for legacy rows. (.get guards the rare un-migrated case.)
+    bw_ids = _jlist(log.get("bowler_wicket_ids"))
+    if bw_ids:
+        await db.execute(
+            text("UPDATE bowler_wickets SET bowler_id = :pid WHERE id = ANY(:ids)"),
+            {"pid": str(remove_id), "ids": bw_ids},
+        )
+    fw_ids = _jlist(log.get("fielder_wicket_ids"))
+    if fw_ids:
+        await db.execute(
+            text("UPDATE bowler_wickets SET fielder_id = :pid WHERE id = ANY(:ids)"),
+            {"pid": str(remove_id), "ids": fw_ids},
+        )
+    grade_ids = _jlist(log.get("grade_stat_ids"))
+    if grade_ids:
+        await db.execute(
+            text("UPDATE player_season_grade_stats SET player_id = :pid WHERE id = ANY(:ids)"),
+            {"pid": str(remove_id), "ids": grade_ids},
+        )
+    appear_ids = _jlist(log.get("appearance_game_ids"))
+    if appear_ids:
+        # Only the rows that were genuinely moved (keep had no appearance for that
+        # game at merge time) are recorded, so moving them back off keep is safe.
+        await db.execute(
+            text(
+                "UPDATE game_appearances SET player_id = :pid "
+                "WHERE player_id = :kid AND game_id::text = ANY(:ids)"
+            ),
+            {"pid": str(remove_id), "kid": str(keep_id), "ids": appear_ids},
         )
 
     await db.execute(
