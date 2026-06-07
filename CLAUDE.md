@@ -453,6 +453,16 @@ BetterStats players by name — KlubPro has no CA ids) + **sponsors**. Full guid
   normalised KlubPro name, so "Eadon-Clarke Jnr, Chas" finds "Chas Eadon-Clarke".
   (A genuinely *different* middle name still needs the operator to edit the
   search.)
+- **In-tool auto-suggest** (v8.4): the external candidate generation only ran for
+  4 clubs (Applecross/High Wycombe/Murdoch/Portland), so a newly-mapped club's
+  `player_match_mappings` is empty → every player showed NO MATCH even though the
+  staged candidates exist. `KlubproPlayers.load()` now name-matches client-side for
+  any player with **no** pre-generated row: exact normalised-name (`nameKey` =
+  sorted tokens) → auto-suggest it (SUGGESTED, bulk-approvable); **two+ same-name
+  candidates** (e.g. "Grace Abbott" ×2) → flag `ambiguous` → "REVIEW · N MATCHES"
+  (never auto-picked). Only fills gaps (rows that already had a generated/decided
+  match are untouched), so the 4 done clubs are unchanged. Header shows
+  suggested/to-review/no-match counts; filters added for each.
 - **Value normalisation** (fixed v8.4 — was importing display labels verbatim):
   KlubPro stages `betterstats_*` as **human labels** ("Right handed", "Right-arm
   fast-medium", "Male") but BetterStats stores **codes** (`batting_hand` 'RIGHT';

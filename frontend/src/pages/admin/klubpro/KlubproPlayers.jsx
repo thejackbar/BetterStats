@@ -26,6 +26,8 @@ const summaryLine = (vals, opener) => {
 const _SUFFIXES = new Set(['jnr', 'snr', 'jr', 'sr', 'ii', 'iii', 'iv'])
 const normName = (s) => (s || '').toString().toLowerCase().replace(/[,]/g, ' ').replace(/\s+/g, ' ').trim()
 const nameTokens = (s) => normName(s).split(' ').filter(t => t && !_SUFFIXES.has(t))
+// Order-independent key for exact-name matching ("Abbott, Grace" ↔ "Grace Abbott").
+const nameKey = (s) => nameTokens(s).slice().sort().join(' ')
 
 // KlubPro stages display labels; BetterStats stores codes. Normalise both to a
 // comparable code so e.g. 'RIGHT' (stored) and "Right handed" (staged) match, and
@@ -96,7 +98,7 @@ function Avatar({ url, name }) {
     className="w-12 h-12 rounded-full object-cover border border-pb-hairline2 shrink-0" />
 }
 
-function StatusBadge({ status, score, imported }) {
+function StatusBadge({ status, score, imported, ambiguous }) {
   if (imported) {
     return <span className="font-mono text-[10px] px-1.5 py-0.5 rounded border text-green-300 border-green-400/30">IMPORTED ✓</span>
   }
@@ -107,8 +109,9 @@ function StatusBadge({ status, score, imported }) {
   }
   let [label, tone] = map[status] || [null, '']
   if (!label) {
-    label = score != null ? `SUGGESTED ${Math.round(score * 100)}%` : 'NO MATCH'
-    tone = score != null ? 'text-pb-amber border-pb-amber/30' : 'text-pb-red/70 border-pb-red/30'
+    if (score != null) { label = `SUGGESTED ${Math.round(score * 100)}%`; tone = 'text-pb-amber border-pb-amber/30' }
+    else if (ambiguous) { label = `REVIEW · ${ambiguous} MATCHES`; tone = 'text-pb-amber border-pb-amber/30' }
+    else { label = 'NO MATCH'; tone = 'text-pb-red/70 border-pb-red/30' }
   }
   return <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded border ${tone}`}>{label}</span>
 }
@@ -149,7 +152,33 @@ export default function KlubproPlayers({ clubMapping }) {
           score: m?.match_score ?? null,
           status,
           imported: !!m?.imported_at,
+          hadMatch: !!m,
           fields: cand ? (hasStored ? { ...recommendedMap(p, cand), ...m.migrate_fields } : recommendedMap(p, cand)) : {},
+        }
+      }
+
+      // Auto-suggest by name for players with NO pre-generated candidate (newly
+      // mapped clubs have an empty player_match_mappings). Exact normalised-name
+      // match → suggest it; two+ same-name candidates (e.g. "Grace Abbott" ×2) →
+      // flag ambiguous for review rather than guessing.
+      const candByKey = {}
+      for (const c of (d.klubpro_candidates || [])) {
+        const key = nameKey(`${c.firstname || ''} ${c.lastname || ''}`)
+        if (key) (candByKey[key] || (candByKey[key] = [])).push(c)
+      }
+      const taken = new Set((d.matches || []).map(m => m.klubpro_player_id).filter(Boolean))
+      for (const p of (d.betterstats_players || [])) {
+        const row = r[p.id]
+        if (row.hadMatch || row.candId) continue
+        const opts = (candByKey[nameKey(p.name)] || []).filter(c => !taken.has(c.klubpro_player_id))
+        if (opts.length === 1) {
+          taken.add(opts[0].klubpro_player_id)
+          row.candId = opts[0].klubpro_player_id
+          row.score = 1
+          row.autoSuggested = true
+          row.fields = recommendedMap(p, opts[0])
+        } else if (opts.length > 1) {
+          row.ambiguous = opts.length
         }
       }
       setRows(r)
@@ -238,6 +267,8 @@ export default function KlubproPlayers({ clubMapping }) {
       // approved decisions whose data hasn't been written to BetterStats yet
       toImport: all.filter(r => r.status === 'approved' && !r.imported).length,
       pending: all.filter(r => r.candId && r.status === 'pending').length,
+      ambiguous: all.filter(r => r.ambiguous).length,
+      nomatch: all.filter(r => r.status === 'pending' && !r.candId && !r.ambiguous).length,
       eligible: eligible.length,
     }
   }, [rows, eligible])
@@ -254,6 +285,9 @@ export default function KlubproPlayers({ clubMapping }) {
         case 'approved': return r.status === 'approved'
         case 'rejected': return r.status === 'rejected'
         case 'skipped': return r.status === 'skipped'
+        case 'suggested': return r.status === 'pending' && !!r.candId
+        case 'ambiguous': return !!r.ambiguous
+        case 'nomatch': return r.status === 'pending' && !r.candId && !r.ambiguous
         case 'image_on': return !!r.fields?.profile_image
         case 'image_off': return cand && (cand.profile_image_found || cand.thumbnail_image_found) && !r.fields?.profile_image
         case 'differences': return cand && compareFields(p, cand).some(c => c.differ)
@@ -338,7 +372,9 @@ export default function KlubproPlayers({ clubMapping }) {
             <span className="text-pb-dim">{counts.total} players</span>
             <span className="text-blue-300">{counts.approved} approved</span>
             <span className="text-green-300">{counts.imported} imported</span>
-            <span className="text-pb-amber">{counts.pending} pending</span>
+            <span className="text-pb-amber">{counts.pending} suggested</span>
+            {counts.ambiguous > 0 && <span className="text-pb-amber">{counts.ambiguous} to review</span>}
+            {counts.nomatch > 0 && <span className="text-pb-red/70">{counts.nomatch} no match</span>}
           </div>
           <div className="flex gap-2 flex-wrap">
             <Btn onClick={bulkApprove} disabled={!counts.eligible || busy}>Bulk approve ({counts.eligible})</Btn>
@@ -360,6 +396,9 @@ export default function KlubproPlayers({ clubMapping }) {
             className="bg-pb-surface2 border border-pb-hairline2 rounded px-3 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent" />
           <Select value={filter} onChange={e => setFilter(e.target.value)} className="max-w-[240px]">
             <option value="all">All</option>
+            <option value="suggested">Suggested (auto-matched)</option>
+            <option value="ambiguous">Needs review (multiple matches)</option>
+            <option value="nomatch">No match found</option>
             <option value="unreviewed">Unreviewed</option>
             <option value="reviewed">Reviewed</option>
             <option value="approved">Approved</option>
@@ -442,7 +481,7 @@ function PlayerRow({ bs, row, cand, expanded, onToggle, onField, onCheckAll, onU
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm text-pb-text font-medium">{bs.name}</span>
-              <StatusBadge status={row?.status} score={row?.status === 'pending' ? row?.score : null} imported={row?.imported} />
+              <StatusBadge status={row?.status} score={row?.status === 'pending' ? row?.score : null} imported={row?.imported} ambiguous={row?.ambiguous} />
             </div>
             <div className="text-[11px] text-pb-faint mt-0.5 leading-snug">
               {summaryLine([genderLabel(bs.gender), bs.player_role, bsBattingLabel(bs), bsBowlingLabel(bs)], bs.is_opening_batsman)}
