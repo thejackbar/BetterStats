@@ -16,6 +16,12 @@ Australia** "Data Source Topology" section in `CLAUDE.md`.
   aggregation needs an ECB exception. **The ECB's own advice is the BYO-token
   model** (clubs paste in their own token) until you reach hundreds of clubs /
   thousands of users, then approach them for partner access.
+- **Scope**: a token authenticates *you*, the `site_id`/`match_id`/`division_id`
+  you pass selects *whose* data — published cross-club data *appears* broadly
+  readable, but you're contractually the data controller for **your own club
+  only**. The clean, in-scope cross-club data is the **opponent half of your own
+  games**; a full opponent dossier needs a **league-site token** (covers every
+  member club). See §4.
 - This is **not** a drop-in for the Australian "open proxy, pull every club"
   pipeline — it's per-club, authenticated, and scorecard-only.
 
@@ -128,7 +134,64 @@ Abridged example shape:
 } ] }
 ```
 
-## 4. Access policy (the constraints that shape strategy)
+## 4. Token scope — what a club token can actually see
+
+A token authenticates **you**; the `site_id` / `match_id` / `division_id` you
+pass selects **whose** data. The open-source `pyplaycricket` client confirms the
+mechanism: every request is `single configured api_token` + a caller-supplied id
+(`config.MATCHES_URL.format(site_id=…, api_key=self.api_key)` etc.) — there is no
+per-id authorisation in the client, and its README tells you how to find
+*another* club's `site_id` "if you want to return all the fixtures for another
+club." So **technical reach** and **contractual scope** are two different things,
+and both bind:
+
+- **Technically**: the API serves **published** data fairly openly to any valid
+  token — other clubs' rosters, fixtures, results, league tables and published
+  scorecards appear reachable by passing their `site_id`/`match_id`/`division_id`.
+  *(Confidence: community-reported via `pyplaycricket`, NOT tested against a live
+  token. The server may reject unfamiliar `site_id`s and the ECB has been
+  tightening — verify with a real token.)*
+- **Contractually**: the grant is *"a club … to extract **their own** data … as
+  data controllers."* You are the data controller for **your club only**. Even
+  where another club's published data is fetchable, building a product on it with
+  a single club's token is **outside the authorisation**, and they suspend on
+  "irregular patterns." For a commercial product the contract is the binding
+  constraint, not the technical reach.
+
+Scope by data type, with **one club's** token:
+
+| Data | Your own club | Opponent **within your games** | **Any other club** |
+|---|---|---|---|
+| Fixtures / results | ✅ `matches.json`/`result_summary.json?site_id=you` | ✅ same fixture | ⚠️ *appears reachable* — pass their `site_id` (published) |
+| Full scorecards | ✅ `match_detail.json?match_id=` | ✅ **both teams in every card** | ⚠️ *appears reachable* if you know the `match_id` |
+| Players (roster) | ✅ `sites/{site_id}/players` | ✅ team sheets in card | ⚠️ *appears reachable* — pass their `site_id` |
+| **Player statistics** | ❌ **no endpoint** — compute from scorecards | ❌ compute from scorecards | ❌ **no stats endpoint for anyone** |
+| Club info | ✅ `clubs.json`/teams | ✅ club ids in card | ⚠️ `clubs.json` is a cross-club **directory** (reference data) |
+| Venue info | ✅ `ground_name`/`ground_id` | ✅ | ⚠️ embedded in any match you can fetch (no standalone venue endpoint) |
+| League tables | ✅ `league_table.json?division_id=` | — | ✅ **inherently multi-club** — a division's table lists every club in it |
+
+**Two hard limits that apply to everyone** (own club *and* others):
+1. **No statistics endpoint at all** — you can never pull pre-computed
+   player/club stats; you compute from scorecards. "View another club's player
+   statistics" is therefore only possible by fetching their scorecards and
+   aggregating yourself.
+2. **Private/unpublished data is presumably own-site only** — member PII
+   (emails/phones), unpublished matches, contact details. The published →
+   private boundary is the main thing **not yet verified** without a token.
+
+**Implication for opposition scouting (BetterIQ):**
+- *Authorised, no caveats*: opponents **within your own fixtures** — `match_detail`
+  carries both team sheets and both innings, so you get full head-to-head
+  scouting of anyone you've played (the mirror of the AU `our_team_pids` trick,
+  but here we keep both halves of *our* games).
+- *A full opponent dossier* (their form across all their games, not just vs us)
+  cleanly needs the **opponent's** token, a **league/competition-site token**
+  (one token → every member club's fixtures/results/tables/scorecards, filtered
+  by `division_id`/`cup_id`), or partner access (Phase 2). **Onboarding a whole
+  league is the most powerful in-scope unit** — it restores the AU-like
+  "scout anyone in the competition" capability legitimately.
+
+## 5. Access policy (the constraints that shape strategy)
 
 Quoting the ECB help centre (verbatim):
 
@@ -159,7 +222,7 @@ Quoting the ECB help centre (verbatim):
   well-established customer base)."* Cold approaches from start-ups /
   experimental / educational projects are currently declined.
 
-## 5. Strategy — the ECB's own recommended path
+## 6. Strategy — the ECB's own recommended path
 
 The commercial-access page lays out the route explicitly:
 
@@ -174,7 +237,17 @@ The commercial-access page lays out the route explicitly:
 Each onboarding UK club's admin signs the Play-Cricket agreement, obtains their
 `api_token`, and pastes it into BetterStats. We sync only that club's `site_id`.
 This is the ECB's recommended model for a product at our stage and maps onto our
-existing per-org sync.
+existing per-org sync. Within scope this gives full own-club data + head-to-head
+opposition intel (the opponent half of our games — see §4).
+
+**Onboarding unit — prefer leagues where possible.** A *league/competition* is
+also a Play-Cricket "site" with its own token, and that token covers **every
+member club** (fixtures, results, tables, scorecards, filtered by
+`division_id`/`cup_id`). Onboarding a league therefore lights up many clubs at
+once **and** unlocks full opposition dossiers across the whole competition — in
+scope — which per-club tokens can't (they're limited to head-to-head). Where a
+league will partner, it's the higher-leverage unit; per-club BYO-token is the
+fallback for clubs whose league won't.
 
 **Phase 2 — Partner access (after growth).**
 At hundreds of clubs / thousands of users, approach the helpdesk for
@@ -188,7 +261,7 @@ it.
 Net: the UK can launch with **zero dependency on an ECB relationship** and
 graduate into one later.
 
-## 6. Architectural deltas vs the Australian pipeline
+## 7. Architectural deltas vs the Australian pipeline
 
 | | Australia (current) | UK (Play-Cricket) |
 |---|---|---|
@@ -211,14 +284,23 @@ Concrete code shape for a Phase-1 spike (not yet built):
   `batting_innings` / `bowling_spells` (no aggregate feed exists).
 - Reuse the `uuid5(org, raw_id)` / `grassroots_id` collision machinery unchanged.
 
-## 7. Open questions / not yet verified
+## 8. Open questions / not yet verified
 
-- Exact `how_out` code vocabulary beyond the PDF sample (`b`, `ct`, `no`) — need
-  a live token to enumerate (`lbw`, `st`, `ro`, `hw`, `rh`, `dnb`, `absent`, …).
+These all need a **live club token** to settle:
+
+- **The published → private boundary.** Does a token actually return other
+  clubs' published data when you pass their `site_id`/`match_id` (community
+  reports yes), and exactly which fields are gated to your own site (member PII,
+  unpublished matches)? This is the single most decision-relevant unknown for
+  scope (§4).
+- **Server-side `site_id` enforcement** — does the API reject `site_id`s your
+  token "doesn't own", or only the contract restricts use?
+- Exact `how_out` code vocabulary beyond the PDF sample (`b`, `ct`, `no`) —
+  enumerate (`lbw`, `st`, `ro`, `hw`, `rh`, `dnb`, `absent`, …).
 - Whether `player_id` is truly global across clubs (it almost certainly is, like
   CA participant ids) — confirms the collision-scheme need.
-- `players.json` / `teams.json` exact field sets (docs are bot-blocked; confirm
-  with a token).
+- `players.json` / `teams.json` / `clubs.json` exact field sets and whether
+  `clubs.json` is a full directory or a name/county search (docs are bot-blocked).
 - League-points / ladder shape from `league_table.json` for a ladders feature.
 - Historical depth available per club via the API (CA reaches to 1975; unknown
   for Play-Cricket).
