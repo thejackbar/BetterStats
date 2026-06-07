@@ -315,6 +315,24 @@ def _normalise_name(name: str) -> str:
     return re.sub(r"\s+", " ", name).lower()
 
 
+def _parse_initial_form(name: str):
+    """If ``name`` reads as 'Surname Initial' or 'Initial Surname' (one token is a
+    single letter), return ``(surname_last_token, initial)`` so it can be matched
+    against a full 'First Last' record; otherwise ``None``.
+
+    Examples → ('camarda', 'f'): "Camarda F", "F Camarda", "Van Der Berg F".
+    Uses the last surname token (so middle names on our side still match).
+    """
+    toks = _normalise_name(name).split()
+    if len(toks) < 2:
+        return None
+    if len(toks[-1]) == 1 and len(toks[-2]) > 1:   # "Camarda F" / "Van Der Berg F"
+        return (toks[-2], toks[-1])
+    if len(toks[0]) == 1 and len(toks[-1]) > 1:    # "F Camarda" / "F Van Der Berg"
+        return (toks[-1], toks[0])
+    return None
+
+
 def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> dict:
     """names → match info. ``players`` = list of (id, display_name).
 
@@ -330,10 +348,14 @@ def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> 
     """
     norm_map: dict = {}
     blocks: dict = {}
+    surname_initial: dict = {}          # (surname_last_token, first_initial) → [(pid, pname)]
     for pid, pname in players:
         nn = _normalise_name(pname)
         norm_map.setdefault(nn, []).append((pid, pname))
         blocks.setdefault(nn[:1], []).append((pid, pname, nn))
+        toks = nn.split()
+        if len(toks) >= 2 and len(toks[-1]) > 1:
+            surname_initial.setdefault((toks[-1], toks[0][0]), []).append((pid, pname))
 
     out: dict = {}
     for name in names:
@@ -349,6 +371,23 @@ def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> 
                          "note": "Two players share this name — merge them first, then re-import.",
                          "candidates": [{"player_id": str(pid), "name": pn} for pid, pn in exact]}
         else:
+            # "Surname Initial" sheets (e.g. "Camarda F") are common and full-string
+            # fuzzy matching misses them — the words are reordered, so they don't even
+            # share a first-character block. Match on exact surname + first-name
+            # initial and surface the hit(s) as close matches to *confirm*. Never
+            # auto-accept: an initial isn't a unique identity, so a genuinely new
+            # "Smith J" must not silently merge into an existing different "John Smith".
+            ikey = _parse_initial_form(name)
+            init_hits = surname_initial.get(ikey, []) if ikey else []
+            if init_hits:
+                conf = 0.9 if len(init_hits) == 1 else 0.8
+                out[name] = {
+                    "player_id": None, "confidence": conf,
+                    "status": "fuzzy", "auto_status": "fuzzy",
+                    "candidates": [{"player_id": str(pid), "name": pn, "confidence": conf}
+                                   for pid, pn in init_hits[:5]],
+                }
+                continue
             pool = blocks.get(n[:1], [])
             scored = sorted(
                 ((SequenceMatcher(None, n, nn).ratio(), pid, pn) for pid, pn, nn in pool),
