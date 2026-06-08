@@ -72,29 +72,29 @@ async def rebuild_for_org(org_id_str: str) -> None:
 
         merged_away = await _build_merge_map(session, org_id)
 
+        # Resume-friendly + crash-safe: only games not yet rebuilt with the
+        # caught_behind flag (legacy rows are all-NULL; a rebuilt game has ≥1
+        # non-NULL). The wipe is now PER GAME, done only AFTER a successful
+        # scorecard fetch (in the loop below), so a dropped connection can never
+        # leave a game's bowler_wickets deleted-and-not-restored.
         games = await session.execute(
             sql_text(
                 "SELECT DISTINCT g.id FROM games g "
                 "JOIN grades gr ON gr.id = g.grade_id "
                 "JOIN seasons s ON s.id = gr.season_id "
                 "WHERE s.organisation_id = :org_id "
+                "  AND NOT EXISTS (SELECT 1 FROM bowler_wickets bw "
+                "                 WHERE bw.game_id = g.id AND bw.caught_behind IS NOT NULL) "
                 "ORDER BY g.id"
             ),
             {"org_id": str(org_id)},
         )
         game_ids = [r[0] for r in games.all()]
 
-        if game_ids:
-            await session.execute(
-                sql_text("DELETE FROM bowler_wickets WHERE game_id = ANY(:gids)"),
-                {"gids": game_ids},
-            )
-            await session.commit()
-
     print(
         f"Loaded {len(known_player_ids)} players, "
         f"{len(merged_away)} active merges. "
-        f"Wiped bowler_wickets for {len(game_ids)} games. Re-parsing..."
+        f"{len(game_ids)} games to (re)build. Re-parsing..."
     )
 
     inserted_total = 0
@@ -133,12 +133,19 @@ async def rebuild_for_org(org_id_str: str) -> None:
                         p = merged_away.get(p, p)
                     our_team_pids.add(p)
             rows = extract_bowler_wickets(scorecard, gid, our_team_pids, pid_by_guid, merged_away)
-            if rows:
-                async with async_session_maker() as session:
-                    for r in rows:
-                        session.add(r)
-                    await session.commit()
-                inserted_total += len(rows)
+            # Per-game wipe + reinsert in ONE transaction, only now that the
+            # fetch above succeeded — a failed fetch `continue`d and left the
+            # game's existing rows intact. An empty `rows` correctly clears a
+            # game that now yields no wickets.
+            async with async_session_maker() as session:
+                await session.execute(
+                    sql_text("DELETE FROM bowler_wickets WHERE game_id = :gid"),
+                    {"gid": gid},
+                )
+                for r in rows:
+                    session.add(r)
+                await session.commit()
+            inserted_total += len(rows)
         except Exception as exc:
             errors += 1
             print(f"  err on {gid}: {exc}")

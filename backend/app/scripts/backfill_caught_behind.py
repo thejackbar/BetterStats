@@ -70,12 +70,20 @@ async def backfill_for_org(org_id_str: str) -> None:
 
         merged_away = await _build_merge_map(session, org_id)
 
+        # Resume-friendly: only games that still have a caught dismissal whose
+        # caught_behind hasn't been set. A fully-processed game is skipped, so a
+        # re-run finishes an interrupted pass fast and naturally retries games
+        # skipped on a failed fetch. (To force a full re-derive after a logic
+        # change, NULL the column for the org first.)
         games = await session.execute(
             sql_text(
                 "SELECT DISTINCT g.id FROM games g "
                 "JOIN grades gr ON gr.id = g.grade_id "
                 "JOIN seasons s ON s.id = gr.season_id "
                 "WHERE s.organisation_id = :org_id "
+                "  AND EXISTS (SELECT 1 FROM batting_innings bi "
+                "             WHERE bi.game_id = g.id AND bi.dismissal_type = 'c' "
+                "               AND bi.caught_behind IS NULL) "
                 "ORDER BY g.id"
             ),
             {"org_id": str(org_id)},
