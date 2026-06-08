@@ -1094,7 +1094,11 @@ async def get_dismissal_breakdown(
     rows = await db.execute(
         text(f"""
             SELECT
-                COALESCE(bi.dismissal_type, 'unknown') AS dismissal_type,
+                CASE
+                    WHEN (bi.dismissal_type = 'c' OR bi.dismissal_type LIKE 'c %')
+                         AND bi.caught_behind IS TRUE THEN 'caught behind'
+                    ELSE COALESCE(bi.dismissal_type, 'unknown')
+                END AS dismissal_type,
                 COUNT(*) AS count
             FROM v_effective_batting_innings bi
             JOIN players p ON p.id = bi.player_id
@@ -1102,7 +1106,7 @@ async def get_dismissal_breakdown(
             JOIN grades g ON g.id = gm.grade_id
             WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND p.organisation_id = :o
               {grade_where}
-            GROUP BY bi.dismissal_type
+            GROUP BY 1
             ORDER BY COUNT(*) DESC
         """),
         params,

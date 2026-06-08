@@ -45,11 +45,15 @@ function PlayerLink({ id, name, slug }) {
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
 
 const DISMISSAL_LABELS = {
+  b: 'Bowled',
   bowled: 'Bowled',
+  c: 'Caught',
   caught: 'Caught',
+  'caught behind': 'Caught Behind',
   'caught and bowled': 'Caught & Bowled',
   lbw: 'LBW',
   'run out': 'Run Out',
+  st: 'Stumped',
   stumped: 'Stumped',
   'hit wicket': 'Hit Wicket',
   'handled the ball': 'Handled the Ball',

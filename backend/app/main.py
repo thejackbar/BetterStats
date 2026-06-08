@@ -77,6 +77,32 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE fall_of_wickets ADD COLUMN IF NOT EXISTS batter_name TEXT"
         ))
+        # Batting: flag caught-behind (caught by the wicketkeeper, migration 075).
+        # Kept off the dismissal_type string so existing "count caught" readers are
+        # untouched. Recreate the effective view with the column so the dismissal
+        # breakdown can read it even if alembic lags. DDL must stay byte-identical
+        # to migration 075's _VIEW_WITH_FLAG.
+        await conn.execute(text(
+            "ALTER TABLE batting_innings ADD COLUMN IF NOT EXISTS caught_behind BOOLEAN"
+        ))
+        await conn.execute(text("""
+            CREATE OR REPLACE VIEW v_effective_batting_innings AS
+            SELECT
+                id, game_id, player_id, innings_number,
+                runs, balls, fours, sixes, strike_rate,
+                dismissal_type, not_out, batting_position, did_not_bat,
+                'api'::text AS source,
+                caught_behind
+            FROM batting_innings
+            UNION ALL
+            SELECT
+                id, manual_game_id AS game_id, player_id, innings_number,
+                runs, balls, fours, sixes, strike_rate,
+                dismissal_type, not_out, batting_position, did_not_bat,
+                'manual'::text AS source,
+                NULL::boolean AS caught_behind
+            FROM manual_batting_innings
+        """))
         # BetterSelect → Net Manager: net/practice attendance + batting-queue
         # sessions. Defensive idempotent creates so the API boots even if a
         # numbered migration hasn't run yet (mirrors the self-service block).

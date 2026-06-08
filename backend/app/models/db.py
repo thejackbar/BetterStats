@@ -689,6 +689,11 @@ class BattingInnings(Base):
     not_out = Column(Boolean, default=False)
     batting_position = Column(Integer)
     did_not_bat = Column(Boolean, default=False)
+    # True when the dismissal was a catch by the wicketkeeper ("caught behind").
+    # Derived from the dagger (†) marker on the catcher in CA's dismissalText.
+    # NULL = unknown (legacy rows pre-backfill, and manual entries) → treated as
+    # a plain catch by readers. See migration 075.
+    caught_behind = Column(Boolean, nullable=True)
 
     game = relationship("Game", back_populates="batting_innings")
     player = relationship("Player", back_populates="batting_innings")
