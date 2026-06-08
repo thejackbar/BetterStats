@@ -799,7 +799,7 @@ async def bowler_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         text(
             """
             SELECT bw.batter_position AS pos, bw.batter_runs AS runs,
-                   bw.dismissal_type AS dt, bw.fielder_id::text AS fid,
+                   bw.dismissal_type AS dt, bw.caught_behind AS cb, bw.fielder_id::text AS fid,
                    COALESCE(f.display_name_override, f.name) AS fielder
             FROM bowler_wickets bw
             JOIN v_effective_games g ON g.id = bw.game_id
@@ -841,7 +841,7 @@ async def bowler_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
     # Dismissal split — for the scouting note.
     dism: dict[str, int] = {}
     for r in rows:
-        lbl = _dism_label(r["dt"])
+        lbl = _dism_label(r["dt"], r.get("cb"))
         if lbl:
             dism[lbl] = dism.get(lbl, 0) + 1
 
@@ -908,6 +908,7 @@ async def bowler_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
             how = {
                 "bowled": "bowls them", "lbw": "traps them lbw",
                 "caught": "finds the edge or catcher", "stumped": "beats them in the air",
+                "caught behind": "nicks them off to the keeper",
                 "caught & bowled": "catches them off his own bowling",
             }.get(topd[0], f"takes {topd[0]} wickets")
             bits.append(f"Mostly {how} ({round(100 * topd[1] / n)}%).")

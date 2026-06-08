@@ -628,7 +628,8 @@ async def _wickets_quality(session: AsyncSession, org_id: str, season_id: str | 
     res = await session.execute(
         text(
             f"""
-            SELECT bw.batter_position AS pos, bw.batter_runs AS runs, bw.dismissal_type AS dt
+            SELECT bw.batter_position AS pos, bw.batter_runs AS runs,
+                   bw.dismissal_type AS dt, bw.caught_behind AS cb
             FROM bowler_wickets bw
             JOIN v_effective_games g ON g.id = bw.game_id
             JOIN grades gr ON gr.id = g.grade_id
@@ -667,7 +668,9 @@ async def _wickets_quality(session: AsyncSession, org_id: str, season_id: str | 
         d = (r["dt"] or "").strip().lower()
         if not d:
             continue
-        key = ("caught" if d.startswith("caught") and "bowled" not in d else
+        caught_plain = d.startswith("caught") and "bowled" not in d
+        key = ("caught behind" if caught_plain and r.get("cb") else
+               "caught" if caught_plain else
                "bowled" if d == "bowled" else
                "lbw" if "lbw" in d or "leg before" in d else
                "stumped" if d == "stumped" else
@@ -1014,21 +1017,23 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
     return {"season": {"id": resolved["season_id"], "name": resolved["name"]}, "players": pls[:12]}
 
 
-def _dismissal_key(dt: str | None) -> str | None:
+def _dismissal_key(dt: str | None, caught_behind: bool | None = False) -> str | None:
+    # Accepts both sync's short codes ("c"/"b"/"st", batting_innings) and free-text
+    # long forms (manual entries). caught_behind splits the keeper catch out.
     d = (dt or "").strip().lower()
     if not d:
         return None
     if "run out" in d:
         return "run out"
-    if "bowled" in d and "caught" in d:
+    if ("bowled" in d and "caught" in d) or d in ("c&b", "c & b"):
         return "c & b"
-    if d.startswith("caught"):
-        return "caught"
-    if d == "bowled":
+    if d == "c" or d.startswith("c ") or d.startswith("caught"):
+        return "caught behind" if caught_behind else "caught"
+    if d in ("b", "bowled"):
         return "bowled"
     if "lbw" in d or "leg before" in d:
         return "lbw"
-    if d == "stumped":
+    if d in ("st", "stumped"):
         return "stumped"
     return d
 
@@ -1049,7 +1054,7 @@ async def _batting_extra(session: AsyncSession, org_id: str, season_id: str | No
             f"""
             SELECT bi.player_id::text AS pid, COALESCE(p.display_name_override, p.name) AS name,
                    bi.runs AS runs, bi.batting_position AS pos,
-                   bi.not_out AS no, bi.dismissal_type AS dt
+                   bi.not_out AS no, bi.dismissal_type AS dt, bi.caught_behind AS cb
             FROM v_effective_batting_innings bi
             JOIN players p ON p.id = bi.player_id
             JOIN v_effective_games g ON g.id = bi.game_id
@@ -1079,7 +1084,7 @@ async def _batting_extra(session: AsyncSession, org_id: str, season_id: str | No
         if dismissed:
             a["outs"] += 1
             dismissed_scores.append(int(r["runs"]))
-            k = _dismissal_key(r["dt"])
+            k = _dismissal_key(r["dt"], r.get("cb"))
             if k:
                 dism[k] += 1
         if r["pos"] is not None and 1 <= int(r["pos"]) <= 11:
