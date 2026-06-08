@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 5
+DOSSIER_VERSION = 6
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -443,7 +443,8 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
             SELECT COALESCE(pl.grassroots_id, pl.id::text) AS pid,
                    COALESCE(pl.display_name_override, pl.name) AS name,
                    g.id::text AS match_id, g.played_at,
-                   bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out, bi.dismissal_type
+                   bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out,
+                   bi.dismissal_type, bi.caught_behind
             FROM v_effective_batting_innings bi
             JOIN players pl ON pl.id = bi.player_id
             JOIN v_effective_games g ON g.id = bi.game_id
@@ -471,7 +472,14 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
         else:
             b["outs"] += 1
             if r.dismissal_type:
-                b["dism"][r.dismissal_type] += 1
+                # Normalise to the same keys the live path uses, and split out
+                # caught-behind (kept off dismissal_type as a separate bool col).
+                dt = r.dismissal_type.strip().lower()
+                if dt in ("caught and bowled", "caught & bowled", "c & b", "c and b"):
+                    dt = "c&b"
+                elif dt == "caught" and r.caught_behind:
+                    dt = "caught behind"
+                b["dism"][dt] += 1
         if b["hs"] is None or runs > b["hs"]:
             b["hs"], b["hs_no"] = runs, bool(r.not_out)
         b["scores"].append({"date": when_s, "runs": runs, "balls": balls, "not_out": bool(r.not_out)})
@@ -953,13 +961,19 @@ def _confidence(samples: int) -> str:
     return "low"
 
 
-_DISMISSAL_ADVICE = {
-    "caught": "tends to hole out — keep catchers in",
-    "caught behind": "nicks off — a tight keeper line works",
-    "c&b": "hits it back — follow through ready",
-    "bowled": "gets bowled a lot — attack the stumps",
-    "lbw": "lbw-prone — bowl straight and full",
-    "stumped": "has been stumped — spin can draw him down",
+# Descriptive observation for a dominant dismissal mode (the NOTE). The matching
+# tactical PLAN lives in iq_phrases. Cricket logic matters here — a batter who
+# "holes out" (caught) is mishitting to fielders, so the plan pushes catchers OUT
+# into the deep (NOT "keep catchers in", which was the old, wrong wording).
+_DISMISSAL_NOTE = {
+    "bowled": "Gets bowled more than most — beaten through the gate.",
+    "lbw": "Falls lbw regularly — vulnerable playing across the line.",
+    "caught": "Tends to hole out — he finds the fielder with the big shot.",
+    "caught behind": "Nicks off more often than most — feels for the ball outside off.",
+    "c&b": "Has a habit of driving it straight back to the bowler.",
+    "stumped": "Can be drawn out of his crease and stumped.",
+    "run out": "Has been run out a few times — suspect between the wickets.",
+    "hit wicket": "Has been hit-wicket — gets cramped on the back foot.",
 }
 
 
@@ -967,6 +981,8 @@ def _enrich_batter(b: dict, rank: int) -> None:
     outs = sum((b.get("dismissals") or {}).values())
     b["confidence"] = _confidence(b.get("innings"))
     avg = b.get("average")
+    arch = iq_phrases.batter_archetype(b, rank)
+    seed = b.get("player_id") or b.get("name") or ""
     # A rotating, archetype-aware scouting description (varied per player) plus a
     # concise factual line — so two danger bats never read the same.
     stat = f"{b['runs']} runs @ {avg if avg is not None else '—'} this season"
@@ -974,15 +990,26 @@ def _enrich_batter(b: dict, rank: int) -> None:
         stat += " and striking it well"
     elif b.get("form") == "cold":
         stat += ", though out of touch lately"
-    bits = [iq_phrases.batter_note(b, rank), stat + "."]
+    bits = [iq_phrases.batter_note(arch, seed), stat + "."]
 
-    plan = "Remove early" if rank == 0 else "Keep him quiet"
+    # Dismissal pattern → a NOTE (how he gets out) + the matching tactical PLAN.
     dism = b.get("dismissals") or {}
+    dominant = None
     if outs >= 3 and dism:
         top, cnt = max(dism.items(), key=lambda kv: kv[1])
-        if cnt / outs >= 0.4 and top in _DISMISSAL_ADVICE:
-            bits.append(_DISMISSAL_ADVICE[top][0].upper() + _DISMISSAL_ADVICE[top][1:] + ".")
-            plan = _DISMISSAL_ADVICE[top]
+        if cnt / outs >= 0.4:
+            dominant = top
+    if dominant and dominant in _DISMISSAL_NOTE:
+        bits.append(_DISMISSAL_NOTE[dominant])
+    # Caught behind is a high-value, specific tell — surface it even when it isn't
+    # the single dominant mode (the user's ask: "nicks off more than usual").
+    cb = dism.get("caught behind", 0)
+    if outs >= 3 and cb >= 2 and cb / outs >= 0.25 and dominant != "caught behind":
+        bits.append(_DISMISSAL_NOTE["caught behind"])
+        if dominant is None:
+            dominant = "caught behind"
+    plan = iq_phrases.batter_plan(arch, dominant, seed)
+
     vs = b.get("vs_us")
     if vs and vs.get("average") and (avg is None or vs["average"] >= avg):
         bits.append(f"Averages {vs['average']} against us specifically.")
@@ -1027,16 +1054,18 @@ def _enrich_bowler(b: dict, rank: int) -> None:
     b["confidence"] = _confidence(b.get("matches"))
     avg = b.get("average")
     econ = b.get("economy")
+    arch = iq_phrases.bowler_archetype(b, rank)
+    seed = b.get("player_id") or b.get("name") or ""
     stat = f"{b['wickets']} wkts @ {avg if avg is not None else '—'}"
     if econ is not None:
         stat += f", economy {econ}"
-    bits = [iq_phrases.bowler_note(b, rank), stat + "."]
+    bits = [iq_phrases.bowler_note(arch, seed), stat + "."]
     tight = econ is not None and econ < 4.0
     vs = b.get("vs_us")
     if vs and vs.get("wickets"):
         bits.append(f"Has {vs['wickets']} wkts against us before.")
     b["key_note"] = " ".join(bits)
-    b["plan"] = "See him off — don't take risks" if (rank == 0 or tight) else "Look to score off him"
+    b["plan"] = iq_phrases.bowler_plan(arch, seed)
 
     danger_reasons, caution_reasons = [], []
     if rank == 0:
@@ -1286,6 +1315,11 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
     partnership_insight = _partnership_insight(partnerships)
 
     # ── Scouting synthesis: per-player key-notes + how they win/lose + game plan ──
+    # Flag the keeper-batters from the real fielding data so they get keeper-aware
+    # descriptions/plans (a danger bat who also keeps).
+    keeper_ids = {k["player_id"] for k in keepers}
+    for db in danger_batters:
+        db["is_keeper"] = db.get("player_id") in keeper_ids
     for rank, db in enumerate(danger_batters):
         _enrich_batter(db, rank)
     for rank, db in enumerate(danger_bowlers):

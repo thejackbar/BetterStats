@@ -110,10 +110,10 @@ function ScopeToggle({ scope, onScope, options }) {
   return <Segmented sm value={scope} onChange={onScope} options={options} />
 }
 
-function CommandStrip({ h2h, lm, scope, onScope, scopeOptions }) {
+function CommandStrip({ h2h, lm, scope, onScope, scopeOptions, filterLabel }) {
   const drawn = (h2h?.draws || 0) + (h2h?.ties || 0)
   const lmColor = lm?.result === 'WIN' ? 'var(--pb-brand)' : lm?.result === 'LOSS' ? 'var(--pb-red)' : 'var(--pb-amber)'
-  const eyebrow = scope === 'season' ? 'Record this season' : scope === 'grade' ? 'Record in this grade' : 'All-time record'
+  const eyebrow = scope === 'selected' ? `Record · ${filterLabel}` : 'All-time record'
 
   // No history at all (unfiltered) → render nothing; the page's empty states cover it.
   if ((!h2h || !h2h.meetings) && scope === 'all') return null
@@ -124,7 +124,7 @@ function CommandStrip({ h2h, lm, scope, onScope, scopeOptions }) {
         <div className="iq-eyebrow mb-3 flex flex-wrap items-center justify-between gap-2">
           <span>{eyebrow}</span><ScopeToggle scope={scope} onScope={onScope} options={scopeOptions} />
         </div>
-        <Empty>No meetings {scope === 'season' ? 'in the selected season' : 'in this grade'} — switch back to all-time.</Empty>
+        <Empty>No meetings for {filterLabel} — switch to All-time.</Empty>
       </div>
     )
   }
@@ -701,10 +701,10 @@ export default function OppositionScout() {
   const [teamsList, setTeamsList] = useState([])     // their teams, held stable across rebuilds
   const [matching, setMatching] = useState(null)     // fixture being matched to a club
   const [tags, setTags] = useState({})               // participant_id → scouting tag
-  const [scope, setScope] = useState('all')          // record card: 'all' | 'season' | 'grade'
+  const [scope, setScope] = useState('all')          // record card: 'all' | 'selected'
   const pollRef = useRef(null)
 
-  // The GLOBAL BetterIQ filter bar (top of the page) is now the single source of
+  // The GLOBAL BetterIQ filter bar (top of the page) is the single source of
   // truth — no separate "Scout team" control. `ctx.team.id` is a grade NAME (the
   // IQ-wide convention); the season can be a single year or a cross-season range.
   const { ctx, seasons } = useIQFilter()
@@ -713,6 +713,13 @@ export default function OppositionScout() {
   const seasonIdsKey = seasonIds.join(',')
   const seasonText = ctx ? seasonLabel(ctx, seasons) : ''
   const isAllSeasons = seasons.length > 0 && seasonIds.length === seasons.length
+  // The newest single season is the global *default*, so treat it as "no season
+  // filter" (the all-time landing the user wants). Only an older single season or
+  // a multi-season range counts as an actively-chosen season filter.
+  const newestId = seasons.length ? seasons[seasons.length - 1].id : null
+  const seasonActive = !isAllSeasons && seasonIds.length > 0 && !(seasonIds.length === 1 && seasonIds[0] === newestId)
+  const hasFilter = !!ctxGradeName || seasonActive
+  const filterLabel = [ctxGradeName, seasonActive ? seasonText : null].filter(Boolean).join(' · ') || 'Filtered'
   // Map the selected grade NAME onto THIS opponent's grade_id for the live scout
   // (their grade ids carry the competition-wide grade name).
   const teamGradeId = useMemo(() => {
@@ -721,14 +728,11 @@ export default function OppositionScout() {
     const t = teamsList.find(x => (x.team_name || '').toLowerCase() === lc || (x.grade_name || '').toLowerCase() === lc)
     return t?.grade_id || null
   }, [ctxGradeName, teamsList])
-  // Record-card scope toggle options: All-time always; Season when a sub-range is
-  // chosen; Grade when a specific grade is chosen in the top bar.
-  const scopeOptions = useMemo(() => {
-    const opts = [{ value: 'all', label: 'All-time' }]
-    if (seasonIds.length && !isAllSeasons) opts.push({ value: 'season', label: seasonText || 'Season' })
-    if (ctxGradeName) opts.push({ value: 'grade', label: ctxGradeName })
-    return opts
-  }, [seasonIds.length, isAllSeasons, seasonText, ctxGradeName])
+  // Record-card toggle: All-time vs the active top-bar filter. Only shown when a
+  // filter is actually active (otherwise the report is all-time anyway).
+  const scopeOptions = hasFilter
+    ? [{ value: 'all', label: 'All-time' }, { value: 'selected', label: filterLabel }]
+    : []
 
   // Pull opponent list + saved scouting tags once.
   useEffect(() => {
@@ -751,26 +755,33 @@ export default function OppositionScout() {
 
   const stopPoll = () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
 
-  // Keep the record-card scope valid as the top filter changes (e.g. switching
-  // back to "All grades" while the card is on Grade).
-  useEffect(() => { if (scope === 'grade' && !ctxGradeName) setScope('all') }, [scope, ctxGradeName])
-  useEffect(() => { if (scope === 'season' && (!seasonIds.length || isAllSeasons)) setScope('all') }, [scope, seasonIds.length, isAllSeasons])
+  // Auto-apply the top filter: the record-card scope follows whether a filter is
+  // active, so setting a grade/season immediately scopes the WHOLE report (record,
+  // our performers, venues, bowler match-ups) — the previous design quietly needed
+  // a second click on a card toggle, which is why the filter "wasn't working". The
+  // user can still flip to All-time to override; changing the filter re-applies it.
+  const filterSig = `${ctxGradeName || ''}|${seasonActive ? seasonIdsKey : ''}`
+  const filterBaseline = useRef(undefined)
+  useEffect(() => {
+    if (!ctx) return
+    if (filterBaseline.current !== filterSig) {
+      filterBaseline.current = filterSig
+      setScope(hasFilter ? 'selected' : 'all')
+    }
+  }, [ctx, filterSig, hasFilter])
 
-  // Instant report — historical record vs them, scoped by the card toggle:
-  //   all    → all-time / all-grades (the default headline)
-  //   season → the season(s) chosen in the top bar
-  //   grade  → the grade chosen in the top bar
-  // Only the *active* scope's value is keyed, so flipping the top bar while the
-  // card is on "All-time" doesn't trigger a pointless refetch.
-  const effGrade = scope === 'grade' ? ctxGradeName : null
-  const effSeasonIds = scope === 'season' ? seasonIds : null
+  // Instant report — historical record vs them, scoped to the active top-bar
+  // filter when scope === 'selected', else all-time.
+  const applyFilter = scope === 'selected' && hasFilter
+  const effGrade = applyFilter && ctxGradeName ? ctxGradeName : null
+  const effSeasonIds = applyFilter && seasonActive ? seasonIds : null
   const effSeasonKey = effSeasonIds ? effSeasonIds.join(',') : ''
   const reportSel = useRef(null)
   useEffect(() => {
     if (!selected) { setReport(null); return }
     let alive = true
     // Blank the report only when the opponent itself changed (first load); a
-    // scope/season/grade change refetches in place so the toggle doesn't flicker.
+    // scope change refetches in place so the card/toggle doesn't flicker.
     if (reportSel.current !== selected) { setReport(null); reportSel.current = selected }
     api.iqOppositionReport({
       opponent: selected.opponent, fixtureId: selected.fixtureId,
@@ -779,7 +790,7 @@ export default function OppositionScout() {
       .then(r => { if (alive) setReport(r) }).catch(() => { if (alive) setReport({ error: true }) })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, scope, effGrade, effSeasonKey])
+  }, [selected, effGrade, effSeasonKey])
 
   // Live dossier — re-polled when the opponent OR chosen grade (top bar) changes.
   useEffect(() => {
@@ -803,13 +814,15 @@ export default function OppositionScout() {
   const pick = (sel) => {
     setSelected(sel)
     setTeamsList([])
-    setScope('all')
+    // Keep the active filter applied to the new opponent (scope is governed by the
+    // filter-follow effect); only reset the All-time override when nothing's filtered.
+    setScope(hasFilter ? 'selected' : 'all')
     const sp = {}
     if (sel.fixtureId) sp.fixture = sel.fixtureId
     else if (sel.opponent) sp.opponent = sel.opponent
     setSearchParams(sp, { replace: true })
   }
-  const clearSelection = () => { setSelected(null); setTeamsList([]); setScope('all'); setSearchParams({}, { replace: true }) }
+  const clearSelection = () => { setSelected(null); setTeamsList([]); setSearchParams({}, { replace: true }) }
 
   // Manually match an unlinked fixture to a known club entity.
   const startMatch = (fx) => setMatching({ fixtureId: fx.fixture_id, name: fx.opponent_name })
@@ -915,7 +928,7 @@ export default function OppositionScout() {
         ) : (
           <>
             <CommandStrip h2h={report.head_to_head} lm={report.last_meeting}
-              scope={scope} onScope={setScope} scopeOptions={scopeOptions} />
+              scope={scope} onScope={setScope} scopeOptions={scopeOptions} filterLabel={filterLabel} />
 
             {/* Instant: our record + venue */}
             <div className="grid gap-5 lg:grid-cols-2">
