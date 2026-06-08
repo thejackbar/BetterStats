@@ -724,10 +724,13 @@ async def _snapshot(db: AsyncSession, player: Player) -> dict:
             .order_by(Season.year.desc().nullslast(), Season.name.desc())
             .limit(1)
         )).scalar()
-        catches = 0
+        catches = catches_wk = 0
         if latest_season:
             c_res = await db.execute(
-                select(func.coalesce(func.sum(FieldingStat.catches), 0))
+                select(
+                    func.coalesce(func.sum(FieldingStat.catches), 0),
+                    func.coalesce(func.sum(FieldingStat.catches_wk), 0),
+                )
                 .join(Game, Game.id == FieldingStat.game_id)
                 .join(Grade, Grade.id == Game.grade_id)
                 .where(
@@ -735,10 +738,14 @@ async def _snapshot(db: AsyncSession, player: Player) -> dict:
                     Grade.season_id == latest_season,
                 )
             )
-            catches = int(c_res.scalar() or 0)
+            row = c_res.first()
+            catches = int((row and row[0]) or 0)
+            catches_wk = int((row and row[1]) or 0)
         snap["season_catches"] = catches
+        snap["season_catches_wk"] = catches_wk
     except Exception:
         snap["season_catches"] = 0
+        snap["season_catches_wk"] = 0
 
     # last_picked — most recent fixture this player was named in.
     try:

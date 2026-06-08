@@ -135,6 +135,9 @@ function TrendSummary({ detail }) {
             <Stat label="Wickets" value={num(detail.career?.bowling?.total_wickets, 0)} />
             <Stat label="Bowl avg" value={Number(detail.career?.bowling?.average) || 0} decimals={2} count={false} />
             <Stat label="Catches" value={num(detail.career?.fielding?.total_catches_non_wk, 0)} />
+            {num(detail.career?.fielding?.total_catches_wk, 0) > 0 && (
+              <Stat label="Ct (wk)" value={num(detail.career?.fielding?.total_catches_wk, 0)} />
+            )}
           </div>
         </Card>
         <Card eyebrow="recent form" title="Form & peak">

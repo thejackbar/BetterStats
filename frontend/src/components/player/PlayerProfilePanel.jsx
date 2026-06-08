@@ -244,7 +244,9 @@ function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail })
           <div className="flex items-center gap-2">
             <span className="font-mono text-[9.5px] text-pb-faint w-14">CATCHES</span>
             <span className="pb-num font-display font-bold text-base text-pb-text">{snap.season_catches ?? 0}</span>
-            <span className="text-[11.5px] text-pb-faintest">this season</span>
+            <span className="text-[11.5px] text-pb-faintest">
+              this season{(snap.season_catches_wk ?? 0) > 0 ? ` · ${snap.season_catches_wk} wk` : ''}
+            </span>
           </div>
         </div>
       </div>

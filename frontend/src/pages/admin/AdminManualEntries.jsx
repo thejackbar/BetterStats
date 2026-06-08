@@ -786,7 +786,7 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
                       <td className="py-2 pr-3 text-right text-pb-text">{r.games_played}</td>
                       <td className="py-2 pr-3 text-right text-pb-text">{r.batting_runs}</td>
                       <td className="py-2 pr-3 text-right text-pb-text">{r.bowling_wickets}</td>
-                      <td className="py-2 pr-3 text-right text-pb-text">{r.fielding_catches}</td>
+                      <td className="py-2 pr-3 text-right text-pb-text">{r.fielding_catches}{r.fielding_catches_wk ? <span className="text-pb-faintest"> ({r.fielding_catches_wk} wk)</span> : ''}</td>
                       <td className="py-2 text-right">
                         <button className={BTN_SECONDARY + ' mr-2'} onClick={() => handleEdit(r)}>Edit</button>
                         <button className={BTN_DANGER} onClick={() => handleDelete(r)}>Delete</button>
@@ -907,7 +907,7 @@ function CareerAdjustmentsTab({ players, refreshAll, onPending }) {
                     <td className="py-2 pr-3 text-right text-pb-text">{r.games_played}</td>
                     <td className="py-2 pr-3 text-right text-pb-text">{r.batting_runs}</td>
                     <td className="py-2 pr-3 text-right text-pb-text">{r.bowling_wickets}</td>
-                    <td className="py-2 pr-3 text-right text-pb-text">{r.fielding_catches}</td>
+                    <td className="py-2 pr-3 text-right text-pb-text">{r.fielding_catches}{r.fielding_catches_wk ? <span className="text-pb-faintest"> ({r.fielding_catches_wk} wk)</span> : ''}</td>
                     <td className="py-2 text-right">
                       <button className={BTN_SECONDARY + ' mr-2'} onClick={() => handleEdit(r)}>Edit</button>
                       <button className={BTN_DANGER} onClick={() => handleDelete(r)}>Delete</button>
