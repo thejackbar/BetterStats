@@ -22,6 +22,7 @@ import {
 import { Radar, BAT_AXES, BOWL_AXES, PhaseStrip, buildRadar } from './viz'
 import KeyPlayersCard from './KeyPlayersCard'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
+import { useIQFilter, seasonIdsInRange, seasonLabel } from './Context'
 import Dropdown from '../../../components/Dropdown'
 
 const POLL_MS = 2500
@@ -100,10 +101,33 @@ function ScoutPicker({ data, onPick, onMatch }) {
 
 /* ── Command strip — the instant report hero ─────────────────────────────── */
 
-function CommandStrip({ h2h, lm }) {
-  if (!h2h || !h2h.meetings) return null
-  const drawn = (h2h.draws || 0) + (h2h.ties || 0)
+/* The scope toggle on the record card — All-time / Season / Grade. Reflects the
+   top filter bar's season + grade so the user can flip the record (and our
+   record / bowler match-ups) between the impressive all-time number and the
+   selected slice, without it silently overriding the headline. */
+function ScopeToggle({ scope, onScope, options }) {
+  if (options.length < 2) return null
+  return <Segmented sm value={scope} onChange={onScope} options={options} />
+}
+
+function CommandStrip({ h2h, lm, scope, onScope, scopeOptions }) {
+  const drawn = (h2h?.draws || 0) + (h2h?.ties || 0)
   const lmColor = lm?.result === 'WIN' ? 'var(--pb-brand)' : lm?.result === 'LOSS' ? 'var(--pb-red)' : 'var(--pb-amber)'
+  const eyebrow = scope === 'season' ? 'Record this season' : scope === 'grade' ? 'Record in this grade' : 'All-time record'
+
+  // No history at all (unfiltered) → render nothing; the page's empty states cover it.
+  if ((!h2h || !h2h.meetings) && scope === 'all') return null
+  // Filtered to nothing → keep the card (and the toggle) so the user can switch back.
+  if (!h2h || !h2h.meetings) {
+    return (
+      <div className="iq-card iq-accent-card overflow-hidden iq-rise p-6 md:p-7">
+        <div className="iq-eyebrow mb-3 flex flex-wrap items-center justify-between gap-2">
+          <span>{eyebrow}</span><ScopeToggle scope={scope} onScope={onScope} options={scopeOptions} />
+        </div>
+        <Empty>No meetings {scope === 'season' ? 'in the selected season' : 'in this grade'} — switch back to all-time.</Empty>
+      </div>
+    )
+  }
   return (
     <div className="iq-card iq-accent-card overflow-hidden iq-rise">
       <div className="relative grid lg:grid-cols-[auto_1fr_auto]">
@@ -114,7 +138,9 @@ function CommandStrip({ h2h, lm }) {
         </div>
         {/* W-L-D */}
         <div className="p-6 md:p-7 flex flex-col justify-center">
-          <div className="iq-eyebrow mb-3">All-time record</div>
+          <div className="iq-eyebrow mb-3 flex flex-wrap items-center justify-between gap-2">
+            <span>{eyebrow}</span><ScopeToggle scope={scope} onScope={onScope} options={scopeOptions} />
+          </div>
           <div className="flex items-end gap-6">
             <Stat label="Won" value={h2h.wins} tone="win" big />
             <Stat label="Lost" value={h2h.losses} tone="loss" big />
@@ -260,10 +286,18 @@ function InningsPhases({ selected }) {
   }, [selected])
   if (!ph?.available) return null
   return (
-    <Card eyebrow="Estimated · ball-by-ball" title="Innings phases"
-      right={ph.innings ? <Tag tone="faint">{ph.innings}{ph.total != null ? ` · ${ph.total}` : ''}</Tag> : null}>
+    <Card eyebrow="per-innings averages · estimated" title="How they pace an innings"
+      right={ph.innings ? <Tag tone="faint">{ph.innings} inns{ph.total != null ? ` · ${ph.total} games` : ''}</Tag> : null}>
+      <div className="text-pb-faint text-[12px] mb-4 leading-relaxed">
+        Average <span className="text-pb-dim">run rate</span> in each third of their innings, from recent ball-by-ball games — where they accelerate and where they can be squeezed.
+      </div>
       <PhaseStrip phases={ph.phases} />
-      {ph.insight && <div className="text-pb-dim text-[12.5px] mt-4 leading-relaxed">{ph.insight}</div>}
+      {ph.insight && (
+        <div className="flex gap-2.5 text-[13px] mt-4 leading-relaxed">
+          <Icon name="info" size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--pb-accent)' }} />
+          <span className="text-pb-dim">{ph.insight}</span>
+        </div>
+      )}
       {ph.note && <Note>{ph.note}</Note>}
     </Card>
   )
@@ -445,26 +479,55 @@ function Partnerships({ partnerships, insight }) {
   if (!partnerships?.length) return null
   const max = Math.max(1, ...partnerships.map(p => p.avg_partnership || 0))
   const ord = k => ({ 1: '1st', 2: '2nd', 3: '3rd' }[k] || `${k}th`)
+  const anyWeak = partnerships.some(p => p.weak)
   return (
-    <Card accent eyebrow="avg partnership by wicket" title="Where they wobble">
+    <Card accent eyebrow="avg partnership by wicket" title="Where they build & wobble">
       <div className="space-y-2.5">
         {partnerships.map((p, idx) => {
-          const weak = p.avg_partnership < 20
+          // `weak` = a genuine TOP/MIDDLE-order soft spot (backend-flagged); `tail`
+          // = 8th wicket on, naturally low and never a real insight, so it's muted
+          // rather than reddened (the old rule reddened every sub-20 stand).
+          const barColor = p.weak ? 'var(--pb-red)' : p.tail ? 'var(--pb-hairline2)' : 'var(--pb-accent)'
+          const valColor = p.weak ? 'var(--pb-red)' : p.tail ? 'var(--pb-faintest)' : 'var(--pb-text)'
           return (
             <div key={p.wicket} className="flex items-center gap-3 text-[13px]">
-              <span className="w-7 text-pb-faint shrink-0 iq-mono text-[11px]">{ord(p.wicket)}</span>
-              <div className="flex-1"><Bar pct={(p.avg_partnership / max) * 100} color={weak ? 'var(--pb-red)' : 'var(--pb-accent)'} h={9} delay={idx * 0.06} /></div>
-              <span className="w-8 text-right iq-num shrink-0 font-semibold" style={{ color: weak ? 'var(--pb-red)' : 'var(--pb-text)' }}>{p.avg_partnership}</span>
+              <span className={`w-7 shrink-0 iq-mono text-[11px] ${p.tail ? 'text-pb-faintest' : 'text-pb-faint'}`}>{ord(p.wicket)}</span>
+              <div className="flex-1"><Bar pct={(p.avg_partnership / max) * 100} color={barColor} h={9} delay={idx * 0.06} /></div>
+              <span className="w-8 text-right iq-num shrink-0 font-semibold" style={{ color: valColor }}>{p.avg_partnership}</span>
             </div>
           )
         })}
       </div>
       {insight && <div className="text-pb-dim text-[12.5px] mt-4 leading-relaxed">{insight}</div>}
+      {anyWeak && <Note>Red marks a genuine top/middle-order soft spot. The tail (8th wicket on) is greyed — a low last-wicket stand is normal, not a weakness.</Note>}
     </Card>
   )
 }
 
 /* ── Squad tables (dossier) ──────────────────────────────────────────────── */
+
+/* "vs us" cells — runs bold, "@ avg" muted, full detail on hover. A dash when
+   we've no record of facing them (was a cramped "142@35.5" before). */
+function VsUsBat({ vs }) {
+  if (!vs || !vs.innings) return <span className="text-pb-faintest">—</span>
+  return (
+    <span className="iq-num whitespace-nowrap"
+      title={`${vs.innings} inns · ${vs.runs} runs${vs.high_score != null ? ` · HS ${vs.high_score}` : ''} against us`}>
+      <span className="font-semibold">{vs.runs}</span>
+      <span className="text-pb-faint"> @ {a2(vs.average)}</span>
+    </span>
+  )
+}
+function VsUsBowl({ vs }) {
+  if (!vs || !vs.wickets) return <span className="text-pb-faintest">—</span>
+  return (
+    <span className="iq-num whitespace-nowrap"
+      title={`${vs.wickets} wkts @ ${a2(vs.average)}${vs.best ? ` · best ${vs.best}` : ''} against us`}>
+      <span className="font-semibold">{vs.wickets}w</span>
+      <span className="text-pb-faint"> @ {a2(vs.average)}</span>
+    </span>
+  )
+}
 
 function SquadTable({ dossier }) {
   const [tab, setTab] = useState('batting')
@@ -492,7 +555,7 @@ function SquadTable({ dossier }) {
                     <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{num(p.strike_rate)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num">{num(p.high_score)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{p.fifties}/{p.hundreds}</td>
-                    <td className="py-2.5 px-1.5 text-right iq-num text-[11.5px]">{p.vs_us ? `${p.vs_us.runs}@${a2(p.vs_us.average)}` : <span className="text-pb-faintest">—</span>}</td>
+                    <td className="py-2.5 px-1.5 text-right text-[11.5px]"><VsUsBat vs={p.vs_us} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -514,7 +577,7 @@ function SquadTable({ dossier }) {
                     <td className="py-2.5 px-1.5 text-right iq-num">{a2(p.average)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{a2(p.economy)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num">{num(p.best)}</td>
-                    <td className="py-2.5 px-1.5 text-right iq-num text-[11.5px]">{p.vs_us ? `${p.vs_us.wickets}w@${a2(p.vs_us.average)}` : <span className="text-pb-faintest">—</span>}</td>
+                    <td className="py-2.5 px-1.5 text-right text-[11.5px]"><VsUsBowl vs={p.vs_us} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -626,19 +689,6 @@ function BuildingCard({ oppName }) {
   )
 }
 
-/* ── Team narrowing (which side of the club to scout) ─────────────────────── */
-
-function TeamNarrow({ teams, value, onChange, disabled }) {
-  if (!teams?.length) return null
-  const options = [{ value: '', label: 'Whole club' }, ...teams.map(t => ({ value: t.grade_id, label: `${t.team_name}${t.matches ? ` (${t.matches})` : ''}` }))]
-  return (
-    <div className={`flex flex-wrap items-center gap-2.5 ${disabled ? 'opacity-60 pointer-events-none' : ''}`}>
-      <span className="iq-eyebrow">Scout team</span>
-      <Segmented sm value={value || ''} onChange={(v) => onChange(v || null)} options={options} />
-    </div>
-  )
-}
-
 /* ── Main ────────────────────────────────────────────────────────────────── */
 
 export default function OppositionScout() {
@@ -648,11 +698,37 @@ export default function OppositionScout() {
   const [selected, setSelected] = useState(null)     // {opponent?, fixtureId?, name?}
   const [report, setReport] = useState(null)         // instant held-data report
   const [dossier, setDossier] = useState(null)       // live dossier (status/payload)
-  const [team, setTeam] = useState(null)             // chosen opponent team (grade_id) | null = whole club
   const [teamsList, setTeamsList] = useState([])     // their teams, held stable across rebuilds
   const [matching, setMatching] = useState(null)     // fixture being matched to a club
   const [tags, setTags] = useState({})               // participant_id → scouting tag
+  const [scope, setScope] = useState('all')          // record card: 'all' | 'season' | 'grade'
   const pollRef = useRef(null)
+
+  // The GLOBAL BetterIQ filter bar (top of the page) is now the single source of
+  // truth — no separate "Scout team" control. `ctx.team.id` is a grade NAME (the
+  // IQ-wide convention); the season can be a single year or a cross-season range.
+  const { ctx, seasons } = useIQFilter()
+  const ctxGradeName = ctx?.team?.id || null
+  const seasonIds = useMemo(() => seasonIdsInRange(ctx, seasons), [ctx, seasons])
+  const seasonIdsKey = seasonIds.join(',')
+  const seasonText = ctx ? seasonLabel(ctx, seasons) : ''
+  const isAllSeasons = seasons.length > 0 && seasonIds.length === seasons.length
+  // Map the selected grade NAME onto THIS opponent's grade_id for the live scout
+  // (their grade ids carry the competition-wide grade name).
+  const teamGradeId = useMemo(() => {
+    if (!ctxGradeName) return null
+    const lc = ctxGradeName.toLowerCase()
+    const t = teamsList.find(x => (x.team_name || '').toLowerCase() === lc || (x.grade_name || '').toLowerCase() === lc)
+    return t?.grade_id || null
+  }, [ctxGradeName, teamsList])
+  // Record-card scope toggle options: All-time always; Season when a sub-range is
+  // chosen; Grade when a specific grade is chosen in the top bar.
+  const scopeOptions = useMemo(() => {
+    const opts = [{ value: 'all', label: 'All-time' }]
+    if (seasonIds.length && !isAllSeasons) opts.push({ value: 'season', label: seasonText || 'Season' })
+    if (ctxGradeName) opts.push({ value: 'grade', label: ctxGradeName })
+    return opts
+  }, [seasonIds.length, isAllSeasons, seasonText, ctxGradeName])
 
   // Pull opponent list + saved scouting tags once.
   useEffect(() => {
@@ -675,24 +751,43 @@ export default function OppositionScout() {
 
   const stopPoll = () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
 
-  // Instant report — club-wide, independent of the team filter, so it only
-  // reloads when the opponent changes.
+  // Keep the record-card scope valid as the top filter changes (e.g. switching
+  // back to "All grades" while the card is on Grade).
+  useEffect(() => { if (scope === 'grade' && !ctxGradeName) setScope('all') }, [scope, ctxGradeName])
+  useEffect(() => { if (scope === 'season' && (!seasonIds.length || isAllSeasons)) setScope('all') }, [scope, seasonIds.length, isAllSeasons])
+
+  // Instant report — historical record vs them, scoped by the card toggle:
+  //   all    → all-time / all-grades (the default headline)
+  //   season → the season(s) chosen in the top bar
+  //   grade  → the grade chosen in the top bar
+  // Only the *active* scope's value is keyed, so flipping the top bar while the
+  // card is on "All-time" doesn't trigger a pointless refetch.
+  const effGrade = scope === 'grade' ? ctxGradeName : null
+  const effSeasonIds = scope === 'season' ? seasonIds : null
+  const effSeasonKey = effSeasonIds ? effSeasonIds.join(',') : ''
+  const reportSel = useRef(null)
   useEffect(() => {
-    setReport(null)
-    if (!selected) return
+    if (!selected) { setReport(null); return }
     let alive = true
-    api.iqOppositionReport({ opponent: selected.opponent, fixtureId: selected.fixtureId })
+    // Blank the report only when the opponent itself changed (first load); a
+    // scope/season/grade change refetches in place so the toggle doesn't flicker.
+    if (reportSel.current !== selected) { setReport(null); reportSel.current = selected }
+    api.iqOppositionReport({
+      opponent: selected.opponent, fixtureId: selected.fixtureId,
+      grade: effGrade || undefined, seasonIds: effSeasonIds || undefined,
+    })
       .then(r => { if (alive) setReport(r) }).catch(() => { if (alive) setReport({ error: true }) })
     return () => { alive = false }
-  }, [selected])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, scope, effGrade, effSeasonKey])
 
-  // Live dossier — re-polled when the opponent OR chosen team changes.
+  // Live dossier — re-polled when the opponent OR chosen grade (top bar) changes.
   useEffect(() => {
     stopPoll()
     setDossier(null)
     if (!selected) return
     let alive = true
-    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team }
+    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team: teamGradeId }
     const poll = () => {
       api.iqOppositionDossier(params).then(d => {
         if (!alive) return
@@ -703,18 +798,18 @@ export default function OppositionScout() {
     }
     poll()
     return () => { alive = false; stopPoll() }
-  }, [selected, team])
+  }, [selected, teamGradeId])
 
   const pick = (sel) => {
     setSelected(sel)
-    setTeam(null)
     setTeamsList([])
+    setScope('all')
     const sp = {}
     if (sel.fixtureId) sp.fixture = sel.fixtureId
     else if (sel.opponent) sp.opponent = sel.opponent
     setSearchParams(sp, { replace: true })
   }
-  const clearSelection = () => { setSelected(null); setTeam(null); setTeamsList([]); setSearchParams({}, { replace: true }) }
+  const clearSelection = () => { setSelected(null); setTeamsList([]); setScope('all'); setSearchParams({}, { replace: true }) }
 
   // Manually match an unlinked fixture to a known club entity.
   const startMatch = (fx) => setMatching({ fixtureId: fx.fixture_id, name: fx.opponent_name })
@@ -732,7 +827,7 @@ export default function OppositionScout() {
   const refresh = () => {
     if (!selected) return
     setDossier({ status: 'building' })
-    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team }
+    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team: teamGradeId }
     api.iqRefreshDossier(params)
       .then(d => {
         setDossier(d)
@@ -751,14 +846,14 @@ export default function OppositionScout() {
   const oppName = report?.opponent?.name || dossier?.opponent?.name || selected?.name || 'Opponent'
   const building = dossier?.status === 'building'
   const ready = dossier && dossier.status !== 'building' && dossier.status !== 'error' && dossier.status !== 'unavailable'
-  const teamName = dossier?.selected_team_name || teamsList.find(t => t.grade_id === team)?.team_name || null
-  const teamMatches = teamsList.find(t => t.grade_id === (team || teamsList[0]?.grade_id))?.matches
+  const teamName = dossier?.selected_team_name || teamsList.find(t => t.grade_id === teamGradeId)?.team_name || null
+  const teamMatches = teamsList.find(t => t.grade_id === (teamGradeId || teamsList[0]?.grade_id))?.matches
 
   const goCheatSheet = () => {
     const qs = new URLSearchParams()
     if (selected.opponent) qs.set('opponent', selected.opponent)
     if (selected.fixtureId) qs.set('fixture', selected.fixtureId)
-    if (team) qs.set('team', team)
+    if (teamGradeId) qs.set('team', teamGradeId)
     navigate(`/admin/betteriq/opposition/cheatsheet?${qs}`)
   }
 
@@ -819,7 +914,8 @@ export default function OppositionScout() {
           <div className="iq-card p-6"><Empty>Couldn't load the head-to-head just now.</Empty></div>
         ) : (
           <>
-            <CommandStrip h2h={report.head_to_head} lm={report.last_meeting} />
+            <CommandStrip h2h={report.head_to_head} lm={report.last_meeting}
+              scope={scope} onScope={setScope} scopeOptions={scopeOptions} />
 
             {/* Instant: our record + venue */}
             <div className="grid gap-5 lg:grid-cols-2">
@@ -842,8 +938,12 @@ export default function OppositionScout() {
           </>
         )}
 
-        {/* Which side of the club to scout — drives the live squad + form below */}
-        {teamsList.length > 0 && <TeamNarrow teams={teamsList} value={team} onChange={setTeam} disabled={building} />}
+        {/* The live squad scout below follows the top "Their grade" filter — when
+            it's narrowed to a grade this club doesn't field, fall back to the
+            whole club rather than show nothing. */}
+        {ctxGradeName && teamsList.length > 0 && !teamGradeId && (
+          <Note>They don't field a side in “{ctxGradeName}” — showing their whole club below. Pick a different grade in the top bar to narrow it.</Note>
+        )}
 
         {/* Live dossier — phase 2 */}
         {building && <BuildingCard oppName={oppName} />}
@@ -891,10 +991,18 @@ export default function OppositionScout() {
             <SquadTable dossier={dossier} />
 
             {dossier.historical_threats?.length > 0 && (
-              <Card eyebrow="not in recent squad" title="Historically hurt us">
-                <div className="flex flex-wrap gap-x-6 gap-y-2">
+              <Card eyebrow="not in their current squad · watch for a recall" title="Historically hurt us">
+                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
                   {dossier.historical_threats.map(p => (
-                    <span key={p.player_id} className="text-[13.5px]">{p.name} <span className="text-pb-faint iq-num">{p.runs} @ {a2(p.average)}</span></span>
+                    <div key={p.player_id} className="flex items-center justify-between gap-3 px-3.5 py-2.5"
+                      style={{ background: 'var(--pb-surface2)', borderRadius: 10 }}
+                      title={`${p.innings || 0} inns${p.high_score != null ? ` · HS ${p.high_score}` : ''} against us`}>
+                      <span className="text-[13.5px] font-medium truncate">{p.name}</span>
+                      <span className="iq-num text-[12.5px] whitespace-nowrap shrink-0">
+                        <span className="font-semibold">{p.runs}</span>
+                        <span className="text-pb-faint"> @ {a2(p.average)}</span>
+                      </span>
+                    </div>
                   ))}
                 </div>
               </Card>

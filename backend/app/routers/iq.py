@@ -43,13 +43,21 @@ async def opposition_opponents(
 async def opposition_report(
     opponent: str | None = Query(None, description="opp_key from the opponents list"),
     fixture_id: str | None = Query(None, description="resolve the opponent from an upcoming fixture"),
+    grade: str | None = Query(None, description="scope the record to one grade (by name) — the card's Grade toggle"),
+    season_ids: str | None = Query(None, description="comma-separated season ids to scope the record — the card's Season toggle"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Full scouting report for one opponent (head-to-head, our record vs them,
-    their danger batters, and their roster when that club is synced)."""
+    their danger batters, and their roster when that club is synced).
+
+    ``grade``/``season_ids`` optionally scope the historical sections (record,
+    our performers, venues, last meeting, bowler match-ups) to match the record
+    card's All-time / Season / Grade toggle. Omit both for the all-time view."""
+    seasons = [s for s in (season_ids.split(",") if season_ids else []) if s.strip()]
     return await iq_service.opposition_report(
-        db, str(club.id), opponent=opponent, fixture_id=fixture_id
+        db, str(club.id), opponent=opponent, fixture_id=fixture_id,
+        grade=grade, season_ids=seasons or None,
     )
 
 
