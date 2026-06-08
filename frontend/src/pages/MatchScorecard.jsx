@@ -364,9 +364,13 @@ function FallOfWicketsSection({ fow = [], fmtName = n => n }) {
                 <span className="text-pb-faint mx-1">-</span>
                 <span className="font-mono text-pb-text">{f.wicket_number}</span>
                 {f.player_name && (
-                  <Link to={`/players/${f.player_id}`} className="text-pb-faint ml-1.5 hover:text-pb-accent transition-colors">
-                    {fmtName(f.player_name)}
-                  </Link>
+                  f.player_id ? (
+                    <Link to={`/players/${f.player_id}`} className="text-pb-faint ml-1.5 hover:text-pb-accent transition-colors">
+                      {fmtName(f.player_name)}
+                    </Link>
+                  ) : (
+                    <span className="text-pb-faint ml-1.5">{fmtName(f.player_name)}</span>
+                  )
                 )}
               </div>
             ))}

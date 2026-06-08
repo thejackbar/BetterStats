@@ -71,6 +71,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE player_availability ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'admin'"
         ))
+        # Fall of wicket: dismissed batter's scorecard name (migration 074) — names
+        # the opposition half of our games (player_id NULL) from the DB, no live
+        # fetch. Defensive idempotent add so the API boots even if alembic lags.
+        await conn.execute(text(
+            "ALTER TABLE fall_of_wickets ADD COLUMN IF NOT EXISTS batter_name TEXT"
+        ))
         # BetterSelect → Net Manager: net/practice attendance + batting-queue
         # sessions. Defensive idempotent creates so the API boots even if a
         # numbered migration hasn't run yet (mirrors the self-service block).

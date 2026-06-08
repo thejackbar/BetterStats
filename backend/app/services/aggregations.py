@@ -1244,7 +1244,7 @@ async def get_game_fall_of_wickets(session: AsyncSession, game_id: str) -> list[
                 fow.innings_number,
                 fow.score_at_fall,
                 fow.overs_at_fall,
-                COALESCE(p.display_name_override, p.name) AS player_name,
+                COALESCE(p.display_name_override, p.name, fow.batter_name) AS player_name,
                 fow.player_id::text
             FROM fall_of_wickets fow
             LEFT JOIN players p ON p.id = fow.player_id

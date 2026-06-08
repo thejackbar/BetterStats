@@ -1768,6 +1768,7 @@ async def sync_grassroots_game_level_data(
                             wicket_number=wkt,
                             score_at_fall=row.get("runs"),
                             player_id=pid,
+                            batter_name=row.get("playerShortName"),
                         ))
                         fow_count += 1
 
