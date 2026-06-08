@@ -192,28 +192,36 @@ function DismissalDonut({ dismissals }) {
   if (!dismissals?.length) return null
   const total = dismissals.reduce((s, d) => s + Number(d.count), 0)
   const pieData = dismissals.map(d => ({ name: d.dismissal_type || 'Unknown', value: Number(d.count) }))
+  const hasCaughtBehind = dismissals.some(d => /caught behind/i.test(d.dismissal_type || ''))
   return (
-    <div className="flex flex-col md:flex-row items-center gap-6">
-      <div className="w-44 h-44 shrink-0">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={72} dataKey="value" paddingAngle={2}>
-              {pieData.map((_, idx) => <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />)}
-            </Pie>
-            <Tooltip contentStyle={CHART_TOOLTIP_STYLE.contentStyle} formatter={(v) => [`${v} (${Math.round(v/total*100)}%)`, '']} />
-          </PieChart>
-        </ResponsiveContainer>
+    <div>
+      <div className="flex flex-col md:flex-row items-center gap-6">
+        <div className="w-44 h-44 shrink-0">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={72} dataKey="value" paddingAngle={2}>
+                {pieData.map((_, idx) => <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />)}
+              </Pie>
+              <Tooltip contentStyle={CHART_TOOLTIP_STYLE.contentStyle} formatter={(v) => [`${v} (${Math.round(v/total*100)}%)`, '']} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+          {dismissals.map((d, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm">
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+              <span className="capitalize text-pb-dim flex-1 truncate">{d.dismissal_type || 'Unknown'}</span>
+              <span className="font-mono font-bold text-pb-text">{d.count}</span>
+              <span className="font-mono text-pb-faint text-[11px] w-9 text-right">{Math.round(Number(d.count)/total*100)}%</span>
+            </div>
+          ))}
+        </div>
       </div>
-      <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-        {dismissals.map((d, i) => (
-          <div key={i} className="flex items-center gap-2 text-sm">
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-            <span className="capitalize text-pb-dim flex-1 truncate">{d.dismissal_type || 'Unknown'}</span>
-            <span className="font-mono font-bold text-pb-text">{d.count}</span>
-            <span className="font-mono text-pb-faint text-[11px] w-9 text-right">{Math.round(Number(d.count)/total*100)}%</span>
-          </div>
-        ))}
-      </div>
+      {hasCaughtBehind && (
+        <p className="text-[11px] text-pb-faint mt-3 leading-snug">
+          Caught behind is identified where the scorecard records who kept wicket; some older games don't, so the true share is a little higher.
+        </p>
+      )}
     </div>
   )
 }
