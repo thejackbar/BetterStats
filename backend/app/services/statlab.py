@@ -166,7 +166,18 @@ MATCH_CONTEXT_FILTERS: dict[str, dict] = {
 # Per-innings filters — applied to batting_innings (bi) joins only; relevant
 # only for innings_list and the live-aggregate paths of player_*.
 INNINGS_CONTEXT_FILTERS: dict[str, dict] = {
-    "dismissal":    {"sql": "LOWER(COALESCE(bi.dismissal_type, '')) = LOWER(:ctx_dismissal)", "value_kind": "text"},
+    # Value-aware so the friendly labels match what sync actually stores (bare
+    # short codes 'c'/'b'/'st', long forms for the rest), plus the caught_behind
+    # flag for "caught behind". ELSE keeps the exact-match fallback (e.g. 'not out').
+    "dismissal":    {"sql": "(CASE "
+                            "WHEN LOWER(:ctx_dismissal) = 'caught behind' THEN bi.caught_behind IS TRUE "
+                            "WHEN LOWER(:ctx_dismissal) = 'caught'  THEN (bi.dismissal_type = 'c' OR bi.dismissal_type LIKE 'c %' OR LOWER(bi.dismissal_type) LIKE 'ct%' OR LOWER(bi.dismissal_type) LIKE 'caught%') "
+                            "WHEN LOWER(:ctx_dismissal) = 'bowled'  THEN (bi.dismissal_type = 'b' OR bi.dismissal_type LIKE 'b %' OR LOWER(bi.dismissal_type) LIKE 'bowled%') "
+                            "WHEN LOWER(:ctx_dismissal) = 'stumped' THEN (bi.dismissal_type = 'st' OR bi.dismissal_type LIKE 'st %' OR LOWER(bi.dismissal_type) LIKE 'stumped%') "
+                            "WHEN LOWER(:ctx_dismissal) = 'lbw'     THEN (LOWER(bi.dismissal_type) LIKE 'lbw%' OR LOWER(bi.dismissal_type) LIKE 'leg before%') "
+                            "WHEN LOWER(:ctx_dismissal) = 'run out' THEN LOWER(bi.dismissal_type) LIKE 'run out%' "
+                            "WHEN LOWER(:ctx_dismissal) = 'hit wicket' THEN LOWER(bi.dismissal_type) LIKE 'hit wicket%' "
+                            "ELSE LOWER(COALESCE(bi.dismissal_type, '')) = LOWER(:ctx_dismissal) END)", "value_kind": "text"},
     "position_min": {"sql": "bi.batting_position >= :ctx_position_min",                       "value_kind": "int"},
     "position_max": {"sql": "bi.batting_position <= :ctx_position_max",                       "value_kind": "int"},
 }
@@ -2629,6 +2640,43 @@ async def derived_dismissal_caught(session, *, org_id, limit, offset=0, context)
                                    like_patterns=["c", "c %", "c. %", "ct%", "caught", "caught%"], result_col="caught_count")
 
 
+async def derived_dismissal_caught_behind(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+) -> list[dict]:
+    """Players most often caught behind (caught by the wicketkeeper). Uses the
+    stored caught_behind flag — the keeper-catch subset of 'caught'. Only the
+    games where the scorecard records who kept are attributable, so this is a
+    floor (see the caught-behind footnote on player profiles)."""
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), "offset": offset, **mp, **pp}
+    universe = _game_universe_sql(mc)
+    player_extra = (" AND " + " AND ".join(pc)) if pc else ""
+    sql = f"""
+        WITH {universe},
+        counts AS (
+            SELECT
+                bi.player_id::text AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COUNT(*)::int AS caught_behind_count
+            FROM game_universe gu
+            JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            WHERE p.organisation_id = :org_id
+              AND bi.did_not_bat IS NOT TRUE
+              AND bi.caught_behind IS TRUE
+              {player_extra}
+            GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name)
+        )
+        SELECT * FROM counts
+        WHERE caught_behind_count > 0
+        ORDER BY caught_behind_count DESC, player_name ASC
+        LIMIT :limit OFFSET :offset
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
 async def derived_dismissal_lbw(session, *, org_id, limit, offset=0, context):
     return await _dismissal_count(session, org_id=org_id, limit=limit, offset=offset, context=context,
                                    like_patterns=["lbw", "lbw %", "lbw%", "leg before wicket%"], result_col="lbw_count")
@@ -4086,6 +4134,12 @@ DERIVED_QUERIES: dict[str, dict] = {
         "description": "Players most often dismissed caught.",
         "fn": derived_dismissal_caught,
         "columns": [{"key": "caught_count", "label": "CAUGHT", "decimal": False}],
+    },
+    "dismissal_caught_behind": {
+        "label": "Highest caught-behind count",
+        "description": "Players most often caught behind (by the wicketkeeper). Counts only where the scorecard records who kept, so it's a floor.",
+        "fn": derived_dismissal_caught_behind,
+        "columns": [{"key": "caught_behind_count", "label": "CT (WK)", "decimal": False}],
     },
     "dismissal_lbw": {
         "label": "Highest LBW count",
