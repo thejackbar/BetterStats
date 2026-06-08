@@ -32,7 +32,7 @@ const NAV = [
   { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: CAP.MANAGE_SELECTIONS },
 ]
 
-export default function BetterSelectLayout({ children, title, actions }) {
+export default function BetterSelectLayout({ children, title, actions, headerLeft }) {
   const { user, logout, hasCapability } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
@@ -103,9 +103,10 @@ export default function BetterSelectLayout({ children, title, actions }) {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="sticky top-0 z-30 bg-pb-surface/80 backdrop-blur border-b pb-hairline px-4 md:px-6 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             <button onClick={() => setMobileOpen(true)} className="md:hidden text-pb-faint">☰</button>
             <h1 className="font-display font-bold text-lg md:text-xl">{title}</h1>
+            {headerLeft && <><span className="h-[22px] w-px bg-pb-hairline2 hidden sm:block" />{headerLeft}</>}
           </div>
           <div className="flex items-center gap-3">
             {actions}
