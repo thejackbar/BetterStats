@@ -1166,6 +1166,19 @@ def _parse_bowler_and_fielder(dismissal_text: str, dismissal_type: str) -> tuple
     return bowler_name, None, ""
 
 
+def _caught_by_keeper(dismissal_text: str) -> bool:
+    """True when a caught dismissal's catcher is the wicketkeeper ("caught
+    behind"). CA marks the keeper with a dagger (†) before their name in
+    dismissalText, e.g. "c †Smith b Jones". We check only the *fielder* slot
+    (before the bowler marker) so a keeper who also bowled — "c Fielder b †K" —
+    isn't mistaken for a keeper catch. c&b ("c & b Jones") has no fielder slot
+    and returns False. Caller must gate on dismissalType == "Caught"."""
+    if not dismissal_text or "†" not in dismissal_text:
+        return False
+    m = _CAUGHT_FIELDER_RE.match(_norm_name(dismissal_text).strip())
+    return bool(m and m.group(1).strip().startswith("†"))
+
+
 def _count_dismissals_grassroots(batting_rows: list) -> int:
     """Number of wickets that actually fell in this innings."""
     return len(_dismissed_pids_grassroots(batting_rows))
@@ -1697,6 +1710,10 @@ async def sync_grassroots_game_level_data(
                             continue
                         not_out = dt_id == 1
                         dt_short = _GR_DISMISSAL_SHORT.get(dt_long, dt_long.lower())
+                        caught_behind = (
+                            dt_long == "Caught"
+                            and _caught_by_keeper(row.get("dismissalText") or "")
+                        )
                         session.add(BattingInnings(
                             game_id=match_uuid, player_id=pid, innings_number=inn_num,
                             batting_position=row.get("batOrder"),
@@ -1706,6 +1723,7 @@ async def sync_grassroots_game_level_data(
                             sixes=row.get("sixesScored") or 0,
                             not_out=not_out,
                             dismissal_type=dt_short or None,
+                            caught_behind=caught_behind,
                             did_not_bat=False,
                         ))
                         bat_count += 1

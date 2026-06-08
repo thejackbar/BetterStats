@@ -421,18 +421,25 @@ async def player_trend(session: AsyncSession, org_id: str, player_id: str) -> di
 # ─── Player deep-dive (analytics brief §1.4/1.5/1.9/1.10) ─────────────────────
 
 _DISM_MAP = {
-    "caught": "caught", "caught behind": "caught", "caught keeper": "caught",
+    # Sync stores short codes ("c"/"b"/"st"); accept both short and long forms.
+    "c": "caught", "caught": "caught",
+    "caught behind": "caught behind", "caught keeper": "caught behind",
     "c&b": "caught & bowled", "caught and bowled": "caught & bowled", "caught & bowled": "caught & bowled",
-    "bowled": "bowled", "lbw": "lbw", "leg before wicket": "lbw",
-    "run out": "run out", "stumped": "stumped", "hit wicket": "hit wicket",
+    "b": "bowled", "bowled": "bowled",
+    "lbw": "lbw", "leg before wicket": "lbw",
+    "run out": "run out",
+    "st": "stumped", "stumped": "stumped",
+    "hit wicket": "hit wicket",
 }
 _POS_BUCKETS = [("Opening", 1, 2), ("First drop", 3, 3), ("Middle order", 4, 6), ("Lower order", 7, 8), ("Tail", 9, 11)]
 
 
-def _dism_label(dt: str | None) -> str | None:
+def _dism_label(dt: str | None, caught_behind: bool | None = False) -> str | None:
     d = (dt or "").strip().lower()
     if not d or "not out" in d:
         return None
+    if caught_behind and (d == "c" or d.startswith("c ") or d == "caught" or "caught behind" in d):
+        return "caught behind"
     return _DISM_MAP.get(d, d)
 
 
@@ -535,7 +542,7 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
         text(
             """
             SELECT bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out, bi.dismissal_type,
-                   bi.batting_position, bi.innings_number, g.result,
+                   bi.caught_behind, bi.batting_position, bi.innings_number, g.result,
                    COALESCE(g.opp_org_id, g.opp_club_name) AS opp_key, g.opp_club_name AS opp_name
             FROM v_effective_batting_innings bi
             JOIN v_effective_games g ON g.id = bi.game_id
@@ -598,7 +605,7 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
     for r in inns:
         if r["not_out"]:
             continue
-        lbl = _dism_label(r["dismissal_type"])
+        lbl = _dism_label(r["dismissal_type"], r.get("caught_behind"))
         if lbl:
             dism[lbl] = dism.get(lbl, 0) + 1
     total_out = sum(dism.values())
