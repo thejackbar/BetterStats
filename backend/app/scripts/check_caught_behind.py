@@ -103,15 +103,43 @@ async def main() -> None:
                 incomplete.append(r["name"])
             print(f"  {(r['name'] or '?')[:30]:<30}{r['catches']:>9}{done:>6.0f}%{r['cb']:>7}{rate:>6.1f}%{flag}")
 
+        # 6. Per-club bowling coverage — watch the rebuild progress per club.
+        brows = (await s.execute(t("""
+            SELECT o.name AS name,
+                   count(*) FILTER (WHERE bw.dismissal_type='caught') AS caught,
+                   count(*) FILTER (WHERE bw.dismissal_type='caught' AND bw.caught_behind IS NOT NULL) AS done,
+                   count(*) FILTER (WHERE bw.caught_behind IS TRUE) AS cb
+            FROM bowler_wickets bw
+            JOIN games g ON g.id = bw.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s2 ON s2.id = gr.season_id
+            JOIN organisations o ON o.id = s2.organisation_id
+            GROUP BY o.name
+            HAVING count(*) FILTER (WHERE bw.dismissal_type='caught') > 0
+            ORDER BY caught DESC
+        """))).mappings().all()
+        print("\n[per-club bowling coverage]")
+        print(f"  {'club':<30}{'caught':>9}{'done%':>7}{'cb':>7}{'cb%':>7}")
+        bow_incomplete = []
+        for r in brows:
+            done = (100 * r["done"] / r["caught"]) if r["caught"] else 0.0
+            rate = (100 * r["cb"] / r["caught"]) if r["caught"] else 0.0
+            flag = "  <- rebuild" if done < 95 else ""
+            if done < 95:
+                bow_incomplete.append(r["name"])
+            print(f"  {(r['name'] or '?')[:30]:<30}{r['caught']:>9}{done:>6.0f}%{r['cb']:>7}{rate:>6.1f}%{flag}")
+
         print("\n" + "-" * 70)
         if not (bi and bw and vw):
             print("RESULT: schema missing — deploy + migrate before backfilling.")
-        elif bdone >= 95 and not w["legacy"] and not incomplete:
+        elif bdone >= 95 and not w["legacy"] and not incomplete and not bow_incomplete:
             print("RESULT: all good — columns present, both backfills complete across every club.")
         else:
             print("RESULT: action needed — see WARN lines above.")
             if incomplete:
                 print(f"  clubs needing batting backfill: {', '.join(incomplete[:20])}")
+            if bow_incomplete:
+                print(f"  clubs needing bowling rebuild: {', '.join(bow_incomplete[:20])}")
         print("-" * 70)
 
 
