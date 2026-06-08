@@ -1,0 +1,129 @@
+// The Selection pool's filter bar. One shared system across both board views:
+//   row 1  — search · sort popover · Filters button (active-count badge)
+//   row 2  — quick role chips (Bat/Bowl/All/WK) · Hide unavailable · recency
+//   panel  — Availability · Bowling · Batting hand · Form groups, plus the
+//            searchable Squad picker and the compact Selection-status control
+//   below  — removable active-filter pills + Clear all, and an "X of Y" count.
+//
+// State lives in the URL via useFilters (filters.jsx) so it survives navigation
+// and is shareable; this component only composes the presentation. The long
+// squad list is handled by SquadPicker (search + quick picks); selection status
+// is a 3-way segmented control rather than yet another checkbox.
+import { useState } from 'react'
+import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
+import { Icon, Chip, Search, RecencySelect, Dot, Segmented, FilterButton } from './ui'
+import { SortMenu, SquadPicker } from './filters'
+import { BOWL_KINDS, HAND_KINDS, FORM_BUCKETS, SORTS } from './selectionMeta'
+
+const ROLE_QUICK = [['BAT', 'Bat'], ['BWL', 'Bowl'], ['ALL', 'All'], ['WKT', 'WK']]
+const ROLE_LABEL = { BAT: 'Batter', BWL: 'Bowler', ALL: 'All-rounder', WKT: 'Keeper' }
+const STATUS_OPTS = [{ value: '', label: 'All' }, { value: 'unselected', label: 'Unselected' }, { value: 'clash', label: 'In another XI' }]
+
+function PanelGroup({ label, children }) {
+  return (
+    <div className="min-w-0">
+      <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faintest pb-1 border-b border-pb-hairline">{label}</div>
+      <div className="flex flex-col gap-0.5 mt-1.5">{children}</div>
+    </div>
+  )
+}
+function Check({ label, checked, onChange, dot }) {
+  return (
+    <label className="flex items-center gap-2 text-[12.5px] text-pb-dim hover:text-pb-text cursor-pointer py-0.5">
+      <input type="checkbox" checked={checked} onChange={onChange} className="accent-pb-accent w-3.5 h-3.5 shrink-0" />
+      {dot && <Dot status={dot} size={7} />}
+      {label}
+    </label>
+  )
+}
+
+export default function SelectionFilters({ filters, sort, setSort, squadOptions, yearsF, setYearsF, count, total }) {
+  const [open, setOpen] = useState(false)
+  const { values, search, setSearch, toggle, setValue, setMulti, clearAll, activeCount } = filters
+  const hideUnavail = !!values.hideUnavail
+
+  const pills = []
+  ;(values.role || []).forEach((r) => pills.push({ k: 'r' + r, label: ROLE_LABEL[r] || r, rm: () => toggle('role', r) }))
+  ;(values.avail || []).forEach((s) => pills.push({ k: 'a' + s, label: AVAILABILITY[s]?.label || s, rm: () => toggle('avail', s) }))
+  ;(values.bowling || []).forEach((b) => pills.push({ k: 'b' + b, label: (BOWL_KINDS.find((x) => x.value === b) || {}).label, rm: () => toggle('bowling', b) }))
+  ;(values.hand || []).forEach((h) => pills.push({ k: 'h' + h, label: h === 'RIGHT' ? 'RHB' : 'LHB', rm: () => toggle('hand', h) }))
+  ;(values.form || []).forEach((fm) => pills.push({ k: 'f' + fm, label: (FORM_BUCKETS.find((x) => x.value === fm) || {}).label, rm: () => toggle('form', fm) }))
+  ;(values.squad || []).forEach((s) => pills.push({ k: 's' + s, label: (squadOptions.find((o) => o.value === s) || {}).label || s, rm: () => toggle('squad', s) }))
+  if (values.status) pills.push({ k: 'st', label: values.status === 'unselected' ? 'Unselected' : 'In another XI', rm: () => setValue('status', '') })
+  if (hideUnavail) pills.push({ k: 'hu', label: 'Hide unavailable', rm: () => setValue('hideUnavail', false) })
+  // (recency has its own dedicated dropdown control, so it isn't duplicated as a pill)
+
+  const resetAll = () => { clearAll(); setYearsF(0) }
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {/* Row 1 — search · sort · filters */}
+      <div className="flex items-center gap-2">
+        <Search value={search} onChange={setSearch} placeholder="Search players…" className="flex-1 min-w-0" />
+        <SortMenu value={sort} onChange={setSort} options={SORTS} />
+        <FilterButton active={open} count={activeCount} onClick={() => setOpen((o) => !o)} />
+      </div>
+
+      {/* Row 2 — quick role chips + hide-unavailable + recency */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {ROLE_QUICK.map(([v, l]) => (
+          <Chip key={v} label={l} active={(values.role || []).includes(v)} onClick={() => toggle('role', v)} />
+        ))}
+        <span className="h-4 w-px bg-pb-hairline2 mx-0.5" />
+        <Chip label="Hide unavailable" dot={hideUnavail ? 'var(--pb-positive)' : undefined}
+          active={hideUnavail} onClick={() => setValue('hideUnavail', !hideUnavail)} />
+        <span className="ml-auto"><RecencySelect value={yearsF} onChange={setYearsF} /></span>
+      </div>
+
+      {/* Filters panel */}
+      {open && (
+        <div className="grid gap-x-5 gap-y-4 rounded-lg border border-pb-hairline2 bg-pb-surface2/40 p-3.5"
+          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+          <PanelGroup label="Availability">
+            {AVAIL_ORDER.map((s) => (
+              <Check key={s} label={AVAILABILITY[s].label} dot={s}
+                checked={(values.avail || []).includes(s)} onChange={() => toggle('avail', s)} />
+            ))}
+          </PanelGroup>
+          <PanelGroup label="Bowling">
+            {BOWL_KINDS.map((b) => (
+              <Check key={b.value} label={b.label} checked={(values.bowling || []).includes(b.value)} onChange={() => toggle('bowling', b.value)} />
+            ))}
+          </PanelGroup>
+          <PanelGroup label="Batting hand">
+            {HAND_KINDS.map((h) => (
+              <Check key={h.value} label={h.label} checked={(values.hand || []).includes(h.value)} onChange={() => toggle('hand', h.value)} />
+            ))}
+          </PanelGroup>
+          <PanelGroup label="Form">
+            {FORM_BUCKETS.map((f) => (
+              <Check key={f.value} label={f.label} checked={(values.form || []).includes(f.value)} onChange={() => toggle('form', f.value)} />
+            ))}
+          </PanelGroup>
+          <PanelGroup label="Squad">
+            <SquadPicker options={squadOptions} selected={values.squad || []}
+              onToggle={(v) => toggle('squad', v)} onSetMany={(arr) => setMulti('squad', arr)} />
+          </PanelGroup>
+          <PanelGroup label="Selection">
+            <Segmented sm value={values.status || ''} onChange={(v) => setValue('status', v)} options={STATUS_OPTS} />
+          </PanelGroup>
+        </div>
+      )}
+
+      {/* Active pills */}
+      {pills.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {pills.map((p) => (
+            <button key={p.k} type="button" onClick={p.rm}
+              className="inline-flex items-center gap-1 rounded-full bg-pb-accent/12 text-pb-accent text-[11.5px] font-medium pl-2.5 pr-1.5 py-1 hover:bg-pb-accent/22 transition">
+              {p.label}<Icon name="close" size={11} className="opacity-70" />
+            </button>
+          ))}
+          <button type="button" onClick={resetAll} className="text-[11.5px] text-pb-faint hover:text-pb-accent underline underline-offset-2 ml-1">Clear all</button>
+        </div>
+      )}
+
+      <div className="text-[11.5px] text-pb-faint pb-num">{count} of {total} shown</div>
+    </div>
+  )
+}

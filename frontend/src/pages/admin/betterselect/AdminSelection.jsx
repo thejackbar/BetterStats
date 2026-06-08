@@ -1,36 +1,37 @@
-// BetterSelect → Selection. The "batting-order slots" board from the design
-// handoff (docs/design_handoff_betterselect/prototype/bs-selection-c.jsx):
-// the available pool on the left (wider), the XI as numbered 1..N slots on the
-// right. Click a pool player to fill the focused/next slot, right-click for the
-// next empty, or drag onto a specific slot. Captain/keeper toggles live on each
-// filled slot. Auto-fill tops up empty slots with the best available player.
+// BetterSelect → Selection. The team-picking "hero feature", rebuilt to the
+// design handoff (docs/design_handoff_selection_redesign): one shared selection
+// state rendered two toggleable ways —
+//   • Dual rail   — Available pool ↔ Selected XI (build the side)
+//   • Team sheet  — a numbered batting-order spine drafted from a pool grid
 //
-// Recreated with the real API + atom kit. Semantic availability colours
-// (green/amber/red) are fixed; the club accent is reserved for chrome.
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+// Both are fully bidirectional via the pointer DnD engine (pool→XI, XI→pool to
+// remove, drag-to-reorder) PLUS tap/click-to-place (primary on mobile). Player
+// rows show the real role + style + a quiet form indicator (roleLine + FormBars)
+// instead of the old hardcoded positional hints. The pool filters are expanded
+// (availability / bowling / batting-hand / form / a searchable squad picker /
+// selection status) on top of the existing search + recency.
+//
+// Wired to the real selection API + atom kit. Availability colours stay
+// semantic (green/amber/red); the club accent is reserved for chrome.
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
+import { useTheme } from '../../../contexts/ThemeContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
-import { AVAILABILITY, AVAIL_ORDER, availRank } from '../../../lib/availability'
-import {
-  Icon, Avatar, AvailDot, RoleChips, Tag, Btn, Segmented, Empty, QuickAvailModal,
-  RecencySelect, playedWithinYears,
-} from './ui'
-import { useFilters, FilterBar } from './filters'
+import { availRank } from '../../../lib/availability'
+import { Icon, Avatar, Btn, RoleChips, Tag, Empty, QuickAvailModal, playedWithinYears } from './ui'
+import { useFilters } from './filters'
+import SelectionFilters from './SelectionFilters'
+import { DnD } from './selectionDnd'
+import { DualRailView, TeamSheetView } from './SelectionViews'
+import { classifyBowl, formBucket } from './selectionMeta'
 
-const FORMATS = [
-  { value: 11, label: '11' },
-  { value: 12, label: '12' },
-  { value: 13, label: '13' },
-  { value: 0, label: 'No limit' },
-]
-
-// Soft positional hints + which roles "fit" each slot (drives suggestions).
-const POS_HINTS = ['Opener', 'Opener', 'First drop', 'Top order', 'Top order', 'Middle order', 'Middle order', 'All-rounder', 'Lower order', 'Tail', 'Tail', '12th', '13th']
+// Soft role-band each batting slot prefers — drives auto-fill placement (the
+// displayed positional *hints* are gone, but the eligibility model is useful).
 function slotAccepts(i) {
   if (i <= 1) return ['BAT', 'WKT']
   if (i <= 4) return ['BAT', 'WKT', 'ALL']
@@ -39,13 +40,27 @@ function slotAccepts(i) {
   return ['BWL', 'ALL']
 }
 function fitsSlot(p, i) {
-  const acc = slotAccepts(i)
-  return (p.skill_positions || []).some((r) => acc.includes(r))
+  return (p.skill_positions || []).some((r) => slotAccepts(i).includes(r))
 }
-const ROLE_LABEL = { BAT: 'BAT', BWL: 'BWL', ALL: 'ALL', WKT: 'WK' }
+
+// Longest shared leading word-run across squad names, so a tag reads "2nd XI"
+// not "Applecross 2nd XI" without hardcoding the club name.
+function commonPrefixWord(names) {
+  if (names.length < 2) return ''
+  let prefix = names[0]
+  for (const n of names.slice(1)) {
+    let i = 0
+    while (i < prefix.length && i < n.length && prefix[i] === n[i]) i++
+    prefix = prefix.slice(0, i)
+    if (!prefix) break
+  }
+  const cut = prefix.lastIndexOf(' ')
+  return cut > 0 ? prefix.slice(0, cut + 1) : ''
+}
+const stripPrefix = (prefix, name) => (prefix && name?.startsWith(prefix) ? name.slice(prefix.length) : name)
 
 function fmtHeader(fx) {
-  if (!fx) return { title: 'Selection', sub: '' }
+  if (!fx) return { title: 'Selection', sub: '', kicker: 'Team sheet' }
   const us = fx.home_away === 'AWAY' ? (fx.away_team || 'Us') : (fx.home_team || 'Us')
   const opp = fx.opponent_name || fx.label || 'TBC'
   const title = fx.home_away === 'BYE' ? 'BYE' : `${us} vs ${opp}`
@@ -57,7 +72,28 @@ function fmtHeader(fx) {
   }
   if (fx.start_time) bits.push(fx.start_time)
   if (fx.venue) bits.push(`${fx.venue}${fx.home_away === 'AWAY' ? ' (A)' : fx.home_away === 'HOME' ? ' (H)' : ''}`)
-  return { title, sub: bits.join(' · ') }
+  return { title, sub: bits.join(' · '), kicker: `Team sheet${fx.round ? ` · Round ${fx.round}` : ''}` }
+}
+
+const VIEWS = [
+  { id: 'rail', name: 'Dual rail', icon: 'cols' },
+  { id: 'sheet', name: 'Team sheet', icon: 'sheet' },
+]
+
+function ViewToggle({ value, onChange }) {
+  return (
+    <div className="inline-flex p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline" role="tablist" aria-label="Selection view">
+      {VIEWS.map((v) => {
+        const on = v.id === value
+        return (
+          <button key={v.id} type="button" role="tab" aria-selected={on} title={`${v.name} view`} onClick={() => onChange(v.id)}
+            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 font-display font-semibold text-[13px] whitespace-nowrap transition ${on ? 'bg-pb-surface text-pb-accent shadow-sm' : 'text-pb-faint hover:text-pb-text'}`}>
+            <Icon name={v.icon} size={15} /><span className="hidden md:inline">{v.name}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 export default function AdminSelection() {
@@ -65,25 +101,28 @@ export default function AdminSelection() {
   const navigate = useNavigate()
   const { hasCapability } = useAuth()
   const toast = useToast()
+  const { theme, toggle: toggleTheme } = useTheme()
   const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
 
   const [data, setData] = useState(null)
-  const [slots, setSlots] = useState([])     // [playerId|null], length = slot count
+  const [slots, setSlots] = useState([])
   const [capId, setCapId] = useState(null)
   const [wkId, setWkId] = useState(null)
   const [focus, setFocus] = useState(null)
   const [format, setFormat] = useState(11)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
-  const [yearsF, setYearsF] = useState(3)           // recency: played within N yrs (0 = any; quiet control)
-  const [availEdit, setAvailEdit] = useState(null) // player object for quick-update modal
+  const [yearsF, setYearsF] = useState(3)
+  const [sort, setSort] = useState('squad')
+  const [availEdit, setAvailEdit] = useState(null)
   const [showSheet, setShowSheet] = useState(false)
   const [copied, setCopied] = useState(false)
   const [allFixtures, setAllFixtures] = useState([])
-  const [prevXI, setPrevXI] = useState(null) // { player_ids, captain_id, wicket_keeper_id, source_* }
-
-  const dragId = useRef(null)       // pool player being dragged
-  const dragSlot = useRef(null)     // slot index being dragged (reorder)
+  const [prevXI, setPrevXI] = useState(null)
+  const [view, setView] = useState(() => {
+    const v = localStorage.getItem('bs-view'); return v === 'sheet' || v === 'rail' ? v : 'rail'
+  })
+  useEffect(() => { localStorage.setItem('bs-view', view) }, [view])
 
   const load = useCallback(() => {
     setData(null)
@@ -117,9 +156,7 @@ export default function AdminSelection() {
   }, [data])
   const usedIds = useMemo(() => new Set(slots.filter(Boolean)), [slots])
 
-  // Comparator: autofill tier (own-squad → grade below → grade above), then
-  // composite form score, then availability, then name. Tier/score come from
-  // the backend; ineligibles (null tier) sink to the bottom.
+  // Default (Squad order) comparator: tier → form score → availability → name.
   const cmp = useCallback((a, b) => {
     const at = a.tier ?? 99, bt = b.tier ?? 99
     if (at !== bt) return at - bt
@@ -130,22 +167,26 @@ export default function AdminSelection() {
     return (a.display_name || '').localeCompare(b.display_name || '')
   }, [])
 
-  const squadOptions = useMemo(() => {
-    const s = new Set()
-    ;(data?.pool || []).forEach((p) => (p.squads || []).forEach((sq) => s.add(sq)))
-    return [...s].sort()
+  // Squad facet options (short label + pool count for the searchable picker).
+  const squadPrefix = useMemo(() => {
+    const names = new Set()
+    ;(data?.pool || []).forEach((p) => (p.squads || []).forEach((s) => names.add(s)))
+    return commonPrefixWord([...names])
   }, [data])
+  const squadShort = useCallback((name) => stripPrefix(squadPrefix, name) || name, [squadPrefix])
+  const squadOptions = useMemo(() => {
+    const counts = {}
+    ;(data?.pool || []).forEach((p) => (p.squads || []).forEach((s) => { counts[s] = (counts[s] || 0) + 1 }))
+    return Object.keys(counts)
+      .map((n) => ({ value: n, label: squadShort(n), count: counts[n] }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [data, squadShort])
 
   const facets = useMemo(() => [
-    { key: 'squad', label: 'Squad', type: 'multi', options: squadOptions.map((s) => ({ value: s, label: s })) },
-    { key: 'avail', label: 'Availability', type: 'multi', options: AVAIL_ORDER.map((s) => ({ value: s, label: AVAILABILITY[s].label, dot: AVAILABILITY[s].cssVar })) },
-    { key: 'role', label: 'Role', type: 'multi', options: [
-      { value: 'BAT', label: 'BAT' }, { value: 'BWL', label: 'BWL' }, { value: 'ALL', label: 'ALL' }, { value: 'WKT', label: 'WK' },
-    ] },
-    { key: 'status', label: 'Selection', type: 'single', options: [
-      { value: 'unselected', label: 'Unselected' }, { value: 'clash', label: 'In another XI' },
-    ] },
-  ], [squadOptions])
+    { key: 'squad', type: 'multi' }, { key: 'avail', type: 'multi' }, { key: 'role', type: 'multi' },
+    { key: 'bowling', type: 'multi' }, { key: 'hand', type: 'multi' }, { key: 'form', type: 'multi' },
+    { key: 'status', type: 'single' }, { key: 'hideUnavail', type: 'bool' },
+  ], [])
   const filters = useFilters(facets)
   const { values, search } = filters
 
@@ -155,122 +196,90 @@ export default function AdminSelection() {
     if (search.trim()) list = list.filter((p) => (p.display_name || '').toLowerCase().includes(search.trim().toLowerCase()))
     if (values.role?.length) list = list.filter((p) => (p.skill_positions || []).some((r) => values.role.includes(r)))
     if (values.avail?.length) list = list.filter((p) => values.avail.includes(p.availability || 'NO_RESPONSE'))
+    if (values.bowling?.length) list = list.filter((p) => values.bowling.includes(classifyBowl(p)))
+    if (values.hand?.length) list = list.filter((p) => values.hand.includes(p.batting_hand))
+    if (values.form?.length) list = list.filter((p) => { const b = formBucket(p); return b && values.form.includes(b) })
     if (values.squad?.length) list = list.filter((p) => values.squad.some((s) => (p.squads || []).includes(s)))
+    if (values.hideUnavail) list = list.filter((p) => p.availability !== 'UNAVAILABLE')
     if (yearsF) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
     if (values.status === 'unselected') list = list.filter((p) => !(p.clash?.length > 0))
     else if (values.status === 'clash') list = list.filter((p) => p.clash?.length > 0)
-    return list.slice().sort(cmp)
-  }, [available, search, values, yearsF, cmp])
+    const sorters = {
+      squad: cmp,
+      form: (a, b) => (b.score ?? 0) - (a.score ?? 0) || (a.display_name || '').localeCompare(b.display_name || ''),
+      name: (a, b) => (a.display_name || '').localeCompare(b.display_name || ''),
+    }
+    return list.slice().sort(sorters[sort] || cmp)
+  }, [available, search, values, yearsF, sort, cmp])
 
   const filled = slots.filter(Boolean)
   const count = filled.length
   const target = format || 0
   const offCount = target > 0 && count !== target
 
-  // ── Slot mutations ────────────────────────────────────────────────────────
+  // ── Slot mutations (plain fns — DnD always calls the latest onDrop) ────────
   const markDirty = () => setDirty(true)
 
   const placeInSlot = (slotIdx, playerId) => {
-    setSlots((prev) => {
-      const next = [...prev]
-      const existing = next.indexOf(playerId)
-      if (existing !== -1) next[existing] = null
-      next[slotIdx] = playerId
-      return next
-    })
+    setSlots((prev) => { const n = [...prev]; const ex = n.indexOf(playerId); if (ex !== -1) n[ex] = null; n[slotIdx] = playerId; return n })
     markDirty()
-    setFocus((f) => {
-      // advance focus to the next empty slot after this one
-      const after = slots.findIndex((x, i) => i > slotIdx && x == null)
-      return after
-    })
+    setFocus(slots.findIndex((x, i) => i > slotIdx && x == null))
   }
-
+  const swapSlots = (from, to) => {
+    if (from === to) return
+    setSlots((prev) => { const n = [...prev]; const m = n[from]; n[from] = n[to]; n[to] = m; return n })
+    markDirty()
+  }
   const tapPlayer = (p) => {
     if (!canEdit) return
     if (p.clash?.length > 0) { toast.error(`${p.display_name} is already picked for ${p.clash.join(', ')} that day`); return }
+    if (p.availability === 'UNAVAILABLE') return
     setSlots((prev) => {
       const next = [...prev]
       const existing = next.indexOf(p.id)
       if (existing !== -1) next[existing] = null
-      let target = focus != null && next[focus] == null ? focus : next.indexOf(null)
-      if (target === -1) {
-        if (format === 0) { next.push(p.id); return next }  // no-limit: append
+      const t = focus != null && next[focus] == null ? focus : next.indexOf(null)
+      if (t === -1) {
+        if (format === 0) { next.push(p.id); return next }
         toast.error('All slots are full — increase the side size to add more.')
         return prev
       }
-      next[target] = p.id
-      return next
-    })
-    markDirty()
-    setFocus(() => slots.findIndex((x) => x == null && x !== undefined))
-  }
-
-  const addNext = (p) => { // right-click → next empty
-    if (!canEdit || p.clash?.length > 0) return
-    setSlots((prev) => {
-      const next = [...prev]
-      if (next.indexOf(p.id) !== -1) return prev
-      const t = next.indexOf(null)
-      if (t === -1) { if (format === 0) { next.push(p.id); return next } return prev }
       next[t] = p.id
       return next
     })
     markDirty()
+    setFocus(slots.findIndex((x) => x == null))
   }
-
   const removeAt = (i) => {
     setSlots((prev) => { const n = [...prev]; const id = n[i]; n[i] = null; if (id === capId) setCapId(null); if (id === wkId) setWkId(null); return n })
     markDirty()
     setFocus(i)
   }
+  const toggleCap = (id) => { setCapId((c) => (c === id ? null : id)); markDirty() }
+  const toggleWk = (id) => { setWkId((c) => (c === id ? null : id)); markDirty() }
+  const clearXI = () => {
+    if (!canEdit) return
+    setSlots((prev) => prev.map(() => null)); setCapId(null); setWkId(null); setFocus(0); markDirty()
+  }
 
-  const onDropSlot = (i) => {
-    if (dragId.current) { placeInSlot(i, dragId.current); dragId.current = null }
-    else if (dragSlot.current != null) {
-      const from = dragSlot.current
-      dragSlot.current = null
-      if (from === i) return
-      setSlots((prev) => { const next = [...prev]; const moved = next[from]; next[from] = next[i]; next[i] = moved; return next })
-      markDirty()
+  // Drop semantics shared by both views.
+  const onDrop = (tgt, item) => {
+    if (!canEdit) return
+    if (tgt.kind === 'slot') {
+      if (item.kind === 'pool') {
+        const p = item.player
+        if (p.clash?.length > 0 || p.availability === 'UNAVAILABLE') return
+        placeInSlot(tgt.idx, p.id)
+      } else if (item.kind === 'slot') swapSlots(item.idx, tgt.idx)
+    } else if (tgt.kind === 'pool' && item.kind === 'slot') {
+      removeAt(item.idx)
     }
   }
 
-  const toggleCap = (id) => { setCapId((c) => (c === id ? null : id)); markDirty() }
-  const toggleWk = (id) => { setWkId((c) => (c === id ? null : id)); markDirty() }
-
-  // Per-slot suggestion: best autofill-eligible candidate that fits the slot's
-  // role band (openers for 1-2, bowlers for 9-11, etc.). Same tier discipline
-  // as fillEmpty — never proposes a women's-grade player for a men's fixture
-  // or a 1st XI regular for a 6th XI sheet.
-  const suggestMap = useMemo(() => {
-    const out = {}
-    const taken = new Set(slots.filter(Boolean))
-    const eligible = (data?.pool || []).filter((p) =>
-      p.autofill_eligible && !taken.has(p.id) && !(p.clash?.length > 0) && p.availability !== 'UNAVAILABLE'
-    )
-    slots.forEach((id, i) => {
-      if (id) return
-      const fit = eligible.filter((p) => !taken.has(p.id) && fitsSlot(p, i)).sort(cmp)
-      const any = eligible.filter((p) => !taken.has(p.id)).sort(cmp)
-      const pick = fit[0] || any[0]
-      if (pick) { out[i] = pick; taken.add(pick.id) }
-    })
-    return out
-  }, [slots, data, cmp])
-
-  // Fill empty slots. With `useLastWeek`, seed position-by-position from the
-  // previous XI first (skipping anyone now unavailable/clashing/already in),
-  // then top up remaining gaps with the best available player.
-  //
-  // Tier discipline: own-squad players fill first; only when that pool is
-  // exhausted do we dip into the grade below (promotion candidates), then the
-  // grade above (drop-down candidates). A player carried over from last week
-  // who's no longer eligible (e.g. they've moved squads) stays put — we don't
-  // tear last week's XI apart, but we don't bring more like them in either.
+  // Auto-fill empty slots (own squad → grade below → grade above), optionally
+  // seeding from last week's XI first. Unchanged tier discipline.
   const fillEmpty = (useLastWeek) => {
     if (!canEdit) return
-    // No-limit has no fixed slots to fill — autofill would be meaningless.
     if (format === 0) { toast.error('Set a side size (11/12/13) to auto-fill'); return }
     const okToPick = (p) => p && !(p.clash?.length > 0) && p.availability !== 'UNAVAILABLE'
     setSlots((prev) => {
@@ -298,7 +307,6 @@ export default function AdminSelection() {
       }
       return next
     })
-    // Carry captain/keeper from last week if those slots are otherwise unset.
     if (useLastWeek && prevXI) {
       if (!capId && prevXI.captain_id && poolById[prevXI.captain_id]) setCapId(prevXI.captain_id)
       if (!wkId && prevXI.wicket_keeper_id && poolById[prevXI.wicket_keeper_id]) setWkId(prevXI.wicket_keeper_id)
@@ -306,14 +314,12 @@ export default function AdminSelection() {
     markDirty()
   }
 
-  // ── Format (persisted club default) ──────────────────────────────────────
   const changeFormat = async (size) => {
     setFormat(size)
     setSlots((prev) => {
-      if (size === 0) return prev.filter(Boolean) // collapse to filled
+      if (size === 0) return prev.filter(Boolean)
       const next = prev.slice(0, size)
       while (next.length < size) next.push(null)
-      // drop cap/wk if they fell off the end
       const kept = new Set(next.filter(Boolean))
       if (capId && !kept.has(capId)) setCapId(null)
       if (wkId && !kept.has(wkId)) setWkId(null)
@@ -322,7 +328,6 @@ export default function AdminSelection() {
     if (canEdit) { try { await api.bsSetDefaultTeamSize(size) } catch (e) { toast.error('Could not save side size: ' + e.message) } }
   }
 
-  // ── Availability quick-update ────────────────────────────────────────────
   const pickAvail = async (status) => {
     const p = availEdit
     setAvailEdit(null)
@@ -332,7 +337,6 @@ export default function AdminSelection() {
     catch (e) { toast.error('Could not update availability: ' + e.message); load() }
   }
 
-  // ── Save ─────────────────────────────────────────────────────────────────
   const save = async () => {
     if (offCount) {
       const diff = count > target ? `${count - target} too many` : `${target - count} too few`
@@ -350,15 +354,14 @@ export default function AdminSelection() {
     } finally { setSaving(false) }
   }
 
-  // ── Share ────────────────────────────────────────────────────────────────
+  const { title, sub, kicker } = fmtHeader(fx)
   const lineupText = () => {
-    const head = fmtHeader(fx)
     const lines = filled.map((id, i) => {
       const p = poolById[id]
       const tags = [id === capId && '(C)', id === wkId && '(WK)'].filter(Boolean).join(' ')
       return `${i + 1}. ${p?.display_name || '—'}${tags ? ' ' + tags : ''}`
     })
-    return `${head.title}${head.sub ? '\n' + head.sub : ''}\n\n${lines.join('\n')}`
+    return `${title}${sub ? '\n' + sub : ''}\n\n${lines.join('\n')}`
   }
   const copyLineup = async () => {
     try { await navigator.clipboard.writeText(lineupText()); setCopied(true); setTimeout(() => setCopied(false), 1800) }
@@ -380,7 +383,6 @@ export default function AdminSelection() {
     })
   }
 
-  // ── Team balance ─────────────────────────────────────────────────────────
   const balance = useMemo(() => {
     const has = (id, code) => (poolById[id]?.skill_positions || []).includes(code)
     const b = { BAT: 0, ALL: 0, BWL: 0, WKT: 0 }
@@ -391,186 +393,55 @@ export default function AdminSelection() {
 
   if (data === null) return <BetterSelectLayout title="Selection"><PbSpinner message="Loading selection…" /></BetterSelectLayout>
 
-  const { title, sub } = fmtHeader(fx)
-  // Auto-fill only applies to fixed-size sides with empty slots — never No Limit.
   const canAutofill = format > 0 && slots.some((x) => x == null)
-  const capOk = capId && filled.includes(capId)
-  const wkOk = wkId && filled.includes(wkId)
-
   const hasPrev = (prevXI?.player_ids?.length || 0) > 0
-  const actions = canEdit && (
-    <div className="flex gap-2">
-      {canAutofill && hasPrev && <Btn variant="ghost" sm icon="bolt" onClick={() => fillEmpty(true)} title="Seed empty slots from last week's XI, then top up">Fill from last week</Btn>}
-      {canAutofill && <Btn variant="ghost" sm icon="bolt" onClick={() => fillEmpty(false)}>Auto-fill</Btn>}
-      <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}>Share</Btn>
-      <Btn variant="primary" sm icon="check" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : dirty ? `Save XI (${count})` : 'Saved'}</Btn>
+
+  const contextLeft = (
+    <>
+      <Link to="/admin/betterselect/selection" className="text-[11px] text-pb-faint hover:text-pb-text whitespace-nowrap">← All teams</Link>
+      {allFixtures.length > 1 && (
+        <select value={fixtureId} onChange={(e) => navigate(`/admin/betterselect/select/${e.target.value}`)}
+          className="bg-pb-surface border pb-hairline rounded-md px-2 py-1 text-[11px] text-pb-text max-w-[55%] truncate">
+          {allFixtures.map((f) => (
+            <option key={f.id} value={f.id} style={{ color: '#000' }}>
+              {(f.home_away === 'AWAY' ? '@ ' : 'vs ') + (f.opponent_name || f.label || 'TBC')}{f.played_on ? ` · ${f.played_on}` : ''}
+            </option>
+          ))}
+        </select>
+      )}
+    </>
+  )
+
+  const filterBar = (
+    <SelectionFilters filters={filters} sort={sort} setSort={setSort} squadOptions={squadOptions}
+      yearsF={yearsF} setYearsF={setYearsF} count={pool.length} total={available.length} />
+  )
+
+  const vm = {
+    title, sub, kicker, contextLeft, filterBar, squadShort, canEdit,
+    poolById, pool, slots, capId, wkId, focus, format, count, target, balance,
+    filledSet: usedIds, canAutofill, hasPrev,
+    changeFormat, tapPlayer, placeInSlot, removeAt, swapSlots, setFocus, toggleCap, toggleWk,
+    autofill: () => fillEmpty(false), fillLastWeek: () => fillEmpty(true), clearXI, setAvailEdit,
+  }
+
+  const headerLeft = <ViewToggle value={view} onChange={setView} />
+  const actions = (
+    <div className="flex items-center gap-2.5">
+      <button onClick={toggleTheme} title="Toggle theme"
+        className="inline-flex items-center justify-center w-[34px] h-[34px] rounded-lg bg-pb-surface2 border border-pb-hairline text-pb-dim hover:text-pb-text">
+        <Icon name={theme === 'light' ? 'moon' : 'sun'} size={16} />
+      </button>
+      <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}><span className="hidden sm:inline">Share</span></Btn>
+      {canEdit && <Btn variant="primary" sm icon="check" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : dirty ? `Save${count ? ` (${count})` : ''}` : 'Saved'}</Btn>}
     </div>
   )
 
   return (
-    <BetterSelectLayout title="Selection" actions={actions}>
-      {/* Context bar — fixture identity + side size + count. Soft accent tint
-          (not a solid fill) so the club colour reads as a calm header band. */}
-      <div className="rounded-lg px-5 py-3 mb-3 border" style={{ background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' }}>
-        <div className="flex items-center justify-between gap-3">
-          <Link to="/admin/betterselect/selection" className="text-[11px] text-pb-faint hover:text-pb-text">← All teams</Link>
-          {allFixtures.length > 1 && (
-            <select value={fixtureId} onChange={(e) => navigate(`/admin/betterselect/select/${e.target.value}`)}
-              className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[11px] text-pb-text max-w-[55%]">
-              {allFixtures.map((f) => (
-                <option key={f.id} value={f.id} style={{ color: '#000' }}>
-                  {(f.home_away === 'AWAY' ? '@ ' : 'vs ') + (f.opponent_name || f.label || 'TBC')}{f.played_on ? ` · ${f.played_on}` : ''}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-        <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 mt-1">
-          <div>
-            <h2 className="font-display font-bold text-xl leading-tight text-pb-text">{title}</h2>
-            {sub && <div className="text-sm text-pb-faint">{sub}</div>}
-          </div>
-          <div className="flex items-center gap-2">
-            <Segmented value={format} onChange={changeFormat} sm options={FORMATS} />
-            <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full"
-              style={{ background: offCount ? 'var(--pb-amber)' : 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: offCount ? '#1b1205' : 'var(--pb-accent)' }}>
-              {count}{target > 0 ? ` / ${target}` : ''} picked
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Team-balance strip */}
-      <div className="pb-card px-4 py-2.5 mb-3 flex flex-wrap items-center gap-x-5 gap-y-2">
-        {['BAT', 'ALL', 'BWL', 'WKT'].map((c) => {
-          const low = (c === 'BWL' && balance.lightBowling) || (c === 'WKT' && !balance.hasKeeper)
-          return (
-            <span key={c} className="inline-flex items-center gap-1.5 text-[13px]">
-              <span className="font-mono text-[10px] tracking-wide2" style={{ color: low ? 'var(--pb-amber)' : 'var(--pb-faint)' }}>{ROLE_LABEL[c]}</span>
-              <b className="pb-num" style={{ color: low ? 'var(--pb-amber)' : 'var(--pb-text)' }}>{balance[c]}</b>
-            </span>
-          )
-        })}
-        <span className="h-4 w-px bg-pb-hairline2" />
-        <span className="inline-flex items-center gap-1.5 text-[12px]" style={{ color: capOk ? 'var(--pb-text)' : 'var(--pb-faint)' }}>
-          <Tag tone={capOk ? 'accent' : 'faint'}>C</Tag>{capOk ? (poolById[capId]?.display_name || 'Captain') : 'No captain'}
-        </span>
-        <span className="inline-flex items-center gap-1.5 text-[12px]" style={{ color: wkOk ? 'var(--pb-text)' : 'var(--pb-amber)' }}>
-          <Tag tone={wkOk ? 'amber' : 'faint'}>WK</Tag>{wkOk ? (poolById[wkId]?.display_name || 'Keeper') : 'No keeper named'}
-        </span>
-        {balance.lightBowling && <span className="ml-auto text-[12px] text-pb-amber inline-flex items-center gap-1.5"><Icon name="info" size={13} /> Light on bowling</span>}
-      </div>
-
-      {/* Body: pool (left, wider) + numbered slots (right) */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-        {/* POOL */}
-        <div className="pb-card flex flex-col min-h-0">
-          <div className="px-3 py-2.5 border-b pb-hairline">
-            <FilterBar filters={filters} facets={facets} searchPlaceholder="Search players…"
-              count={pool.length} total={available.length}
-              right={<RecencySelect value={yearsF} onChange={setYearsF} />} />
-          </div>
-          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1 pb-scroll max-h-[60vh] lg:max-h-[calc(100vh-360px)]">
-            {pool.map((p) => {
-              const clash = p.clash?.length > 0
-              const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
-              return (
-                <div key={p.id}
-                  draggable={canEdit && !clash}
-                  onDragStart={() => { dragId.current = p.id }}
-                  onDragEnd={() => { dragId.current = null }}
-                  onClick={() => tapPlayer(p)}
-                  onContextMenu={(e) => { e.preventDefault(); addNext(p) }}
-                  className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-pb-hairline ${clash ? 'opacity-50 cursor-not-allowed' : canEdit ? 'cursor-pointer hover:border-pb-accent/40' : ''}`}
-                  style={{ background: p.availability === 'NO_RESPONSE' || !p.availability ? 'var(--pb-surface2)' : `color-mix(in srgb, ${meta.cssVar} 7%, var(--pb-surface2))` }}>
-                  <AvailDot player={p} status={p.availability} onEdit={canEdit ? setAvailEdit : undefined} />
-                  <Avatar player={p} size={28} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-medium truncate">{p.display_name}</div>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <RoleChips roles={p.skill_positions} muted />
-                      {p.availability_reason && <span className="text-[10.5px] text-pb-faint truncate">{p.availability_reason}</span>}
-                    </div>
-                  </div>
-                  {p.squads?.[0] && <Tag tone={p.squad_match ? 'accent' : 'faint'}>{p.squads[0]}</Tag>}
-                  {clash
-                    ? <span className="font-mono text-[9px] text-pb-red whitespace-nowrap">⛔ {p.clash.join(', ')}</span>
-                    : canEdit && <span className="text-pb-faintest"><Icon name="arrow" size={16} /></span>}
-                </div>
-              )
-            })}
-            {pool.length === 0 && <div className="p-4"><Empty>No players match.</Empty></div>}
-          </div>
-        </div>
-
-        {/* SLOTS */}
-        <div className="pb-card flex flex-col min-h-0">
-          <div className="px-4 py-2.5 border-b pb-hairline flex items-center justify-between">
-            <h3 className="font-mono text-[11px] uppercase tracking-wide3 text-pb-faint">Batting order</h3>
-            <span className="font-mono text-[11px] text-pb-faint pb-num">{count}{target > 0 ? `/${target}` : ''}</span>
-          </div>
-          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1 pb-scroll max-h-[60vh] lg:max-h-[calc(100vh-360px)]">
-            {slots.map((id, i) => {
-              const p = id ? poolById[id] : null
-              const isFocus = focus === i
-              const sug = !id ? suggestMap[i] : null
-              return (
-                <div key={i}
-                  onDragOver={(e) => { if (canEdit) e.preventDefault() }}
-                  onDrop={() => canEdit && onDropSlot(i)}
-                  onClick={() => !id && setFocus(i)}
-                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-colors"
-                  style={{
-                    borderColor: isFocus && !id ? 'var(--pb-accent)' : 'var(--pb-hairline)',
-                    borderStyle: id ? 'solid' : 'dashed',
-                    background: id ? 'var(--pb-surface2)' : isFocus ? 'color-mix(in srgb, var(--pb-accent) 4%, transparent)' : 'transparent',
-                  }}>
-                  <span className="font-mono text-xs text-pb-faintest w-5 text-right shrink-0">{i + 1}</span>
-                  {p ? (
-                    <>
-                      <span draggable={canEdit} onDragStart={() => { dragSlot.current = i }} onDragEnd={() => { dragSlot.current = null }} className={canEdit ? 'cursor-grab text-pb-faintest shrink-0' : 'hidden'}><Icon name="grip" size={13} /></span>
-                      <AvailDot player={p} status={p.availability} onEdit={canEdit ? setAvailEdit : undefined} />
-                      <Avatar player={p} size={24} />
-                      <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                        <span className="text-[13px] font-medium truncate">{p.display_name}</span>
-                        {id === capId && <Tag>C</Tag>}{id === wkId && <Tag tone="amber">WK</Tag>}
-                        <span className="text-[10px] text-pb-faintest hidden xl:inline">{POS_HINTS[i] || ''}</span>
-                      </div>
-                      {canEdit && (
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button onClick={() => toggleCap(id)} title="Captain" className={`w-6 h-6 rounded text-[10px] font-bold font-mono ${id === capId ? 'bg-pb-accent text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>C</button>
-                          <button onClick={() => toggleWk(id)} title="Wicket-keeper" className={`w-6 h-6 rounded text-[10px] font-bold font-mono ${id === wkId ? 'bg-pb-amber text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>WK</button>
-                          <button onClick={() => removeAt(i)} title="Remove" className="w-6 h-6 rounded text-pb-faintest hover:text-pb-red hover:bg-pb-red/10"><Icon name="close" size={13} /></button>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="flex-1 flex items-center gap-2 min-w-0">
-                      <span className="text-[11px] text-pb-faintest">{POS_HINTS[i] || 'Empty'}</span>
-                      {sug && (
-                        isFocus ? (
-                          <button onClick={(e) => { e.stopPropagation(); placeInSlot(i, sug.id) }} disabled={!canEdit}
-                            className="ml-auto inline-flex items-center gap-1.5 text-[11.5px] text-pb-accent hover:underline">
-                            <Icon name="plus" size={13} /> {sug.display_name}
-                          </button>
-                        ) : (
-                          <span className="ml-auto text-[11px] text-pb-faint truncate">try {sug.display_name}</span>
-                        )
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            {format === 0 && (
-              <div onClick={() => toast.info ? toast.info('Tap a player in the pool to add') : null}
-                className="px-2.5 py-3 rounded-lg border border-dashed border-pb-hairline2 text-center text-[11.5px] text-pb-faintest">
-                Tap a player to add to the order
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+    <BetterSelectLayout title="Selection" headerLeft={headerLeft} actions={actions}>
+      <DnD onDrop={onDrop}>
+        {view === 'sheet' ? <TeamSheetView vm={vm} /> : <DualRailView vm={vm} />}
+      </DnD>
 
       {availEdit && (
         <QuickAvailModal player={availEdit} dateLabel={fx?.played_on} current={availEdit.availability}

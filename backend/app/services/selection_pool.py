@@ -75,8 +75,9 @@ def _tier_for(fx_seq: int | None, sq_seq: int | None) -> int | None:
 
 
 async def _recent_batting_form(db: AsyncSession, org_id) -> dict[str, dict]:
-    """Per-player last-N batting innings: {total_runs, innings}. Excludes
-    DNB/absent so a no-show doesn't drag the average down."""
+    """Per-player last-N batting innings: {total_runs, innings, series}. Excludes
+    DNB/absent so a no-show doesn't drag the average down. ``series`` is the
+    per-innings runs ordered oldest→newest (so a sparkline reads left→right)."""
     rows = await db.execute(
         text(
             """
@@ -92,17 +93,22 @@ async def _recent_batting_form(db: AsyncSession, org_id) -> dict[str, dict]:
                        OR LOWER(ba.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb'))
                   AND g.played_at IS NOT NULL
             )
-            SELECT player_id, SUM(runs)::float AS total_runs, COUNT(*)::int AS innings
+            SELECT player_id, SUM(runs)::float AS total_runs, COUNT(*)::int AS innings,
+                   array_agg(runs ORDER BY rn DESC) AS series
             FROM ranked WHERE rn <= :n GROUP BY player_id
             """
         ),
         {"org": org_id, "n": RECENT_FORM_GAMES},
     )
-    return {str(pid): {"total_runs": runs, "innings": inns} for pid, runs, inns in rows.fetchall()}
+    return {
+        str(pid): {"total_runs": runs, "innings": inns, "series": [int(x) for x in (series or [])]}
+        for pid, runs, inns, series in rows.fetchall()
+    }
 
 
 async def _recent_bowling_form(db: AsyncSession, org_id) -> dict[str, dict]:
-    """Per-player last-N bowling spells: {total_wickets, innings}."""
+    """Per-player last-N bowling spells: {total_wickets, innings, series}. ``series``
+    is the per-spell wickets ordered oldest→newest."""
     rows = await db.execute(
         text(
             """
@@ -115,13 +121,79 @@ async def _recent_bowling_form(db: AsyncSession, org_id) -> dict[str, dict]:
                 WHERE p.organisation_id = :org
                   AND g.played_at IS NOT NULL
             )
-            SELECT player_id, SUM(wickets)::float AS total_wickets, COUNT(*)::int AS innings
+            SELECT player_id, SUM(wickets)::float AS total_wickets, COUNT(*)::int AS innings,
+                   array_agg(wickets ORDER BY rn DESC) AS series
             FROM ranked WHERE rn <= :n GROUP BY player_id
             """
         ),
         {"org": org_id, "n": RECENT_FORM_GAMES},
     )
-    return {str(pid): {"total_wickets": wkts, "innings": inns} for pid, wkts, inns in rows.fetchall()}
+    return {
+        str(pid): {"total_wickets": wkts, "innings": inns, "series": [int(x) for x in (series or [])]}
+        for pid, wkts, inns, series in rows.fetchall()
+    }
+
+
+def _is_bowler_only(skills: set[str]) -> bool:
+    return "BWL" in skills and not (skills & {"BAT", "WKT", "ALL"})
+
+
+def _recent_level(skills: set[str], recent_bat: dict | None, recent_bowl: dict | None) -> tuple[float | None, bool]:
+    """Recent-only composite on the runs-per-innings scale + whether a sample
+    exists. Mirrors the role weighting in ``_compute_score`` but recent-only."""
+    bat_inn = (recent_bat or {}).get("innings") or 0
+    bowl_inn = (recent_bowl or {}).get("innings") or 0
+    bat = (float(recent_bat["total_runs"]) / bat_inn) if bat_inn else None
+    bowl = ((float(recent_bowl["total_wickets"]) / bowl_inn) * WICKET_RUN_EQUIV) if bowl_inn else None
+    if _is_bowler_only(skills):
+        return bowl, bowl is not None
+    if "ALL" in skills or ("BWL" in skills and skills & {"BAT", "WKT"}):
+        vals = [v for v in (bat, bowl) if v is not None]
+        return (sum(vals) / len(vals) if vals else None), bool(vals)
+    return bat, bat is not None
+
+
+def _season_level(skills: set[str], season: dict | None) -> float | None:
+    """Season baseline on the same runs-per-innings scale (for the form trend)."""
+    if not season:
+        return None
+    bat = float(season["batting_average"]) if season.get("batting_average") is not None else None
+    bowl = None
+    if season.get("wickets") and season.get("bowling_innings"):
+        bowl = (float(season["wickets"]) / float(season["bowling_innings"])) * WICKET_RUN_EQUIV
+    if _is_bowler_only(skills):
+        return bowl
+    if "ALL" in skills or ("BWL" in skills and skills & {"BAT", "WKT"}):
+        vals = [v for v in (bat, bowl) if v is not None]
+        return sum(vals) / len(vals) if vals else None
+    return bat
+
+
+def _form_word(level: float | None, baseline: float | None, has_recent: bool) -> str | None:
+    """A quiet form bucket blending the recent level with its trend vs the
+    season baseline. None when there's no recent sample to judge from."""
+    if not has_recent or level is None:
+        return None
+    rising = baseline is not None and level >= baseline + 8
+    falling = baseline is not None and level <= baseline - 10
+    if level >= 40:
+        return "warm" if falling else "hot"
+    if level >= 26:
+        return "hot" if (rising and level >= 34) else "warm"
+    if level >= 16:
+        return "warm" if rising else "steady"
+    if level >= 8:
+        return "steady" if rising else "quiet"
+    return "quiet" if rising else "cold"
+
+
+def _recent_series(skills: set[str], recent_bat: dict | None, recent_bowl: dict | None) -> list[int]:
+    """The role-appropriate last-4 series for the sparkline (bat runs for
+    bat-led/all-rounders, spell wickets for bowler-only; bat as a fallback)."""
+    if _is_bowler_only(skills):
+        return list((recent_bowl or {}).get("series") or [])
+    bat = list((recent_bat or {}).get("series") or [])
+    return bat if bat else list((recent_bowl or {}).get("series") or [])
 
 
 async def _latest_season_stats(db: AsyncSession, org_id) -> dict[str, dict]:
@@ -296,7 +368,16 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
 
         gender_ok = (fx_is_women == sq_is_women)
         recent_ok = bool(lp) and lp >= autofill_cutoff
-        score = _compute_score(p.skill_positions, recent_bat.get(pid), recent_bowl.get(pid), season_stats.get(pid))
+        rb, rw, ss = recent_bat.get(pid), recent_bowl.get(pid), season_stats.get(pid)
+        score = _compute_score(p.skill_positions, rb, rw, ss)
+
+        # Quiet form indicator: a last-4 sparkline series + a trend-aware word
+        # (recent level vs season baseline). Frontend renders the bars + word;
+        # if the series is empty it shows the word alone (or nothing if None).
+        skills_set = {s.upper() for s in (p.skill_positions or []) if s}
+        rlevel, has_recent = _recent_level(skills_set, rb, rw)
+        form_word = _form_word(rlevel, _season_level(skills_set, ss), has_recent)
+        recent_series = _recent_series(skills_set, rb, rw)
 
         pool.append({
             "id": pid,
@@ -324,6 +405,8 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "gender_ok": gender_ok,
             "recent_ok": recent_ok,
             "score": round(score, 2),
+            "form": form_word,
+            "recent": recent_series,
             "autofill_eligible": bool(tier in (1, 2, 3) and recent_ok and gender_ok and not manual_inactive),
         })
 
