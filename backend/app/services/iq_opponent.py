@@ -348,6 +348,207 @@ def _finalise_bowl(pid: str, b: dict) -> dict:
     }
 
 
+async def _synced_opponent_org(session: AsyncSession, opp_key: str) -> str | None:
+    """Return the opponent's org id IF they are a synced BetterStats club holding
+    game data, else None. ``opp_key`` is their org UUID when synced (the
+    COALESCE(opp_org_id, opp_club_name) identity) — the DB-first gate.
+    """
+    if not _is_uuid(opp_key):
+        return None
+    hit = (await session.execute(
+        text(
+            """
+            SELECT 1
+            FROM seasons s
+            JOIN grades gr ON gr.season_id = s.id
+            JOIN games g ON g.grade_id = gr.id
+            WHERE s.organisation_id = CAST(:org AS UUID)
+            LIMIT 1
+            """
+        ),
+        {"org": opp_key},
+    )).first()
+    return opp_key if hit else None
+
+
+async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
+    """Build the dossier's ``season_bat/bowl/field/fow`` accumulators from the
+    opponent's OWN stored data — identical in-memory shape to what
+    ``_scout_grade`` builds from live Grassroots, so the rest of ``_assemble``
+    runs unchanged (no duplicated synthesis).
+
+    Scoped to their latest season. ``pid`` = their players' raw participant GUID
+    (``grassroots_id``) so the vs-us records (parsed from the GR head-to-head
+    cards, whose participantId is that same GUID) key-align. Returns
+    ``(bat, bowl, field, fow, dates, teams)``.
+    """
+    bat: dict = {}
+    bowl: dict = {}
+    field: dict = {}
+    fow: dict = {}
+    dates: list[date] = []
+    teams: list[dict] = []
+
+    yr = (await session.execute(
+        text("SELECT MAX(year) FROM seasons WHERE organisation_id = CAST(:org AS UUID) AND year IS NOT NULL"),
+        {"org": opp_org_id},
+    )).scalar()
+    if yr is None:
+        return bat, bowl, field, fow, dates, teams
+    p = {"org": opp_org_id, "yr": yr}
+
+    grade_rows = await session.execute(
+        text(
+            """
+            SELECT COALESCE(gr.grassroots_id, gr.id::text) AS grade_id,
+                   COALESCE(gr.display_name_override, gr.name) AS grade_name,
+                   COUNT(DISTINCT g.id) AS matches
+            FROM grades gr
+            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN games g ON g.grade_id = gr.id
+            WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :yr
+            GROUP BY 1, 2
+            ORDER BY matches DESC NULLS LAST, grade_name
+            """
+        ),
+        p,
+    )
+    for r in grade_rows:
+        teams.append({"grade_id": r.grade_id, "grade_name": r.grade_name,
+                      "team_name": r.grade_name, "matches": int(r.matches or 0)})
+
+    bat_rows = await session.execute(
+        text(
+            """
+            SELECT COALESCE(pl.grassroots_id, pl.id::text) AS pid,
+                   COALESCE(pl.display_name_override, pl.name) AS name,
+                   g.id::text AS match_id, g.played_at,
+                   bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out, bi.dismissal_type
+            FROM v_effective_batting_innings bi
+            JOIN players pl ON pl.id = bi.player_id
+            JOIN v_effective_games g ON g.id = bi.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :yr
+              AND NOT COALESCE(bi.did_not_bat, FALSE)
+              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+            """
+        ),
+        p,
+    )
+    for r in bat_rows:
+        b = bat.setdefault(r.pid, _new_bat(r.name))
+        runs, balls = r.runs or 0, r.balls or 0
+        when_s = r.played_at.isoformat() if r.played_at else None
+        b["inns"] += 1
+        b["runs"] += runs
+        b["balls"] += balls
+        b["fours"] += r.fours or 0
+        b["sixes"] += r.sixes or 0
+        b["matches"].add(r.match_id)
+        if r.not_out:
+            b["no"] += 1
+        else:
+            b["outs"] += 1
+            if r.dismissal_type:
+                b["dism"][r.dismissal_type] += 1
+        if b["hs"] is None or runs > b["hs"]:
+            b["hs"], b["hs_no"] = runs, bool(r.not_out)
+        b["scores"].append({"date": when_s, "runs": runs, "balls": balls, "not_out": bool(r.not_out)})
+        if r.played_at:
+            dates.append(r.played_at)
+
+    bowl_rows = await session.execute(
+        text(
+            """
+            SELECT COALESCE(pl.grassroots_id, pl.id::text) AS pid,
+                   COALESCE(pl.display_name_override, pl.name) AS name,
+                   g.id::text AS match_id, g.played_at,
+                   bs.overs, bs.maidens, bs.runs, bs.wickets
+            FROM v_effective_bowling_spells bs
+            JOIN players pl ON pl.id = bs.player_id
+            JOIN v_effective_games g ON g.id = bs.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :yr
+            """
+        ),
+        p,
+    )
+    for r in bowl_rows:
+        bw = bowl.setdefault(r.pid, _new_bowl(r.name))
+        w, runs = r.wickets or 0, r.runs or 0
+        balls = _overs_to_balls(float(r.overs)) if r.overs is not None else 0
+        when_s = r.played_at.isoformat() if r.played_at else None
+        bw["balls"] += balls
+        bw["maidens"] += r.maidens or 0
+        bw["runs"] += runs
+        bw["wkts"] += w
+        bw["spells"] += 1
+        bw["matches"].add(r.match_id)
+        if w >= 5:
+            bw["five_fors"] += 1
+        if w > bw["best_w"] or (w == bw["best_w"] and (bw["best_r"] is None or runs < bw["best_r"])):
+            bw["best_w"], bw["best_r"] = w, runs
+        bw["spell_log"].append({"date": when_s, "wkts": w, "runs": runs, "balls": balls})
+
+    field_rows = await session.execute(
+        text(
+            """
+            SELECT COALESCE(pl.grassroots_id, pl.id::text) AS pid,
+                   COALESCE(pl.display_name_override, pl.name) AS name,
+                   SUM(fs.catches) AS ct, SUM(fs.catches_wk) AS ct_wk,
+                   SUM(fs.run_outs) AS ro, SUM(fs.stumpings) AS st
+            FROM v_effective_fielding_stats fs
+            JOIN players pl ON pl.id = fs.player_id
+            JOIN v_effective_games g ON g.id = fs.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :yr
+            GROUP BY 1, 2
+            """
+        ),
+        p,
+    )
+    for r in field_rows:
+        f = _new_field(r.name)
+        f["ct"], f["ct_wk"], f["ro"], f["st"] = int(r.ct or 0), int(r.ct_wk or 0), int(r.ro or 0), int(r.st or 0)
+        field[r.pid] = f
+
+    # Partnership-by-wicket / collapse map from their stored partnerships
+    # (is_club_innings = their batting). Cumulative partnership runs within an
+    # innings == the score at each fall, so we recover the live fow shape exactly.
+    part_rows = await session.execute(
+        text(
+            """
+            SELECT g.id::text AS match_id, pt.innings_number, pt.wicket_number, pt.runs
+            FROM partnerships pt
+            JOIN v_effective_games g ON g.id = pt.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :yr
+              AND pt.is_club_innings IS TRUE
+            ORDER BY g.id, pt.innings_number, pt.wicket_number
+            """
+        ),
+        p,
+    )
+    cur_key = None
+    cumulative = 0
+    for r in part_rows:
+        key = (r.match_id, r.innings_number)
+        if key != cur_key:
+            cur_key, cumulative = key, 0
+        runs = r.runs or 0
+        cumulative += runs
+        e = fow.setdefault(r.wicket_number, {"runs": 0, "n": 0, "falls": []})
+        e["runs"] += max(runs, 0)
+        e["n"] += 1
+        e["falls"].append(cumulative)
+
+    return bat, bowl, field, fow, dates, teams
+
+
 def _danger_index_bat(p: dict) -> float:
     """Rank batters by output, leaning on recent form. Explainable, not magic."""
     base = (p["average"] or 0) * 0.5 + (p["runs"] or 0) * 0.05
@@ -854,47 +1055,66 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
     if opp_name is None:
         opp_name = next((t["team_name"] for t in teams), None)
 
-    # Decide which grades to scout: one chosen team, or the whole club. Whole-club
-    # is the default so no player is missed just because they play a different grade.
-    selected_team_name = None
-    if team_grade_id:
-        scout_grades = [g for g in teams if g["grade_id"] == team_grade_id]
-        if not scout_grades:  # selected a team discovery didn't list — scout it directly
-            gn = await _grade_name(session, team_grade_id)
-            scout_grades = [{"grade_id": team_grade_id, "grade_name": gn, "team_name": gn or "Selected team", "matches": None}]
-        selected_team_name = scout_grades[0]["team_name"]
-        per_team_cap, total_cap = MAX_OPP_SEASON_MATCHES, MAX_OPP_SEASON_MATCHES
-    else:
-        scout_grades = teams[:MAX_TEAMS_SCOUTED]
-        if not scout_grades:  # discovery found nothing — fall back to the most-recent-meeting grade
-            fb = next((g["grade_id"] for g in our_games if g.get("grade_id")), None)
-            if fb:
-                gn = await _grade_name(session, fb)
-                scout_grades = [{"grade_id": fb, "grade_name": gn, "team_name": gn or (opp_name or ""), "matches": None}]
-            per_team_cap, total_cap = MAX_OPP_SEASON_MATCHES, MAX_OPP_SEASON_MATCHES
-        else:
-            per_team_cap, total_cap = MAX_MATCHES_PER_TEAM, MAX_TOTAL_SEASON_MATCHES
-
     season_bat: dict = {}
     season_bowl: dict = {}
     season_field: dict = {}
     season_fow: dict = {}
     season_dates: list[date] = []
-    seen_match_ids: set[str] = set()
     season_matches = 0
     teams_scouted = 0
-    for g in scout_grades:
-        if season_matches >= total_cap:
-            break
-        cap = min(per_team_cap, total_cap - season_matches)
-        n = await _scout_grade(
-            g["grade_id"], our_org_id=org_id, opp_org_id=opp_org_id, opp_name=opp_name, cap=cap,
-            bat=season_bat, bowl=season_bowl, field=season_field, dates=season_dates, seen=seen_match_ids,
-            fow=season_fow,
+    selected_team_name = None
+    scout_grades: list[dict] = []
+
+    # DB-first: when the opponent is itself a synced BetterStats club, build their
+    # season form from our own stored data — no live Grassroots card scraping and
+    # no re-storing their stats. Everything downstream (finalise, danger sorting,
+    # enrichment, game plan, partnerships) is shape-identical, so it's unchanged.
+    synced_org = await _synced_opponent_org(session, opp_key)
+    if synced_org:
+        season_bat, season_bowl, season_field, season_fow, season_dates, db_teams = \
+            await _db_season_accumulators(session, synced_org)
+        if not teams and db_teams:
+            teams = db_teams
+        scout_grades = teams
+        teams_scouted = len(db_teams)
+        season_matches = len(
+            {m for b in season_bat.values() for m in b["matches"]}
+            | {m for b in season_bowl.values() for m in b["matches"]}
         )
-        season_matches += n
-        if n:
-            teams_scouted += 1
+    else:
+        # Live Grassroots scouting: one chosen team, or the whole club (default, so
+        # no player is missed just because they play a different grade).
+        if team_grade_id:
+            scout_grades = [g for g in teams if g["grade_id"] == team_grade_id]
+            if not scout_grades:  # selected a team discovery didn't list — scout it directly
+                gn = await _grade_name(session, team_grade_id)
+                scout_grades = [{"grade_id": team_grade_id, "grade_name": gn, "team_name": gn or "Selected team", "matches": None}]
+            selected_team_name = scout_grades[0]["team_name"]
+            per_team_cap, total_cap = MAX_OPP_SEASON_MATCHES, MAX_OPP_SEASON_MATCHES
+        else:
+            scout_grades = teams[:MAX_TEAMS_SCOUTED]
+            if not scout_grades:  # discovery found nothing — fall back to the most-recent-meeting grade
+                fb = next((g["grade_id"] for g in our_games if g.get("grade_id")), None)
+                if fb:
+                    gn = await _grade_name(session, fb)
+                    scout_grades = [{"grade_id": fb, "grade_name": gn, "team_name": gn or (opp_name or ""), "matches": None}]
+                per_team_cap, total_cap = MAX_OPP_SEASON_MATCHES, MAX_OPP_SEASON_MATCHES
+            else:
+                per_team_cap, total_cap = MAX_MATCHES_PER_TEAM, MAX_TOTAL_SEASON_MATCHES
+
+        seen_match_ids: set[str] = set()
+        for g in scout_grades:
+            if season_matches >= total_cap:
+                break
+            cap = min(per_team_cap, total_cap - season_matches)
+            n = await _scout_grade(
+                g["grade_id"], our_org_id=org_id, opp_org_id=opp_org_id, opp_name=opp_name, cap=cap,
+                bat=season_bat, bowl=season_bowl, field=season_field, dates=season_dates, seen=seen_match_ids,
+                fow=season_fow,
+            )
+            season_matches += n
+            if n:
+                teams_scouted += 1
 
     # Head-to-head vs us — re-fetch our stored games against them (club-wide, all
     # seasons, capped, newest first) and parse the opponent's cards specifically
@@ -995,7 +1215,12 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
 
     coverage = "rich" if season_matches else ("history_only" if h2h_games else "none")
     notes = []
-    if team_grade_id and season_matches:
+    if synced_org and season_matches:
+        notes.append(
+            f"Built from our own database — {opp_name or 'this opponent'} is a synced "
+            f"BetterStats club ({season_matches} of their matches this season)."
+        )
+    elif team_grade_id and season_matches:
         notes.append(f"Focused on {selected_team_name or 'one team'} — {season_matches} recent matches in this grade.")
     elif season_matches:
         notes.append(
