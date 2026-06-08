@@ -27,7 +27,7 @@ import uuid
 from sqlalchemy import select, text as sql_text
 
 from app.models.db import Player, async_session_maker
-from app.services.sync import _caught_by_keeper
+from app.services.sync import _caught_by_keeper, _innings_keeper_names
 from app.services.grassroots_scores_client import get_match_scorecard
 
 
@@ -111,6 +111,7 @@ async def backfill_for_org(org_id_str: str) -> None:
             updates: list[dict] = []
             for inn in (scorecard.get("innings") or []):
                 inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+                keeper_names = _innings_keeper_names(inn.get("fielding") or [])
                 for row in (inn.get("batting") or []):
                     if (row.get("dismissalType") or "") != "Caught":
                         continue  # flag only meaningful for catches
@@ -122,7 +123,7 @@ async def backfill_for_org(org_id_str: str) -> None:
                         continue  # opposition / unknown batter — not our row
                     updates.append({
                         "gid": gid, "inn": inn_num, "pid": pid,
-                        "cb": _caught_by_keeper(row.get("dismissalText") or ""),
+                        "cb": _caught_by_keeper(row.get("dismissalText") or "", keeper_names),
                     })
             if updates:
                 async with async_session_maker() as session:

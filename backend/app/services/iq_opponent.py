@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import OppositionDossier, async_session_maker
 from app.services import grassroots_scores_client as gr
-from app.services.sync import _caught_by_keeper
+from app.services.sync import _caught_by_keeper, _innings_keeper_names
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +200,7 @@ def _accumulate(scorecard: dict, match_id: str, opp_pids: dict[str, str], when: 
     """Fold one scorecard's opponent rows into the accumulators (in place)."""
     when_s = when.isoformat() if when else None
     for inn in (scorecard.get("innings") or []):
+        keeper_names = _innings_keeper_names(inn.get("fielding") or [])
         for row in (inn.get("batting") or []):
             pid = row.get("participantId")
             if pid not in opp_pids:
@@ -226,7 +227,7 @@ def _accumulate(scorecard: dict, match_id: str, opp_pids: dict[str, str], when: 
                 dt_long = row.get("dismissalType") or ""
                 if dt_long:
                     short = _DISMISSAL_SHORT.get(dt_long, dt_long.lower())
-                    if short == "caught" and _caught_by_keeper(row.get("dismissalText") or ""):
+                    if short == "caught" and _caught_by_keeper(row.get("dismissalText") or "", keeper_names):
                         short = "caught behind"
                     b["dism"][short] += 1
             if b["hs"] is None or runs > b["hs"]:

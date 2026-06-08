@@ -28,13 +28,19 @@ function fmtScore(runs, wickets) {
   return `${runs}/${wickets}`
 }
 
-// Shorten "Firstname Lastname" → "F Lastname" in dismissal strings
-function fmtDismissal(text) {
+// Shorten "Firstname Lastname" → "F Lastname" in dismissal strings.
+// caughtBehind: when the dismissal was a catch by the keeper. The live
+// dismissalText already carries the standard dagger (†) before the keeper's
+// name; when we only have the stored short code ("c"), the flag lets us still
+// mark it "(wk)" so caught-behind shows even without a live fetch.
+function fmtDismissal(text, caughtBehind) {
   if (!text) return '—'
-  return text.replace(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/g, match => {
+  let out = text.replace(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/g, match => {
     const words = match.trim().split(/\s+/)
     return `${words[0][0]} ${words[words.length - 1]}`
   })
+  if (caughtBehind && !out.includes('†')) out = `${out} (wk)`
+  return out
 }
 
 // True iff two team-name strings refer to the same club.
@@ -231,7 +237,7 @@ function BattingCard({ label, teamName, batting = [], inningsTotal, fmtName = n 
                   }
                 </td>
                 <td className="py-2 pr-5 font-mono text-[12px] whitespace-nowrap max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>
-                  {row.not_out ? 'not out' : fmtDismissal(row.dismissal_type)}
+                  {row.not_out ? 'not out' : fmtDismissal(row.dismissal_type, row.caught_behind)}
                 </td>
                 <td className="py-2 px-3 text-right w-12">
                   <span
