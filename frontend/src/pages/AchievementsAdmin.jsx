@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
 import { PbSpinner } from '../lib/presskit'
 import { CATEGORY_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
+import Dropdown from '../components/Dropdown'
 
 const CATEGORIES = ['Club Award', 'Association Award', 'Office Bearer', 'Premiership', 'Hall of Fame', 'Life Membership', 'Milestone']
 
@@ -17,14 +18,6 @@ function PlayerAutocomplete({ players, value, onChange }) {
   const ref = useRef(null)
 
   useEffect(() => { setQuery(value || '') }, [value])
-
-  useEffect(() => {
-    function handler(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
 
   const filtered = query.trim().length >= 1
     ? players.filter(p => (p.display_name || p.name).toLowerCase().includes(query.trim().toLowerCase())).slice(0, 10)
@@ -40,19 +33,23 @@ function PlayerAutocomplete({ players, value, onChange }) {
         placeholder="Full name"
         className={INPUT_CLS}
       />
-      {open && filtered.length > 0 && (
-        <div className="absolute z-50 mt-1 w-full bg-pb-surface border pb-hairline rounded shadow-xl max-h-52 overflow-y-auto pb-scroll">
-          {filtered.map(p => (
-            <button
-              key={p.id}
-              onMouseDown={() => { const dn = p.display_name || p.name; setQuery(dn); onChange({ name: dn, id: p.id }); setOpen(false) }}
-              className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
-            >
-              {p.display_name || p.name}
-            </button>
-          ))}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={ref}
+        open={open && filtered.length > 0}
+        onClose={() => setOpen(false)}
+        maxHeight={208}
+        className="bg-pb-surface border pb-hairline rounded shadow-xl pb-scroll"
+      >
+        {filtered.map(p => (
+          <button
+            key={p.id}
+            onMouseDown={() => { const dn = p.display_name || p.name; setQuery(dn); onChange({ name: dn, id: p.id }); setOpen(false) }}
+            className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
+          >
+            {p.display_name || p.name}
+          </button>
+        ))}
+      </Dropdown>
     </div>
   )
 }
@@ -389,12 +386,6 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
-  useEffect(() => {
-    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
   const filtered = query.trim().length >= 1
     ? players.filter(p => (p.display_name || p.name).toLowerCase().includes(query.trim().toLowerCase()) && !selectedPlayers.find(s => s.id === p.id)).slice(0, 10)
     : []
@@ -438,16 +429,20 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
             placeholder="Search and add players…"
             className={INPUT_CLS}
           />
-          {open && filtered.length > 0 && (
-            <div className="absolute z-50 mt-1 w-full bg-pb-surface border pb-hairline rounded shadow-xl max-h-52 overflow-y-auto pb-scroll">
-              {filtered.map(p => (
-                <button key={p.id} onMouseDown={() => addPlayer(p)}
-                  className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text">
-                  {p.display_name || p.name}
-                </button>
-              ))}
-            </div>
-          )}
+          <Dropdown
+            anchorRef={ref}
+            open={open && filtered.length > 0}
+            onClose={() => setOpen(false)}
+            maxHeight={208}
+            className="bg-pb-surface border pb-hairline rounded shadow-xl pb-scroll"
+          >
+            {filtered.map(p => (
+              <button key={p.id} onMouseDown={() => addPlayer(p)}
+                className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text">
+                {p.display_name || p.name}
+              </button>
+            ))}
+          </Dropdown>
         </div>
         {selectedPlayers.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">

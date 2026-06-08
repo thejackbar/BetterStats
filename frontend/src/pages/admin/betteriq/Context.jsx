@@ -5,9 +5,10 @@
    route changes without a shared layout route, persisted to sessionStorage.
 
    Ported from the v2 design handoff; wired to the real seasons/grades API. */
-import { useSyncExternalStore, useState, useEffect, useMemo } from 'react'
+import { useSyncExternalStore, useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../../lib/api'
 import { Icon, Segmented, Tag } from './ui'
+import Dropdown from '../../../components/Dropdown'
 
 /* ── season label helpers ─────────────────────────────────────────────────── */
 export function shortSeason(name) {
@@ -126,17 +127,22 @@ export const ROUTE_FILTERS = {
 /* ── Popover shell ────────────────────────────────────────────────────────── */
 function Popover({ trigger, children, width = 300, align = 'left' }) {
   const [open, setOpen] = useState(false)
+  const ref = useRef(null)
   return (
-    <div className="relative">
+    <div className="relative" ref={ref}>
       <div onClick={() => setOpen(o => !o)}>{trigger(open)}</div>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute z-40 mt-2 iq-card p-3.5" style={{ width, [align]: 0, boxShadow: 'var(--iq-card-shadow)' }}>
-            {typeof children === 'function' ? children(() => setOpen(false)) : children}
-          </div>
-        </>
-      )}
+      <Dropdown
+        anchorRef={ref}
+        open={open}
+        onClose={() => setOpen(false)}
+        align={align === 'right' ? 'end' : 'start'}
+        width={width}
+        gap={8}
+        className="iq-card p-3.5"
+        style={{ boxShadow: 'var(--iq-card-shadow)', overflow: 'visible', maxHeight: 'none' }}
+      >
+        {typeof children === 'function' ? children(() => setOpen(false)) : children}
+      </Dropdown>
     </div>
   )
 }

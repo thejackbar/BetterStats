@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
+import Dropdown from '../components/Dropdown'
 
 export default function Onboard() {
   const [query, setQuery] = useState('')
@@ -14,16 +15,6 @@ export default function Onboard() {
   const navigate = useNavigate()
   const debounceRef = useRef(null)
   const wrapperRef = useRef(null)
-
-  useEffect(() => {
-    function handleClickOutside(e) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
-        setShowResults(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
 
   useEffect(() => {
     if (selected) return
@@ -120,8 +111,14 @@ export default function Onboard() {
               )}
             </div>
 
-            {showResults && results.length > 0 && (
-              <ul className="absolute z-10 mt-1 w-full bg-pb-surface border pb-hairline rounded shadow-xl max-h-60 overflow-y-auto">
+            <Dropdown
+              anchorRef={wrapperRef}
+              open={showResults && results.length > 0}
+              onClose={() => setShowResults(false)}
+              maxHeight={240}
+              className="bg-pb-surface border pb-hairline rounded shadow-xl"
+            >
+              <ul>
                 {results.map((org) => (
                   <li key={org.id}>
                     <button
@@ -137,13 +134,16 @@ export default function Onboard() {
                   </li>
                 ))}
               </ul>
-            )}
+            </Dropdown>
 
-            {showResults && !searching && results.length === 0 && query.length >= 2 && (
-              <div className="absolute z-10 mt-1 w-full bg-pb-surface border pb-hairline rounded px-4 py-3 text-sm text-pb-faint">
-                No clubs found for "{query}"
-              </div>
-            )}
+            <Dropdown
+              anchorRef={wrapperRef}
+              open={showResults && !searching && results.length === 0 && query.length >= 2}
+              onClose={() => setShowResults(false)}
+              className="bg-pb-surface border pb-hairline rounded px-4 py-3 text-sm text-pb-faint"
+            >
+              No clubs found for "{query}"
+            </Dropdown>
           </div>
 
           {message && (

@@ -9,7 +9,8 @@
        stat table, the stronger value highlighted per row.
    Reads the GLOBAL Season + Team filter (useIQFilter); all data is real
    (api.iqTrends*). ?player=<id> deep-links a player. Averages 2dp via a2(). */
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import Dropdown from '../../../components/Dropdown'
 import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import {
@@ -59,28 +60,34 @@ function MoverList({ title, tone, items, kind, onPick }) {
 function PlayerSearch({ players, onPick, placeholder = 'Search a player…' }) {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
+  const ref = useRef(null)
   const t = q.trim().toLowerCase()
   const matches = (t ? players.filter(p => (p.name || '').toLowerCase().includes(t)) : players).slice(0, 30)
   return (
-    <div className="relative" onFocusCapture={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}>
+    <div ref={ref} className="relative" onFocusCapture={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}>
       <Search value={q} onChange={(v) => { setQ(v); setOpen(true) }} placeholder={placeholder} className="w-full" />
-      {open && (
-        <div className="absolute z-30 mt-1.5 w-full iq-card p-1.5 max-h-80 overflow-auto iq-scroll" style={{ boxShadow: 'var(--iq-card-shadow)' }}>
-          {matches.length === 0 ? (
-            <div className="px-2.5 py-2 text-pb-faint text-sm">{players.length === 0 ? 'No current-season players found.' : 'No match.'}</div>
-          ) : matches.map(p => (
-            <button key={p.player_id} type="button" onClick={() => { onPick(p.player_id); setQ(''); setOpen(false) }}
-              className="w-full flex items-center justify-between gap-3 px-2.5 py-2 text-left transition" style={{ borderRadius: 8 }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--pb-surface2)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
-              <span className="font-medium text-[13.5px] truncate">{p.name}</span>
-              <span className="iq-mono text-pb-faintest text-[11px] whitespace-nowrap">
-                {p.matches}g{p.runs ? ` · ${p.runs}r @ ${a2(p.bat_avg)}` : ''}{p.wickets ? ` · ${p.wickets}w @ ${a2(p.bowl_avg)}` : ''}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={ref}
+        open={open}
+        onClose={() => setOpen(false)}
+        maxHeight={320}
+        className="iq-card p-1.5 iq-scroll"
+        style={{ boxShadow: 'var(--iq-card-shadow)' }}
+      >
+        {matches.length === 0 ? (
+          <div className="px-2.5 py-2 text-pb-faint text-sm">{players.length === 0 ? 'No current-season players found.' : 'No match.'}</div>
+        ) : matches.map(p => (
+          <button key={p.player_id} type="button" onClick={() => { onPick(p.player_id); setQ(''); setOpen(false) }}
+            className="w-full flex items-center justify-between gap-3 px-2.5 py-2 text-left transition" style={{ borderRadius: 8 }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--pb-surface2)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
+            <span className="font-medium text-[13.5px] truncate">{p.name}</span>
+            <span className="iq-mono text-pb-faintest text-[11px] whitespace-nowrap">
+              {p.matches}g{p.runs ? ` · ${p.runs}r @ ${a2(p.bat_avg)}` : ''}{p.wickets ? ` · ${p.wickets}w @ ${a2(p.bowl_avg)}` : ''}
+            </span>
+          </button>
+        ))}
+      </Dropdown>
     </div>
   )
 }

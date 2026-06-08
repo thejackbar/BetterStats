@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import BetterSocialsLayout from '../../components/admin/BetterSocialsLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
+import Dropdown from '../../components/Dropdown'
 import { api } from '../../lib/api'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
@@ -309,6 +310,7 @@ export default function AdminSocialPost() {
   const [oppResults, setOppResults] = useState([])
   const [oppSearching, setOppSearching] = useState(false)
   const oppSearchTimeout = useRef(null)
+  const oppBoxRef = useRef(null)
 
   const [selectedPlayers, setSelectedPlayers] = useState([])
   const [playerSearch, setPlayerSearch] = useState('')
@@ -483,6 +485,9 @@ export default function AdminSocialPost() {
   const [scTeamResults, setScTeamResults] = useState({ home: [], away: [] })
   const [scTeamSearching, setScTeamSearching] = useState({ home: false, away: false })
   const scTeamSearchTimeout = useRef({ home: null, away: null })
+  const scHomeRef = useRef(null)
+  const scAwayRef = useRef(null)
+  const scTeamRefBySide = { home: scHomeRef, away: scAwayRef }
 
   const handleScTeamSearch = useCallback(async (side, q) => {
     setScTeamSearch(s => ({ ...s, [side]: q }))
@@ -941,7 +946,7 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Opponent</h2>
                 <div className="relative mb-3">
-                  <div className="relative">
+                  <div ref={oppBoxRef} className="relative">
                     <input
                       value={oppSearch}
                       onChange={e => handleOppSearch(e.target.value)}
@@ -950,20 +955,24 @@ export default function AdminSocialPost() {
                     />
                     {oppSearching && <span className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[9px] text-pb-faintest animate-pulse">SEARCHING...</span>}
                   </div>
-                  {oppResults.length > 0 && (
-                    <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-pb-surface border pb-hairline rounded shadow-lg max-h-48 overflow-y-auto">
-                      {oppResults.map((org, i) => (
-                        <button key={org.id || i} onClick={() => selectOpponent(org)}
-                          className="w-full text-left px-3 py-2 hover:bg-pb-surface2 flex items-center gap-2 border-b pb-hairline last:border-0">
-                          {(org.logoURL || org.logo_url) && (
-                            <img src={org.logoURL || org.logo_url} alt="" className="w-7 h-7 rounded object-contain bg-pb-surface2 shrink-0" />
-                          )}
-                          <span className="text-sm text-pb-text flex-1 truncate">{org.name}</span>
-                          {org.shortName && <span className="font-mono text-[9px] text-pb-faintest">{org.shortName}</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <Dropdown
+                    anchorRef={oppBoxRef}
+                    open={oppResults.length > 0}
+                    onClose={() => setOppResults([])}
+                    maxHeight={192}
+                    className="bg-pb-surface border pb-hairline rounded shadow-lg"
+                  >
+                    {oppResults.map((org, i) => (
+                      <button key={org.id || i} onClick={() => selectOpponent(org)}
+                        className="w-full text-left px-3 py-2 hover:bg-pb-surface2 flex items-center gap-2 border-b pb-hairline last:border-0">
+                        {(org.logoURL || org.logo_url) && (
+                          <img src={org.logoURL || org.logo_url} alt="" className="w-7 h-7 rounded object-contain bg-pb-surface2 shrink-0" />
+                        )}
+                        <span className="text-sm text-pb-text flex-1 truncate">{org.name}</span>
+                        {org.shortName && <span className="font-mono text-[9px] text-pb-faintest">{org.shortName}</span>}
+                      </button>
+                    ))}
+                  </Dropdown>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Club Name"><TextInput value={opponent.name} onChange={v => patchOpp({ name: v })} placeholder="Subiaco CC" /></Field>
@@ -1352,23 +1361,27 @@ export default function AdminSocialPost() {
                       <div className="px-3 pb-3 pt-2 flex flex-col gap-2">
                         <div className="relative">
                           <label className="block font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase mb-1">Search Club (CA)</label>
-                          <div className="relative">
+                          <div ref={scTeamRefBySide[side]} className="relative">
                             <input value={scTeamSearch[side]} onChange={e => handleScTeamSearch(side, e.target.value)} placeholder="Type club name…"
                               className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-1.5 text-xs text-pb-text placeholder:text-pb-faintest" />
                             {scTeamSearching[side] && <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[9px] text-pb-faintest animate-pulse">SEARCHING…</span>}
                           </div>
-                          {scTeamResults[side].length > 0 && (
-                            <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-pb-surface border pb-hairline rounded shadow-lg max-h-48 overflow-y-auto">
-                              {scTeamResults[side].map((org, i) => (
-                                <button key={org.id || i} onClick={() => selectScTeam(side, org)}
-                                  className="w-full text-left px-3 py-1.5 hover:bg-pb-surface2 flex items-center gap-2 border-b pb-hairline last:border-0">
-                                  {(org.logoURL || org.logo_url) && <img src={org.logoURL || org.logo_url} alt="" className="w-6 h-6 rounded object-contain bg-pb-surface2 shrink-0" />}
-                                  <span className="text-xs text-pb-text flex-1 truncate">{org.name}</span>
-                                  {org.shortName && <span className="font-mono text-[9px] text-pb-faintest">{org.shortName}</span>}
-                                </button>
-                              ))}
-                            </div>
-                          )}
+                          <Dropdown
+                            anchorRef={scTeamRefBySide[side]}
+                            open={scTeamResults[side].length > 0}
+                            onClose={() => setScTeamResults(r => ({ ...r, [side]: [] }))}
+                            maxHeight={192}
+                            className="bg-pb-surface border pb-hairline rounded shadow-lg"
+                          >
+                            {scTeamResults[side].map((org, i) => (
+                              <button key={org.id || i} onClick={() => selectScTeam(side, org)}
+                                className="w-full text-left px-3 py-1.5 hover:bg-pb-surface2 flex items-center gap-2 border-b pb-hairline last:border-0">
+                                {(org.logoURL || org.logo_url) && <img src={org.logoURL || org.logo_url} alt="" className="w-6 h-6 rounded object-contain bg-pb-surface2 shrink-0" />}
+                                <span className="text-xs text-pb-text flex-1 truncate">{org.name}</span>
+                                {org.shortName && <span className="font-mono text-[9px] text-pb-faintest">{org.shortName}</span>}
+                              </button>
+                            ))}
+                          </Dropdown>
                         </div>
                         <div className="grid grid-cols-4 gap-2">
                           <div className="col-span-2"><Field label="Team Name"><TextInput value={t.name} onChange={v => patchScTeam(side, { name: v, monogram: v.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) })} placeholder="HOME TEAM" /></Field></div>

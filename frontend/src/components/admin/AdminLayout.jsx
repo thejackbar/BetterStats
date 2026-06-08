@@ -226,10 +226,25 @@ export default function AdminLayout({ children }) {
       )}
 
       <div className="flex flex-1 max-w-7xl mx-auto w-full">
-        {/* Sidebar */}
+        {/* Mobile drawer backdrop — dims the page and closes the menu on tap.
+            Sits below the sidebar (z-40) and the header (z-50); mobile only. */}
+        {mobileOpen && (
+          <div
+            className="fixed inset-0 z-30 bg-black/60 md:hidden"
+            onClick={() => setMobileOpen(false)}
+          />
+        )}
+        {/* Sidebar — an inline column on desktop, but a fixed slide-in drawer on
+            mobile so it overlays the page instead of fighting <main> for width in
+            the same flex row (which made the content overlap / go askew when the
+            burger was tapped). The header (z-50) stays above the z-40 drawer so
+            the burger/✕ remains tappable to close it. */}
         <aside className={`
-          ${mobileOpen ? 'block' : 'hidden'} md:block
-          w-full md:w-40 shrink-0 border-r pb-hairline-r pt-3 pb-6 px-1.5
+          ${mobileOpen
+            ? 'fixed left-0 top-14 bottom-0 z-40 w-64 max-w-[80vw] overflow-y-auto bg-pb-surface shadow-2xl'
+            : 'hidden'}
+          md:static md:z-auto md:block md:w-40 md:max-w-none md:overflow-visible md:bg-transparent md:shadow-none
+          shrink-0 border-r pb-hairline-r pt-3 pb-6 px-1.5
         `}>
           <nav>
             {/* Better HQ — staff-only platform tools. Pinned to the TOP because

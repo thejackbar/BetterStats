@@ -1,18 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import { useFlash, Flash, inputCls, btnPrimary, btnGhost, btnDanger } from './adminParts'
+import Dropdown from '../../../components/Dropdown'
 
 // Name field with a club-player autocomplete. Typing keeps a free-text name
 // (player_id cleared); picking a suggestion links the player (sets name + id).
 function PlayerNameInput({ players, name, playerId, onChange, placeholder = 'Name' }) {
   const [open, setOpen] = useState(false)
+  const ref = useRef(null)
   const q = (name || '').trim().toLowerCase()
   const matches = q
     ? players.filter(p => (p.display_name_override || p.name || '').toLowerCase().includes(q)).slice(0, 6)
     : []
   return (
-    <div className="relative w-full">
+    <div ref={ref} className="relative w-full">
       <input
         value={name}
         onChange={e => { onChange(e.target.value, null); setOpen(true) }}
@@ -22,22 +24,26 @@ function PlayerNameInput({ players, name, playerId, onChange, placeholder = 'Nam
         className={`${inputCls} ${playerId ? 'pr-7' : ''}`}
       />
       {playerId && <span title="Linked to player profile" className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px]" style={{ color: 'var(--pb-accent)' }}>🔗</span>}
-      {open && matches.length > 0 && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-pb-surface border pb-hairline rounded shadow-lg max-h-48 overflow-auto">
-          {matches.map(p => {
-            const label = p.display_name_override || p.name
-            return (
-              <button
-                key={p.id} type="button"
-                onMouseDown={e => { e.preventDefault(); onChange(label, p.id); setOpen(false) }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-pb-text hover:bg-pb-surface2"
-              >
-                {label}
-              </button>
-            )
-          })}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={ref}
+        open={open && matches.length > 0}
+        onClose={() => setOpen(false)}
+        maxHeight={192}
+        className="bg-pb-surface border pb-hairline rounded shadow-lg"
+      >
+        {matches.map(p => {
+          const label = p.display_name_override || p.name
+          return (
+            <button
+              key={p.id} type="button"
+              onMouseDown={e => { e.preventDefault(); onChange(label, p.id); setOpen(false) }}
+              className="block w-full text-left px-3 py-1.5 text-sm text-pb-text hover:bg-pb-surface2"
+            >
+              {label}
+            </button>
+          )
+        })}
+      </Dropdown>
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
+import Dropdown from '../Dropdown'
 
 // Super-admin (Better staff) club switcher — lets staff re-scope the whole
 // admin app to any club without logging out. Renders nothing for non-super
@@ -13,21 +14,6 @@ export default function ClubSwitcher() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const wrapRef = useRef(null)
-
-  // Close on outside click / Escape.
-  useEffect(() => {
-    if (!open) return
-    const onClick = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
-    }
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', onClick)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onClick)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
 
   // Lazy-load clubs on first open.
   useEffect(() => {
@@ -82,8 +68,15 @@ export default function ClubSwitcher() {
         </svg>
       </button>
 
-      {open && (
-        <div className="absolute right-0 mt-1.5 w-72 bg-pb-surface border pb-hairline rounded-lg shadow-xl z-50 overflow-hidden">
+      <Dropdown
+        anchorRef={wrapRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        align="end"
+        width={288}
+        gap={6}
+        className="bg-pb-surface border pb-hairline rounded-lg shadow-xl overflow-hidden"
+      >
           <div className="px-3 py-2 border-b pb-hairline-b">
             <div className="font-mono text-[9px] tracking-wide3 text-pb-faint uppercase mb-1.5">Managing club</div>
             <input
@@ -141,8 +134,7 @@ export default function ClubSwitcher() {
           {error && (
             <div className="px-3 py-2 border-t pb-hairline-t font-mono text-[10px] text-pb-red">{error}</div>
           )}
-        </div>
-      )}
+      </Dropdown>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import { TIER_ORDER, TIER_INFO, tierLabel, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
+import Dropdown from '../../components/Dropdown'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
@@ -32,16 +33,6 @@ export default function SuperClubs() {
 
   const load = () => api.superListClubs().then(setClubs).catch(() => {})
   useEffect(() => { load() }, [])
-
-  useEffect(() => {
-    function handleClickOutside(e) {
-      if (searchWrapRef.current && !searchWrapRef.current.contains(e.target)) {
-        setShowResults(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -231,8 +222,14 @@ export default function SuperClubs() {
                   <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--pb-accent)' }}>✓</span>
                 )}
               </div>
-              {showResults && results.length > 0 && (
-                <ul className="absolute z-10 mt-1 w-full bg-pb-surface border pb-hairline rounded shadow-xl max-h-56 overflow-y-auto">
+              <Dropdown
+                anchorRef={searchWrapRef}
+                open={showResults && results.length > 0}
+                onClose={() => setShowResults(false)}
+                maxHeight={224}
+                className="bg-pb-surface border pb-hairline rounded shadow-xl"
+              >
+                <ul>
                   {results.map(org => (
                     <li key={org.id}>
                       <button
@@ -248,12 +245,15 @@ export default function SuperClubs() {
                     </li>
                   ))}
                 </ul>
-              )}
-              {showResults && !searching && results.length === 0 && query.trim().length >= 2 && (
-                <div className="absolute z-10 mt-1 w-full bg-pb-surface border pb-hairline rounded px-3 py-2 text-sm text-pb-faint">
-                  No clubs found for "{query}"
-                </div>
-              )}
+              </Dropdown>
+              <Dropdown
+                anchorRef={searchWrapRef}
+                open={showResults && !searching && results.length === 0 && query.trim().length >= 2}
+                onClose={() => setShowResults(false)}
+                className="bg-pb-surface border pb-hairline rounded px-3 py-2 text-sm text-pb-faint"
+              >
+                No clubs found for "{query}"
+              </Dropdown>
               <p className="font-mono text-[10px] text-pb-faintest mt-1">
                 A club must be picked from search so its data syncs correctly.
               </p>

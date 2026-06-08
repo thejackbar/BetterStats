@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import Dropdown from '../../components/Dropdown'
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
 
@@ -22,6 +23,7 @@ const EMPTY_FORM = {
 function PlayerSearch({ label, name, playerId, onSelect, players }) {
   const [query, setQuery] = useState(name)
   const [open, setOpen] = useState(false)
+  const ref = useRef(null)
 
   const filtered = query.length >= 2
     ? players.filter(p => p.display_name.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
@@ -40,7 +42,7 @@ function PlayerSearch({ label, name, playerId, onSelect, players }) {
   }
 
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <label className="font-mono text-[10px] text-pb-faint block mb-1">{label}</label>
       <input
         type="text"
@@ -52,21 +54,24 @@ function PlayerSearch({ label, name, playerId, onSelect, players }) {
         className={INPUT_CLS}
       />
       {playerId && <p className="font-mono text-[10px] text-pb-faintest mt-0.5 truncate">{playerId}</p>}
-      {open && filtered.length > 0 && (
-        <div className="absolute z-10 w-full bg-pb-surface border pb-hairline rounded mt-1 shadow-lg">
-          {filtered.map(p => (
-            <button
-              key={p.id}
-              type="button"
-              onMouseDown={() => handleSelect(p)}
-              className="w-full text-left px-3 py-2 text-sm text-pb-text hover:bg-pb-surface2"
-            >
-              {p.display_name}
-              {p.playhq_id && <span className="ml-2 font-mono text-[10px] text-pb-faintest">PHQ: {p.playhq_id}</span>}
-            </button>
-          ))}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={ref}
+        open={open && filtered.length > 0}
+        onClose={() => setOpen(false)}
+        className="bg-pb-surface border pb-hairline rounded shadow-lg"
+      >
+        {filtered.map(p => (
+          <button
+            key={p.id}
+            type="button"
+            onMouseDown={() => handleSelect(p)}
+            className="w-full text-left px-3 py-2 text-sm text-pb-text hover:bg-pb-surface2"
+          >
+            {p.display_name}
+            {p.playhq_id && <span className="ml-2 font-mono text-[10px] text-pb-faintest">PHQ: {p.playhq_id}</span>}
+          </button>
+        ))}
+      </Dropdown>
     </div>
   )
 }
@@ -439,6 +444,7 @@ function WizardRow({ record, players, onDeleted }) {
 function UnmatchedPlayerRow({ label, players, value, onChange }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const ref = useRef(null)
 
   const filtered = query.length >= 2
     ? players.filter(p => p.display_name.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
@@ -453,7 +459,7 @@ function UnmatchedPlayerRow({ label, players, value, onChange }) {
   return (
     <div className="flex items-center gap-2">
       <span className="font-mono text-[10px] text-pb-amber shrink-0">{label}</span>
-      <div className="relative flex-1 max-w-xs">
+      <div ref={ref} className="relative flex-1 max-w-xs">
         <input
           type="text"
           value={query}
@@ -463,20 +469,24 @@ function UnmatchedPlayerRow({ label, players, value, onChange }) {
           placeholder="Link to player…"
           className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-xs focus:outline-none focus:border-pb-accent"
         />
-        {open && filtered.length > 0 && (
-          <div className="absolute z-20 w-full bg-pb-surface border pb-hairline rounded mt-1 shadow-lg max-h-40 overflow-y-auto">
-            {filtered.map(p => (
-              <button
-                key={p.id}
-                type="button"
-                onMouseDown={() => handleSelect(p)}
-                className="w-full text-left px-2 py-1.5 text-xs text-pb-text hover:bg-pb-surface2"
-              >
-                {p.display_name}
-              </button>
-            ))}
-          </div>
-        )}
+        <Dropdown
+          anchorRef={ref}
+          open={open && filtered.length > 0}
+          onClose={() => setOpen(false)}
+          maxHeight={160}
+          className="bg-pb-surface border pb-hairline rounded shadow-lg"
+        >
+          {filtered.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              onMouseDown={() => handleSelect(p)}
+              className="w-full text-left px-2 py-1.5 text-xs text-pb-text hover:bg-pb-surface2"
+            >
+              {p.display_name}
+            </button>
+          ))}
+        </Dropdown>
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import Dropdown from '../../components/Dropdown'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
 const LABEL_CLS = 'font-mono text-[10px] text-pb-faint block mb-1'
@@ -35,6 +36,7 @@ function ConfirmModal({ open, title, body, confirmLabel = 'Save changes', danger
 
 function ComboInput({ value, onChange, suggestions = [], placeholder, allowNew = true }) {
   const [open, setOpen] = useState(false)
+  const ref = useRef(null)
   const q = (value || '').toLowerCase().trim()
   const filtered = q.length === 0
     ? suggestions.slice(0, 12)
@@ -43,7 +45,7 @@ function ComboInput({ value, onChange, suggestions = [], placeholder, allowNew =
   const isNew = value && value.trim().length > 0 && !exactMatch
 
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <input
         type="text"
         value={value || ''}
@@ -53,18 +55,22 @@ function ComboInput({ value, onChange, suggestions = [], placeholder, allowNew =
         placeholder={placeholder}
         className={INPUT_CLS}
       />
-      {open && filtered.length > 0 && (
-        <div className="absolute z-30 w-full bg-pb-surface border pb-hairline rounded mt-1 shadow-lg max-h-56 overflow-y-auto">
-          {filtered.map(s => (
-            <button
-              key={s}
-              type="button"
-              onMouseDown={() => { onChange(s); setOpen(false) }}
-              className="w-full text-left px-3 py-1.5 text-sm text-pb-text hover:bg-pb-surface2"
-            >{s}</button>
-          ))}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={ref}
+        open={open && filtered.length > 0}
+        onClose={() => setOpen(false)}
+        maxHeight={224}
+        className="bg-pb-surface border pb-hairline rounded shadow-lg"
+      >
+        {filtered.map(s => (
+          <button
+            key={s}
+            type="button"
+            onMouseDown={() => { onChange(s); setOpen(false) }}
+            className="w-full text-left px-3 py-1.5 text-sm text-pb-text hover:bg-pb-surface2"
+          >{s}</button>
+        ))}
+      </Dropdown>
       {isNew && allowNew && (
         <p className="text-[10px] text-amber-300 mt-0.5">
           âš  New value â€” not in existing data. Double-check the spelling before saving.
@@ -77,6 +83,7 @@ function ComboInput({ value, onChange, suggestions = [], placeholder, allowNew =
 function PlayerPicker({ players, value, onChange, placeholder = 'Search playerâ€¦' }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const ref = useRef(null)
   const selected = players.find(p => p.id === value)
   const displayValue = open ? query : (selected ? selected.display_name : '')
 
@@ -85,7 +92,7 @@ function PlayerPicker({ players, value, onChange, placeholder = 'Search playerâ€
     : []
 
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <input
         type="text"
         value={displayValue}
@@ -95,18 +102,22 @@ function PlayerPicker({ players, value, onChange, placeholder = 'Search playerâ€
         placeholder={placeholder}
         className={INPUT_CLS}
       />
-      {open && filtered.length > 0 && (
-        <div className="absolute z-20 w-full bg-pb-surface border pb-hairline rounded mt-1 shadow-lg max-h-64 overflow-y-auto">
-          {filtered.map(p => (
-            <button
-              key={p.id}
-              type="button"
-              onMouseDown={() => { onChange(p.id); setOpen(false); setQuery('') }}
-              className="w-full text-left px-3 py-2 text-sm text-pb-text hover:bg-pb-surface2"
-            >{p.display_name}</button>
-          ))}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={ref}
+        open={open && filtered.length > 0}
+        onClose={() => setOpen(false)}
+        maxHeight={256}
+        className="bg-pb-surface border pb-hairline rounded shadow-lg"
+      >
+        {filtered.map(p => (
+          <button
+            key={p.id}
+            type="button"
+            onMouseDown={() => { onChange(p.id); setOpen(false); setQuery('') }}
+            className="w-full text-left px-3 py-2 text-sm text-pb-text hover:bg-pb-surface2"
+          >{p.display_name}</button>
+        ))}
+      </Dropdown>
     </div>
   )
 }
