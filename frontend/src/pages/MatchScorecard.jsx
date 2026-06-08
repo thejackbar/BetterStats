@@ -364,9 +364,13 @@ function FallOfWicketsSection({ fow = [], fmtName = n => n }) {
                 <span className="text-pb-faint mx-1">-</span>
                 <span className="font-mono text-pb-text">{f.wicket_number}</span>
                 {f.player_name && (
-                  <Link to={`/players/${f.player_id}`} className="text-pb-faint ml-1.5 hover:text-pb-accent transition-colors">
-                    {fmtName(f.player_name)}
-                  </Link>
+                  f.player_id ? (
+                    <Link to={`/players/${f.player_id}`} className="text-pb-faint ml-1.5 hover:text-pb-accent transition-colors">
+                      {fmtName(f.player_name)}
+                    </Link>
+                  ) : (
+                    <span className="text-pb-faint ml-1.5">{fmtName(f.player_name)}</span>
+                  )
                 )}
               </div>
             ))}
@@ -449,14 +453,14 @@ export default function MatchScorecard() {
   const fmtName = useNameFormat(orgData)
 
   useEffect(() => {
-    const fetch = orgId
-      ? api.getPlayHQScorecard(orgId, gameId)
-      : api.getScorecard(gameId)
-    fetch
+    // Always DB-first → Grassroots fallback for live/unsynced (api.getScorecard);
+    // the old PlayHQ Partner path (when ?org was present) is retired. ?org is
+    // still read below purely for club name-formatting.
+    api.getScorecard(gameId)
       .then(setGame)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [gameId, orgId])
+  }, [gameId])
 
   useEffect(() => {
     if (orgId) api.getOrg(orgId).then(setOrgData).catch(() => {})

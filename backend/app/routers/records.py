@@ -7,7 +7,7 @@ import uuid
 
 from app.models.db import get_db, Grade, Season, Organisation, ManualPartnershipRecord
 from sqlalchemy import select as sa_select
-from app.services import playhq_partner_client, playhq_client
+from app.services import playhq_client
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -39,9 +39,10 @@ async def get_records_grades(
                 out.append({"id": str(g.id), "name": g.name, "season_id": str(g.season_id)})
         return out
 
-    # DB has no grades — try the cheap org-level PlayHQ grades endpoint (single call)
+    # DB has no grades — fall back to the Grassroots grades endpoint (one call per
+    # season). Needs the raw CA season GUID (grassroots_id), not our per-club id.
     org = await db.get(Organisation, uuid.UUID(org_id))
-    if not org or not org.playhq_id:
+    if not org:
         return []
 
     db_seasons_res = await db.execute(select(Season).where(Season.organisation_id == uuid.UUID(org_id)))
@@ -50,45 +51,20 @@ async def get_records_grades(
         for s in db_seasons_res.scalars().all()
     ]
 
-    try:
-        data = await playhq_partner_client._get(
-            f"{playhq_partner_client.BASE_URL}/v1/organisations/{org.playhq_id}/grades"
-        )
-        api_grades = data.get("data", []) or []
-    except Exception:
-        api_grades = []
-
-    if not api_grades:
-        # Partner API per-season fallback
-        partner_results = await asyncio.gather(
-            *[playhq_partner_client.get_season_grades(str(s["id"])) for s in db_seasons_list],
-            return_exceptions=True,
-        )
-        seen_ids: set[str] = set()
-        for s, res in zip(db_seasons_list, partner_results):
-            if isinstance(res, list):
-                for g in res:
-                    gid = g.get("id")
-                    if gid and gid not in seen_ids:
-                        seen_ids.add(gid)
-                        api_grades.append({**g, "_season_id": s["id"]})
-
-    if not api_grades:
-        # Grassroots API fallback — needs the raw CA season GUID, not our
-        # per-club season id.
-        gr_seasons = [s for s in db_seasons_list if s.get("grassroots_id")]
-        grassroots_results = await asyncio.gather(
-            *[playhq_client.get_grades(org_id, s["grassroots_id"]) for s in gr_seasons],
-            return_exceptions=True,
-        )
-        seen_ids2: set[str] = set()
-        for s, res in zip(gr_seasons, grassroots_results):
-            if isinstance(res, list):
-                for g in res:
-                    gid = g.get("id")
-                    if gid and gid not in seen_ids2:
-                        seen_ids2.add(gid)
-                        api_grades.append({**g, "_season_id": s["id"]})
+    api_grades: list[dict] = []
+    gr_seasons = [s for s in db_seasons_list if s.get("grassroots_id")]
+    grassroots_results = await asyncio.gather(
+        *[playhq_client.get_grades(org_id, s["grassroots_id"]) for s in gr_seasons],
+        return_exceptions=True,
+    )
+    seen_ids2: set[str] = set()
+    for s, res in zip(gr_seasons, grassroots_results):
+        if isinstance(res, list):
+            for g in res:
+                gid = g.get("id")
+                if gid and gid not in seen_ids2:
+                    seen_ids2.add(gid)
+                    api_grades.append({**g, "_season_id": s["id"]})
 
     if not api_grades:
         return []

@@ -27,8 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_FIXTURES, require_cap
 from app.models.db import Fixture, Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club
-from app.services import playhq_partner_client
 from app.services.club_match import club_match_keys
+from app.services.fixtures_source import org_grassroots_fixtures
 
 router = APIRouter(prefix="/fixtures", tags=["fixtures"])
 
@@ -307,20 +307,17 @@ async def sync_fixtures(
     club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_FIXTURES)),
 ):
-    """Pull upcoming fixtures from the PlayHQ partner API and upsert them.
+    """Pull upcoming fixtures from the Grassroots /scores API and upsert them.
 
     Upserts on (organisation_id, playhq_id) so re-running is idempotent and two
-    clubs that play each other keep separate rows. Only non-FINAL games dated
-    today-or-later are stored.
+    clubs that play each other keep separate rows. The Grassroots source already
+    returns only upcoming/live matches dated today-or-later. (``playhq_id`` is the
+    upstream match id — now the GR match GUID — kept as the column name for
+    backwards compatibility, not a PlayHQ namespace anymore.)
     """
-    if not club.playhq_id:
-        return {"synced": 0, "detail": "Club has no playhq_id — manual fixtures only."}
-
-    seasons_res = await db.execute(select(Season).where(Season.organisation_id == club.id))
-    db_seasons = [{"id": str(s.id), "name": s.name} for s in seasons_res.scalars().all()]
-    games = await playhq_partner_client.get_org_games(
-        club.playhq_id, club.name, db_seasons=db_seasons, grassroots_org_id=str(club.id)
-    )
+    games = await org_grassroots_fixtures(db, club)
+    if not games:
+        return {"synced": 0, "detail": "No upcoming Grassroots fixtures found for this club."}
 
     # Teams for name-based auto-attribution (id, name, sequence).
     tm_res = await db.execute(
@@ -328,13 +325,12 @@ async def sync_fixtures(
     )
     teams = [(tid, tname, tseq) for tid, tname, tseq in tm_res.fetchall()]
 
-    today_iso = date.today().isoformat()
     synced = 0
     teams_assigned = 0
     for g in games:
         gid = g.get("id")
         played = g.get("played_at")
-        if not gid or g.get("status") == "FINAL" or not played or played < today_iso:
+        if not gid or not played:
             continue
         existing = (
             await db.execute(
@@ -346,7 +342,7 @@ async def sync_fixtures(
         ).scalar_one_or_none()
         home_away, opponent = _derive_sides(g, club)
         target = existing or Fixture(id=uuid.uuid4(), organisation_id=club.id)
-        target.source = "playhq"
+        target.source = "grassroots"
         target.playhq_id = str(gid)
         target.round = g.get("round")
         target.played_on = _parse_date(played)

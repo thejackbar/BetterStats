@@ -1244,7 +1244,7 @@ async def get_game_fall_of_wickets(session: AsyncSession, game_id: str) -> list[
                 fow.innings_number,
                 fow.score_at_fall,
                 fow.overs_at_fall,
-                COALESCE(p.display_name_override, p.name) AS player_name,
+                COALESCE(p.display_name_override, p.name, fow.batter_name) AS player_name,
                 fow.player_id::text
             FROM fall_of_wickets fow
             LEFT JOIN players p ON p.id = fow.player_id
@@ -2393,6 +2393,70 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
     return [dict(r) for r in result.mappings()]
 
 
+async def _club_results(
+    session: AsyncSession,
+    org_id: str,
+    season_ids: Optional[list] = None,
+    grade_id: Optional[str] = None,
+) -> dict:
+    """W/L/D and win-rate over the org's own completed games.
+
+    A game is 'ours' when our club name's first word appears on either side —
+    mirrors ``get_org_results`` so the headline matches the results list. Reads
+    ``v_effective_games`` (so it self-corrects with the cross-club views) and
+    replaces the retired PlayHQ Partner win/loss override.
+    """
+    name_row = await session.execute(
+        text("SELECT name FROM organisations WHERE id = CAST(:id AS UUID)"),
+        {"id": org_id},
+    )
+    org_name = name_row.scalar() or ""
+    org_word = org_name.split()[0] if org_name else ""
+
+    clauses = ["s.organisation_id = CAST(:org_id AS UUID)"]
+    params: dict = {"org_id": org_id}
+    if org_word:
+        clauses.append("(g.home_team ILIKE :pat OR g.away_team ILIKE :pat)")
+        params["pat"] = f"%{org_word}%"
+    if grade_id:
+        clauses.append("gr.id = CAST(:grade_id AS UUID)")
+        params["grade_id"] = grade_id
+    elif season_ids:
+        clauses.append("s.id = ANY(:sids)")
+        params["sids"] = season_ids
+
+    row = dict(
+        (
+            await session.execute(
+                text(
+                    f"""
+            SELECT
+                COUNT(*) FILTER (WHERE g.result IS NOT NULL)            AS total,
+                COUNT(*) FILTER (WHERE g.result = 'WIN')               AS wins,
+                COUNT(*) FILTER (WHERE g.result = 'LOSS')              AS losses,
+                COUNT(*) FILTER (WHERE g.result IN ('DRAW', 'TIE'))    AS draws
+            FROM v_effective_games g
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE {' AND '.join(clauses)}
+        """
+                ),
+                params,
+            )
+        ).mappings().first()
+        or {}
+    )
+    total = int(row.get("total") or 0)
+    wins = int(row.get("wins") or 0)
+    return {
+        "total_games": total,
+        "wins": wins,
+        "losses": int(row.get("losses") or 0),
+        "draws": int(row.get("draws") or 0),
+        "win_rate": round(wins / total * 100, 1) if total else 0,
+    }
+
+
 async def get_club_summary(
     session: AsyncSession,
     org_id: str,
@@ -2471,6 +2535,7 @@ async def get_club_summary(
             "total_players": int(row.get("total_players") or 0),
             "seasons": 1,
         })
+        base.update(await _club_results(session, org_id, grade_id=grade_id))
         return base
 
     where = "WHERE p.organisation_id = :org_id"
@@ -2502,6 +2567,7 @@ async def get_club_summary(
         "total_players": int(row.get("total_players") or 0),
         "seasons": int(row.get("seasons") or 0),
     })
+    base.update(await _club_results(session, org_id, season_ids=season_ids))
     return base
 
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from typing import Optional
 import logging
 import uuid
@@ -9,55 +9,8 @@ logger = logging.getLogger(__name__)
 
 from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, get_db
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
-from app.services import playhq_partner_client
 
 router = APIRouter(prefix="/games", tags=["games"])
-
-
-async def _enrich_scorecard_player_ids(
-    scorecard: dict,
-    org: Organisation,
-    db: AsyncSession,
-) -> None:
-    """Add player_id to batting/bowling rows whose playhq_appearance_id matches a DB Player."""
-    appearance_ids = set()
-    for innings in (scorecard.get("innings") or []):
-        for row in innings.get("batting", []) + innings.get("bowling", []):
-            if row.get("playhq_appearance_id"):
-                appearance_ids.add(row["playhq_appearance_id"])
-    if not appearance_ids:
-        return
-    result = await db.execute(
-        select(Player).where(
-            Player.organisation_id == org.id,
-            Player.playhq_id.in_(appearance_ids),
-        )
-    )
-    playhq_to_db: dict[str, str] = {p.playhq_id: str(p.id) for p in result.scalars().all()}
-    for innings in (scorecard.get("innings") or []):
-        for row in innings.get("batting", []) + innings.get("bowling", []):
-            phq_id = row.get("playhq_appearance_id")
-            if phq_id:
-                row["player_id"] = playhq_to_db.get(phq_id)
-
-
-def _filter_by_season(games: list, season_obj) -> list:
-    """Filter PlayHQ partner API games to those matching a DB Season.
-    Tries exact name match first, falls back to year-range match so that
-    cross-year seasons (e.g. Summer 2024/25 spans Oct 2024 – Mar 2025) still work.
-    """
-    name = (season_obj.name or "").strip().lower()
-    by_name = [g for g in games if g.get("season", "").strip().lower() == name]
-    if by_name:
-        return by_name
-    # Fallback: match by the season's start year — games played in year Y or Y+1
-    year = season_obj.year
-    if year:
-        return [
-            g for g in games
-            if g.get("played_at", "")[:4] in (str(year), str(year + 1))
-        ]
-    return []
 
 
 async def _fetch_manual_games_as_list(
@@ -111,201 +64,56 @@ async def list_games(
     manual_games = await _fetch_manual_games_as_list(
         db, uuid.UUID(org_id), season_id, grade_id, finals_only,
     )
-    if org and org.playhq_id:
-        db_seasons_res = await db.execute(
-            select(Season).where(Season.organisation_id == uuid.UUID(org_id))
-        )
-        db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
-        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons, grassroots_org_id=str(org.id))
-        recent = [g for g in all_games if g.get("status") == "FINAL" and g.get("played_at")]
-        if season_id:
-            season_obj = await db.get(Season, uuid.UUID(season_id))
-            if season_obj:
-                recent = _filter_by_season(recent, season_obj)
-        if grade_id:
-            grade_obj = await db.get(Grade, uuid.UUID(grade_id))
-            if grade_obj:
-                recent = [g for g in recent if (g.get("grade") or {}).get("name", "").strip().lower() == grade_obj.name.strip().lower()]
-        if finals_only:
-            recent = [g for g in recent if "final" in (g.get("round") or {}).get("name", "").lower()]
-        recent.extend(manual_games)
-        recent.sort(key=lambda x: x.get("played_at") or "", reverse=True)
-        return recent[:limit]
 
-    # Fallback: DB query (empty for most installs until games are synced)
-    query = (
-        select(Game, Grade, Season)
-        .join(Grade, Grade.id == Game.grade_id)
-        .join(Season, Season.id == Grade.season_id)
-        .where(Season.organisation_id == uuid.UUID(org_id))
-    )
+    # Recent games come from our own synced data (DB-first). We restrict to the
+    # club's OWN games via the org-name-word home/away filter — the same rule
+    # get_org_results uses — since a shared grade can hold other clubs' games.
+    org_word = (org.name or "").split()[0] if org and org.name else ""
+    clauses = ["s.organisation_id = CAST(:org_id AS UUID)"]
+    params: dict = {"org_id": org_id, "limit": limit}
+    if org_word:
+        clauses.append("(g.home_team ILIKE :org_pat OR g.away_team ILIKE :org_pat)")
+        params["org_pat"] = f"%{org_word}%"
     if season_id:
-        query = query.where(Season.id == uuid.UUID(season_id))
+        clauses.append("s.id = CAST(:season_id AS UUID)")
+        params["season_id"] = season_id
     if grade_id:
-        query = query.where(Grade.id == uuid.UUID(grade_id))
+        clauses.append("gr.id = CAST(:grade_id AS UUID)")
+        params["grade_id"] = grade_id
     if finals_only:
-        query = query.where(Game.is_final == True)
-    query = query.order_by(Game.played_at.desc()).limit(limit)
-    result = await db.execute(query)
+        clauses.append("g.is_final = TRUE")
+
+    result = await db.execute(
+        text(f"""
+            SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
+                   gr.id AS grade_id, COALESCE(gr.display_name_override, gr.name) AS grade_name,
+                   gr.name AS grade_raw,
+                   s.id AS season_id, s.name AS season_name, s.year AS season_year
+            FROM v_effective_games g
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY g.played_at DESC NULLS LAST
+            LIMIT :limit
+        """),
+        params,
+    )
     api_games = [
         {
-            "id": str(game.id),
-            "played_at": game.played_at.isoformat() if game.played_at else None,
-            "home_team": game.home_team,
-            "away_team": game.away_team,
-            "result": game.result,
-            "winning_team": game.winning_team,
-            "grade": {"id": str(grade.id), "name": grade.display_name, "raw_name": grade.name},
-            "season": {"id": str(season.id), "name": season.name, "year": season.year},
+            "id": str(r.id),
+            "played_at": r.played_at.isoformat() if r.played_at else None,
+            "home_team": r.home_team,
+            "away_team": r.away_team,
+            "result": r.result,
+            "winning_team": r.winning_team,
+            "grade": {"id": str(r.grade_id), "name": r.grade_name, "raw_name": r.grade_raw},
+            "season": {"id": str(r.season_id), "name": r.season_name, "year": r.season_year},
         }
-        for game, grade, season in result.all()
+        for r in result
     ]
     combined = api_games + manual_games
     combined.sort(key=lambda x: x.get("played_at") or "", reverse=True)
     return combined[:limit]
-
-
-@router.get("/playhq/{playhq_game_id}")
-async def get_playhq_game(
-    playhq_game_id: str,
-    org_id: str = Query(...),
-    db: AsyncSession = Depends(get_db),
-):
-    org = await db.get(Organisation, uuid.UUID(org_id))
-    if not org or not org.playhq_id:
-        raise HTTPException(status_code=404, detail="Organisation not found or no PlayHQ ID")
-    db_seasons_res = await db.execute(
-        select(Season).where(Season.organisation_id == org.id)
-    )
-    db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
-    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons, grassroots_org_id=str(org.id))
-    game = next((g for g in all_games if str(g.get("id", "")) == playhq_game_id), None)
-    if not game:
-        logger.warning(f"PlayHQ game {playhq_game_id!r} not found in {len(all_games)} games for org {org.id}")
-        raise HTTPException(status_code=404, detail="Game not found")
-    return game
-
-
-@router.get("/playhq/{playhq_game_id}/scorecard/debug")
-async def debug_playhq_scorecard(
-    playhq_game_id: str,
-    org_id: str = Query(...),
-):
-    """Return raw PlayHQ REST period/team structure alongside parsed innings count."""
-    from app.services.playhq_partner_client import BASE_URL, _get, _parse_summary_rest
-    try:
-        raw = await _get(f"{BASE_URL}/v2/games/{playhq_game_id}/summary")
-    except Exception as e:
-        return {"error": str(e), "fixture_id": playhq_game_id, "hint": "PlayHQ API call failed — check fixture ID is a PlayHQ game ID, not an internal DB UUID"}
-    data = raw.get("data") or {}
-    if not data:
-        return {"error": "PlayHQ returned empty data", "raw_keys": list(raw.keys()), "fixture_id": playhq_game_id}
-    periods_summary = [
-        {
-            "name": p.get("name"),
-            "teams": [
-                {"id": t.get("id"), "name": t.get("name"), "discipline": t.get("discipline")}
-                for t in (p.get("teams") or [])
-            ],
-        }
-        for p in (data.get("periods") or [])
-    ]
-    try:
-        parsed = _parse_summary_rest(data)
-    except Exception as e:
-        parsed = {"innings": [], "parse_error": str(e)}
-    return {
-        "fixture_id": playhq_game_id,
-        "periods_count": len(periods_summary),
-        "periods": periods_summary,
-        "teams_top_level": [{"id": t.get("id"), "name": t.get("name")} for t in (data.get("teams") or [])],
-        "parsed_innings_count": len(parsed.get("innings", [])),
-        "parsed_innings": [
-            {"innings_number": inn["innings_number"], "batting_team": inn["batting_team"], "bowling_team": inn["bowling_team"], "batting_rows": len(inn["batting"]), "bowling_rows": len(inn["bowling"])}
-            for inn in parsed.get("innings", [])
-        ],
-        "parse_error": parsed.get("parse_error"),
-    }
-
-
-@router.get("/playhq/{playhq_game_id}/scorecard")
-async def get_playhq_scorecard(
-    playhq_game_id: str,
-    org_id: str = Query(...),
-    db: AsyncSession = Depends(get_db),
-):
-    org = await db.get(Organisation, uuid.UUID(org_id))
-    if not org or not org.playhq_id:
-        raise HTTPException(status_code=404, detail="Organisation not found or no PlayHQ ID")
-    db_seasons_res = await db.execute(
-        select(Season).where(Season.organisation_id == org.id)
-    )
-    db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
-    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons, grassroots_org_id=str(org.id))
-    matched = next((g for g in all_games if str(g.get("id", "")) == playhq_game_id), None)
-    game_url = matched.get("url", "") if matched else ""
-    try:
-        scorecard = await playhq_partner_client.get_fixture_scorecard(playhq_game_id, game_url=game_url)
-        await _enrich_scorecard_player_ids(scorecard, org, db)
-    except Exception as e:
-        logger.warning(f"PlayHQ scorecard fetch failed for {playhq_game_id}: {e}")
-        raise HTTPException(status_code=502, detail=f"Scorecard unavailable: {e}")
-
-    # Flatten innings-nested structure into the same shape the frontend expects
-    batting_flat = []
-    bowling_flat = []
-    innings_totals: dict[int, dict] = {}
-    for inn in (scorecard.get("innings") or []):
-        n = inn.get("innings_number", 1)
-        innings_totals[n] = {
-            "runs": inn.get("total_runs"),
-            "wickets": inn.get("total_wickets"),
-            "batting_team": inn.get("batting_team", ""),
-        }
-        for row in (inn.get("batting") or []):
-            batting_flat.append({
-                "innings_number": n,
-                "player_id": row.get("player_id"),
-                "player_name": row.get("name"),
-                "runs": row.get("runs"),
-                "balls": row.get("balls"),
-                "fours": row.get("fours"),
-                "sixes": row.get("sixes"),
-                "strike_rate": row.get("strike_rate"),
-                "dismissal_type": row.get("how_out"),
-                "not_out": row.get("not_out", False),
-            })
-        for row in (inn.get("bowling") or []):
-            bowling_flat.append({
-                "innings_number": n,
-                "player_id": row.get("player_id"),
-                "player_name": row.get("name"),
-                "overs": row.get("overs"),
-                "maidens": row.get("maidens"),
-                "runs": row.get("runs"),
-                "wickets": row.get("wickets"),
-                "wides": row.get("wides"),
-                "no_balls": row.get("no_balls"),
-                "economy": row.get("economy"),
-            })
-
-    meta = matched or {}
-    return {
-        "id": playhq_game_id,
-        "home_team": meta.get("home_team"),
-        "away_team": meta.get("away_team"),
-        "played_at": meta.get("played_at"),
-        "result": meta.get("result"),
-        "winning_team": meta.get("winning_team"),
-        "grade": meta.get("grade"),
-        "season": meta.get("season"),
-        "innings_totals": innings_totals,
-        "batting": batting_flat,
-        "bowling": bowling_flat,
-        "fielding": [],
-        "fall_of_wickets": scorecard.get("fall_of_wickets") or [],
-        "partnerships": scorecard.get("partnerships") or [],
-    }
 
 
 @router.get("/{game_id}/scorecard/gr-debug")
@@ -360,6 +168,128 @@ async def debug_gr_scorecard(game_id: str):
     return sample
 
 
+def _to_float(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _gr_scorecard_response(game_id: str) -> Optional[dict]:
+    """Full both-teams scorecard for a live / not-yet-synced match, built directly
+    from Grassroots. Returns None when GR has nothing for this id (truly unknown).
+
+    Same response shape as the DB path (get_scorecard) so the frontend renders it
+    identically — DB-first, Grassroots only when we don't hold the match.
+    """
+    from app.services.grassroots_scores_client import get_match_scorecard
+    gr = await get_match_scorecard(game_id)
+    if not gr:
+        return None
+
+    teams = gr.get("teams") or []
+    team_name: dict[str, str] = {}
+    home_team = away_team = None
+    for t in teams:
+        tid = (t.get("id") or "").lower()
+        nm = t.get("displayName") or t.get("name")
+        if tid:
+            team_name[tid] = nm
+        if t.get("isHome"):
+            home_team = nm
+        else:
+            away_team = nm
+
+    played_at = None
+    for sched in (gr.get("matchSchedule") or []):
+        iso = sched.get("startDateTime") or ""
+        if iso:
+            played_at = iso[:10]
+            break
+    grade = gr.get("grade") or {}
+    _DNB = {"absent", "did not bat", "dnb"}
+
+    batting: list[dict] = []
+    bowling: list[dict] = []
+    fow: list[dict] = []
+    innings_totals: dict[int, dict] = {}
+    for inn in (gr.get("innings") or []):
+        inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+        bt_id = str(inn.get("battingTeamId") or "").lower()
+        innings_totals[inn_num] = {
+            "runs": inn.get("runsScored"),
+            "wickets": inn.get("numberOfWicketsFallen"),
+            "extras": inn.get("totalExtras"),
+            "batting_team": team_name.get(bt_id),
+        }
+        for row in (inn.get("batting") or []):
+            dt_id = row.get("dismissalTypeId") or 0
+            dt_long = row.get("dismissalType") or ""
+            is_dnb = dt_long.lower() in _DNB
+            if dt_id == 0 and not is_dnb:
+                continue
+            batting.append({
+                "innings_number": inn_num,
+                "player_id": None,
+                "player_name": row.get("playerShortName") or "Unknown",
+                "runs": None if is_dnb else (row.get("runsScored") or 0),
+                "balls": None if is_dnb else (row.get("ballsFaced") or 0),
+                "fours": None if is_dnb else (row.get("foursScored") or 0),
+                "sixes": None if is_dnb else (row.get("sixesScored") or 0),
+                "strike_rate": _to_float(row.get("strikeRate")),
+                "dismissal_type": None if is_dnb else (row.get("dismissalText") or dt_long.lower() or None),
+                "not_out": dt_id == 1,
+                "did_not_bat": is_dnb,
+                "batting_position": row.get("batOrder"),
+            })
+        for row in (inn.get("bowling") or []):
+            bowling.append({
+                "innings_number": inn_num,
+                "player_id": None,
+                "player_name": row.get("playerShortName") or "Unknown",
+                "overs": row.get("oversBowled"),
+                "maidens": row.get("maidensBowled"),
+                "runs": row.get("runsConceded"),
+                "wickets": row.get("wicketsTaken"),
+                "wides": row.get("wideBalls"),
+                "no_balls": row.get("noBalls"),
+                "economy": _to_float(row.get("economy")),
+            })
+        for row in (inn.get("fallOfWickets") or []):
+            wkt = row.get("order")
+            if wkt is None:
+                continue
+            fow.append({
+                "innings_number": inn_num,
+                "wicket_number": wkt,
+                "score_at_fall": row.get("runs"),
+                "overs_at_fall": None,
+                "player_name": row.get("playerShortName"),
+                "player_id": None,
+            })
+
+    return {
+        "id": game_id,
+        "home_team": home_team,
+        "away_team": away_team,
+        "played_at": played_at,
+        "result": None,
+        "winning_team": None,
+        "result_text": (gr.get("matchSummary") or {}).get("resultText"),
+        "grade": {"id": grade.get("id"), "name": grade.get("name"), "raw_name": grade.get("name")} if grade.get("id") else None,
+        "season": None,
+        "innings_totals": innings_totals,
+        "batting": batting,
+        "bowling": bowling,
+        "opp_batting": [],
+        "opp_bowling": [],
+        "fielding": [],
+        "fall_of_wickets": fow,
+        "partnerships": [],
+        "live": True,
+    }
+
+
 @router.get("/{game_id}/scorecard")
 async def get_scorecard(
     game_id: str,
@@ -370,7 +300,12 @@ async def get_scorecard(
     if not game:
         manual = await db.get(ManualGame, uuid.UUID(game_id))
         if not manual:
-            raise HTTPException(status_code=404, detail="Game not found")
+            # Not in our DB → live or never-synced. Build the card from Grassroots
+            # (DB-first, GR-fallback). 404 only if GR doesn't know it either.
+            gr_card = await _gr_scorecard_response(game_id)
+            if gr_card is None:
+                raise HTTPException(status_code=404, detail="Game not found")
+            return gr_card
         game = manual
         is_manual = True
 

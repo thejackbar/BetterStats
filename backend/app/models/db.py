@@ -769,6 +769,9 @@ class FallOfWicket(Base):
     score_at_fall = Column(Integer)
     overs_at_fall = Column(Numeric(5, 1))
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    # The dismissed batter's scorecard name. Set for every FOW row (both teams);
+    # for opposition batters player_id is NULL, so this is the only name we hold.
+    batter_name = Column(Text, nullable=True)
 
     game = relationship("Game", back_populates="fall_of_wickets")
     player = relationship("Player")

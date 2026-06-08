@@ -336,7 +336,7 @@ export default function Dashboard() {
                         {g.played_at ? new Date(g.played_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—'}
                       </td>
                       <td className="py-2.5">
-                        <Link to={`/games/${g.id}?org=${orgId}`} className="text-pb-text hover:text-pb-accent font-medium">
+                        <Link to={`/games/${g.id}`} className="text-pb-text hover:text-pb-accent font-medium">
                           {g.home_team} <span className="text-pb-faint text-[11px]">v</span> {g.away_team}
                         </Link>
                       </td>
@@ -377,7 +377,7 @@ export default function Dashboard() {
                       <div className="font-mono text-pb-faint text-[10.5px] tracking-wide2 truncate">{f.venue}</div>
                     )}
                     {f.id && (
-                      <Link to={`/scorecards/${f.id}`} className="mt-1 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-accent transition self-start">
+                      <Link to={`/games/${f.id}`} className="mt-1 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-accent transition self-start">
                         SCORECARD →
                       </Link>
                     )}

@@ -126,8 +126,6 @@ const StatLab = lazy(() => import('./pages/StatLab'))
 const Yearbook = lazy(() => import('./pages/Yearbook'))
 const GamesPage = lazy(() => import('./pages/GamesPage'))
 const MatchScorecard = lazy(() => import('./pages/MatchScorecard'))
-const MatchOverview = lazy(() => import('./pages/MatchOverview'))
-const PlayHQScorecard = lazy(() => import('./pages/PlayHQScorecard'))
 const ClubInactive = lazy(() => import('./pages/ClubInactive'))
 const Onboard = lazy(() => import('./pages/Onboard'))
 
@@ -262,8 +260,6 @@ export default function App() {
 
           {/* Game-level pages */}
           <Route path="/games/:gameId" element={<MatchScorecard />} />
-          <Route path="/match/:gameId" element={<MatchOverview />} />
-          <Route path="/scorecards/:gameId" element={<PlayHQScorecard />} />
 
           {/* Public club pages (slug-based) */}
           <Route path="/club-inactive" element={<ClubInactive />} />

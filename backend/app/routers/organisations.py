@@ -4,30 +4,18 @@ from sqlalchemy import select, text
 import re as _re
 from pydantic import BaseModel
 import uuid
-from datetime import date
 
 from app.models.db import Organisation, Season, Grade, User, ClubMembership, get_db
 from app.services import playhq_client
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
-from app.services import playhq_partner_client
+from app.services.fixtures_source import org_grassroots_fixtures
 from app.routers.auth import get_current_user
 from app.auth.capabilities import require_cap, RUN_SYNC
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
 _org_sync_running: set = set()
-
-
-def _filter_by_season(games: list, season_obj) -> list:
-    name = (season_obj.name or "").strip().lower()
-    by_name = [g for g in games if g.get("season", "").strip().lower() == name]
-    if by_name:
-        return by_name
-    year = season_obj.year
-    if year:
-        return [g for g in games if g.get("played_at", "")[:4] in (str(year), str(year + 1))]
-    return []
 
 
 class OnboardRequest(BaseModel):
@@ -225,19 +213,7 @@ async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depe
                 out.append({"id": str(g.id), "name": g.name})
         return out
 
-    # No grades in DB — try the cheap per-season PlayHQ endpoint (single call per season)
-    try:
-        api_grades = await playhq_partner_client.get_season_grades(season_id)
-        if api_grades:
-            def _grade_sort_key(x):
-                m = _re.match(r'^(\d+)', x["name"])
-                return (int(m.group(1)) if m else float('inf'), x["name"])
-            return sorted(
-                [{"id": g["id"], "name": g.get("name", "")} for g in api_grades if g.get("id")],
-                key=_grade_sort_key,
-            )
-    except Exception:
-        pass
+    # Grades are seeded into the DB during sync; no live API fallback needed.
     return []
 
 
@@ -267,65 +243,33 @@ async def get_org_summary(
     grade_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    summary = await get_club_summary(db, org_id, season_id, grade_id)
-    org = await db.get(Organisation, uuid.UUID(org_id))
-    if org and org.playhq_id:
-        db_seasons_res = await db.execute(
-            select(Season).where(Season.organisation_id == uuid.UUID(org_id))
-        )
-        db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
-        all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons, grassroots_org_id=str(org.id))
-        final = [g for g in all_games if g.get("status") == "FINAL" and g.get("result")]
-        if season_id:
-            season_obj = await db.get(Season, uuid.UUID(season_id))
-            if season_obj:
-                final = _filter_by_season(final, season_obj)
-        if grade_id:
-            grade_obj = await db.get(Grade, uuid.UUID(grade_id))
-            if grade_obj:
-                final = [g for g in final if (g.get("grade") or {}).get("name", "").strip().lower() == grade_obj.name.strip().lower()]
-        wins = sum(1 for g in final if g.get("result") == "WIN")
-        losses = sum(1 for g in final if g.get("result") == "LOSS")
-        draws = sum(1 for g in final if g.get("result") in ("DRAW", "TIE"))
-        total = len(final)
-        summary["total_games"] = total
-        summary["wins"] = wins
-        summary["losses"] = losses
-        summary["draws"] = draws
-        summary["win_rate"] = round(wins / total * 100, 1) if total > 0 else 0
-    return summary
+    # W/L/D/total_games/win_rate are computed from our own synced games inside
+    # get_club_summary (DB-first) — the old PlayHQ Partner override is retired.
+    return await get_club_summary(db, org_id, season_id, grade_id)
 
 
 @router.get("/{org_id}/fixtures")
 async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
-    """Fetch upcoming fixtures from the PlayHQ partner API."""
+    """Fetch upcoming fixtures from the Grassroots /scores API (DB grades → live
+    per-grade match list). Replaces the retired PlayHQ Partner path."""
     org = await db.get(Organisation, uuid.UUID(org_id))
-    if not org or not org.playhq_id:
+    if not org:
         return []
-
-    db_seasons_res = await db.execute(
-        select(Season).where(Season.organisation_id == uuid.UUID(org_id))
-    )
-    db_seasons = [{"id": str(s.id), "name": s.name} for s in db_seasons_res.scalars().all()]
-    all_games = await playhq_partner_client.get_org_games(org.playhq_id, org.name, db_seasons=db_seasons, grassroots_org_id=str(org.id))
-    today = date.today()
-
+    fixtures = await org_grassroots_fixtures(db, org)
     upcoming = [
         {
-            "id": g["id"],
-            "home_team": g["home_team"],
-            "away_team": g["away_team"],
-            "date": g["played_at"],
-            "time": g.get("time"),
-            "grade": (g.get("grade") or {}).get("name", ""),
-            "season": g.get("season", ""),
-            "round": g.get("round"),
-            "venue": g.get("venue"),
+            "id": fx["id"],
+            "home_team": fx["home_team"],
+            "away_team": fx["away_team"],
+            "date": fx["played_at"],
+            "time": fx.get("time"),
+            "grade": fx.get("grade_name") or "",
+            "season": fx.get("season_name") or "",
+            "round": fx.get("round"),
+            "venue": fx.get("venue"),
         }
-        for g in all_games
-        if g.get("status") != "FINAL" and g.get("played_at") and g["played_at"] >= today.isoformat()
+        for fx in fixtures
     ]
-    upcoming.sort(key=lambda x: (x["date"], x.get("time") or ""))
     return upcoming[:20]
 
 

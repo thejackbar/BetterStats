@@ -376,6 +376,7 @@ function Bowling({ d, seasonId, teamId }) {
   const attack = d.attack
   const disc = d.discipline
   const wq = d.wickets_quality
+  const cb = d.collapse_bowlers
   const maxShare = Math.max(1, ...((attack?.bowlers || []).map(a => a.wickets || 0)))
 
   return (
@@ -410,6 +411,29 @@ function Bowling({ d, seasonId, teamId }) {
             ))}
           </div>
           <Note><b>Strike</b> takes wickets quickly · <b>Containment</b> restricts runs · <b>Stock</b> workhorse. Frontline bowlers only; bar = share of wickets.</Note>
+        </Card>
+      )}
+
+      {cb && cb.bowlers?.length > 0 && (
+        <Card eyebrow="who runs through sides" title="Collapse-causers"
+          right={<span className="text-pb-faint text-[12px] iq-num">{cb.burst_threshold}+ wkts / innings</span>}>
+          <div className="space-y-3">
+            {cb.bowlers.map((b, i) => (
+              <div key={b.player_id} className="flex items-center gap-3">
+                <Initials name={b.name} size={34} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-[14px] truncate">{b.name}</span>
+                    <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">
+                      {b.bursts}× burst · {b.wickets}w · best {b.best_haul}{b.economy != null ? ` · econ ${a2(b.economy)}` : ''}
+                    </span>
+                  </div>
+                  <div className="text-pb-faint text-[11.5px]">{b.five_fors > 0 ? `${b.five_fors} five-for${b.five_fors > 1 ? 's' : ''}` : 'no five-fors'}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <Note>A "burst" is {cb.burst_threshold}+ wickets in one innings — the spells that trigger collapses. Economy pairs the strike rate with how containing they are.</Note>
         </Card>
       )}
 
