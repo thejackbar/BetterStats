@@ -141,8 +141,6 @@ export const api = {
     return request(`/organisations/${orgId}/results?${params}`)
   },
   getScorecard: (gameId) => request(`/games/${gameId}/scorecard`),
-  getPlayHQGame: (orgId, gameId) => request(`/games/playhq/${gameId}?org_id=${encodeURIComponent(orgId)}`),
-  getPlayHQScorecard: (orgId, gameId) => request(`/games/playhq/${gameId}/scorecard?org_id=${encodeURIComponent(orgId)}`),
 
   // Admin / merge tools
   getMergeCandidates: (orgId) => request(`/admin/merge-candidates?org_id=${orgId}`),

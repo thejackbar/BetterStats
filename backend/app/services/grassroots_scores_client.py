@@ -14,6 +14,7 @@ column (both are Grassroots GUIDs), so no extra mapping table is required.
 import asyncio
 import logging
 import time
+from datetime import date
 from typing import Optional
 
 import httpx
@@ -184,3 +185,97 @@ async def get_match_scorecard(match_id: str) -> Optional[dict]:
     except Exception as e:
         logger.warning(f"GR scores: /matches/{match_id} failed: {e}")
         return None
+
+
+# ── Upcoming fixtures ────────────────────────────────────────────────────────
+# CA's restricted /fixturesladders/.../fixtures endpoints are 403 with the public
+# key, but /scores/grades/{id}/matches returns EVERY match in a grade keyed by a
+# status enum (verified live against an in-season winter comp):
+#   0=UPCOMING  2=LIVE  3=COMPLETED  4=ABANDONED  5=NO RESULT
+# Upcoming fixtures are simply the rows whose status is pre-completion and whose
+# scheduled date is today-or-later. grade_id MUST be the raw CA grade GUID
+# (grades.grassroots_id, COALESCE'd with id for legacy rows).
+_FIXTURE_STATUS_UPCOMING = 0
+_FIXTURE_STATUS_LIVE = 2
+
+
+async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> list[dict]:
+    """Upcoming (and optionally live) fixtures for one grade, normalised.
+
+    Reuses ``get_grade_matches`` (same in-process cache). Returns a list of
+    ``{id, home_team, away_team, played_at, time, status, round, venue, grade_id}``
+    dicts for matches that haven't reached a terminal state and are scheduled
+    today-or-later.
+    """
+    matches = await get_grade_matches(grade_id)
+    today = date.today().isoformat()
+    keep = {_FIXTURE_STATUS_UPCOMING}
+    if include_live:
+        keep.add(_FIXTURE_STATUS_LIVE)
+    out: list[dict] = []
+    for m in matches:
+        try:
+            sid = int(m.get("statusId"))
+        except (TypeError, ValueError):
+            continue
+        if sid not in keep:
+            continue
+        sched = (m.get("matchSchedule") or [{}])
+        dt = (sched[0].get("startDateTime") if sched else "") or ""
+        day = dt[:10]
+        if not day or day < today:
+            continue
+        teams = m.get("teams") or []
+        home = next((t.get("displayName") for t in teams if t.get("isHome")), None)
+        away = next((t.get("displayName") for t in teams if not t.get("isHome")), None)
+        out.append({
+            "id": m.get("id"),
+            "home_team": home,
+            "away_team": away,
+            "played_at": day,
+            "time": dt[11:16] if len(dt) >= 16 else None,
+            "status": "LIVE" if sid == _FIXTURE_STATUS_LIVE else "UPCOMING",
+            "round": (m.get("round") or {}).get("name"),
+            "venue": (m.get("venue") or {}).get("name"),
+            "grade_id": grade_id,
+        })
+    return out
+
+
+async def get_grades_fixtures(
+    grade_ids: list[str],
+    match_keys: Optional[list[str]] = None,
+    *,
+    include_live: bool = True,
+) -> list[dict]:
+    """Aggregate ``get_grade_fixtures`` across grades, de-duplicated and sorted.
+
+    ``match_keys`` (lowercased club name keys, e.g. from ``club_match_keys``)
+    optionally restricts results to fixtures involving that club (substring match
+    on either side). Grades are fetched concurrently; the underlying per-grade
+    cache makes repeat calls cheap.
+    """
+    results = await asyncio.gather(
+        *[get_grade_fixtures(g, include_live=include_live) for g in grade_ids],
+        return_exceptions=True,
+    )
+    out: list[dict] = []
+    seen: set = set()
+    for r in results:
+        if not isinstance(r, list):
+            if isinstance(r, Exception):
+                logger.warning(f"GR fixtures: grade fetch failed: {r}")
+            continue
+        for fx in r:
+            fid = fx.get("id")
+            if not fid or fid in seen:
+                continue
+            if match_keys:
+                hl = (fx.get("home_team") or "").lower()
+                al = (fx.get("away_team") or "").lower()
+                if not any(k in hl or k in al for k in match_keys):
+                    continue
+            seen.add(fid)
+            out.append(fx)
+    out.sort(key=lambda x: (x["played_at"], x.get("time") or ""))
+    return out

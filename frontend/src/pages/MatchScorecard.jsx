@@ -449,14 +449,14 @@ export default function MatchScorecard() {
   const fmtName = useNameFormat(orgData)
 
   useEffect(() => {
-    const fetch = orgId
-      ? api.getPlayHQScorecard(orgId, gameId)
-      : api.getScorecard(gameId)
-    fetch
+    // Always DB-first → Grassroots fallback for live/unsynced (api.getScorecard);
+    // the old PlayHQ Partner path (when ?org was present) is retired. ?org is
+    // still read below purely for club name-formatting.
+    api.getScorecard(gameId)
       .then(setGame)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [gameId, orgId])
+  }, [gameId])
 
   useEffect(() => {
     if (orgId) api.getOrg(orgId).then(setOrgData).catch(() => {})
