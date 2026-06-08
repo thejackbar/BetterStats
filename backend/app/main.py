@@ -103,6 +103,11 @@ async def lifespan(app: FastAPI):
                 NULL::boolean AS caught_behind
             FROM manual_batting_innings
         """))
+        # Bowling: flag caught-behind on bowler_wickets (migration 076). Read
+        # directly (no effective view), so a plain idempotent add is enough.
+        await conn.execute(text(
+            "ALTER TABLE bowler_wickets ADD COLUMN IF NOT EXISTS caught_behind BOOLEAN"
+        ))
         # BetterSelect → Net Manager: net/practice attendance + batting-queue
         # sessions. Defensive idempotent creates so the API boots even if a
         # numbered migration hasn't run yet (mirrors the self-service block).

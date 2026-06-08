@@ -1077,6 +1077,7 @@ def extract_bowler_wickets(
                 batter_name=row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or ""),
                 batter_position=row.get("batOrder"),
                 dismissal_type=method or None,
+                caught_behind=(method == "caught" and _caught_by_keeper(d_text)),
                 batter_runs=int(b_runs) if b_runs is not None else None,
                 batter_balls=int(b_balls) if b_balls is not None else None,
             ))

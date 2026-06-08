@@ -749,6 +749,10 @@ class BowlerWicket(Base):
     batter_runs = Column(Integer, nullable=True)
     batter_balls = Column(Integer, nullable=True)
     dismissal_type = Column(Text, nullable=False)
+    # True when a caught dismissal was taken by the wicketkeeper ("caught
+    # behind"). Derived from the dagger (†) on the catcher in dismissalText.
+    # NULL = unknown (legacy rows until rebuilt). See migration 076.
+    caught_behind = Column(Boolean, nullable=True)
 
 
 class GameAppearance(Base):

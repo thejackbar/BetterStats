@@ -686,7 +686,11 @@ async def get_bowling_dismissal_breakdown(session: AsyncSession, player_id: str)
     result = await session.execute(
         text("""
             SELECT
-                COALESCE(bw.dismissal_type, 'unknown') AS dismissal_type,
+                CASE
+                    WHEN bw.dismissal_type = 'caught' AND bw.caught_behind IS TRUE
+                        THEN 'caught behind'
+                    ELSE COALESCE(bw.dismissal_type, 'unknown')
+                END AS dismissal_type,
                 COUNT(*) AS count
             FROM bowler_wickets bw
             WHERE bw.bowler_id = :pid

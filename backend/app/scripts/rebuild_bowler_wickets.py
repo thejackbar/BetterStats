@@ -5,9 +5,16 @@ the table without wiping games / batting_innings / bowling_spells / etc.
 Re-fetches each game's scorecard from CA and re-runs the bowler-wickets
 extractor.
 
+Also the way to back-fill `bowler_wickets.caught_behind` (migration 076) — the
+extractor now records whether each caught wicket was off the keeper.
+
 Usage from the backend container:
+  # one club:
   docker exec -e PYTHONPATH=/app betterstats-backend \\
     python -m app.scripts.rebuild_bowler_wickets <org_id>
+  # every club (no arg, or "all"):
+  docker exec -e PYTHONPATH=/app betterstats-backend \\
+    python -m app.scripts.rebuild_bowler_wickets all
 
 Roughly the same network cost as a Full Rebuild (one scorecard fetch per
 game) but only touches `bowler_wickets`, so it's noticeably faster and
@@ -144,8 +151,32 @@ async def rebuild_for_org(org_id_str: str) -> None:
     )
 
 
+async def rebuild_all() -> None:
+    """Rebuild every organisation, sequentially, so one run repopulates the whole
+    site (e.g. after adding bowler_wickets.caught_behind). One club's failure must
+    not abort the rest."""
+    async with async_session_maker() as session:
+        rows = await session.execute(
+            sql_text("SELECT id, name FROM organisations ORDER BY name")
+        )
+        orgs = [(r[0], r[1]) for r in rows.all()]
+    print(f"Rebuilding bowler_wickets for {len(orgs)} organisations...\n")
+    failed: list[str] = []
+    for idx, (oid, name) in enumerate(orgs, start=1):
+        print(f"=== [{idx}/{len(orgs)}] {name} ({oid}) ===")
+        try:
+            await rebuild_for_org(str(oid))
+        except Exception as exc:
+            failed.append(f"{name} ({oid}): {exc}")
+            print(f"  !! org failed: {exc}")
+    print(f"\nAll organisations done. {len(failed)} failed.")
+    for f in failed:
+        print(f"  - {f}")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python -m app.scripts.rebuild_bowler_wickets <org_id>")
-        sys.exit(1)
-    asyncio.run(rebuild_for_org(sys.argv[1]))
+    arg = sys.argv[1] if len(sys.argv) > 1 else "all"
+    if arg.lower() == "all":
+        asyncio.run(rebuild_all())
+    else:
+        asyncio.run(rebuild_for_org(arg))

@@ -12,8 +12,12 @@ but only updates `batting_innings.caught_behind`, so it's far faster and the
 blast radius is contained. Re-runnable (idempotent).
 
 Usage from the backend container:
+  # one club:
   docker exec -e PYTHONPATH=/app betterstats-backend \\
     python -m app.scripts.backfill_caught_behind <org_id>
+  # every club (no arg, or "all"):
+  docker exec -e PYTHONPATH=/app betterstats-backend \\
+    python -m app.scripts.backfill_caught_behind all
 """
 
 import asyncio
@@ -145,8 +149,31 @@ async def backfill_for_org(org_id_str: str) -> None:
     )
 
 
+async def backfill_all() -> None:
+    """Backfill every organisation, sequentially. Idempotent and non-destructive
+    (only UPDATEs batting_innings.caught_behind), so a failed run can be re-run."""
+    async with async_session_maker() as session:
+        rows = await session.execute(
+            sql_text("SELECT id, name FROM organisations ORDER BY name")
+        )
+        orgs = [(r[0], r[1]) for r in rows.all()]
+    print(f"Backfilling caught_behind for {len(orgs)} organisations...\n")
+    failed: list[str] = []
+    for idx, (oid, name) in enumerate(orgs, start=1):
+        print(f"=== [{idx}/{len(orgs)}] {name} ({oid}) ===")
+        try:
+            await backfill_for_org(str(oid))
+        except Exception as exc:  # one club's failure must not abort the rest
+            failed.append(f"{name} ({oid}): {exc}")
+            print(f"  !! org failed: {exc}")
+    print(f"\nAll organisations done. {len(failed)} failed.")
+    for f in failed:
+        print(f"  - {f}")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python -m app.scripts.backfill_caught_behind <org_id>")
-        sys.exit(1)
-    asyncio.run(backfill_for_org(sys.argv[1]))
+    arg = sys.argv[1] if len(sys.argv) > 1 else "all"
+    if arg.lower() == "all":
+        asyncio.run(backfill_all())
+    else:
+        asyncio.run(backfill_for_org(arg))

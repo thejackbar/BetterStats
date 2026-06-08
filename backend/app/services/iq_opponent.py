@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import OppositionDossier, async_session_maker
 from app.services import grassroots_scores_client as gr
+from app.services.sync import _caught_by_keeper
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 3
+DOSSIER_VERSION = 4
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -224,7 +225,10 @@ def _accumulate(scorecard: dict, match_id: str, opp_pids: dict[str, str], when: 
                 b["outs"] += 1
                 dt_long = row.get("dismissalType") or ""
                 if dt_long:
-                    b["dism"][_DISMISSAL_SHORT.get(dt_long, dt_long.lower())] += 1
+                    short = _DISMISSAL_SHORT.get(dt_long, dt_long.lower())
+                    if short == "caught" and _caught_by_keeper(row.get("dismissalText") or ""):
+                        short = "caught behind"
+                    b["dism"][short] += 1
             if b["hs"] is None or runs > b["hs"]:
                 b["hs"], b["hs_no"] = runs, not_out
             b["scores"].append({"date": when_s, "runs": runs, "balls": balls, "not_out": not_out})
@@ -909,7 +913,7 @@ def _confidence(samples: int) -> str:
 
 _DISMISSAL_ADVICE = {
     "caught": "tends to hole out — keep catchers in",
-    "caught keeper": "nicks off — a tight keeper line works",
+    "caught behind": "nicks off — a tight keeper line works",
     "c&b": "hits it back — follow through ready",
     "bowled": "gets bowled a lot — attack the stumps",
     "lbw": "lbw-prone — bowl straight and full",
