@@ -1028,6 +1028,7 @@ def extract_bowler_wickets(
         batting_rows = inn.get("batting") or []
         bowling_rows = inn.get("bowling") or []
         fielding_rows = inn.get("fielding") or []
+        keeper_names = _innings_keeper_names(fielding_rows)
 
         bowl_name_to_pid: dict[str, str] = {}
         for r in bowling_rows:
@@ -1077,7 +1078,7 @@ def extract_bowler_wickets(
                 batter_name=row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or ""),
                 batter_position=row.get("batOrder"),
                 dismissal_type=method or None,
-                caught_behind=(method == "caught" and _caught_by_keeper(d_text)),
+                caught_behind=(method == "caught" and _caught_by_keeper(d_text, keeper_names)),
                 batter_runs=int(b_runs) if b_runs is not None else None,
                 batter_balls=int(b_balls) if b_balls is not None else None,
             ))
@@ -1167,17 +1168,34 @@ def _parse_bowler_and_fielder(dismissal_text: str, dismissal_type: str) -> tuple
     return bowler_name, None, ""
 
 
-def _caught_by_keeper(dismissal_text: str) -> bool:
+def _innings_keeper_names(fielding_rows: list) -> set[str]:
+    """Normalised short-names of the wicketkeeper(s) in this innings — the
+    fielders credited with a wicketkeeper catch or a stumping. CA puts NO keeper
+    marker in dismissalText (it reads plain "c: C Cecchi b: A Ricci"), so a
+    'caught' is 'caught behind' iff its catcher is one of these."""
+    names: set[str] = set()
+    for f in (fielding_rows or []):
+        if (f.get("wicketKeeperCatches") or 0) > 0 or (f.get("stumpings") or 0) > 0:
+            nm = f.get("playerShortName")
+            if nm:
+                names.add(_norm_name(nm).strip().lower())
+    return names
+
+
+def _caught_by_keeper(dismissal_text: str, keeper_names: set[str]) -> bool:
     """True when a caught dismissal's catcher is the wicketkeeper ("caught
-    behind"). CA marks the keeper with a dagger (†) before their name in
-    dismissalText, e.g. "c †Smith b Jones". We check only the *fielder* slot
-    (before the bowler marker) so a keeper who also bowled — "c Fielder b †K" —
-    isn't mistaken for a keeper catch. c&b ("c & b Jones") has no fielder slot
-    and returns False. Caller must gate on dismissalType == "Caught"."""
-    if not dismissal_text or "†" not in dismissal_text:
+    behind"). The catcher is the fielder named between 'c' and 'b' in
+    dismissalText (e.g. "c: C Cecchi b: A Ricci" → "C Cecchi"); we match it
+    against the innings' keepers (the fielders with a wk-catch / stumping), since
+    CA marks no keeper symbol in the text. Caller gates on dismissalType ==
+    'Caught'. `keeper_names` comes from `_innings_keeper_names(inn['fielding'])`."""
+    if not dismissal_text or not keeper_names:
         return False
     m = _CAUGHT_FIELDER_RE.match(_norm_name(dismissal_text).strip())
-    return bool(m and m.group(1).strip().startswith("†"))
+    if not m:
+        return False
+    catcher = m.group(1).strip().lstrip("†").strip().lower()
+    return catcher in keeper_names
 
 
 def _count_dismissals_grassroots(batting_rows: list) -> int:
@@ -1689,6 +1707,7 @@ async def sync_grassroots_game_level_data(
                     bowling_rows = inn.get("bowling") or []
                     fielding_rows = inn.get("fielding") or []
                     fow_rows = inn.get("fallOfWickets") or []
+                    keeper_names = _innings_keeper_names(fielding_rows)
 
                     for row in batting_rows:
                         pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
@@ -1713,7 +1732,7 @@ async def sync_grassroots_game_level_data(
                         dt_short = _GR_DISMISSAL_SHORT.get(dt_long, dt_long.lower())
                         caught_behind = (
                             dt_long == "Caught"
-                            and _caught_by_keeper(row.get("dismissalText") or "")
+                            and _caught_by_keeper(row.get("dismissalText") or "", keeper_names)
                         )
                         session.add(BattingInnings(
                             game_id=match_uuid, player_id=pid, innings_number=inn_num,

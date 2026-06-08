@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, get_db
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
+from app.services.sync import _caught_by_keeper, _innings_keeper_names
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -215,6 +216,7 @@ async def _gr_scorecard_response(game_id: str) -> Optional[dict]:
     innings_totals: dict[int, dict] = {}
     for inn in (gr.get("innings") or []):
         inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+        keeper_names = _innings_keeper_names(inn.get("fielding") or [])
         bt_id = str(inn.get("battingTeamId") or "").lower()
         innings_totals[inn_num] = {
             "runs": inn.get("runsScored"),
@@ -238,6 +240,7 @@ async def _gr_scorecard_response(game_id: str) -> Optional[dict]:
                 "sixes": None if is_dnb else (row.get("sixesScored") or 0),
                 "strike_rate": _to_float(row.get("strikeRate")),
                 "dismissal_type": None if is_dnb else (row.get("dismissalText") or dt_long.lower() or None),
+                "caught_behind": dt_long == "Caught" and _caught_by_keeper(row.get("dismissalText") or "", keeper_names),
                 "not_out": dt_id == 1,
                 "did_not_bat": is_dnb,
                 "batting_position": row.get("batOrder"),
@@ -524,6 +527,7 @@ async def get_scorecard(
 
             for inn in (gr_data.get("innings") or []):
                 inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+                keeper_names = _innings_keeper_names(inn.get("fielding") or [])
 
                 # Capture authoritative innings totals directly from GR.
                 # totalExtras covers byes/leg-byes/penalties not on bowling rows.
@@ -595,6 +599,7 @@ async def get_scorecard(
                         "fours": None if is_dnb else (row.get("foursScored") or 0),
                         "sixes": None if is_dnb else (row.get("sixesScored") or 0),
                         "dismissal_type": dismissal_str,
+                        "caught_behind": dt_long == "Caught" and _caught_by_keeper(row.get("dismissalText") or "", keeper_names),
                         "not_out": dt_id == 1,
                         "did_not_bat": is_dnb,
                         "batting_position": row.get("batOrder"),
