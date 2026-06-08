@@ -691,6 +691,89 @@ async def _wickets_quality(session: AsyncSession, org_id: str, season_id: str | 
     }
 
 
+async def _collapse_bowlers(session: AsyncSession, org_id: str, season_id: str | None, grade_id: str | None = None) -> dict | None:
+    """Collapse-causing bowlers (net-new) — which bowlers take wickets in *bursts*
+    (3+ in an innings) and at what economy. Distinct from _wickets_quality (which
+    profiles top-order vs tail): this is the "runs through a side" angle for the
+    economy-vs-fall-of-wickets read. Joins bowler_wickets (wicket events) to
+    bowling_spells (economy). Org-scoped, so the dossier reuses it for a synced
+    opponent's bowling strengths/weaknesses too — no duplicate logic.
+    """
+    season_clause = _scope(season_id, grade_id)
+    params = {"org": org_id, "season": season_id, "grade": grade_id}
+    res = await session.execute(
+        text(
+            f"""
+            SELECT bw.bowler_id::text AS pid,
+                   COALESCE(pl.display_name_override, pl.name) AS name,
+                   bw.game_id::text AS gid, bw.innings_number AS inn,
+                   COUNT(*) AS wkts
+            FROM bowler_wickets bw
+            JOIN players pl ON pl.id = bw.bowler_id
+            JOIN v_effective_games g ON g.id = bw.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID) {season_clause}
+            GROUP BY 1, 2, 3, 4
+            """
+        ),
+        params,
+    )
+    spells = [dict(r) for r in res.mappings()]
+    if not spells:
+        return None
+
+    # Economy per bowler — overs are cricket notation (10.2 = 10 overs 2 balls).
+    eco_res = await session.execute(
+        text(
+            f"""
+            SELECT bs.player_id::text AS pid,
+                   SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)) AS balls,
+                   SUM(bs.runs) AS runs
+            FROM v_effective_bowling_spells bs
+            JOIN v_effective_games g ON g.id = bs.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID) {season_clause}
+              AND bs.overs IS NOT NULL
+            GROUP BY 1
+            """
+        ),
+        params,
+    )
+    eco = {r.pid: (float(r.runs or 0), float(r.balls or 0)) for r in eco_res}
+
+    BURST = 3  # 3+ wickets in an innings = a collapse-inducing spell
+    agg: dict = {}
+    for sp in spells:
+        a = agg.setdefault(sp["pid"], {"name": sp["name"], "wkts": 0, "bursts": 0, "best": 0, "five_fors": 0})
+        a["wkts"] += sp["wkts"]
+        a["best"] = max(a["best"], sp["wkts"])
+        if sp["wkts"] >= BURST:
+            a["bursts"] += 1
+        if sp["wkts"] >= 5:
+            a["five_fors"] += 1
+
+    out = []
+    for pid, a in agg.items():
+        if a["bursts"] <= 0:
+            continue
+        runs, balls = eco.get(pid, (0.0, 0.0))
+        out.append({
+            "player_id": pid,
+            "name": a["name"],
+            "wickets": a["wkts"],
+            "bursts": a["bursts"],
+            "best_haul": a["best"],
+            "five_fors": a["five_fors"],
+            "economy": round(runs / (balls / 6), 2) if balls else None,
+        })
+    if not out:
+        return None
+    out.sort(key=lambda o: (o["bursts"], o["wickets"]), reverse=True)
+    return {"bowlers": out[:10], "burst_threshold": BURST}
+
+
 async def _team_starts(session: AsyncSession, org_id: str, season_id: str | None, grade_id: str | None = None) -> dict | None:
     """Team starts (brief §7.4) — our opening-partnership profile and how our
     win rate changes after a good vs a poor start. Opening stands come from
@@ -1144,6 +1227,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
     discipline = await _safe(session, lambda: _discipline(session, org_id, season_id, grade_id), None)
     captaincy = await _safe(session, lambda: _captaincy(session, org_id, season_id, grade_id), [])
     wickets_quality = await _safe(session, lambda: _wickets_quality(session, org_id, season_id, grade_id), None)
+    collapse_bowlers = await _safe(session, lambda: _collapse_bowlers(session, org_id, season_id, grade_id), None)
     starts = await _safe(session, lambda: _team_starts(session, org_id, season_id, grade_id), None)
     role_ratings = await _safe(session, lambda: _role_ratings(session, org_id, season_id, grade_id), None)
     batting_extra = await _safe(session, lambda: _batting_extra(session, org_id, season_id, grade_id), None)
@@ -1163,6 +1247,7 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
         "discipline": discipline,
         "captaincy": captaincy,
         "wickets_quality": wickets_quality,
+        "collapse_bowlers": collapse_bowlers,
         "starts": starts,
         "role_ratings": role_ratings,
         "batting_extra": batting_extra,
