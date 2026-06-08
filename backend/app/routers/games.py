@@ -360,6 +360,7 @@ async def get_scorecard(
             "sixes": bi.sixes,
             "strike_rate": float(bi.strike_rate) if bi.strike_rate is not None else None,
             "dismissal_type": bi.dismissal_type,
+            "caught_behind": bi.caught_behind,
             "not_out": bi.not_out,
             "batting_position": bi.batting_position,
             "did_not_bat": bool(bi.did_not_bat),

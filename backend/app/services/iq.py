@@ -777,7 +777,10 @@ async def _our_bowler_dominance(session: AsyncSession, org_id: str, opp_key: str
                 COUNT(*) AS dismissals,
                 COALESCE(SUM(bw.batter_runs), 0) AS runs_made,
                 MAX(bw.batter_runs) AS top_score,
-                ARRAY_AGG(DISTINCT LOWER(bw.dismissal_type)) AS how
+                ARRAY_AGG(DISTINCT CASE
+                    WHEN bw.dismissal_type = 'caught' AND bw.caught_behind IS TRUE
+                        THEN 'caught behind'
+                    ELSE LOWER(bw.dismissal_type) END) AS how
             FROM bowler_wickets bw
             JOIN v_effective_games g ON g.id = bw.game_id{_ORG_SCOPE}
             JOIN players p ON p.id = bw.bowler_id
