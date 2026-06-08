@@ -54,6 +54,27 @@ _ORG_SCOPE = (
 )
 
 
+def _opp_scope(grade: str | None, season_ids: list[str] | None, params: dict) -> str:
+    """Extra WHERE clauses to narrow an opponent query to a grade (by name, the
+    BetterIQ filter convention — see ``iq_team._scope``) and/or a set of seasons.
+
+    Mutates ``params`` with the bound values and returns SQL to append after the
+    ``opp_key`` predicate. Empty inputs ⇒ no clause ⇒ all-time / all-grades, so
+    the default report is byte-for-byte what it was before filtering existed."""
+    clauses: list[str] = []
+    if grade:
+        params["grade"] = grade
+        clauses.append("AND gr.name = :grade")
+    if season_ids:
+        keys = []
+        for i, sid in enumerate(season_ids):
+            k = f"season_{i}"
+            params[k] = sid
+            keys.append(f"CAST(:{k} AS UUID)")
+        clauses.append(f"AND gr.season_id IN ({', '.join(keys)})")
+    return " ".join(clauses)
+
+
 async def _held_org_keys(session: AsyncSession) -> set[str]:
     """Org ids + playhq_ids of organisations we hold that have players.
 
@@ -453,13 +474,21 @@ async def resolve_opponent(
     return opp_key, name, grade_id
 
 
-async def _head_to_head(session: AsyncSession, org_id: str, opp_key: str) -> dict:
+async def _head_to_head(
+    session: AsyncSession, org_id: str, opp_key: str,
+    *, grade: str | None = None, season_ids: list[str] | None = None,
+) -> dict:
     """Our overall record vs an opponent + home/away split + recent meetings.
 
     ``our_venue`` is derived from the known opponent name against the game's
     home/away club — no need to know our own (multi-team) names. Manual games
     have NULL home/away club, so their venue reads as unknown.
+
+    ``grade``/``season_ids`` optionally scope the record to one grade (by name)
+    and/or a set of seasons (the card's All-time/Season/Grade toggle).
     """
+    params = {"org_id": org_id, "opp_key": opp_key}
+    scope = _opp_scope(grade, season_ids, params)
     summary = await session.execute(
         text(
             f"""
@@ -477,9 +506,10 @@ async def _head_to_head(session: AsyncSession, org_id: str, opp_key: str) -> dic
             FROM v_effective_games g{_ORG_SCOPE}
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
+              {scope}
             """
         ),
-        {"org_id": org_id, "opp_key": opp_key},
+        params,
     )
     s = summary.mappings().first() or {}
     wins, losses = (s.get("wins") or 0), (s.get("losses") or 0)
@@ -503,11 +533,12 @@ async def _head_to_head(session: AsyncSession, org_id: str, opp_key: str) -> dic
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
               AND g.played_at IS NOT NULL
+              {scope}
             ORDER BY g.played_at DESC
             LIMIT 12
             """
         ),
-        {"org_id": org_id, "opp_key": opp_key},
+        params,
     )
     recent = [
         {
@@ -539,13 +570,19 @@ async def _head_to_head(session: AsyncSession, org_id: str, opp_key: str) -> dic
     }
 
 
-async def _our_performers_vs(session: AsyncSession, org_id: str, opp_key: str) -> dict:
+async def _our_performers_vs(
+    session: AsyncSession, org_id: str, opp_key: str,
+    *, grade: str | None = None, season_ids: list[str] | None = None,
+) -> dict:
     """Our players' batting + bowling record against this opponent.
 
     Doubles as selection intel — who in our squad has historically enjoyed this
     match-up. Restricted to currently-active players so retired names don't crowd
-    the list, ordered by output.
+    the list, ordered by output. ``grade``/``season_ids`` scope it to match the
+    record card's filter.
     """
+    params = {"org_id": org_id, "opp_key": opp_key}
+    scope = _opp_scope(grade, season_ids, params)
     batting = await session.execute(
         text(
             f"""
@@ -565,13 +602,14 @@ async def _our_performers_vs(session: AsyncSession, org_id: str, opp_key: str) -
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
               AND p.status = 'active'
+              {scope}
             GROUP BY p.id, p.display_name_override, p.name, p.status
             HAVING COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) > 0
             ORDER BY runs DESC
             LIMIT 10
             """
         ),
-        {"org_id": org_id, "opp_key": opp_key},
+        params,
     )
     top_batting = []
     for r in batting.mappings():
@@ -606,13 +644,14 @@ async def _our_performers_vs(session: AsyncSession, org_id: str, opp_key: str) -
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
               AND p.status = 'active'
+              {scope}
             GROUP BY p.id, p.display_name_override, p.name, p.status
             HAVING COALESCE(SUM(bs.wickets), 0) > 0
             ORDER BY wickets DESC, runs ASC
             LIMIT 10
             """
         ),
-        {"org_id": org_id, "opp_key": opp_key},
+        params,
     )
     top_bowling = []
     for r in bowling.mappings():
@@ -635,7 +674,10 @@ async def _our_performers_vs(session: AsyncSession, org_id: str, opp_key: str) -
     return {"batting": top_batting, "bowling": top_bowling}
 
 
-async def _their_danger_batters(session: AsyncSession, org_id: str, opp_key: str) -> list[dict]:
+async def _their_danger_batters(
+    session: AsyncSession, org_id: str, opp_key: str,
+    *, grade: str | None = None, season_ids: list[str] | None = None,
+) -> list[dict]:
     """Opponent batters our bowlers have dismissed, with the runs they made.
 
     A *partial* signal (only dismissals BY us; not-outs and knocks we didn't end
@@ -643,6 +685,8 @@ async def _their_danger_batters(session: AsyncSession, org_id: str, opp_key: str
     watch", ordered by runs scored against us. Only synced games carry
     ``bowler_wickets`` (manual games have none), which is fine.
     """
+    params = {"org_id": org_id, "opp_key": opp_key}
+    scope = _opp_scope(grade, season_ids, params)
     res = await session.execute(
         text(
             f"""
@@ -656,13 +700,14 @@ async def _their_danger_batters(session: AsyncSession, org_id: str, opp_key: str
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
               AND bw.batter_name IS NOT NULL AND bw.batter_name <> ''
+              {scope}
             GROUP BY bw.batter_name
             HAVING COALESCE(SUM(bw.batter_runs), 0) > 0
             ORDER BY runs DESC, times_out DESC
             LIMIT 15
             """
         ),
-        {"org_id": org_id, "opp_key": opp_key},
+        params,
     )
     out = []
     for r in res.mappings():
@@ -729,8 +774,13 @@ async def search_opponent_players(session: AsyncSession, org_id: str, q: str) ->
     ]
 
 
-async def _venues_vs(session: AsyncSession, org_id: str, opp_key: str) -> list[dict]:
+async def _venues_vs(
+    session: AsyncSession, org_id: str, opp_key: str,
+    *, grade: str | None = None, season_ids: list[str] | None = None,
+) -> list[dict]:
     """Our win/loss record at each venue against this opponent."""
+    params = {"org_id": org_id, "opp_key": opp_key}
+    scope = _opp_scope(grade, season_ids, params)
     res = await session.execute(
         text(
             f"""
@@ -742,13 +792,14 @@ async def _venues_vs(session: AsyncSession, org_id: str, opp_key: str) -> list[d
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
               AND g.venue IS NOT NULL AND g.venue <> ''
+              {scope}
             GROUP BY g.venue
             HAVING COUNT(*) FILTER (WHERE g.result IS NOT NULL) >= 2
             ORDER BY played DESC
             LIMIT 8
             """
         ),
-        {"org_id": org_id, "opp_key": opp_key},
+        params,
     )
     return [
         {"venue": r["venue"], "played": r["played"], "wins": r["wins"], "losses": r["losses"]}
@@ -756,7 +807,10 @@ async def _venues_vs(session: AsyncSession, org_id: str, opp_key: str) -> list[d
     ]
 
 
-async def _our_bowler_dominance(session: AsyncSession, org_id: str, opp_key: str) -> list[dict]:
+async def _our_bowler_dominance(
+    session: AsyncSession, org_id: str, opp_key: str,
+    *, grade: str | None = None, season_ids: list[str] | None = None,
+) -> list[dict]:
     """Our bowler → their batter match-ups: who we've dismissed repeatedly.
 
     Selection gold — "Smith has Jones' number" — read straight from
@@ -766,6 +820,8 @@ async def _our_bowler_dominance(session: AsyncSession, org_id: str, opp_key: str
     invisible), but the repeat-dismissal pattern is exactly the matchup intel asked
     for. Only synced games carry ``bowler_wickets`` (manual games have none).
     """
+    params = {"org_id": org_id, "opp_key": opp_key}
+    scope = _opp_scope(grade, season_ids, params)
     res = await session.execute(
         text(
             f"""
@@ -787,13 +843,14 @@ async def _our_bowler_dominance(session: AsyncSession, org_id: str, opp_key: str
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
               AND bw.batter_name IS NOT NULL AND bw.batter_name <> ''
+              {scope}
             GROUP BY p.id, bowler, p.status, bw.batter_name
             HAVING COUNT(*) >= 2
             ORDER BY COUNT(*) DESC, runs_made ASC, bowler ASC
             LIMIT 20
             """
         ),
-        {"org_id": org_id, "opp_key": opp_key},
+        params,
     )
     out = []
     for r in res.mappings():
@@ -812,9 +869,14 @@ async def _our_bowler_dominance(session: AsyncSession, org_id: str, opp_key: str
     return out
 
 
-async def _last_meeting(session: AsyncSession, org_id: str, opp_key: str) -> dict | None:
+async def _last_meeting(
+    session: AsyncSession, org_id: str, opp_key: str,
+    *, grade: str | None = None, season_ids: list[str] | None = None,
+) -> dict | None:
     """Opposition memory (brief §16.10) — what happened last time we played them:
     our score, their score, our top performers, from the most recent meeting."""
+    params = {"org_id": org_id, "opp_key": opp_key}
+    scope = _opp_scope(grade, season_ids, params)
     g = await session.execute(
         text(
             f"""
@@ -822,10 +884,11 @@ async def _last_meeting(session: AsyncSession, org_id: str, opp_key: str) -> dic
             FROM v_effective_games g{_ORG_SCOPE}
             WHERE s.organisation_id = CAST(:org_id AS UUID) AND {_OPP_KEY} = :opp_key
               AND g.played_at IS NOT NULL
+              {scope}
             ORDER BY g.played_at DESC LIMIT 1
             """
         ),
-        {"org_id": org_id, "opp_key": opp_key},
+        params,
     )
     row = g.mappings().first()
     if not row:
@@ -1068,11 +1131,16 @@ async def opposition_report(
     *,
     opponent: str | None = None,
     fixture_id: str | None = None,
+    grade: str | None = None,
+    season_ids: list[str] | None = None,
 ) -> dict:
     """Assemble the full opposition scouting report for one opponent.
 
     Coverage tiers (see module docstring) are reflected in the ``coverage`` block
-    so the UI can be honest about what's known.
+    so the UI can be honest about what's known. ``grade`` (a grade name) and
+    ``season_ids`` optionally scope the head-to-head record, our record vs them,
+    venues, last meeting and bowler match-ups — the record card's
+    All-time/Season/Grade toggle. Both empty ⇒ all-time/all-grades.
     """
     opp_key, name = await _resolve_opp_key(session, org_id, opponent=opponent, fixture_id=fixture_id)
 
@@ -1097,12 +1165,12 @@ async def opposition_report(
             "last_meeting": None,
         }
 
-    head_to_head = await _head_to_head(session, org_id, opp_key)
-    our_performers = await _our_performers_vs(session, org_id, opp_key)
-    danger = await _their_danger_batters(session, org_id, opp_key)
-    venues = await _venues_vs(session, org_id, opp_key)
-    bowler_dominance = await _our_bowler_dominance(session, org_id, opp_key)
-    last_meeting = await _last_meeting(session, org_id, opp_key)
+    head_to_head = await _head_to_head(session, org_id, opp_key, grade=grade, season_ids=season_ids)
+    our_performers = await _our_performers_vs(session, org_id, opp_key, grade=grade, season_ids=season_ids)
+    danger = await _their_danger_batters(session, org_id, opp_key, grade=grade, season_ids=season_ids)
+    venues = await _venues_vs(session, org_id, opp_key, grade=grade, season_ids=season_ids)
+    bowler_dominance = await _our_bowler_dominance(session, org_id, opp_key, grade=grade, season_ids=season_ids)
+    last_meeting = await _last_meeting(session, org_id, opp_key, grade=grade, season_ids=season_ids)
 
     # Rich coverage only if the opponent is itself a synced org we hold.
     held = await _held_org_keys(session)

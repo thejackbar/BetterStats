@@ -178,20 +178,29 @@ export function AreaChart({ points, labels, h = 170, color = 'var(--pb-accent)',
 }
 
 /* ── PhaseStrip — innings phases (powerplay / middle / death) ─────────────── */
+const _PHASE_COLOR = (i) => (i === 0 ? 'var(--iq-c-wkts)' : i === 1 ? 'var(--pb-accent)' : 'var(--iq-c-amber)')
+const _PHASE_RANGE = { Powerplay: 'First 10 overs', Middle: 'Middle overs', Death: 'Last 10 overs' }
+
 export function PhaseStrip({ phases }) {
+  // Run rate is the metric that actually compares phases, so it's the hero here;
+  // runs / wickets / overs sit underneath as supporting detail.
   return (
-    <div className="space-y-3">
-      <div className="flex w-full overflow-hidden" style={{ height: 14, borderRadius: 99, gap: 2 }}>
-        {phases.map((p, i) => <div key={i} title={`${p.label}: ${p.runs}`}
-          style={{ flexGrow: Math.max(p.runs, 1), background: i === 0 ? 'var(--iq-c-wkts)' : i === 1 ? 'var(--pb-accent)' : 'var(--iq-c-amber)', borderRadius: 3,
+    <div className="space-y-3.5">
+      <div className="flex w-full overflow-hidden" style={{ height: 12, borderRadius: 99, gap: 2 }}>
+        {phases.map((p, i) => <div key={i} title={`${p.label}: ${p.runs} runs`}
+          style={{ flexGrow: Math.max(p.runs, 1), background: _PHASE_COLOR(i), borderRadius: 3,
             transformOrigin: 'left', animation: `iq-grow .8s cubic-bezier(.22,.61,.36,1) ${i * 0.1}s both` }} />)}
       </div>
       <div className="grid grid-cols-3 gap-3">
         {phases.map((p, i) => (
-          <div key={i} className="p-3" style={{ background: 'var(--pb-surface2)', borderRadius: 10 }}>
-            <div className="iq-eyebrow" style={{ fontSize: 9, color: i === 0 ? 'var(--iq-c-wkts)' : i === 1 ? 'var(--pb-accent)' : 'var(--iq-c-amber)' }}>{p.label}</div>
-            <div className="iq-headline iq-num mt-1.5" style={{ fontSize: 22 }}><CountUp value={p.runs} /></div>
-            <div className="text-pb-faint text-[11px] mt-0.5 iq-num">ov {p.overs} · {p.wkts}w · {p.rr} rpo</div>
+          <div key={i} className="p-3.5" style={{ background: 'var(--pb-surface2)', borderRadius: 12 }}>
+            <div className="iq-eyebrow" style={{ fontSize: 9, color: _PHASE_COLOR(i) }}>{p.label}</div>
+            <div className="text-pb-faintest iq-mono mt-0.5" style={{ fontSize: 9.5 }}>{_PHASE_RANGE[p.label] || ''}</div>
+            <div className="flex items-baseline gap-1.5 mt-2">
+              <span className="iq-headline iq-num" style={{ fontSize: 24, lineHeight: 1 }}><CountUp value={p.rr} decimals={2} /></span>
+              <span className="text-pb-faint text-[10px]">runs/over</span>
+            </div>
+            <div className="text-pb-faint text-[11px] mt-1.5 iq-num">{p.runs} runs · {p.wkts}w · {p.overs} ov</div>
           </div>
         ))}
       </div>

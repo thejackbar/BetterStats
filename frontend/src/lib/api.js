@@ -1108,8 +1108,16 @@ export const api = {
   // Opponents we have history against + upcoming fixtures to scout.
   iqListOpponents: () => request('/iq/opposition/opponents'),
   // Instant report from data we already hold (head-to-head, our record vs them).
-  iqOppositionReport: ({ opponent, fixtureId } = {}) =>
-    request(`/iq/opposition/report?${_iqQs(opponent, fixtureId)}`),
+  // `grade` (a grade name) and `seasonIds` (array of season ids) scope the
+  // historical sections to match the record card's All-time/Season/Grade toggle.
+  iqOppositionReport: ({ opponent, fixtureId, grade, seasonIds } = {}) => {
+    const qs = _iqQs(opponent, fixtureId)
+    const extra = new URLSearchParams()
+    if (grade) extra.set('grade', grade)
+    if (seasonIds && seasonIds.length) extra.set('season_ids', seasonIds.join(','))
+    const tail = extra.toString()
+    return request(`/iq/opposition/report?${qs}${tail ? `&${tail}` : ''}`)
+  },
   // Live dossier (squad + form + deep vs-us). Poll until status === 'ready'.
   // `team` (a grade_id from the dossier's `teams`) narrows the scout to one side;
   // omit it for the whole club.

@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import OppositionDossier, async_session_maker
 from app.services import grassroots_scores_client as gr
+from app.services import iq_phrases
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 4
+DOSSIER_VERSION = 5
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -305,10 +306,24 @@ def _finalise_bat(pid: str, b: dict) -> dict:
     recent_runs = [s["runs"] for s in recent]
     avg = round(runs / outs, 2) if outs else None
     recent_avg = round(sum(recent_runs) / max(len([s for s in recent if not s["not_out"]]), 1), 2) if recent else None
-    # "Hot" when recent scoring clearly outpaces the career-vs-field average.
+    # Form / "in form" flame. Judged in ABSOLUTE terms first (a batter making 30+
+    # right now IS in form) and only then relative to their own baseline (a surge
+    # for a modest average). The old purely-relative rule was the bug behind the
+    # flame: it never lit up consistently good players (recent ≈ career, so never
+    # 25% above) and over-lit weak ones (a single 30 dwarfs a low career average).
     form = None
-    if avg is not None and recent_avg is not None and len(recent) >= 3:
-        form = "hot" if recent_avg >= avg * 1.25 else ("cold" if recent_avg <= avg * 0.6 else "steady")
+    if recent_avg is not None and len(recent) >= 3:
+        recent_best = max(recent_runs[:3]) if recent_runs else 0
+        if (
+            recent_avg >= 30
+            or recent_best >= 50
+            or (recent_avg >= 20 and avg is not None and recent_avg >= avg * 1.3)
+        ):
+            form = "hot"
+        elif recent_avg < 12 and (avg is None or recent_avg < avg * 0.7):
+            form = "cold"
+        else:
+            form = "steady"
     return {
         "player_id": pid,
         "name": b["name"],
@@ -883,19 +898,45 @@ def _ordinal(n: int) -> str:
     return {1: "1st", 2: "2nd", 3: "3rd"}.get(n, f"{n}th")
 
 
+# Wickets from here on are the tail — a low 9th/10th-wicket stand is expected,
+# not an insight, so it's never flagged as a weakness anywhere.
+_TAIL_WICKET = 8
+
+
 def _partnership_insight(partnerships: list[dict]) -> str | None:
-    """A one-line read on where the opponent's batting is strong vs fragile."""
+    """A one-line read on where their batting is strong vs *genuinely* fragile.
+
+    Deliberately ignores the tail (8th wicket on): a cheap last-wicket stand is
+    obvious, not actionable. We surface real tells instead — opener reliance, and
+    a top/middle-order wicket that's weak relative to the stands around it."""
     qualified = [p for p in partnerships if p["samples"] >= 3 and p["avg_partnership"] is not None]
     if len(qualified) < 3:
         return None
+    top_mid = [p for p in qualified if p["wicket"] < _TAIL_WICKET]
+    if not top_mid:
+        return None
     strongest = max(qualified, key=lambda p: p["avg_partnership"])
-    weakest = min(qualified, key=lambda p: p["avg_partnership"])
-    bits = [f"Strongest stand is the {_ordinal(strongest['wicket'])} wicket (avg {strongest['avg_partnership']})."]
-    if weakest["avg_partnership"] < strongest["avg_partnership"] * 0.5:
+    bits: list[str] = []
+    # Opener reliance — a genuine tell when the opening stand dwarfs the rest.
+    openers = [p for p in qualified if p["wicket"] <= 2]
+    rest = [p for p in qualified if 3 <= p["wicket"] < _TAIL_WICKET]
+    if openers and rest:
+        best_open = max(openers, key=lambda p: p["avg_partnership"])
+        avg_rest = sum(p["avg_partnership"] for p in rest) / len(rest)
+        if best_open["avg_partnership"] >= 30 and best_open["avg_partnership"] >= avg_rest * 1.8:
+            bits.append(
+                f"They lean on their openers — the {_ordinal(best_open['wicket'])}-wicket stand averages "
+                f"{best_open['avg_partnership']} but the middle order is far thinner; break it early and the scoring stalls."
+            )
+    # A real soft spot in the top/middle order (never the tail).
+    soft = min((p for p in top_mid if p["wicket"] >= 2), key=lambda p: p["avg_partnership"], default=None)
+    if soft and soft["avg_partnership"] < strongest["avg_partnership"] * 0.5:
         bits.append(
-            f"Fragile around the {_ordinal(weakest['wicket'])} wicket (avg {weakest['avg_partnership']}) —"
-            " a wicket there tends to trigger a slide."
+            f"There's a soft spot at the {_ordinal(soft['wicket'])} wicket (just {soft['avg_partnership']}) — "
+            "a strike there tends to trigger a slide."
         )
+    if not bits:
+        bits.append(f"Their strongest stand is the {_ordinal(strongest['wicket'])} wicket (avg {strongest['avg_partnership']}).")
     return " ".join(bits)
 
 
@@ -925,76 +966,94 @@ _DISMISSAL_ADVICE = {
 def _enrich_batter(b: dict, rank: int) -> None:
     outs = sum((b.get("dismissals") or {}).values())
     b["confidence"] = _confidence(b.get("innings"))
-    bits = [
-        f"Their leading run-scorer this season ({b['runs']} @ {b['average'] or '—'})."
-        if rank == 0 else f"{b['runs']} runs @ {b['average'] or '—'} this season."
-    ]
+    avg = b.get("average")
+    # A rotating, archetype-aware scouting description (varied per player) plus a
+    # concise factual line — so two danger bats never read the same.
+    stat = f"{b['runs']} runs @ {avg if avg is not None else '—'} this season"
     if b.get("form") == "hot":
-        bits.append("In hot form right now.")
+        stat += " and striking it well"
     elif b.get("form") == "cold":
-        bits.append("Out of touch lately.")
-    if (b.get("fifties") or 0) + (b.get("hundreds") or 0) >= 2:
-        bits.append("Converts starts into big scores.")
-    plan = "Remove early" if rank == 0 else "Keep quiet"
+        stat += ", though out of touch lately"
+    bits = [iq_phrases.batter_note(b, rank), stat + "."]
+
+    plan = "Remove early" if rank == 0 else "Keep him quiet"
     dism = b.get("dismissals") or {}
     if outs >= 3 and dism:
         top, cnt = max(dism.items(), key=lambda kv: kv[1])
         if cnt / outs >= 0.4 and top in _DISMISSAL_ADVICE:
             bits.append(_DISMISSAL_ADVICE[top][0].upper() + _DISMISSAL_ADVICE[top][1:] + ".")
             plan = _DISMISSAL_ADVICE[top]
-    risk = "high" if (rank == 0 or b.get("form") == "hot") else "medium"
     vs = b.get("vs_us")
-    if vs and vs.get("average") and (b.get("average") is None or vs["average"] >= b["average"]):
-        bits.append(f"Averages {vs['average']} against us — handle with care.")
-        risk = "high"
+    if vs and vs.get("average") and (avg is None or vs["average"] >= avg):
+        bits.append(f"Averages {vs['average']} against us specifically.")
 
-    # Danger vs false-threat alert (brief §16.2/16.3) — is the reputation real?
+    # Danger vs paper-tiger read (brief §16.2/16.3). Be inclusive about danger so
+    # the *obvious* threats (top scorer, in form, high average, history vs us) all
+    # light up — the old rule only fired on hot form / vs-us, so a quietly elite
+    # accumulator went unflagged. "Paper tiger" is reserved for thin or flattering
+    # profiles with no live danger signal.
     inns = b.get("innings") or 0
     hs_num = int(str(b.get("high_score") or "0").rstrip("*") or 0)
+    flattered = inns >= 4 and (b.get("not_outs") or 0) / inns >= 0.4
+    sound = b.get("confidence") != "low"  # enough innings to trust the average
     danger_reasons, caution_reasons = [], []
+    if rank == 0:
+        danger_reasons.append("their leading run-scorer")
     if b.get("form") == "hot":
         danger_reasons.append("in hot form")
-    if vs and vs.get("average") and vs["average"] >= 30 and (b.get("average") is None or vs["average"] >= b["average"]):
-        danger_reasons.append(f"averages {vs['average']} vs us")
-    if inns >= 4 and (b.get("not_outs") or 0) / inns >= 0.35 and b.get("average"):
+    # A big average is only a *danger* signal off a sound, un-flattered sample —
+    # otherwise it's a paper-tiger tell handled below.
+    if avg is not None and avg >= 35 and sound and not flattered:
+        danger_reasons.append(f"averages {avg}")
+    if vs and vs.get("average") and vs["average"] >= 30 and (avg is None or vs["average"] >= avg):
+        danger_reasons.append(f"{vs['average']} vs us")
+    if (b.get("fifties") or 0) + (b.get("hundreds") or 0) >= 3:
+        danger_reasons.append("piles up big scores")
+    if flattered and avg:
         caution_reasons.append("average flattered by not-outs")
-    if inns >= 4 and b.get("runs") and hs_num / b["runs"] >= 0.4:
+    if inns >= 4 and b.get("runs") and hs_num / b["runs"] >= 0.45:
         caution_reasons.append("leans on one big score")
     if b.get("confidence") == "low":
         caution_reasons.append("small sample")
-    if b.get("strike_rate") is not None and b["strike_rate"] < 55 and inns >= 4:
-        caution_reasons.append("scores slowly, containable")
+    if b.get("strike_rate") is not None and b["strike_rate"] < 55 and inns >= 5:
+        caution_reasons.append("slow scorer, containable")
     level = "danger" if danger_reasons else ("caution" if caution_reasons else None)
     b["alert"] = {"level": level, "danger": danger_reasons, "caution": caution_reasons} if level else None
-
-    b["risk"], b["key_note"], b["plan"] = risk, " ".join(bits), plan
+    b["risk"] = "high" if level == "danger" else ("low" if level == "caution" else "medium")
+    b["key_note"], b["plan"] = " ".join(bits), plan
 
 
 def _enrich_bowler(b: dict, rank: int) -> None:
     b["confidence"] = _confidence(b.get("matches"))
-    bits = [
-        f"Their main wicket threat ({b['wickets']} wkts @ {b['average'] or '—'})."
-        if rank == 0 else f"{b['wickets']} wkts @ {b['average'] or '—'}, econ {b['economy'] or '—'}."
-    ]
+    avg = b.get("average")
     econ = b.get("economy")
+    stat = f"{b['wickets']} wkts @ {avg if avg is not None else '—'}"
+    if econ is not None:
+        stat += f", economy {econ}"
+    bits = [iq_phrases.bowler_note(b, rank), stat + "."]
     tight = econ is not None and econ < 4.0
-    if tight:
-        bits.append("Hard to get away — rotate strike, don't attack.")
-    elif econ is not None and econ >= 6.0:
-        bits.append("Leaks runs — one to target.")
     vs = b.get("vs_us")
     if vs and vs.get("wickets"):
-        bits.append(f"Has troubled us before ({vs['wickets']}w @ {vs.get('average') or '—'}).")
-    b["risk"] = "high" if rank == 0 else "medium"
+        bits.append(f"Has {vs['wickets']} wkts against us before.")
     b["key_note"] = " ".join(bits)
     b["plan"] = "See him off — don't take risks" if (rank == 0 or tight) else "Look to score off him"
-    bowl_danger, bowl_caution = [], []
-    if rank == 0 or ((b.get("wickets") or 0) >= 4 and (b.get("economy") or 99) < 4.5):
-        bowl_danger.append("main threat")
+
+    danger_reasons, caution_reasons = [], []
+    if rank == 0:
+        danger_reasons.append("their leading wicket-taker")
+    if (b.get("wickets") or 0) >= 5:
+        danger_reasons.append("regular wickets")
+    if tight:
+        danger_reasons.append("very economical")
+    if vs and vs.get("wickets") and vs["wickets"] >= 3:
+        danger_reasons.append("has troubled us")
     if b.get("confidence") == "low":
-        bowl_caution.append("small sample")
-    lvl = "danger" if bowl_danger else ("caution" if bowl_caution else None)
-    b["alert"] = {"level": lvl, "danger": bowl_danger, "caution": bowl_caution} if lvl else None
+        caution_reasons.append("small sample")
+    if econ is not None and econ >= 6.0 and (b.get("wickets") or 0) < 5:
+        caution_reasons.append("leaks runs — one to target")
+    level = "danger" if danger_reasons else ("caution" if caution_reasons else None)
+    b["alert"] = {"level": level, "danger": danger_reasons, "caution": caution_reasons} if level else None
+    b["risk"] = "high" if level == "danger" else ("low" if level == "caution" else "medium")
 
 
 def _how_they_win_lose(batters, bowlers, danger_bowlers, partnerships):
@@ -1005,13 +1064,17 @@ def _how_they_win_lose(batters, bowlers, danger_bowlers, partnerships):
         pct = round(100 * top3 / total_runs)
         win.append(f"Top-order driven — {pct}% of their runs come from their top three.")
         lose.append(f"Early wickets choke them — {pct}% of their scoring rides on the top three.")
-    qualified = [p for p in partnerships if p["samples"] >= 3]
+    qualified = [p for p in partnerships if p["samples"] >= 3 and p["avg_partnership"] is not None]
     if qualified:
         strong = max(qualified, key=lambda p: p["avg_partnership"])
-        weak = min(qualified, key=lambda p: p["avg_partnership"])
-        win.append(f"Build big partnerships — strongest is the {_ordinal(strong['wicket'])} wicket (avg {strong['avg_partnership']}).")
-        if weak["avg_partnership"] < strong["avg_partnership"] * 0.6:
-            lose.append(f"Fragile around the {_ordinal(weak['wicket'])} wicket (avg {weak['avg_partnership']}) — a strike there can trigger a slide.")
+        win.append(f"Build through the {_ordinal(strong['wicket'])} wicket — their strongest stand (avg {strong['avg_partnership']}).")
+        # Only a TOP/MIDDLE-order soft spot counts — a cheap tail is obvious, not
+        # a usable insight, so the 8th wicket on is never flagged here.
+        top_mid = [p for p in qualified if 2 <= p["wicket"] < _TAIL_WICKET]
+        if top_mid:
+            weak = min(top_mid, key=lambda p: p["avg_partnership"])
+            if weak["avg_partnership"] < strong["avg_partnership"] * 0.5:
+                lose.append(f"Fragile at the {_ordinal(weak['wicket'])} wicket (avg {weak['avg_partnership']}) — get in there and the innings can unravel.")
     real_threats = [b for b in bowlers if (b.get("wickets") or 0) >= 4]
     if len(real_threats) <= 1 and danger_bowlers:
         lose.append(f"Thin attack — {danger_bowlers[0]['name']} is their one real threat; see him off and cash in on the rest.")
@@ -1208,6 +1271,18 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
             "samples": e["n"],
             "typical_score_at_fall": round(statistics.median(e["falls"])) if e["falls"] else None,
         })
+    # Flag genuine top/middle-order soft spots for the UI; never redden the tail
+    # (a low 9th/10th-wicket stand is expected, not a weakness).
+    strongest_ps = max((p["avg_partnership"] for p in partnerships if p["samples"] >= 3), default=0)
+    for p in partnerships:
+        p["tail"] = p["wicket"] >= _TAIL_WICKET
+        p["weak"] = bool(
+            not p["tail"]
+            and p["wicket"] >= 2
+            and p["samples"] >= 3
+            and strongest_ps > 0
+            and p["avg_partnership"] < strongest_ps * 0.5
+        )
     partnership_insight = _partnership_insight(partnerships)
 
     # ── Scouting synthesis: per-player key-notes + how they win/lose + game plan ──
