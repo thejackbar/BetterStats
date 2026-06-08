@@ -1,24 +1,26 @@
-"""BetterIQ — rotating scouting descriptions for danger players.
+"""BetterIQ — rotating scouting descriptions + plans for danger players.
 
-The opponent dossier flags a handful of danger batters / bowlers. Rather than
-stamp every one of them with the same boilerplate ("Their leading run-scorer
-this season."), we classify each into an *archetype* from their scorecard
-profile and pull a flavourful one-line description from a large per-archetype
-pool. The pick is deterministic per player (a stable hash of the player id), so:
+The opponent dossier flags a handful of danger batters / bowlers (and keeper-
+batters). Rather than stamp every one with the same boilerplate, we classify
+each into an *archetype* from their scorecard profile and pull a flavourful
+one-line description — and a separate actionable *plan* — from large per-archetype
+pools. The pick is deterministic per player (a stable hash of the player id), so:
 
 * a given player always reads the same way (no flip-flop between refreshes), and
-* different danger players of the same archetype read differently (variety).
+* different players of the same archetype read differently (variety).
 
 Everything here is presentation only — no stats are invented. The factual line
-("523 @ 47.5 this season") is appended separately by the caller.
+("523 @ 47.5 this season") is appended separately by the caller. The plan pools
+are keyed first on a dominant *dismissal mode* (the most actionable signal, e.g.
+"nicks off" → bowl a tight off-stump line) and otherwise on the archetype.
 """
 from __future__ import annotations
 
 import hashlib
 
-# ── batter archetypes ─────────────────────────────────────────────────────────
-# Order matters in the classifier (most distinctive trait wins); the pools are
-# independent so a player only ever reads from one of them.
+# ════════════════════════════════════════════════════════════════════════════
+#  BATTER DESCRIPTIONS  (archetype pools)
+# ════════════════════════════════════════════════════════════════════════════
 
 NEMESIS_BAT = [
     "Has our number — keeps cashing in whenever he sees our bowling.",
@@ -158,6 +160,35 @@ LEADER_BAT = [
     "Their best bat by a distance; this is the contest within the contest.",
 ]
 
+# Keeper-batters — a gloveman who can bat. Detected from real fielding data
+# (wicketkeeper catches / stumpings), so these only fire for an actual keeper.
+KEEPER_BAT = [
+    "Their keeper-batter — busy, sharp between the wickets and never out of the game.",
+    "Gloveman who can really bat; he's used to building an innings under pressure.",
+    "A wicketkeeper-batsman — expect quick singles and a cool head when it tightens.",
+    "Keeps and bats up the order; a genuine two-in-one threat to plan for.",
+    "Their keeper with the bat in hand — scrappy, street-smart and hard to shift.",
+    "A gloveman-bat who reads the game well; he'll milk you if you let him settle.",
+    "Wicketkeeper-batter who thrives on rotating the strike — cut off his singles.",
+    "He keeps wickets and anchors the innings; don't underestimate his batting.",
+    "A busy keeper-bat — quick feet, soft hands, and a knack for the awkward knock.",
+    "Their gloveman bats with real nous; pressure him before he gets going.",
+    "Keeper-batter who's seen every situation from behind the stumps — very streetwise.",
+    "A dual threat: takes his chances with the gloves and grafts runs with the bat.",
+    "Their keeper can bat properly — treat him as a top-order wicket, not a tail-ender.",
+    "Nimble keeper-bat; he'll nudge, nurdle and run you ragged for ones and twos.",
+    "A wicketkeeper who bats with the game's tempo in mind — calm under pressure.",
+    "Gloveman-batter with a high cricket IQ; he rarely gets himself out cheaply.",
+    "Their keeper is a real batting asset — bowl to a plan, don't gift him width.",
+    "A scrapping keeper-bat who finds a way; dot balls are your friend against him.",
+    "Keeps tidily and bats with intent — a genuine all-round headache.",
+    "Their gloveman bats like a specialist; the keeper tag undersells the threat.",
+    "A keeper-batsman who loves a chase — composed and good at pacing a run-down.",
+    "Sharp keeper, sharper between the wickets — he turns ones into twos.",
+    "Their keeper-bat is the heartbeat of the side; vocal, busy and combative.",
+    "A glovesman who bats deep into the innings — patience will be needed.",
+]
+
 STEADY_BAT = [
     "A dependable contributor who quietly does damage if ignored.",
     "Not flashy, but consistent — the kind who sneaks a useful score.",
@@ -181,7 +212,9 @@ STEADY_BAT = [
     "Dependable and unhurried — tighten the screws and wait.",
 ]
 
-# ── bowler archetypes ─────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+#  BOWLER DESCRIPTIONS  (archetype pools)
+# ════════════════════════════════════════════════════════════════════════════
 
 NEMESIS_BOWL = [
     "Has tormented us before — our batters have struggled to read him.",
@@ -298,10 +331,36 @@ SPEARHEAD_BOWL = [
     "Front and centre of their bowling — this is the match-up that matters.",
 ]
 
+# Wickets but expensive — the boom-or-bust threat (strikes, but leaks runs while
+# hunting). Detectable from scorecard wickets + economy alone.
+BOOMBUST_BOWL = [
+    "Boom or bust — he takes wickets but leaks runs hunting them.",
+    "A wicket-taker who pays for it; punish the bad balls, respect the good one.",
+    "High-risk, high-reward bowler — plenty to score off, but he'll strike too.",
+    "He buys his wickets — there are runs on offer if you survive the danger ball.",
+    "Attacking but expensive; cash in on the loose stuff, watch the wicket ball.",
+    "Gives you chances to score and chances to get out in the same over.",
+    "A feast-or-famine bowler — milk the width, but don't take him on blindly.",
+    "He'll go searching for wickets and spray a few — be patient for the four-ball.",
+    "Dangerous when it's on, costly when it's not — pick your shots carefully.",
+    "Wicket threat with a leaky economy; the runs are there for the disciplined.",
+    "He bowls wicket-to-wicket aggression — score off the misses, respect the hits.",
+    "An all-or-nothing bowler; he'll get one, but he'll concede plenty too.",
+    "Goes hard for wickets and bleeds runs doing it — capitalise without the risk.",
+    "Plenty of release balls, but a genuine wicket threat — stay switched on.",
+    "He attacks relentlessly; punish the width, but never relax against him.",
+    "Expensive but penetrative — the loose ball is your reward for surviving.",
+    "A bowler who buys wickets with runs; be greedy on the bad ones only.",
+    "He'll get a couple but go for plenty — patience turns him into a target.",
+    "Boom-or-bust spells — the danger and the runs come hand in hand.",
+    "Aggressive and wayward; make the most of his off-days, beware his on-days.",
+]
+
 
 _BAT_POOLS = {
     "nemesis": NEMESIS_BAT,
     "in_form": INFORM_BAT,
+    "keeper": KEEPER_BAT,
     "aggressor": AGGRESSOR_BAT,
     "anchor": ANCHOR_BAT,
     "converter": CONVERTER_BAT,
@@ -312,10 +371,165 @@ _BOWL_POOLS = {
     "nemesis": NEMESIS_BOWL,
     "miser": MISER_BOWL,
     "striker": STRIKER_BOWL,
+    "boom_or_bust": BOOMBUST_BOWL,
     "workhorse": WORKHORSE_BOWL,
     "spearhead": SPEARHEAD_BOWL,
 }
 
+# ════════════════════════════════════════════════════════════════════════════
+#  PLANS  (tactical instructions — keyed by dismissal mode, then archetype)
+# ════════════════════════════════════════════════════════════════════════════
+
+# Dominant dismissal mode → how to get him out again. The cricket logic matters:
+# a batter who "holes out" (caught) is mishitting to fielders, so push catchers
+# OUT and invite the big shot — you do NOT keep catchers in the ring.
+_BAT_DISMISSAL_PLANS = {
+    "bowled": [
+        "Attack the stumps — bring it back in and target the gate.",
+        "Bowl straight and full; he plays around his front pad.",
+        "Full, fast and at off stump — there's a gap to bowl at.",
+        "Swing or seam it in at the stumps early.",
+        "Keep it stump-to-stump; he gives a chance playing across the line.",
+    ],
+    "lbw": [
+        "Bowl straight and full — hit the top of the pads.",
+        "Swing it in to the front pad; he's lbw-prone.",
+        "Target a full middle-and-leg line — he plays across it.",
+        "Full, straight and into the stumps; keep the umpire interested.",
+        "Cramp him with the inswinger and trap him in front.",
+    ],
+    "caught": [
+        "Keep men back on the rope and tempt the big shot — he holes out.",
+        "Set a catching trap in the deep; give him the boundary ball.",
+        "Push the fielders out for the mishit — he can't resist the aerial route.",
+        "Hang a man in the deep and bowl into the hit; he goes aerial under pressure.",
+        "Protect the boundary and invite the lofted shot — he finds the fielder.",
+    ],
+    "caught behind": [
+        "Fuller, tighter outside off with the keeper up and a slip in — he nicks off.",
+        "Draw him into the drive on a fourth-stump line; he feels for it.",
+        "Bowl a probing off-stump channel — the edge is on offer.",
+        "Seam it away off a full length; keeper and slip in play.",
+        "Tempt the loose drive away from the body and take the nick.",
+    ],
+    "c&b": [
+        "Bowl straight and stay alert — he hits it back at you.",
+        "Follow through ready for the return catch; he drives uppishly.",
+        "Tempt the straight drive and hold the caught-and-bowled chance.",
+        "Bowl into the hit and keep your hands ready in the follow-through.",
+    ],
+    "stumped": [
+        "Flight it and drag him out of his crease — he's been stumped before.",
+        "Bowl into the rough and tempt the charge; keeper up and ready.",
+        "Toss it up wider — he comes down the track and overbalances.",
+        "Spin it away from the bat and let the keeper finish the job.",
+        "Vary the flight; he commits early and can be beaten in the air.",
+    ],
+    "run out": [
+        "Pile on the field pressure — he hesitates and has been run out before.",
+        "Attack the single and back up at both ends; he ball-watches.",
+        "Be sharp to the stumps — he's suspect between the wickets.",
+        "Hit the stumps at every chance; the run-out is on offer.",
+    ],
+    "hit wicket": [
+        "Bang it in short and crowd him — he can tread on his stumps.",
+        "Cramp him on the back foot; he gets tangled and loses his footing.",
+    ],
+}
+
+_BAT_ARCHETYPE_PLANS = {
+    "nemesis": [
+        "Throw a fresh plan at him — what we've tried hasn't worked.",
+        "Best bowler, best field, from ball one; he owns this match-up.",
+        "Don't bowl him into form — vary your length and angles early.",
+        "Set defensive fields and make him earn every run the hard way.",
+    ],
+    "in_form": [
+        "Get him before he's set — your strike bowler with the new ball.",
+        "Strike early; a man in this touch only gets harder to remove.",
+        "Attack from the off and break his rhythm before he settles.",
+        "Front-load your best overs at him while the ball is hard.",
+    ],
+    "aggressor": [
+        "Bowl tight and take the pace off — make him manufacture his shots.",
+        "Deny him width and pace; cramp him for room.",
+        "Back-of-a-length into the body and dry up the boundaries.",
+        "Set the field back and make him take the risk to score.",
+        "Change pace and length constantly — give him no rhythm to hit.",
+    ],
+    "anchor": [
+        "Dry up the singles and build the pressure — patience beats him.",
+        "Bowl maidens at him and force the rash shot.",
+        "Squeeze both ends; frustration is your wicket-taker here.",
+        "Don't search for the magic ball — let the dots do the work.",
+    ],
+    "converter": [
+        "Take the half-chance — don't let him get set and go big.",
+        "Throw everything at the first ten balls; he cashes in once in.",
+        "Be ruthless with any early chance; he won't give a second.",
+        "Keep him under pressure before he reaches twenty.",
+    ],
+    "leader": [
+        "Plan the innings around removing him — he's the wicket that matters.",
+        "Save an over of your best bowler for him specifically.",
+        "Get him and the rest follow — make him your priority.",
+        "No freebies — every ball at him with a clear purpose.",
+    ],
+    "keeper": [
+        "Cut off his singles and make him force it — he loves to stay busy.",
+        "Set straight fields and starve the gaps; he nudges and runs.",
+        "Keep it tight outside off; gloveman-bats nibble at width.",
+        "Pressure him early before he gets busy and takes the game on.",
+    ],
+    "steady": [
+        "Bowl a tidy, patient line and wait for the error.",
+        "Keep it simple and disciplined; he'll give you a chance.",
+        "Don't over-attack — let the pressure bring the wicket.",
+        "Stick to your stock ball and keep him honest.",
+    ],
+}
+
+_BOWL_PLANS = {
+    "nemesis": [
+        "Have a clear plan for him; watch for the ball that's done us before.",
+        "See him off without risk, then target the others.",
+        "Respect his spell — survive it and the runs come elsewhere.",
+        "Don't get drawn into his trap ball; play him on merit.",
+    ],
+    "miser": [
+        "Rotate the strike and refuse to take the bait.",
+        "Milk him for ones; don't try to break him and lose a wicket.",
+        "Accept the dot balls and cash in at the other end.",
+        "Be patient — see off his spell, then attack the change bowlers.",
+    ],
+    "striker": [
+        "See off his opening burst, then bat normally.",
+        "Survive his spell at all costs — he hunts wickets.",
+        "Play straight and leave well against him; minimise the risk.",
+        "Respect the new-ball threat; don't give him the early one.",
+    ],
+    "boom_or_bust": [
+        "Cash in when he drops short or wide — he leaks while he hunts.",
+        "Take the gifts but respect the wicket ball; he's wayward but dangerous.",
+        "Be patient for the four-ball; just don't fall to the good one.",
+        "Punish his loose deliveries — there are plenty between the wicket balls.",
+    ],
+    "workhorse": [
+        "Be patient and pick off the loose ball; he bowls long, tidy spells.",
+        "Wait him out and attack the bowler at the other end.",
+        "Rotate the strike; don't let him settle into a rhythm against you.",
+        "Outlast him — he'll keep coming, so stay disciplined.",
+    ],
+    "spearhead": [
+        "See off their main man, then go after the support attack.",
+        "Weather his overs; the door opens once he's bowled out.",
+        "Respect him early and target the weaker bowlers.",
+        "Survive his spell and the pressure shifts back to them.",
+    ],
+}
+
+
+# ── selection + picking ───────────────────────────────────────────────────────
 
 def _pick(pool: list[str], seed: str) -> str:
     """Deterministically pick one phrase from ``pool`` for ``seed`` (a player id),
@@ -338,6 +552,8 @@ def batter_archetype(b: dict, rank: int) -> str:
         return "nemesis"
     if b.get("form") == "hot":
         return "in_form"
+    if b.get("is_keeper"):
+        return "keeper"
     if (sr is not None and sr >= 110) or (boundary is not None and boundary >= 60):
         return "aggressor"
     if sr is not None and sr <= 70 and avg is not None and avg >= 30:
@@ -354,6 +570,7 @@ def bowler_archetype(b: dict, rank: int) -> str:
     econ = b.get("economy")
     sr = b.get("strike_rate")
     overs = b.get("overs") or 0
+    wkts = b.get("wickets") or 0
     vs = b.get("vs_us") or {}
     if vs.get("wickets") and vs["wickets"] >= 3:
         return "nemesis"
@@ -361,23 +578,35 @@ def bowler_archetype(b: dict, rank: int) -> str:
         return "miser"
     if (sr is not None and sr <= 24) or (b.get("five_fors") or 0) >= 1:
         return "striker"
+    if wkts >= 5 and econ is not None and econ >= 5.5:
+        return "boom_or_bust"
     if overs >= 40:
         return "workhorse"
     if rank == 0:
         return "spearhead"
-    # Default: lean on the most useful remaining signal.
     if econ is not None and econ < 4.6:
         return "miser"
     return "striker"
 
 
-def batter_note(b: dict, rank: int) -> str:
+def batter_note(archetype: str, seed: str) -> str:
     """A rotating one-line scouting description for a danger batter."""
-    arch = batter_archetype(b, rank)
-    return _pick(_BAT_POOLS.get(arch, STEADY_BAT), b.get("player_id") or b.get("name") or "")
+    return _pick(_BAT_POOLS.get(archetype, STEADY_BAT), seed)
 
 
-def bowler_note(b: dict, rank: int) -> str:
+def bowler_note(archetype: str, seed: str) -> str:
     """A rotating one-line scouting description for a danger bowler."""
-    arch = bowler_archetype(b, rank)
-    return _pick(_BOWL_POOLS.get(arch, SPEARHEAD_BOWL), b.get("player_id") or b.get("name") or "")
+    return _pick(_BOWL_POOLS.get(archetype, SPEARHEAD_BOWL), seed)
+
+
+def batter_plan(archetype: str, dominant_dismissal: str | None, seed: str) -> str:
+    """A rotating, situation-appropriate plan: keyed on the dominant dismissal
+    mode when there is one (most actionable), otherwise on the archetype."""
+    if dominant_dismissal and dominant_dismissal in _BAT_DISMISSAL_PLANS:
+        return _pick(_BAT_DISMISSAL_PLANS[dominant_dismissal], (seed or "") + ":plan")
+    return _pick(_BAT_ARCHETYPE_PLANS.get(archetype, _BAT_ARCHETYPE_PLANS["steady"]), (seed or "") + ":plan")
+
+
+def bowler_plan(archetype: str, seed: str) -> str:
+    """A rotating plan for handling a danger bowler, keyed on archetype."""
+    return _pick(_BOWL_PLANS.get(archetype, _BOWL_PLANS["spearhead"]), (seed or "") + ":plan")
