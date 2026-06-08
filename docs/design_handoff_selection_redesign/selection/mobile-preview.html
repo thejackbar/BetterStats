@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mobile preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0d14; }
+  .wrap { display: flex; gap: 28px; padding: 28px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+  .phone { width: 390px; height: 844px; border-radius: 30px; overflow: hidden; border: 1px solid #262d3d; box-shadow: 0 24px 60px -20px rgba(0,0,0,.7); background: #fff; }
+  .phone iframe { width: 390px; height: 844px; border: 0; display: block; }
+  .cap { color: #8a90a2; font-family: 'JetBrains Mono', monospace; font-size: 12px; text-align: center; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <div class="phone"><iframe id="f1" src="../BetterSelect Selection.html?view=B&panel=pool"></iframe></div>
+    <div class="cap">Dual rail · Pool</div>
+  </div>
+  <div>
+    <div class="phone"><iframe id="f2" src="../BetterSelect Selection.html?view=B&panel=xi"></iframe></div>
+    <div class="cap">Dual rail · Your XI</div>
+  </div>
+  <div>
+    <div class="phone"><iframe id="f3" src="../BetterSelect Selection.html?view=C"></iframe></div>
+    <div class="cap">Team sheet</div>
+  </div>
+</div>
+<script>/* state baked into URL params */</script>
+</body>
+</html>
