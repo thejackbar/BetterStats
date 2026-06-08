@@ -80,12 +80,12 @@ function PickPill({ count, target }) {
 
 export function FixtureBar({ vm }) {
   return (
-    <div className="rounded-xl px-4 py-3.5 mb-3 border"
+    <div className="rounded-xl px-4 py-2.5 mb-2.5 border"
       style={{ background: 'color-mix(in srgb, var(--pb-accent) 9%, var(--pb-surface))', borderColor: 'color-mix(in srgb, var(--pb-accent) 26%, transparent)' }}>
       <div className="flex items-center justify-between gap-3">{vm.contextLeft}</div>
-      <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 mt-1.5">
+      <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 mt-1">
         <div className="min-w-0">
-          <h2 className="font-display font-bold text-[23px] leading-tight">{vm.title}</h2>
+          <h2 className="font-display font-bold text-[20px] leading-tight">{vm.title}</h2>
           {vm.sub && <div className="text-[13.5px] text-pb-dim mt-0.5">{vm.sub}</div>}
         </div>
         {vm.canEdit && (
@@ -104,7 +104,7 @@ export function BalanceStrip({ vm }) {
   const cap = vm.capId && vm.filledSet.has(vm.capId) ? vm.poolById[vm.capId]?.display_name : null
   const wk = vm.wkId && vm.filledSet.has(vm.wkId) ? vm.poolById[vm.wkId]?.display_name : null
   return (
-    <div className="pb-card rounded-xl px-4 py-2.5 mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]">
+    <div className="pb-card rounded-xl px-4 py-2 mb-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
       {ROLE_CODES.map((c) => {
         const low = (c === 'BWL' && b.lightBowling) || (c === 'WKT' && !b.hasKeeper)
         return (
@@ -150,7 +150,7 @@ function DualCard({ p, kind, idx, vm, drag }) {
   const dragItem = kind === 'pool' ? { kind: 'pool', player: p } : { kind: 'slot', idx, player: p }
   const interactive = vm.canEdit && !blocked
   return (
-    <div className={`group relative flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl border bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''} border-pb-hairline`}
+    <div className={`group relative shrink-0 flex items-center gap-2.5 pl-3.5 pr-3 py-1.5 rounded-xl border bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''} border-pb-hairline`}
       {...(kind === 'pool' && interactive ? drag.bind(dragItem) : {})}
       onClick={kind === 'pool' && interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
       <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
@@ -158,12 +158,12 @@ function DualCard({ p, kind, idx, vm, drag }) {
         <span {...drag.bind(dragItem)} className="cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={14} /></span>
       )}
       <span className="relative shrink-0">
-        <Avatar player={p} size={40} />
-        <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={11} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
+        <Avatar player={p} size={34} />
+        <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={10} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-[14.5px] font-semibold truncate">{p.display_name}</span>
+          <span className="text-[14px] font-semibold truncate">{p.display_name}</span>
           {p.id === vm.capId && <Tag>C</Tag>}{p.id === vm.wkId && <Tag tone="amber">WK</Tag>}
           {p.squads?.[0] && (kind === 'pool') && <Tag tone={p.squad_match ? 'accent' : 'faint'}>{vm.squadShort(p.squads[0])}</Tag>}
         </div>
@@ -190,13 +190,13 @@ function DualSlot({ i, id, vm, drag }) {
   const isFocus = vm.focus === i
   const hovered = drag.hover === 'slot:' + i
   return (
-    <div className="flex items-stretch gap-2">
-      <span className="font-display font-bold text-[19px] text-pb-faintest w-[26px] flex items-center justify-center shrink-0 pt-0.5 pb-num">{i + 1}</span>
+    <div className="flex items-stretch gap-2 shrink-0">
+      <span className="font-display font-bold text-[18px] text-pb-faintest w-[22px] flex items-center justify-center shrink-0 pb-num">{i + 1}</span>
       <div className="flex-1 min-w-0" data-drop-kind="slot" data-drop-idx={i} onClick={() => !p && vm.canEdit && vm.setFocus(i)}>
         {p
           ? <DualCard p={p} kind="slot" idx={i} vm={vm} drag={drag} />
           : (
-            <div className={`flex items-center gap-2 px-4 py-3.5 rounded-xl border border-dashed min-h-[64px] text-[13px] transition-colors ${hovered ? 'border-pb-accent text-pb-accent bg-pb-accent/10 border-solid' : isFocus ? 'border-pb-accent text-pb-accent bg-pb-accent/[0.06]' : 'border-pb-hairline2 text-pb-faintest'}`}>
+            <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-dashed min-h-[50px] text-[13px] transition-colors ${hovered ? 'border-pb-accent text-pb-accent bg-pb-accent/10 border-solid' : isFocus ? 'border-pb-accent text-pb-accent bg-pb-accent/[0.06]' : 'border-pb-hairline2 text-pb-faintest'}`}>
               <Icon name="plus" size={15} /><span>{isFocus ? 'Tap a player in the pool' : hovered ? 'Drop here' : 'Open slot'}</span>
             </div>
           )}
@@ -234,7 +234,7 @@ export function DualRailView({ vm }) {
             {vm.filterBar}
           </header>
           <div data-drop-kind="pool"
-            className={`flex flex-col gap-2 p-2.5 overflow-auto pb-scroll max-h-none lg:max-h-[calc(100vh-360px)] rounded-b-xl ${poolHover ? 'bg-pb-red/[0.06] shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--pb-red)_35%,transparent)]' : ''}`}>
+            className={`flex flex-col gap-1.5 p-2 overflow-auto pb-scroll max-h-none lg:max-h-[calc(100vh-300px)] rounded-b-xl ${poolHover ? 'bg-pb-red/[0.06] shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--pb-red)_35%,transparent)]' : ''}`}>
             {vm.pool.map((p) => <DualCard key={p.id} p={p} kind="pool" vm={vm} drag={drag} />)}
             {vm.pool.length === 0 && <div className="p-4 text-pb-faint text-sm">No players match.</div>}
             {poolHover && <div className="sticky bottom-1.5 mx-auto mt-1.5 px-3.5 py-1.5 rounded-full text-xs text-pb-red bg-pb-surface border border-dashed border-pb-red/40">Drop here to remove from XI</div>}
@@ -260,7 +260,7 @@ export function DualRailView({ vm }) {
               </div>
             )}
           </header>
-          <div className="flex flex-col gap-2 p-2.5 overflow-auto pb-scroll max-h-none lg:max-h-[calc(100vh-360px)]">
+          <div className="flex flex-col gap-1.5 p-2 overflow-auto pb-scroll max-h-none lg:max-h-[calc(100vh-300px)]">
             {vm.slots.map((id, i) => <DualSlot key={i} i={i} id={id} vm={vm} drag={drag} />)}
             {vm.format === 0 && <div className="px-4 py-3 rounded-xl border border-dashed border-pb-hairline2 text-center text-[12px] text-pb-faintest">Tap a player to add to the order</div>}
           </div>
@@ -278,13 +278,13 @@ function SheetRow({ i, id, vm, drag }) {
   const zebra = p && i % 2 === 1
   return (
     <div data-drop-kind="slot" data-drop-idx={i} onClick={() => !p && vm.canEdit && vm.setFocus(i)}
-      className={`flex items-center gap-3.5 px-4 sm:px-5 min-h-[60px] py-2.5 border-b border-pb-hairline transition-colors ${!p ? 'cursor-pointer' : ''} ${hovered ? 'bg-pb-accent/10 shadow-[inset_3px_0_0_var(--pb-accent)]' : isFocus && !p ? 'bg-pb-accent/[0.06] shadow-[inset_3px_0_0_var(--pb-accent)]' : zebra ? 'bg-pb-surface2/45' : ''}`}>
-      <span className="font-display font-bold text-[28px] leading-none w-8 text-center shrink-0 pb-num tracking-tight" style={{ color: p ? 'var(--pb-accent)' : 'var(--pb-faintest)' }}>{i + 1}</span>
+      className={`flex items-center gap-3 px-4 sm:px-5 min-h-[50px] py-1.5 border-b border-pb-hairline transition-colors ${!p ? 'cursor-pointer' : ''} ${hovered ? 'bg-pb-accent/10 shadow-[inset_3px_0_0_var(--pb-accent)]' : isFocus && !p ? 'bg-pb-accent/[0.06] shadow-[inset_3px_0_0_var(--pb-accent)]' : zebra ? 'bg-pb-surface2/45' : ''}`}>
+      <span className="font-display font-bold text-[25px] leading-none w-7 text-center shrink-0 pb-num tracking-tight" style={{ color: p ? 'var(--pb-accent)' : 'var(--pb-faintest)' }}>{i + 1}</span>
       {p ? (
         <>
           {vm.canEdit && <span {...drag.bind({ kind: 'slot', idx: i, player: p })} className="cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={15} /></span>}
           <span className="relative shrink-0">
-            <Avatar player={p} size={38} />
+            <Avatar player={p} size={34} />
             <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={11} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
           </span>
           <div className="flex-1 min-w-0">
@@ -348,16 +348,16 @@ export function TeamSheetView({ vm }) {
   return (
     <div>
       {/* Masthead */}
-      <div className="flex flex-wrap items-end justify-between gap-x-7 gap-y-4 px-5 sm:px-6 py-5 rounded-t-2xl border border-b-0 pb-hairline"
+      <div className="flex flex-wrap items-end justify-between gap-x-7 gap-y-3 px-5 sm:px-6 py-3.5 rounded-t-2xl border border-b-0 pb-hairline"
         style={{ background: 'linear-gradient(180deg, color-mix(in srgb, var(--pb-accent) 14%, var(--pb-surface)), var(--pb-surface))' }}>
-        <div className="flex-1 min-w-0 flex flex-col gap-1">
+        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
           <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-pb-accent">{vm.kicker}</div>
-          <h2 className="font-display font-bold tracking-tight leading-tight m-0 break-words" style={{ fontSize: 'clamp(22px, 2.6vw, 28px)' }}>{vm.title}</h2>
-          {vm.sub && <div className="text-[13.5px] text-pb-dim">{vm.sub}</div>}
+          <h2 className="font-display font-bold tracking-tight leading-tight m-0 break-words" style={{ fontSize: 'clamp(21px, 2.4vw, 26px)' }}>{vm.title}</h2>
+          {vm.sub && <div className="text-[13px] text-pb-dim">{vm.sub}</div>}
         </div>
         <div className="flex items-center gap-5">
           {vm.canEdit && <SizePicker value={vm.format} onChange={vm.changeFormat} />}
-          <div className="font-display flex items-baseline gap-1"><b className="text-[46px] leading-none text-pb-accent font-bold pb-num">{vm.count}</b><span className="text-[18px] text-pb-faint">/ {vm.target || '∞'}</span></div>
+          <div className="font-display flex items-baseline gap-1"><b className="text-[38px] leading-none text-pb-accent font-bold pb-num">{vm.count}</b><span className="text-[17px] text-pb-faint">/ {vm.target || '∞'}</span></div>
           <div className="hidden sm:flex gap-3.5 font-display">
             {ROLE_CODES.map((c) => {
               const low = (c === 'BWL' && b.lightBowling) || (c === 'WKT' && !b.hasKeeper)
@@ -374,7 +374,7 @@ export function TeamSheetView({ vm }) {
 
       {/* The sheet */}
       <div className="rounded-b-2xl border border-t-0 pb-hairline bg-pb-surface overflow-hidden mb-4">
-        <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: '2px solid var(--pb-hairline2)' }}>
+        <div className="flex items-center justify-between px-5 py-2.5" style={{ borderBottom: '2px solid var(--pb-hairline2)' }}>
           <span className="font-display font-bold text-[15px] tracking-tight">Batting order</span>
           {vm.canEdit && (
             <div className="flex items-center gap-2">
@@ -388,7 +388,7 @@ export function TeamSheetView({ vm }) {
           {vm.slots.map((id, i) => <SheetRow key={i} i={i} id={id} vm={vm} drag={drag} />)}
           {vm.format === 0 && <div className="px-5 py-4 text-center text-[12.5px] text-pb-faintest">Tap a card below to add to the order</div>}
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 py-3.5 text-[13px]" style={{ borderTop: '2px solid var(--pb-hairline2)' }}>
+        <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 py-2.5 text-[13px]" style={{ borderTop: '2px solid var(--pb-hairline2)' }}>
           <span className="inline-flex items-center gap-1.5" style={{ color: cap ? 'var(--pb-text)' : 'var(--pb-faint)' }}><Tag tone={cap ? 'accent' : 'faint'}>C</Tag>{cap || 'No captain named'}</span>
           <span className="inline-flex items-center gap-1.5" style={{ color: wk ? 'var(--pb-text)' : 'var(--pb-amber)' }}><Tag tone={wk ? 'amber' : 'faint'}>WK</Tag>{wk || 'No keeper named'}</span>
           {b.lightBowling && <span className="inline-flex items-center gap-1.5 text-pb-amber"><Icon name="info" size={13} /> Light on bowling</span>}
