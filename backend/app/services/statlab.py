@@ -71,6 +71,8 @@ PLAYER_AGG_METRICS: dict[str, str] = {
     "runs_conceded": "runs_conceded",
     "best_bowling_wickets": "best_bowling_wickets",
     "catches": "catches",
+    "catches_wk": "catches_wk",
+    "catches_non_wk": "catches_non_wk",
     "run_outs": "run_outs",
     "stumpings": "stumpings",
     "wides": "wides",
@@ -589,6 +591,8 @@ def _player_agg_innings_cte(
             SELECT
                 {select_cols}
                 COALESCE(SUM(fs.catches), 0)   AS catches,
+                COALESCE(SUM(fs.catches_wk), 0) AS catches_wk,
+                COALESCE(SUM(GREATEST(fs.catches - fs.catches_wk, 0)), 0) AS catches_non_wk,
                 COALESCE(SUM(fs.run_outs), 0)  AS run_outs,
                 COALESCE(SUM(fs.stumpings), 0) AS stumpings
             FROM game_universe gu
@@ -672,6 +676,8 @@ async def query_player_career(
                     COALESCE(bowl.wides, 0)    AS wides,
                     COALESCE(bowl.no_balls, 0) AS no_balls,
                     COALESCE(field.catches, 0)                                        AS catches,
+                    COALESCE(field.catches_wk, 0)                                     AS catches_wk,
+                    COALESCE(field.catches_non_wk, 0)                                 AS catches_non_wk,
                     COALESCE(field.run_outs, 0)                                       AS run_outs,
                     COALESCE(field.stumpings, 0)                                      AS stumpings
                 FROM appear
@@ -718,6 +724,8 @@ async def query_player_career(
                     COALESCE(SUM(pss.wides), 0)    AS wides,
                     COALESCE(SUM(pss.no_balls), 0) AS no_balls,
                     COALESCE(SUM(pss.catches), 0)                                                AS catches,
+                    COALESCE(SUM(pss.catches_wk), 0)                                             AS catches_wk,
+                    COALESCE(SUM(pss.catches_non_wk), 0)                                         AS catches_non_wk,
                     COALESCE(SUM(pss.run_outs), 0)                                               AS run_outs,
                     COALESCE(SUM(pss.stumpings), 0)                                              AS stumpings
                 FROM player_season_stats pss
@@ -807,6 +815,8 @@ async def query_player_season(
                     COALESCE(bowl.wides, 0)    AS wides,
                     COALESCE(bowl.no_balls, 0) AS no_balls,
                     COALESCE(field.catches, 0)                        AS catches,
+                    COALESCE(field.catches_wk, 0)                     AS catches_wk,
+                    COALESCE(field.catches_non_wk, 0)                 AS catches_non_wk,
                     COALESCE(field.run_outs, 0)                       AS run_outs,
                     COALESCE(field.stumpings, 0)                      AS stumpings
                 FROM appear
@@ -879,6 +889,8 @@ async def query_player_season(
                     COALESCE(pss.wides, 0)    AS wides,
                     COALESCE(pss.no_balls, 0) AS no_balls,
                     COALESCE(pss.catches, 0)                                                      AS catches,
+                    COALESCE(pss.catches_wk, 0)                                                    AS catches_wk,
+                    COALESCE(pss.catches_non_wk, 0)                                                AS catches_non_wk,
                     COALESCE(pss.run_outs, 0)                                                     AS run_outs,
                     COALESCE(pss.stumpings, 0)                                                    AS stumpings
                 FROM player_season_stats pss
@@ -959,6 +971,8 @@ async def query_player_grade(
                 COALESCE(bowl.wides, 0)    AS wides,
                 COALESCE(bowl.no_balls, 0) AS no_balls,
                 COALESCE(field.catches, 0)                              AS catches,
+                COALESCE(field.catches_wk, 0)                           AS catches_wk,
+                COALESCE(field.catches_non_wk, 0)                       AS catches_non_wk,
                 COALESCE(field.run_outs, 0)                             AS run_outs,
                 COALESCE(field.stumpings, 0)                            AS stumpings
             FROM appear
@@ -1031,6 +1045,8 @@ def _family_agg_select_cols() -> str:
         COALESCE(SUM(pss.wides), 0)                                                             AS wides,
         COALESCE(SUM(pss.no_balls), 0)                                                          AS no_balls,
         COALESCE(SUM(pss.catches), 0)                                                           AS catches,
+        COALESCE(SUM(pss.catches_wk), 0)                                                         AS catches_wk,
+        COALESCE(SUM(pss.catches_non_wk), 0)                                                     AS catches_non_wk,
         COALESCE(SUM(pss.run_outs), 0)                                                          AS run_outs,
         COALESCE(SUM(pss.stumpings), 0)                                                         AS stumpings
     """
@@ -1194,6 +1210,8 @@ async def query_family_grade(
                 COALESCE(bowl.wides, 0)                 AS wides,
                 COALESCE(bowl.no_balls, 0)              AS no_balls,
                 COALESCE(field.catches, 0)              AS catches,
+                COALESCE(field.catches_wk, 0)           AS catches_wk,
+                COALESCE(field.catches_non_wk, 0)       AS catches_non_wk,
                 COALESCE(field.run_outs, 0)             AS run_outs,
                 COALESCE(field.stumpings, 0)            AS stumpings
             FROM appear
@@ -1239,6 +1257,8 @@ async def query_family_grade(
                 COALESCE(SUM(pp.wides), 0)                                                      AS wides,
                 COALESCE(SUM(pp.no_balls), 0)                                                   AS no_balls,
                 COALESCE(SUM(pp.catches), 0)                                                    AS catches,
+                COALESCE(SUM(pp.catches_wk), 0)                                                  AS catches_wk,
+                COALESCE(SUM(pp.catches_non_wk), 0)                                              AS catches_non_wk,
                 COALESCE(SUM(pp.run_outs), 0)                                                   AS run_outs,
                 COALESCE(SUM(pp.stumpings), 0)                                                  AS stumpings
             FROM per_player pp
