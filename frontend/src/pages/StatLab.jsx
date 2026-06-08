@@ -4,6 +4,7 @@ import { useClub } from '../hooks/useClub'
 import { useClubData } from '../hooks/useClubData'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../lib/api'
+import Dropdown from '../components/Dropdown'
 import ClubInactive from './ClubInactive'
 import { Label, Card, Btn, PageHeader, PbSpinner } from '../lib/presskit'
 
@@ -573,12 +574,6 @@ function PickerInput({ orgId, kind, value, placeholder, onChange }) {
     return () => { cancelled = true; clearTimeout(timer) }
   }, [open, orgId, kind, query])
 
-  useEffect(() => {
-    const onClick = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
-  }, [])
-
   const pick = (v) => { onChange(v); setQuery(v); setOpen(false) }
   const clear = () => { onChange(''); setQuery(''); setOpen(false) }
 
@@ -596,23 +591,27 @@ function PickerInput({ orgId, kind, value, placeholder, onChange }) {
           <button onClick={clear} className="text-pb-faint hover:text-pb-red text-xs px-1" title="Clear">×</button>
         )}
       </div>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full bg-pb-bg pb-card shadow-xl max-h-52 overflow-auto pb-scroll">
-          {loading && <div className="text-pb-faintest font-mono text-[10px] px-3 py-2">Loading…</div>}
-          {!loading && items.length === 0 && (
-            <div className="text-pb-faintest font-mono text-[10px] px-3 py-2">No matches.</div>
-          )}
-          {items.map(it => (
-            <button
-              key={it.value}
-              onMouseDown={(e) => { e.preventDefault(); pick(it.value) }}
-              className="block w-full text-left px-3 py-1.5 text-xs text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
-            >
-              {it.value}
-            </button>
-          ))}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={wrapRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        maxHeight={208}
+        className="bg-pb-bg pb-card shadow-xl pb-scroll"
+      >
+        {loading && <div className="text-pb-faintest font-mono text-[10px] px-3 py-2">Loading…</div>}
+        {!loading && items.length === 0 && (
+          <div className="text-pb-faintest font-mono text-[10px] px-3 py-2">No matches.</div>
+        )}
+        {items.map(it => (
+          <button
+            key={it.value}
+            onMouseDown={(e) => { e.preventDefault(); pick(it.value) }}
+            className="block w-full text-left px-3 py-1.5 text-xs text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
+          >
+            {it.value}
+          </button>
+        ))}
+      </Dropdown>
     </div>
   )
 }
@@ -798,10 +797,9 @@ function categoriesForTarget(targetMetrics) {
     .filter(c => c.fields.length > 0)
 }
 
-function FieldPicker({ open, onClose, onPick, categories, anchorRect }) {
+function FieldPicker({ open, onClose, onPick, categories, anchorRef }) {
   const [search, setSearch] = useState('')
   useEffect(() => { if (open) setSearch('') }, [open])
-  if (!open) return null
   const term = search.trim().toLowerCase()
   const filtered = categories.map(c => ({
     ...c,
@@ -809,54 +807,52 @@ function FieldPicker({ open, onClose, onPick, categories, anchorRect }) {
   })).filter(c => c.fields.length > 0)
 
   return (
-    <>
-      <div className="fixed inset-0 z-30" onClick={onClose} />
-      <div
-        className="absolute z-40 mt-1 bg-pb-bg pb-card shadow-xl w-[340px] max-h-[420px] overflow-auto pb-scroll"
-        style={{ top: anchorRect?.bottom ? `${anchorRect.bottom + window.scrollY}px` : undefined, left: anchorRect?.left ? `${anchorRect.left + window.scrollX}px` : undefined }}
-      >
-        <div className="sticky top-0 bg-pb-bg pb-hairline-b p-2">
-          <input
-            autoFocus
-            className={inputCls}
-            placeholder="Search metrics…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="py-1">
-          {filtered.length === 0 && <p className="text-pb-faintest text-xs px-3 py-3">No matching metrics for this query type.</p>}
-          {filtered.map(c => (
-            <div key={c.key} className="px-2 py-1.5">
-              <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest px-1 mb-1">{c.label.toUpperCase()}</div>
-              <div className="flex flex-col gap-0.5">
-                {c.fields.map(f => (
-                  <button
-                    key={f}
-                    onClick={() => { onPick(f); onClose() }}
-                    title={METRIC_LABELS[f]?.label || f}
-                    className="text-left px-2 py-1.5 rounded hover:bg-pb-surface2 text-[12px] text-pb-dim hover:text-pb-text transition"
-                  >
-                    {METRIC_LABELS[f]?.label || f}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+    <Dropdown
+      anchorRef={anchorRef}
+      open={open}
+      onClose={onClose}
+      align="start"
+      width={340}
+      maxHeight={420}
+      className="bg-pb-bg pb-card shadow-xl pb-scroll"
+    >
+      <div className="sticky top-0 bg-pb-bg pb-hairline-b p-2">
+        <input
+          autoFocus
+          className={inputCls}
+          placeholder="Search metrics…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
       </div>
-    </>
+      <div className="py-1">
+        {filtered.length === 0 && <p className="text-pb-faintest text-xs px-3 py-3">No matching metrics for this query type.</p>}
+        {filtered.map(c => (
+          <div key={c.key} className="px-2 py-1.5">
+            <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest px-1 mb-1">{c.label.toUpperCase()}</div>
+            <div className="flex flex-col gap-0.5">
+              {c.fields.map(f => (
+                <button
+                  key={f}
+                  onClick={() => { onPick(f); onClose() }}
+                  title={METRIC_LABELS[f]?.label || f}
+                  className="text-left px-2 py-1.5 rounded hover:bg-pb-surface2 text-[12px] text-pb-dim hover:text-pb-text transition"
+                >
+                  {METRIC_LABELS[f]?.label || f}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Dropdown>
   )
 }
 
 function FilterLeaf({ leaf, categories, onChange, onRemove }) {
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [anchor, setAnchor] = useState(null)
   const fieldBtnRef = useRef(null)
-  const openPicker = () => {
-    if (fieldBtnRef.current) setAnchor(fieldBtnRef.current.getBoundingClientRect())
-    setPickerOpen(true)
-  }
+  const openPicker = () => setPickerOpen(true)
   const cat = leaf.field ? CATEGORY_LOOKUP[leaf.field] : null
   const fieldLabel = leaf.field ? (METRIC_LABELS[leaf.field]?.label || leaf.field) : 'Choose metric'
   return (
@@ -897,7 +893,7 @@ function FilterLeaf({ leaf, categories, onChange, onRemove }) {
         onClose={() => setPickerOpen(false)}
         onPick={(field) => onChange({ ...leaf, field })}
         categories={categories}
-        anchorRect={anchor}
+        anchorRef={fieldBtnRef}
       />
     </div>
   )

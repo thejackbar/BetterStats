@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import { PageHeader, PbSpinner } from '../lib/presskit'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
+import Dropdown from '../components/Dropdown'
 
 const MAX_PLAYERS = 5
 const PLAYER_COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444']
@@ -108,6 +109,7 @@ function PlayerSearch({ players, playersLoading, onSelect, excludeIds = [], fmt 
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const blurTimer = useRef(null)
+  const anchorRef = useRef(null)
 
   const filtered = useMemo(() => {
     const available = players.filter(p => !excludeIds.includes(p.id))
@@ -116,7 +118,7 @@ function PlayerSearch({ players, playersLoading, onSelect, excludeIds = [], fmt 
   }, [players, query, excludeIds])
 
   return (
-    <div className="relative">
+    <div ref={anchorRef} className="relative">
       <div className="relative">
         <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-pb-faint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -131,23 +133,27 @@ function PlayerSearch({ players, playersLoading, onSelect, excludeIds = [], fmt 
           className="w-full bg-pb-surface border pb-hairline text-pb-text text-sm rounded pl-8 pr-3 py-2 focus:outline-none focus:border-pb-accent placeholder-pb-faint"
         />
       </div>
-      {open && (filtered.length > 0 || playersLoading) && (
-        <div className="absolute z-50 w-full mt-1 bg-pb-surface border pb-hairline rounded shadow-xl max-h-56 overflow-y-auto pb-scroll">
-          {playersLoading && filtered.length === 0 ? (
-            <p className="px-3 py-2 text-sm text-pb-faint">Loading…</p>
-          ) : (
-            filtered.map(p => (
-              <button
-                key={p.id}
-                onMouseDown={() => { onSelect(p); setQuery(''); setOpen(false) }}
-                className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text transition-colors"
-              >
-                {fmt(p.display_name || p.name)}
-              </button>
-            ))
-          )}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={anchorRef}
+        open={open && (filtered.length > 0 || playersLoading)}
+        onClose={() => setOpen(false)}
+        maxHeight={224}
+        className="bg-pb-surface border pb-hairline rounded shadow-xl pb-scroll"
+      >
+        {playersLoading && filtered.length === 0 ? (
+          <p className="px-3 py-2 text-sm text-pb-faint">Loading…</p>
+        ) : (
+          filtered.map(p => (
+            <button
+              key={p.id}
+              onMouseDown={() => { onSelect(p); setQuery(''); setOpen(false) }}
+              className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text transition-colors"
+            >
+              {fmt(p.display_name || p.name)}
+            </button>
+          ))
+        )}
+      </Dropdown>
     </div>
   )
 }

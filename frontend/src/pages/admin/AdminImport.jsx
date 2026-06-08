@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
+import Dropdown from '../../components/Dropdown'
 import { PbSpinner } from '../../lib/presskit'
 
 // ── field metadata for the column-mapping step ───────────────────────────────
@@ -477,12 +478,6 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const ref = useRef(null)
-  useEffect(() => {
-    if (!open) return
-    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [open])
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase()
     const base = ql ? options.filter(o => (o.name || '').toLowerCase().includes(ql)) : options
@@ -498,30 +493,36 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
         <span className="truncate">{valueLabel(value, idName, kind)}</span>
         <span className="text-pb-faint ml-2">▾</span>
       </button>
-      {open && (
-        <div className="absolute z-30 mt-1 w-72 max-h-72 overflow-auto bg-pb-surface border pb-hairline rounded shadow-xl p-1">
-          <button className={item} onClick={() => pick(kind === 'player' ? '__new__' : '__prior__')}>
-            {kind === 'player' ? '+ Create new player' : '↪ Career summary (no season)'}
+      <Dropdown
+        anchorRef={ref}
+        open={open}
+        onClose={() => setOpen(false)}
+        align="start"
+        width={288}
+        maxHeight={288}
+        className="bg-pb-surface border pb-hairline rounded shadow-xl p-1"
+      >
+        <button className={item} onClick={() => pick(kind === 'player' ? '__new__' : '__prior__')}>
+          {kind === 'player' ? '+ Create new player' : '↪ Career summary (no season)'}
+        </button>
+        <button className={item} onClick={() => pick('__skip__')}>Skip this {kind}</button>
+        {(candidates || []).length > 0 && <div className="px-2 pt-2 pb-1 font-mono text-[9px] tracking-wide2 text-pb-faint">SUGGESTED</div>}
+        {(candidates || []).map(c => (
+          <button key={c.id} className={`${item} leading-tight py-1.5`} onClick={() => pick(c.id)}>
+            <span className="flex items-center justify-between gap-2">
+              <span className="truncate">{c.name}</span>
+              {c.confidence != null && <span className="text-pb-faint shrink-0">{Math.round(c.confidence * 100)}%</span>}
+            </span>
+            {kind === 'player' && c.stats && <span className="block text-[10px] text-pb-faint mt-0.5">{candStatLine(c.stats)}</span>}
           </button>
-          <button className={item} onClick={() => pick('__skip__')}>Skip this {kind}</button>
-          {(candidates || []).length > 0 && <div className="px-2 pt-2 pb-1 font-mono text-[9px] tracking-wide2 text-pb-faint">SUGGESTED</div>}
-          {(candidates || []).map(c => (
-            <button key={c.id} className={`${item} leading-tight py-1.5`} onClick={() => pick(c.id)}>
-              <span className="flex items-center justify-between gap-2">
-                <span className="truncate">{c.name}</span>
-                {c.confidence != null && <span className="text-pb-faint shrink-0">{Math.round(c.confidence * 100)}%</span>}
-              </span>
-              {kind === 'player' && c.stats && <span className="block text-[10px] text-pb-faint mt-0.5">{candStatLine(c.stats)}</span>}
-            </button>
-          ))}
-          <div className="px-1 pt-2 pb-1 sticky top-0">
-            <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={`Search all ${kind === 'player' ? 'players' : 'seasons'}…`}
-              className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
-          </div>
-          {filtered.map(o => <button key={o.id} className={item} onClick={() => pick(o.id)}>{o.name}</button>)}
-          {filtered.length === 0 && <div className="px-2 py-1 text-[11px] text-pb-faint">No matches</div>}
+        ))}
+        <div className="px-1 pt-2 pb-1 sticky top-0">
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={`Search all ${kind === 'player' ? 'players' : 'seasons'}…`}
+            className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
         </div>
-      )}
+        {filtered.map(o => <button key={o.id} className={item} onClick={() => pick(o.id)}>{o.name}</button>)}
+        {filtered.length === 0 && <div className="px-2 py-1 text-[11px] text-pb-faint">No matches</div>}
+      </Dropdown>
     </div>
   )
 }

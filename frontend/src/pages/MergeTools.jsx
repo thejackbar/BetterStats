@@ -2,6 +2,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner } from '../lib/presskit'
+import Dropdown from '../components/Dropdown'
 
 function StatBadge({ label, value }) {
   return (
@@ -58,14 +59,6 @@ function PlayerSearch({ players, value, onChange, placeholder }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
-  useEffect(() => {
-    function handler(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
   const filtered = query.trim().length >= 1
     ? players.filter(p => p.name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 10)
     : []
@@ -100,19 +93,23 @@ function PlayerSearch({ players, value, onChange, placeholder }) {
           <button onClick={clear} className="absolute right-3 top-1/2 -translate-y-1/2 text-pb-faint hover:text-pb-text text-lg leading-none">×</button>
         )}
       </div>
-      {open && filtered.length > 0 && (
-        <div className="absolute z-50 mt-1 w-full bg-pb-surface border pb-hairline rounded shadow-xl max-h-52 overflow-y-auto pb-scroll">
-          {filtered.map(p => (
-            <button
-              key={p.id}
-              onMouseDown={() => select(p)}
-              className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
-            >
-              {p.name}
-            </button>
-          ))}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={ref}
+        open={open && filtered.length > 0}
+        onClose={() => setOpen(false)}
+        maxHeight={208}
+        className="bg-pb-surface border pb-hairline rounded shadow-xl pb-scroll"
+      >
+        {filtered.map(p => (
+          <button
+            key={p.id}
+            onMouseDown={() => select(p)}
+            className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
+          >
+            {p.name}
+          </button>
+        ))}
+      </Dropdown>
     </div>
   )
 }

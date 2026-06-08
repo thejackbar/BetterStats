@@ -3,6 +3,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import Dropdown from '../../components/Dropdown'
 
 const RELATIONSHIP_OPTIONS = [
   'Father', 'Mother', 'Son', 'Daughter',
@@ -18,12 +19,6 @@ function PlayerPicker({ players, value, onChange, placeholder = 'Search playerâ€
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
-
-  useEffect(() => {
-    function close(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -53,19 +48,23 @@ function PlayerPicker({ players, value, onChange, placeholder = 'Search playerâ€
         placeholder={placeholder}
         className="w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent placeholder-pb-faintest"
       />
-      {open && filtered.length > 0 && (
-        <div className="absolute z-50 mt-1 w-full bg-pb-surface border pb-hairline rounded shadow-xl max-h-52 overflow-y-auto pb-scroll">
-          {filtered.map(p => (
-            <button
-              key={p.id}
-              onMouseDown={() => pick(p)}
-              className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
-            >
-              {p.name}
-            </button>
-          ))}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={ref}
+        open={open && filtered.length > 0}
+        onClose={() => setOpen(false)}
+        maxHeight={208}
+        className="bg-pb-surface border pb-hairline rounded shadow-xl pb-scroll"
+      >
+        {filtered.map(p => (
+          <button
+            key={p.id}
+            onMouseDown={() => pick(p)}
+            className="w-full text-left px-3 py-2 text-sm text-pb-dim hover:bg-pb-surface2 hover:text-pb-text"
+          >
+            {p.name}
+          </button>
+        ))}
+      </Dropdown>
     </div>
   )
 }

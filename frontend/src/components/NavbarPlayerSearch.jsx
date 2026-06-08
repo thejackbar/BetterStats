@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
+import Dropdown from './Dropdown'
 
 const MAX_RESULTS = 8
 
@@ -33,16 +34,6 @@ export default function NavbarPlayerSearch({ orgId, club, variant = 'desktop', o
   }, [players, query])
 
   useEffect(() => { setHighlight(0) }, [query])
-
-  useEffect(() => {
-    function onClick(e) {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
-  }, [])
 
   function selectPlayer(p) {
     if (!p) return
@@ -118,33 +109,35 @@ export default function NavbarPlayerSearch({ orgId, club, variant = 'desktop', o
           </button>
         )}
       </div>
-      {showDropdown && (
-        <div className={
-          isMobile
-            ? 'mt-2 w-full bg-pb-surface pb-hairline rounded shadow-lg overflow-hidden max-h-[60vh] overflow-y-auto'
-            : 'absolute top-full right-0 mt-1 w-[260px] bg-pb-surface pb-hairline rounded shadow-lg overflow-hidden z-50 max-h-[400px] overflow-y-auto'
-        }>
-          {matches.length === 0 ? (
-            <div className={isMobile ? 'px-3 py-3 text-pb-faint text-[13px]' : 'px-3 py-2 text-pb-faint text-[12px]'}>
-              No players match.
-            </div>
-          ) : matches.map((p, i) => (
-            <Link
-              key={p.id}
-              to={`/players/${p.id}`}
-              onClick={() => { setQuery(''); setOpen(false); onSelect?.() }}
-              onMouseEnter={() => setHighlight(i)}
-              className={
-                isMobile
-                  ? `block px-3 py-3 text-[14px] text-pb-text hover:bg-pb-surface2 transition-colors ${i === highlight ? 'bg-pb-surface2' : ''}`
-                  : `block px-3 py-1.5 text-[12px] text-pb-text hover:bg-pb-surface2 transition-colors ${i === highlight ? 'bg-pb-surface2' : ''}`
-              }
-            >
-              {fmt(p.display_name || p.name)}
-            </Link>
-          ))}
-        </div>
-      )}
+      <Dropdown
+        anchorRef={containerRef}
+        open={showDropdown}
+        onClose={() => setOpen(false)}
+        align={isMobile ? 'stretch' : 'end'}
+        width={isMobile ? undefined : 260}
+        maxHeight={isMobile ? undefined : 400}
+        className="bg-pb-surface pb-hairline rounded shadow-lg overflow-hidden"
+      >
+        {matches.length === 0 ? (
+          <div className={isMobile ? 'px-3 py-3 text-pb-faint text-[13px]' : 'px-3 py-2 text-pb-faint text-[12px]'}>
+            No players match.
+          </div>
+        ) : matches.map((p, i) => (
+          <Link
+            key={p.id}
+            to={`/players/${p.id}`}
+            onClick={() => { setQuery(''); setOpen(false); onSelect?.() }}
+            onMouseEnter={() => setHighlight(i)}
+            className={
+              isMobile
+                ? `block px-3 py-3 text-[14px] text-pb-text hover:bg-pb-surface2 transition-colors ${i === highlight ? 'bg-pb-surface2' : ''}`
+                : `block px-3 py-1.5 text-[12px] text-pb-text hover:bg-pb-surface2 transition-colors ${i === highlight ? 'bg-pb-surface2' : ''}`
+            }
+          >
+            {fmt(p.display_name || p.name)}
+          </Link>
+        ))}
+      </Dropdown>
     </div>
   )
 }

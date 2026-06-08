@@ -22,6 +22,7 @@ import {
 import { Radar, BAT_AXES, BOWL_AXES, PhaseStrip, buildRadar } from './viz'
 import KeyPlayersCard from './KeyPlayersCard'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
+import Dropdown from '../../../components/Dropdown'
 
 const POLL_MS = 2500
 const num = (v, d = '—') => (v === null || v === undefined ? d : v)
@@ -531,6 +532,7 @@ function OppPlayerScout({ dossier, tags, onSaveTag }) {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
   const [sel, setSel] = useState(null)
+  const ref = useRef(null)
   const index = useMemo(() => buildOppPlayerIndex(dossier), [dossier])
   const enriched = useMemo(() => {
     const m = new Map()
@@ -544,19 +546,24 @@ function OppPlayerScout({ dossier, tags, onSaveTag }) {
   const selected = sel ? index.get(sel) : null
   return (
     <Card eyebrow="search any of their squad" title="Scout a player">
-      <div className="relative max-w-sm" onFocusCapture={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}>
+      <div ref={ref} className="relative max-w-sm" onFocusCapture={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}>
         <Search value={q} onChange={(v) => { setQ(v); setOpen(true) }} placeholder="Search an opponent player…" className="w-full" />
-        {open && (
-          <div className="absolute z-30 mt-1 w-full iq-card p-1 max-h-72 overflow-auto iq-scroll shadow-lg" style={{ background: 'var(--pb-surface)' }}>
-            {matches.length === 0 ? <div className="px-2.5 py-2 text-pb-faint text-sm">No match.</div> : matches.map(p => (
-              <button key={p.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { setSel(p.id); setQ(''); setOpen(false) }}
-                className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
-                <span className="font-medium truncate">{p.name}</span>
-                <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">{p.bat?.runs ? `${p.bat.runs}r @ ${a2(p.bat.average)}` : ''}{p.bowl?.wickets ? ` · ${p.bowl.wickets}w` : ''}</span>
-              </button>
-            ))}
-          </div>
-        )}
+        <Dropdown
+          anchorRef={ref}
+          open={open}
+          onClose={() => setOpen(false)}
+          maxHeight={288}
+          className="iq-card p-1 iq-scroll shadow-lg"
+          style={{ background: 'var(--pb-surface)' }}
+        >
+          {matches.length === 0 ? <div className="px-2.5 py-2 text-pb-faint text-sm">No match.</div> : matches.map(p => (
+            <button key={p.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { setSel(p.id); setQ(''); setOpen(false) }}
+              className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
+              <span className="font-medium truncate">{p.name}</span>
+              <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">{p.bat?.runs ? `${p.bat.runs}r @ ${a2(p.bat.average)}` : ''}{p.bowl?.wickets ? ` · ${p.bowl.wickets}w` : ''}</span>
+            </button>
+          ))}
+        </Dropdown>
       </div>
       {selected
         ? <div className="mt-4"><OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={dossier.opponent?.name} playerId={sel} tag={tags?.[sel]} onSaveTag={onSaveTag} /></div>

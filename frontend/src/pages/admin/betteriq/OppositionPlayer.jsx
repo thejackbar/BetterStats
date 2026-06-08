@@ -11,6 +11,7 @@
  * ?opponent=<opp_key> and ?player=<participant_id>.
  */
 import { useState, useEffect, useMemo, useRef } from 'react'
+import Dropdown from '../../../components/Dropdown'
 import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
@@ -145,6 +146,8 @@ export default function OppositionPlayer() {
   const clubMatches = (cq ? opponents.filter(o => (o.name || '').toLowerCase().includes(cq)) : opponents).slice(0, 40)
   const pq = playerQ.trim().toLowerCase()
   const playerMatches = pq ? all.filter(p => p.name.toLowerCase().includes(pq)) : all
+  const clubRef = useRef(null)
+  const playerRef = useRef(null)
 
   return (
     <IQLayout
@@ -158,47 +161,57 @@ export default function OppositionPlayer() {
         <div className="iq-fade">
           <div className="flex flex-wrap items-center gap-3 mb-5">
             <span className="iq-eyebrow">Club</span>
-            <div className="relative flex-1 min-w-[260px] max-w-md"
+            <div ref={clubRef} className="relative flex-1 min-w-[260px] max-w-md"
               onFocusCapture={() => setClubOpen(true)} onBlur={() => setTimeout(() => setClubOpen(false), 150)}>
               <Search value={clubQ} onChange={(v) => { setClubQ(v); setClubOpen(true) }} placeholder="Search an opponent club…" className="w-full" />
-              {clubOpen && (
-                <div className="absolute z-30 mt-1 w-full iq-card p-1 max-h-80 overflow-auto iq-scroll shadow-lg" style={{ background: 'var(--pb-surface)' }}>
-                  {clubMatches.length === 0
-                    ? <div className="px-2.5 py-2 text-pb-faint text-sm">{opponents.length === 0 ? 'No opponents with history yet.' : 'No match.'}</div>
-                    : clubMatches.map(o => (
-                      <button key={o.opp_key} type="button" onMouseDown={e => e.preventDefault()} onClick={() => pickClub(o)}
-                        className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
-                        <span className="font-medium truncate">{o.name}</span>
-                        <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">{o.shared_grade ? 'shared grade' : `${o.meetings} mtgs${o.coverage === 'rich' ? ' · rich' : ''}`}</span>
-                      </button>
-                    ))}
-                </div>
-              )}
+              <Dropdown
+                anchorRef={clubRef}
+                open={clubOpen}
+                onClose={() => setClubOpen(false)}
+                maxHeight={320}
+                className="iq-card p-1 iq-scroll shadow-lg"
+                style={{ background: 'var(--pb-surface)' }}
+              >
+                {clubMatches.length === 0
+                  ? <div className="px-2.5 py-2 text-pb-faint text-sm">{opponents.length === 0 ? 'No opponents with history yet.' : 'No match.'}</div>
+                  : clubMatches.map(o => (
+                    <button key={o.opp_key} type="button" onMouseDown={e => e.preventDefault()} onClick={() => pickClub(o)}
+                      className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
+                      <span className="font-medium truncate">{o.name}</span>
+                      <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">{o.shared_grade ? 'shared grade' : `${o.meetings} mtgs${o.coverage === 'rich' ? ' · rich' : ''}`}</span>
+                    </button>
+                  ))}
+              </Dropdown>
             </div>
           </div>
 
           {/* Player-first search — jump straight to an opposition player */}
           <div className="flex flex-wrap items-center gap-3 mb-6">
             <span className="iq-eyebrow">Player</span>
-            <div className="relative flex-1 min-w-[260px] max-w-md"
+            <div ref={playerRef} className="relative flex-1 min-w-[260px] max-w-md"
               onFocusCapture={() => setPOpen(true)} onBlur={() => setTimeout(() => setPOpen(false), 150)}>
               <Search value={pSearch} onChange={(v) => { setPSearch(v); setPOpen(true) }} placeholder="…or search an opposition player by name" className="w-full" />
-              {pOpen && pSearch.trim().length >= 2 && (
-                <div className="absolute z-30 mt-1 w-full iq-card p-1 max-h-80 overflow-auto iq-scroll shadow-lg" style={{ background: 'var(--pb-surface)' }}>
-                  {pResults.length === 0
-                    ? <div className="px-2.5 py-2 text-pb-faint text-sm">No opposition player found — we index batters our bowlers have dismissed.</div>
-                    : pResults.map((r, i) => (
-                      <button key={`${r.opp_key}-${r.name}-${i}`} type="button" onMouseDown={e => e.preventDefault()} onClick={() => pickOpponentPlayer(r)}
-                        className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
-                        <span className="min-w-0">
-                          <span className="font-medium truncate block">{r.name}</span>
-                          <span className="text-pb-faintest text-[11px] truncate block">{r.club_name}</span>
-                        </span>
-                        <span className="text-pb-faint text-[11px] iq-num whitespace-nowrap">{r.runs}r vs us</span>
-                      </button>
-                    ))}
-                </div>
-              )}
+              <Dropdown
+                anchorRef={playerRef}
+                open={pOpen && pSearch.trim().length >= 2}
+                onClose={() => setPOpen(false)}
+                maxHeight={320}
+                className="iq-card p-1 iq-scroll shadow-lg"
+                style={{ background: 'var(--pb-surface)' }}
+              >
+                {pResults.length === 0
+                  ? <div className="px-2.5 py-2 text-pb-faint text-sm">No opposition player found — we index batters our bowlers have dismissed.</div>
+                  : pResults.map((r, i) => (
+                    <button key={`${r.opp_key}-${r.name}-${i}`} type="button" onMouseDown={e => e.preventDefault()} onClick={() => pickOpponentPlayer(r)}
+                      className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
+                      <span className="min-w-0">
+                        <span className="font-medium truncate block">{r.name}</span>
+                        <span className="text-pb-faintest text-[11px] truncate block">{r.club_name}</span>
+                      </span>
+                      <span className="text-pb-faint text-[11px] iq-num whitespace-nowrap">{r.runs}r vs us</span>
+                    </button>
+                  ))}
+              </Dropdown>
             </div>
           </div>
 
