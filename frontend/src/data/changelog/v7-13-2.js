@@ -2,7 +2,7 @@ export default {
   "version": "v7.13.2",
   "date": "2026-05-26",
   "sortKey": "2026-05-26T00:00:19Z",
-  "title": "StatLab: full CricketStatz-style report set",
+  "title": "StatLab: full classic report set",
   "items": [
     "Added 70+ new presets and derived reports across Popular, Season Honours, Batting, Bowling, Fielding & Keeping, Partnerships, and Match categories",
     "New per-match aggregates: Most Runs in a Match, Most Sixes/Fours/Boundaries in a Match, Best Bowling in a Match, Most Wickets in a Match, Most Catches/Stumpings/Run Outs in a Match, Most Balls Bowled in a Match",

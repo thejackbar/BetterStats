@@ -7,7 +7,7 @@ export default {
     "Game-level scorecards now load all the way back to the 1970s — every season, every grade",
     "Home and away team names now correctly populate for all historical games",
     "Duplicate batting/bowling rows from overlapping sync paths eliminated",
-    "PlayHQ Partner sync path removed — Grassroots covers all seasons including 2025/26 with fewer gaps",
+    "A legacy sync path was retired — our main pipeline now covers all seasons including 2025/26 with fewer gaps",
     "Player stats from scorecards now correctly attributed through merged player IDs"
   ]
 }
