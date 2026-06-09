@@ -686,7 +686,7 @@ export default function AdminSocialPost() {
     const urlOrId = scUrlInput.trim()
     const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
     const m = urlOrId.match(uuidRe)
-    if (!m) { setScUrlStatus('Paste a play.cricket.com.au match URL or a match UUID'); return }
+    if (!m) { setScUrlStatus('Paste a match URL or a match ID'); return }
     const matchId = m[0]
     setScUrlStatus('loading')
     try {
@@ -785,7 +785,7 @@ export default function AdminSocialPost() {
     const urlOrId = resUrlInput.trim()
     const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
     const m = urlOrId.match(uuidRe)
-    if (!m) { setResUrlStatus('Paste a play.cricket.com.au match URL or a match UUID'); return }
+    if (!m) { setResUrlStatus('Paste a match URL or a match ID'); return }
     setResUrlStatus('loading')
     try {
       const data = await api.getSocialScorecard(m[0])
@@ -1651,7 +1651,7 @@ export default function AdminSocialPost() {
                   <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
                   <div className="flex gap-2">
                     <input type="text" value={resUrlInput} onChange={e => { setResUrlInput(e.target.value); setResUrlStatus(null) }}
-                      placeholder="https://play.cricket.com.au/match/37af9ea5-..."
+                      placeholder="Match link or match ID (e.g. 37af9ea5-…)"
                       className="flex-1 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono"
                       onKeyDown={e => e.key === 'Enter' && handleResultImport()} />
                     <button onClick={handleResultImport} disabled={resUrlStatus === 'loading'}
@@ -1908,7 +1908,7 @@ export default function AdminSocialPost() {
                   <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
                   <div className="flex gap-2">
                     <input type="text" value={scUrlInput} onChange={e => { setScUrlInput(e.target.value); setScUrlStatus(null) }}
-                      placeholder="https://play.cricket.com.au/match/37af9ea5-..."
+                      placeholder="Match link or match ID (e.g. 37af9ea5-…)"
                       className="flex-1 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono"
                       onKeyDown={e => e.key === 'Enter' && handleScUrlImport()} />
                     <button onClick={handleScUrlImport} disabled={scUrlStatus === 'loading'}
@@ -2004,7 +2004,7 @@ export default function AdminSocialPost() {
                       </summary>
                       <div className="px-3 pb-3 pt-2 flex flex-col gap-2">
                         <div className="relative">
-                          <label className="block font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase mb-1">Search Club (CA)</label>
+                          <label className="block font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase mb-1">Search Club</label>
                           <div ref={scTeamRefBySide[side]} className="relative">
                             <input value={scTeamSearch[side]} onChange={e => handleScTeamSearch(side, e.target.value)} placeholder="Type club name…"
                               className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-1.5 text-xs text-pb-text placeholder:text-pb-faintest" />
