@@ -1103,23 +1103,37 @@ async def get_records(
             ORDER BY index_score DESC LIMIT :limit
         """)
 
-    # Collapse rows that describe the same physical stand. The 077 migration
-    # removes exact intra-game duplicates, but the same match can in principle
-    # exist under two game ids (e.g. a re-pulled/duplicated game record), which
-    # would otherwise show twice. Two entries identical on (unordered pair, runs,
-    # wicket, grade, season) are visually indistinguishable, so we keep the first.
+    # Collapse rows that describe the same physical stand. A stand can be present
+    # both as a synced `partnerships` row AND as a hand-entered
+    # `manual_partnership_record` (the manual import predates game-level sync
+    # reaching that season), so the records page would list it twice. The two
+    # sources format the SAME stand differently, so the key must be
+    # representation-agnostic:
+    #   * season  — synced rows carry "Summer 2016/17"; manual rows carry the bare
+    #               start year "2016". Key on the 4-digit start year so they match.
+    #   * players — synced names are "Last, First"; manual names are "First Last".
+    #               Key on each name's lowercased, sorted token set so order/format
+    #               can't matter, and make the pair unordered.
+    # Two entries equal on (unordered pair, runs, wicket, grade, season-year) are
+    # visually indistinguishable on this page (there's no date/opponent column),
+    # so we keep the first (synced rows are added before manual ones).
+    def _season_year_key(s: str | None) -> str:
+        m = re.search(r"\d{4}", s or "")
+        return m.group(0) if m else (s or "").strip().lower()
+
+    def _name_key(name: str | None) -> tuple:
+        return tuple(sorted(t for t in re.split(r"[\s,]+", (name or "").strip().lower()) if t))
+
     def dedup_partnerships(rows: list[dict]) -> list[dict]:
         seen: set = set()
         out: list[dict] = []
         for r in rows:
-            a = str(r.get("player1_id") or (r.get("player1_name") or "").strip().lower())
-            b = str(r.get("player2_id") or (r.get("player2_name") or "").strip().lower())
             key = (
-                frozenset((a, b)),
+                frozenset((_name_key(r.get("player1_name")), _name_key(r.get("player2_name")))),
                 r.get("runs"),
                 r.get("wicket_number"),
                 (r.get("grade_name") or "").strip().lower(),
-                (r.get("season_name") or "").strip().lower(),
+                _season_year_key(r.get("season_name")),
             )
             if key in seen:
                 continue
