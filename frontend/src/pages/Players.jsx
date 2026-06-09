@@ -8,6 +8,7 @@ import ClubInactive from './ClubInactive'
 import SeasonSelector from '../components/SeasonSelector'
 import { PageHeader, PbSpinner, Card } from '../lib/presskit'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
+import { fmt2, fmtCount } from '../lib/cricketFormat'
 
 function PlayerStat({ label, value, accent }) {
   const display = value ?? '—'
@@ -140,7 +141,7 @@ export default function Players() {
                 const bw = bowlingStats[player.id]
                 const bestFigs = bw?.best_bowling_figures
                   ? bw.best_bowling_figures.replace('-', '/')
-                  : (bw?.best_figures_wickets != null ? `${bw.best_figures_wickets}w` : null)
+                  : (bw?.best_figures_wickets != null ? `${fmtCount(bw.best_figures_wickets)} wickets` : null)
                 return (
                   <Link
                     key={player.id}
@@ -154,13 +155,13 @@ export default function Players() {
                       <span className="font-mono text-[10px] text-pb-faint shrink-0">VIEW →</span>
                     </div>
                     <div className="grid grid-cols-5 gap-x-2 gap-y-1.5 text-[11px]">
-                      <PlayerStat label="M" value={b?.games} />
+                      <PlayerStat label="M" value={b?.games != null ? fmtCount(b.games) : null} />
                       <PlayerStat label="INN" value={b?.innings} />
-                      <PlayerStat label="RUNS" value={b?.total_runs} accent />
-                      <PlayerStat label="AVG" value={b?.average != null ? Number(b.average).toFixed(2) : null} />
+                      <PlayerStat label="RUNS" value={b?.total_runs != null ? fmtCount(b.total_runs) : null} accent />
+                      <PlayerStat label="AVG" value={b?.average != null ? fmt2(b.average) : null} />
                       <PlayerStat label="HS" value={b?.high_score} />
                       <PlayerStat label="50s" value={b?.fifties} />
-                      <PlayerStat label="WKTS" value={bw?.total_wickets} accent={bw?.total_wickets > 0} />
+                      <PlayerStat label="WKTS" value={bw?.total_wickets != null ? fmtCount(bw.total_wickets) : null} accent={bw?.total_wickets > 0} />
                       <PlayerStat label="BEST" value={bestFigs} />
                     </div>
                   </Link>
@@ -199,7 +200,7 @@ export default function Players() {
                         const bw = bowlingStats[player.id]
                         const bestFigs = bw?.best_bowling_figures
                           ? bw.best_bowling_figures.replace('-', '/')
-                          : (bw?.best_figures_wickets != null ? `${bw.best_figures_wickets}w` : null)
+                          : (bw?.best_figures_wickets != null ? `${fmtCount(bw.best_figures_wickets)} wickets` : null)
                         return (
                           <tr key={player.id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                             <td className="py-3 pl-5">
@@ -207,19 +208,19 @@ export default function Players() {
                                 {fmt(player.display_name || player.name)}
                               </Link>
                             </td>
-                            <td className="py-3 font-mono text-pb-dim text-right">{b?.games ?? '—'}</td>
+                            <td className="py-3 font-mono text-pb-dim text-right">{b?.games != null ? fmtCount(b.games) : '—'}</td>
                             <td className="py-3 font-mono text-pb-dim text-right">{b?.innings ?? '—'}</td>
                             <td className="py-3 text-right">
                               <span className="font-mono font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
-                                {b?.total_runs ?? '—'}
+                                {b?.total_runs != null ? fmtCount(b.total_runs) : '—'}
                               </span>
                             </td>
-                            <td className="py-3 font-mono text-pb-dim text-right">{b?.average != null ? Number(b.average).toFixed(2) : '—'}</td>
+                            <td className="py-3 font-mono text-pb-dim text-right">{b?.average != null ? fmt2(b.average) : '—'}</td>
                             <td className="py-3 font-mono text-pb-dim text-right">{b?.high_score ?? '—'}</td>
                             <td className="py-3 font-mono text-pb-dim text-right hidden md:table-cell">{b?.fifties ?? '—'}</td>
                             <td className="py-3 text-right hidden lg:table-cell">
                               <span className="font-mono font-bold pb-num" style={{ color: bw?.total_wickets > 0 ? 'var(--pb-accent)' : undefined }}>
-                                {bw?.total_wickets ?? '—'}
+                                {bw?.total_wickets != null ? fmtCount(bw.total_wickets) : '—'}
                               </span>
                             </td>
                             <td className="py-3 font-mono text-pb-dim text-right hidden lg:table-cell">

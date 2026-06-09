@@ -9,6 +9,7 @@ import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import {
   Icon, CountUp, Bar, ResultPills, Card, Note, Tag, Btn, Initials, Delta, a2,
+  fmtCount, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart, DonutStat } from './viz'
 import { useIQFilter } from './Context'
@@ -151,7 +152,7 @@ function ClubPulse({ record, last10, curve, seasonLbl }) {
             : <div className="text-pb-faintest text-[12px]">No results yet</div>}
           {record?.matches != null && (
             <div className="text-pb-faint text-[12px] mt-2.5 iq-num">
-              {record.matches} game{record.matches === 1 ? '' : 's'} this season
+              {fmtCount(record.matches)} game{record.matches === 1 ? '' : 's'} this season
             </div>
           )}
         </div>
@@ -273,9 +274,9 @@ function MvpRow({ p, rank, max, onOpen }) {
   const pct = max > 0 ? (p.impact / max) * 100 : 0
   const top = rank === 1
   const sub = [
-    p.runs != null ? `${p.runs} runs` : null,
-    p.wickets ? `${p.wickets} wkts` : null,
-    p.dismissals ? `${p.dismissals} dis` : null,
+    p.runs != null ? runsPhrase(p.runs) : null,
+    p.wickets ? wktsPhrase(p.wickets) : null,
+    p.dismissals ? `${fmtCount(p.dismissals)} dismissals` : null,
   ].filter(Boolean).join(' · ')
   return (
     <button onClick={onOpen} className="w-full flex items-center gap-4 px-2 py-3 text-left transition rounded-xl hover:bg-pb-surface2 iq-rise"

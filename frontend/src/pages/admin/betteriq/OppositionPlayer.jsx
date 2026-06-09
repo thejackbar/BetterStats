@@ -15,7 +15,7 @@ import Dropdown from '../../../components/Dropdown'
 import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
-import { Icon, Tag, Btn, Search, Empty, PageIntro, Note } from './ui'
+import { Icon, Tag, Btn, Search, Empty, PageIntro, Note, runsPhrase, wktsPhrase } from './ui'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
 
 const POLL_MS = 2500
@@ -208,7 +208,7 @@ export default function OppositionPlayer() {
                         <span className="font-medium truncate block">{r.name}</span>
                         <span className="text-pb-faintest text-[11px] truncate block">{r.club_name}</span>
                       </span>
-                      <span className="text-pb-faint text-[11px] iq-num whitespace-nowrap">{r.runs}r vs us</span>
+                      <span className="text-pb-faint text-[11px] iq-num whitespace-nowrap">{runsPhrase(r.runs)} vs us</span>
                     </button>
                   ))}
               </Dropdown>
@@ -279,7 +279,7 @@ export default function OppositionPlayer() {
                           {p.bat?.form === 'hot' && <Icon name="flame" size={12} style={{ color: 'var(--pb-red)' }} />}
                           {danger && <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--pb-red)' }} />}
                         </span>
-                        <span className="iq-mono text-pb-faint shrink-0" style={{ fontSize: 10.5 }}>{p.bat?.runs ? `${p.bat.runs}r` : ''}{p.bowl?.wickets ? ` ${p.bowl.wickets}w` : ''}</span>
+                        <span className="iq-mono text-pb-faint shrink-0" style={{ fontSize: 10.5 }}>{p.bat?.runs ? runsPhrase(p.bat.runs) : ''}{p.bowl?.wickets ? ` · ${wktsPhrase(p.bowl.wickets)}` : ''}</span>
                       </button>
                     )
                   })}

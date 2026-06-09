@@ -8,6 +8,7 @@ import { useNameFormat } from '../lib/nameFormat'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import { Card, PageHeader, PbSpinner, TabBar, ResultPill, Kpi } from '../lib/presskit'
+import { fmt2, fmtOvers, fmtCount } from '../lib/cricketFormat'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -109,8 +110,8 @@ function BattingTable({ rows, fmt: fmtName }) {
                 </Link>
               </td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">{r.innings ?? '—'}</td>
-              <td className="py-3 text-right pr-4 font-mono font-semibold text-pb-text">{r.total_runs ?? '—'}</td>
-              <td className="py-3 text-right pr-4 font-mono text-pb-dim">{fmt(r.average)}</td>
+              <td className="py-3 text-right pr-4 font-mono font-semibold text-pb-text">{fmtCount(r.total_runs)}</td>
+              <td className="py-3 text-right pr-4 font-mono text-pb-dim">{fmt2(r.average)}</td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">{r.high_score ?? '—'}</td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">{r.fifties ?? '—'}</td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">{r.hundreds ?? '—'}</td>
@@ -147,10 +148,10 @@ function BowlingTable({ rows, fmt: fmtName }) {
                   {fmtName(r.name)}
                 </Link>
               </td>
-              <td className="py-3 text-right pr-4 font-mono text-pb-dim">{fmt(r.overs, 1)}</td>
-              <td className="py-3 text-right pr-4 font-mono font-semibold text-pb-text">{r.total_wickets ?? '—'}</td>
-              <td className="py-3 text-right pr-4 font-mono text-pb-dim">{fmt(r.average)}</td>
-              <td className="py-3 text-right pr-4 font-mono text-pb-dim">{fmt(r.economy)}</td>
+              <td className="py-3 text-right pr-4 font-mono text-pb-dim">{fmtOvers(r.overs)}</td>
+              <td className="py-3 text-right pr-4 font-mono font-semibold text-pb-text">{fmtCount(r.total_wickets)}</td>
+              <td className="py-3 text-right pr-4 font-mono text-pb-dim">{fmt2(r.average)}</td>
+              <td className="py-3 text-right pr-4 font-mono text-pb-dim">{fmt2(r.economy)}</td>
               <td className="py-3 text-right pr-4 font-mono text-pb-dim">
                 {r.best_figures_wickets != null ? `${r.best_figures_wickets}/${r.best_figures_runs}` : '—'}
               </td>

@@ -17,13 +17,14 @@ import {
   Sparkline, SplitBar, StackedBar,
   Card, Stat, Note, Tag, Btn, Segmented, Search, Empty, surname,
   Tabs, PageIntro, Delta, Initials, KV, a2,
+  fmtCount, fmtOvers, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
 import { Radar, AreaChart } from './viz'
 import { useIQFilter, seasonsInRange } from './Context'
 import { api } from '../../../lib/api'
 
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
-const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`)
+const pct = (v) => fmtPct(v)
 const TYPE_LABEL = { runs: 'runs', wickets: 'wickets', matches: 'games', catches: 'catches' }
 const ACCENT = 'var(--pb-accent)'
 const AMBER = 'var(--iq-c-amber)'
@@ -83,7 +84,7 @@ function PlayerSearch({ players, onPick, placeholder = 'Search a player…' }) {
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
             <span className="font-medium text-[13.5px] truncate">{p.name}</span>
             <span className="iq-mono text-pb-faintest text-[11px] whitespace-nowrap">
-              {p.matches}g{p.runs ? ` · ${p.runs}r @ ${a2(p.bat_avg)}` : ''}{p.wickets ? ` · ${p.wickets}w @ ${a2(p.bowl_avg)}` : ''}
+              {p.matches} {p.matches === 1 ? 'game' : 'games'}{p.runs ? ` · ${runsPhrase(p.runs, p.bat_avg)}` : ''}{p.wickets ? ` · ${wktsPhrase(p.wickets, p.bowl_avg)}` : ''}
             </span>
           </button>
         ))}
@@ -130,10 +131,10 @@ function TrendSummary({ detail }) {
         <Card eyebrow="career to date" title="Career">
           <div className="grid grid-cols-3 gap-y-4 gap-x-3">
             <Stat label="Runs" value={num(b.total_runs, 0)} />
-            <Stat label="Average" value={Number(b.average) || 0} decimals={2} count={false} />
+            <Stat label="Average" value={a2(b.average)} count={false} />
             <Stat label="100s / 50s" value={`${num(b.hundreds, 0)}/${num(b.fifties, 0)}`} />
             <Stat label="Wickets" value={num(detail.career?.bowling?.total_wickets, 0)} />
-            <Stat label="Bowl avg" value={Number(detail.career?.bowling?.average) || 0} decimals={2} count={false} />
+            <Stat label="Bowl avg" value={a2(detail.career?.bowling?.average)} count={false} />
             <Stat label="Catches" value={num(detail.career?.fielding?.total_catches_non_wk, 0)} />
             {num(detail.career?.fielding?.total_catches_wk, 0) > 0 && (
               <Stat label="Ct (wk)" value={num(detail.career?.fielding?.total_catches_wk, 0)} />
@@ -150,8 +151,8 @@ function TrendSummary({ detail }) {
               : <div className="text-pb-faintest text-[11px] py-3">Not enough recent innings.</div>}
           </div>
           <div className="mt-4 space-y-0.5">
-            {peakBat && <KV label="Best batting season" value={`${peakBat.season} · ${peakBat.runs} @ ${a2(peakBat.average)}`} />}
-            {detail.peak?.bowling && <KV label="Best bowling season" value={`${detail.peak.bowling.season} · ${detail.peak.bowling.wickets}w @ ${a2(detail.peak.bowling.average)}`} />}
+            {peakBat && <KV label="Best batting season" value={`${peakBat.season} · ${runsPhrase(peakBat.runs, peakBat.average)}`} />}
+            {detail.peak?.bowling && <KV label="Best bowling season" value={`${detail.peak.bowling.season} · ${wktsPhrase(detail.peak.bowling.wickets, detail.peak.bowling.average)}`} />}
             {!peakBat && !detail.peak?.bowling && <Empty>Not enough history yet.</Empty>}
           </div>
         </Card>
@@ -200,7 +201,7 @@ function TrajectoryTab({ detail, ctx, seasons }) {
       <Card eyebrow="runs per season" title="Trajectory" right={isRange ? <Delta value={dRuns} suffix=" runs" /> : null}>
         <AreaChart points={rows.map(s => s.total_runs || 0)} labels={rows.map(s => s.season_name)} h={190} />
         {isRange
-          ? <Note>Over the selected range: <b style={{ color: 'var(--pb-text)' }}>{dRuns >= 0 ? '+' : ''}{dRuns} runs</b> and <b style={{ color: 'var(--pb-text)' }}>{dAvg >= 0 ? '+' : ''}{a2(dAvg)} average</b> across {spanRows.length} season{spanRows.length === 1 ? '' : 's'}.</Note>
+          ? <Note>Over the selected range: <b style={{ color: 'var(--pb-text)' }}>{dRuns >= 0 ? '+' : ''}{fmtCount(dRuns)} runs</b> and <b style={{ color: 'var(--pb-text)' }}>{dAvg >= 0 ? '+' : ''}{a2(dAvg)} average</b> across {spanRows.length} season{spanRows.length === 1 ? '' : 's'}.</Note>
           : <Note>Runs scored each season, oldest → newest. Switch the season filter to <b style={{ color: 'var(--pb-text)' }}>Compare</b> for a range delta.</Note>}
       </Card>
       <Card eyebrow="the numbers" title="Season by season">
@@ -225,10 +226,10 @@ function TrajectoryTab({ detail, ctx, seasons }) {
                     <td className="py-2 px-1 iq-mono text-pb-dim whitespace-nowrap">
                       <span className="inline-flex items-center gap-2">{s.season_name}{on && isRange && <span style={{ width: 6, height: 6, borderRadius: 99, background: ACCENT }} />}</span>
                     </td>
-                    <td className="py-2 px-1 text-right iq-num text-pb-faint">{num(s.matches, 0)}</td>
-                    <td className="py-2 px-1 text-right iq-num font-semibold">{num(s.total_runs, 0)}</td>
+                    <td className="py-2 px-1 text-right iq-num text-pb-faint">{fmtCount(s.matches)}</td>
+                    <td className="py-2 px-1 text-right iq-num font-semibold">{fmtCount(s.total_runs)}</td>
                     <td className="py-2 px-1 text-right iq-num">{a2(s.batting_average)}</td>
-                    <td className="py-2 px-1 text-right iq-num font-semibold">{num(s.total_wickets, 0)}</td>
+                    <td className="py-2 px-1 text-right iq-num font-semibold">{fmtCount(s.total_wickets)}</td>
                     <td className="py-2 px-1 text-right iq-num">{a2(s.bowling_average)}</td>
                     <td className="py-2 px-1 text-right iq-num text-pb-faint">{a2(s.economy)}</td>
                   </tr>
@@ -279,8 +280,8 @@ function ReliabilityCard({ deep }) {
         ))}
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-[12px] text-pb-faint">
-        {rel.failure_rate != null && <span>Fails (&lt;10): <span className="iq-num">{rel.failure_rate}%</span></span>}
-        {rel.contribution_rate != null && <span>20+ contributions: <span className="iq-num">{rel.contribution_rate}%</span></span>}
+        {rel.failure_rate != null && <span>Fails (&lt;10): <span className="iq-num">{fmtPct(rel.failure_rate)}</span></span>}
+        {rel.contribution_rate != null && <span>20+ contributions: <span className="iq-num">{fmtPct(rel.contribution_rate)}</span></span>}
       </div>
       <Note>Floor / median / ceiling are the 25th, 50th and 90th percentiles of their scores. A wider spread means more boom-or-bust.</Note>
     </Card>
@@ -302,7 +303,7 @@ function ConversionCard({ deep }) {
       <SplitBar h={12} segments={segs} />
       <div className="grid grid-cols-3 gap-3 text-center mt-4">
         <div><div className="iq-headline iq-num" style={{ fontSize: 22 }}>{pct(c.start_pct)}</div><div className="iq-eyebrow mt-1" style={{ fontSize: 8.5 }}>reach 25</div></div>
-        <div><div className="iq-headline iq-num" style={{ fontSize: 22 }}>{c.convert_25_to_50 == null ? '—' : `${c.convert_25_to_50}%`}</div><div className="iq-eyebrow mt-1" style={{ fontSize: 8.5 }}>25 → 50</div></div>
+        <div><div className="iq-headline iq-num" style={{ fontSize: 22 }}>{fmtPct(c.convert_25_to_50)}</div><div className="iq-eyebrow mt-1" style={{ fontSize: 8.5 }}>25 → 50</div></div>
         <div><div className="iq-headline iq-num" style={{ fontSize: 22 }}>{num(c.fifties, 0)}/{num(c.hundreds, 0)}</div><div className="iq-eyebrow mt-1" style={{ fontSize: 8.5 }}>50s / 100s</div></div>
       </div>
       {deep.dismissals?.length > 0 && (
@@ -323,8 +324,8 @@ function MilestonesCard({ milestones }) {
         {milestones.map((m, i) => (
           <div key={i} className="flex items-center justify-between gap-3 py-1">
             <div className="min-w-0 flex-1">
-              <div className="font-semibold text-[14px] leading-tight">{m.target} {TYPE_LABEL[m.type] || m.type}</div>
-              <div className="text-pb-faint text-[12px] mt-1">needs <span className="iq-num">{m.needed}</span></div>
+              <div className="font-semibold text-[14px] leading-tight">{fmtCount(m.target)} {TYPE_LABEL[m.type] || m.type}</div>
+              <div className="text-pb-faint text-[12px] mt-1">needs <span className="iq-num">{fmtCount(m.needed)}</span></div>
             </div>
             {m.eta_games ? <Tag tone="accent" className="shrink-0">~{m.eta_games} game{m.eta_games === 1 ? '' : 's'}</Tag> : null}
           </div>
@@ -340,8 +341,8 @@ function SelectionValueCard({ deep }) {
   return (
     <Card eyebrow="impact" title="Selection value & match-ups">
       <div className="flex items-end gap-6 mb-4">
-        <div><div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-brand)' }}>{sv.with?.win_pct ?? '—'}%</div><div className="iq-eyebrow mt-1">With him <span className="text-pb-faintest">· {sv.with?.games ?? 0}g</span></div></div>
-        <div><div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-red)' }}>{sv.without?.win_pct ?? '—'}%</div><div className="iq-eyebrow mt-1">Without <span className="text-pb-faintest">· {sv.without?.games ?? 0}g</span></div></div>
+        <div><div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-brand)' }}>{fmtPct(sv.with?.win_pct)}</div><div className="iq-eyebrow mt-1">With him <span className="text-pb-faintest">· {sv.with?.games ?? 0} {sv.with?.games === 1 ? 'game' : 'games'}</span></div></div>
+        <div><div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-red)' }}>{fmtPct(sv.without?.win_pct)}</div><div className="iq-eyebrow mt-1">Without <span className="text-pb-faintest">· {sv.without?.games ?? 0} {sv.without?.games === 1 ? 'game' : 'games'}</span></div></div>
         {sv.swing != null && <div className="ml-auto"><Delta value={sv.swing} suffix=" pts" /></div>}
       </div>
       {deep.by_position?.length > 0 && (
@@ -353,7 +354,7 @@ function SelectionValueCard({ deep }) {
           <div className="flex flex-wrap gap-2">
             {deep.similar_players.map(s => (
               <span key={s.player_id} className="text-[12.5px] px-2.5 py-1" style={{ background: 'var(--pb-surface2)', borderRadius: 99 }}>
-                {s.name} <span className="iq-num text-pb-faint">{s.similarity}%</span>
+                {s.name} <span className="iq-num text-pb-faint">{fmtPct(s.similarity)}</span>
               </span>
             ))}
           </div>
@@ -371,7 +372,7 @@ function BattingStyleCard({ deep }) {
     <Card eyebrow="batting profile" title="Style & situation" right={bs?.profile ? <Tag tone="accent">{bs.profile}</Tag> : null}>
       {bs && (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          {[['Strike rate', a2(bs.strike_rate)], ['Boundary %', bs.boundary_pct == null ? '—' : `${bs.boundary_pct}%`], ['Balls/boundary', num(bs.balls_per_boundary)], ['4s / 6s', `${num(bs.fours, 0)}/${num(bs.sixes, 0)}`]].map(([l, v]) => (
+          {[['Strike rate', a2(bs.strike_rate)], ['Boundary %', fmtPct(bs.boundary_pct)], ['Balls/boundary', a2(bs.balls_per_boundary)], ['4s / 6s', `${num(bs.fours, 0)}/${num(bs.sixes, 0)}`]].map(([l, v]) => (
             <div key={l} className="text-center"><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{v}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>{l}</div></div>
           ))}
         </div>
@@ -401,11 +402,11 @@ function OppositionVenueCard({ deep }) {
         <div className="grid sm:grid-cols-2 gap-4 text-[13px]">
           <div>
             <div className="iq-eyebrow mb-1.5">Dominates</div>
-            {deep.by_opposition.best.length ? deep.by_opposition.best.map(o => <div key={o.name} className="flex justify-between gap-2 py-0.5"><span className="truncate">{o.name}</span><span className="iq-num text-pb-faint whitespace-nowrap">{o.runs} @ {a2(o.average)}</span></div>) : <Empty>—</Empty>}
+            {deep.by_opposition.best.length ? deep.by_opposition.best.map(o => <div key={o.name} className="flex justify-between gap-2 py-0.5"><span className="truncate">{o.name}</span><span className="iq-num text-pb-faint whitespace-nowrap">{runsPhrase(o.runs, o.average)}</span></div>) : <Empty>—</Empty>}
           </div>
           <div>
             <div className="iq-eyebrow mb-1.5">Struggles vs</div>
-            {deep.by_opposition.worst.length ? deep.by_opposition.worst.map(o => <div key={o.name} className="flex justify-between gap-2 py-0.5"><span className="truncate">{o.name}</span><span className="iq-num text-pb-faint whitespace-nowrap">{o.runs} @ {a2(o.average)}</span></div>) : <Empty>—</Empty>}
+            {deep.by_opposition.worst.length ? deep.by_opposition.worst.map(o => <div key={o.name} className="flex justify-between gap-2 py-0.5"><span className="truncate">{o.name}</span><span className="iq-num text-pb-faint whitespace-nowrap">{runsPhrase(o.runs, o.average)}</span></div>) : <Empty>—</Empty>}
           </div>
         </div>
       )}
@@ -424,10 +425,10 @@ function OppositionVenueCard({ deep }) {
               {deep.by_venue.map((v, i) => (
                 <tr key={i} style={{ borderTop: '1px solid var(--pb-hairline)' }}>
                   <td className="py-1.5 px-1 truncate max-w-[200px]">{v.venue}</td>
-                  <td className="py-1.5 px-1 text-right iq-num text-pb-faint">{v.games}</td>
-                  <td className="py-1.5 px-1 text-right iq-num">{v.total_runs}</td>
+                  <td className="py-1.5 px-1 text-right iq-num text-pb-faint">{fmtCount(v.games)}</td>
+                  <td className="py-1.5 px-1 text-right iq-num">{fmtCount(v.total_runs)}</td>
                   <td className="py-1.5 px-1 text-right iq-num">{a2(v.batting_average)}</td>
-                  <td className="py-1.5 px-1 text-right iq-num">{v.wickets}</td>
+                  <td className="py-1.5 px-1 text-right iq-num">{fmtCount(v.wickets)}</td>
                   <td className="py-1.5 px-1 text-right iq-num text-pb-faint">{a2(v.bowling_average)}</td>
                 </tr>
               ))}
@@ -460,7 +461,7 @@ function BowlingDeepDive({ deep, bdeep }) {
           return (
             <Card eyebrow="career" title="Bowling profile">
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-                {[['Wkts', num(bp.total_wickets, 0)], ['Avg', a2(bp.average)], ['Econ', a2(bp.economy)], ['S/R', a2(bp.bowling_strike_rate)], ['Best', bp.best_bowling_figures || '—'], ['5wi', num(bp.five_fors, 0)]].map(([l, v]) => (
+                {[['Wkts', fmtCount(bp.total_wickets)], ['Avg', a2(bp.average)], ['Econ', a2(bp.economy)], ['S/R', a2(bp.bowling_strike_rate)], ['Best', bp.best_bowling_figures || '—'], ['5wi', num(bp.five_fors, 0)]].map(([l, v]) => (
                   <div key={l} className="text-center"><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{v}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>{l}</div></div>
                 ))}
               </div>
@@ -473,7 +474,7 @@ function BowlingDeepDive({ deep, bdeep }) {
                     { label: 'Lower (8–11)', value: low, color: 'var(--pb-dim)' },
                   ]} />
                   <div className="flex justify-between text-[11px] text-pb-faint mt-1.5">
-                    <span>Top {Math.round(100 * top / tot)}%</span><span>Middle {Math.round(100 * mid / tot)}%</span><span>Lower {Math.round(100 * low / tot)}%</span>
+                    <span>Top {fmtPct(100 * top / tot)}</span><span>Middle {fmtPct(100 * mid / tot)}</span><span>Lower {fmtPct(100 * low / tot)}</span>
                   </div>
                 </div>
               )}
@@ -499,9 +500,9 @@ function BowlingDeepDive({ deep, bdeep }) {
               { label: 'Set (30+)', value: bdeep.quality.set, color: 'var(--pb-dim)' },
             ]} />
             <div className="grid grid-cols-3 gap-2 text-center mt-4">
-              <div><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{bdeep.quality.new_pct == null ? '—' : `${bdeep.quality.new_pct}%`}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>caught new</div></div>
-              <div><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{bdeep.quality.set_pct == null ? '—' : `${bdeep.quality.set_pct}%`}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>removed set</div></div>
-              <div><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{num(bdeep.quality.scalp_value)}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>avg scalp</div></div>
+              <div><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{fmtPct(bdeep.quality.new_pct)}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>caught new</div></div>
+              <div><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{fmtPct(bdeep.quality.set_pct)}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>removed set</div></div>
+              <div><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{a2(bdeep.quality.scalp_value)}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>avg scalp</div></div>
             </div>
             <Note>"Set" = the batter had 30+ when dismissed; "new" = under 10. Avg scalp is the mean score of the batters he removed{bdeep.quality.ducks ? ` · ${bdeep.quality.ducks} duck${bdeep.quality.ducks === 1 ? '' : 's'} inflicted` : ''}.</Note>
           </Card>
@@ -520,9 +521,9 @@ function BowlingDeepDive({ deep, bdeep }) {
             </Card>
           )}
           {bdeep?.discipline && (
-            <Card eyebrow={`${bdeep.discipline.overs} overs`} title="Discipline">
+            <Card eyebrow={`${fmtOvers(bdeep.discipline.overs)} overs`} title="Discipline">
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-                {[['Extras/over', a2(bdeep.discipline.extras_per_over)], ['Wides/over', a2(bdeep.discipline.wides_per_over)], ['Wides', num(bdeep.discipline.wides, 0)], ['No-balls', num(bdeep.discipline.no_balls, 0)]].map(([l, v]) => (
+                {[['Extras/over', a2(bdeep.discipline.extras_per_over)], ['Wides/over', a2(bdeep.discipline.wides_per_over)], ['Wides', fmtCount(bdeep.discipline.wides)], ['No-balls', fmtCount(bdeep.discipline.no_balls)]].map(([l, v]) => (
                   <div key={l} className="text-center"><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{v}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>{l}</div></div>
                 ))}
               </div>
@@ -583,10 +584,10 @@ function careerRows(A, B) {
     return nx > ny ? 'a' : 'b'
   }
   return [
-    { label: 'Runs', a: num(ab.total_runs, 0), b: num(bb.total_runs, 0), better: cmp(ab.total_runs, bb.total_runs) },
+    { label: 'Runs', a: fmtCount(ab.total_runs ?? 0), b: fmtCount(bb.total_runs ?? 0), better: cmp(ab.total_runs, bb.total_runs) },
     { label: 'Bat avg', a: a2(ab.average), b: a2(bb.average), better: cmp(ab.average, bb.average) },
     { label: '100s / 50s', a: `${num(ab.hundreds, 0)}/${num(ab.fifties, 0)}`, b: `${num(bb.hundreds, 0)}/${num(bb.fifties, 0)}`, better: cmp(ab.hundreds, bb.hundreds) },
-    { label: 'Wickets', a: num(abo.total_wickets, 0), b: num(bbo.total_wickets, 0), better: cmp(abo.total_wickets, bbo.total_wickets) },
+    { label: 'Wickets', a: fmtCount(abo.total_wickets ?? 0), b: fmtCount(bbo.total_wickets ?? 0), better: cmp(abo.total_wickets, bbo.total_wickets) },
     { label: 'Bowl avg', a: a2(abo.average), b: a2(bbo.average), better: cmp(abo.average, bbo.average, true) },
   ]
 }
@@ -775,7 +776,7 @@ function Overview({ overview, players, squads, squad, setSquad, pickerPlayers, o
                   <Initials name={p.name} size={32} />
                   <div className="min-w-0">
                     <div className="font-semibold text-[13px] truncate">{p.name}</div>
-                    <div className="iq-mono text-pb-faintest text-[10.5px] truncate">{p.matches}g{p.runs ? ` · ${p.runs}r` : ''}{p.wickets ? ` · ${p.wickets}w` : ''}</div>
+                    <div className="iq-mono text-pb-faintest text-[10.5px] truncate">{p.matches} {p.matches === 1 ? 'game' : 'games'}{p.runs ? ` · ${runsPhrase(p.runs)}` : ''}{p.wickets ? ` · ${wktsPhrase(p.wickets)}` : ''}</div>
                   </div>
                 </button>
               ))}
@@ -807,7 +808,7 @@ function Overview({ overview, players, squads, squad, setSquad, pickerPlayers, o
                   <Initials name={e.name} size={38} />
                   <div className="min-w-0">
                     <div className="font-semibold text-[14px] truncate">{e.name}</div>
-                    <div className="text-pb-dim text-[12.5px] mt-0.5 leading-snug iq-num">{e.runs}r · {e.wickets}w · {e.seasons} season{e.seasons === 1 ? '' : 's'}</div>
+                    <div className="text-pb-dim text-[12.5px] mt-0.5 leading-snug iq-num">{runsPhrase(e.runs)} · {wktsPhrase(e.wickets)} · {e.seasons} season{e.seasons === 1 ? '' : 's'}</div>
                   </div>
                 </button>
               ))}

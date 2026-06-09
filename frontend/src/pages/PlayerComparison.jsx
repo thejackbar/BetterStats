@@ -7,6 +7,16 @@ import ClubInactive from './ClubInactive'
 import { PageHeader, PbSpinner } from '../lib/presskit'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 import Dropdown from '../components/Dropdown'
+import { fmt2, fmtCount } from '../lib/cricketFormat'
+
+// Rate metrics → always 2 decimals; every other (integer count) metric →
+// thousands separators. Keys mirror the *_METRICS tables above.
+const RATE_KEYS = new Set(['average', 'strike_rate', 'economy', 'bowling_strike_rate'])
+function formatMetric(metric, v) {
+  if (v == null) return '—'
+  if (RATE_KEYS.has(metric.key)) return fmt2(v)
+  return fmtCount(v)
+}
 
 const MAX_PLAYERS = 5
 const PLAYER_COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444']
@@ -568,7 +578,7 @@ export default function PlayerComparison() {
                                       val != null           ? 'var(--pb-text)' : 'var(--pb-faintest)',
                                   }}
                                 >
-                                  {val ?? '—'}
+                                  {formatMetric(metric, val)}
                                 </span>
                               </td>
                             )

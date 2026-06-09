@@ -16,6 +16,7 @@ import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
 import { CAP } from '../lib/capabilities'
 import { battingHandLabel, bowlingLabel, bowls, genderLabel } from '../lib/playerAttributes'
+import { fmtOvers, oversToBalls } from '../lib/cricketFormat'
 import {
   BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -274,8 +275,8 @@ function AveragesChart({ seasonStats }) {
     .filter(s => s.batting_average != null || s.bowling_average != null)
     .map(s => ({
       season: s.season_name?.replace('Summer ', '') ?? '',
-      bat_avg: s.batting_average != null ? Number(Number(s.batting_average).toFixed(1)) : null,
-      bowl_avg: s.bowling_average != null ? Number(Number(s.bowling_average).toFixed(1)) : null,
+      bat_avg: s.batting_average != null ? Number(Number(s.batting_average).toFixed(2)) : null,
+      bowl_avg: s.bowling_average != null ? Number(Number(s.bowling_average).toFixed(2)) : null,
     }))
   if (!chartData.length) return null
   return (
@@ -408,12 +409,12 @@ function BowlingTab({ bowling, seasonStats }) {
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-x-6 gap-y-4">
           {[
             ['WICKETS', bowling.total_wickets, true],
-            ['OVERS', bowling.total_overs != null ? Number(bowling.total_overs).toFixed(1) : '—'],
+            ['OVERS', fmtOvers(bowling.total_overs)],
             ['AVERAGE', fmtDec(bowling.average)],
             ['ECONOMY', fmtDec(bowling.economy)],
             ['5-FORS', bowling.five_fors ?? 0],
             ['MAIDENS', bowling.total_maidens ?? 0],
-            ['BEST', bowling.best_bowling_figures || (bowling.best_figures_wickets ? `${bowling.best_figures_wickets}w` : '—')],
+            ['BEST', bowling.best_bowling_figures || (bowling.best_figures_wickets ? `${bowling.best_figures_wickets} wickets` : '—')],
           ].map(([label, value, accent]) => (
             <div key={label} className="flex flex-col">
               <span className="font-mono text-[9.5px] tracking-wide3 text-pb-faint">{label}</span>
@@ -446,12 +447,12 @@ function BowlingTab({ bowling, seasonStats }) {
                   <tr key={s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{s.season_name}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_wickets)}</td>
-                    <td className="py-2.5 font-mono text-pb-dim text-right">{s.total_overs != null ? Number(s.total_overs).toFixed(1) : '—'}</td>
+                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmtOvers(s.total_overs)}</td>
                     <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.bowling_average, true)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmtDec(s.economy)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.five_fors)}</td>
                     <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">
-                      {s.best_bowling_figures || (s.best_bowling_wickets ? `${s.best_bowling_wickets}w` : '—')}
+                      {s.best_bowling_figures || (s.best_bowling_wickets ? `${s.best_bowling_wickets} wickets` : '—')}
                     </td>
                   </tr>
                 ))}
@@ -594,15 +595,15 @@ function ScoreDistributionChart({ innings }) {
 function CareerBowlingProgressionChart({ spells }) {
   if (!spells?.length) return null
   const asc = [...spells].reverse()
-  let totalRuns = 0, totalWickets = 0, totalOvers = 0
+  let totalRuns = 0, totalWickets = 0, totalBalls = 0
   const points = asc.map((s, i) => {
     totalRuns += (s.runs ?? 0)
     totalWickets += (s.wickets ?? 0)
-    totalOvers += parseFloat(s.overs ?? 0)
+    totalBalls += oversToBalls(s.overs)
     return {
       i: i + 1,
       avg: totalWickets > 0 ? Math.round((totalRuns / totalWickets) * 100) / 100 : null,
-      econ: totalOvers > 0 ? Math.round((totalRuns / totalOvers) * 100) / 100 : null,
+      econ: totalBalls > 0 ? Math.round((totalRuns / (totalBalls / 6)) * 100) / 100 : null,
     }
   })
   return (
@@ -651,10 +652,10 @@ function PlayerRadarChart({ batting, bowling, fielding, innings }) {
   const normInv = (v, lo, hi) => v == null ? 0 : Math.max(0, Math.min(100, ((hi - v) / (hi - lo)) * 100))
 
   const axes = [
-    { axis: 'Bat Avg',    raw: battingAvg > 0 ? battingAvg.toFixed(1) : '—',                    value: norm(battingAvg, 50) },
-    { axis: 'Strike Rt',  raw: totalBalls > 0 ? strikeRate.toFixed(0) : '—',                    value: norm(strikeRate, 120) },
+    { axis: 'Bat Avg',    raw: battingAvg > 0 ? battingAvg.toFixed(2) : '—',                    value: norm(battingAvg, 50) },
+    { axis: 'Strike Rt',  raw: totalBalls > 0 ? strikeRate.toFixed(2) : '—',                    value: norm(strikeRate, 120) },
     { axis: 'Big Scores', raw: inningsCount > 0 ? `${(bigScoreRate * 100).toFixed(0)}%` : '—',  value: norm(bigScoreRate, 0.35) },
-    { axis: 'Bowl Avg',   raw: hasBowled && bowlingAvg != null ? bowlingAvg.toFixed(1) : '—',   value: hasBowled ? normInv(bowlingAvg, 12, 40) : 0 },
+    { axis: 'Bowl Avg',   raw: hasBowled && bowlingAvg != null ? bowlingAvg.toFixed(2) : '—',   value: hasBowled ? normInv(bowlingAvg, 12, 40) : 0 },
     { axis: 'Economy',    raw: hasBowled && economy != null ? economy.toFixed(2) : '—',         value: hasBowled ? normInv(economy, 3, 8) : 0 },
     { axis: 'Fielding',   raw: games > 0 ? `${fieldingPerMatch.toFixed(2)}/g` : '—',            value: norm(fieldingPerMatch, 0.8) },
   ]
@@ -935,7 +936,7 @@ function SpellHistoryTable({ spells }) {
                 </td>
                 <td className="py-2.5 font-mono text-[11px] text-pb-dim max-w-[180px] truncate">{match}</td>
                 <td className="py-2.5 font-mono text-[11px] text-pb-faint">{row.grade_name || '—'}</td>
-                <td className="py-2.5 font-mono text-sm text-pb-dim text-right">{row.overs ?? '—'}</td>
+                <td className="py-2.5 font-mono text-sm text-pb-dim text-right">{fmtOvers(row.overs)}</td>
                 <td className="py-2.5 font-mono text-[11px] text-pb-faint text-right">{row.maidens ?? '—'}</td>
                 <td className="py-2.5 font-mono text-sm text-pb-dim text-right">{row.runs ?? '—'}</td>
                 <td className="py-2.5 text-right">
@@ -1382,7 +1383,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                 <LineChart
                   data={[...seasonStats].filter(s => s.season_id).reverse().filter(s => s.bowling_average != null || s.economy != null).map(s => ({
                     season: s.season_name?.replace('Summer ', '') ?? '',
-                    bowl_avg: s.bowling_average != null ? Number(Number(s.bowling_average).toFixed(1)) : null,
+                    bowl_avg: s.bowling_average != null ? Number(Number(s.bowling_average).toFixed(2)) : null,
                     economy: s.economy != null ? Number(Number(s.economy).toFixed(2)) : null,
                   }))}
                   margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
@@ -1428,7 +1429,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                       <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                         <td className="py-2.5 pl-5 text-pb-text">{r.grade_name}</td>
                         <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{r.wickets}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.total_overs != null ? Number(r.total_overs).toFixed(1) : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{fmtOvers(r.total_overs)}</td>
                         <td className="py-2.5 font-mono text-pb-text text-right">{fmt(r.average, true)}</td>
                         <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(r.economy, true)}</td>
                         <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">
@@ -1490,11 +1491,11 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                         <td className="py-2.5 font-mono text-pb-dim text-right">{r.losses ?? 0}</td>
                         <td className="py-2.5 font-mono text-pb-dim text-right border-l border-pb-hairline pl-3">{r.innings || '—'}</td>
                         <td className="py-2.5 font-mono text-pb-text text-right">{r.total_runs > 0 ? r.total_runs : '—'}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.batting_average != null ? Number(r.batting_average).toFixed(1) : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.batting_average != null ? Number(r.batting_average).toFixed(2) : '—'}</td>
                         <td className="py-2.5 font-mono text-pb-dim text-right">{r.high_score ?? '—'}</td>
                         <td className="py-2.5 font-mono text-pb-text text-right border-l border-pb-hairline pl-3">{r.wickets > 0 ? r.wickets : '—'}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.bowling_average != null ? Number(r.bowling_average).toFixed(1) : '—'}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.economy != null ? Number(r.economy).toFixed(1) : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.bowling_average != null ? Number(r.bowling_average).toFixed(2) : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.economy != null ? Number(r.economy).toFixed(2) : '—'}</td>
                         <td className="py-2.5 font-mono text-pb-dim text-right border-l border-pb-hairline pl-3">{r.catches_non_wk > 0 ? r.catches_non_wk : '—'}</td>
                         <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">{r.stumpings > 0 ? r.stumpings : '—'}</td>
                       </tr>
@@ -1542,11 +1543,11 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                         <td className="py-2.5 font-mono text-pb-dim text-right">{r.losses ?? 0}</td>
                         <td className="py-2.5 font-mono text-pb-dim text-right border-l border-pb-hairline pl-3">{r.innings || '—'}</td>
                         <td className="py-2.5 font-mono text-pb-text text-right">{r.total_runs > 0 ? r.total_runs : '—'}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.batting_average != null ? Number(r.batting_average).toFixed(1) : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.batting_average != null ? Number(r.batting_average).toFixed(2) : '—'}</td>
                         <td className="py-2.5 font-mono text-pb-dim text-right">{r.high_score ?? '—'}</td>
                         <td className="py-2.5 font-mono text-pb-text text-right border-l border-pb-hairline pl-3">{r.wickets > 0 ? r.wickets : '—'}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.bowling_average != null ? Number(r.bowling_average).toFixed(1) : '—'}</td>
-                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.economy != null ? Number(r.economy).toFixed(1) : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.bowling_average != null ? Number(r.bowling_average).toFixed(2) : '—'}</td>
+                        <td className="py-2.5 font-mono text-pb-dim text-right">{r.economy != null ? Number(r.economy).toFixed(2) : '—'}</td>
                         <td className="py-2.5 font-mono text-pb-dim text-right border-l border-pb-hairline pl-3">{r.catches_non_wk > 0 ? r.catches_non_wk : '—'}</td>
                         <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">{r.stumpings > 0 ? r.stumpings : '—'}</td>
                       </tr>
@@ -1602,7 +1603,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                           <td className="py-2.5 font-mono text-pb-dim text-right">{r.lost}</td>
                           <td className="py-2.5 font-mono text-pb-dim text-right">{r.drawn}</td>
                           <td className="py-2.5 pr-5 font-mono text-pb-text text-right">
-                            {r.win_pct != null ? `${r.win_pct.toFixed(1)}%` : '—'}
+                            {r.win_pct != null ? `${Math.round(r.win_pct)}%` : '—'}
                           </td>
                         </tr>
                       ))}
@@ -1638,7 +1639,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
                             <td className="py-2.5 font-mono text-pb-dim text-right">{totals.lost}</td>
                             <td className="py-2.5 font-mono text-pb-dim text-right">{totals.drawn}</td>
                             <td className="py-2.5 pr-5 font-mono text-pb-text text-right">
-                              {winPct != null ? `${winPct.toFixed(1)}%` : '—'}
+                              {winPct != null ? `${Math.round(winPct)}%` : '—'}
                             </td>
                           </tr>
                         )
@@ -2468,7 +2469,7 @@ export default function PlayerProfile() {
                   <div className="pb-card p-3 flex flex-col gap-1">
                     <Label>BEST</Label>
                     <span className="font-mono text-2xl font-bold pb-num leading-none mt-1 text-pb-text">
-                      {bowling.best_bowling_figures || (bowling.best_figures_wickets != null ? `${bowling.best_figures_wickets}w` : '—')}
+                      {bowling.best_bowling_figures || (bowling.best_figures_wickets != null ? `${bowling.best_figures_wickets} wickets` : '—')}
                     </span>
                   </div>
                   <div className="pb-card p-3 flex flex-col gap-1">

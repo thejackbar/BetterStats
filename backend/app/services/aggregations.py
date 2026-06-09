@@ -285,7 +285,7 @@ async def get_career_bowling_from_spells(
         SELECT
             COALESCE(SUM(wickets), 0) AS total_wickets,
             ROUND(SUM(runs)::numeric / NULLIF(SUM(wickets), 0), 2) AS average,
-            ROUND(SUM(runs)::numeric / NULLIF(SUM(overs), 0), 2) AS economy,
+            ROUND(SUM(runs)::numeric * 6 / NULLIF(SUM(FLOOR(overs) * 6 + ROUND((overs - FLOOR(overs)) * 10)), 0), 2) AS economy,
             (SELECT wickets FROM qualifying ORDER BY wickets DESC, runs ASC LIMIT 1) AS best_figures_wickets,
             (SELECT wickets::text || '/' || runs::text FROM qualifying ORDER BY wickets DESC, runs ASC LIMIT 1) AS best_bowling_figures,
             COALESCE(SUM(maidens), 0) AS total_maidens,

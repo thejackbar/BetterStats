@@ -385,8 +385,14 @@ export function KV({ label, value, tone }) {
   )
 }
 
-/* ── a2 — averages always to 2 decimals (cricket convention) ─────────────── */
-export function a2(v) {
-  if (v === null || v === undefined || v === '' || Number.isNaN(Number(v))) return '—'
-  return Number(v).toFixed(2)
-}
+/* ── Number formatting — re-exported from the app-wide single source of truth.
+   a2 stays the BetterIQ alias for "average to 2dp"; the rest let IQ screens
+   spell out runs/wickets, format overs (base-6) and counts (commas) the same
+   way every other surface does. See src/lib/cricketFormat.js. ───────────────── */
+export {
+  fmt2 as a2,
+  fmt2, fmtAverage, fmtEconomy, fmtStrikeRate, fmtRunRate,
+  fmtCount, fmtRuns, fmtWickets, fmtNum,
+  fmtOvers, oversToBalls, ballsToOvers, sumOvers,
+  fmtPct, runsPhrase, wktsPhrase, DASH,
+} from '../../../lib/cricketFormat'

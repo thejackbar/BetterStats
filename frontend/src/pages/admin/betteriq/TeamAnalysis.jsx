@@ -8,6 +8,7 @@ import { api } from '../../../lib/api'
 import {
   Icon, Card, Stat, Note, Tag, Bar, Gauge, SplitBar, StackedBar,
   Initials, KV, Empty, Tabs, PageIntro, Delta, a2,
+  fmtCount, fmtOvers, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart, PhaseStrip } from './viz'
 import { useIQFilter, seasonsInRange } from './Context'
@@ -20,7 +21,7 @@ const TABS = [
 ]
 
 const ord = (k) => ({ 1: '1st', 2: '2nd', 3: '3rd' }[k] || `${k}th`)
-const pctTxt = (v) => (v === null || v === undefined ? '—' : `${v}%`)
+const pctTxt = (v) => fmtPct(v)
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
 const bandColor = (v) => (v >= 70 ? 'var(--pb-brand)' : v >= 45 ? 'var(--pb-amber)' : 'var(--pb-red)')
 
@@ -96,12 +97,12 @@ function Overview({ d, isRange, compareRows, compareLoading }) {
               <div>
                 <div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-brand)' }}>{pctTxt(inn.bat_first?.win_pct)}</div>
                 <div className="iq-eyebrow mt-1.5">Batting first</div>
-                <div className="text-pb-faint text-[11px] mt-1 iq-num">{inn.bat_first?.wins ?? 0}/{inn.bat_first?.played ?? 0} · avg {num(inn.bat_first?.avg_score)}</div>
+                <div className="text-pb-faint text-[11px] mt-1 iq-num">{inn.bat_first?.wins ?? 0}/{inn.bat_first?.played ?? 0} · avg {a2(inn.bat_first?.avg_score)}</div>
               </div>
               <div>
                 <div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-amber)' }}>{pctTxt(inn.chasing?.win_pct)}</div>
                 <div className="iq-eyebrow mt-1.5">Chasing</div>
-                <div className="text-pb-faint text-[11px] mt-1 iq-num">{inn.chasing?.wins ?? 0}/{inn.chasing?.played ?? 0} · avg target {num(inn.chasing?.avg_target)}</div>
+                <div className="text-pb-faint text-[11px] mt-1 iq-num">{inn.chasing?.wins ?? 0}/{inn.chasing?.played ?? 0} · avg target {a2(inn.chasing?.avg_target)}</div>
               </div>
             </div>
             <Note>Win % over decided games for each first-innings choice.</Note>
@@ -140,7 +141,7 @@ function Overview({ d, isRange, compareRows, compareLoading }) {
                     </span>
                   </div>
                   <Bar pct={v.played ? (v.wins / v.played) * 100 : 0} color={winning ? 'var(--pb-brand)' : 'var(--pb-red)'} h={7} />
-                  {v.avg_score != null && <div className="text-pb-faintest text-[11px] mt-1 iq-num">avg score {v.avg_score}</div>}
+                  {v.avg_score != null && <div className="text-pb-faintest text-[11px] mt-1 iq-num">avg score {a2(v.avg_score)}</div>}
                 </div>
               )
             })}
@@ -167,11 +168,11 @@ function Batting({ d, seasonId, teamId }) {
       <div className="grid gap-5 lg:grid-cols-3">
         <Card eyebrow="profile" title="Team batting">
           <div className="space-y-1">
-            <Stat label="Avg score" value={num(b.avg_score)} count={false} />
+            <Stat label="Avg score" value={a2(b.avg_score)} count={false} />
             <div className="pt-2 mt-2" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
-              <KV label="High score" value={num(b.high_score)} />
-              <KV label="Low score" value={num(b.low_score)} />
-              <KV label="Wkts lost / inns" value={num(b.avg_wickets_lost)} />
+              <KV label="High score" value={fmtCount(b.high_score)} />
+              <KV label="Low score" value={fmtCount(b.low_score)} />
+              <KV label="Wkts lost / inns" value={a2(b.avg_wickets_lost)} />
               <KV label="Boundary %" value={pctTxt(b.boundary_pct)} />
             </div>
           </div>
@@ -193,14 +194,14 @@ function Batting({ d, seasonId, teamId }) {
         {starts ? (
           <Card eyebrow="opening stand" title="Our starts">
             <div className="grid grid-cols-2 gap-3">
-              <Stat label="Avg" value={num(starts.avg)} count={false} />
-              <Stat label="Best" value={num(starts.best)} count={false} />
+              <Stat label="Avg" value={a2(starts.avg)} count={false} />
+              <Stat label="Best" value={fmtCount(starts.best)} count={false} />
             </div>
             <div className="pt-3 mt-3" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
-              <KV label="Median" value={num(starts.median)} />
+              <KV label="Median" value={fmtCount(starts.median)} />
               <KV label="25+ / 50+" value={`${starts.over_25 ?? 0} / ${starts.over_50 ?? 0}`} />
-              {starts.after_good && <KV label={`After good (≥${starts.good_threshold})`} value={`${pctTxt(starts.after_good.win_pct)} · ${starts.after_good.played}g`} tone="win" />}
-              {starts.after_poor && <KV label={`After poor (<${starts.good_threshold})`} value={`${pctTxt(starts.after_poor.win_pct)} · ${starts.after_poor.played}g`} tone="loss" />}
+              {starts.after_good && <KV label={`After good (≥${starts.good_threshold})`} value={`${pctTxt(starts.after_good.win_pct)} · ${starts.after_good.played} games`} tone="win" />}
+              {starts.after_poor && <KV label={`After poor (<${starts.good_threshold})`} value={`${pctTxt(starts.after_poor.win_pct)} · ${starts.after_poor.played} games`} tone="loss" />}
             </div>
             <Note>Opening (1st-wicket) partnership; win rate is over decided games.</Note>
           </Card>
@@ -215,7 +216,7 @@ function Batting({ d, seasonId, teamId }) {
                 <div key={p.wicket} className="flex items-center gap-2 text-[12px]">
                   <span className="iq-mono text-pb-faint w-7 shrink-0">{ord(p.wicket)}</span>
                   <div className="flex-1"><Bar pct={(p.avg_partnership / maxP) * 100} delay={i * 0.05} h={7} /></div>
-                  <span className="iq-num w-9 text-right shrink-0">{p.avg_partnership}</span>
+                  <span className="iq-num w-9 text-right shrink-0">{a2(p.avg_partnership)}</span>
                 </div>
               ))}
             </div>
@@ -234,9 +235,9 @@ function Batting({ d, seasonId, teamId }) {
                     {p.opening && <Tag tone="faint">opening</Tag>}
                   </div>
                   <div className="flex items-center gap-3 whitespace-nowrap text-pb-faint iq-num text-[12.5px]">
-                    <span>{p.stands} stands</span>
-                    <span className="font-semibold text-pb-text">{p.runs} @ {a2(p.avg)}</span>
-                    <span className="w-20 text-right">best {p.best}{p.fifties ? ` · ${p.fifties}×50` : ''}</span>
+                    <span>{fmtCount(p.stands)} stands</span>
+                    <span className="font-semibold text-pb-text">{runsPhrase(p.runs, p.avg)}</span>
+                    <span className="w-20 text-right">best {fmtCount(p.best)}{p.fifties ? ` · ${p.fifties}×50` : ''}</span>
                   </div>
                 </div>
               ))}
@@ -247,13 +248,13 @@ function Batting({ d, seasonId, teamId }) {
 
         {c && c.innings_analysed > 0 && (
           <Card accent eyebrow="the recurring wobble" title="Collapse analysis"
-            right={<span className="text-pb-faint text-[12px]">3 wkts ≤{c.threshold}</span>}>
+            right={<span className="text-pb-faint text-[12px]">3 wickets ≤{c.threshold}</span>}>
             <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
               <div>
                 <span className="iq-headline iq-num" style={{ fontSize: 28 }}>{pctTxt(c.collapse_pct)}</span>
                 <span className="text-pb-faint text-[13px] ml-2">of innings ({c.collapse_count}/{c.innings_analysed})</span>
               </div>
-              {c.worst && <div className="text-[13px] text-pb-faint">Worst: <span className="iq-num font-semibold text-pb-text">3 for {c.worst.runs}</span> from the {ord(c.worst.start_wicket)}</div>}
+              {c.worst && <div className="text-[13px] text-pb-faint">Worst: <span className="iq-num font-semibold text-pb-text">3 for {fmtCount(c.worst.runs)}</span> from the {ord(c.worst.start_wicket)}</div>}
             </div>
             {c.by_start_wicket?.length > 0 && (
               <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
@@ -300,7 +301,7 @@ function Batting({ d, seasonId, teamId }) {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-[13.5px] truncate">{s.name}</span>
-                        <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">{s.runs} runs · {s.innings} inns{s.avg != null ? ` · ${a2(s.avg)}` : ''}</span>
+                        <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">{fmtCount(s.runs)} runs · {fmtCount(s.innings)} inns{s.avg != null ? ` · ${a2(s.avg)}` : ''}</span>
                       </div>
                       <Bar pct={(s.runs / maxRuns) * 100} delay={i * 0.05} h={6} />
                     </div>
@@ -384,12 +385,12 @@ function Bowling({ d, seasonId, teamId }) {
       <TeamPhases seasonId={seasonId} teamId={teamId} side="bowl" />
       <Card eyebrow="summary" title="Attack overall">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Stat label="Avg conceded" value={num(bw.avg_conceded)} count={false} />
-          <Stat label="Wkts / game" value={num(bw.avg_wickets_taken)} count={false} />
+          <Stat label="Avg conceded" value={a2(bw.avg_conceded)} count={false} />
+          <Stat label="Wkts / game" value={a2(bw.avg_wickets_taken)} count={false} />
           {attack && <Stat label="Pace" value={pctTxt(attack.pace_pct)} tone="accent" count={false} />}
           {attack && <Stat label="Spin" value={pctTxt(attack.spin_pct)} count={false} />}
         </div>
-        <Note>We concede {num(bw.avg_conceded)} on average per innings; wickets per game is across all completed games.</Note>
+        <Note>We concede {a2(bw.avg_conceded)} on average per innings; wickets per game is across all completed games.</Note>
       </Card>
 
       {attack && attack.bowlers?.length > 0 && (
@@ -402,9 +403,9 @@ function Bowling({ d, seasonId, teamId }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-[14px] truncate">{a.name}</span>
-                    <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">{a.wickets}w · avg {a2(a.avg)} · econ {a2(a.econ)}</span>
+                    <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">{wktsPhrase(a.wickets)} · avg {a2(a.avg)} · econ {a2(a.econ)}</span>
                   </div>
-                  <div className="text-pb-faint text-[11.5px] mb-1">{a.role}{a.spin ? ' · spin' : a.pace ? ' · pace' : ''} · {a.overs} ov</div>
+                  <div className="text-pb-faint text-[11.5px] mb-1">{a.role}{a.spin ? ' · spin' : a.pace ? ' · pace' : ''} · {fmtOvers(a.overs)} ov</div>
                   <Bar pct={(a.wickets / maxShare) * 100} delay={i * 0.06} h={6} />
                 </div>
               </div>
@@ -416,7 +417,7 @@ function Bowling({ d, seasonId, teamId }) {
 
       {cb && cb.bowlers?.length > 0 && (
         <Card eyebrow="who runs through sides" title="Collapse-causers"
-          right={<span className="text-pb-faint text-[12px] iq-num">{cb.burst_threshold}+ wkts / innings</span>}>
+          right={<span className="text-pb-faint text-[12px] iq-num">{cb.burst_threshold}+ wickets / innings</span>}>
           <div className="space-y-3">
             {cb.bowlers.map((b, i) => (
               <div key={b.player_id} className="flex items-center gap-3">
@@ -425,7 +426,7 @@ function Bowling({ d, seasonId, teamId }) {
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-[14px] truncate">{b.name}</span>
                     <span className="iq-num text-pb-faint text-[12px] whitespace-nowrap">
-                      {b.bursts}× burst · {b.wickets}w · best {b.best_haul}{b.economy != null ? ` · econ ${a2(b.economy)}` : ''}
+                      {b.bursts}× burst · {wktsPhrase(b.wickets)} · best {b.best_haul}{b.economy != null ? ` · econ ${a2(b.economy)}` : ''}
                     </span>
                   </div>
                   <div className="text-pb-faint text-[11.5px]">{b.five_fors > 0 ? `${b.five_fors} five-for${b.five_fors > 1 ? 's' : ''}` : 'no five-fors'}</div>
@@ -441,9 +442,9 @@ function Bowling({ d, seasonId, teamId }) {
         <Card eyebrow="discipline" title="Extras conceded"
           right={<span className="text-pb-faint text-[12px] iq-num">{pctTxt(disc.extras_pct)} of runs</span>}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-1">
-            <Stat label="Extras / over" value={num(disc.extras_per_over)} count={false} />
-            <Stat label="Wides / over" value={num(disc.wides_per_over)} count={false} />
-            <Stat label="Total extras" value={num(disc.extras)} sub={`${disc.wides ?? 0}w · ${disc.no_balls ?? 0}nb`} count={false} />
+            <Stat label="Extras / over" value={a2(disc.extras_per_over)} count={false} />
+            <Stat label="Wides / over" value={a2(disc.wides_per_over)} count={false} />
+            <Stat label="Total extras" value={fmtCount(disc.extras)} sub={`${disc.wides ?? 0} wides · ${disc.no_balls ?? 0} no-balls`} count={false} />
             <Stat label="% of runs" value={pctTxt(disc.extras_pct)} sub="conceded" count={false} />
           </div>
           {disc.bowlers?.length > 0 && (
@@ -451,7 +452,7 @@ function Bowling({ d, seasonId, teamId }) {
               {disc.bowlers.map(bl => (
                 <div key={bl.player_id} className="flex items-center justify-between gap-3 text-[12.5px] py-0.5">
                   <span className="font-medium truncate">{bl.name}</span>
-                  <span className="iq-num text-pb-faint whitespace-nowrap">{bl.overs} ov · {bl.wides}w · {bl.no_balls}nb · <span className="font-semibold text-pb-text">{num(bl.extras_per_over)}/ov</span></span>
+                  <span className="iq-num text-pb-faint whitespace-nowrap">{fmtOvers(bl.overs)} ov · {bl.wides} wides · {bl.no_balls} no-balls · <span className="font-semibold text-pb-text">{a2(bl.extras_per_over)}/ov</span></span>
                 </div>
               ))}
             </div>
@@ -462,7 +463,7 @@ function Bowling({ d, seasonId, teamId }) {
 
       {wq && (
         <Card eyebrow="wicket-taking" title="Quality of our wickets"
-          right={<span className="text-pb-faint text-[12px] iq-num">{num(wq.total)} wkts</span>}>
+          right={<span className="text-pb-faint text-[12px] iq-num">{fmtCount(wq.total)} wickets</span>}>
           {wq.top_pct != null && (
             <div className="mb-4">
               <div className="iq-eyebrow mb-1.5">Which batters we remove</div>
@@ -526,7 +527,7 @@ function Players({ d }) {
                     <span className="iq-num font-bold text-[14px]" style={{ color: c.win_pct != null && c.win_pct >= 50 ? 'var(--pb-brand)' : 'var(--pb-text)' }}>{pctTxt(c.win_pct)}</span>
                   </div>
                   <div className="text-pb-faint text-[12px] mt-0.5 iq-num">
-                    {c.wins}–{c.losses}–{c.draws} from {c.led} · avg {num(c.avg_score)}{c.finals ? ` · finals ${c.finals_won}/${c.finals}` : ''}
+                    {c.wins}–{c.losses}–{c.draws} from {fmtCount(c.led)} · avg {a2(c.avg_score)}{c.finals ? ` · finals ${c.finals_won}/${c.finals}` : ''}
                   </div>
                 </div>
               </div>
@@ -548,7 +549,7 @@ function Players({ d }) {
                       <span className="font-semibold text-[13.5px] truncate">{a.name}</span>
                       {a.diff != null && <span className="iq-num font-bold text-[13px]" style={{ color: a.diff >= 0 ? 'var(--pb-brand)' : 'var(--pb-amber)' }}>{a.diff >= 0 ? '+' : ''}{a2(a.diff)}</span>}
                     </div>
-                    <div className="text-pb-faint text-[11.5px] mb-1 iq-num">{a.runs} @ {a2(a.bat_avg)} · {a.wickets}w @ {a2(a.bowl_avg)} · {a.role}</div>
+                    <div className="text-pb-faint text-[11.5px] mb-1 iq-num">{runsPhrase(a.runs, a.bat_avg)} · {wktsPhrase(a.wickets, a.bowl_avg)} · {a.role}</div>
                     <Bar pct={(Math.abs(a.diff || 0) / maxRating) * 100} delay={i * 0.06} h={5} color={a.diff >= 0 ? 'var(--pb-accent)' : 'var(--pb-amber)'} />
                   </div>
                 </div>

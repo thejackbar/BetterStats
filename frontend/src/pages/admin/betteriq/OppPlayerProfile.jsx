@@ -19,6 +19,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   Sparkline, Card, Stat, Note, Tag, Btn, Initials, StackedBar, a2,
+  fmtCount, fmtOvers, fmtPct, oversToBalls,
 } from './ui'
 import { Radar, WagonWheel, ZONE_LABELS, buildRadar } from './viz'
 
@@ -86,7 +87,7 @@ function radarForEntry(entry, batPeers, bowlPeers) {
       { label: 'Wickets', value: p => p.wickets },
       { label: 'Economy', value: p => p.economy, lower: true },
       { label: 'Average', value: p => p.average, lower: true },
-      { label: 'Strike rate', value: p => (p.overs ? (p.overs * 6) / Math.max(p.wickets || 1, 1) : 0), lower: true },
+      { label: 'Strike rate', value: p => (p.overs ? oversToBalls(p.overs) / Math.max(p.wickets || 1, 1) : 0), lower: true },
       { label: 'Overs', value: p => p.overs },
       { label: 'vs us', value: p => p.vs_us?.wickets || 0 },
     ], bowl)
@@ -305,18 +306,18 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
           <Card eyebrow="this season" title="Batting">
             <div className="grid grid-cols-3 gap-4">
               <Stat label="Runs" value={bat.runs} />
-              <Stat label="Average" value={Number(bat.average) || 0} decimals={2} count={false} />
-              <Stat label="Strike rate" value={num(bat.strike_rate)} count={false} />
+              <Stat label="Average" value={a2(bat.average)} count={false} />
+              <Stat label="Strike rate" value={a2(bat.strike_rate)} count={false} />
               <Stat label="High score" value={num(bat.high_score)} count={false} />
               <Stat label="50s / 100s" value={`${num(bat.fifties, 0)}/${num(bat.hundreds, 0)}`} count={false} />
               <Stat label="Innings" value={bat.innings} />
             </div>
-            {bat.boundary_pct != null && <div className="text-pb-faint text-[12px] mt-3 iq-num">Boundary %: {bat.boundary_pct}%</div>}
+            {bat.boundary_pct != null && <div className="text-pb-faint text-[12px] mt-3 iq-num">Boundary %: {fmtPct(bat.boundary_pct)}</div>}
             {spark.length >= 2 && (
               <div className="mt-5 px-3 pt-3 pb-2" style={{ background: 'var(--pb-surface2)', borderRadius: 12 }}>
                 <div className="flex items-center justify-between mb-1">
                   <span className="iq-eyebrow" style={{ fontSize: 9 }}>Last {spark.length}</span>
-                  <span className="iq-mono text-pb-faint" style={{ fontSize: 10.5 }}>{(bat.recent_scores || []).join('  ')}</span>
+                  <span className="iq-mono text-pb-faint" style={{ fontSize: 10.5 }}>{(bat.recent_scores || []).join(' · ')}</span>
                 </div>
                 <Sparkline key={playerId || entry.name} values={spark} h={46} stroke={formColor} dots />
               </div>
@@ -327,15 +328,15 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
           <Card eyebrow="this season" title="Bowling">
             <div className="grid grid-cols-3 gap-4">
               <Stat label="Wickets" value={bowl.wickets} />
-              <Stat label="Average" value={Number(bowl.average) || 0} decimals={2} count={false} />
-              <Stat label="Economy" value={Number(bowl.economy) || 0} decimals={2} count={false} />
+              <Stat label="Average" value={a2(bowl.average)} count={false} />
+              <Stat label="Economy" value={a2(bowl.economy)} count={false} />
               <Stat label="Best" value={num(bowl.best)} count={false} />
-              <Stat label="Overs" value={num(bowl.overs)} count={false} />
+              <Stat label="Overs" value={fmtOvers(bowl.overs)} count={false} />
               {bowl.five_fors
                 ? <Stat label="5wi" value={bowl.five_fors} />
-                : <Stat label="Recent wkts" value={(bowl.recent_wickets || []).reduce((a, b) => a + (Number(b) || 0), 0)} suffix="w" />}
+                : <Stat label="Recent wickets" value={(bowl.recent_wickets || []).reduce((a, b) => a + (Number(b) || 0), 0)} />}
             </div>
-            {bowl.recent_wickets?.length > 0 && <div className="text-pb-faint text-[12px] mt-3 iq-num">Recent: {bowl.recent_wickets.join(', ')}</div>}
+            {bowl.recent_wickets?.length > 0 && <div className="text-pb-faint text-[12px] mt-3 iq-num">Recent: {bowl.recent_wickets.join(' · ')}</div>}
           </Card>
         )}
         {dism?.length > 0 && (
@@ -353,9 +354,9 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
               <div>
                 <div className="iq-eyebrow mb-2">Their batting vs us</div>
                 <div className="flex flex-wrap items-end gap-6">
-                  <div><div className="iq-headline iq-num" style={{ fontSize: 30 }}>{num(bat.vs_us.runs)}</div><div className="iq-eyebrow mt-1">Runs</div></div>
+                  <div><div className="iq-headline iq-num" style={{ fontSize: 30 }}>{fmtCount(bat.vs_us.runs)}</div><div className="iq-eyebrow mt-1">Runs</div></div>
                   <div><div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-brand)' }}>{a2(bat.vs_us.average)}</div><div className="iq-eyebrow mt-1">Average</div></div>
-                  <div><div className="iq-headline iq-num" style={{ fontSize: 30 }}>{num(bat.vs_us.high_score)}</div><div className="iq-eyebrow mt-1">High score</div></div>
+                  <div><div className="iq-headline iq-num" style={{ fontSize: 30 }}>{fmtCount(bat.vs_us.high_score)}</div><div className="iq-eyebrow mt-1">High score</div></div>
                 </div>
                 <div className="text-pb-faint text-[12px] mt-2 iq-num">{num(bat.vs_us.innings, 0)} inns{bat.vs_us.fifties ? ` · ${bat.vs_us.fifties}×50` : ''}{bat.vs_us.hundreds ? ` · ${bat.vs_us.hundreds}×100` : ''}{bat.vs_us.dismissed_by ? ` · out to ${bat.vs_us.dismissed_by}` : ''}</div>
               </div>
@@ -364,7 +365,7 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
               <div>
                 <div className="iq-eyebrow mb-2">Their bowling vs us</div>
                 <div className="flex flex-wrap items-end gap-6">
-                  <div><div className="iq-headline iq-num" style={{ fontSize: 30 }}>{num(bowl.vs_us.wickets)}</div><div className="iq-eyebrow mt-1">Wickets</div></div>
+                  <div><div className="iq-headline iq-num" style={{ fontSize: 30 }}>{fmtCount(bowl.vs_us.wickets)}</div><div className="iq-eyebrow mt-1">Wickets</div></div>
                   <div><div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-red)' }}>{a2(bowl.vs_us.average)}</div><div className="iq-eyebrow mt-1">Average</div></div>
                   <div><div className="iq-headline iq-num" style={{ fontSize: 30 }}>{a2(bowl.vs_us.economy)}</div><div className="iq-eyebrow mt-1">Economy</div></div>
                 </div>

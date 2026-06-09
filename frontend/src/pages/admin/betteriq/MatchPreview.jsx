@@ -7,7 +7,7 @@ import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import {
   Icon, CountUp, ResultPills, SplitBar, Card, Tag, Btn, Search, Empty,
-  Initials, PageIntro, Note, a2,
+  Initials, PageIntro, Note, a2, fmtCount, fmtPct, runsPhrase,
 } from './ui'
 
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
@@ -34,7 +34,7 @@ function PerfStat({ value, unit, avg }) {
   return (
     <div className="text-right shrink-0">
       <div className="iq-num font-semibold text-[15px] leading-none">
-        {num(value, 0)}<span className="text-pb-faint font-normal text-[11px] ml-1">{unit}</span>
+        {fmtCount(value)}<span className="text-pb-faint font-normal text-[11px] ml-1">{unit}</span>
       </div>
       <div className="iq-num text-pb-faint text-[11px] mt-1">avg {a2(avg)}</div>
     </div>
@@ -47,15 +47,15 @@ function synthesise({ report, ladder, team }) {
   const inn = team?.innings
   if (inn?.bat_first?.win_pct != null && inn?.chasing?.win_pct != null) {
     const bf = inn.bat_first.win_pct, ch = inn.chasing.win_pct
-    if (Math.abs(bf - ch) >= 8) bits.push(bf > ch ? `Lean to batting first — we win ${bf}% setting vs ${ch}% chasing.` : `We chase well — ${ch}% vs ${bf}% batting first.`)
+    if (Math.abs(bf - ch) >= 8) bits.push(bf > ch ? `Lean to batting first — we win ${fmtPct(bf)} setting vs ${fmtPct(ch)} chasing.` : `We chase well — ${fmtPct(ch)} vs ${fmtPct(bf)} batting first.`)
   }
   if (inn?.par?.par_score != null) bits.push(`A winning first-innings total is usually around ${inn.par.par_score}.`)
   const db = report?.their_danger_batters?.[0]
-  if (db?.name) bits.push(`Watch ${db.name}${db.runs ? ` (${db.runs} runs${db.average ? ` @ ${a2(db.average)}` : ''})` : ''} — their main threat.`)
+  if (db?.name) bits.push(`Watch ${db.name}${db.runs ? ` (${runsPhrase(db.runs, db.average)})` : ''} — their main threat.`)
   const dom = report?.matchups?.bowler_dominance?.[0]
   if (dom?.bowler && dom?.batter) bits.push(`Save ${dom.bowler} for ${dom.batter} — he's dismissed him ${dom.dismissals}×.`)
   const ob = report?.our_performers?.batting?.[0]
-  if (ob?.name) bits.push(`${ob.name} is our man with the bat against them (${ob.runs} @ ${a2(ob.average)}).`)
+  if (ob?.name) bits.push(`${ob.name} is our man with the bat against them (${runsPhrase(ob.runs, ob.average)}).`)
   if (ladder?.available && ladder.our_row?.rank && ladder.opponent_row?.rank) {
     bits.push(`Ladder: you're ${ord(ladder.our_row.rank)}, they're ${ord(ladder.opponent_row.rank)}.`)
   }
@@ -90,10 +90,10 @@ function LadderTable({ ladder, oppName }) {
                 <span className="truncate">{r.team_name || (r.us ? 'Us' : oppName)}</span>
                 {r.us && <Tag tone="accent" className="ml-1.5">Us</Tag>}
               </td>
-              <td className="py-2.5 px-2 text-right iq-num text-pb-faint">{num(r.played, 0)}</td>
-              <td className="py-2.5 px-2 text-right iq-num">{num(r.won, 0)}</td>
-              <td className="py-2.5 px-2 text-right iq-num">{num(r.lost, 0)}</td>
-              <td className="py-2.5 px-2 text-right iq-num font-bold">{num(r.points, 0)}</td>
+              <td className="py-2.5 px-2 text-right iq-num text-pb-faint">{fmtCount(r.played)}</td>
+              <td className="py-2.5 px-2 text-right iq-num">{fmtCount(r.won)}</td>
+              <td className="py-2.5 px-2 text-right iq-num">{fmtCount(r.lost)}</td>
+              <td className="py-2.5 px-2 text-right iq-num font-bold">{fmtCount(r.points)}</td>
             </tr>
           ))}
         </tbody>
@@ -216,7 +216,7 @@ export default function MatchPreview() {
                 )}
               </Card>
 
-              <Card eyebrow={h2h?.meetings ? `${h2h.meetings} meetings` : 'head-to-head'} title="Head-to-head" right={h2h?.win_pct != null ? <Tag tone="faint">{h2h.win_pct}% win</Tag> : null}>
+              <Card eyebrow={h2h?.meetings ? `${h2h.meetings} meetings` : 'head-to-head'} title="Head-to-head" right={h2h?.win_pct != null ? <Tag tone="faint">{fmtPct(h2h.win_pct)} win</Tag> : null}>
                 {report === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div>
                   : h2h && h2h.meetings > 0 ? (
                     <>
@@ -302,7 +302,7 @@ export default function MatchPreview() {
                             <Initials name={e.name} size={32} tone="accent" />
                             <span className="font-semibold truncate">{e.name}</span>
                           </div>
-                          <PerfStat value={e.wickets} unit="wkts" avg={e.average} />
+                          <PerfStat value={e.wickets} unit="wickets" avg={e.average} />
                         </div>
                       ))}
                     </div>
@@ -317,7 +317,7 @@ export default function MatchPreview() {
                   <div className="iq-headline iq-num" style={{ fontSize: 'clamp(40px,5vw,60px)', color: 'var(--pb-accent)' }}><CountUp value={par.par_score} /></div>
                   <div className="text-pb-dim text-[13.5px] max-w-sm leading-relaxed">
                     Median winning first-innings score across our grounds — post that batting first and you're in the box seat.
-                    {par.lowest_defended != null && <> The lowest total we've defended is <span className="iq-num font-semibold text-pb-text">{par.lowest_defended}</span>.</>}
+                    {par.lowest_defended != null && <> The lowest total we've defended is <span className="iq-num font-semibold text-pb-text">{fmtCount(par.lowest_defended)}</span>.</>}
                   </div>
                 </div>
               </Card>
@@ -380,7 +380,7 @@ export default function MatchPreview() {
                       <button key={o.opp_key} onClick={() => load({ opp_key: o.opp_key, opponent_name: o.name })}
                         className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-left transition hover:bg-pb-surface2">
                         <span className="iq-display font-medium truncate">{o.name}</span>
-                        <span className="iq-num text-pb-faint text-[11px]">{num(o.meetings, 0)} mtgs</span>
+                        <span className="iq-num text-pb-faint text-[11px]">{fmtCount(o.meetings)} mtgs</span>
                       </button>
                     ))}
                 </div>

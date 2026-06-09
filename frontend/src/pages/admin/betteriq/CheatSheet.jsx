@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import './iq-theme.css'
-import { Icon, CountUp, ResultPills, SplitBar, Tag, Btn, Empty, a2, surname } from './ui'
+import { Icon, CountUp, ResultPills, SplitBar, Tag, Btn, Empty, a2, surname, runsPhrase, wktsPhrase } from './ui'
 import { api } from '../../../lib/api'
 
 /* BetterIQ — Captain's Cheat Sheet (analytics brief §16.6).
@@ -235,7 +235,7 @@ export default function CheatSheet() {
               {dangerBat.length
                 ? dangerBat.slice(0, 3).map((b, i) => (
                   <PlayerRow key={b.player_id || i} name={surname(b.name)}
-                    line={`${b.runs ?? 0} @ ${a2(b.average)}`}
+                    line={runsPhrase(b.runs ?? 0, b.average)}
                     note={dismissPlan(b.name) || b.plan || b.key_note} />
                 ))
                 : <Empty className="text-pb-faint text-[11.5px]">{building ? 'Loading…' : 'No standout batters identified.'}</Empty>}
@@ -247,7 +247,7 @@ export default function CheatSheet() {
               {dangerBowl.length
                 ? dangerBowl.slice(0, 3).map((b, i) => (
                   <PlayerRow key={b.player_id || i} name={surname(b.name)}
-                    line={`${b.wickets ?? 0}w @ ${a2(b.average)}`}
+                    line={wktsPhrase(b.wickets ?? 0, b.average)}
                     note={b.plan || b.key_note} />
                 ))
                 : <Empty className="text-pb-faint text-[11.5px]">{building ? 'Loading…' : 'No standout bowlers identified.'}</Empty>}
@@ -260,11 +260,11 @@ export default function CheatSheet() {
                 ? <>
                   {ourBat.slice(0, 2).map((p, i) => (
                     <PlayerRow key={p.player_id || `b${i}`} name={surname(p.name)}
-                      line={`${p.runs ?? 0} @ ${a2(p.average)}`} note="Scores heavily against them" />
+                      line={runsPhrase(p.runs ?? 0, p.average)} note="Scores heavily against them" />
                   ))}
                   {ourBowl.slice(0, 2).map((p, i) => (
                     <PlayerRow key={p.player_id || `w${i}`} name={surname(p.name)}
-                      line={`${p.wickets ?? 0}w @ ${a2(p.average)}`} note="Has their number — bowl him long" />
+                      line={wktsPhrase(p.wickets ?? 0, p.average)} note="Has their number — bowl him long" />
                   ))}
                 </>
                 : <Empty className="text-pb-faint text-[11.5px]">No prior record against them.</Empty>}

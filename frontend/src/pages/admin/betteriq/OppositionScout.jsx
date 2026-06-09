@@ -18,6 +18,7 @@ import { api } from '../../../lib/api'
 import {
   Icon, Bar, Gauge, ResultPills, SplitBar, StackedBar, Heatmap,
   Card, Stat, Note, Tag, Btn, Segmented, Search, Empty, PageIntro, a2,
+  fmtCount, fmtOvers, runsPhrase, wktsPhrase,
 } from './ui'
 import { Radar, BAT_AXES, BOWL_AXES, PhaseStrip, buildRadar } from './viz'
 import KeyPlayersCard from './KeyPlayersCard'
@@ -175,7 +176,7 @@ function CommandStrip({ h2h, lm, scope, onScope, scopeOptions, filterLabel }) {
             {lm.venue && <div className="text-[11.5px] text-pb-faintest mt-0.5">{lm.venue}</div>}
             {(lm.our_top_bat || lm.our_top_bowl) && (
               <div className="mt-3 pt-3 space-y-1 text-[12.5px]" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
-                {lm.our_top_bat && <div><span className="text-pb-faint">Top bat:</span> {lm.our_top_bat.name} <span className="iq-num font-semibold">{lm.our_top_bat.runs}</span></div>}
+                {lm.our_top_bat && <div><span className="text-pb-faint">Top bat:</span> {lm.our_top_bat.name} <span className="iq-num font-semibold">{fmtCount(lm.our_top_bat.runs)}</span></div>}
                 {lm.our_top_bowl && <div><span className="text-pb-faint">Top bowl:</span> {lm.our_top_bowl.name} <span className="iq-num font-semibold">{lm.our_top_bowl.wickets}/{lm.our_top_bowl.runs}</span></div>}
               </div>
             )}
@@ -261,7 +262,7 @@ function GamePlan({ plan, report }) {
         ) : null}
         {(ourBat || ourBowl) && (
           <div className="flex gap-2.5"><Icon name="check" size={16} className="mt-0.5 shrink-0" style={{ color: 'var(--pb-brand)' }} />
-            <span><span className="text-pb-faint">Our edge:</span> {ourBat ? `${ourBat.name} (${ourBat.runs} @ ${a2(ourBat.average)})` : ''}{ourBat && ourBowl ? ', ' : ''}{ourBowl ? `${ourBowl.name} (${ourBowl.wickets}w @ ${a2(ourBowl.average)})` : ''} — own this match-up.</span></div>
+            <span><span className="text-pb-faint">Our edge:</span> {ourBat ? `${ourBat.name} (${runsPhrase(ourBat.runs, ourBat.average)})` : ''}{ourBat && ourBowl ? ', ' : ''}{ourBowl ? `${ourBowl.name} (${wktsPhrase(ourBowl.wickets, ourBowl.average)})` : ''} — own this match-up.</span></div>
         )}
       </div>
       <Note>Synthesised from scorecards — a starting plan, not gospel.</Note>
@@ -369,7 +370,7 @@ function OurRecord({ performers }) {
             {bat.length ? bat.slice(0, 6).map(p => (
               <div key={p.player_id} className="flex items-center justify-between gap-3">
                 <span className={`text-[13.5px] whitespace-nowrap ${p.active ? '' : 'text-pb-faint'}`}>{p.name}{!p.active && ' ·'}</span>
-                <span className="iq-num text-pb-dim text-[12.5px] whitespace-nowrap shrink-0">{p.runs} @ {a2(p.average)}</span>
+                <span className="iq-num text-pb-dim text-[12.5px] whitespace-nowrap shrink-0">{runsPhrase(p.runs, p.average)}</span>
               </div>
             )) : <Empty>—</Empty>}
           </div>
@@ -380,7 +381,7 @@ function OurRecord({ performers }) {
             {bowl.length ? bowl.slice(0, 6).map(p => (
               <div key={p.player_id} className="flex items-center justify-between gap-3">
                 <span className={`text-[13.5px] whitespace-nowrap ${p.active ? '' : 'text-pb-faint'}`}>{p.name}{!p.active && ' ·'}</span>
-                <span className="iq-num text-pb-dim text-[12.5px] whitespace-nowrap shrink-0">{p.wickets}w @ {a2(p.average)}</span>
+                <span className="iq-num text-pb-dim text-[12.5px] whitespace-nowrap shrink-0">{wktsPhrase(p.wickets, p.average)}</span>
               </div>
             )) : <Empty>—</Empty>}
           </div>
@@ -446,7 +447,7 @@ function Matchups({ matchups }) {
                   <td className="py-2 px-1 whitespace-nowrap">{m.batter}</td>
                   <td className="py-2 px-1 text-right iq-num font-semibold">{m.dismissals}×</td>
                   <td className="py-2 px-1 text-pb-faint text-[11.5px] capitalize">{(m.how || []).join(', ') || '—'}</td>
-                  <td className="py-2 px-1 text-right iq-num text-pb-faint">{num(m.runs_made, 0)}</td>
+                  <td className="py-2 px-1 text-right iq-num text-pb-faint">{fmtCount(m.runs_made)}</td>
                 </tr>
               ))}
             </tbody>
@@ -512,8 +513,8 @@ function VsUsBat({ vs }) {
   if (!vs || !vs.innings) return <span className="text-pb-faintest">—</span>
   return (
     <span className="iq-num whitespace-nowrap"
-      title={`${vs.innings} inns · ${vs.runs} runs${vs.high_score != null ? ` · HS ${vs.high_score}` : ''} against us`}>
-      <span className="font-semibold">{vs.runs}</span>
+      title={`${vs.innings} inns · ${runsPhrase(vs.runs)}${vs.high_score != null ? ` · HS ${vs.high_score}` : ''} against us`}>
+      <span className="font-semibold">{fmtCount(vs.runs)}</span>
       <span className="text-pb-faint"> @ {a2(vs.average)}</span>
     </span>
   )
@@ -522,8 +523,8 @@ function VsUsBowl({ vs }) {
   if (!vs || !vs.wickets) return <span className="text-pb-faintest">—</span>
   return (
     <span className="iq-num whitespace-nowrap"
-      title={`${vs.wickets} wkts @ ${a2(vs.average)}${vs.best ? ` · best ${vs.best}` : ''} against us`}>
-      <span className="font-semibold">{vs.wickets}w</span>
+      title={`${wktsPhrase(vs.wickets, vs.average)}${vs.best ? ` · best ${vs.best}` : ''} against us`}>
+      <span className="font-semibold">{wktsPhrase(vs.wickets)}</span>
       <span className="text-pb-faint"> @ {a2(vs.average)}</span>
     </span>
   )
@@ -549,11 +550,11 @@ function SquadTable({ dossier }) {
                 {bat.map(p => (
                   <tr key={p.player_id} style={{ borderTop: '1px solid var(--pb-hairline)' }} className="transition-colors hover:bg-pb-surface2">
                     <td className="py-2.5 px-1.5 font-medium whitespace-nowrap">{p.name} {p.form === 'hot' && <Icon name="flame" size={13} className="inline" style={{ color: 'var(--pb-red)' }} />}</td>
-                    <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{p.innings}</td>
-                    <td className="py-2.5 px-1.5 text-right iq-num font-semibold">{p.runs}</td>
+                    <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{fmtCount(p.innings)}</td>
+                    <td className="py-2.5 px-1.5 text-right iq-num font-semibold">{fmtCount(p.runs)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num">{a2(p.average)}</td>
-                    <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{num(p.strike_rate)}</td>
-                    <td className="py-2.5 px-1.5 text-right iq-num">{num(p.high_score)}</td>
+                    <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{a2(p.strike_rate)}</td>
+                    <td className="py-2.5 px-1.5 text-right iq-num">{fmtCount(p.high_score)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{p.fifties}/{p.hundreds}</td>
                     <td className="py-2.5 px-1.5 text-right text-[11.5px]"><VsUsBat vs={p.vs_us} /></td>
                   </tr>
@@ -572,8 +573,8 @@ function SquadTable({ dossier }) {
                 {bowl.map(p => (
                   <tr key={p.player_id} style={{ borderTop: '1px solid var(--pb-hairline)' }} className="transition-colors hover:bg-pb-surface2">
                     <td className="py-2.5 px-1.5 font-medium whitespace-nowrap">{p.name}</td>
-                    <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{num(p.overs)}</td>
-                    <td className="py-2.5 px-1.5 text-right iq-num font-semibold">{p.wickets}</td>
+                    <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{fmtOvers(p.overs)}</td>
+                    <td className="py-2.5 px-1.5 text-right iq-num font-semibold">{fmtCount(p.wickets)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num">{a2(p.average)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num text-pb-faint">{a2(p.economy)}</td>
                     <td className="py-2.5 px-1.5 text-right iq-num">{num(p.best)}</td>
@@ -623,7 +624,7 @@ function OppPlayerScout({ dossier, tags, onSaveTag }) {
             <button key={p.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { setSel(p.id); setQ(''); setOpen(false) }}
               className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
               <span className="font-medium truncate">{p.name}</span>
-              <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">{p.bat?.runs ? `${p.bat.runs}r @ ${a2(p.bat.average)}` : ''}{p.bowl?.wickets ? ` · ${p.bowl.wickets}w` : ''}</span>
+              <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">{p.bat?.runs ? runsPhrase(p.bat.runs, p.bat.average) : ''}{p.bowl?.wickets ? ` · ${wktsPhrase(p.bowl.wickets)}` : ''}</span>
             </button>
           ))}
         </Dropdown>
@@ -1012,7 +1013,7 @@ export default function OppositionScout() {
                       title={`${p.innings || 0} inns${p.high_score != null ? ` · HS ${p.high_score}` : ''} against us`}>
                       <span className="text-[13.5px] font-medium truncate">{p.name}</span>
                       <span className="iq-num text-[12.5px] whitespace-nowrap shrink-0">
-                        <span className="font-semibold">{p.runs}</span>
+                        <span className="font-semibold">{fmtCount(p.runs)}</span>
                         <span className="text-pb-faint"> @ {a2(p.average)}</span>
                       </span>
                     </div>

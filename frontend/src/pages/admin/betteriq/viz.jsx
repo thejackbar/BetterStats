@@ -3,7 +3,7 @@
    PhaseStrip (innings phases), DonutStat. All draw-in animated, theme-aware.
    Ported from the v2 design handoff to real ES modules. */
 import { useState, useEffect, useMemo } from 'react'
-import { CountUp } from './ui'
+import { CountUp, fmtOvers, fmtCount } from './ui'
 
 function useMounted(delay = 60) {
   const [on, setOn] = useState(false)
@@ -200,7 +200,7 @@ export function PhaseStrip({ phases }) {
               <span className="iq-headline iq-num" style={{ fontSize: 24, lineHeight: 1 }}><CountUp value={p.rr} decimals={2} /></span>
               <span className="text-pb-faint text-[10px]">runs/over</span>
             </div>
-            <div className="text-pb-faint text-[11px] mt-1.5 iq-num">{p.runs} runs · {p.wkts}w · {p.overs} ov</div>
+            <div className="text-pb-faint text-[11px] mt-1.5 iq-num">{fmtCount(p.runs)} runs · {p.wkts} wickets · {fmtOvers(p.overs)} ov</div>
           </div>
         ))}
       </div>

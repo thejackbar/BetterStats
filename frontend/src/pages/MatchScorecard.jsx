@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner, Card, ResultPill } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
+import { fmtOvers } from '../lib/cricketFormat'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
 function sumOversBalls(bowlingRows) {
@@ -325,7 +326,7 @@ function BowlingCard({ label, teamName, bowling = [], fmtName = n => n }) {
                     : <span className="text-pb-text font-semibold">{fmtName(row.player_name) || '—'}</span>
                   }
                 </td>
-                <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{row.overs ?? '—'}</td>
+                <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{fmtOvers(row.overs)}</td>
                 <td className="py-2 px-3 font-mono text-[12px] text-right max-sm:hidden" style={{ color: 'var(--pb-faint)' }}>{row.maidens ?? 0}</td>
                 <td className="py-2 px-3 font-mono font-semibold text-[13px] text-right" style={{ color: 'var(--pb-text)' }}>{row.runs ?? '—'}</td>
                 <td className="py-2 px-3 text-right">
