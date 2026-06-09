@@ -315,6 +315,71 @@ function cleanClubName(n) {
     .trim()
 }
 
+// "Subiaco Marist Cricket Club" → "Subiaco Marist" (tidy + title-cased for the
+// editable opponent field; templates uppercase on render anyway).
+function tidyClubName(n) {
+  return cleanClubName(n).toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase())
+}
+
+// '2022-10-01' → 'SAT 1 OCT' (matches the date style used across the templates).
+function fmtIsoDate(iso) {
+  if (!iso) return ''
+  const d = new Date(`${iso}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return iso
+  const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
+  const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`
+}
+
+// AU score notation from a parsed scorecard team: '9/287' (wickets/runs) while
+// wickets are in hand, plain total once all out.
+function scoreString(t) {
+  const total = String(t?.total ?? '').trim()
+  if (!total) return ''
+  const wk = Number(t?.wickets)
+  return Number.isFinite(wk) && wk < 10 ? `${wk}/${total}` : total
+}
+
+// Distinctive club-name tokens (drops the generic cricket/club words) used to
+// tell "our" innings from the opponent's on an imported scorecard.
+function clubTokens(name) {
+  return (name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !['cricket', 'club', 'the', 'district', 'junior', 'colts'].includes(w))
+}
+
+// Top 3 batters (most runs, fewer balls breaks ties), shaped for a performer row
+// — keeps the participant id so the designer can pull the player's profile photo.
+function topBatters(t) {
+  return [...(t?.batting || [])]
+    .filter((b) => !b.didNotBat && (Number(b.r) > 0 || Number(b.b) > 0))
+    .sort((a, b) => (Number(b.r) - Number(a.r)) || (Number(a.b) - Number(b.b)))
+    .slice(0, 3)
+    .map((b) => ({
+      last: b.last || b.first || '',
+      line: `${b.r}${b.notOut ? '*' : ''} (${b.b})`,
+      pid: b.pid || null,
+      first: b.first || '',
+    }))
+}
+
+// Top 3 bowlers (most wickets, then fewest runs / best economy).
+function topBowlers(t) {
+  const overs = (o) => parseFloat(String(o || '0').replace(/[^0-9.]/g, '')) || 0
+  return [...(t?.bowling || [])]
+    .filter((b) => overs(b.o) > 0 || Number(b.w) > 0)
+    .sort((a, b) => (Number(b.w) - Number(a.w)) || (Number(a.r) - Number(b.r)) || (Number(a.econ) - Number(b.econ)))
+    .slice(0, 3)
+    .map((b) => ({
+      last: b.last || b.first || '',
+      line: `${b.w}/${b.r}`,
+      pid: b.pid || null,
+      first: b.first || '',
+    }))
+}
+
 // Per-row opponent combobox: live club search (api.searchOrgs) with a dropdown,
 // while staying a free-text field so a name can still be typed by hand.
 function OppRowSearch({ value, onType, onPick, placeholder = 'Opponent (search clubs)…' }) {
@@ -491,11 +556,15 @@ export default function AdminSocialPost() {
   const [toss, setToss] = useState({ winner: 'TEAM', decision: 'BAT' })
   const [motm, setMotm] = useState({ playerIdx: 0, stats: [{ label: 'Runs', value: '' }, { label: 'SR', value: '' }], summary: '' })
   const [result, setResult] = useState({
-    winner: 'TEAM', margin: '', teamScore: '', oppScore: '', teamOvers: '', oppOvers: '', motmLast: '',
-    motmFirst: '', motmRole: '', motmBat: '', motmBowl: '',
+    winner: 'TEAM', margin: '', grade: '', teamScore: '', oppScore: '', teamOvers: '', oppOvers: '', motmLast: '',
+    motmFirst: '', motmRole: '', motmBat: '', motmBowl: '', motmPlayerId: '',
     topBatters: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
     topBowlers: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
   })
+  // Result-tab scorecard auto-fill (paste a play.cricket match link → top 3
+  // batters/bowlers for both sides, scores, result, MOTM + matched photos).
+  const [resUrlInput, setResUrlInput] = useState('')
+  const [resUrlStatus, setResUrlStatus] = useState(null)
   // Fixtures / results roundups — one post, all grades. Seeded with sample rows
   // so a fresh tab previews well; users edit/add/remove.
   const [fixtures, setFixtures] = useState(() => DEFAULT_FIXTURES.map((f) => ({ ...f })))
@@ -597,6 +666,99 @@ export default function AdminSocialPost() {
       setScUrlStatus('ok')
     } catch (e) {
       setScUrlStatus(e?.message || 'Failed to load scorecard')
+    }
+  }
+
+  // Resolve a scorecard participant id (ours, merge-resolved) to the loaded
+  // player object so we can pull their profile photo + canonical id.
+  const playerForPid = useCallback((pid) => {
+    if (!pid) return null
+    const key = String(pid).toLowerCase()
+    return allPlayers.find((p) => String(p.id).toLowerCase() === key) || null
+  }, [allPlayers])
+
+  // Take a parsed scorecard ({meta, home, away}) and fill the whole Result tab:
+  // works out which innings is ours, the top 3 batters & bowlers per side, the
+  // scores/result/margin, opponent + match meta, and a best-guess POTM (the
+  // winning side's top scorer) matched to a profile photo where possible.
+  const applyResultScorecard = useCallback((data) => {
+    const tokens = clubTokens(settings?.name)
+    const matchesClub = (name) => {
+      const n = (name || '').toLowerCase()
+      return tokens.length > 0 && tokens.some((t) => n.includes(t))
+    }
+    const usKey = matchesClub(data.home?.name) ? 'home'
+      : matchesClub(data.away?.name) ? 'away' : 'home'
+    const themKey = usKey === 'home' ? 'away' : 'home'
+    const us = data[usKey] || {}
+    const them = data[themKey] || {}
+
+    const usRuns = parseInt(String(us.total || '0'), 10) || 0
+    const themRuns = parseInt(String(them.total || '0'), 10) || 0
+    const resultText = (data.meta?.result || '').toUpperCase()
+    const tieRe = /\b(TIE|TIED|DRAW|DREW|NO ?RESULT|ABANDON|WASH)/
+    let winner
+    if (tieRe.test(resultText) || usRuns === themRuns) winner = 'TIE'
+    else winner = usRuns > themRuns ? 'TEAM' : 'OPPONENT'
+    const marginMatch = resultText.match(/\bBY\b(.+)$/)
+    const margin = marginMatch ? `BY ${marginMatch[1].trim()}` : ''
+
+    // POTM = top run-scorer on the winning side (falls back to ours on a tie).
+    const winTeam = winner === 'OPPONENT' ? them : us
+    const topBat = [...(winTeam.batting || [])]
+      .filter((b) => !b.didNotBat)
+      .sort((a, b) => Number(b.r) - Number(a.r))[0]
+    const motmPlayer = topBat ? playerForPid(topBat.pid) : null
+    const sameBowl = topBat
+      ? (winTeam.bowling || []).find((bw) => (bw.pid && topBat.pid && String(bw.pid).toLowerCase() === String(topBat.pid).toLowerCase()) || (bw.last && topBat.last && bw.last === topBat.last))
+      : null
+
+    setResult((r) => ({
+      ...r,
+      winner,
+      margin,
+      grade: data.meta?.competition || r.grade,
+      teamScore: scoreString(us) || r.teamScore,
+      oppScore: scoreString(them) || r.oppScore,
+      teamOvers: us.overs || r.teamOvers,
+      oppOvers: them.overs || r.oppOvers,
+      motmFirst: topBat?.first || '',
+      motmLast: topBat?.last || '',
+      motmBat: topBat ? `${topBat.r}${topBat.notOut ? '*' : ''} (${topBat.b})` : '',
+      motmBowl: sameBowl ? `${sameBowl.w}/${sameBowl.r}` : '',
+      motmPlayerId: motmPlayer?.id || '',
+      topBatters: { team: topBatters(us), opponent: topBatters(them) },
+      topBowlers: { team: topBowlers(us), opponent: topBowlers(them) },
+    }))
+    setMatch((m) => ({
+      ...m,
+      round: data.meta?.round || m.round,
+      venue: data.meta?.venue || m.venue,
+      date: fmtIsoDate(data.meta?.date) || m.date,
+    }))
+    if (them.name) {
+      setOpponent((o) => ({
+        ...o,
+        name: tidyClubName(them.name) || o.name,
+        short: them.short || o.short,
+        monogram: them.monogram || o.monogram,
+        logo: them.logo || o.logo,
+      }))
+    }
+  }, [settings, playerForPid])
+
+  const handleResultImport = async () => {
+    const urlOrId = resUrlInput.trim()
+    const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+    const m = urlOrId.match(uuidRe)
+    if (!m) { setResUrlStatus('Paste a play.cricket.com.au match URL or a match UUID'); return }
+    setResUrlStatus('loading')
+    try {
+      const data = await api.getSocialScorecard(m[0])
+      applyResultScorecard(data)
+      setResUrlStatus('ok')
+    } catch (e) {
+      setResUrlStatus(e?.message || 'Failed to load scorecard')
     }
   }
 
@@ -902,7 +1064,7 @@ export default function AdminSocialPost() {
   }
   if (templateId === 'C4') {
     extraProps.result = {
-      winner: result.winner, margin: result.margin, teamScore: result.teamScore,
+      winner: result.winner, margin: result.margin, grade: result.grade, teamScore: result.teamScore,
       oppScore: result.oppScore, motmLast: result.motmLast,
       topBatters: result.topBatters, topBowlers: result.topBowlers,
     }
@@ -941,8 +1103,14 @@ export default function AdminSocialPost() {
   }
   if (tmpl.kind === 'singleresult') {
     const mapPerf = (arr) => (arr || []).map((p) => ({ n: p.last, l: p.line })).filter((p) => p.n || p.l)
+    // POTM photo: an uploaded hero image wins, else the matched player's profile
+    // photo (RS4 "Star of the Day" shows it in place of the initials).
+    const motmProfile = playerForPid(result.motmPlayerId)
+    const potmPhoto = (heroMode === 'hero' && heroImage.blobUrl)
+      ? heroImage.blobUrl
+      : (motmProfile?.photo_url ? `${BASE_URL}/images/players/${motmProfile.id}/photo` : null)
     extraProps.result = {
-      comp: matchData.competition, round: matchData.round, date: matchData.date,
+      comp: matchData.competition, grade: result.grade || '', round: matchData.round, date: matchData.date,
       season: matchData.season, venue: matchData.venue,
       us: { name: team.name, mono: team.monogram, logo: team.logo, score: result.teamScore || '—', overs: result.teamOvers || '' },
       them: { name: oppData.name, mono: oppData.monogram, logo: oppData.logo, score: result.oppScore || '—', overs: result.oppOvers || '' },
@@ -950,7 +1118,7 @@ export default function AdminSocialPost() {
       margin: result.margin || '',
       potm: {
         first: result.motmFirst || '', last: result.motmLast || '', role: result.motmRole || '',
-        bat: result.motmBat || '', bowl: result.motmBowl || '',
+        bat: result.motmBat || '', bowl: result.motmBowl || '', photo: potmPhoto,
         line: [result.motmBat, result.motmBowl].filter(Boolean).join(' · '),
       },
       topBat: { us: mapPerf(result.topBatters.team), them: mapPerf(result.topBatters.opponent) },
@@ -981,11 +1149,13 @@ export default function AdminSocialPost() {
     setToss({ winner: 'TEAM', decision: 'BAT' })
     setMotm({ playerIdx: 0, stats: [{ label: 'Runs', value: '' }, { label: 'SR', value: '' }], summary: '' })
     setResult({
-      winner: 'TEAM', margin: '', teamScore: '', oppScore: '', teamOvers: '', oppOvers: '', motmLast: '',
-      motmFirst: '', motmRole: '', motmBat: '', motmBowl: '',
+      winner: 'TEAM', margin: '', grade: '', teamScore: '', oppScore: '', teamOvers: '', oppOvers: '', motmLast: '',
+      motmFirst: '', motmRole: '', motmBat: '', motmBowl: '', motmPlayerId: '',
       topBatters: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
       topBowlers: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
     })
+    setResUrlInput('')
+    setResUrlStatus(null)
     setFixtures(DEFAULT_FIXTURES.map((f) => ({ ...f })))
     setResults(DEFAULT_RESULTS.map((r) => ({ ...r })))
     setScorecardMatch(DEFAULT_SCORECARD)
@@ -1431,7 +1601,32 @@ export default function AdminSocialPost() {
             {activeTab === 'result' && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Match Result</h2>
+
+                {/* PlayCricket URL import — auto top 3 batters & bowlers (both sides),
+                    scores, result, MOTM + matched player photos. Everything stays editable. */}
+                <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
+                  <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from PlayCricket</p>
+                  <div className="flex gap-2">
+                    <input type="text" value={resUrlInput} onChange={e => { setResUrlInput(e.target.value); setResUrlStatus(null) }}
+                      placeholder="https://play.cricket.com.au/match/37af9ea5-..."
+                      className="flex-1 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono"
+                      onKeyDown={e => e.key === 'Enter' && handleResultImport()} />
+                    <button onClick={handleResultImport} disabled={resUrlStatus === 'loading'}
+                      className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+                      style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+                      {resUrlStatus === 'loading' ? 'Loading…' : 'Import'}
+                    </button>
+                  </div>
+                  {resUrlStatus && resUrlStatus !== 'loading' && (
+                    <p className={`font-mono text-[9px] mt-1.5 ${resUrlStatus === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
+                      {resUrlStatus === 'ok' ? '✓ Top performers, scores & MOTM filled — review below' : `✗ ${resUrlStatus}`}
+                    </p>
+                  )}
+                  <p className="font-mono text-[9px] mt-1.5 text-pb-faintest">Pulls the top 3 batters & bowlers for both sides and matches your players for photos.</p>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="col-span-2"><Field label="Grade"><TextInput value={result.grade} onChange={v => setResult(r => ({ ...r, grade: v }))} placeholder="1ST GRADE" /></Field></div>
                   <Field label="Winner">
                     <select value={result.winner} onChange={e => setResult(r => ({ ...r, winner: e.target.value }))}
                       className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text">
@@ -1457,6 +1652,69 @@ export default function AdminSocialPost() {
                     <Field label="MOTM Bowling"><TextInput value={result.motmBowl} onChange={v => setResult(r => ({ ...r, motmBowl: v }))} placeholder="2/24" /></Field>
                   </>}
                 </div>
+
+                {/* POTM image — Star of the Day shows a player profile photo or an
+                    uploaded hero image in place of the initials (RS4 feedback). */}
+                <div className="mb-4 pt-3 border-t pb-hairline">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase">POTM Photo</label>
+                    <span className="font-mono text-[9px] text-pb-faintest">Star of the Day layout</span>
+                  </div>
+                  <div className="flex gap-2 mb-2">
+                    <button onClick={() => setHeroMode('player')}
+                      className={`flex-1 py-1.5 rounded border text-xs font-mono transition-colors ${heroMode === 'player' ? '' : 'text-pb-faint border-transparent hover:border-pb-hairline'}`}
+                      style={heroMode === 'player' ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
+                    >Player Photo</button>
+                    <button onClick={() => setHeroMode('hero')}
+                      className={`flex-1 py-1.5 rounded border text-xs font-mono transition-colors ${heroMode === 'hero' ? '' : 'text-pb-faint border-transparent hover:border-pb-hairline'}`}
+                      style={heroMode === 'hero' ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
+                    >Hero Image</button>
+                  </div>
+                  {heroMode === 'player' ? (
+                    <>
+                      <select value={result.motmPlayerId} onChange={e => setResult(r => ({ ...r, motmPlayerId: e.target.value }))}
+                        className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text">
+                        <option value="">No photo — initials</option>
+                        {allPlayers.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {(p.display_name || p.name)}{p.photo_url ? '' : ' · no photo'}
+                          </option>
+                        ))}
+                      </select>
+                      {(() => {
+                        const mp = playerForPid(result.motmPlayerId)
+                        if (mp?.photo_url) return (
+                          <div className="flex items-center gap-2 mt-2">
+                            <img src={`${BASE_URL}/images/players/${mp.id}/photo`} alt="" className="w-12 h-12 rounded-full object-cover object-top" />
+                            <span className="text-[11px] text-pb-faint">{mp.display_name || mp.name}</span>
+                          </div>
+                        )
+                        if (result.motmPlayerId) return <p className="text-[11px] text-pb-faintest mt-1">This player has no profile photo — initials will show.</p>
+                        return null
+                      })()}
+                    </>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <label className="flex items-center gap-3 cursor-pointer group">
+                        <span className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint group-hover:bg-pb-surface2 transition-colors">Choose File</span>
+                        <span className="text-[11px] text-pb-faint truncate">{heroImage.blobUrl ? 'Image selected' : 'No file chosen'}</span>
+                        <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" />
+                      </label>
+                      {heroImage.blobUrl && (
+                        <div className="flex items-start gap-3">
+                          <img src={heroImage.blobUrl} alt="Hero preview" className="w-16 h-16 object-contain rounded bg-pb-surface2" />
+                          <div className="flex flex-col gap-2 flex-1">
+                            <button onClick={() => setEditor({ key: 'hero', source: heroImage.blobUrl })}
+                              className="text-xs font-mono text-pb-faint hover:text-pb-text text-left">✎ Edit (crop / remove background)</button>
+                            <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null }) }}
+                              className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left">Remove image</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {[
                   { side: 'team', label: `Our Batters`, type: 'topBatters' },
                   { side: 'team', label: `Our Bowlers`, type: 'topBowlers' },
