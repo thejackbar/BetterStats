@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { PbSpinner } from '../../lib/presskit'
+import { formatSeason } from '../../lib/cricketFormat'
 
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 
@@ -96,7 +97,7 @@ export default function AdminFeeReports() {
           </div>
           <div className="flex items-center gap-2">
             <select value={seasonId} onChange={e => setSeasonId(e.target.value)} className={inp}>
-              {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
             </select>
             <button onClick={exportCsv} disabled={!seasonId}
               className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>

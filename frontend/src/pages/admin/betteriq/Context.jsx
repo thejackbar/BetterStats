@@ -9,16 +9,13 @@ import { useSyncExternalStore, useState, useEffect, useMemo, useRef } from 'reac
 import { api } from '../../../lib/api'
 import { Icon, Segmented, Tag } from './ui'
 import Dropdown from '../../../components/Dropdown'
+import { formatSeason } from '../../../lib/cricketFormat'
 
 /* ── season label helpers ─────────────────────────────────────────────────── */
+// Canonical "YYYY/YY" season label — same standard used everywhere else.
 export function shortSeason(name) {
   if (!name) return '—'
-  const m = String(name).match(/(\d{2})(\d{2})\s*[/\-]\s*(\d{2})/) // "...2024/25"
-  if (m) return `${m[2]}/${m[3]}`
-  const m2 = String(name).match(/(\d{4})\s*[/\-]\s*(\d{2,4})/)
-  if (m2) return `${m2[1].slice(2)}/${m2[2].slice(-2)}`
-  const y = String(name).match(/(\d{4})/)
-  return y ? y[1] : String(name)
+  return formatSeason(name) || String(name)
 }
 function sortKey(s) {
   if (!s) return 0
@@ -225,7 +222,7 @@ function SeasonList({ seasons, season, mode, onChange, anchor, setAnchor }) {
                 background: endpoint ? 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' : inSpan ? 'color-mix(in srgb, var(--pb-accent) 7%, transparent)' : 'transparent' }}
               onMouseEnter={e => { if (!endpoint) e.currentTarget.style.background = 'var(--pb-surface2)' }}
               onMouseLeave={e => { if (!endpoint) e.currentTarget.style.background = inSpan ? 'color-mix(in srgb, var(--pb-accent) 7%, transparent)' : 'transparent' }}>
-              <span className="font-medium text-[13.5px] truncate" style={{ color: endpoint || inSpan ? 'var(--pb-accent)' : 'var(--pb-text)' }}>{s.name || s.label}</span>
+              <span className="font-medium text-[13.5px] truncate" style={{ color: endpoint || inSpan ? 'var(--pb-accent)' : 'var(--pb-text)' }}>{formatSeason(s) || s.label}</span>
               {endpoint && <Icon name="check" size={14} className="shrink-0" style={{ color: 'var(--pb-accent)' }} />}
             </button>
           )

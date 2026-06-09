@@ -7,7 +7,7 @@ import { api } from '../lib/api'
 import Dropdown from '../components/Dropdown'
 import ClubInactive from './ClubInactive'
 import { Label, Card, Btn, PageHeader, PbSpinner } from '../lib/presskit'
-import { fmt2, fmtCount, fmtOvers } from '../lib/cricketFormat'
+import { fmt2, fmtCount, fmtOvers, formatSeason } from '../lib/cricketFormat'
 
 // ─── Static config ────────────────────────────────────────────────────────────
 
@@ -639,7 +639,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
         <Label>Season</Label>
         <select className={`${selectCls} mt-1 ${isFieldActive(ctx.season_id) ? activeFieldCls : ''}`} value={ctx.season_id || ''} onChange={e => set('season_id', e.target.value)}>
           <option value="">All seasons</option>
-          {(seasons || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {(seasons || []).map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
         </select>
       </div>
       <div>
@@ -1858,6 +1858,8 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
 
 function formatCell(v, col) {
   if (v == null || v === '') return '—'
+  // Season labels → canonical "YYYY/YY" (matches dropdowns and the rest of the app).
+  if (col?.key === 'season_name') return formatSeason(v)
   // Overs are base-6 cricket notation (10.2 = 10 overs 2 balls), never a decimal.
   if (col?.key === 'overs') return fmtOvers(v)
   // Averages / strike rates / economy → always 2 decimals.

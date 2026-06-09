@@ -5,6 +5,7 @@ import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
 import { PbSpinner } from '../../lib/presskit'
+import { formatSeason } from '../../lib/cricketFormat'
 
 // ── field metadata for the column-mapping step ───────────────────────────────
 // Season is handled on its own (below Identity) because it only applies to a
@@ -409,7 +410,7 @@ export default function AdminImport() {
         {step === 'seasons' && (
           <MatchTable
             title="Match seasons" subtitle="Match each season label to one of your seasons. Anything we can't match (and catch-all rows like “Prior Seasons & Adjustments”) defaults to Career summary (no season) — a single adjustment bucket that fills in everything online data doesn't already hold."
-            rows={(resolved?.seasons) || []} kind="season" allOptions={allSeasons.map(s => ({ id: s.id, name: s.name }))}
+            rows={(resolved?.seasons) || []} kind="season" allOptions={allSeasons.map(s => ({ id: s.id, name: formatSeason(s) }))}
             loading={resolving}
             valueFor={(r) => {
               const ov = seasonOverrides[r.raw_label]

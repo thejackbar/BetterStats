@@ -21,6 +21,7 @@ import {
 } from './ui'
 import { Radar, AreaChart } from './viz'
 import { useIQFilter, seasonsInRange } from './Context'
+import { formatSeason } from '../../../lib/cricketFormat'
 import { api } from '../../../lib/api'
 
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
@@ -199,7 +200,7 @@ function TrajectoryTab({ detail, ctx, seasons }) {
   return (
     <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr] items-start">
       <Card eyebrow="runs per season" title="Trajectory" right={isRange ? <Delta value={dRuns} suffix=" runs" /> : null}>
-        <AreaChart points={rows.map(s => s.total_runs || 0)} labels={rows.map(s => s.season_name)} h={190} />
+        <AreaChart points={rows.map(s => s.total_runs || 0)} labels={rows.map(s => formatSeason(s.season_name))} h={190} />
         {isRange
           ? <Note>Over the selected range: <b style={{ color: 'var(--pb-text)' }}>{dRuns >= 0 ? '+' : ''}{fmtCount(dRuns)} runs</b> and <b style={{ color: 'var(--pb-text)' }}>{dAvg >= 0 ? '+' : ''}{a2(dAvg)} average</b> across {spanRows.length} season{spanRows.length === 1 ? '' : 's'}.</Note>
           : <Note>Runs scored each season, oldest → newest. Switch the season filter to <b style={{ color: 'var(--pb-text)' }}>Compare</b> for a range delta.</Note>}
@@ -224,7 +225,7 @@ function TrajectoryTab({ detail, ctx, seasons }) {
                 return (
                   <tr key={i} style={{ borderTop: '1px solid var(--pb-hairline)', opacity: on ? 1 : 0.4 }}>
                     <td className="py-2 px-1 iq-mono text-pb-dim whitespace-nowrap">
-                      <span className="inline-flex items-center gap-2">{s.season_name}{on && isRange && <span style={{ width: 6, height: 6, borderRadius: 99, background: ACCENT }} />}</span>
+                      <span className="inline-flex items-center gap-2">{formatSeason(s.season_name)}{on && isRange && <span style={{ width: 6, height: 6, borderRadius: 99, background: ACCENT }} />}</span>
                     </td>
                     <td className="py-2 px-1 text-right iq-num text-pb-faint">{fmtCount(s.matches)}</td>
                     <td className="py-2 px-1 text-right iq-num font-semibold">{fmtCount(s.total_runs)}</td>

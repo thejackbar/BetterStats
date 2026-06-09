@@ -13,6 +13,7 @@ import {
 } from './ui'
 import { AreaChart, DonutStat } from './viz'
 import { useIQFilter } from './Context'
+import { formatSeason } from '../../../lib/cricketFormat'
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
 function fmtDate(iso) {
@@ -530,7 +531,7 @@ export default function BetterIQHome() {
       {/* MVPs + movers + capabilities */}
       <div className="grid gap-6 lg:grid-cols-[1.15fr_1fr] items-start">
         <div>
-          <SectionHead sub={`season impact · 0–100${mvp?.season?.name ? ` · ${mvp.season.name}` : ''}`}>Club MVPs</SectionHead>
+          <SectionHead sub={`season impact · 0–100${mvp?.season?.name ? ` · ${formatSeason(mvp.season)}` : ''}`}>Club MVPs</SectionHead>
           {mvp === undefined ? (
             <Skeleton h={360} />
           ) : mvpPlayers.length === 0 ? (

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import { formatSeason } from '../../lib/cricketFormat'
 
 export default function AdminGames() {
   const [seasons, setSeasons] = useState([])
@@ -37,7 +38,7 @@ export default function AdminGames() {
             className="bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
           >
             {seasons.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
+              <option key={s.id} value={s.id}>{formatSeason(s)}</option>
             ))}
           </select>
           <span className="font-mono text-[10px] text-pb-faint">

@@ -5,6 +5,26 @@ import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } 
 import { PbSpinner } from '../lib/presskit'
 import { CATEGORY_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import Dropdown from '../components/Dropdown'
+import { formatSeason } from '../lib/cricketFormat'
+
+// Build the deduped, canonical "YYYY/YY" season options for the add/edit
+// dropdowns. Dedupes across the inconsistent source names (so "Summer 1996/97"
+// and "1996/97" collapse to one entry) and keeps any already-selected value
+// selectable even if it isn't in the org's current season list.
+function seasonOptionList(seasons, ...current) {
+  const seen = new Set()
+  const opts = []
+  for (const s of seasons || []) {
+    const label = formatSeason(s)
+    if (label && !seen.has(label)) { seen.add(label); opts.push(label) }
+  }
+  for (const v of current) {
+    const label = v ? formatSeason(v) : ''
+    if (label && !seen.has(label)) { seen.add(label); opts.push(label) }
+  }
+  opts.sort((a, b) => b.localeCompare(a))
+  return opts
+}
 
 const CATEGORIES = ['Club Award', 'Association Award', 'Office Bearer', 'Premiership', 'Hall of Fame', 'Life Membership', 'Milestone']
 
@@ -236,6 +256,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
 
   const subcatOptions = getSubcategoriesFromDefs(awardDefs, form.category)
   const achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
+  const seasonOpts = seasonOptionList(seasons, form.season, form.season_end)
 
   const setCategory = (cat) => {
     setForm(f => ({ ...f, category: cat, subcategory: '', achievement: '' }))
@@ -257,17 +278,17 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
     <>
       <div>
         <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Season {form.category === 'Office Bearer' ? 'Start' : ''}</label>
-        <select className={INPUT_CLS} value={form.season} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
+        <select className={INPUT_CLS} value={formatSeason(form.season)} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
           <option value="">— All Time —</option>
-          {seasons.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+          {seasonOpts.map(label => <option key={label} value={label}>{label}</option>)}
         </select>
       </div>
       {form.category === 'Office Bearer' && (
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Season End</label>
-          <select className={INPUT_CLS} value={form.season_end || ''} onChange={e => setForm(f => ({ ...f, season_end: e.target.value }))}>
+          <select className={INPUT_CLS} value={formatSeason(form.season_end || '')} onChange={e => setForm(f => ({ ...f, season_end: e.target.value }))}>
             <option value="">— Present —</option>
-            {seasons.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+            {seasonOpts.map(label => <option key={label} value={label}>{label}</option>)}
           </select>
         </div>
       )}
@@ -327,10 +348,17 @@ function AchievementForm({ orgId, initial, players, seasons, awardDefs, onSave, 
     if (!form.achievement.trim() || !form.player_name.trim()) { setError('Player Name and Achievement are required'); return }
     setSaving(true); setError(null)
     try {
+      // Persist the canonical "YYYY/YY" label so editing an old award (e.g.
+      // "Summer 1996/97") converges it onto the standard season — no duplicates.
+      const normed = {
+        ...form,
+        season: form.season ? (formatSeason(form.season) || form.season) : form.season,
+        season_end: form.season_end ? (formatSeason(form.season_end) || form.season_end) : form.season_end,
+      }
       if (initial?.id) {
-        await api.updateAchievement(initial.id, form)
+        await api.updateAchievement(initial.id, normed)
       } else {
-        const payload = { ...form, org_id: orgId }
+        const payload = { ...normed, org_id: orgId }
         if (!payload.player_id) delete payload.player_id
         await api.createAchievement(payload)
       }
@@ -398,8 +426,10 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
     if (selectedPlayers.length === 0) { setError('Select at least one player'); return }
     setSaving(true); setError(null)
     try {
+      const season = form.season ? (formatSeason(form.season) || form.season) : form.season
+      const season_end = form.season_end ? (formatSeason(form.season_end) || form.season_end) : form.season_end
       for (const p of selectedPlayers) {
-        await api.createAchievement({ ...form, org_id: orgId, player_id: p.id, player_name: p.display_name || p.name })
+        await api.createAchievement({ ...form, season, season_end, org_id: orgId, player_id: p.id, player_name: p.display_name || p.name })
       }
       onSave()
     } catch (e) {
@@ -518,16 +548,25 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
   if ((loading && !achievements) || seasons === null) return <PbSpinner message="Loading achievements…" />
 
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  // Canonical "YYYY/YY" key for grouping, filtering and display. Collapses the
+  // inconsistent stored values ("Summer 1996/97", "1996/97", "2016", "2025_26")
+  // onto one season so they no longer show as duplicate groups. Orphaned UUIDs
+  // (org recreated) keep their own bucket, rendered as "Unknown Season".
+  const seasonKey = (s) => {
+    if (!s) return ''
+    if (UUID_RE.test(s)) return s
+    return formatSeason(s)
+  }
   const seasonDisplay = (s) => {
     if (!s || s === 'All Time') return 'All Time'
     if (UUID_RE.test(s)) return 'Unknown Season'
-    return s.replace(/_/g, '/')
+    return formatSeason(s)
   }
 
-  const allSeasons = [...new Set((achievements || []).map(a => a.season).filter(Boolean))].sort((a, b) => b.localeCompare(a))
+  const allSeasons = [...new Set((achievements || []).map(a => seasonKey(a.season)).filter(Boolean))].sort((a, b) => b.localeCompare(a))
 
   const filtered = (achievements || []).filter(a => {
-    if (filterSeason && a.season !== filterSeason) return false
+    if (filterSeason && seasonKey(a.season) !== filterSeason) return false
     if (filterCategory && a.category !== filterCategory) return false
     if (filterSearch) {
       const q = filterSearch.toLowerCase()
@@ -538,7 +577,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
 
   const grouped = {}
   for (const a of filtered) {
-    const s = a.season || 'All Time'
+    const s = seasonKey(a.season) || 'All Time'
     if (!grouped[s]) grouped[s] = {}
     if (!grouped[s][a.category]) grouped[s][a.category] = []
     grouped[s][a.category].push(a)

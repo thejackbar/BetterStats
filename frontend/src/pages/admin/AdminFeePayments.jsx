@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { PbSpinner } from '../../lib/presskit'
+import { formatSeason } from '../../lib/cricketFormat'
 
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 
@@ -85,7 +86,7 @@ export default function AdminFeePayments() {
 
         <div className="flex flex-wrap items-center gap-3 mb-5">
           <select value={seasonId} onChange={e => setSeasonId(e.target.value)} className={inp}>
-            {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
           </select>
           <input className={`${inp} flex-1 min-w-[180px]`} placeholder="Search name, bank ref, method…" value={q} onChange={e => setQ(e.target.value)} />
           <select value={kindFilter} onChange={e => setKindFilter(e.target.value)} className={inp}>

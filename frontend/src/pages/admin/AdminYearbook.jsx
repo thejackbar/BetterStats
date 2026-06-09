@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { PbSpinner, Btn } from '../../lib/presskit'
+import { formatSeason } from '../../lib/cricketFormat'
 
 function _seasonSlug(name) {
   if (!name) return ''
@@ -39,10 +40,10 @@ export default function AdminYearbook() {
     try {
       if (yb.status === 'published') {
         await api.unpublishYearbook(org.id, yb.season_id)
-        setMsg(`${yb.season_name} set back to Draft.`)
+        setMsg(`${formatSeason(yb.season_name)} set back to Draft.`)
       } else {
         await api.publishYearbook(org.id, yb.season_id)
-        setMsg(`${yb.season_name} published!`)
+        setMsg(`${formatSeason(yb.season_name)} published!`)
       }
       load()
     } catch (e) {
@@ -99,7 +100,7 @@ export default function AdminYearbook() {
               className="flex items-center gap-4 rounded-xl border border-white/8 bg-white/3 px-5 py-4"
             >
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-white/90 text-[14px]">{yb.season_name}</div>
+                <div className="font-medium text-white/90 text-[14px]">{formatSeason(yb.season_name)}</div>
                 <div className="flex items-center gap-3 mt-1">
                   <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-mono tracking-wide3 border ${
                     yb.status === 'published'
