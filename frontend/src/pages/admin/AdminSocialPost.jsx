@@ -315,21 +315,6 @@ function cleanClubName(n) {
     .trim()
 }
 
-// Fetch a logo and knock out its background (transparent PNG) so opposition
-// crests sit cleanly on the dark post. Same engine as the hero-image editor.
-// Falls back to the plain URL if removal fails (e.g. a cross-origin CDN logo
-// that can't be fetched client-side).
-async function removeLogoBg(url) {
-  if (!url) return url
-  try {
-    const { removeBackground } = await import('@imgly/background-removal')
-    const blob = await removeBackground(url, { debug: false })
-    return URL.createObjectURL(blob)
-  } catch {
-    return url
-  }
-}
-
 // Per-row opponent combobox: live club search (api.searchOrgs) with a dropdown,
 // while staying a free-text field so a name can still be typed by hand.
 function OppRowSearch({ value, onType, onPick, placeholder = 'Opponent (search clubs)…' }) {
@@ -375,10 +360,10 @@ function OppLogoChip({ logo, loading, onClear }) {
   return (
     <div className="flex items-center gap-2">
       {loading
-        ? <span className="font-mono text-[9px] text-pb-faint animate-pulse">Pulling logo · removing background…</span>
+        ? <span className="font-mono text-[9px] text-pb-faint animate-pulse">Pulling logo…</span>
         : <>
             <img src={logo} alt="" className="h-7 max-w-[88px] object-contain rounded bg-pb-surface" onError={e => { e.target.style.display = 'none' }} />
-            <span className="font-mono text-[9px] text-pb-faint">logo · bg removed</span>
+            <span className="font-mono text-[9px] text-pb-faint">club logo</span>
             <button onClick={onClear} className="text-pb-faintest hover:text-red-400 text-[10px] ml-auto">✕ logo</button>
           </>}
     </div>
@@ -738,15 +723,14 @@ export default function AdminSocialPost() {
     setOppResults([])
   }, [resolveClubLogo])
 
-  // Roundup row opponent pick: fill name + mono immediately, then pull the club
-  // logo and knock out its background (async).
+  // Roundup row opponent pick: fill name + mono immediately, then pull the
+  // club's logo (shown as-is in the circular badge spot).
   const pickRowOpp = useCallback(async (kind, idx, org) => {
     const setter = kind === 'fx' ? setFixtures : setResults
     const name = (cleanClubName(org.name) || org.name || org.shortName || '').toUpperCase()
     const mono = (org.shortName || deriveShort(org.name || 'OPP')).toUpperCase().slice(0, 3)
     setter(rows => rows.map((r, j) => j === idx ? { ...r, opp: name, oppMono: mono, oppLogoLoading: true } : r))
-    let logo = await resolveClubLogo(org)
-    if (logo) logo = await removeLogoBg(logo)
+    const logo = await resolveClubLogo(org)
     setter(rows => rows.map((r, j) => j === idx ? { ...r, oppLogo: logo, oppLogoLoading: false } : r))
   }, [resolveClubLogo])
 
