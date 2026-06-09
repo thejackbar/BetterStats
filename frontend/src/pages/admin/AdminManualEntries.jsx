@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
+import { formatSeason } from '../../lib/cricketFormat'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
 const LABEL_CLS = 'font-mono text-[10px] text-pb-faint block mb-1'
@@ -389,7 +390,7 @@ function InlineSpreadsheet({ players, seasons, grades, onImported, onPending }) 
           <label className={LABEL_CLS}>Season</label>
           <select className={INPUT_CLS} value={seasonId} onChange={e => { setSeasonId(e.target.value); setGradeId('') }}>
             <option value="">— Choose a season —</option>
-            {seasons.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}
+            {seasons.map(s => (<option key={s.id} value={s.id}>{formatSeason(s)}</option>))}
           </select>
         </div>
         <div>
@@ -729,7 +730,7 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
             <label className={LABEL_CLS}>Season (optional)</label>
             <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm({ ...form, season_id: e.target.value, grade_id: '' })}>
               <option value="">— Career only (no specific season) —</option>
-              {seasons.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}
+              {seasons.map(s => (<option key={s.id} value={s.id}>{formatSeason(s)}</option>))}
             </select>
             {isCareerMode && (
               <p className="text-[10px] text-pb-faint mt-1">Will save as a career-only adjustment.</p>
@@ -782,7 +783,7 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending 
                   {list.map(r => (
                     <tr key={r.id} className="border-b pb-hairline">
                       <td className="py-2 pr-3 text-pb-text">{r.player_name}</td>
-                      <td className="py-2 pr-3 text-pb-faint">{r.season_name}</td>
+                      <td className="py-2 pr-3 text-pb-faint">{formatSeason(r.season_name)}</td>
                       <td className="py-2 pr-3 text-right text-pb-text">{r.games_played}</td>
                       <td className="py-2 pr-3 text-right text-pb-text">{r.batting_runs}</td>
                       <td className="py-2 pr-3 text-right text-pb-text">{r.bowling_wickets}</td>
@@ -1099,7 +1100,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
             <label className={LABEL_CLS}>Season *</label>
             <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm({ ...form, season_id: e.target.value, grade_id: '' })}>
               <option value="">— Choose a season —</option>
-              {seasons.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}
+              {seasons.map(s => (<option key={s.id} value={s.id}>{formatSeason(s)}</option>))}
             </select>
           </div>
           <div>
@@ -1275,7 +1276,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
                   <tr key={r.id} className="border-b pb-hairline">
                     <td className="py-2 pr-3 text-pb-text">{r.played_at ? r.played_at.split('T')[0] : '—'}</td>
                     <td className="py-2 pr-3 text-pb-faint">{r.opposition || '—'}</td>
-                    <td className="py-2 pr-3 text-pb-faint">{r.season_name}</td>
+                    <td className="py-2 pr-3 text-pb-faint">{formatSeason(r.season_name)}</td>
                     <td className="py-2 pr-3 text-right text-pb-text">{r.batting_count}</td>
                     <td className="py-2 text-right">
                       <button className={BTN_SECONDARY + ' mr-2'} onClick={() => handleEdit(r)}>Edit</button>

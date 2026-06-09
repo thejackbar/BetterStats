@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { PbSpinner, Btn } from '../../lib/presskit'
 import ImageEditorModal from '../../components/ImageEditorModal'
+import { formatSeason } from '../../lib/cricketFormat'
 
 // Yearbook image paths can be either legacy on-disk relative paths
 // ("yearbooks/{org_id}/...") or new DB-backed serving URLs ("/api/images/...").
@@ -800,7 +801,7 @@ export default function AdminYearbookDetail() {
   if (!org || loading) return <PbSpinner />
   if (!yearbook) return <div className="max-w-3xl mx-auto px-4 py-8 text-white/50">Yearbook not found.</div>
 
-  const seasonName = yearbook.season?.name || seasonId
+  const seasonName = formatSeason(yearbook.season) || seasonId
   const isPublished = yearbook.status === 'published'
   const narrative = yearbook.sections?.find(s => s.section_type === 'narrative')
   const hasAiDraft = !!narrative?.ai_draft

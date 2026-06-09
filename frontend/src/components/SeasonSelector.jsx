@@ -1,3 +1,5 @@
+import { formatSeason } from '../lib/cricketFormat'
+
 export default function SeasonSelector({
   seasons = [],
   grades = [],
@@ -27,7 +29,7 @@ export default function SeasonSelector({
             className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
           >
             <option value="">All seasons</option>
-            {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
           </select>
         </div>
       )}

@@ -86,6 +86,56 @@ export function fmtPct(v, { sign = false } = {}) {
   return `${sign && n > 0 ? '+' : ''}${n}%`
 }
 
+// ── Season labels: canonical "YYYY/YY" ───────────────────────────────────────
+// Single source of truth for how a season is shown ANYWHERE in the app. Cricket
+// Australia, MyCricket and manual imports all name seasons differently
+// ("Summer 2025/26", "Winter 2024/25", "2025_26", or a bare "2016"), which used
+// to leak into dropdowns and tables as inconsistent labels and even duplicate
+// season groups. Normalise every one to the Australian-summer-season form
+// "YYYY/YY" (start year + 2-digit end year), e.g.
+//   "Summer 1996/97" → "1996/97"   "2025_26" → "2025/26"   2016 → "2016/17"
+//
+// Accepts a season object ({ name, year }), a raw name string, or a numeric
+// year. Returns the original string when it can't find a year (so genuinely
+// non-dated labels survive), and passes "All Time" / blank through untouched.
+const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function formatSeason(input, year) {
+  if (input === null || input === undefined || input === '') return ''
+  let name
+  if (typeof input === 'object') {
+    name = input.name
+    if (year === undefined || year === null) year = input.year
+  } else {
+    name = String(input)
+  }
+  if (name === 'All Time' || name === 'Career (no season)') return name
+  // A raw UUID (achievements occasionally store the season's DB id) carries no
+  // readable year — hand it back so the caller can decide what to show.
+  if (typeof name === 'string' && _UUID_RE.test(name.trim())) return name
+
+  let start = null
+  // 1) An explicit split year ("…2016/17", "2025_26", "2025-26") — unambiguous.
+  if (name) {
+    const m = String(name).match(/(\d{4})\s*[/_-]\s*\d{2,4}/)
+    if (m) start = parseInt(m[1], 10)
+  }
+  // 2) The numeric year column (the season's start year).
+  if (start === null && year !== undefined && year !== null && /^\d{4}$/.test(String(year))) {
+    start = parseInt(String(year), 10)
+  }
+  // 3) A bare 4-digit year anywhere in the name (start year, e.g. 2016 → 2016/17).
+  if (start === null && name) {
+    const m = String(name).match(/(\d{4})/)
+    if (m) start = parseInt(m[1], 10)
+  }
+  if (start === null) return name || ''
+  const end = String((start + 1) % 100).padStart(2, '0')
+  return `${start}/${end}`
+}
+// Clearer intent at call sites that pass a season row.
+export const seasonLabel = formatSeason
+
 // ── Spelled-out stat phrases (no bare r/w) ────────────────────────────────────
 // "580 runs" / "1 run" / "580 runs @ 58.00"
 export function runsPhrase(runs, avg) {

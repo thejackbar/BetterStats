@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { PbSpinner } from '../../lib/presskit'
+import { formatSeason } from '../../lib/cricketFormat'
 
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 const PAY_METHODS = ['', 'EFT', 'Cash', 'PlayHQ', 'Comp', 'Other']
@@ -360,7 +361,7 @@ export default function AdminFeeMemberDetail() {
             : <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">MANUAL</span>}
         </div>
         <div className="flex items-center gap-2 mb-5">
-          <span className="text-pb-faint text-sm">{data.season.name}</span>
+          <span className="text-pb-faint text-sm">{formatSeason(data.season)}</span>
           <StatusBadge status={f.status} />
           <CreditChip amount={f.credit} />
         </div>

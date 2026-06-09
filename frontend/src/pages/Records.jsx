@@ -8,7 +8,7 @@ import SeasonSelector from '../components/SeasonSelector'
 import { useClubData } from '../hooks/useClubData'
 import { Label, Card, PageHeader, PbSpinner, TabBar } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
-import { fmtOvers } from '../lib/cricketFormat'
+import { fmtOvers, formatSeason } from '../lib/cricketFormat'
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
 
@@ -82,7 +82,7 @@ function RecordTable({ headers, rows }) {
 
 function BattingTab({ data, latestSeason, fmt = n => n }) {
   if (!data) return <PbSpinner />
-  const isNew = (seasonName) => latestSeason && seasonName && seasonName === latestSeason
+  const isNew = (seasonName) => latestSeason && seasonName && formatSeason(seasonName) === formatSeason(latestSeason)
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <RecordSection title="MOST CAREER RUNS" empty={!data.top_career_runs?.length}>
@@ -101,7 +101,7 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
           rows={(data.top_high_scores || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
             <span className="font-bold" style={{ color: r.runs >= 100 ? 'var(--pb-chart-milestone, #f5b542)' : 'var(--pb-accent)' }}>{r.runs}{r.not_out ? '*' : ''}</span>,
-            <span className="text-pb-faintest text-[11px]">{r.season_name}{isNew(r.season_name) && <NewBadge />}</span>,
+            <span className="text-pb-faintest text-[11px]">{formatSeason(r.season_name)}{isNew(r.season_name) && <NewBadge />}</span>,
           ])}
         />
       </RecordSection>
@@ -142,7 +142,7 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
             rows={(data.most_runs_season || []).map((r, i) => [
               <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
               <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.runs?.toLocaleString()}</span>,
-              <span className="text-pb-faintest text-[11px]">{r.season_name}{isNew(r.season_name) && <NewBadge />}</span>,
+              <span className="text-pb-faintest text-[11px]">{formatSeason(r.season_name)}{isNew(r.season_name) && <NewBadge />}</span>,
             ])}
           />
         </RecordSection>
@@ -165,7 +165,7 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
 
 function BowlingTab({ data, latestSeason, fmt = n => n }) {
   if (!data) return <PbSpinner />
-  const isNew = (seasonName) => latestSeason && seasonName && seasonName === latestSeason
+  const isNew = (seasonName) => latestSeason && seasonName && formatSeason(seasonName) === formatSeason(latestSeason)
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <RecordSection title="MOST CAREER WICKETS" empty={!data.top_career_wickets?.length}>
@@ -184,7 +184,7 @@ function BowlingTab({ data, latestSeason, fmt = n => n }) {
           rows={(data.best_innings_figures || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
             <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.wickets}/{r.runs}</span>,
-            <span className="text-pb-faintest text-[11px]">{r.season_name}{isNew(r.season_name) && <NewBadge />}</span>,
+            <span className="text-pb-faintest text-[11px]">{formatSeason(r.season_name)}{isNew(r.season_name) && <NewBadge />}</span>,
           ])}
         />
       </RecordSection>
@@ -227,7 +227,7 @@ function BowlingTab({ data, latestSeason, fmt = n => n }) {
             rows={(data.most_wickets_season || []).map((r, i) => [
               <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
               <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.wickets}</span>,
-              <span className="text-pb-faintest text-[11px]">{r.season_name}{isNew(r.season_name) && <NewBadge />}</span>,
+              <span className="text-pb-faintest text-[11px]">{formatSeason(r.season_name)}{isNew(r.season_name) && <NewBadge />}</span>,
             ])}
           />
         </RecordSection>
@@ -353,7 +353,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.wicket_number ? ORDINALS[r.wicket_number - 1] : '—'}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name || '—'}</td>
-                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.season_name || '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -394,7 +394,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                           <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
                         </td>
                         <td className="py-2 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
-                        <td className="py-2 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.season_name || '—'}</td>
+                        <td className="py-2 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -439,7 +439,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
                         <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name || '—'}</td>
-                        <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.season_name || '—'}</td>
+                        <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}</td>
                       </tr>
                     ))}
                   </tbody>

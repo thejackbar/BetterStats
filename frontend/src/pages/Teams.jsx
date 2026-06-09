@@ -6,6 +6,7 @@ import { usePageMeta } from '../hooks/usePageMeta'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import { PageHeader, PbSpinner } from '../lib/presskit'
+import { formatSeason } from '../lib/cricketFormat'
 
 export default function Teams() {
   const { clubSlug } = useParams()
@@ -63,7 +64,7 @@ export default function Teams() {
             className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
           >
             {seasons.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
+              <option key={s.id} value={s.id}>{formatSeason(s)}</option>
             ))}
           </select>
         </div>

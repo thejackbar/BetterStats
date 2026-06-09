@@ -8,7 +8,7 @@ import { useNameFormat } from '../lib/nameFormat'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import { Card, PageHeader, PbSpinner, TabBar, ResultPill, Kpi } from '../lib/presskit'
-import { fmt2, fmtOvers, fmtCount } from '../lib/cricketFormat'
+import { fmt2, fmtOvers, fmtCount, formatSeason } from '../lib/cricketFormat'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -273,7 +273,7 @@ export default function TeamDetail() {
 
   usePageMeta({
     title: gradeInfo
-      ? `${gradeInfo.name} — ${gradeInfo.season_name || ''} — ${club?.name || clubSlug}`
+      ? `${gradeInfo.name} — ${formatSeason(gradeInfo.season_name)} — ${club?.name || clubSlug}`
       : `Team — ${club?.name || clubSlug}`,
   })
 
@@ -307,7 +307,7 @@ export default function TeamDetail() {
       </div>
 
       <PageHeader
-        eyebrow={gradeInfo?.season_name || ''}
+        eyebrow={formatSeason(gradeInfo?.season_name)}
         title={gradeInfo?.name || '…'}
       />
 

@@ -2,7 +2,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner } from '../lib/presskit'
-import { fmt2, fmtCount } from '../lib/cricketFormat'
+import { fmt2, fmtCount, formatSeason } from '../lib/cricketFormat'
 import betterStatsLogo from '../assets/betterstatslogo_white.png'
 
 function hexWithAlpha(hex, alpha) {
@@ -357,7 +357,7 @@ export default function ShareCard() {
               className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
             >
               <option value="">Career Statistics</option>
-              {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
             </select>
             {statsLoading && <span className="font-mono text-[10px] text-pb-faint">updating…</span>}
           </div>

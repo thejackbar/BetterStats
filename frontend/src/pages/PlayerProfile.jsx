@@ -16,7 +16,7 @@ import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
 import { CAP } from '../lib/capabilities'
 import { battingHandLabel, bowlingLabel, bowls, genderLabel } from '../lib/playerAttributes'
-import { fmtOvers, oversToBalls } from '../lib/cricketFormat'
+import { fmtOvers, oversToBalls, formatSeason } from '../lib/cricketFormat'
 import {
   BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -232,6 +232,7 @@ function SeasonChart({ data }) {
   // Drop the career-level "Prior Seasons & Adjustments" row (no season_id) —
   // it belongs in the table totals, not as a labelled bar on a season chart.
   const chartData = [...data].filter(s => s.season_id).reverse()
+    .map(s => ({ ...s, season_name: formatSeason(s.season_name) }))
   return (
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -253,7 +254,7 @@ function CumulativeRunsChart({ seasonStats }) {
   let cumulative = 0
   const chartData = [...seasonStats].filter(s => s.season_id).reverse().map(s => {
     cumulative += (s.total_runs ?? 0)
-    return { season: s.season_name?.replace('Summer ', '') ?? '', total: cumulative, season_runs: s.total_runs ?? 0 }
+    return { season: formatSeason(s.season_name), total: cumulative, season_runs: s.total_runs ?? 0 }
   })
   return (
     <ResponsiveContainer width="100%" height={220}>
@@ -274,7 +275,7 @@ function AveragesChart({ seasonStats }) {
   const chartData = [...seasonStats].filter(s => s.season_id).reverse()
     .filter(s => s.batting_average != null || s.bowling_average != null)
     .map(s => ({
-      season: s.season_name?.replace('Summer ', '') ?? '',
+      season: formatSeason(s.season_name),
       bat_avg: s.batting_average != null ? Number(Number(s.batting_average).toFixed(2)) : null,
       bowl_avg: s.bowling_average != null ? Number(Number(s.bowling_average).toFixed(2)) : null,
     }))
@@ -378,7 +379,7 @@ function BattingTab({ batting, seasonStats, seasons }) {
               <tbody>
                 {sorted.map((s, i) => (
                   <tr key={s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-                    <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{s.season_name}</td>
+                    <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{formatSeason(s.season_name)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.batting_innings)}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_runs)}</td>
                     <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.batting_average, true)}</td>
@@ -445,7 +446,7 @@ function BowlingTab({ bowling, seasonStats }) {
               <tbody>
                 {sorted.map((s, i) => (
                   <tr key={s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-                    <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{s.season_name}</td>
+                    <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{formatSeason(s.season_name)}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_wickets)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmtOvers(s.total_overs)}</td>
                     <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.bowling_average, true)}</td>
@@ -507,7 +508,7 @@ function FieldingTab({ fielding, seasonStats }) {
               <tbody>
                 {sorted.map((s, i) => (
                   <tr key={s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-                    <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{s.season_name}</td>
+                    <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{formatSeason(s.season_name)}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_catches_non_wk ?? (s.total_catches - (s.total_catches_wk ?? 0)))}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.total_catches_wk)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.total_run_outs)}</td>
@@ -1091,7 +1092,7 @@ function CaptainTab({ captainStats }) {
               <tbody>
                 {by_season.map((row, i) => (
                   <tr key={i} className={i % 2 === 1 ? 'bg-pb-surface' : ''}>
-                    <td className="py-2 pr-4 font-mono text-pb-text text-[12px]">{row.season_name}</td>
+                    <td className="py-2 pr-4 font-mono text-pb-text text-[12px]">{formatSeason(row.season_name)}</td>
                     <td className="py-2 px-2 text-right font-mono text-pb-dim">{row.games_captained}</td>
                     <td className="py-2 px-2 text-right font-mono text-pb-dim">{row.wins}/{row.losses}/{row.draws}</td>
                     <td className="py-2 px-2 text-right font-mono text-pb-dim">{fmtV(row.batting_innings)}</td>
@@ -1333,7 +1334,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           {seasonStats?.some(s => (s.total_wickets ?? 0) > 0) && (
             <Card title="WICKETS BY SEASON">
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={[...seasonStats].filter(s => s.season_id).reverse()} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <BarChart data={[...seasonStats].filter(s => s.season_id).reverse().map(s => ({ ...s, season_name: formatSeason(s.season_name) }))} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
                   <XAxis dataKey="season_name" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} />
@@ -1382,7 +1383,7 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart
                   data={[...seasonStats].filter(s => s.season_id).reverse().filter(s => s.bowling_average != null || s.economy != null).map(s => ({
-                    season: s.season_name?.replace('Summer ', '') ?? '',
+                    season: formatSeason(s.season_name),
                     bowl_avg: s.bowling_average != null ? Number(Number(s.bowling_average).toFixed(2)) : null,
                     economy: s.economy != null ? Number(Number(s.economy).toFixed(2)) : null,
                   }))}
@@ -1841,7 +1842,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   const subcatOptions = getSubcategoriesFromDefs(awardDefs, form.category)
   const achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
   const seasonMap = Object.fromEntries(seasons.map(s => [s.id, s.name]))
-  const seasonDisplay = (s) => !s || s === 'All Time' ? 'All Time' : (seasonMap[s] || s.replace(/_/g, '/'))
+  const seasonDisplay = (s) => !s || s === 'All Time' ? 'All Time' : (formatSeason(seasonMap[s] || s) || s)
 
   const openEdit = (a) => {
     setForm({ season: a.season||'', season_end: a.season_end||'', category: a.category, subcategory: a.subcategory||'', achievement: a.achievement, detail: a.detail||'' })
@@ -1960,7 +1961,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               <Label className="block mb-1">Season</Label>
               <select className={selectCls} value={form.season} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
                 <option value="">All Time</option>
-                {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
               </select>
             </div>
             {form.category === 'Office Bearer' && (
@@ -1968,7 +1969,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
                 <Label className="block mb-1">Season End</Label>
                 <select className={selectCls} value={form.season_end} onChange={e => setForm(f => ({ ...f, season_end: e.target.value }))}>
                   <option value="">Present</option>
-                  {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
                 </select>
               </div>
             )}
@@ -2361,7 +2362,7 @@ export default function PlayerProfile() {
             >
               <option value="">All Seasons</option>
               {seasons.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+                <option key={s.id} value={s.id}>{formatSeason(s)}</option>
               ))}
             </select>
           </div>
