@@ -1,20 +1,47 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { nameMatchesSearch, formatPlayerName, joinDisplayName, nameSortKey } from '../../lib/nameFormat'
-import { countryFlagUrl } from '../../data/countries'
+import { ALPHABET, RANGES, letterOfName, rangeOfName, groupByLetter } from '../../lib/playerAlphabet'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 import { PbSpinner } from '../../lib/presskit'
+import { bowls, bowlingLabel } from '../../lib/playerAttributes'
 import { Profile, draftFromProfile, patchFromDraft } from '../../components/player/PlayerProfilePanel'
-import { QuickAvailModal } from './betterselect/ui'
+import { Avatar, RoleChips, Icon, QuickAvailModal } from './betterselect/ui'
+import '../../styles/players-list.css'
 
 // ---------------------------------------------------------------------------
-// ProfileModal — the canonical player profile (shared with BetterSelect),
-// shown in a modal. Replaces the old cramped edit form so editing a player is
-// the same experience everywhere.
+// Meta line — the useful role / batting-hand / bowling summary that REPLACES
+// the old raw-UUID + "PHQ: …" clutter on every row.
 // ---------------------------------------------------------------------------
-function ProfileModal({ playerId, teams, canEdit, onClose, onSaved }) {
+const ROLE_NOUN = {
+  'Batter': 'Batter', 'Bowler': 'Bowler', 'All Rounder': 'All-rounder',
+  'Allrounder': 'All-rounder', 'All-Rounder': 'All-rounder',
+  'Wicketkeeper': 'Keeper', 'Wicketkeeper-Batter': 'Keeper-bat', 'Keeper': 'Keeper',
+}
+function roleNoun(p) {
+  if (p.is_opening_batsman) return 'Opening bat'
+  return ROLE_NOUN[p.player_role] || p.player_role || ''
+}
+function metaLine(p) {
+  const bits = []
+  const r = roleNoun(p)
+  if (r) bits.push(r)
+  if (p.batting_hand === 'LEFT') bits.push('LHB')
+  else if (p.batting_hand === 'RIGHT') bits.push('RHB')
+  if (bowls(p.bowling_action, p.bowling_type)) bits.push(bowlingLabel(p.bowling_action, p.bowling_type))
+  return bits.join(' · ')
+}
+
+const nameOf = (p) => p.display_name || p.display_name_override || p.name || ''
+
+// ---------------------------------------------------------------------------
+// ProfileModal — the canonical player profile (shared with BetterSelect), shown
+// in a modal with prev/next player navigation so you can flip through the list
+// without closing. The detail panel itself is unchanged.
+// ---------------------------------------------------------------------------
+function ProfileModal({ playerId, teams, canEdit, index, total, onPrev, onNext, onClose, onSaved }) {
   const [profile, setProfile] = useState(null)
   const [draft, setDraft] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -22,11 +49,18 @@ function ProfileModal({ playerId, teams, canEdit, onClose, onSaved }) {
   const [err, setErr] = useState('')
   const [availEdit, setAvailEdit] = useState(null) // { player, date }
 
+  // Esc closes; ← / → flip players (ignored while typing in a field).
   useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    const handler = (e) => {
+      if (e.key === 'Escape') { onClose(); return }
+      const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)
+      if (typing) return
+      if (e.key === 'ArrowLeft') onPrev?.()
+      else if (e.key === 'ArrowRight') onNext?.()
+    }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  }, [onClose, onPrev, onNext])
 
   useEffect(() => {
     let live = true
@@ -64,8 +98,6 @@ function ProfileModal({ playerId, teams, canEdit, onClose, onSaved }) {
     onSaved?.({ id: playerId, photo_url: url })
   }, [playerId, onSaved])
 
-  // Availability editing — same quick-update flow as BetterSelect. Persists one
-  // (player, date) row, then re-pulls the profile so the snapshot dot updates.
   const pickAvail = async (status) => {
     const ed = availEdit
     setAvailEdit(null)
@@ -91,7 +123,21 @@ function ProfileModal({ playerId, teams, canEdit, onClose, onSaved }) {
         style={{ backdropFilter: 'blur(2px)' }}
         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       >
-        <div className="pb-card bg-pb-surface w-full max-w-5xl mt-8 mb-8 max-h-[88vh] overflow-hidden flex flex-col">
+        <div className="pl-root pb-card bg-pb-surface w-full max-w-5xl mt-8 mb-8 max-h-[88vh] overflow-hidden flex flex-col">
+          {total > 1 && (
+            <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-pb-hairline shrink-0">
+              <div className="pm-nav">
+                <button onClick={onPrev} title="Previous player (←)" disabled={total < 2}>
+                  <Icon name="chevron" size={16} style={{ transform: 'rotate(180deg)' }} />
+                </button>
+                <span>{index + 1} <i>/ {total}</i></span>
+                <button onClick={onNext} title="Next player (→)" disabled={total < 2}>
+                  <Icon name="chevron" size={16} />
+                </button>
+              </div>
+              <span className="font-mono text-[10px] text-pb-faint tracking-wide2">← → TO FLIP · ESC TO CLOSE</span>
+            </div>
+          )}
           {err && <div className="px-5 py-2 font-mono text-[11px] text-pb-red border-b border-pb-hairline shrink-0">{err.toUpperCase()}</div>}
           {!profileForView || !draft
             ? <div className="p-10"><PbSpinner message="Loading profile…" /></div>
@@ -114,16 +160,46 @@ function ProfileModal({ playerId, teams, canEdit, onClose, onSaved }) {
 }
 
 // ---------------------------------------------------------------------------
+// Row
+// ---------------------------------------------------------------------------
+function PlayerRow({ p, squadName, canEdit, fmt, onOpen }) {
+  const inactive = p.status === 'inactive'
+  const meta = metaLine(p)
+  return (
+    <div className="pl-row" style={{ opacity: inactive ? 0.62 : 1 }} onClick={onOpen}>
+      <Avatar player={p} size={40} noLink />
+      <div className="pl-row-main">
+        <div className="pl-row-top">
+          <span className="pl-row-name">{fmt(p.display_name_override || p.name)}</span>
+          <RoleChips roles={p.skill_positions || []} muted />
+          {p.is_overseas && (
+            <span className="pl-badge globe" title={p.overseas_country ? `Overseas — ${p.overseas_country}` : 'Overseas'}>
+              <Icon name="info" size={11} /> Overseas
+            </span>
+          )}
+          {inactive && <span className="pl-badge mute">Inactive</span>}
+        </div>
+        {meta && <div className="pl-row-meta">{meta}</div>}
+      </div>
+      {squadName && <span className="pl-squad">{squadName}</span>}
+      <button className="pl-edit" onClick={(e) => { e.stopPropagation(); onOpen() }}>
+        <Icon name="player" size={13} /> {canEdit ? 'Edit' : 'View'}
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // AdminPlayers
 // ---------------------------------------------------------------------------
-
 export default function AdminPlayers() {
   const { hasCapability } = useAuth()
   const canEdit = hasCapability(CAP.MANAGE_PLAYERS)
   const [players, setPlayers] = useState([])
   const [teams, setTeams] = useState([])
   const [filter, setFilter] = useState('')
-  const [overseasFilter, setOverseasFilter] = useState('all') // 'all' | 'only' | 'exclude'
+  const [scope, setScope] = useState('all') // all | local | overseas
+  const [range, setRange] = useState(RANGES[0].key)
   const [msg, setMsg] = useState('')
   const [nameFormat, setNameFormat] = useState('last_first')
   const [showCreate, setShowCreate] = useState(false)
@@ -132,28 +208,81 @@ export default function AdminPlayers() {
   const [createMsg, setCreateMsg] = useState('')
   const [editingId, setEditingId] = useState(null) // player id or null
 
+  const scrollRef = useRef(null)
+  const headerRefs = useRef({})
+  const pendingJump = useRef(null)
+
   useEffect(() => {
     api.adminListPlayers().then(setPlayers).catch(() => {})
     api.adminGetSettings().then(s => setNameFormat(s.player_name_format || 'last_first')).catch(() => {})
     api.bsListTeams().then(t => setTeams(t || [])).catch(() => setTeams([]))
   }, [])
 
-  const fmt = (name) => formatPlayerName(name, nameFormat)
+  const searching = filter.trim().length > 0
+  const teamNameById = useMemo(() => Object.fromEntries(teams.map((t) => [t.id, t.name])), [teams])
+  const squadNameOf = useCallback((p) => (p.squad_team_id ? teamNameById[p.squad_team_id] : null), [teamNameById])
 
-  const filtered = players.filter(p => {
-    if (overseasFilter === 'only' && !p.is_overseas) return false
-    if (overseasFilter === 'exclude' && p.is_overseas) return false
-    const q = filter.trim()
-    if (!q) return true
-    return (
-      nameMatchesSearch(p.name, q) ||
-      nameMatchesSearch(p.display_name_override, q) ||
-      (p.playhq_id || '').toLowerCase().includes(q.toLowerCase())
-    )
-  })
+  // Base set: scope + search, surname-sorted. Range filtering happens after.
+  const base = useMemo(() => {
+    const out = players.filter((p) => {
+      if (scope === 'local' && p.is_overseas) return false
+      if (scope === 'overseas' && !p.is_overseas) return false
+      const q = filter.trim()
+      if (!q) return true
+      return (
+        nameMatchesSearch(p.name, q) ||
+        nameMatchesSearch(p.display_name_override, q) ||
+        (p.playhq_id || '').toLowerCase().includes(q.toLowerCase())
+      )
+    })
+    return out.sort((a, b) => nameSortKey(nameOf(a)).localeCompare(nameSortKey(nameOf(b))))
+  }, [players, scope, filter])
 
-  // Merge whatever the modal sends back (a full profile on save, or a partial
-  // { id, photo_url } on photo change) into the matching list row.
+  // Counts per range over the base set (drives the tab labels).
+  const rangeCounts = useMemo(() => {
+    const m = {}; RANGES.forEach((r) => (m[r.key] = 0))
+    base.forEach((p) => { const k = rangeOfName(nameOf(p)); m[k] = (m[k] || 0) + 1 })
+    return m
+  }, [base])
+
+  // What's actually shown — range slice unless searching (then all matches).
+  const shown = useMemo(() => {
+    if (searching) return base
+    return base.filter((p) => rangeOfName(nameOf(p)) === range)
+  }, [base, searching, range])
+
+  const groups = useMemo(() => groupByLetter(shown, nameOf), [shown])
+  const letterSet = useMemo(() => new Set(base.map((p) => letterOfName(nameOf(p)))), [base])
+  const fmt = useCallback((name) => formatPlayerName(name, nameFormat), [nameFormat])
+
+  const scrollToLetter = useCallback((letter) => {
+    const el = headerRefs.current[letter]; const sc = scrollRef.current
+    if (el && sc) sc.scrollTop = Math.max(0, el.offsetTop - 4)
+  }, [])
+
+  // Finish a cross-range jump once the new range has rendered its headers.
+  useEffect(() => {
+    if (pendingJump.current) { scrollToLetter(pendingJump.current); pendingJump.current = null }
+  }, [range, shown, scrollToLetter])
+
+  const jumpTo = useCallback((letter) => {
+    if (!searching) {
+      const r = RANGES.find((rg) => letter >= rg.from && letter <= rg.to)
+      if (r && r.key !== range) { pendingJump.current = letter; setRange(r.key); return }
+    }
+    scrollToLetter(letter)
+  }, [searching, range, scrollToLetter])
+
+  // Modal navigation flips through the shown list, wrapping.
+  const shownIds = useMemo(() => shown.map((p) => p.id), [shown])
+  const editingIndex = editingId ? shownIds.indexOf(editingId) : -1
+  const moveModal = useCallback((d) => {
+    if (!shownIds.length) return
+    const i = shownIds.indexOf(editingId)
+    const next = ((i < 0 ? 0 : i) + d + shownIds.length) % shownIds.length
+    setEditingId(shownIds[next])
+  }, [shownIds, editingId])
+
   const handleModalSaved = useCallback((updated) => {
     if (!updated?.id) return
     setPlayers(ps => ps.map(p => p.id === updated.id ? { ...p, ...updated } : p))
@@ -168,12 +297,10 @@ export default function AdminPlayers() {
         first_name: createForm.first_name.trim(),
         last_name: createForm.last_name.trim(),
         playhq_id: createForm.playhq_id.trim() || null,
-        // Stored canonically as "Last, First" so the override sorts by surname
-        // and follows the club's name-format setting, like a synced name.
         display_name_override: joinDisplayName(createForm.display_first, createForm.display_last) || null,
       }
       const created = await api.adminCreatePlayer(payload)
-      setPlayers(ps => [...ps, created].sort((a, b) => nameSortKey(a.display_name || a.name).localeCompare(nameSortKey(b.display_name || b.name))))
+      setPlayers(ps => [...ps, created])
       setCreateForm({ first_name: '', last_name: '', playhq_id: '', display_first: '', display_last: '' })
       setShowCreate(false)
       setMsg('Player created')
@@ -192,22 +319,30 @@ export default function AdminPlayers() {
           playerId={editingId}
           teams={teams}
           canEdit={canEdit}
+          index={editingIndex}
+          total={shownIds.length}
+          onPrev={() => moveModal(-1)}
+          onNext={() => moveModal(1)}
           onClose={() => setEditingId(null)}
           onSaved={handleModalSaved}
         />
       )}
 
-      <div className="max-w-4xl">
-        <div className="flex items-center justify-between mb-5">
-          <h1 className="font-display font-bold text-2xl text-pb-text">Players</h1>
+      <div className="pl-root max-w-[1100px] mx-auto">
+        {/* Page head */}
+        <div className="pl-pagehead">
+          <div>
+            <h1 className="font-display font-bold text-2xl text-pb-text">Players</h1>
+            <div className="pl-sub">{base.length.toLocaleString()} players{scope !== 'all' ? ` · ${scope}` : ''}</div>
+          </div>
           <div className="flex items-center gap-3">
             {msg && <span className="font-mono text-[11px] tracking-wide2" style={{ color: 'var(--pb-accent)' }}>{msg.toUpperCase()}</span>}
             <button
               onClick={() => { setShowCreate(v => !v); setCreateMsg('') }}
-              className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-display font-semibold text-[13.5px] text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
-              {showCreate ? 'CANCEL' : '+ ADD PLAYER'}
+              {showCreate ? 'Cancel' : <><Icon name="plus" size={16} /> Add player</>}
             </button>
           </div>
         </div>
@@ -218,66 +353,44 @@ export default function AdminPlayers() {
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
                 <label className="font-mono text-[10px] text-pb-faintest block mb-1">First Name *</label>
-                <input
-                  autoFocus
-                  type="text"
-                  value={createForm.first_name}
+                <input autoFocus type="text" value={createForm.first_name} required
                   onChange={e => setCreateForm(f => ({ ...f, first_name: e.target.value }))}
-                  required
                   className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-                  placeholder="e.g. John"
-                />
+                  placeholder="e.g. John" />
               </div>
               <div>
                 <label className="font-mono text-[10px] text-pb-faintest block mb-1">Last Name *</label>
-                <input
-                  type="text"
-                  value={createForm.last_name}
+                <input type="text" value={createForm.last_name} required
                   onChange={e => setCreateForm(f => ({ ...f, last_name: e.target.value }))}
-                  required
                   className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-                  placeholder="e.g. Smith"
-                />
+                  placeholder="e.g. Smith" />
               </div>
             </div>
             <div className="mb-3">
               <label className="font-mono text-[10px] text-pb-faintest block mb-1">PlayHQ ID (optional)</label>
-              <input
-                type="text"
-                value={createForm.playhq_id}
+              <input type="text" value={createForm.playhq_id}
                 onChange={e => setCreateForm(f => ({ ...f, playhq_id: e.target.value }))}
                 className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none focus:border-pb-amber"
-                style={{ '--tw-border-opacity': 1 }}
-                placeholder="e.g. a1b2c3d4-e5f6-..."
-              />
+                placeholder="e.g. a1b2c3d4-e5f6-…" />
             </div>
             <div className="mb-3">
               <label className="font-mono text-[10px] text-pb-faintest block mb-1">Display name override (optional)</label>
               <div className="grid grid-cols-2 gap-3">
-                <input
-                  type="text"
-                  value={createForm.display_first}
+                <input type="text" value={createForm.display_first}
                   onChange={e => setCreateForm(f => ({ ...f, display_first: e.target.value }))}
                   className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-                  placeholder="Display first name"
-                />
-                <input
-                  type="text"
-                  value={createForm.display_last}
+                  placeholder="Display first name" />
+                <input type="text" value={createForm.display_last}
                   onChange={e => setCreateForm(f => ({ ...f, display_last: e.target.value }))}
                   className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent"
-                  placeholder="Display last name"
-                />
+                  placeholder="Display last name" />
               </div>
               <p className="font-mono text-[10px] text-pb-faintest mt-1">Leave blank to show the synced name. Sorted by surname.</p>
             </div>
             <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={creating}
+              <button type="submit" disabled={creating}
                 className="px-4 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
-                style={{ background: 'var(--pb-accent)' }}
-              >
+                style={{ background: 'var(--pb-accent)' }}>
                 {creating ? 'CREATING…' : 'CREATE PLAYER'}
               </button>
               {createMsg && <span className="font-mono text-[11px] text-pb-red">{createMsg}</span>}
@@ -285,102 +398,71 @@ export default function AdminPlayers() {
           </form>
         )}
 
-        <div className="relative mb-4">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-pb-faint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search by name (any order), display name or PHQ ID…"
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-            className="w-full bg-pb-surface border pb-hairline rounded pl-9 pr-4 py-2.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent placeholder-pb-faintest"
-          />
+        {/* Search */}
+        <div className="pl-search">
+          <Icon name="search" size={18} style={{ color: 'var(--pb-faint)' }} />
+          <input value={filter} onChange={e => setFilter(e.target.value)}
+            placeholder="Search by name (first or last, any order)…" />
+          {filter && <button className="pl-clear" onClick={() => setFilter('')}><Icon name="close" size={15} /></button>}
         </div>
 
-        <div className="flex items-center gap-2 mb-4">
-          <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Overseas</span>
-          <div className="flex items-center border pb-hairline rounded overflow-hidden">
-            {[
-              { value: 'all',     label: 'All' },
-              { value: 'exclude', label: 'Local' },
-              { value: 'only',    label: 'Overseas' },
-            ].map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setOverseasFilter(opt.value)}
-                className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
-                  overseasFilter === opt.value
-                    ? 'bg-pb-accent/15 text-pb-accent'
-                    : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
-                }`}
-              >
-                {opt.label}
-              </button>
+        {/* Controls: scope + alphabet ranges */}
+        <div className="pl-controls">
+          <div className="inline-flex flex-wrap p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline">
+            {[{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'overseas', label: 'Overseas' }].map((o) => {
+              const active = o.value === scope
+              return (
+                <button key={o.value} type="button" onClick={() => setScope(o.value)}
+                  className={`rounded-md font-display font-semibold text-[13px] px-3 py-1.5 transition ${active ? 'bg-pb-accent/15 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>
+                  {o.label}
+                </button>
+              )
+            })}
+          </div>
+          {!searching && (
+            <div className="pl-ranges">
+              {RANGES.map((r) => (
+                <button key={r.key}
+                  className={`pl-rangetab${range === r.key ? ' on' : ''}${!rangeCounts[r.key] ? ' empty' : ''}`}
+                  onClick={() => { setRange(r.key); if (scrollRef.current) scrollRef.current.scrollTop = 0 }}>
+                  {r.label}<i>{rangeCounts[r.key] || 0}</i>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="pl-shown">{searching ? `${shown.length} match${shown.length === 1 ? '' : 'es'}` : `${shown.length} shown`}</div>
+        </div>
+
+        {/* List + jump rail */}
+        <div className="pl-listwrap" style={{ height: 'calc(100vh - 320px)', minHeight: 360 }}>
+          <div ref={scrollRef} className="pl-scroll bs-scroll sb-prominent">
+            {groups.length === 0 && (
+              <div className="pl-empty">{searching ? `No players match “${filter}”.` : 'No players in this range.'}</div>
+            )}
+            {groups.map(([L, list]) => (
+              <section key={L}>
+                <div className="pl-letterhead" ref={(el) => { headerRefs.current[L] = el }}>
+                  <span>{L}</span><i>{list.length}</i>
+                </div>
+                {list.map((p) => (
+                  <PlayerRow key={p.id} p={p} squadName={squadNameOf(p)} canEdit={canEdit} fmt={fmt} onOpen={() => setEditingId(p.id)} />
+                ))}
+              </section>
             ))}
           </div>
-          <span className="font-mono text-[10px] text-pb-faintest ml-1">
-            Click <span style={{ color: 'var(--pb-accent)' }}>{canEdit ? 'Edit' : 'View'}</span> on any player to open their profile.
-          </span>
-        </div>
 
-        <div className="pb-card overflow-hidden">
-          {filtered.length === 0 && (
-            <div className="px-5 py-8 text-center text-pb-faint font-mono text-[11px]">No players found</div>
-          )}
-          {filtered.map((p, i) => (
-            <div key={p.id} className={`px-5 py-3.5 flex items-start justify-between gap-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-              <div className="min-w-0 flex items-center gap-3">
-                {p.photo_url && (
-                  <img
-                    src={p.photo_url}
-                    alt=""
-                    className="w-8 h-8 rounded-full object-cover shrink-0 border pb-hairline"
-                  />
-                )}
-                <div>
-                  <p className="text-pb-text text-sm font-medium">
-                    {fmt(p.display_name_override || p.name)}
-                    {p.display_name_override && (
-                      <span className="ml-2 font-mono text-[10px] text-pb-faint">(raw: {p.name})</span>
-                    )}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
-                    <span className="font-mono text-[10px] text-pb-faintest">{p.id}</span>
-                    {p.playhq_id ? (
-                      <span className="font-mono text-[10px] text-pb-amber/70">PHQ: {p.playhq_id}</span>
-                    ) : (
-                      <span className="font-mono text-[10px] text-pb-faintest italic">no PHQ ID</span>
-                    )}
-                    {p.gender && (
-                      <span className="font-mono text-[10px] text-pb-faint">{p.gender}</span>
-                    )}
-                    {p.player_role && (
-                      <span className="font-mono text-[10px] text-pb-faint">{p.player_role}</span>
-                    )}
-                    {p.is_player === false && (
-                      <span className="font-mono text-[10px] text-pb-faintest italic">non-player</span>
-                    )}
-                    {p.is_overseas && (
-                      <span className="inline-flex items-center gap-1 font-mono text-[10px] text-pb-amber/80">
-                        {p.overseas_country && countryFlagUrl(p.overseas_country) && (
-                          <img src={countryFlagUrl(p.overseas_country)} alt="" style={{ width: 14, height: 'auto' }} />
-                        )}
-                        {p.overseas_country || 'Overseas'}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setEditingId(p.id)}
-                className="font-mono text-[10px] px-3 py-1.5 rounded border pb-hairline text-pb-faint hover:text-pb-text transition-colors shrink-0"
-              >
-                {canEdit ? 'Edit' : 'View'}
-              </button>
+          {!searching && (
+            <div className="pl-rail">
+              {ALPHABET.map((L) => {
+                const has = letterSet.has(L)
+                const here = groups.some(([g]) => g === L)
+                return (
+                  <button key={L} className={`pl-rail-l${here ? ' here' : ''}${has ? '' : ' off'}`}
+                    disabled={!has} onClick={() => jumpTo(L)}>{L}</button>
+                )
+              })}
             </div>
-          ))}
+          )}
         </div>
       </div>
     </AdminLayout>

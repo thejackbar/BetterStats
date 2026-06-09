@@ -1,0 +1,96 @@
+/* Players admin list — alphabet range tabs, sticky letter headers, an A–Z jump
+   rail and a prominent scrollbar. Ported from docs/players_admin_redesign and
+   re-keyed onto the live Press Box (--pb-*) tokens. Class-prefixed (pl-/pm-) and
+   the two tokens the app lacks (--pb-railbg / --pb-shadow) are defined locally on
+   .pl-root so nothing leaks into the rest of the admin. Theme-aware: the app's
+   theme.css already flips the --pb-* tokens these rules consume. */
+
+.pl-root {
+  --pb-railbg: color-mix(in srgb, var(--pb-surface2) 60%, var(--pb-bg));
+  --pb-shadow: 0 1px 2px rgba(0, 0, 0, .18), 0 12px 32px -16px rgba(0, 0, 0, .5);
+  --font-display: 'Geist', 'Barlow Condensed', 'Oswald', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ── Page head ──────────────────────────────────────────────────────────── */
+.pl-pagehead { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.pl-sub { margin-top: 4px; font-size: 13px; color: var(--pb-faint); font-variant-numeric: tabular-nums; }
+
+/* ── Search ─────────────────────────────────────────────────────────────── */
+.pl-search { display: flex; align-items: center; gap: 11px; height: 48px; padding: 0 16px; border-radius: 12px;
+  background: var(--pb-surface); border: 1px solid var(--pb-hairline2); margin-bottom: 14px; }
+.pl-search:focus-within { border-color: color-mix(in srgb, var(--pb-accent) 50%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pb-accent) 12%, transparent); }
+.pl-search input { flex: 1; background: none; border: none; outline: none; color: var(--pb-text); font-size: 15px; }
+.pl-search input::placeholder { color: var(--pb-faint); }
+.pl-clear { background: var(--pb-surface2); border: none; color: var(--pb-faint); width: 26px; height: 26px; border-radius: 7px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.pl-clear:hover { color: var(--pb-text); }
+
+/* ── Controls (scope + range tabs) ──────────────────────────────────────── */
+.pl-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.pl-ranges { display: inline-flex; gap: 4px; padding: 3px; background: var(--pb-surface); border: 1px solid var(--pb-hairline); border-radius: 10px; flex-wrap: wrap; }
+.pl-rangetab { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 7px; border: none; cursor: pointer;
+  background: transparent; color: var(--pb-dim); font-family: var(--font-display, inherit); font-weight: 600; font-size: 13px; transition: all .14s; }
+.pl-rangetab:hover { color: var(--pb-text); }
+.pl-rangetab i { font-style: normal; font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--pb-faintest); }
+.pl-rangetab.on { background: color-mix(in srgb, var(--pb-accent) 15%, transparent); color: var(--pb-accent); }
+.pl-rangetab.on i { color: color-mix(in srgb, var(--pb-accent) 80%, var(--pb-text)); }
+.pl-rangetab.empty { opacity: .4; }
+.pl-shown { margin-left: auto; font-size: 12px; color: var(--pb-faint); font-variant-numeric: tabular-nums; }
+
+/* ── List + jump rail ───────────────────────────────────────────────────── */
+.pl-listwrap { display: flex; gap: 8px; align-items: stretch; }
+.pl-scroll { position: relative; flex: 1; min-width: 0; overflow-y: auto;
+  background: var(--pb-surface); border: 1px solid var(--pb-hairline); border-radius: 14px; box-shadow: var(--pb-shadow); }
+
+/* prominent scrollbar — the requested fix (standalone so it also works inside a
+   card, e.g. BetterSelect's master list). Needs --pb-railbg, so the element must
+   live under .pl-root. */
+.sb-prominent { scrollbar-width: auto; scrollbar-color: var(--pb-faint) var(--pb-railbg); }
+.sb-prominent::-webkit-scrollbar { width: 15px; }
+.sb-prominent::-webkit-scrollbar-track { background: var(--pb-railbg); }
+.sb-prominent::-webkit-scrollbar-thumb { background: var(--pb-hairline2); border: 3px solid var(--pb-railbg); border-radius: 999px; min-height: 44px; }
+.sb-prominent::-webkit-scrollbar-thumb:hover { background: var(--pb-faint); }
+.pl-scroll.sb-prominent::-webkit-scrollbar-track { border-radius: 0 14px 14px 0; }
+
+.pl-letterhead { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 7px 16px;
+  background: color-mix(in srgb, var(--pb-surface2) 92%, var(--pb-surface)); border-bottom: 1px solid var(--pb-hairline);
+  backdrop-filter: blur(4px); font-family: var(--font-display, inherit); font-weight: 700; font-size: 13px; letter-spacing: .04em; color: var(--pb-accent); }
+.pl-letterhead i { font-style: normal; font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--pb-faintest); }
+
+/* ── Row (Cricket Data → Players) ───────────────────────────────────────── */
+.pl-row { display: flex; align-items: center; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--pb-hairline); cursor: pointer; transition: background .12s; }
+.pl-row:hover { background: var(--pb-surface2); }
+.pl-row-main { flex: 1; min-width: 0; }
+.pl-row-top { display: flex; align-items: center; gap: 9px; flex-wrap: nowrap; min-width: 0; }
+.pl-row-name { font-family: var(--font-display, inherit); font-weight: 600; font-size: 15px; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pl-row-meta { margin-top: 3px; font-size: 12.5px; color: var(--pb-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-badge { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; font-family: var(--font-mono, monospace); font-size: 9.5px; font-weight: 600; letter-spacing: .03em; padding: 2px 7px; border-radius: 999px; }
+.pl-badge.globe { background: color-mix(in srgb, var(--pb-amber) 14%, transparent); color: var(--pb-amber); }
+.pl-badge.mute { background: var(--pb-surface2); color: var(--pb-faint); border: 1px solid var(--pb-hairline2); }
+.pl-squad { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--pb-faint); background: var(--pb-surface2); border: 1px solid var(--pb-hairline); padding: 4px 9px; border-radius: 7px; white-space: nowrap; flex-shrink: 0; }
+.pl-edit { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; font-family: var(--font-display, inherit); font-weight: 600; font-size: 12.5px; color: var(--pb-dim);
+  background: transparent; border: 1px solid var(--pb-hairline2); border-radius: 8px; padding: 6px 12px; cursor: pointer; transition: all .14s; }
+.pl-row:hover .pl-edit { color: var(--pb-accent); border-color: color-mix(in srgb, var(--pb-accent) 45%, transparent); background: color-mix(in srgb, var(--pb-accent) 8%, transparent); }
+.pl-empty { padding: 48px 20px; text-align: center; color: var(--pb-faint); font-size: 14px; }
+
+/* ── A–Z jump rail ──────────────────────────────────────────────────────── */
+.pl-rail { display: flex; flex-direction: column; justify-content: center; gap: 0; padding: 6px 2px; width: 24px; flex-shrink: 0;
+  background: var(--pb-surface); border: 1px solid var(--pb-hairline); border-radius: 999px; align-self: stretch; }
+.pl-rail-l { flex: 1; min-height: 0; border: none; background: none; cursor: pointer; padding: 0; border-radius: 999px;
+  font-family: var(--font-mono, monospace); font-size: 10.5px; font-weight: 600; color: var(--pb-faint); transition: color .1s, background .1s; }
+.pl-rail-l:hover:not(.off) { color: var(--pb-text); }
+.pl-rail-l.here { color: var(--pb-accent); }
+.pl-rail-l.off { color: var(--pb-faintest); opacity: .45; cursor: default; }
+
+/* ── Modal prev/next nav (Cricket Data → Players profile modal) ─────────── */
+.pm-nav { display: inline-flex; align-items: center; gap: 4px; background: var(--pb-surface2); border: 1px solid var(--pb-hairline); border-radius: 9px; padding: 3px; }
+.pm-nav button { width: 30px; height: 30px; border: none; background: none; color: var(--pb-dim); border-radius: 7px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.pm-nav button:hover:not(:disabled) { color: var(--pb-text); background: var(--pb-surface); }
+.pm-nav button:disabled { opacity: .35; cursor: default; }
+.pm-nav span { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--pb-dim); padding: 0 6px; white-space: nowrap; }
+.pm-nav span i { font-style: normal; color: var(--pb-faintest); }
+
+@media (max-width: 640px) {
+  .pl-squad { display: none; }
+  .pl-rail { display: none; }
+}

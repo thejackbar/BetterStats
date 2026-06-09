@@ -11,6 +11,12 @@ import {
   SC1_Broadcast, SC2_Brutalist, SC3_Dashboard,
   PALETTES, orgToPalette,
 } from '../../social/cricket-templates'
+import {
+  FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
+  ResultMarginHero, ResultBroadcast, ResultVersusColumns, ResultStar, ResultInningsBars, ResultTicket,
+  ResultsList, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
+  DEFAULT_FIXTURES, DEFAULT_RESULTS,
+} from '../../social/round-templates'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE REGISTRY
@@ -28,7 +34,28 @@ const TEMPLATES = [
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
   { id: 'C3', name: 'Player Spotlight',component: C3_ManOfMatch,      desc: 'Man of match / player stats',     maxPlayers: 1 },
-  { id: 'C4', name: 'Match Result',    component: C4_FinalScore,      desc: 'Full time result + top performers', maxPlayers: 0 },
+  { id: 'C4', name: 'Result · Classic', component: C4_FinalScore,     desc: 'Full time result + top performers', maxPlayers: 0 },
+  // Single-match result layouts (fold into the Final Score tab alongside C4).
+  { id: 'RS1', name: 'Margin Hero',    component: ResultMarginHero,   desc: 'Big WIN headline + margin',       maxPlayers: 0, kind: 'singleresult' },
+  { id: 'RS2', name: 'Broadcast',      component: ResultBroadcast,    desc: 'Team rows + top performers',      maxPlayers: 0, kind: 'singleresult' },
+  { id: 'RS3', name: 'Versus Columns', component: ResultVersusColumns, desc: 'Two columns, winner lit',        maxPlayers: 0, kind: 'singleresult' },
+  { id: 'RS4', name: 'Star of the Day', component: ResultStar,        desc: 'Player-of-the-match hero',        maxPlayers: 0, kind: 'singleresult' },
+  { id: 'RS5', name: 'Innings Bars',   component: ResultInningsBars,  desc: 'Proportional score bars',         maxPlayers: 0, kind: 'singleresult' },
+  { id: 'RS6', name: 'Match Ticket',   component: ResultTicket,       desc: 'Ticket-stub aesthetic',           maxPlayers: 0, kind: 'singleresult' },
+  // Fixtures roundup — one post, all grades.
+  { id: 'FX1', name: 'List',           component: FixtureList,        desc: 'Clean factual rows',              maxPlayers: 0, kind: 'fixtures' },
+  { id: 'FX2', name: 'Match-day Hype', component: FixtureHype,        desc: 'Diagonal poster',                 maxPlayers: 0, kind: 'fixtures' },
+  { id: 'FX3', name: 'Grid',           component: FixtureGrid,        desc: '2×3 fixture cards',               maxPlayers: 0, kind: 'fixtures' },
+  { id: 'FX4', name: 'Board',          component: FixtureBoard,       desc: 'Departure-board table',           maxPlayers: 0, kind: 'fixtures' },
+  { id: 'FX5', name: 'Headline',       component: FixtureHeadline,    desc: 'Feature match + also-on',         maxPlayers: 0, kind: 'fixtures' },
+  { id: 'FX6', name: 'Schedule',       component: FixtureSchedule,    desc: 'Match-day timeline',              maxPlayers: 0, kind: 'fixtures' },
+  // Results roundup — one post, all grades, win/loss coded.
+  { id: 'RR1', name: 'Weekend Wrap',   component: ResultsList,        desc: 'Win/loss list',                   maxPlayers: 0, kind: 'results' },
+  { id: 'RR2', name: 'W/L Scoreboard', component: ResultsScoreboard,  desc: '2×3 result cards',                maxPlayers: 0, kind: 'results' },
+  { id: 'RR3', name: 'Record Strip',   component: ResultsRecord,      desc: 'W–L record summary',              maxPlayers: 0, kind: 'results' },
+  { id: 'RR4', name: 'Headline',       component: ResultsHeadline,    desc: 'Feature result + others',         maxPlayers: 0, kind: 'results' },
+  { id: 'RR5', name: 'Board',          component: ResultsBoard,       desc: 'Results table',                   maxPlayers: 0, kind: 'results' },
+  { id: 'RR6', name: 'Win/Loss Split', component: ResultsSplit,       desc: 'Wins vs losses columns',          maxPlayers: 0, kind: 'results' },
   { id: 'SC1', name: 'Broadcast',      component: SC1_Broadcast,      desc: 'TV-style full scorecard',         maxPlayers: 0, isScorecard: true },
   { id: 'SC2', name: 'Brutalist',      component: SC2_Brutalist,      desc: 'Bold type, heavy rules',          maxPlayers: 0, isScorecard: true },
   { id: 'SC3', name: 'Dashboard',      component: SC3_Dashboard,      desc: 'Soft cards, app-style',           maxPlayers: 0, isScorecard: true },
@@ -37,19 +64,25 @@ const TEMPLATES = [
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
   T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup',
-  C1: 'announcement', C2: 'toss', C3: 'motm', C4: 'result',
+  FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
+  C1: 'announcement', C2: 'toss', C3: 'motm',
+  C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result',
+  RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
 }
 const TABS = [
   { key: 'lineup',       label: 'Lineup' },
+  { key: 'fixtures',     label: 'Fixtures' },
+  { key: 'result',       label: 'Final Score' },
+  { key: 'results',      label: 'Results' },
+  { key: 'motm',         label: 'Player of Match' },
   { key: 'announcement', label: 'Announcement' },
   { key: 'toss',         label: 'Toss' },
-  { key: 'motm',         label: 'Player of Match' },
-  { key: 'result',       label: 'Final Score' },
   { key: 'scorecard',    label: 'Scorecard' },
 ]
 const TAB_FIRST = {
-  lineup: 'T1', announcement: 'C1', toss: 'C2', motm: 'C3', result: 'C4', scorecard: 'SC1',
+  lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3',
+  result: 'C4', results: 'RR1', scorecard: 'SC1',
 }
 
 const DISPLAY_FONTS = [
@@ -359,10 +392,15 @@ export default function AdminSocialPost() {
   const [toss, setToss] = useState({ winner: 'TEAM', decision: 'BAT' })
   const [motm, setMotm] = useState({ playerIdx: 0, stats: [{ label: 'Runs', value: '' }, { label: 'SR', value: '' }], summary: '' })
   const [result, setResult] = useState({
-    winner: 'TEAM', margin: '', teamScore: '', oppScore: '', motmLast: '',
+    winner: 'TEAM', margin: '', teamScore: '', oppScore: '', teamOvers: '', oppOvers: '', motmLast: '',
+    motmFirst: '', motmRole: '', motmBat: '', motmBowl: '',
     topBatters: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
     topBowlers: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
   })
+  // Fixtures / results roundups — one post, all grades. Seeded with sample rows
+  // so a fresh tab previews well; users edit/add/remove.
+  const [fixtures, setFixtures] = useState(() => DEFAULT_FIXTURES.map((f) => ({ ...f })))
+  const [results, setResults] = useState(() => DEFAULT_RESULTS.map((r) => ({ ...r })))
 
   const renderRef = useRef(null)
 
@@ -737,6 +775,42 @@ export default function AdminSocialPost() {
     season: match.season || '2025–26',
   }
 
+  // Fixtures / single-result / results roundups (new BetterSocials post sets).
+  // They share the club identity, sponsor logos and round meta with the rest.
+  const clubMark = { name: team.name, full: team.fullName, mono: team.monogram, logo: team.logo }
+  const roundMeta = { round: matchData.round, date: matchData.date, comp: matchData.competition, season: matchData.season }
+  if (tmpl.kind === 'fixtures') {
+    extraProps.meta = roundMeta
+    extraProps.fixtures = fixtures
+    extraProps.club = clubMark
+    extraProps.sponsors = scorecardMatch.meta.sponsors
+  }
+  if (tmpl.kind === 'results') {
+    extraProps.meta = roundMeta
+    extraProps.results = results
+    extraProps.club = clubMark
+    extraProps.sponsors = scorecardMatch.meta.sponsors
+  }
+  if (tmpl.kind === 'singleresult') {
+    const mapPerf = (arr) => (arr || []).map((p) => ({ n: p.last, l: p.line })).filter((p) => p.n || p.l)
+    extraProps.result = {
+      comp: matchData.competition, round: matchData.round, date: matchData.date,
+      season: matchData.season, venue: matchData.venue,
+      us: { name: team.name, mono: team.monogram, logo: team.logo, score: result.teamScore || '—', overs: result.teamOvers || '' },
+      them: { name: oppData.name, mono: oppData.monogram, logo: oppData.logo, score: result.oppScore || '—', overs: result.oppOvers || '' },
+      winner: result.winner === 'OPPONENT' ? 'them' : result.winner === 'TIE' ? 'tie' : 'us',
+      margin: result.margin || '',
+      potm: {
+        first: result.motmFirst || '', last: result.motmLast || '', role: result.motmRole || '',
+        bat: result.motmBat || '', bowl: result.motmBowl || '',
+        line: [result.motmBat, result.motmBowl].filter(Boolean).join(' · '),
+      },
+      topBat: { us: mapPerf(result.topBatters.team), them: mapPerf(result.topBatters.opponent) },
+      topBowl: { us: mapPerf(result.topBowlers.team), them: mapPerf(result.topBowlers.opponent) },
+    }
+    extraProps.sponsors = scorecardMatch.meta.sponsors
+  }
+
   const fontStyle = {
     '--social-display-font': displayFont.family,
     '--social-display-font-weight': String(displayFont.weight),
@@ -759,10 +833,13 @@ export default function AdminSocialPost() {
     setToss({ winner: 'TEAM', decision: 'BAT' })
     setMotm({ playerIdx: 0, stats: [{ label: 'Runs', value: '' }, { label: 'SR', value: '' }], summary: '' })
     setResult({
-      winner: 'TEAM', margin: '', teamScore: '', oppScore: '', motmLast: '',
+      winner: 'TEAM', margin: '', teamScore: '', oppScore: '', teamOvers: '', oppOvers: '', motmLast: '',
+      motmFirst: '', motmRole: '', motmBat: '', motmBowl: '',
       topBatters: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
       topBowlers: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
     })
+    setFixtures(DEFAULT_FIXTURES.map((f) => ({ ...f })))
+    setResults(DEFAULT_RESULTS.map((r) => ({ ...r })))
     setScorecardMatch(DEFAULT_SCORECARD)
     setScUrlInput('')
     setScUrlStatus(null)
@@ -782,7 +859,7 @@ export default function AdminSocialPost() {
 
   // ─── Controls ────────────────────────────────────────────────────────────────
   const showMatchInfo = activeTab !== 'scorecard'
-  const showOpponent  = activeTab !== 'scorecard'
+  const showOpponent  = !['scorecard', 'fixtures', 'results'].includes(activeTab)
   const showPlayers   = activeTab !== 'scorecard' && tmpl.maxPlayers > 0
   const showHeroImage = ['T1','T3','T6','T7','C1','C3'].includes(templateId)
 
@@ -1202,8 +1279,8 @@ export default function AdminSocialPost() {
               </section>
             )}
 
-            {/* C4 Final Score */}
-            {templateId === 'C4' && (
+            {/* Final Score — C4 + the single-match result layouts (RS*) */}
+            {activeTab === 'result' && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Match Result</h2>
                 <div className="grid grid-cols-2 gap-3 mb-4">
@@ -1215,12 +1292,22 @@ export default function AdminSocialPost() {
                       <option value="TIE">Tie / No result</option>
                     </select>
                   </Field>
-                  <Field label="Margin"><TextInput value={result.margin} onChange={v => setResult(r => ({ ...r, margin: v }))} placeholder="by 28 runs" /></Field>
-                  <Field label="Our Score"><TextInput value={result.teamScore} onChange={v => setResult(r => ({ ...r, teamScore: v }))} placeholder="182/6 (20)" /></Field>
-                  <Field label="Their Score"><TextInput value={result.oppScore} onChange={v => setResult(r => ({ ...r, oppScore: v }))} placeholder="154/9 (20)" /></Field>
-                  <div className="col-span-2">
-                    <Field label="MOTM Surname"><TextInput value={result.motmLast} onChange={v => setResult(r => ({ ...r, motmLast: v }))} placeholder="HOLT" /></Field>
+                  <Field label="Margin"><TextInput value={result.margin} onChange={v => setResult(r => ({ ...r, margin: v }))} placeholder="BY 4 WICKETS" /></Field>
+                  <Field label="Our Score"><TextInput value={result.teamScore} onChange={v => setResult(r => ({ ...r, teamScore: v }))} placeholder="6/188" /></Field>
+                  <Field label="Their Score"><TextInput value={result.oppScore} onChange={v => setResult(r => ({ ...r, oppScore: v }))} placeholder="184" /></Field>
+                  {tmpl.kind === 'singleresult' && <>
+                    <Field label="Our Overs"><TextInput value={result.teamOvers} onChange={v => setResult(r => ({ ...r, teamOvers: v }))} placeholder="38.2" /></Field>
+                    <Field label="Their Overs"><TextInput value={result.oppOvers} onChange={v => setResult(r => ({ ...r, oppOvers: v }))} placeholder="49.1" /></Field>
+                  </>}
+                  <div className={tmpl.kind === 'singleresult' ? '' : 'col-span-2'}>
+                    <Field label="MOTM Surname"><TextInput value={result.motmLast} onChange={v => setResult(r => ({ ...r, motmLast: v }))} placeholder="OKAFOR" /></Field>
                   </div>
+                  {tmpl.kind === 'singleresult' && <>
+                    <Field label="MOTM First"><TextInput value={result.motmFirst} onChange={v => setResult(r => ({ ...r, motmFirst: v }))} placeholder="JAMES" /></Field>
+                    <Field label="MOTM Role"><TextInput value={result.motmRole} onChange={v => setResult(r => ({ ...r, motmRole: v }))} placeholder="ALL-ROUNDER" /></Field>
+                    <Field label="MOTM Batting"><TextInput value={result.motmBat} onChange={v => setResult(r => ({ ...r, motmBat: v }))} placeholder="94* (71)" /></Field>
+                    <Field label="MOTM Bowling"><TextInput value={result.motmBowl} onChange={v => setResult(r => ({ ...r, motmBowl: v }))} placeholder="2/24" /></Field>
+                  </>}
                 </div>
                 {[
                   { side: 'team', label: `Our Batters`, type: 'topBatters' },
@@ -1251,6 +1338,96 @@ export default function AdminSocialPost() {
                     </div>
                   </div>
                 ))}
+              </section>
+            )}
+
+            {/* Fixtures roundup data */}
+            {activeTab === 'fixtures' && (
+              <section className="pb-card p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Fixtures</h2>
+                  <span className="font-mono text-[9px] text-pb-faintest">{fixtures.length} grades</span>
+                </div>
+                <p className="text-[11px] text-pb-faint mb-3">Round, date &amp; competition come from <strong>Match Info</strong> above.</p>
+                <div className="flex flex-col gap-2">
+                  {fixtures.map((f, i) => {
+                    const set = (patch) => setFixtures(rows => rows.map((r, j) => j === i ? { ...r, ...patch } : r))
+                    return (
+                      <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5">
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 58px 20px' }}>
+                          <input value={f.grade} onChange={e => set({ grade: e.target.value })} placeholder="Grade · 1ST XI"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                          <select value={f.ha} onChange={e => set({ ha: e.target.value })}
+                            className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
+                            <option value="H">Home</option><option value="A">Away</option>
+                          </select>
+                          <button onClick={() => setFixtures(rows => rows.filter((_, j) => j !== i))}
+                            className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                        </div>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 64px' }}>
+                          <input value={f.opp} onChange={e => set({ opp: e.target.value })} placeholder="Opponent name"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
+                          <input value={f.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <input value={f.time} onChange={e => set({ time: e.target.value })} placeholder="12:30 PM"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                          <input value={f.venue} onChange={e => set({ venue: e.target.value })} placeholder="Venue"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <button onClick={() => setFixtures(rows => [...rows, { grade: '', opp: '', oppMono: '', ha: 'H', time: '', venue: '' }])}
+                    className="text-left text-xs text-pb-faint hover:text-pb-accent font-mono">+ Add fixture</button>
+                </div>
+              </section>
+            )}
+
+            {/* Results roundup data */}
+            {activeTab === 'results' && (
+              <section className="pb-card p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Results</h2>
+                  <span className="font-mono text-[9px] text-pb-faintest">{results.length} grades</span>
+                </div>
+                <p className="text-[11px] text-pb-faint mb-3">Round &amp; date come from <strong>Match Info</strong> above. W/L colour-codes the post.</p>
+                <div className="flex flex-col gap-2">
+                  {results.map((r, i) => {
+                    const set = (patch) => setResults(rows => rows.map((x, j) => j === i ? { ...x, ...patch } : x))
+                    return (
+                      <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5">
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 72px 20px' }}>
+                          <input value={r.grade} onChange={e => set({ grade: e.target.value })} placeholder="Grade · 1ST XI"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                          <select value={r.outcome} onChange={e => set({ outcome: e.target.value })}
+                            className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
+                            <option value="W">Won</option><option value="L">Lost</option><option value="T">Tie/NR</option>
+                          </select>
+                          <button onClick={() => setResults(rows => rows.filter((_, j) => j !== i))}
+                            className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                        </div>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 64px' }}>
+                          <input value={r.opp} onChange={e => set({ opp: e.target.value })} placeholder="Opponent name"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
+                          <input value={r.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
+                        </div>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 1fr 1.2fr' }}>
+                          <input value={r.us} onChange={e => set({ us: e.target.value })} placeholder="Us 6/188"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                          <input value={r.them} onChange={e => set({ them: e.target.value })} placeholder="Them 184"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                          <input value={r.margin} onChange={e => set({ margin: e.target.value })} placeholder="BY 4 WICKETS"
+                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <button onClick={() => setResults(rows => [...rows, { grade: '', opp: '', oppMono: '', us: '', them: '', outcome: 'W', margin: '' }])}
+                    className="text-left text-xs text-pb-faint hover:text-pb-accent font-mono">+ Add result</button>
+                </div>
               </section>
             )}
 

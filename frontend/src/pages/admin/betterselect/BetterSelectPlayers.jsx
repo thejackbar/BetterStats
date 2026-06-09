@@ -3,14 +3,15 @@
 // + inline-editable management fields) on the right. The profile UI itself now
 // lives in components/player/PlayerProfilePanel so Admin → Players renders the
 // exact same thing.
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
-import { nameMatchesSearch } from '../../../lib/nameFormat'
+import { nameMatchesSearch, nameSortKey } from '../../../lib/nameFormat'
+import { ALPHABET, RANGES, letterOfName, rangeOfName, groupByLetter } from '../../../lib/playerAlphabet'
 import { PbSpinner } from '../../../lib/presskit'
 import { bowls, bowlingLabel } from '../../../lib/playerAttributes'
 import { Profile, draftFromProfile, patchFromDraft } from '../../../components/player/PlayerProfilePanel'
@@ -20,6 +21,7 @@ import {
   AVAIL_ORDER, AVAILABILITY,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
+import '../../../styles/players-list.css'
 
 function normGender(g) { const s = (g || '').toLowerCase(); return s.startsWith('f') ? 'female' : s.startsWith('m') ? 'male' : '' }
 
@@ -103,8 +105,12 @@ function PlayerList({ players, statusOf, squadNameOf, selectedIds, selectedId, o
   ], [squadOptions])
   const filters = useFilters(facets)
   const { values, search } = filters
+  const searching = search.trim().length > 0
 
-  const list = useMemo(() => players.filter((p) => {
+  const nameOf = (p) => p.display_name || p.name || ''
+
+  // Filtered + surname-sorted. Alphabet range/grouping happens after.
+  const base = useMemo(() => players.filter((p) => {
     if (!values.inactive && p.status === 'inactive') return false
     if (search.trim() && !nameMatchesSearch(p.display_name || p.name, search)) return false
     if (values.role?.length && !values.role.includes(p.player_role)) return false
@@ -119,28 +125,94 @@ function PlayerList({ players, statusOf, squadNameOf, selectedIds, selectedId, o
     if (values.newbie && p.last_played) return false
     if (!playedWithinYears(p.last_played, years)) return false
     return true
-  }), [players, values, search, years, statusOf, selectedIds])
+  }).sort((a, b) => nameSortKey(nameOf(a)).localeCompare(nameSortKey(nameOf(b)))),
+  [players, values, search, years, statusOf, selectedIds])
+
+  const [range, setRange] = useState(RANGES[0].key)
+  const scrollRef = useRef(null)
+  const headerRefs = useRef({})
+  const pendingJump = useRef(null)
+
+  const rangeCounts = useMemo(() => {
+    const m = {}; RANGES.forEach((r) => (m[r.key] = 0))
+    base.forEach((p) => { const k = rangeOfName(nameOf(p)); m[k] = (m[k] || 0) + 1 })
+    return m
+  }, [base])
+  const shown = useMemo(() => searching ? base : base.filter((p) => rangeOfName(nameOf(p)) === range), [base, searching, range])
+  const groups = useMemo(() => groupByLetter(shown, nameOf), [shown])
+  const letterSet = useMemo(() => new Set(base.map((p) => letterOfName(nameOf(p)))), [base])
+
+  const scrollToLetter = useCallback((L) => {
+    const el = headerRefs.current[L]; const sc = scrollRef.current
+    if (el && sc) sc.scrollTop = Math.max(0, el.offsetTop - 4)
+  }, [])
+  useEffect(() => {
+    if (pendingJump.current) { scrollToLetter(pendingJump.current); pendingJump.current = null }
+  }, [range, shown, scrollToLetter])
+  const jumpTo = useCallback((L) => {
+    if (!searching) {
+      const r = RANGES.find((rg) => L >= rg.from && L <= rg.to)
+      if (r && r.key !== range) { pendingJump.current = L; setRange(r.key); return }
+    }
+    scrollToLetter(L)
+  }, [searching, range, scrollToLetter])
 
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const clearSel = () => setSel(new Set())
 
   return (
-    <div className="pb-card bg-pb-surface flex flex-col min-h-0 h-[70vh] lg:h-full overflow-hidden">
+    <div className="pl-root pb-card bg-pb-surface flex flex-col min-h-0 h-[70vh] lg:h-full overflow-hidden">
       <div className="px-3.5 py-3 border-b border-pb-hairline">
         <FilterBar filters={filters} facets={facets} searchPlaceholder="Search players…"
-          count={list.length} total={players.length}
+          count={base.length} total={players.length}
           right={<RecencySelect value={years} onChange={setYears} />} />
       </div>
 
-      <div className="overflow-auto flex-1">
-        {list.length === 0
-          ? <div className="px-4 py-8"><Empty>No players match these filters.</Empty></div>
-          : list.map((p) => (
-            <PlayerRow key={p.id} p={p} active={p.id === selectedId} selected={sel.has(p.id)}
-              status={statusOf(p.id)} squadName={squadNameOf(p)}
-              onSelect={() => onSelect(p.id)} onOpenProfile={() => onOpenProfile(p.id)} onToggleSel={() => toggleSel(p.id)}
-              onEditAvail={onEditAvail} canEditAvail={!!onEditAvail} />
-          ))}
+      {!searching && (
+        <div className="px-3 py-2 border-b border-pb-hairline flex items-center gap-2 flex-wrap">
+          <div className="pl-ranges">
+            {RANGES.map((r) => (
+              <button key={r.key}
+                className={`pl-rangetab${range === r.key ? ' on' : ''}${!rangeCounts[r.key] ? ' empty' : ''}`}
+                onClick={() => { setRange(r.key); if (scrollRef.current) scrollRef.current.scrollTop = 0 }}>
+                {r.label}<i>{rangeCounts[r.key] || 0}</i>
+              </button>
+            ))}
+          </div>
+          <span className="pl-shown">{shown.length} shown</span>
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0 flex gap-1.5 p-1.5">
+        <div ref={scrollRef} className="relative overflow-auto flex-1 min-w-0 bs-scroll sb-prominent rounded-lg">
+          {shown.length === 0
+            ? <div className="px-4 py-8"><Empty>{searching ? 'No players match these filters.' : 'No players in this range.'}</Empty></div>
+            : groups.map(([L, glist]) => (
+              <section key={L}>
+                <div className="pl-letterhead" ref={(el) => { headerRefs.current[L] = el }}>
+                  <span>{L}</span><i>{glist.length}</i>
+                </div>
+                {glist.map((p) => (
+                  <PlayerRow key={p.id} p={p} active={p.id === selectedId} selected={sel.has(p.id)}
+                    status={statusOf(p.id)} squadName={squadNameOf(p)}
+                    onSelect={() => onSelect(p.id)} onOpenProfile={() => onOpenProfile(p.id)} onToggleSel={() => toggleSel(p.id)}
+                    onEditAvail={onEditAvail} canEditAvail={!!onEditAvail} />
+                ))}
+              </section>
+            ))}
+        </div>
+        {!searching && (
+          <div className="pl-rail">
+            {ALPHABET.map((L) => {
+              const has = letterSet.has(L)
+              const here = groups.some(([g]) => g === L)
+              return (
+                <button key={L} className={`pl-rail-l${here ? ' here' : ''}${has ? '' : ' off'}`}
+                  disabled={!has} onClick={() => jumpTo(L)}>{L}</button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {canEdit && sel.size > 0 && (
