@@ -306,6 +306,41 @@ function TextInput({ value, onChange, placeholder }) {
   )
 }
 
+// Pull a whole round (all grades) from Play.cricket — the multi-match analogue
+// of the scorecard URL import. Lets the operator pick a match-day when the club
+// played across more than one date.
+function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick }) {
+  const rowsOf = (d) => (d ? d[rowsKey] || [] : [])
+  return (
+    <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from Play.cricket</p>
+      <div className="flex gap-2 items-center">
+        <button onClick={onPull} disabled={status === 'loading'}
+          className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+          style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+          {status === 'loading' ? 'Loading…' : 'Pull from Play.cricket'}
+        </button>
+        {dates.length > 1 && (
+          <select value={idx} onChange={e => onPick(+e.target.value)}
+            className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
+            {dates.map((d, i) => (
+              <option key={d.date || i} value={i}>{d.label}{d.round ? ` · ${d.round}` : ''} ({rowsOf(d).length})</option>
+            ))}
+          </select>
+        )}
+      </div>
+      {status === 'ok' && dates.length > 0 && (
+        <p className="font-mono text-[9px] mt-1.5 text-green-400">✓ {rowsOf(dates[idx]).length} loaded · {dates[idx]?.label}</p>
+      )}
+      {status && status !== 'loading' && status !== 'ok' && (
+        <p className="font-mono text-[9px] mt-1.5 text-pb-faint">
+          {status === 'empty' ? `No ${hint} found for the current season.` : `✗ ${status}`}
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
@@ -401,6 +436,9 @@ export default function AdminSocialPost() {
   // so a fresh tab previews well; users edit/add/remove.
   const [fixtures, setFixtures] = useState(() => DEFAULT_FIXTURES.map((f) => ({ ...f })))
   const [results, setResults] = useState(() => DEFAULT_RESULTS.map((r) => ({ ...r })))
+  // Play.cricket round import (the multi-match analogue of the scorecard import).
+  const [fxImport, setFxImport] = useState({ status: null, dates: [], idx: 0, season: null })
+  const [rrImport, setRrImport] = useState({ status: null, dates: [], idx: 0, season: null })
 
   const renderRef = useRef(null)
 
@@ -497,6 +535,39 @@ export default function AdminSocialPost() {
       setScUrlStatus(e?.message || 'Failed to load scorecard')
     }
   }
+
+  // ── Play.cricket fixtures / results round import ────────────────────────────
+  const applyFxDate = useCallback((d, season) => {
+    if (!d) return
+    setFixtures((d.fixtures || []).map(f => ({ ...f })))
+    setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
+  }, [])
+  const importFixtures = useCallback(async () => {
+    setFxImport(s => ({ ...s, status: 'loading' }))
+    try {
+      const data = await api.getSocialFixtures()
+      const dates = data.dates || []
+      if (!dates.length) { setFxImport({ status: 'empty', dates: [], idx: 0, season: data.season }); return }
+      setFxImport({ status: 'ok', dates, idx: 0, season: data.season })
+      applyFxDate(dates[0], data.season)
+    } catch (e) { setFxImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
+  }, [applyFxDate])
+
+  const applyRrDate = useCallback((d, season) => {
+    if (!d) return
+    setResults((d.results || []).map(r => ({ ...r })))
+    setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
+  }, [])
+  const importResults = useCallback(async () => {
+    setRrImport(s => ({ ...s, status: 'loading' }))
+    try {
+      const data = await api.getSocialResults()
+      const dates = data.dates || []
+      if (!dates.length) { setRrImport({ status: 'empty', dates: [], idx: 0, season: data.season }); return }
+      setRrImport({ status: 'ok', dates, idx: 0, season: data.season })
+      applyRrDate(dates[0], data.season)
+    } catch (e) { setRrImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
+  }, [applyRrDate])
 
   const patchScMeta = patch => setScorecardMatch(m => ({ ...m, meta: { ...m.meta, ...patch } }))
   const patchScTeam = (side, patch) => setScorecardMatch(m => ({ ...m, [side]: { ...m[side], ...patch } }))
@@ -1349,6 +1420,10 @@ export default function AdminSocialPost() {
                   <span className="font-mono text-[9px] text-pb-faintest">{fixtures.length} grades</span>
                 </div>
                 <p className="text-[11px] text-pb-faint mb-3">Round, date &amp; competition come from <strong>Match Info</strong> above.</p>
+                <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
+                  status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
+                  onPull={importFixtures}
+                  onPick={(i) => { setFxImport(s => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
                 <div className="flex flex-col gap-2">
                   {fixtures.map((f, i) => {
                     const set = (patch) => setFixtures(rows => rows.map((r, j) => j === i ? { ...r, ...patch } : r))
@@ -1393,6 +1468,10 @@ export default function AdminSocialPost() {
                   <span className="font-mono text-[9px] text-pb-faintest">{results.length} grades</span>
                 </div>
                 <p className="text-[11px] text-pb-faint mb-3">Round &amp; date come from <strong>Match Info</strong> above. W/L colour-codes the post.</p>
+                <RoundImportBox hint="recent results" rowsKey="results"
+                  status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
+                  onPull={importResults}
+                  onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
                 <div className="flex flex-col gap-2">
                   {results.map((r, i) => {
                     const set = (patch) => setResults(rows => rows.map((x, j) => j === i ? { ...x, ...patch } : x))
