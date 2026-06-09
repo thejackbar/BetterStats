@@ -8,6 +8,7 @@ import SeasonSelector from '../components/SeasonSelector'
 import { useClubData } from '../hooks/useClubData'
 import { Label, Card, PageHeader, PbSpinner, TabBar } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
+import { fmtOvers } from '../lib/cricketFormat'
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
 
@@ -203,7 +204,7 @@ function BowlingTab({ data, latestSeason, fmt = n => n }) {
           rows={(data.top_economy || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
             <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.economy != null ? Number(r.economy).toFixed(2) : '—'}</span>,
-            r.wickets ?? '—', r.overs ?? '—',
+            r.wickets ?? '—', fmtOvers(r.overs),
           ])}
         />
       </RecordSection>

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { PbSpinner, TabBar, Label, AnimatedNum } from '../lib/presskit'
+import { fmtOvers } from '../lib/cricketFormat'
 import { resolveAwardLabel } from '../lib/achievementOptions'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { useAuth } from '../contexts/AuthContext'
@@ -738,7 +739,7 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
               </span>,
               p.matches ?? '—',
               <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.wickets ?? '—'}</span>,
-              fmt(p.overs, 1),
+              fmtOvers(p.overs),
               fmt(p.average),
               fmt(p.economy),
               fmt(p.strike_rate),
@@ -798,7 +799,7 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
                 </span>,
                 <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.best_figures || '—'}</span>,
                 p.wickets ?? '—',
-                fmt(p.overs, 1),
+                fmtOvers(p.overs),
                 fmt(p.average),
               ])}
             />

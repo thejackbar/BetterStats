@@ -8,6 +8,7 @@
  *
  * See ScreenshotOrMock.jsx for the fallback wrapper.
  */
+import { fmt2 } from '../../lib/cricketFormat'
 
 // ── Browser chrome wrapper ────────────────────────────────────────────────
 function BrowserChrome({ url, children }) {
@@ -209,8 +210,8 @@ export function MockLeaderboard() {
                 <td className="py-2.5 font-medium">{r.name}</td>
                 <td className="py-2.5 text-right font-mono tabular-nums">{r.games}</td>
                 <td className="py-2.5 text-right font-mono tabular-nums font-semibold">{r.runs}</td>
-                <td className="py-2.5 text-right font-mono tabular-nums text-pb-dim">{r.avg.toFixed(2)}</td>
-                <td className="py-2.5 text-right font-mono tabular-nums text-pb-dim">{r.sr.toFixed(1)}</td>
+                <td className="py-2.5 text-right font-mono tabular-nums text-pb-dim">{fmt2(r.avg)}</td>
+                <td className="py-2.5 text-right font-mono tabular-nums text-pb-dim">{fmt2(r.sr)}</td>
                 <td className="py-2.5 text-right font-mono tabular-nums text-pb-dim">{r.hs}</td>
               </tr>
             ))}

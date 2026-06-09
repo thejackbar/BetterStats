@@ -749,7 +749,7 @@ async def player_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
     if dismissals:
         bits.append(f"Most often out {dismissals[0]['type']} ({dismissals[0]['pct']}%).")
     if best_opp:
-        bits.append(f"Enjoys facing {best_opp[0]['name']} (avg {best_opp[0]['average']}).")
+        bits.append(f"Enjoys facing {best_opp[0]['name']} (avg {best_opp[0]['average']:.2f}).")
     scouting_note = " ".join(bits)
 
     return {
@@ -899,7 +899,7 @@ async def bowler_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
             bits.append(f"Mops up the lower order — {round(100 * tail / tot_pos)}% of wickets bat 8 or below.")
     if quality and kr >= 5:
         if (quality["set_pct"] or 0) >= 45:
-            bits.append(f"Removes set batters (their scalps average {quality['scalp_value']}).")
+            bits.append(f"Removes set batters (their scalps average {quality['scalp_value']:.2f}).")
         elif (quality["new_pct"] or 0) >= 50:
             bits.append("Strikes early — usually gets batters before they're in.")
     if dism:

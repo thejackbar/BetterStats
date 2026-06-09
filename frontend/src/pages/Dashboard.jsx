@@ -13,6 +13,7 @@ import {
   AnimatedNum, Sparkline, MiniBars, Label, Card, Btn,
   ResultPill, Kpi, PageHeader, PbSpinner,
 } from '../lib/presskit'
+import { fmt2, fmtCount } from '../lib/cricketFormat'
 
 const SPONSOR_IMAGE = import.meta.env.VITE_SPONSOR_IMAGE || ''
 const SPONSOR_URL = import.meta.env.VITE_SPONSOR_URL || ''
@@ -186,10 +187,10 @@ export default function Dashboard() {
           eyebrow={`${org.short_name || org.name} · CLUB DASHBOARD`}
           title={org.name}
           meta={[
-            summary && <span key="m">PLAYED <span className="text-pb-text">{summary.total_games}</span></span>,
-            summary && <span key="r"><span className="text-pb-text">{summary.total_runs?.toLocaleString()}</span> RUNS</span>,
-            summary && <span key="w"><span className="text-pb-text">{summary.total_wickets}</span> WICKETS</span>,
-            summary && <span key="p"><span className="text-pb-text">{summary.total_players}</span> PLAYERS</span>,
+            summary && <span key="m">PLAYED <span className="text-pb-text">{fmtCount(summary.total_games)}</span></span>,
+            summary && <span key="r"><span className="text-pb-text">{fmtCount(summary.total_runs)}</span> RUNS</span>,
+            summary && <span key="w"><span className="text-pb-text">{fmtCount(summary.total_wickets)}</span> WICKETS</span>,
+            summary && <span key="p"><span className="text-pb-text">{fmtCount(summary.total_players)}</span> PLAYERS</span>,
           ].filter(Boolean)}
           actions={[
             <Btn key="sync" onClick={handleSync} disabled={syncing}>
@@ -257,11 +258,11 @@ export default function Dashboard() {
                     <Link to={`/players/${p.player_id}`} className="flex-1 min-w-0">
                       <div className="text-pb-text text-[14px] font-semibold truncate">{fmt(p.name)}</div>
                       <div className="text-pb-faint font-mono text-[10.5px] tracking-wide2">
-                        AVG {p.average != null ? Number(p.average).toFixed(2) : '—'} · HS {p.high_score ?? '—'}
+                        AVG {fmt2(p.average)} · HS {p.high_score ?? '—'}
                       </div>
                     </Link>
                     <span className="font-mono text-pb-text text-[14px] font-bold pb-num w-12 text-right" style={{ color: "var(--pb-accent)" }}>
-                      {p.total_runs}
+                      {fmtCount(p.total_runs)}
                     </span>
                   </li>
                 ))}
@@ -282,14 +283,14 @@ export default function Dashboard() {
                     <Link to={`/players/${p.player_id}`} className="flex-1 min-w-0">
                       <div className="text-pb-text text-[14px] font-semibold truncate">{fmt(p.name)}</div>
                       <div className="text-pb-faint font-mono text-[10.5px] tracking-wide2">
-                        AVG {p.average != null ? Number(p.average).toFixed(2) : '—'} · ECON {p.economy != null ? Number(p.economy).toFixed(2) : '—'} · BEST {
+                        AVG {fmt2(p.average)} · ECON {fmt2(p.economy)} · BEST {
                           p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') :
-                          p.best_figures_wickets != null ? `${p.best_figures_wickets}w` : '—'
+                          p.best_figures_wickets != null ? `${fmtCount(p.best_figures_wickets)} wickets` : '—'
                         }
                       </div>
                     </Link>
                     <span className="font-mono text-pb-text text-[14px] font-bold pb-num w-12 text-right" style={{ color: "var(--pb-accent)" }}>
-                      {p.total_wickets}w
+                      {fmtCount(p.total_wickets)}
                     </span>
                   </li>
                 ))}

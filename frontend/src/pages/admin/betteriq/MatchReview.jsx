@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
-import { Card, Note, Tag, Btn, Empty, PageIntro } from './ui'
+import { Card, Note, Tag, Btn, Empty, PageIntro, fmtCount, fmtOvers } from './ui'
 
 const ord = (k) => ({ 1: '1st', 2: '2nd', 3: '3rd' }[k] || `${k}th`)
 
@@ -145,7 +145,7 @@ function GameReviewDetail({ review }) {
                     <span className="font-semibold text-[14px] truncate">{p.name}</span>
                   </div>
                   <span className="iq-num font-semibold text-[13.5px] whitespace-nowrap">
-                    {p.wickets ?? 0}/{p.runs ?? 0}{p.overs != null ? ` (${p.overs})` : ''}
+                    {p.wickets ?? 0}/{p.runs ?? 0}{p.overs != null ? ` (${fmtOvers(p.overs)})` : ''}
                   </span>
                 </div>
               ))}
@@ -159,7 +159,7 @@ function GameReviewDetail({ review }) {
         <Card eyebrow="best stand">
           {bp ? (
             <>
-              <div className="iq-headline iq-num" style={{ fontSize: 26 }}>{bp.runs}</div>
+              <div className="iq-headline iq-num" style={{ fontSize: 26 }}>{fmtCount(bp.runs)}</div>
               <div className="text-pb-dim text-[12.5px] mt-1 leading-snug">
                 {bp.batters}{bp.wicket ? ` · ${ord(bp.wicket)} wkt` : ''}
               </div>
@@ -167,13 +167,13 @@ function GameReviewDetail({ review }) {
           ) : <Empty>—</Empty>}
         </Card>
         <Card eyebrow="extras conceded">
-          <div className="iq-headline iq-num" style={{ fontSize: 26 }}>{review.extras_conceded ?? 0}</div>
+          <div className="iq-headline iq-num" style={{ fontSize: 26 }}>{fmtCount(review.extras_conceded ?? 0)}</div>
           <div className="text-pb-dim text-[12.5px] mt-1">wides + no-balls</div>
         </Card>
         <Card eyebrow="key collapse">
           {collapse ? (
             <>
-              <div className="iq-headline iq-num" style={{ fontSize: 26, color: 'var(--pb-red)' }}>3 for {collapse.runs}</div>
+              <div className="iq-headline iq-num" style={{ fontSize: 26, color: 'var(--pb-red)' }}>3 for {fmtCount(collapse.runs)}</div>
               <div className="text-pb-dim text-[12.5px] mt-1 leading-snug">from the {ord(collapse.start_wicket)} wicket</div>
             </>
           ) : (

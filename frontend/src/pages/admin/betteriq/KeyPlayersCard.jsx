@@ -10,9 +10,7 @@
  * bowlers, plus form / vs_us / risk / confidence / plan / key_note / alert.
  */
 import { useState } from 'react'
-import { Icon, CountUp, Sparkline, Tag, Segmented, surname, a2 } from './ui'
-
-function num(v, d = '—') { return (v === null || v === undefined) ? d : v }
+import { Icon, CountUp, Sparkline, Tag, Segmented, surname, a2, runsPhrase, wktsPhrase } from './ui'
 
 /* recent_scores may be strings ('67*', '12') — parse to ints for the sparkline */
 function toInt(v) { const n = parseInt(String(v).replace(/[*]/g, ''), 10); return Number.isNaN(n) ? 0 : n }
@@ -45,15 +43,15 @@ export default function KeyPlayersCard({ title, subtitle, players, kind = 'bat' 
   const isBat = kind === 'bat'
   const spark = isBat ? (p.recent_scores || []).map(toInt) : (p.recent_wickets || [])
   const headline = isBat ? p.runs : p.wickets
-  const unit = isBat ? 'runs' : 'wkts'
-  const sub = isBat ? `avg ${a2(p.average)} · SR ${num(p.strike_rate)}` : `avg ${a2(p.average)} · econ ${a2(p.economy)}`
+  const unit = isBat ? 'runs' : 'wickets'
+  const sub = isBat ? `avg ${a2(p.average)} · SR ${a2(p.strike_rate)}` : `avg ${a2(p.average)} · econ ${a2(p.economy)}`
   const formLabel = p.form === 'hot' ? 'In form' : p.form === 'cold' ? 'Out of form' : null
   const formColor = p.form === 'hot' ? 'var(--pb-brand)' : p.form === 'cold' ? 'var(--pb-red)' : 'var(--pb-amber)'
   const vs = p.vs_us
   const riskColor = p.risk === 'high' ? 'var(--pb-red)' : p.risk === 'medium' ? 'var(--pb-amber)' : 'var(--pb-faint)'
   const recentStr = isBat
-    ? (p.recent_scores || []).join('  ')
-    : (p.recent_wickets || []).map(w => `${w}w`).join('  ')
+    ? (p.recent_scores || []).join(' · ')
+    : (p.recent_wickets || []).join(' · ')
 
   return (
     <div className="iq-card overflow-hidden" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 28%, transparent)' }}>
@@ -92,8 +90,8 @@ export default function KeyPlayersCard({ title, subtitle, players, kind = 'bat' 
               <span className="text-pb-faint" style={{ fontSize: 14, fontWeight: 500, marginLeft: 4 }}>{unit}</span>
             </div>
             {vs && (isBat
-              ? (vs.runs ? <div className="text-pb-faint text-[11.5px] iq-num mt-1">{vs.runs} @ {a2(vs.average)} vs us</div> : null)
-              : (vs.wickets ? <div className="text-pb-faint text-[11.5px] iq-num mt-1">{vs.wickets}w @ {a2(vs.average)} vs us</div> : null))}
+              ? (vs.runs ? <div className="text-pb-faint text-[11.5px] iq-num mt-1">{runsPhrase(vs.runs, vs.average)} vs us</div> : null)
+              : (vs.wickets ? <div className="text-pb-faint text-[11.5px] iq-num mt-1">{wktsPhrase(vs.wickets, vs.average)} vs us</div> : null))}
           </div>
         </div>
 

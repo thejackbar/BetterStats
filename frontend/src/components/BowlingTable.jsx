@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
+import { fmtOvers, fmtEconomy } from '../lib/cricketFormat'
 
 export default function BowlingTable({ spells = [], showPlayer = false }) {
   const [sort, setSort] = useState({ key: 'wickets', dir: 'desc' })
@@ -76,7 +77,7 @@ export default function BowlingTable({ spells = [], showPlayer = false }) {
                 </td>
                 <td className="py-2.5 px-3 font-mono text-[11px] text-pb-dim max-w-[180px] truncate">{match}</td>
                 <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint">{row.grade_name || '—'}</td>
-                <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.overs != null ? Number(row.overs).toFixed(1) : '—'}</td>
+                <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{fmtOvers(row.overs)}</td>
                 <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.maidens ?? '—'}</td>
                 <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">{row.runs ?? '—'}</td>
                 <td className="py-2.5 px-3">
@@ -90,7 +91,7 @@ export default function BowlingTable({ spells = [], showPlayer = false }) {
                   </span>
                 </td>
                 <td className="py-2.5 px-3 font-mono text-sm text-pb-dim">
-                  {row.economy != null ? Number(row.economy).toFixed(2) : '—'}
+                  {fmtEconomy(row.economy)}
                 </td>
                 <td className="py-2.5 px-3 font-mono text-sm text-pb-faint">{row.wides ?? '—'}</td>
                 <td className="py-2.5 px-3 font-mono text-sm text-pb-faint">{row.no_balls ?? '—'}</td>

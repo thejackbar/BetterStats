@@ -7,6 +7,7 @@ import { api } from '../lib/api'
 import Dropdown from '../components/Dropdown'
 import ClubInactive from './ClubInactive'
 import { Label, Card, Btn, PageHeader, PbSpinner } from '../lib/presskit'
+import { fmt2, fmtCount, fmtOvers } from '../lib/cricketFormat'
 
 // ─── Static config ────────────────────────────────────────────────────────────
 
@@ -1857,9 +1858,17 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
 
 function formatCell(v, col) {
   if (v == null || v === '') return '—'
-  if (col?.decimal) return Number(v).toFixed(2)
+  // Overs are base-6 cricket notation (10.2 = 10 overs 2 balls), never a decimal.
+  if (col?.key === 'overs') return fmtOvers(v)
+  // Averages / strike rates / economy → always 2 decimals.
+  if (col?.decimal) return fmt2(v)
   if (col?.key === 'played_at' && typeof v === 'string') {
     try { return new Date(v).toISOString().slice(0, 10) } catch { return v }
+  }
+  // Numeric counts (runs, wickets, matches, balls…) → thousands separators.
+  // Leave non-numeric values (e.g. best-bowling "5/28" strings) untouched.
+  if (typeof v === 'number' || (typeof v === 'string' && v !== '' && !Number.isNaN(Number(v)))) {
+    return fmtCount(v)
   }
   return v
 }

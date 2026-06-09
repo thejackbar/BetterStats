@@ -636,7 +636,7 @@ async def _our_performers_vs(
                 p.status AS status,
                 COALESCE(SUM(bs.wickets), 0) AS wickets,
                 COALESCE(SUM(bs.runs), 0) AS runs,
-                COALESCE(SUM(bs.overs), 0) AS overs,
+                COALESCE(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)), 0) AS balls,
                 MAX(bs.wickets) AS best_wkts
             FROM v_effective_bowling_spells bs
             JOIN v_effective_games g ON g.id = bs.game_id{_ORG_SCOPE}
@@ -657,7 +657,7 @@ async def _our_performers_vs(
     for r in bowling.mappings():
         wkts = r["wickets"] or 0
         runs = r["runs"] or 0
-        overs = float(r["overs"] or 0)
+        balls = float(r["balls"] or 0)
         top_bowling.append(
             {
                 "player_id": r["id"],
@@ -666,7 +666,7 @@ async def _our_performers_vs(
                 "wickets": wkts,
                 "runs": runs,
                 "average": round(runs / wkts, 2) if wkts else None,
-                "economy": round(runs / overs, 2) if overs else None,
+                "economy": round(runs / (balls / 6), 2) if balls else None,
                 "best_wickets": r["best_wkts"],
             }
         )

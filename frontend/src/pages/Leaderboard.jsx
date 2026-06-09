@@ -11,6 +11,7 @@ import {
   Label, Card, PageHeader, PbSpinner,
 } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
+import { fmt2, fmtCount } from '../lib/cricketFormat'
 
 const BATTING_SORTS = [
   { key: 'total_runs',    label: 'MOST RUNS' },
@@ -224,10 +225,10 @@ function BattingTable({ rows, sortBy, fmt = n => n }) {
                 {cols.map(c => {
                   let val
                   const isPrimary = (c === 'RUNS' && sortBy === 'total_runs') || (c === 'AVG' && sortBy === 'average') || (c === 'HS' && sortBy === 'high_score') || (c === '50s' && sortBy === 'fifties') || (c === '100s' && sortBy === 'hundreds') || (c === '6s' && sortBy === 'total_sixes') || (c === '4s' && sortBy === 'total_fours') || (c === 'DUCKS' && sortBy === 'ducks')
-                  if (c === 'M')    val = p.games ?? '—'
-                  else if (c === 'RUNS')  val = p.total_runs ?? '—'
+                  if (c === 'M')    val = p.games != null ? fmtCount(p.games) : '—'
+                  else if (c === 'RUNS')  val = p.total_runs != null ? fmtCount(p.total_runs) : '—'
                   else if (c === 'INN')   val = p.innings ?? '—'
-                  else if (c === 'AVG')   val = p.average != null ? Number(p.average).toFixed(2) : '—'
+                  else if (c === 'AVG')   val = fmt2(p.average)
                   else if (c === 'HS')    val = p.high_score ?? '—'
                   else if (c === '50s')   val = p.fifties ?? '—'
                   else if (c === '100s')  val = p.hundreds ?? '—'
@@ -282,17 +283,19 @@ function BowlingTable({ rows, sortBy, fmt = n => n }) {
                 <td className="py-3 pr-3 text-right">
                   <span className="font-mono text-[15px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
                     {sortBy === 'best_figures_wickets'
-                      ? (p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') : p.best_figures_wickets != null ? `${p.best_figures_wickets}w` : '—')
+                      ? (p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') : p.best_figures_wickets != null ? `${fmtCount(p.best_figures_wickets)} wickets` : '—')
+                      : (sortBy === 'economy' || sortBy === 'average') ? fmt2(p[sortBy])
+                      : sortBy === 'total_wickets' ? (p.total_wickets != null ? fmtCount(p.total_wickets) : '—')
                       : (p[sortBy] ?? '—')}
                   </span>
                 </td>
                 {sortBy !== 'total_wickets' && (
-                  <td className="py-3 pr-3 font-mono text-pb-text text-right">{p.total_wickets ?? '—'}</td>
+                  <td className="py-3 pr-3 font-mono text-pb-text text-right">{p.total_wickets != null ? fmtCount(p.total_wickets) : '—'}</td>
                 )}
-                <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.average != null ? Number(p.average).toFixed(2) : '—'}</td>
-                <td className="py-3 pr-3 font-mono text-pb-dim text-right">{p.economy != null ? Number(p.economy).toFixed(2) : '—'}</td>
+                <td className="py-3 pr-3 font-mono text-pb-dim text-right">{fmt2(p.average)}</td>
+                <td className="py-3 pr-3 font-mono text-pb-dim text-right">{fmt2(p.economy)}</td>
                 <td className="py-3 pr-5 font-mono text-pb-dim text-right">
-                  {p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') : p.best_figures_wickets != null ? `${p.best_figures_wickets}w` : '—'}
+                  {p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') : p.best_figures_wickets != null ? `${fmtCount(p.best_figures_wickets)} wickets` : '—'}
                 </td>
               </tr>
             ))}

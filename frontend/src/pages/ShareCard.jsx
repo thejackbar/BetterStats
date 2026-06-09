@@ -2,6 +2,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner } from '../lib/presskit'
+import { fmt2, fmtCount } from '../lib/cricketFormat'
 import betterStatsLogo from '../assets/betterstatslogo_white.png'
 
 function hexWithAlpha(hex, alpha) {
@@ -166,9 +167,9 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
             {[
               { label: 'M', value: cb.games },
               { label: 'Inns', value: cb.innings },
-              { label: 'Runs', value: cb.total_runs, highlight: true },
+              { label: 'Runs', value: cb.total_runs != null ? fmtCount(cb.total_runs) : null, highlight: true },
               { label: 'HS', value: cb.high_score },
-              { label: 'Ave', value: cb.average },
+              { label: 'Ave', value: cb.average != null ? fmt2(cb.average) : null },
             ].map(({ label, value, highlight }) => (
               <div key={label} style={{ textAlign: 'center' }}>
                 <div style={{
@@ -211,10 +212,10 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: isMobile ? 8 : 12 }}>
             {[
-              { label: 'Wkts', value: cbw.total_wickets, highlight: true },
-              { label: 'Ave', value: cbw.average },
-              { label: 'Econ', value: cbw.economy },
-              { label: 'Best', value: cbw.best_bowling_figures || (cbw.best_figures_wickets ? `${cbw.best_figures_wickets}w` : '—') },
+              { label: 'Wkts', value: cbw.total_wickets != null ? fmtCount(cbw.total_wickets) : null, highlight: true },
+              { label: 'Ave', value: cbw.average != null ? fmt2(cbw.average) : null },
+              { label: 'Econ', value: cbw.economy != null ? fmt2(cbw.economy) : null },
+              { label: 'Best', value: cbw.best_bowling_figures || (cbw.best_figures_wickets ? `${fmtCount(cbw.best_figures_wickets)} wickets` : '—') },
             ].map(({ label, value, highlight }) => (
               <div key={label} style={{ textAlign: 'center' }}>
                 <div style={{
@@ -250,10 +251,10 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: isMobile ? 8 : 12 }}>
             {[
-              { label: 'Ct', value: cf.total_catches_non_wk ?? cf.total_catches, highlight: true },
-              { label: 'Ct (WK)', value: cf.total_catches_wk },
-              { label: 'RO', value: cf.total_run_outs },
-              { label: 'Stmps', value: cf.total_stumpings },
+              { label: 'Ct', value: fmtCount(cf.total_catches_non_wk ?? cf.total_catches), highlight: true },
+              { label: 'Ct (WK)', value: fmtCount(cf.total_catches_wk) },
+              { label: 'RO', value: fmtCount(cf.total_run_outs) },
+              { label: 'Stmps', value: fmtCount(cf.total_stumpings) },
             ].map(({ label, value, highlight }) => (
               <div key={label} style={{ textAlign: 'center' }}>
                 <div style={{
@@ -326,7 +327,7 @@ export default function ShareCard() {
 
   const handleShare = async () => {
     const url = window.location.href
-    const text = `${player.name} — ${cb?.total_runs ?? 0} runs, ${cbw?.total_wickets ?? 0} wickets | BetterStats`
+    const text = `${player.name} — ${fmtCount(cb?.total_runs ?? 0)} runs, ${fmtCount(cbw?.total_wickets ?? 0)} wickets | BetterStats`
 
     if (navigator.share) {
       try {

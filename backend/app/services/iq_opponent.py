@@ -333,7 +333,7 @@ def _finalise_bat(pid: str, b: dict) -> dict:
         "not_outs": b["no"],
         "high_score": (f"{b['hs']}*" if b["hs_no"] else str(b["hs"])) if b["hs"] is not None else None,
         "average": avg,
-        "strike_rate": round(100 * runs / balls, 1) if balls else None,
+        "strike_rate": round(100 * runs / balls, 2) if balls else None,
         "fifties": fifties,
         "hundreds": hundreds,
         "fours": b["fours"],
@@ -361,7 +361,7 @@ def _finalise_bowl(pid: str, b: dict) -> dict:
         "wickets": wkts,
         "average": round(runs / wkts, 2) if wkts else None,
         "economy": round(runs / (balls / 6), 2) if balls else None,
-        "strike_rate": round(balls / wkts, 1) if wkts else None,
+        "strike_rate": round(balls / wkts, 2) if wkts else None,
         "best": (f"{b['best_w']}/{b['best_r']}" if b["best_w"] >= 0 else None),
         "five_fors": b["five_fors"],
         "recent_wickets": [s["wkts"] for s in log[:5]],
@@ -934,7 +934,7 @@ def _partnership_insight(partnerships: list[dict]) -> str | None:
         if best_open["avg_partnership"] >= 30 and best_open["avg_partnership"] >= avg_rest * 1.8:
             bits.append(
                 f"They lean on their openers — the {_ordinal(best_open['wicket'])}-wicket stand averages "
-                f"{best_open['avg_partnership']} but the middle order is far thinner; break it early and the scoring stalls."
+                f"{best_open['avg_partnership']:.2f} but the middle order is far thinner; break it early and the scoring stalls."
             )
     # A real soft spot in the top/middle order (never the tail).
     soft = min((p for p in top_mid if p["wicket"] >= 2), key=lambda p: p["avg_partnership"], default=None)
@@ -985,7 +985,8 @@ def _enrich_batter(b: dict, rank: int) -> None:
     seed = b.get("player_id") or b.get("name") or ""
     # A rotating, archetype-aware scouting description (varied per player) plus a
     # concise factual line — so two danger bats never read the same.
-    stat = f"{b['runs']} runs @ {avg if avg is not None else '—'} this season"
+    avg_s = f"{avg:.2f}" if avg is not None else "—"
+    stat = f"{b['runs']:,} runs @ {avg_s} this season"
     if b.get("form") == "hot":
         stat += " and striking it well"
     elif b.get("form") == "cold":
@@ -1012,7 +1013,7 @@ def _enrich_batter(b: dict, rank: int) -> None:
 
     vs = b.get("vs_us")
     if vs and vs.get("average") and (avg is None or vs["average"] >= avg):
-        bits.append(f"Averages {vs['average']} against us specifically.")
+        bits.append(f"Averages {vs['average']:.2f} against us specifically.")
 
     # Danger vs paper-tiger read (brief §16.2/16.3). Be inclusive about danger so
     # the *obvious* threats (top scorer, in form, high average, history vs us) all
@@ -1031,9 +1032,9 @@ def _enrich_batter(b: dict, rank: int) -> None:
     # A big average is only a *danger* signal off a sound, un-flattered sample —
     # otherwise it's a paper-tiger tell handled below.
     if avg is not None and avg >= 35 and sound and not flattered:
-        danger_reasons.append(f"averages {avg}")
+        danger_reasons.append(f"averages {avg:.2f}")
     if vs and vs.get("average") and vs["average"] >= 30 and (avg is None or vs["average"] >= avg):
-        danger_reasons.append(f"{vs['average']} vs us")
+        danger_reasons.append(f"{vs['average']:.2f} vs us")
     if (b.get("fifties") or 0) + (b.get("hundreds") or 0) >= 3:
         danger_reasons.append("piles up big scores")
     if flattered and avg:
@@ -1056,14 +1057,15 @@ def _enrich_bowler(b: dict, rank: int) -> None:
     econ = b.get("economy")
     arch = iq_phrases.bowler_archetype(b, rank)
     seed = b.get("player_id") or b.get("name") or ""
-    stat = f"{b['wickets']} wkts @ {avg if avg is not None else '—'}"
+    avg_s = f"{avg:.2f}" if avg is not None else "—"
+    stat = f"{b['wickets']:,} wicket{'' if b['wickets'] == 1 else 's'} @ {avg_s}"
     if econ is not None:
-        stat += f", economy {econ}"
+        stat += f", economy {econ:.2f}"
     bits = [iq_phrases.bowler_note(arch, seed), stat + "."]
     tight = econ is not None and econ < 4.0
     vs = b.get("vs_us")
     if vs and vs.get("wickets"):
-        bits.append(f"Has {vs['wickets']} wkts against us before.")
+        bits.append(f"Has {vs['wickets']:,} wicket{'' if vs['wickets'] == 1 else 's'} against us before.")
     b["key_note"] = " ".join(bits)
     b["plan"] = iq_phrases.bowler_plan(arch, seed)
 
@@ -1131,7 +1133,7 @@ def _game_plan(danger_batters, danger_bowlers, bowlers):
     warning = None
     if remove:
         vs = remove.get("vs_us")
-        warning = (f"{remove['name']} averages {vs['average']} against us." if vs and vs.get("average")
+        warning = (f"{remove['name']} averages {vs['average']:.2f} against us." if vs and vs.get("average")
                    else f"{remove['name']} is their danger man.")
     return {
         "remove_early": {"name": remove["name"], "why": remove.get("key_note")} if remove else None,

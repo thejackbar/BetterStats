@@ -8,7 +8,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
-import { Icon, Btn, Tag, Empty, Search, Card, Note, PageIntro, Initials, a2 } from './ui'
+import { Icon, Btn, Tag, Empty, Search, Card, Note, PageIntro, Initials, a2, runsPhrase, wktsPhrase } from './ui'
 
 /* ── role + scoring model (ported from the design, fed by real fields) ─────── */
 const ROLE_CHIP = {
@@ -287,7 +287,7 @@ function Analysis({ data, fixtureId, onNavigate }) {
                       <div className="text-pb-faint text-[11.5px] iq-num">form {a2(p.form)}</div>
                     </div>
                     <RoleChip role={p.role} />
-                    <span className="iq-num text-pb-dim text-[12.5px] w-10 text-right shrink-0 hidden sm:block">{p.role === 'BWL' ? `${p.wkts}w` : `${p.runs}r`}</span>
+                    <span className="iq-num text-pb-dim text-[12.5px] text-right shrink-0 hidden sm:block whitespace-nowrap">{p.role === 'BWL' ? wktsPhrase(p.wkts) : runsPhrase(p.runs)}</span>
                     <button onClick={() => removeFromXi(p.id)} title="Remove from XI" className="shrink-0 transition" style={{ color: 'var(--pb-faint)', padding: 4, borderRadius: 6 }}
                       onMouseEnter={e => { e.currentTarget.style.color = 'var(--pb-red)'; e.currentTarget.style.background = 'color-mix(in srgb, var(--pb-red) 12%, transparent)' }}
                       onMouseLeave={e => { e.currentTarget.style.color = 'var(--pb-faint)'; e.currentTarget.style.background = 'transparent' }}>

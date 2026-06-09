@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
+import { fmtStrikeRate } from '../lib/cricketFormat'
 
 export default function BattingTable({ innings = [], showPlayer = false }) {
   const [sort, setSort] = useState({ key: 'played_at', dir: 'desc' })
@@ -83,7 +84,7 @@ export default function BattingTable({ innings = [], showPlayer = false }) {
                 <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint">{row.fours ?? '—'}</td>
                 <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint">{row.sixes ?? '—'}</td>
                 <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint">
-                  {row.strike_rate != null ? Number(row.strike_rate).toFixed(1) : '—'}
+                  {fmtStrikeRate(row.strike_rate)}
                 </td>
                 <td className="py-2.5 px-3 font-mono text-[11px] text-pb-faint capitalize">
                   {row.dismissal_type || (row.not_out ? 'not out' : '—')}
