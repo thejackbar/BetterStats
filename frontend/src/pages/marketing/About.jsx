@@ -16,7 +16,7 @@ function Hero() {
           The cricket stats platform <span className="gradient-text">your club deserves.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim leading-relaxed max-w-2xl mx-auto">
-          BetterStats was built to do one thing well — turn the data your club already produces into a public website your members will actually open.
+          Better Cricket was built to do one thing well — turn the data your club already produces into a public website your members will actually open.
         </p>
       </div>
     </section>
@@ -31,10 +31,10 @@ function Story() {
           <p className="pill-neutral inline-flex mb-6">What we do</p>
           <div className="space-y-5 text-lg text-pb-dim leading-relaxed">
             <p>
-              BetterStats was built by a group of people fed up with the way club cricket history gets forgotten as platforms change hands. Every migration — MyCricket to PlayHQ, association to association — left decades of records sitting in a corner nobody could reach.
+              Better Cricket was built by a group of people fed up with the way club cricket history gets forgotten as the systems clubs rely on change hands. Every move — one platform to the next, association to association — left decades of records sitting in a corner nobody could reach.
             </p>
             <p>
-              Australian cricket clubs are full of people who care about that history — who hit the first century, who took the most wickets in a season, who's closing in on 100 games. <span className="text-pb-text">BetterStats makes that information beautiful, accessible, and automatic.</span>
+              Australian cricket clubs are full of people who care about that history — who hit the first century, who took the most wickets in a season, who's closing in on 100 games. <span className="text-pb-text">Better Cricket makes that information beautiful, accessible, and automatic.</span>
             </p>
             <p>
               We want to give clubs what they deserve: a better way to keep their history alive and a platform members will actually open every week.
@@ -117,7 +117,7 @@ function Promise_() {
                 We welcome <span className="gradient-text">feedback and feature requests.</span>
               </h2>
               <p className="text-pb-dim leading-relaxed mb-5">
-                BetterStats is built by cricketers, for cricketers. We listen to the captains, committee members, statisticians and the kids who just want to see their own century on a profile page.
+                Better Cricket is built by cricketers, for cricketers. We listen to the captains, committee members, statisticians and the kids who just want to see their own century on a profile page.
               </p>
               <p className="text-pb-text font-medium mb-6">
                 If something is missing — tell us. If it's important to you, it's important to us.
@@ -136,7 +136,7 @@ function Promise_() {
                 Built for Australian clubs.
               </h3>
               <p className="text-sm text-pb-dim leading-relaxed mb-4">
-                BetterStats currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
+                Better Cricket currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
               </p>
               <p className="text-sm text-pb-dim leading-relaxed">
                 Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link> — it helps us prioritise.
@@ -156,12 +156,15 @@ function ContactBlock() {
         <p className="pill-neutral inline-flex mb-5">Get in touch</p>
         <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">Have a question? <span className="gradient-text">Drop us a line.</span></h2>
         <p className="text-lg text-pb-dim mb-8">
-          Wondering if BetterStats is right for your club? Email <a href={`mailto:${SUPPORT_EMAIL}`} className="text-accent hover:underline">{SUPPORT_EMAIL}</a>{' '}— happy to chat.
+          Wondering if Better Cricket is right for your club? Email <a href={`mailto:${SUPPORT_EMAIL}`} className="text-accent hover:underline">{SUPPORT_EMAIL}</a>{' '}— happy to chat.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <Link to="/contact" className="cta-primary">Get in touch →</Link>
           <Link to="/features" className="cta-secondary">See the product</Link>
         </div>
+        <p className="mt-10 text-xs text-pb-faint">
+          Better Cricket is made by BetterSports (ABN 32 624 335 397), Perth, Western Australia.
+        </p>
       </div>
     </section>
   )
@@ -169,10 +172,10 @@ function ContactBlock() {
 
 export default function About() {
   usePageMeta({
-    title: 'About — BetterStats Cricket Stats Platform',
-    description: 'BetterStats was built by a group of people fed up with the way platform migrations leave decades of club cricket history forgotten. A modern, automated stats platform for Australian cricket clubs.',
-    image: 'https://betterstats.cricket/og-image.png',
-    url: 'https://betterstats.cricket/about',
+    title: 'About — Better Cricket Stats Platform',
+    description: 'Better Cricket was built by a group of people fed up with the way changing systems leave decades of club cricket history forgotten. A modern, automated stats platform for Australian cricket clubs.',
+    image: 'https://betterat.cricket/og-image.png',
+    url: 'https://betterat.cricket/about',
   })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">

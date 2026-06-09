@@ -2,7 +2,7 @@
 //
 // Fetches the club + site config once, applies the club's theme, and renders a
 // website sub-nav + a branded footer (social links, contact, a subtle
-// "Powered by BetterStats" credit) around the page. The site config is exposed
+// "Powered by Better Cricket" credit) around the page. The site config is exposed
 // via context so the homepage doesn't have to re-fetch it. If the club hasn't
 // enabled its website, we bounce to the stats dashboard.
 import { createContext, useContext, useEffect, useState } from 'react'
@@ -111,8 +111,8 @@ export default function WebsiteChrome({ slug, active, children }) {
           </div>
           <div className="mt-8 pt-6 border-t pb-hairline-t flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] font-mono tracking-wide2 text-pb-faintest">
             <span>© {new Date().getFullYear()} {site.name}</span>
-            <a href="https://betterstats.cricket" target="_blank" rel="noopener noreferrer" className="hover:text-pb-faint">
-              Powered by BetterStats
+            <a href="https://betterat.cricket" target="_blank" rel="noopener noreferrer" className="hover:text-pb-faint">
+              Powered by Better Cricket
             </a>
           </div>
         </div>

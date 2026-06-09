@@ -12,12 +12,12 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 const PRICING_JSONLD = {
   '@context': 'https://schema.org',
   '@type': 'Product',
-  name: 'Better — Cricket Club Platform',
+  name: 'Better Cricket — Cricket Club Platform',
   description:
-    'A modular platform for Australian cricket clubs. Core stats and a public club site (BetterStats) plus bolt-on modules for selection, socials, fees and analytics. Sold as Good / Better / Best tiers.',
-  brand: { '@type': 'Brand', name: 'Better' },
-  url: 'https://betterstats.cricket/pricing',
-  image: 'https://betterstats.cricket/og-image.png',
+    'A modular platform for Australian cricket clubs. Core stats and a public club site (BetterStats) plus bolt-on modules for selection, socials, club admin and analytics. Sold as Good / Better / Best tiers.',
+  brand: { '@type': 'Brand', name: 'Better Cricket' },
+  url: 'https://betterat.cricket/pricing',
+  image: 'https://betterat.cricket/og-image.png',
   offers: TIER_ORDER.map((key) => {
     const t = TIER_INFO[key]
     return {
@@ -26,7 +26,7 @@ const PRICING_JSONLD = {
       price: String(t.annual),
       priceCurrency: 'AUD',
       availability: 'https://schema.org/InStock',
-      url: 'https://betterstats.cricket/pricing',
+      url: 'https://betterat.cricket/pricing',
       priceSpecification: { '@type': 'UnitPriceSpecification', price: String(t.annual), priceCurrency: 'AUD', unitText: 'ANN' },
     }
   }),
@@ -151,7 +151,7 @@ function Calculator({ billing }) {
 function ValueTable() {
   const rows = [
     ['Branded public club site', 'Saves your committee', '~$1,200 in dev fees'],
-    ['Nightly PlayHQ sync', 'Saves your statistician', '~3 hr/week'],
+    ['Nightly automatic stats sync', 'Saves your statistician', '~3 hr/week'],
     ['Historical sync — as far back as your data goes', 'Saves the archive project', 'Hours of work, once'],
     ['Auto-built season yearbook', 'Saves your committee', '~2 weekends/yr'],
     ['Shareable stat cards', 'Saves your social manager', '~30 min/week'],
@@ -195,7 +195,7 @@ function ValueTable() {
 function PricingFAQ() {
   const [open, setOpen] = useState(0)
   const faqs = [
-    { q: 'What’s the difference between the tiers?', a: 'Good is the Core — BetterStats stats and your public club site. Better adds BetterSelect (availability + selection) and BetterSocials (branded social posts) to run your season. Best adds BetterFees (treasury) and BetterIQ (analytics + opposition scouting) to run the whole club.' },
+    { q: 'What’s the difference between the tiers?', a: 'Good is the Core — BetterStats stats and your public club site. Better adds BetterSelect (availability + selection) and BetterSocials (branded social posts) to run your season. Best adds BetterAdmin (fees, comms and merch) and BetterIQ (analytics + opposition scouting) to run the whole club.' },
     { q: 'Does the price change based on club size?', a: 'No. Every tier is a flat rate — one team or fifty teams, juniors and seniors, men’s and women’s, the fee is the same. No per-team, per-player or per-grade pricing.' },
     { q: 'Can I add a single module without moving up a tier?', a: 'Yes — any one module can be bolted onto a lower tier à-la-carte. We price add-ons so that two of them cost more than simply moving up a tier, so for most clubs the tier is the better deal. Get in touch and we’ll sort it.' },
     { q: 'Monthly or annual?', a: 'Either. Annual is billed once and works out to roughly two months free — and it carries you through the April–September off-season without a monthly bill landing on a club with no fixtures.' },
@@ -238,11 +238,11 @@ function PricingFAQ() {
 export default function Pricing() {
   const [billing, setBilling] = useState('annual')
   usePageMeta({
-    title: 'Pricing — Good / Better / Best tiers for cricket clubs | Better',
+    title: 'Pricing — Good / Better / Best tiers for cricket clubs | Better Cricket',
     description:
-      'Simple, flat-rate pricing for Australian cricket clubs. Good $449/yr (Core stats + public site), Better $649/yr (+ selection & socials), Best $999/yr (+ fees & BetterIQ analytics). One price per club regardless of size, billed monthly or annually.',
-    image: 'https://betterstats.cricket/og-image.png',
-    url: 'https://betterstats.cricket/pricing',
+      'Simple, flat-rate pricing for Australian cricket clubs. Good $449/yr (Core stats + public site), Better $649/yr (+ selection & socials), Best $999/yr (+ BetterAdmin & BetterIQ analytics). One price per club regardless of size, billed monthly or annually.',
+    image: 'https://betterat.cricket/og-image.png',
+    url: 'https://betterat.cricket/pricing',
     jsonLd: PRICING_JSONLD,
   })
   return (

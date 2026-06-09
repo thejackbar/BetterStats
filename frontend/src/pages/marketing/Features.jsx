@@ -4,6 +4,7 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
+import Comparison3Way from '../../components/marketing/Comparison3Way'
 import {
   MockLeaderboard,
   MockPlayerProfile,
@@ -24,13 +25,13 @@ const HERO_SECTIONS = [
     n: '01',
     eyebrow: 'Automatic Stats Sync',
     title: 'Connect once. Sync forever.',
-    desc: 'BetterStats syncs everything already available online and lets you fill in the gaps with simple CSV templates for the data that isn\'t. Stats update after every match — no spreadsheets to maintain.',
+    desc: 'Connect your club once and your whole match history is imported — then every new game flows in on its own. Stats stay current after every match, with zero data entry and no spreadsheets to maintain.',
     bullets: [
-      'Pulls every match available online into your club site automatically',
-      'Historical CSV imports for older data using our simple templates',
+      'Connect once and your full match history is imported automatically',
+      'Simple CSV templates to fill any gaps in older data',
       'Batting, bowling, and fielding stats captured per player per game',
       'Season aggregates and career totals computed automatically',
-      'Weekly scheduled sync runs overnight — nothing to trigger',
+      'Stays current after every match — nothing to trigger, no data entry',
       'Admin-triggered hard refresh available for on-demand updates',
     ],
     src: SCREENSHOT_PATHS.featuresLeaderboard,
@@ -58,7 +59,7 @@ const HERO_SECTIONS = [
     n: '03',
     eyebrow: 'Player Merge Tool',
     title: 'One player. One profile. Stats stop splitting.',
-    desc: "Multiple PlayCricket profiles for the same player used to scatter stats across two or three records. The Player Merge Tool fixes that — and keeps it fixed.",
+    desc: "Duplicate profiles for the same player used to scatter stats across two or three records. The Player Merge Tool fixes that — and keeps it fixed.",
     bullets: [
       'Smart sorting suggests which profiles likely belong to the same player',
       'One click to merge — all batting, bowling, fielding history combines',
@@ -202,7 +203,7 @@ function Hero() {
           The Core: <span className="gradient-text">BetterStats.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-xl mx-auto leading-relaxed">
-          Your club’s reconciled history and a public site to be proud of — included in every Better plan. Here’s everything it does.
+          Your club’s reconciled history and a public site to be proud of — included in every Better Cricket plan. Here’s everything it does.
         </p>
       </div>
     </section>
@@ -328,9 +329,9 @@ function FeaturesCTA() {
 export default function Features() {
   usePageMeta({
     title: 'Features — Automated Cricket Club Stats | BetterStats',
-    description: 'Every feature included with BetterStats: automatic PlayHQ/MyCricket sync, rich player profiles, leaderboards, all-time records, partnership records, season yearbooks, StatLab custom queries, awards & honours management, and admin tools.',
-    image: 'https://betterstats.cricket/og-image.png',
-    url: 'https://betterstats.cricket/features',
+    description: 'Automatic stats sync, rich player profiles, leaderboards, records and season yearbooks — the Core of Better Cricket. Plus partnership records, StatLab custom queries, awards & honours management, and admin tools.',
+    image: 'https://betterat.cricket/og-image.png',
+    url: 'https://betterat.cricket/features',
   })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
@@ -341,6 +342,7 @@ export default function Features() {
           <FeatureBlock key={f.n} f={f} idx={i} />
         ))}
         <ShortFeatures />
+        <Comparison3Way which="betterstats" />
         <BeyondCore />
         <FeaturesCTA />
       </div>

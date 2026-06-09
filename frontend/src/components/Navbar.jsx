@@ -119,13 +119,13 @@ export default function Navbar() {
   };
 
   const customLogo = club?.logo_url || null;
-  const displayName = club?.name || slug || "BetterStats";
+  const displayName = club?.name || slug || "Better Cricket";
   const displayShort = displayName
     .split(" ")
     .map((w) => w[0])
     .join("")
     .toUpperCase()
-    .slice(0, 4) || "BS";
+    .slice(0, 4) || "BC";
 
   const DROPDOWNS = slug ? {
     stats: [
@@ -174,13 +174,13 @@ export default function Navbar() {
           >
             <img
               src={customLogo || betterStatsLogo}
-              alt={customLogo ? displayName : "BetterStats"}
+              alt={customLogo ? displayName : "Better Cricket"}
               className="w-8 h-8 rounded object-contain"
             />
             <div className="hidden md:block leading-tight">
               <div className="text-pb-text text-[13px] font-semibold tracking-tight">{displayName}</div>
               <div className="text-pb-faint text-[10px] font-mono tracking-wide2">
-                {customLogo ? slug?.toUpperCase() : "BETTERSTATS"} · {SITE_VERSION}
+                {customLogo ? slug?.toUpperCase() : "BETTER CRICKET"} · {SITE_VERSION}
               </div>
             </div>
             <div className="md:hidden text-pb-text text-[13px] font-bold tracking-wide2">{displayShort}</div>
@@ -255,14 +255,14 @@ export default function Navbar() {
             <Link
               to="/"
               className="hidden md:flex items-center gap-1.5 shrink-0 ml-3 group"
-              title="Powered by BetterStats"
+              title="Powered by Better Cricket"
             >
               <span className="hidden sm:block text-pb-faint text-[9px] font-mono tracking-wide2 uppercase">
                 Powered by
               </span>
               <img
                 src={betterStatsLogo}
-                alt="BetterStats"
+                alt="Better Cricket"
                 className="w-6 h-6 object-contain opacity-75 group-hover:opacity-100 transition"
               />
             </Link>
@@ -351,7 +351,7 @@ export default function Navbar() {
                 className="flex items-center gap-2 py-2 text-pb-faint text-[10px] font-mono tracking-wide2 uppercase"
               >
                 <img src={betterStatsLogo} alt="" className="w-5 h-5 opacity-75" />
-                Powered by BetterStats
+                Powered by Better Cricket
               </Link>
             )}
           </div>

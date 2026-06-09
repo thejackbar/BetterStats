@@ -247,7 +247,7 @@ export default function AdminFeesMembers() {
         <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
           <div>
             <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Members</h1>
-            <p className="text-pb-faint text-sm">Membership &amp; match-day fees owed. Days played sync from PlayHQ automatically.</p>
+            <p className="text-pb-faint text-sm">Membership &amp; match-day fees owed. Days played sync automatically.</p>
           </div>
           <div className="flex items-center gap-2">
             <select value={seasonId} onChange={e => setSeasonId(e.target.value)} className={inp}>

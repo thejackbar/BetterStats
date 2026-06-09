@@ -320,7 +320,7 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
 
       {/* PlayHQ ID + non-player flag */}
       <div className="mt-3 pt-3 border-t border-pb-hairline flex flex-wrap gap-x-3.5 gap-y-2 items-end">
-        <Field label="PlayHQ ID" half>
+        <Field label="Player ID" half>
           <PInput value={draft.playhq_id} onChange={(v) => set('playhq_id', v)} placeholder="—" />
         </Field>
         <label className="inline-flex items-center gap-1.5 text-[11px] text-pb-faintest cursor-pointer pb-2.5">

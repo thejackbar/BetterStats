@@ -27,7 +27,7 @@ function ArticleBody({ slug, newsSlug }) {
     title: article ? `${article.title} — ${site.name}` : `News — ${site.name}`,
     description: article?.summary || null,
     image: article?.cover_image_url || null,
-    url: `https://betterstats.cricket/${slug}/website/news/${newsSlug}`,
+    url: `https://betterat.cricket/${slug}/website/news/${newsSlug}`,
   })
 
   if (loading) return <div className="max-w-3xl mx-auto px-4 py-16"><PbSpinner message="Loading…" /></div>

@@ -203,7 +203,7 @@ export default function SuperClubs() {
 
             <div ref={searchWrapRef} className="relative">
               <label className="font-mono text-[10px] text-pb-faint block mb-1">
-                Search Cricket Australia *
+                Search for a club *
               </label>
               <div className="relative">
                 <input
@@ -348,7 +348,7 @@ export default function SuperClubs() {
                     onClick={() => syncClub(club)}
                     disabled={syncing === club.id}
                     className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
-                    title="Pull latest games & stats from Cricket Australia"
+                    title="Pull latest games & stats"
                   >
                     {syncing === club.id ? 'Syncing…' : 'Sync'}
                   </button>

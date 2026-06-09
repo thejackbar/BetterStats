@@ -2,92 +2,107 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <!-- Marketing pages -->
   <url>
-    <loc>https://betterstats.cricket/</loc>
+    <loc>https://betterat.cricket/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/features</loc>
+    <loc>https://betterat.cricket/overview</loc>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/pricing</loc>
+    <loc>https://betterat.cricket/features</loc>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/compare</loc>
+    <loc>https://betterat.cricket/modules</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://betterat.cricket/pricing</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://betterat.cricket/compare</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/faq</loc>
+    <loc>https://betterat.cricket/faq</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/blog</loc>
+    <loc>https://betterat.cricket/blog</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/blog/why-your-cricket-club-needs-a-public-stats-page</loc>
+    <loc>https://betterat.cricket/blog/why-your-cricket-club-needs-a-public-stats-page</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/blog/what-your-club-lost-when-it-moved-to-playhq</loc>
+    <loc>https://betterat.cricket/blog/why-your-clubs-history-keeps-getting-lost</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/blog/betterstats-season-yearbook</loc>
+    <loc>https://betterat.cricket/blog/season-yearbook-automatically-generated</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/blog/how-cricket-statistics-build-club-culture</loc>
+    <loc>https://betterat.cricket/blog/how-to-merge-duplicate-player-records</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/blog/cricket-milestones-numbers-that-define-a-career</loc>
+    <loc>https://betterat.cricket/blog/how-cricket-statistics-build-club-culture</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/blog/what-is-a-good-batting-average-in-club-cricket</loc>
+    <loc>https://betterat.cricket/blog/cricket-milestones-numbers-that-define-a-career</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/blog/5-reasons-your-cricket-club-is-losing-its-stats-history</loc>
+    <loc>https://betterat.cricket/blog/what-is-a-good-batting-average-in-club-cricket</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/blog/understanding-bowling-economy-rate-in-club-cricket</loc>
+    <loc>https://betterat.cricket/blog/5-reasons-your-cricket-club-is-losing-its-stats-history</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/about</loc>
+    <loc>https://betterat.cricket/blog/understanding-bowling-economy-rate-in-club-cricket</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://betterat.cricket/about</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/contact</loc>
+    <loc>https://betterat.cricket/contact</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/terms</loc>
+    <loc>https://betterat.cricket/terms</loc>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
-    <loc>https://betterstats.cricket/privacy</loc>
+    <loc>https://betterat.cricket/privacy</loc>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>

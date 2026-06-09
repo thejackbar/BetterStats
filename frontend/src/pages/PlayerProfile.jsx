@@ -2122,7 +2122,7 @@ export default function PlayerProfile() {
     if (bowling?.total_wickets != null) parts.push(`${bowling.total_wickets} wickets`)
     if (batting.games != null) parts.push(`${batting.games} matches`)
     const club = org?.name ? `${org.name} cricket` : 'club cricket'
-    return parts.length ? `${parts.join(' · ')} — ${club} statistics on BetterStats.` : null
+    return parts.length ? `${parts.join(' · ')} — ${club} statistics on Better Cricket.` : null
   })()
   const playerJsonLd = (() => {
     if (!player || !metaName) return null
@@ -2130,7 +2130,7 @@ export default function PlayerProfile() {
       '@context': 'https://schema.org',
       '@type': 'Person',
       name: metaName,
-      url: `https://betterstats.cricket/players/${player.id}`,
+      url: `https://betterat.cricket/players/${player.id}`,
       sport: 'Cricket',
     }
     if (data?.player?.photo_url) ld.image = data.player.photo_url
@@ -2139,13 +2139,13 @@ export default function PlayerProfile() {
         '@type': 'SportsTeam',
         name: org.name,
         sport: 'Cricket',
-        ...(org.slug ? { url: `https://betterstats.cricket/${org.slug}` } : {}),
+        ...(org.slug ? { url: `https://betterat.cricket/${org.slug}` } : {}),
       }
     }
     return ld
   })()
   usePageMeta({
-    title: metaName ? `${metaName} — Cricket Career Stats | BetterStats` : null,
+    title: metaName ? `${metaName} — Cricket Career Stats | Better Cricket` : null,
     description: metaDesc,
     image: data?.player?.photo_url || org?.logo_url || null,
     jsonLd: playerJsonLd,

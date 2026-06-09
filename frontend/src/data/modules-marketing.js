@@ -1,9 +1,13 @@
-// Marketing copy + helpers for the Better module ecosystem.
+// Marketing copy + helpers for the Better Cricket module ecosystem.
 //
-// The platform is **Better**. Every club gets the **Core (BetterStats)** — data
-// ingestion, reconciled stats and the public club site — and bolts on the
-// modules below. Prices live in src/lib/modules.js (TIER_INFO) so the public
-// pages and the in-app entitlement system never drift apart.
+// The platform is **Better Cricket** (from BetterSports). Every club gets the
+// **Core (BetterStats)** — data ingestion, reconciled stats and the public club
+// site — and bolts on the modules below. Prices live in src/lib/modules.js
+// (TIER_INFO) so the public pages and the in-app entitlement system never drift.
+//
+// The bolt-ons mirror the in-app umbrella tiles: BetterSelect, BetterSocials
+// (the post designer + the club website), BetterAdmin (the back office — fees,
+// comms and merch) and BetterIQ.
 
 import { MODULE, TIER, TIER_INFO, TIER_ORDER } from '../lib/modules'
 
@@ -21,7 +25,7 @@ export const CORE_MARKETING = {
   to: '/features',
 }
 
-// Showcase image for the Modules hub hero (the uploaded "Better Modules" shot).
+// Showcase image for the Modules hub hero.
 export const HUB_SHOWCASE = '/marketing/modules/better-modules.jpg'
 
 // ── Bolt-on modules ─────────────────────────────────────────────────────────
@@ -34,17 +38,18 @@ export const MODULES_MARKETING = [
     icon: '◎',
     accent: '#34d399',
     audience: 'For captains & selectors',
+    compareKey: 'betterselect',
     tagline: 'Availability and smart team selection — sort your weekend XI in minutes.',
     summary:
-      'BetterSelect turns the weekly “who’s in?” scramble into a few taps. Collect availability, build squads, and let form- and grade-aware autofill suggest your best-balanced side — all in your club’s colours.',
+      'BetterSelect turns the weekly “who’s in?” scramble into a few taps. Collect availability with no player accounts, build squads, and let form- and grade-aware autofill suggest your best-balanced side — all in your club’s colours.',
     highlights: [
-      'Availability with whole date-range periods',
+      'Availability with no player logins',
       'Drag-and-drop squad boards',
       'Form-, grade- and gender-aware autofill',
       'Pick the XI on numbered batting slots',
     ],
     features: [
-      { title: 'Availability tracking', desc: 'Players mark themselves in or out, and you can set someone available or unavailable across a whole date range in one go.' },
+      { title: 'Availability tracking', desc: 'Players mark themselves in or out from a magic link — no app, no account — and you can set someone available or unavailable across a whole date range in one go.' },
       { title: 'Squad boards', desc: 'Drag and drop players into selection pools that feed the autofill suggestions.' },
       { title: 'Smart autofill', desc: 'Ranks players by a composite form score (recent + season-to-date), respects grade and gender boundaries, and tiers by squad with a 12-month activity wall.' },
       { title: 'Pick the XI', desc: 'Name your side on numbered batting-order slots, with a suggestion for every position.' },
@@ -67,19 +72,21 @@ export const MODULES_MARKETING = [
     icon: '◈',
     accent: '#38bdf8',
     audience: 'For the social-media manager',
-    tagline: 'Turn match data into posts your community actually reposts.',
+    compareKey: 'bettersocials',
+    tagline: 'Your public website plus match-day posts your community actually reposts.',
     summary:
-      'A club-branded post designer that turns your match data into share-ready graphics — lineups, announcements, player-of-the-match, scorecards and more. Paste a PlayCricket link to auto-fill a scorecard, pick a layout, and download a crisp PNG.',
+      'BetterSocials runs your club’s public website and a post designer that turns your match data into share-ready graphics — lineups, announcements, player-of-the-match, scorecards and more. Pick a layout, and your scorecard fills itself from your own data. Download a crisp PNG.',
     highlights: [
+      'Your public, club-branded website',
       'Lineups, announcements, scorecards & POTM',
-      'Auto-fill scorecards from PlayCricket',
+      'Scorecards auto-fill from your match data',
       'Your club colours, crest & display fonts',
-      'One-tap PNG download',
     ],
     features: [
+      { title: 'Your club website', desc: 'A fast, modern, club-branded public site — news, galleries, sponsors, honour boards and your live stats, all in one place.' },
       { title: 'Six post types', desc: 'Lineup, announcement, toss, player of the match, final score and a full match scorecard — one designer for the whole match day.' },
       { title: 'A layout for every post', desc: 'Multiple designs per type — hero lineups, trading-card grids, side-numbered XIs, broadcast or app-style scorecards, festival posters and more.' },
-      { title: 'Auto-fill from the match', desc: 'Paste a PlayCricket match link and the scorecard fills itself — no retyping names and figures.' },
+      { title: 'Auto-fill from the match', desc: 'Your scorecard fills itself from your own synced match data — no retyping names and figures.' },
       { title: 'On-brand by default', desc: 'Your crest and club colours, a choice of display fonts, and a dark or light finish.' },
       { title: 'One-tap export', desc: 'Download a crisp PNG, ready to post to Instagram, Facebook or X.' },
     ],
@@ -88,37 +95,38 @@ export const MODULES_MARKETING = [
     gallery: [
       { src: '/marketing/modules/bettersocials-announcement.jpg', caption: 'Appointment & announcement cards' },
       { src: '/marketing/modules/bettersocials-potm.jpg', caption: 'Player-of-the-match spotlight' },
-      { src: '/marketing/modules/bettersocials-scorecard-1.jpg', caption: 'Broadcast scorecard, auto-filled from PlayCricket' },
+      { src: '/marketing/modules/bettersocials-scorecard-1.jpg', caption: 'Broadcast scorecard, auto-filled from your match data' },
       { src: '/marketing/modules/bettersocials-scorecard-3.jpg', caption: 'Scorecard — app-style dashboard layout' },
       { src: '/marketing/modules/bettersocials-lineup-1.jpg', caption: 'Team lineup — hero layout' },
       { src: '/marketing/modules/bettersocials-lineup-3b.jpg', caption: 'Team lineup — side-numbered' },
     ],
   },
   {
-    slug: 'betterfees',
-    key: MODULE.FEES,
-    name: 'BetterFees',
+    slug: 'betteradmin',
+    key: 'admin',
+    name: 'BetterAdmin',
     tier: TIER.BEST,
     icon: '◉',
     accent: '#fbbf24',
-    audience: 'For the treasurer',
-    tagline: 'Match fees and membership, finally under control.',
+    audience: 'For the treasurer & secretary',
+    compareKey: 'betteradmin',
+    tagline: 'Run the back office — fees, comms and merch in one place.',
     summary:
-      'Record a payment and BetterFees settles a member’s games automatically — oldest first — and keeps a live, always-correct picture of who’s paid, who’s part-paid and who still owes.',
+      'BetterAdmin is your club’s back office on top of your member list. Auto-allocating match fees, membership, bulk email to your members and merch tracking — all working off the same player database as your stats, so nothing needs exporting between tools.',
+    members: ['BetterFees', 'BetterComms', 'BetterMerch (soon)'],
     highlights: [
       'Auto-allocating match-fee payments',
       'Live Paid / Part-paid / Unpaid',
-      'Overpayments roll forward as credit',
-      'Waive a fee with a note',
+      'Bulk email to your member database',
+      'Merch stock & sales (coming soon)',
     ],
     features: [
-      { title: 'Automatic allocation', desc: 'A recorded payment settles games oldest-first, in full while the money lasts; the boundary game shows part-paid. Edit days played and it re-allocates itself.' },
+      { title: 'Automatic fee allocation', desc: 'A recorded payment settles games oldest-first, in full while the money lasts; the boundary game shows part-paid. Edit days played and it re-allocates itself.' },
       { title: 'Always-correct status', desc: 'Per-game Paid / Part-paid / Unpaid is derived on read — there’s no stale flag to keep in sync.' },
-      { title: 'Credit tracking', desc: 'Overpay and the balance rolls forward as credit; membership and match-fee buckets stay separate.' },
-      { title: 'Waivers', desc: 'Waive a match-day fee with an optional note; it settles immediately and stays out of payment totals.' },
-      { title: 'Membership & schedules', desc: 'Set membership tiers and match-day fee schedules per season.' },
-      { title: 'Bulk & import', desc: 'Record payments in bulk, or import them straight from a CSV.' },
-      { title: 'Financial reports', desc: 'A clean summary with waived totals and a per-tier breakdown for the committee.' },
+      { title: 'Credit & waivers', desc: 'Overpay and the balance rolls forward as credit; waive a match-day fee with a note. Membership and match-fee buckets stay separate.' },
+      { title: 'Membership & schedules', desc: 'Set membership tiers and match-day fee schedules per season, with clean financial reports for the committee.' },
+      { title: 'Bulk email (BetterComms)', desc: 'Newsletters and announcements to your member database — contacts come straight from your players, with Spam-Act-compliant unsubscribes.' },
+      { title: 'Merch (coming soon)', desc: 'Track merchandise stock and sales alongside the rest of the back office.' },
     ],
     screenshot: '/marketing/modules/betterfees-player-payments.jpg',
     gallery: [
@@ -134,6 +142,7 @@ export const MODULES_MARKETING = [
     icon: '◇',
     accent: '#a78bfa',
     audience: 'For the coach & captain',
+    compareKey: 'betteriq',
     tagline: 'Broadcast-grade analytics and an opposition scout for your club.',
     summary:
       'BetterIQ reads your own scorecards — no extra data entry — and turns them into an opposition dossier, a live selection brain and deep player and team analysis. The kind of match prep most pro teams pay for.',

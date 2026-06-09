@@ -23,7 +23,7 @@ export default function Home() {
             </h1>
             <p className="text-pb-dim text-lg md:text-xl leading-relaxed mb-8 max-w-xl">
               The cricket statistics platform built for players. Career averages, innings history,
-              and live match data — all powered by PlayHQ. No manual exports.
+              and live match data — all updated automatically. No manual exports.
             </p>
             <div className="flex flex-wrap gap-4">
               <Link
@@ -49,7 +49,7 @@ export default function Home() {
       {/* Feature blocks */}
       <section className="max-w-5xl mx-auto px-4 py-20">
         <div className="text-center mb-14">
-          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4">WHY BETTERSTATS?</p>
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4">WHY BETTER CRICKET?</p>
           <h2 className="font-display font-bold text-[32px] md:text-[44px] text-pb-text tracking-tight">
             BUILT FOR CRICKET, BUILT FOR PLAYERS
           </h2>
@@ -60,12 +60,12 @@ export default function Home() {
             {
               icon: thiings.barChart,
               title: 'Complete Career Stats',
-              desc: 'Every innings, every bowling spell, tracked automatically from PlayHQ. Batting average, strike rate, economy — all computed for you.',
+              desc: 'Every innings, every bowling spell, tracked automatically. Batting average, strike rate, economy — all computed for you.',
             },
             {
               icon: thiings.lightningBolt,
               title: 'Live Match Updates',
-              desc: 'PlayHQ webhooks push game updates in real time. Stats refresh automatically after every match — zero manual input.',
+              desc: 'Game updates flow in automatically in real time. Stats refresh automatically after every match — zero manual input.',
             },
             {
               icon: thiings.cricketBat,
@@ -85,7 +85,7 @@ export default function Home() {
       {/* Clubs */}
       {orgs.length > 0 && (
         <section className="pb-hairline-t max-w-5xl mx-auto px-4 py-16">
-          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-6 uppercase">Clubs on BetterStats</p>
+          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-6 uppercase">Clubs on Better Cricket</p>
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
             {orgs.map(org => (
               <Link
@@ -111,7 +111,7 @@ export default function Home() {
         <div className="max-w-5xl mx-auto px-4 py-16 text-center">
           <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4">GET STARTED</p>
           <h2 className="font-display font-bold text-3xl text-pb-text mb-4 tracking-tight">READY TO GET YOUR STATS?</h2>
-          <p className="text-pb-faint mb-8">Add your club's PlayHQ Organisation ID and we'll pull everything automatically.</p>
+          <p className="text-pb-faint mb-8">Tell us about your club and we'll pull everything in automatically.</p>
           <Link
             to="/onboard"
             className="inline-block px-8 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"

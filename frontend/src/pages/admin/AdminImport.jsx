@@ -261,7 +261,7 @@ export default function AdminImport() {
         <Link to="/admin" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">← ADMIN</Link>
         <h1 className="font-display font-bold text-2xl text-pb-text mt-2 mb-1">Import historical stats</h1>
         <p className="text-pb-faint text-sm mb-5 leading-relaxed max-w-3xl">
-          Pull your online (Grassroots) data first, then upload your club's own spreadsheet — career totals or
+          Pull your online data first, then upload your club's own spreadsheet — career totals or
           season-by-season, any column layout. We smart-match the columns and reconcile against what's already online:
           where the two overlap, the online data wins, and only the part it's missing is added. <span className="text-pb-dim">A
           player can never be double-counted.</span>

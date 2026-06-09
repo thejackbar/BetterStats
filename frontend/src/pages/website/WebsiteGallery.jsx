@@ -88,7 +88,7 @@ function AlbumsGrid({ slug }) {
   const [albums, setAlbums] = useState([])
   const [loading, setLoading] = useState(true)
 
-  usePageMeta({ title: `Gallery — ${site.name}`, url: `https://betterstats.cricket/${slug}/website/gallery` })
+  usePageMeta({ title: `Gallery — ${site.name}`, url: `https://betterat.cricket/${slug}/website/gallery` })
 
   useEffect(() => {
     let cancelled = false

@@ -476,12 +476,12 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick }) {
   const rowsOf = (d) => (d ? d[rowsKey] || [] : [])
   return (
     <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
-      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from Play.cricket</p>
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
       <div className="flex gap-2 items-center">
         <button onClick={onPull} disabled={status === 'loading'}
           className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-          {status === 'loading' ? 'Loading…' : 'Pull from Play.cricket'}
+          {status === 'loading' ? 'Loading…' : 'Pull from match link'}
         </button>
         {dates.length > 1 && (
           <select value={idx} onChange={e => onPick(+e.target.value)}
@@ -1648,7 +1648,7 @@ export default function AdminSocialPost() {
                 {/* PlayCricket URL import — auto top 3 batters & bowlers (both sides),
                     scores, result, MOTM + matched player photos. Everything stays editable. */}
                 <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
-                  <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from PlayCricket</p>
+                  <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
                   <div className="flex gap-2">
                     <input type="text" value={resUrlInput} onChange={e => { setResUrlInput(e.target.value); setResUrlStatus(null) }}
                       placeholder="https://play.cricket.com.au/match/37af9ea5-..."
@@ -1905,7 +1905,7 @@ export default function AdminSocialPost() {
 
                 {/* PlayCricket URL import */}
                 <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
-                  <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from PlayCricket</p>
+                  <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
                   <div className="flex gap-2">
                     <input type="text" value={scUrlInput} onChange={e => { setScUrlInput(e.target.value); setScUrlStatus(null) }}
                       placeholder="https://play.cricket.com.au/match/37af9ea5-..."

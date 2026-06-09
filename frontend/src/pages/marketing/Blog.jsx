@@ -27,10 +27,10 @@ function PostThumb({ src, title }) {
 
 export default function Blog() {
   usePageMeta({
-    title: 'Blog — Cricket Stats Guides & Club Tips | BetterStats',
-    description: 'Cricket statistics guides and club management tips from the BetterStats team — batting averages, bowling economy, historical data, and more.',
-    image: 'https://betterstats.cricket/og-image.png',
-    url: 'https://betterstats.cricket/blog',
+    title: 'Blog — Cricket Stats Guides & Club Tips | Better Cricket',
+    description: 'Cricket statistics guides and club management tips from the Better Cricket team — batting averages, bowling economy, historical data, and more.',
+    image: 'https://betterat.cricket/og-image.png',
+    url: 'https://betterat.cricket/blog',
   })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">

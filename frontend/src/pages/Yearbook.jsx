@@ -1422,10 +1422,10 @@ export default function Yearbook() {
   useClubTheme(club)
 
   usePageMeta(club && yearbook?.season ? {
-    title: `${club.name} — ${formatSeason(yearbook.season)} Yearbook | BetterStats`,
+    title: `${club.name} — ${formatSeason(yearbook.season)} Yearbook | Better Cricket`,
     description: `${formatSeason(yearbook.season)} season yearbook for ${club.name} — stats, honours, results and records.`,
-    image: club.logo_url || 'https://betterstats.cricket/og-image.png',
-    url: `https://betterstats.cricket/${clubSlug}/yearbook/${seasonSlug || ''}`,
+    image: club.logo_url || 'https://betterat.cricket/og-image.png',
+    url: `https://betterat.cricket/${clubSlug}/yearbook/${seasonSlug || ''}`,
   } : {})
 
   // Load club
@@ -1719,7 +1719,7 @@ export default function Yearbook() {
       {/* Footer */}
       <div className="border-t border-pb-hairline mt-12 py-6 text-center">
         <p className="font-mono text-[10px] text-pb-faintest tracking-wide3">
-          {club.name} · {season?.name} · Powered by BetterStats
+          {club.name} · {season?.name} · Powered by Better Cricket
         </p>
       </div>
     </div>

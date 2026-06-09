@@ -276,8 +276,8 @@ export default function AdminFeeSchedule() {
             <div className="mt-10">
               <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2 uppercase">Grade Formats</p>
               <p className="text-pb-dim text-sm mb-4 leading-relaxed">
-                How each grade counts towards match days. Leave on <span className="text-pb-text">Auto</span> to use PlayHQ's
-                match format; tag women's (PSWL) grades as <span className="text-pb-text">Women's</span> since they arrive as plain
+                How each grade counts towards match days. Leave on <span className="text-pb-text">Auto</span> to use the synced
+                grade type; tag women's (PSWL) grades as <span className="text-pb-text">Women's</span> since they arrive as plain
                 One Day / T20, or set <span className="text-pb-text">Exclude</span> to drop a grade from fees. Recompute after changing these.
               </p>
               <GradeFormatList seasonId={seasonId} />

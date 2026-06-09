@@ -104,19 +104,19 @@ export default function Dashboard() {
     '@type': 'SportsTeam',
     name: club.name,
     sport: 'Cricket',
-    url: `https://betterstats.cricket/${clubSlug}`,
+    url: `https://betterat.cricket/${clubSlug}`,
     ...(club.logo_url ? { logo: club.logo_url } : {}),
     areaServed: { '@type': 'Country', name: 'Australia' },
   } : null
   usePageMeta({
     title: club?.name
-      ? `${club.name} — Cricket Stats, Records & Players | BetterStats`
-      : 'Club Cricket Stats | BetterStats',
+      ? `${club.name} — Cricket Stats, Records & Players | Better Cricket`
+      : 'Club Cricket Stats | Better Cricket',
     description: club?.name
-      ? `Live cricket statistics, leaderboards, all-time records and player profiles for ${club.name} — updated automatically from PlayHQ and MyCricket on BetterStats.`
+      ? `Live cricket statistics, leaderboards, all-time records and player profiles for ${club.name} — updated automatically on Better Cricket.`
       : null,
     image: club?.logo_url || null,
-    url: `https://betterstats.cricket/${clubSlug}`,
+    url: `https://betterat.cricket/${clubSlug}`,
     jsonLd: clubJsonLd,
   })
 
@@ -420,7 +420,7 @@ export default function Dashboard() {
 
         <div className="mt-4 pt-6 pb-hairline-t text-center">
           <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest">
-            POWERED BY <Link to="/" className="hover:text-pb-dim transition-colors">BETTERSTATS</Link>
+            POWERED BY <Link to="/" className="hover:text-pb-dim transition-colors">BETTER CRICKET</Link>
           </p>
         </div>
       </main>

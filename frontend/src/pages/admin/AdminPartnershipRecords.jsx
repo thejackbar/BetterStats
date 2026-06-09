@@ -68,7 +68,7 @@ function PlayerSearch({ label, name, playerId, onSelect, players }) {
             className="w-full text-left px-3 py-2 text-sm text-pb-text hover:bg-pb-surface2"
           >
             {p.display_name}
-            {p.playhq_id && <span className="ml-2 font-mono text-[10px] text-pb-faintest">PHQ: {p.playhq_id}</span>}
+            {p.playhq_id && <span className="ml-2 font-mono text-[10px] text-pb-faintest">ID: {p.playhq_id}</span>}
           </button>
         ))}
       </Dropdown>
@@ -751,7 +751,7 @@ export default function AdminPartnershipRecords() {
         </div>
 
         <p className="font-mono text-[10px] text-pb-faint mb-5 leading-relaxed">
-          Manually add historical partnership records that predate PlayHQ sync. These appear in the Records board alongside auto-synced data.
+          Manually add historical partnership records that predate your synced data. These appear in the Records board alongside auto-synced data.
         </p>
 
         <ImportPanel onImported={handleImported} />

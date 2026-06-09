@@ -66,10 +66,10 @@ export default function BlogPost() {
   const post = getPost(slug)
 
   usePageMeta(post ? {
-    title: `${post.title} | BetterStats`,
+    title: `${post.title} | Better Cricket`,
     description: post.description,
-    image: post.image ? `https://betterstats.cricket${post.image}` : 'https://betterstats.cricket/og-image.png',
-    url: `https://betterstats.cricket/blog/${post.slug}`,
+    image: post.image ? `https://betterat.cricket${post.image}` : 'https://betterat.cricket/og-image.png',
+    url: `https://betterat.cricket/blog/${post.slug}`,
   } : {})
 
   if (!post) return <Navigate to="/blog" replace />
