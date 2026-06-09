@@ -23,7 +23,7 @@ const TIE = '#9aa0b4'
 function Monogram({ text = '?', size = 56, fg, bg, ring, logo }) {
   if (logo) {
     return <img src={logo} alt={text} style={{
-      width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0,
+      width: size, height: size, borderRadius: '50%', objectFit: 'contain', flexShrink: 0,
       border: ring ? `2px solid ${ring}` : 'none', background: bg,
     }} />
   }
@@ -171,7 +171,7 @@ export function FixtureList({ palette: pal, meta = {}, fixtures = [], club = {},
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
                 <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.55, width: 40, flexShrink: 0 }}>{home ? 'VS' : '@'}</span>
-                <Monogram text={r.oppMono} size={50} fg={pal.ink} bg={`${pal.ink}12`} ring={`${pal.ink}33`} />
+                <Monogram text={r.oppMono} logo={r.oppLogo} size={50} fg={pal.ink} bg={`${pal.ink}12`} ring={`${pal.ink}33`} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontFamily: DISPLAY, fontSize: 31, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
                   <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, color: pal.ink, opacity: 0.55, marginTop: 4 }}>{home ? 'HOME' : 'AWAY'}</div>
@@ -265,7 +265,7 @@ export function FixtureGrid({ palette: pal, meta = {}, fixtures = [], club = {},
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={46} />
                 <span style={{ fontFamily: DISPLAY, fontSize: 22, color: pal.accent, opacity: 0.9 }}>v</span>
-                <Monogram text={r.oppMono} size={46} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
+                <Monogram text={r.oppMono} logo={r.oppLogo} size={46} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
                 <div style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: `1px solid ${pal.ink}1a`, paddingTop: 12 }}>
@@ -352,7 +352,7 @@ export function FixtureHeadline({ palette: pal, meta = {}, fixtures = [], club =
           </div>
           <div style={{ fontFamily: DISPLAY, fontSize: 60, color: pal.accent, letterSpacing: 1 }}>VS</div>
           <div style={{ textAlign: 'center', width: 280 }}>
-            <Shield monogram={feat.oppMono} color={pal.ink} size={150} />
+            <Shield logo={feat.oppLogo} monogram={feat.oppMono} color={pal.ink} size={150} />
             <AutoFit max={30} min={16} style={{ fontFamily: DISPLAY, letterSpacing: 0.5, marginTop: 12, textAlign: 'center' }} deps={[feat.opp]}>{feat.opp}</AutoFit>
           </div>
         </div>
@@ -851,7 +851,7 @@ export function ResultsScoreboard({ palette: pal, meta = {}, results = [], club 
                   <span style={{ fontFamily: DISPLAY, fontSize: 32, letterSpacing: -0.5 }}>{r.us}</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: 18, color: pal.accent, opacity: 0.8 }}>v</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: 32, letterSpacing: -0.5, opacity: 0.85 }}>{r.them}</span>
-                  <Monogram text={r.oppMono} size={40} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
+                  <Monogram text={r.oppMono} logo={r.oppLogo} size={40} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
                 </div>
                 <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.2, color: pal.ink, opacity: 0.65, marginTop: 10 }}>{r.opp} · {r.margin}</div>
               </div>
@@ -947,7 +947,7 @@ export function ResultsHeadline({ palette: pal, meta = {}, results = [], club = 
           <span style={{ fontFamily: DISPLAY, fontSize: 34, color: pal.accent }}>v</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <span style={{ fontFamily: DISPLAY, fontSize: 64, letterSpacing: -1, lineHeight: 1, opacity: 0.85 }}>{f.them}</span>
-            <Monogram text={f.oppMono} size={66} fg={pal.ink} bg={`${pal.ink}14`} ring={!fw ? pal.accent : `${pal.ink}40`} />
+            <Monogram text={f.oppMono} logo={f.oppLogo} size={66} fg={pal.ink} bg={`${pal.ink}14`} ring={!fw ? pal.accent : `${pal.ink}40`} />
           </div>
         </div>
         <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: 40, letterSpacing: 0, marginTop: 20, lineHeight: 1 }}>{club.name} {fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>

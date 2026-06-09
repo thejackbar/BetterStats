@@ -306,6 +306,85 @@ function TextInput({ value, onChange, placeholder }) {
   )
 }
 
+// Trim "… Cricket Club" / "… CC" so a searched opponent shows a tidy name on
+// the roundup post (the per-row mono + grade carry the detail).
+function cleanClubName(n) {
+  return (n || '')
+    .replace(/\s+(district\s+|junior\s+)?cricket\s+club$/i, '')
+    .replace(/\s+c\.?c\.?$/i, '')
+    .trim()
+}
+
+// Fetch a logo and knock out its background (transparent PNG) so opposition
+// crests sit cleanly on the dark post. Same engine as the hero-image editor.
+// Falls back to the plain URL if removal fails (e.g. a cross-origin CDN logo
+// that can't be fetched client-side).
+async function removeLogoBg(url) {
+  if (!url) return url
+  try {
+    const { removeBackground } = await import('@imgly/background-removal')
+    const blob = await removeBackground(url, { debug: false })
+    return URL.createObjectURL(blob)
+  } catch {
+    return url
+  }
+}
+
+// Per-row opponent combobox: live club search (api.searchOrgs) with a dropdown,
+// while staying a free-text field so a name can still be typed by hand.
+function OppRowSearch({ value, onType, onPick, placeholder = 'Opponent (search clubs)…' }) {
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [open, setOpen] = useState(false)
+  const timer = useRef(null)
+  const boxRef = useRef(null)
+  const search = (q) => {
+    onType(q)
+    clearTimeout(timer.current)
+    if (!q.trim()) { setResults([]); setOpen(false); return }
+    timer.current = setTimeout(async () => {
+      setSearching(true)
+      try { const r = await api.searchOrgs(q); setResults(r || []); setOpen(true) }
+      catch { setResults([]) }
+      finally { setSearching(false) }
+    }, 350)
+  }
+  return (
+    <div ref={boxRef} className="relative">
+      <input value={value} onChange={e => search(e.target.value)} placeholder={placeholder}
+        className="w-full bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
+      {searching && <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[8px] text-pb-faintest animate-pulse">…</span>}
+      <Dropdown anchorRef={boxRef} open={open && results.length > 0} onClose={() => setOpen(false)} maxHeight={180}
+        className="bg-pb-surface border pb-hairline rounded shadow-lg">
+        {results.map((org, i) => (
+          <button key={org.id || i} onClick={() => { onPick(org); setResults([]); setOpen(false) }}
+            className="w-full text-left px-2.5 py-1.5 hover:bg-pb-surface2 flex items-center gap-2 border-b pb-hairline last:border-0">
+            {(org.logoURL || org.logo_url) && <img src={org.logoURL || org.logo_url} alt="" className="w-6 h-6 rounded object-contain bg-pb-surface2 shrink-0" />}
+            <span className="text-xs text-pb-text flex-1 truncate">{org.name}</span>
+            {org.shortName && <span className="font-mono text-[9px] text-pb-faintest">{org.shortName}</span>}
+          </button>
+        ))}
+      </Dropdown>
+    </div>
+  )
+}
+
+// Logo preview / status for a roundup row's pulled opponent crest.
+function OppLogoChip({ logo, loading, onClear }) {
+  if (!logo && !loading) return null
+  return (
+    <div className="flex items-center gap-2">
+      {loading
+        ? <span className="font-mono text-[9px] text-pb-faint animate-pulse">Pulling logo · removing background…</span>
+        : <>
+            <img src={logo} alt="" className="h-7 max-w-[88px] object-contain rounded bg-pb-surface" onError={e => { e.target.style.display = 'none' }} />
+            <span className="font-mono text-[9px] text-pb-faint">logo · bg removed</span>
+            <button onClick={onClear} className="text-pb-faintest hover:text-red-400 text-[10px] ml-auto">✕ logo</button>
+          </>}
+    </div>
+  )
+}
+
 // Pull a whole round (all grades) from Play.cricket — the multi-match analogue
 // of the scorecard URL import. Lets the operator pick a match-day when the club
 // played across more than one date.
@@ -612,19 +691,26 @@ export default function AdminSocialPost() {
     }, 350)
   }, [])
 
-  const selectScTeam = useCallback(async (side, org) => {
+  // Best logo URL for a searched club: prefer a matching BetterStats org's
+  // (same-origin, so background removal can fetch it), else the CA CDN logo.
+  const resolveClubLogo = useCallback(async (org) => {
     let logoUrl = org.logoURL || org.logo_url || null
     try {
       const bsOrgs = await api.listOrgs()
       const matched = bsOrgs.find(o => o.name?.toLowerCase() === org.name?.toLowerCase() || o.id === org.id)
       if (matched?.id) logoUrl = `${BASE_URL}/images/organisations/${matched.id}/logo`
     } catch { /* fall back to CA logo */ }
+    return logoUrl
+  }, [])
+
+  const selectScTeam = useCallback(async (side, org) => {
+    const logoUrl = await resolveClubLogo(org)
     const name = (org.name || org.shortName || '').toUpperCase()
     const short = (org.shortName || deriveShort(name || 'OPP')).toUpperCase().slice(0, 4)
     patchScTeam(side, { name, short, monogram: short.slice(0, 3), logo: logoUrl })
     setScTeamSearch(s => ({ ...s, [side]: '' }))
     setScTeamResults(r => ({ ...r, [side]: [] }))
-  }, [])
+  }, [resolveClubLogo])
 
   // Opponent search
   const handleOppSearch = useCallback(async (q) => {
@@ -642,12 +728,7 @@ export default function AdminSocialPost() {
   }, [])
 
   const selectOpponent = useCallback(async (org) => {
-    let logoUrl = org.logoURL || org.logo_url || null
-    try {
-      const bsOrgs = await api.listOrgs()
-      const matched = bsOrgs.find(o => o.name?.toLowerCase() === org.name?.toLowerCase() || o.id === org.id)
-      if (matched?.id) logoUrl = `${BASE_URL}/images/organisations/${matched.id}/logo`
-    } catch { /* ignore */ }
+    const logoUrl = await resolveClubLogo(org)
     patchOpp({
       name: org.name || org.shortName || '',
       short: org.shortName || deriveShort(org.name || 'OPP'),
@@ -655,7 +736,19 @@ export default function AdminSocialPost() {
     })
     setOppSearch('')
     setOppResults([])
-  }, [])
+  }, [resolveClubLogo])
+
+  // Roundup row opponent pick: fill name + mono immediately, then pull the club
+  // logo and knock out its background (async).
+  const pickRowOpp = useCallback(async (kind, idx, org) => {
+    const setter = kind === 'fx' ? setFixtures : setResults
+    const name = (cleanClubName(org.name) || org.name || org.shortName || '').toUpperCase()
+    const mono = (org.shortName || deriveShort(org.name || 'OPP')).toUpperCase().slice(0, 3)
+    setter(rows => rows.map((r, j) => j === idx ? { ...r, opp: name, oppMono: mono, oppLogoLoading: true } : r))
+    let logo = await resolveClubLogo(org)
+    if (logo) logo = await removeLogoBg(logo)
+    setter(rows => rows.map((r, j) => j === idx ? { ...r, oppLogo: logo, oppLogoLoading: false } : r))
+  }, [resolveClubLogo])
 
   const handleHeroFile = useCallback((e) => {
     const file = e.target.files?.[0]
@@ -1440,11 +1533,11 @@ export default function AdminSocialPost() {
                             className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
                         </div>
                         <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 64px' }}>
-                          <input value={f.opp} onChange={e => set({ opp: e.target.value })} placeholder="Opponent name"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
+                          <OppRowSearch value={f.opp} onType={v => set({ opp: v })} onPick={org => pickRowOpp('fx', i, org)} />
                           <input value={f.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
                         </div>
+                        <OppLogoChip logo={f.oppLogo} loading={f.oppLogoLoading} onClear={() => set({ oppLogo: null })} />
                         <div className="grid grid-cols-2 gap-1.5">
                           <input value={f.time} onChange={e => set({ time: e.target.value })} placeholder="12:30 PM"
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
@@ -1454,7 +1547,7 @@ export default function AdminSocialPost() {
                       </div>
                     )
                   })}
-                  <button onClick={() => setFixtures(rows => [...rows, { grade: '', opp: '', oppMono: '', ha: 'H', time: '', venue: '' }])}
+                  <button onClick={() => setFixtures(rows => [...rows, { grade: '', opp: '', oppMono: '', ha: 'H', time: '', venue: '', oppLogo: null }])}
                     className="text-left text-xs text-pb-faint hover:text-pb-accent font-mono">+ Add fixture</button>
                 </div>
               </section>
@@ -1488,11 +1581,11 @@ export default function AdminSocialPost() {
                             className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
                         </div>
                         <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 64px' }}>
-                          <input value={r.opp} onChange={e => set({ opp: e.target.value })} placeholder="Opponent name"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
+                          <OppRowSearch value={r.opp} onType={v => set({ opp: v })} onPick={org => pickRowOpp('rr', i, org)} />
                           <input value={r.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
                         </div>
+                        <OppLogoChip logo={r.oppLogo} loading={r.oppLogoLoading} onClear={() => set({ oppLogo: null })} />
                         <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 1fr 1.2fr' }}>
                           <input value={r.us} onChange={e => set({ us: e.target.value })} placeholder="Us 6/188"
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
@@ -1504,7 +1597,7 @@ export default function AdminSocialPost() {
                       </div>
                     )
                   })}
-                  <button onClick={() => setResults(rows => [...rows, { grade: '', opp: '', oppMono: '', us: '', them: '', outcome: 'W', margin: '' }])}
+                  <button onClick={() => setResults(rows => [...rows, { grade: '', opp: '', oppMono: '', us: '', them: '', outcome: 'W', margin: '', oppLogo: null }])}
                     className="text-left text-xs text-pb-faint hover:text-pb-accent font-mono">+ Add result</button>
                 </div>
               </section>
