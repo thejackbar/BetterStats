@@ -944,23 +944,32 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
 
     # Build roster name map from team player lists (covers opposition players not in our DB)
     roster_name_map: dict[str, tuple[str, str]] = {}
+    # Authoritative short name ("Initial Surname", e.g. "J Barendse") for every
+    # roster member — the basis for the consistent "F. Surname" performer label.
+    short_name_map: dict[str, str] = {}
     for team_r in teams_raw:
-        for rp in (team_r.get("players") or []):
-            pid = rp.get("participantId") or ""
+        for rp in ((team_r.get("players") or []) + (team_r.get("nonPlayingMembers") or [])):
+            pid = (rp.get("participantId") or "").lower()
             if not pid:
                 continue
+            nm = rp.get("playerShortName") or rp.get("displayName") or rp.get("name")
+            if nm and pid not in short_name_map:
+                short_name_map[pid] = nm.strip()
             dn = rp.get("displayName") or rp.get("name") or ""
-            if dn:
+            if dn and pid not in roster_name_map:
                 dn = dn.strip()
                 if ", " in dn:
                     lp, fp = dn.split(", ", 1)
-                    roster_name_map[pid.lower()] = (fp.strip(), lp.strip().upper().rstrip(".,;:"))
+                    roster_name_map[pid] = (fp.strip(), lp.strip().upper().rstrip(".,;:"))
                 else:
                     pts = dn.split()
                     if len(pts) >= 2:
-                        roster_name_map[pid.lower()] = (" ".join(pts[1:]), pts[0].upper().rstrip(".,;:"))
+                        # Roster displayName is "First Last": the first token is the
+                        # given name, the rest the surname (the old code had this
+                        # reversed, so opponents showed their first name).
+                        roster_name_map[pid] = (pts[0], " ".join(pts[1:]).upper().rstrip(".,;:"))
                     else:
-                        roster_name_map[pid.lower()] = ("", dn.upper().rstrip(".,;:"))
+                        roster_name_map[pid] = ("", dn.upper().rstrip(".,;:"))
 
     def get_name(pid: str) -> tuple[str, str]:
         key = str(pid).lower()
@@ -983,6 +992,27 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
             return kept_id.lower()
         return None
 
+    def short_display(pid: str, row_name: str | None) -> str:
+        """'F. SURNAME' for a performer label, derived from GR's 'Initial Surname'
+        short name (per-row first, roster fallback, DB name last). Consistent for
+        our players and the opposition alike — fixes the first/last-name mix-up."""
+        raw = (row_name or short_name_map.get(str(pid).lower()) or "").strip()
+        if not raw:
+            f, l = get_name(pid)
+            raw = f"{f} {l}".strip()
+        if not raw:
+            return ""
+        if "," in raw:
+            last, first = (x.strip() for x in raw.split(",", 1))
+        else:
+            parts = raw.split()
+            if len(parts) == 1:
+                return parts[0].upper().rstrip(".,;:")
+            first, last = parts[0], " ".join(parts[1:])
+        fi = first[:1].upper()
+        last = last.strip().upper().rstrip(".,;:")
+        return f"{fi}. {last}" if fi and last else (last or first.upper())
+
     def parse_batting(batting_rows: list) -> list:
         rows = sorted(batting_rows, key=lambda b: b.get("batOrder") or 99)
         result = []
@@ -999,6 +1029,7 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
                 "num": i + 1,
                 "first": first,
                 "last": last,
+                "short": short_display(pid, b.get("playerShortName")),
                 "r": runs,
                 "b": balls,
                 "fours": int(b.get("foursScored") or 0),
@@ -1030,6 +1061,7 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
             result.append({
                 "first": first,
                 "last": last,
+                "short": short_display(pid, bw.get("playerShortName")),
                 "o": overs,
                 "m": int(bw.get("maidensBowled") or 0),
                 "r": runs,
