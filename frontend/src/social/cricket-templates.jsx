@@ -1268,12 +1268,16 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
   const teamBowlers = tw.team || []
   const oppBatters = tb.opponent || []
   const oppBowlers = tw.opponent || []
+  // C4 feedback: shrink the result/score blocks, blow the performers up. These
+  // rows are the focus now, so name + figures are markedly larger.
   const Perf = ({ p, accent }) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: `1px solid ${palette.ink}1a`, padding: '5px 0', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, lineHeight: 1.05, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-      <span style={{ fontSize: 18, letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8 }}>{p.last}</span>
-      <span style={{ fontSize: 16, color: accent || palette.accent, letterSpacing: 1 }}>{p.line}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: `1px solid ${palette.ink}1a`, padding: '9px 0', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, lineHeight: 1.05, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+      <span style={{ fontSize: 30, letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8 }}>{p.last}</span>
+      <span style={{ fontSize: 24, color: accent || palette.accent, letterSpacing: 1 }}>{p.line}</span>
     </div>
   )
+  const metaLine = [result?.grade || match.competition, match.round, match.date]
+    .filter((v, i, a) => v && a.indexOf(v) === i).join(' · ')
   return (
     <div style={{
       width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
@@ -1282,59 +1286,59 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
       <Halftone color={palette.ink} opacity={0.06} size={10} />
       <Stripes color={palette.accent} opacity={0.03} gap={28} angle={0} />
       <div style={{ position: 'absolute', inset: 0, paddingBottom: 64, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '40px 48px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `3px solid ${palette.accent}` }}>
+        <div style={{ padding: '32px 48px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `3px solid ${palette.accent}` }}>
           <div>
-            <div style={{ display: 'inline-block', padding: '8px 16px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 3 }}>FULL TIME</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 10 }}>{match.competition} · {match.round} · {match.date}</div>
+            <div style={{ display: 'inline-block', padding: '7px 15px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3 }}>FULL TIME</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 9 }}>{metaLine}</div>
           </div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 56, letterSpacing: 2, color: palette.ink }}>RESULT</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 42, letterSpacing: 2, color: palette.ink }}>RESULT</div>
         </div>
-        <div style={{ padding: '36px 48px 24px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 24, alignItems: 'center' }}>
-          <div style={{ textAlign: 'center', padding: '22px 18px', background: winnerSide === 'team' ? `${palette.accent}22` : 'transparent', border: `2px solid ${winnerSide === 'team' ? palette.accent : palette.ink + '22'}`, position: 'relative' }}>
-            {winnerSide === 'team' && <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)', padding: '4px 12px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 2 }}>WINNER</div>}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 18 }}>
-              <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={96} shape="shield" />
+        <div style={{ padding: '18px 48px 12px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 20, alignItems: 'center' }}>
+          <div style={{ textAlign: 'center', padding: '13px 16px', background: winnerSide === 'team' ? `${palette.accent}22` : 'transparent', border: `2px solid ${winnerSide === 'team' ? palette.accent : palette.ink + '22'}`, position: 'relative' }}>
+            {winnerSide === 'team' && <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', padding: '3px 11px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 2 }}>WINNER</div>}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+              <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={64} shape="shield" />
               <div style={{ textAlign: 'left' }}>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{team.name}</div>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 64, letterSpacing: -0.5, lineHeight: 1, color: palette.ink, marginTop: 6 }}>{result?.teamScore || '—'}</div>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{team.name}</div>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: palette.ink, marginTop: 4 }}>{result?.teamScore || '—'}</div>
               </div>
             </div>
           </div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 52, letterSpacing: 2, color: palette.accent }}>VS</div>
-          <div style={{ textAlign: 'center', padding: '22px 18px', background: winnerSide === 'opponent' ? `${palette.accent}22` : 'transparent', border: `2px solid ${winnerSide === 'opponent' ? palette.accent : palette.ink + '22'}`, position: 'relative' }}>
-            {winnerSide === 'opponent' && <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)', padding: '4px 12px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 2 }}>WINNER</div>}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 18 }}>
-              <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={96} shape="shield" />
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 38, letterSpacing: 2, color: palette.accent }}>VS</div>
+          <div style={{ textAlign: 'center', padding: '13px 16px', background: winnerSide === 'opponent' ? `${palette.accent}22` : 'transparent', border: `2px solid ${winnerSide === 'opponent' ? palette.accent : palette.ink + '22'}`, position: 'relative' }}>
+            {winnerSide === 'opponent' && <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', padding: '3px 11px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 2 }}>WINNER</div>}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+              <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={64} shape="shield" />
               <div style={{ textAlign: 'left' }}>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{opponent.name}</div>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 64, letterSpacing: -0.5, lineHeight: 1, color: palette.ink, marginTop: 6 }}>{result?.oppScore || '—'}</div>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{opponent.name}</div>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: palette.ink, marginTop: 4 }}>{result?.oppScore || '—'}</div>
               </div>
             </div>
           </div>
         </div>
-        <div style={{ margin: '0 48px 20px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, minHeight: 0 }}>
-          <div style={{ padding: '20px 22px', background: `${palette.ink}08`, borderLeft: `3px solid ${palette.accent}`, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 2, lineHeight: 1, color: palette.accent, marginBottom: 14 }}>{team.short} · TOP PERFORMERS</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginBottom: 6 }}>BATTING</div>
+        <div style={{ margin: '6px 48px 18px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, minHeight: 0 }}>
+          <div style={{ padding: '24px 26px', background: `${palette.ink}08`, borderLeft: `4px solid ${palette.accent}`, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 2, lineHeight: 1, color: palette.accent, marginBottom: 16 }}>{team.short} · TOP PERFORMERS</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginBottom: 6 }}>BATTING</div>
             {teamBatters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginTop: 14, marginBottom: 6 }}>BOWLING</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginTop: 16, marginBottom: 6 }}>BOWLING</div>
             {teamBowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
           </div>
-          <div style={{ padding: '20px 22px', background: `${palette.ink}08`, borderLeft: `3px solid ${palette.ink}55`, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 2, lineHeight: 1, color: palette.ink, opacity: 0.85, marginBottom: 14 }}>{opponent.short} · TOP PERFORMERS</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginBottom: 6 }}>BATTING</div>
+          <div style={{ padding: '24px 26px', background: `${palette.ink}08`, borderLeft: `4px solid ${palette.ink}55`, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 2, lineHeight: 1, color: palette.ink, opacity: 0.85, marginBottom: 16 }}>{opponent.short} · TOP PERFORMERS</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginBottom: 6 }}>BATTING</div>
             {oppBatters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginTop: 14, marginBottom: 6 }}>BOWLING</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginTop: 16, marginBottom: 6 }}>BOWLING</div>
             {oppBowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
           </div>
         </div>
-        <div style={{ margin: '0 48px 20px', padding: '26px 28px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}`, textAlign: 'center' }}>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: palette.accent, marginBottom: 10 }}>// MATCH RESULT</div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 60, letterSpacing: -0.5, lineHeight: 1.05, color: palette.ink }}>
+        <div style={{ margin: '0 48px 18px', padding: '15px 24px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}`, textAlign: 'center' }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent, marginBottom: 5 }}>// MATCH RESULT</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 38, letterSpacing: -0.5, lineHeight: 1.05, color: palette.ink }}>
             {result?.winner === 'TIE' ? 'MATCH TIED' : `${winnerSide === 'team' ? team.name : opponent.name} WIN ${result?.margin || ''}`.trim()}
           </div>
           {result?.motmLast && (
-            <div style={{ display: 'inline-block', marginTop: 12, padding: '6px 14px', background: `${palette.ink}10`, border: `1px solid ${palette.accent}`, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.85 }}>★ MOTM · {result.motmLast}</div>
+            <div style={{ display: 'inline-block', marginTop: 9, padding: '6px 14px', background: `${palette.ink}10`, border: `1px solid ${palette.accent}`, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.85 }}>★ MOTM · {result.motmLast}</div>
           )}
         </div>
       </div>

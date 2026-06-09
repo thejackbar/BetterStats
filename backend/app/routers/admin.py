@@ -971,6 +971,18 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
             return name_map[kept_id.lower()]
         return roster_name_map.get(key) or ("", "")
 
+    def get_pid(pid: str) -> str | None:
+        """The BetterStats player id for this participant (merge-resolved) when the
+        player is one of ours, else None — lets the social designer match a top
+        performer to their profile photo. Opposition players (roster-only) → None."""
+        key = str(pid).lower()
+        if key in name_map:
+            return key
+        kept_id = merged_away.get(key)
+        if kept_id and kept_id.lower() in name_map:
+            return kept_id.lower()
+        return None
+
     def parse_batting(batting_rows: list) -> list:
         rows = sorted(batting_rows, key=lambda b: b.get("batOrder") or 99)
         result = []
@@ -996,6 +1008,7 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
                 "notOut": not_out,
                 "didNotBat": dnb,
                 "role": None,
+                "pid": get_pid(pid),
             })
         return result
 
@@ -1022,6 +1035,7 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
                 "r": runs,
                 "w": int(bw.get("wicketsTaken") or 0),
                 "econ": round(runs / o_float_real, 2) if o_float_real > 0 else 0,
+                "pid": get_pid(pid),
             })
         return result
 
