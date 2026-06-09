@@ -15,6 +15,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
+import { formatSeason } from '../../../lib/cricketFormat'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import {
   Icon, Avatar, Dot, AvailDot, RoleChips, Btn, Search, Chip, Empty, AvailSummary, QuickAvailModal,
@@ -85,7 +86,7 @@ function TeamModal({ team, onClose, onSaved }) {
               <option value="">— Auto-link from match data —</option>
               {currentGradeMissing && <option value={form.grade_id}>{team?.grade_name || 'Current grade'}</option>}
               {gradeSeasons.map((s) => (
-                <optgroup key={s.season_id} label={s.season_name}>
+                <optgroup key={s.season_id} label={formatSeason(s.season_name)}>
                   {s.grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </optgroup>
               ))}

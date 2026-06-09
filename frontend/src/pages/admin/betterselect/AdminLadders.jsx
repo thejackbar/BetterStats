@@ -5,6 +5,7 @@ import LadderBoard from '../../../components/LadderBoard'
 import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { PbSpinner } from '../../../lib/presskit'
+import { formatSeason } from '../../../lib/cricketFormat'
 import { Btn, Icon } from './ui'
 
 // Inline grade-linker for a team that has no grade (so its ladder is missing —
@@ -34,7 +35,7 @@ function UnlinkedRow({ team, gradeSeasons, onLinked }) {
         className="ml-auto bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
         <option value="">— pick the grade —</option>
         {gradeSeasons.map((s) => (
-          <optgroup key={s.season_id} label={s.season_name}>
+          <optgroup key={s.season_id} label={formatSeason(s.season_name)}>
             {s.grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </optgroup>
         ))}

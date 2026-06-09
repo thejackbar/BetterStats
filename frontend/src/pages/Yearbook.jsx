@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { PbSpinner, TabBar, Label, AnimatedNum } from '../lib/presskit'
-import { fmtOvers } from '../lib/cricketFormat'
+import { fmtOvers, formatSeason } from '../lib/cricketFormat'
 import { resolveAwardLabel } from '../lib/achievementOptions'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { useAuth } from '../contexts/AuthContext'
@@ -1422,8 +1422,8 @@ export default function Yearbook() {
   useClubTheme(club)
 
   usePageMeta(club && yearbook?.season ? {
-    title: `${club.name} — ${yearbook.season.name} Yearbook | BetterStats`,
-    description: `${yearbook.season.name} season yearbook for ${club.name} — stats, honours, results and records.`,
+    title: `${club.name} — ${formatSeason(yearbook.season)} Yearbook | BetterStats`,
+    description: `${formatSeason(yearbook.season)} season yearbook for ${club.name} — stats, honours, results and records.`,
     image: club.logo_url || 'https://betterstats.cricket/og-image.png',
     url: `https://betterstats.cricket/${clubSlug}/yearbook/${seasonSlug || ''}`,
   } : {})
@@ -1514,7 +1514,7 @@ export default function Yearbook() {
                   >
                     <div>
                       <div className="text-[15px] font-semibold text-pb-text transition-colors">
-                        {yb.season_name}
+                        {formatSeason(yb.season_name)}
                       </div>
                       {yb.published_at && (
                         <div className="font-mono text-[11px] text-pb-faintest mt-0.5">
@@ -1604,7 +1604,7 @@ export default function Yearbook() {
                   >
                     {yearbooks.filter(yb => yb.status === 'published').map(yb => {
                       const sl = _seasonSlug(yb.season_name)
-                      return <option key={yb.season_id} value={sl}>{yb.season_name}</option>
+                      return <option key={yb.season_id} value={sl}>{formatSeason(yb.season_name)}</option>
                     })}
                   </select>
                 )}

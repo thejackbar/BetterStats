@@ -5,6 +5,8 @@ import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { PbSpinner } from '../../lib/presskit'
 
+import { formatSeason } from '../../lib/cricketFormat'
+
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 const PAY_METHODS = ['EFT', 'Cash', 'PlayHQ', 'Other']
 
@@ -256,7 +258,7 @@ export default function AdminFeeBulkPayment() {
                 <div>
                   <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">SEASON</label>
                   <select className={`${inp} w-full`} value={seasonId} onChange={e => setSeasonId(e.target.value)}>
-                    {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
                   </select>
                 </div>
                 <div>

@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
 import { dashboardTiles, tierInfo, tierLabel, statusLabel, statusIsLive, TIER } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
+import { formatSeason } from '../../lib/cricketFormat'
 
 // Render "BetterX" with the suffix in the club accent colour, matching the
 // existing BetterSelect treatment.
@@ -178,7 +179,7 @@ export default function AdminDashboard() {
             <div className="pb-card overflow-hidden">
               {seasons.slice(0, 5).map((s, i) => (
                 <div key={s.id} className={`flex items-center justify-between px-5 py-3 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-                  <span className="text-pb-text text-sm">{s.name}</span>
+                  <span className="text-pb-text text-sm">{formatSeason(s)}</span>
                   <span className="font-mono text-[10px] text-pb-faintest">{s.year || '—'}</span>
                 </div>
               ))}

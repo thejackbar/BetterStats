@@ -11,7 +11,7 @@ import {
   Label, Card, PageHeader, PbSpinner,
 } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
-import { fmt2, fmtCount } from '../lib/cricketFormat'
+import { fmt2, fmtCount, formatSeason } from '../lib/cricketFormat'
 
 const BATTING_SORTS = [
   { key: 'total_runs',    label: 'MOST RUNS' },
@@ -132,7 +132,7 @@ function SirsTable({ rows, sirsType, fmt = n => n }) {
                                   : `${perf.wickets}/${perf.runs}`}
                               </td>
                               <td className="py-1 pr-4 text-pb-dim">{perf.grade || '—'}</td>
-                              <td className="py-1 pr-4 text-pb-dim">{perf.season || '—'}</td>
+                              <td className="py-1 pr-4 text-pb-dim">{formatSeason(perf.season) || '—'}</td>
                               <td className="py-1 text-pb-dim">{formatSirsDate(perf.date)}</td>
                             </tr>
                           ))}
