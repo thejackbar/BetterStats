@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
+from app.routers.availability import resolve_period_statuses
 from app.services.selection_pool import assemble_selection
 
 router = APIRouter(prefix="/selection", tags=["selection"])
@@ -62,9 +63,11 @@ async def selection_overview(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """All upcoming fixtures with their finalised lineups, for the side-by-side
-    board. One row per fixture, players in batting order. Declared before the
-    /{fixture_id} route so 'overview' isn't read as a fixture id.
+    """All upcoming fixtures with their finalised lineups, for the matchday
+    board. One row per fixture, players in batting order, each carrying their
+    skill roles + per-date availability so the board can derive a health
+    summary (balance / keeper / captain / flags / status) without a second
+    round-trip. Declared before /{fixture_id} so 'overview' isn't read as an id.
     """
     fx_res = await db.execute(
         select(Fixture)
@@ -73,13 +76,23 @@ async def selection_overview(
     )
     fixtures = fx_res.scalars().all()
     if not fixtures:
-        return {"fixtures": []}
+        return {"fixtures": [], "default_team_size": club.default_team_size}
 
     # Team names, to show which of our teams each fixture belongs to.
     tm_res = await db.execute(select(Team).where(Team.organisation_id == club.id))
     team_names = {str(t.id): (t.short_name or t.name) for t in tm_res.scalars().all()}
 
-    # Lineups for these fixtures, with player display name + flags, in order.
+    # Grade label per fixture (drives the small grade badge).
+    grade_ids = {f.grade_id for f in fixtures if f.grade_id}
+    grade_names: dict[str, str] = {}
+    if grade_ids:
+        gr_res = await db.execute(
+            select(Grade.id, Grade.display_name_override, Grade.name).where(Grade.id.in_(grade_ids))
+        )
+        for gid, dno, nm in gr_res.fetchall():
+            grade_names[str(gid)] = dno or nm
+
+    # Lineups for these fixtures, with player display name + roles + flags, in order.
     rows_res = await db.execute(
         select(
             FixtureLineup.fixture_id,
@@ -88,34 +101,67 @@ async def selection_overview(
             FixtureLineup.is_wicket_keeper,
             func.coalesce(Player.display_name_override, Player.name),
             Player.id,
+            Player.skill_positions,
         )
         .join(Player, FixtureLineup.player_id == Player.id)
         .where(FixtureLineup.organisation_id == club.id)
         .order_by(FixtureLineup.batting_order.asc().nullslast())
     )
     by_fixture: dict[str, list] = {}
-    for fid, order, cap, wk, name, pid in rows_res.fetchall():
+    for fid, order, cap, wk, name, pid, skills in rows_res.fetchall():
         by_fixture.setdefault(str(fid), []).append({
             "player_id": str(pid), "display_name": name,
             "batting_order": order, "is_captain": cap, "is_wicket_keeper": wk,
+            "skill_positions": skills or [],
         })
 
-    return {
-        "fixtures": [
-            {
-                "id": str(f.id),
-                "label": f.label,
-                "opponent_name": f.opponent_name,
-                "home_away": f.home_away,
-                "played_on": f.played_on.isoformat() if f.played_on else None,
-                "round": f.round,
-                "venue": f.venue,
-                "team_name": team_names.get(str(f.team_id)) if f.team_id else None,
-                "lineup": by_fixture.get(str(f.id), []),
-            }
-            for f in fixtures
-        ]
-    }
+    # Availability for every fixture's playing date (explicit answer wins, then
+    # the period fallback) — same resolution the builder uses, so the board's
+    # health flags match what you'd see inside.
+    dates = sorted({f.played_on for f in fixtures if f.played_on})
+    explicit: dict[tuple[str, str], str] = {}
+    period_map: dict[str, dict] = {}
+    if dates:
+        av_res = await db.execute(
+            text(
+                "SELECT player_id, avail_date, status FROM player_availability "
+                "WHERE organisation_id = :org AND avail_date BETWEEN :lo AND :hi"
+            ),
+            {"org": club.id, "lo": dates[0], "hi": dates[-1]},
+        )
+        for pid, d, status in av_res.fetchall():
+            explicit[(d.isoformat(), str(pid))] = status
+        period_map = await resolve_period_statuses(db, club.id, dates)
+
+    def avail_for(date_iso: str | None, pid: str) -> str:
+        if not date_iso:
+            return "NO_RESPONSE"
+        if (date_iso, pid) in explicit:
+            return explicit[(date_iso, pid)]
+        info = period_map.get(date_iso, {}).get(pid)
+        return info["status"] if info else "NO_RESPONSE"
+
+    out = []
+    for f in fixtures:
+        date_iso = f.played_on.isoformat() if f.played_on else None
+        lineup = by_fixture.get(str(f.id), [])
+        for p in lineup:
+            p["availability"] = avail_for(date_iso, p["player_id"])
+        out.append({
+            "id": str(f.id),
+            "label": f.label,
+            "opponent_name": f.opponent_name,
+            "home_away": f.home_away,
+            "played_on": date_iso,
+            "start_time": f.start_time,
+            "round": f.round,
+            "venue": f.venue,
+            "team_name": team_names.get(str(f.team_id)) if f.team_id else None,
+            "grade_name": grade_names.get(str(f.grade_id)) if f.grade_id else None,
+            "lineup": lineup,
+        })
+
+    return {"fixtures": out, "default_team_size": club.default_team_size}
 
 
 @router.get("/selected-players")
