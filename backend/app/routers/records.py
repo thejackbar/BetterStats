@@ -1103,6 +1103,30 @@ async def get_records(
             ORDER BY index_score DESC LIMIT :limit
         """)
 
+    # Collapse rows that describe the same physical stand. The 077 migration
+    # removes exact intra-game duplicates, but the same match can in principle
+    # exist under two game ids (e.g. a re-pulled/duplicated game record), which
+    # would otherwise show twice. Two entries identical on (unordered pair, runs,
+    # wicket, grade, season) are visually indistinguishable, so we keep the first.
+    def dedup_partnerships(rows: list[dict]) -> list[dict]:
+        seen: set = set()
+        out: list[dict] = []
+        for r in rows:
+            a = str(r.get("player1_id") or (r.get("player1_name") or "").strip().lower())
+            b = str(r.get("player2_id") or (r.get("player2_name") or "").strip().lower())
+            key = (
+                frozenset((a, b)),
+                r.get("runs"),
+                r.get("wicket_number"),
+                (r.get("grade_name") or "").strip().lower(),
+                (r.get("season_name") or "").strip().lower(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(r)
+        return out
+
     # Flatten by_wicket into wicket_1 ... wicket_10 and normalise field names
     def normalise_partnership(r: dict) -> dict:
         return {
@@ -1145,15 +1169,15 @@ async def get_records(
             partnerships_flat.setdefault(key, []).append(nr)
         grade = mr.get("grade_name") or "Unknown"
         partnerships_flat["by_grade"].setdefault(grade, []).append(nr)
-    # Re-sort top_partnerships by runs desc and cap at 25
+    # Re-sort top_partnerships by runs desc, de-dup identical stands, cap at 25
     partnerships_flat["top_partnerships"].sort(key=lambda r: (r.get("runs") or 0), reverse=True)
-    partnerships_flat["top_partnerships"] = partnerships_flat["top_partnerships"][:25]
-    # Re-sort per-wicket buckets by runs desc and cap at 10
+    partnerships_flat["top_partnerships"] = dedup_partnerships(partnerships_flat["top_partnerships"])[:25]
+    # Re-sort per-wicket buckets by runs desc, de-dup, cap at 10
     for wk in range(1, 11):
         key = f"wicket_{wk}"
         if key in partnerships_flat:
             partnerships_flat[key].sort(key=lambda r: (r.get("runs") or 0), reverse=True)
-            partnerships_flat[key] = partnerships_flat[key][:10]
+            partnerships_flat[key] = dedup_partnerships(partnerships_flat[key])[:10]
     # For each grade, keep only the best partnership per wicket (manual may beat game records)
     for grade in list(partnerships_flat["by_grade"].keys()):
         best: dict[int, dict] = {}
