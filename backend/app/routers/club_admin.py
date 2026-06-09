@@ -1136,6 +1136,7 @@ async def _do_import_partnership_records(file, club, db):
     }
 
     created_records = []
+    duplicate_records = []  # already existed (synced or manual) — not imported
     skipped = 0
     errors = []
 
@@ -1177,39 +1178,81 @@ async def _do_import_partnership_records(file, club, db):
         b1_id = player_map.get(_normalise_name(b1_name))
         b2_id = player_map.get(_normalise_name(b2_name))
 
-        # Check for potential GR duplicate (only when both IDs resolved)
-        gr_duplicate = None
+        # Skip rows that already exist — so re-running an import (or importing a
+        # stand that sync already holds) can't pile up duplicates on the records
+        # page. Two sources to check:
+        existing_reason = None
+
+        # 1) A synced scorecard partnership for the same stand. Match the season on
+        #    the Season's START year (manual records store the start year, e.g. 2016
+        #    for 2016/17, while the game can be played in either calendar year of a
+        #    summer season — matching EXTRACT(YEAR FROM played_at) missed those).
+        #    Only checkable when both batters resolved to ids.
         if b1_id and b2_id:
-            dup_res = await db.execute(_text("""
-                SELECT pt.runs, pt.wicket_number,
-                       EXTRACT(YEAR FROM g.played_at)::int AS season_year,
-                       COALESCE(gr.display_name_override, gr.name) AS grade_name
+            syn_res = await db.execute(_text("""
+                SELECT 1
                 FROM partnerships pt
-                JOIN games g ON g.id = pt.game_id
-                JOIN grades gr ON gr.id = g.grade_id
-                WHERE pt.runs = :runs
+                JOIN games   g  ON g.id  = pt.game_id
+                JOIN grades  gr ON gr.id = g.grade_id
+                JOIN seasons s  ON s.id  = gr.season_id
+                WHERE s.organisation_id = :org_id
+                  AND pt.is_club_innings IS NOT FALSE
+                  AND pt.runs = :runs
                   AND pt.wicket_number = :wicket
-                  AND EXTRACT(YEAR FROM g.played_at)::int = :season_year
                   AND (
                     (pt.batter1_id = CAST(:b1_id AS uuid) AND pt.batter2_id = CAST(:b2_id AS uuid)) OR
                     (pt.batter1_id = CAST(:b2_id AS uuid) AND pt.batter2_id = CAST(:b1_id AS uuid))
                   )
+                  AND lower(btrim(:grade)) IN (
+                    lower(btrim(gr.name)),
+                    lower(btrim(COALESCE(gr.display_name_override, gr.name)))
+                  )
+                  AND :season_year = COALESCE(
+                    s.year, NULLIF(substring(s.name from '([0-9]{4})'), '')::int
+                  )
                 LIMIT 1
             """), {
-                "runs": runs,
-                "wicket": wicket_number,
-                "season_year": season_year,
-                "b1_id": b1_id,
-                "b2_id": b2_id,
+                "org_id": str(club.id), "runs": runs, "wicket": wicket_number,
+                "season_year": season_year, "grade": grade,
+                "b1_id": b1_id, "b2_id": b2_id,
             })
-            dup_row = dup_res.mappings().first()
-            if dup_row:
-                gr_duplicate = {
-                    "runs": int(dup_row["runs"]) if dup_row["runs"] is not None else None,
-                    "wicket_number": int(dup_row["wicket_number"]) if dup_row["wicket_number"] is not None else None,
-                    "season_year": int(dup_row["season_year"]) if dup_row["season_year"] is not None else None,
-                    "grade_name": str(dup_row["grade_name"]) if dup_row["grade_name"] is not None else None,
-                }
+            if syn_res.first() is not None:
+                existing_reason = "synced"
+
+        # 2) A previously-imported manual record for the same stand (unordered name
+        #    pair). Names are always present, so this catches re-uploading a file.
+        if existing_reason is None:
+            man_res = await db.execute(_text("""
+                SELECT 1 FROM manual_partnership_records m
+                WHERE m.org_id = :org_id
+                  AND m.runs = :runs
+                  AND m.wicket_number = :wicket
+                  AND m.season_year = :season_year
+                  AND lower(btrim(m.grade_name)) = lower(btrim(:grade))
+                  AND (
+                    (lower(btrim(m.batter1_name)) = lower(btrim(:b1_name)) AND lower(btrim(m.batter2_name)) = lower(btrim(:b2_name))) OR
+                    (lower(btrim(m.batter1_name)) = lower(btrim(:b2_name)) AND lower(btrim(m.batter2_name)) = lower(btrim(:b1_name)))
+                  )
+                LIMIT 1
+            """), {
+                "org_id": str(club.id), "runs": runs, "wicket": wicket_number,
+                "season_year": season_year, "grade": grade,
+                "b1_name": b1_name, "b2_name": b2_name,
+            })
+            if man_res.first() is not None:
+                existing_reason = "manual"
+
+        if existing_reason:
+            duplicate_records.append({
+                "batter1_name": b1_name,
+                "batter2_name": b2_name,
+                "runs": runs,
+                "wicket_number": wicket_number,
+                "season_year": season_year,
+                "grade_name": grade,
+                "reason": existing_reason,
+            })
+            continue
 
         record = ManualPartnershipRecord(
             org_id=club.id,
@@ -1239,7 +1282,6 @@ async def _do_import_partnership_records(file, club, db):
             "season_year": season_year,
             "grade_name": grade,
             "is_not_out": is_not_out,
-            "gr_duplicate": gr_duplicate,
         })
 
     await db.commit()
@@ -1247,6 +1289,8 @@ async def _do_import_partnership_records(file, club, db):
     return {
         "created": len(created_records),
         "skipped": skipped,
+        "skipped_duplicates": len(duplicate_records),
+        "duplicates": duplicate_records,
         "errors": errors,
         "records": created_records,
     }

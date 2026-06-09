@@ -283,6 +283,8 @@ function GradeMatchPanel({ records, onRecordsRenamed }) {
 
 function ImportWizard({ result, players, onClose, onRecordDeleted }) {
   const { created, skipped, errors, records } = result
+  const skippedDuplicates = result.skipped_duplicates || 0
+  const duplicates = result.duplicates || []
 
   const needsAttention = records.filter(r => r.batter1_unmatched || r.batter2_unmatched || r.gr_duplicate)
   const clean = records.filter(r => !r.batter1_unmatched && !r.batter2_unmatched && !r.gr_duplicate)
@@ -295,6 +297,7 @@ function ImportWizard({ result, players, onClose, onRecordDeleted }) {
             <h2 className="text-pb-text font-semibold">Import Complete — Review Results</h2>
             <p className="font-mono text-[10px] text-pb-faint mt-0.5">
               {created} record{created !== 1 ? 's' : ''} imported
+              {skippedDuplicates > 0 ? `, ${skippedDuplicates} already existed` : ''}
               {skipped > 0 ? `, ${skipped} skipped` : ''}
             </p>
           </div>
@@ -307,9 +310,33 @@ function ImportWizard({ result, players, onClose, onRecordDeleted }) {
           </div>
         )}
 
-        {needsAttention.length === 0 && (
+        {duplicates.length > 0 && (
+          <div className="px-5 py-3 pb-hairline-b">
+            <p className="font-mono text-[10px] text-pb-faint mb-2">
+              {duplicates.length} row{duplicates.length !== 1 ? 's' : ''} skipped — already in your records
+              {' '}(not re-imported)
+            </p>
+            <div className="space-y-1 max-h-40 overflow-y-auto pb-scroll">
+              {duplicates.map((d, i) => (
+                <p key={i} className="font-mono text-[11px] text-pb-faintest">
+                  {d.batter1_name} &amp; {d.batter2_name} · {d.runs} ({ORDINALS[(d.wicket_number || 1) - 1]} wkt) ·
+                  {' '}{d.grade_name} {d.season_year}
+                  {' '}<span className="text-pb-faint">[{d.reason === 'synced' ? 'in game data' : 'already entered'}]</span>
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {needsAttention.length === 0 && created > 0 && (
           <div className="px-5 py-6 text-center font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>
             All {created} records imported cleanly — no issues to review.
+          </div>
+        )}
+
+        {needsAttention.length === 0 && created === 0 && duplicates.length > 0 && (
+          <div className="px-5 py-6 text-center font-mono text-[11px] text-pb-faint">
+            Nothing new to import — every row already exists in your records.
           </div>
         )}
 
