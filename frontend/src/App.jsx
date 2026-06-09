@@ -12,7 +12,7 @@ import ScrollToTop from './components/ScrollToTop'
 import { usePageView } from './hooks/usePageView'
 
 // Marketing pages have their own MarketingNav — suppress the global Navbar on those routes
-const MARKETING_PATHS = ['/', '/features', '/pricing', '/compare', '/modules', '/about', '/contact', '/faq', '/terms', '/privacy', '/blog']
+const MARKETING_PATHS = ['/', '/overview', '/features', '/pricing', '/compare', '/modules', '/about', '/contact', '/faq', '/terms', '/privacy', '/blog']
 function ConditionalNavbar() {
   const { pathname } = useLocation()
   const isMarketing =
@@ -32,6 +32,7 @@ function PageViewBeacon() {
 
 // Marketing — kept synchronous for instant first paint
 import Landing from './pages/marketing/Landing'
+import Overview from './pages/marketing/Overview'
 import Features from './pages/marketing/Features'
 import Pricing from './pages/marketing/Pricing'
 import Compare from './pages/marketing/Compare'
@@ -168,10 +169,13 @@ export default function App() {
         <Routes>
           {/* Marketing site */}
           <Route path="/" element={<Landing />} />
+          <Route path="/overview" element={<Overview />} />
           <Route path="/features" element={<Features />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/compare" element={<Compare />} />
           <Route path="/modules" element={<Modules />} />
+          {/* Legacy module slug → BetterAdmin umbrella */}
+          <Route path="/modules/betterfees" element={<Navigate to="/modules/betteradmin" replace />} />
           <Route path="/modules/:slug" element={<ModuleDetail />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />

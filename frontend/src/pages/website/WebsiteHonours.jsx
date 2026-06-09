@@ -51,7 +51,7 @@ function HonoursBody({ slug }) {
   const [layout, setLayout] = useState(1)
   const [loading, setLoading] = useState(true)
 
-  usePageMeta({ title: `Honours — ${site.name}`, url: `https://betterstats.cricket/${slug}/website/honours` })
+  usePageMeta({ title: `Honours — ${site.name}`, url: `https://betterat.cricket/${slug}/website/honours` })
 
   useEffect(() => {
     let cancelled = false

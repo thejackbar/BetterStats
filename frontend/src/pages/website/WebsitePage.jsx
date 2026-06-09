@@ -23,7 +23,7 @@ function PageBody({ slug, pageSlug }) {
 
   usePageMeta({
     title: page ? `${page.title} — ${site.name}` : site.name,
-    url: `https://betterstats.cricket/${slug}/website/page/${pageSlug}`,
+    url: `https://betterat.cricket/${slug}/website/page/${pageSlug}`,
   })
 
   if (loading) return <div className="max-w-3xl mx-auto px-4 py-16"><PbSpinner message="Loading…" /></div>

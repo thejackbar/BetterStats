@@ -12,11 +12,11 @@ export default function MarketingFooter() {
                 <span className="font-bold text-lg text-navy-950 leading-none">B</span>
               </div>
               <span className="font-bold text-lg tracking-tight">
-                Better<span className="text-accent">.</span>
+                Better<span className="text-accent"> Cricket</span>
               </span>
             </Link>
             <p className="text-pb-dim text-sm leading-relaxed max-w-sm mb-6">
-              The operating system for Australian cricket clubs. BetterStats keeps your history; the modules run your season, your treasury and your match prep.
+              Everything an Australian cricket club runs on, in one place. BetterStats keeps your history; the modules run your season, your back office and your match prep.
             </p>
             <div className="flex gap-4 text-sm text-pb-dim">
               <a href="https://x.com/betterstatsau" target="_blank" rel="noopener noreferrer me" className="hover:text-pb-text transition-colors">Twitter</a>
@@ -58,14 +58,14 @@ export default function MarketingFooter() {
           <div className="col-span-6 md:col-span-2">
             <p className="text-sm font-semibold mb-4">Australian cricket</p>
             <p className="text-sm text-pb-dim mb-3 leading-relaxed">
-              Better syncs from PlayHQ — the official Australian cricket data feed.
+              Better Cricket keeps your club’s full history online and updates it automatically after every match — no spreadsheets, no data entry.
             </p>
             <Link to="/about" className="text-sm text-accent hover:underline">Read our story →</Link>
           </div>
         </div>
 
         <div className="border-t pb-hairline pt-8 flex flex-col md:flex-row md:items-center justify-between gap-3 text-sm text-pb-faint">
-          <p>© {new Date().getFullYear()} Better · Made for cricket, by cricketers · Perth, WA</p>
+          <p>© {new Date().getFullYear()} Better Cricket · A BetterSports product · ABN 32 624 335 397 · Perth, WA</p>
           <div className="flex flex-wrap gap-6">
             <Link to="/terms" className="hover:text-pb-text">Terms</Link>
             <Link to="/privacy" className="hover:text-pb-text">Privacy</Link>

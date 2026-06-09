@@ -1,17 +1,25 @@
 // Shared data for the marketing pages.
 // Keeping data separated so the JSX files stay focused on layout.
 
+// ── Brand ────────────────────────────────────────────────────────────────────
+// Better Cricket is the cricket product of BetterSports (our trading name).
+export const BRAND = 'Better Cricket'
+export const COMPANY = 'BetterSports'
+export const ABN = '32 624 335 397'
+export const DOMAIN = 'betterat.cricket'
+export const BASE_URL = 'https://betterat.cricket'
+
 export const FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform?usp=header'
 export const SUPPORT_EMAIL = 'betterstatsau@gmail.com'
 
 // ── Formspree ────────────────────────────────────────────────────────────────
-// Sign up at https://formspree.io, create a form pointed at betterstatsau@gmail.com,
-// then replace YOUR_FORM_ID below with the 8-char ID from your form's endpoint URL.
+// Sign up at https://formspree.io, create a form pointed at the support inbox,
+// then replace the ID below with the 8-char ID from your form's endpoint URL.
 export const FORMSPREE_ID = 'xykvbqpr'
 
 // ============================================================
 // FEATURES — 6 high-impact cards for the landing & top of features
-// (the deep 11-section list lives inside Features.jsx)
+// (the deep section list lives inside Features.jsx)
 // ============================================================
 export const LANDING_FEATURES = [
   {
@@ -41,7 +49,7 @@ export const LANDING_FEATURES = [
   {
     n: '05',
     title: 'Match Scorecards',
-    desc: 'Every ball, every wicket, every catch — from PlayHQ today back as far as your MyCricket archives reach.',
+    desc: 'Every ball, every wicket, every catch — your whole match history, synced automatically and kept current.',
     stat: 'Full history',
   },
   {
@@ -71,7 +79,7 @@ export const HOW_IT_WORKS = [
   {
     n: '01',
     title: 'We start your first sync',
-    desc: 'You give us your club details and we pull every scrap of available data into BetterStats.',
+    desc: 'You give us your club details and we pull every scrap of available history into Better Cricket — automatically, no spreadsheets to hand over.',
     mins: '5 minutes',
   },
   {
@@ -89,60 +97,219 @@ export const HOW_IT_WORKS = [
 ]
 
 // ============================================================
-// COMPARISON — PlayHQ vs CricketStatz vs BetterStats
-// Cell types:
-//   true  → green tick
-//   false → grey dash
-//   'partial' → amber pill
-//   'manual'  → amber pill
-//   '—'   → literal dash text
-//   {monthly, annual} → billing-toggle-driven text
-//   string → literal text
+// COMPARISONS — one per surface (each marketing page picks its own).
+//
+// Shape:
+//   { eyebrow, heading, sub,
+//     columns: [ { key, name, tag, sub?, us? } … ],   // competitors first, "us" last
+//     sections: [ { section, rows: [ { feature, tip?, textRow?, billing?, values:{ <colKey>: cell } } ] } ],
+//     cta?: { line, label, to } }
+//
+// Cell shapes (read by ComparisonTable):
+//   true  → green tick · false → grey cross
+//   'partial' / 'manual' → amber pill
+//   '—'   → literal em dash
+//   {monthly, annual} → driven by the billing toggle
+//   any other string → literal text
+//
+// BetterIQ is a category of one — see COMPARISON_SOLO below (no table).
 // ============================================================
-export const COMPETITORS = {
-  playhq: { name: 'PlayHQ', tag: 'System of record', sub: 'Official AU cricket scoring' },
-  cstatz: { name: 'CricketStatz', tag: 'Stats software', sub: 'Long-running stats package' },
-  // Generic label used on embedded compare sections (home/features). The dedicated
-  // /compare page can opt back into the specific competitor name via prop.
-  other:  { name: 'Other Competitors', tag: 'Existing tools', sub: 'Generic stats platforms' },
-  us:     { name: 'Better', tag: 'Club platform', sub: 'Core stats + modules' },
+const US_COL = { key: 'us', name: 'Better Cricket', tag: 'One platform', sub: 'Stats, site & the modules that run your club', us: true }
+
+export const COMPARISONS = {
+  // Home + one-pager — the whole platform vs the usual patchwork of tools.
+  platform: {
+    eyebrow: 'Why one platform',
+    heading: "Five tools' worth of club admin. One login.",
+    sub: 'Most clubs run their season across a spreadsheet, a website builder, a design app, an email tool and a few group chats. Better Cricket is all of it — fed by one match feed.',
+    columns: [
+      { key: 'patchwork', name: 'The usual patchwork', tag: 'A spreadsheet + 4 apps', sub: 'Sheets · a DIY site · Canva · Mailchimp · group chats' },
+      US_COL,
+    ],
+    sections: [
+      {
+        section: 'Everything your club runs on',
+        rows: [
+          { feature: 'Complete club history & stats', tip: 'Every player, every season, kept forever', values: { patchwork: 'Spreadsheets', us: true } },
+          { feature: 'Public, club-branded website', tip: 'Your own URL, your colours, your crest, your sponsors', values: { patchwork: 'Separate site builder', us: true } },
+          { feature: 'Availability & team selection', values: { patchwork: 'Group chats', us: true } },
+          { feature: 'Match-day social graphics', tip: 'Lineups, scorecards, player of the match', values: { patchwork: 'Canva, by hand', us: true } },
+          { feature: 'Fees, membership, comms & merch', values: { patchwork: 'Sheets + Mailchimp', us: true } },
+          { feature: 'Opposition scouting & analytics', values: { patchwork: false, us: true } },
+        ],
+      },
+      {
+        section: 'How it feels to run',
+        rows: [
+          { feature: 'Enter your match data once', tip: 'It flows into stats, posts, selection and analytics', values: { patchwork: false, us: true } },
+          { feature: 'Built for cricket, not adapted to it', values: { patchwork: 'partial', us: true } },
+          { feature: 'Logins & bills to manage', textRow: true, values: { patchwork: '5+ tools', us: 'One subscription' } },
+        ],
+      },
+    ],
+    cta: { line: 'Stop stitching five tools together every weekend. Run the whole club from one place.', label: 'See everything Better Cricket does →', to: '/overview' },
+  },
+
+  // BetterStats (Core) — the public stats + site, vs dedicated stats tools.
+  betterstats: {
+    eyebrow: 'Compare',
+    heading: 'Your stats deserve better than a stats tool.',
+    sub: 'BetterStats is the Core every club gets — your full reconciled history and a public site to be proud of. Here is how it sits next to the dedicated cricket-stats tools.',
+    columns: [
+      { key: 'clubstats', name: 'ClubStats', tag: 'Stats site', sub: 'clubstats.cricket' },
+      { key: 'cstatz', name: 'CricketStatz', tag: 'Stats software', sub: 'Long-running desktop package' },
+      US_COL,
+    ],
+    sections: [
+      {
+        section: 'Data depth',
+        rows: [
+          { feature: 'Full career stats, every player', tip: 'Runs, wickets, averages across every season', values: { clubstats: true, cstatz: true, us: true } },
+          { feature: 'Decades of historical archive', tip: 'Your whole history, not just recent seasons', values: { clubstats: 'partial', cstatz: 'manual', us: true } },
+          { feature: 'Partnership records', values: { clubstats: 'partial', cstatz: true, us: true } },
+          { feature: 'Head-to-head player splits', tip: 'How a player has gone vs every club they have played', values: { clubstats: false, cstatz: 'partial', us: true } },
+          { feature: 'Caught-behind & dismissal breakdowns', values: { clubstats: false, cstatz: 'partial', us: true } },
+        ],
+      },
+      {
+        section: 'Surface & presentation',
+        rows: [
+          { feature: 'Public, club-branded website', tip: 'Your own URL, your colours, your crest, your sponsors', values: { clubstats: 'partial', cstatz: false, us: true } },
+          { feature: 'Mobile-first, modern design', values: { clubstats: 'partial', cstatz: false, us: true } },
+          { feature: 'Auto-generated season yearbook', values: { clubstats: false, cstatz: false, us: true } },
+          { feature: 'Shareable social stat cards', tip: 'One-tap export of branded Instagram / X cards', values: { clubstats: false, cstatz: false, us: true } },
+        ],
+      },
+      {
+        section: 'Setup & operations',
+        rows: [
+          { feature: 'Syncs automatically — no data entry', tip: 'Your match history flows in and keeps itself current', values: { clubstats: 'partial', cstatz: false, us: true } },
+          { feature: 'Onboarding & migration included', values: { clubstats: false, cstatz: false, us: true } },
+          { feature: 'Setup time', textRow: true, values: { clubstats: 'Days', cstatz: '2–4 weeks', us: 'Under 1 hour' } },
+          { feature: 'Bolt-on club modules', tip: 'Selection, socials, admin and analytics on the same data', values: { clubstats: false, cstatz: false, us: true } },
+        ],
+      },
+    ],
+    cta: { line: "It is included in every plan. Get your club's history online in under an hour.", label: 'Get your club on Better Cricket →', to: '/contact' },
+  },
+
+  // BetterSocials — vs design + website tools.
+  bettersocials: {
+    eyebrow: 'Compare',
+    heading: 'A designer and a website builder — that already know your cricket.',
+    sub: 'BetterSocials turns your match data into share-ready posts and runs your public website. No design skills, no retyping scorecards into a blank canvas.',
+    columns: [
+      { key: 'canva', name: 'Canva', tag: 'Design app', sub: 'Blank-canvas graphics' },
+      { key: 'squarespace', name: 'Squarespace', tag: 'Website builder', sub: 'Generic site templates' },
+      US_COL,
+    ],
+    sections: [
+      {
+        section: 'Match-day graphics',
+        rows: [
+          { feature: 'Cricket-native post templates', tip: 'Lineups, toss, player of the match, final score, full scorecard', values: { canva: 'manual', squarespace: false, us: true } },
+          { feature: 'Auto-fill from your match data', tip: 'No retyping names and figures', values: { canva: false, squarespace: false, us: true } },
+          { feature: 'Your crest, colours & display fonts by default', values: { canva: 'manual', squarespace: 'partial', us: true } },
+          { feature: 'No design skills needed', values: { canva: false, squarespace: 'partial', us: true } },
+          { feature: 'One-tap PNG export', values: { canva: true, squarespace: false, us: true } },
+        ],
+      },
+      {
+        section: 'Your club online',
+        rows: [
+          { feature: 'Public club website included', values: { canva: false, squarespace: true, us: true } },
+          { feature: 'Live stats, profiles & ladders built in', tip: 'The website is wired to your match data', values: { canva: false, squarespace: false, us: true } },
+          { feature: 'News, galleries, sponsors & honour boards', values: { canva: false, squarespace: true, us: true } },
+          { feature: 'Per-club cost', textRow: true, values: { canva: '~$165/yr', squarespace: '~$300/yr', us: 'Included in Better' } },
+        ],
+      },
+    ],
+    cta: { line: 'One tool for the website and the posts — both fed by your cricket.', label: 'Explore BetterSocials →', to: '/modules/bettersocials' },
+  },
+
+  // BetterSelect — vs group chats + generic team apps.
+  betterselect: {
+    eyebrow: 'Compare',
+    heading: 'Selection that already knows your players.',
+    sub: 'BetterSelect collects availability with no player accounts and suggests a balanced XI from form, grade and role — because it sits on your stats, not a separate database you keep up to date.',
+    columns: [
+      { key: 'chats', name: 'Group chats & sheets', tag: 'The status quo', sub: 'WhatsApp / Facebook + a spreadsheet' },
+      { key: 'teamapps', name: 'Generic team apps', tag: 'Availability tools', sub: 'Built for any sport' },
+      US_COL,
+    ],
+    sections: [
+      {
+        section: 'Collecting availability',
+        rows: [
+          { feature: 'No player accounts or app install', tip: 'A magic link plus the last 4 of their phone', values: { chats: true, teamapps: false, us: true } },
+          { feature: 'One grid for the whole squad', values: { chats: false, teamapps: true, us: true } },
+          { feature: 'Set whole date-range periods at once', values: { chats: false, teamapps: 'partial', us: true } },
+        ],
+      },
+      {
+        section: 'Picking the side',
+        rows: [
+          { feature: 'Form-aware XI suggestions', tip: 'Ranks players by recent and season-to-date form', values: { chats: false, teamapps: false, us: true } },
+          { feature: 'Grade, gender & squad-tier aware', values: { chats: false, teamapps: false, us: true } },
+          { feature: 'Knows every player’s stats already', tip: 'No separate roster to maintain', values: { chats: false, teamapps: false, us: true } },
+          { feature: 'Pick the XI on numbered batting slots', values: { chats: false, teamapps: false, us: true } },
+          { feature: 'Live fixtures & grade ladders', values: { chats: false, teamapps: 'partial', us: true } },
+        ],
+      },
+    ],
+    cta: { line: 'Turn the weekly "who’s in?" scramble into a few taps.', label: 'Explore BetterSelect →', to: '/modules/betterselect' },
+  },
+
+  // BetterAdmin — the back office, vs email + fee/merch tooling.
+  betteradmin: {
+    eyebrow: 'Compare',
+    heading: 'Your back office, on top of your member list.',
+    sub: 'BetterAdmin runs fees, comms and merch off the same player database as your stats — so you are not exporting CSVs between an email tool, a spreadsheet and a payment app.',
+    columns: [
+      { key: 'mailchimp', name: 'Mailchimp', tag: 'Email tool', sub: 'Newsletters & lists' },
+      { key: 'sheets', name: 'Spreadsheets & apps', tag: 'Fees / merch', sub: 'Manual tracking' },
+      US_COL,
+    ],
+    sections: [
+      {
+        section: 'Money',
+        rows: [
+          { feature: 'Match fees that auto-allocate', tip: 'A payment settles games oldest-first; status is always correct', values: { mailchimp: false, sheets: 'manual', us: true } },
+          { feature: 'Membership tiers & schedules', values: { mailchimp: false, sheets: 'manual', us: true } },
+          { feature: 'Credit & waivers handled', values: { mailchimp: false, sheets: 'manual', us: true } },
+          { feature: 'Merch stock & sales', tip: 'Coming soon', values: { mailchimp: false, sheets: 'manual', us: 'partial' } },
+        ],
+      },
+      {
+        section: 'Comms',
+        rows: [
+          { feature: 'Bulk email to your members', values: { mailchimp: true, sheets: false, us: true } },
+          { feature: 'Contacts come from your player database', tip: 'No list to export and re-import', values: { mailchimp: false, sheets: false, us: true } },
+          { feature: 'Spam-Act compliant unsubscribes', values: { mailchimp: true, sheets: false, us: true } },
+          { feature: 'One back office, one bill', textRow: true, values: { mailchimp: '~$20+/mo', sheets: 'Free + your time', us: 'Included in Best' } },
+        ],
+      },
+    ],
+    cta: { line: 'Stop reconciling three tools every month.', label: 'Explore BetterAdmin →', to: '/modules/betteradmin' },
+  },
 }
 
-export const COMPARISON_3WAY = [
-  {
-    section: 'Data depth',
-    rows: [
-      { feature: 'Live match scorecards', tip: 'Ball-by-ball scoring during a match', playhq: true, cstatz: true, us: true },
-      { feature: 'Career stats (all-time, per player)', tip: 'Runs, wickets, averages across every season', playhq: false, cstatz: true, us: true },
-      { feature: 'Pre-2020 historical archive', tip: 'MyCricket-era scorecards before PlayHQ migration', playhq: false, cstatz: 'manual', us: true },
-      { feature: 'Full club history indexed', tip: 'As far back as your PlayHQ + MyCricket data goes', playhq: false, cstatz: 'manual', us: true },
-      { feature: 'Partnership records', playhq: false, cstatz: true, us: true },
-      { feature: 'Head-to-head player splits', tip: 'How a player has gone vs every club they have played', playhq: false, cstatz: 'partial', us: true },
+// BetterIQ stands alone — there is no club-platform equivalent to compare it to.
+export const COMPARISON_SOLO = {
+  betteriq: {
+    eyebrow: 'Category of one',
+    heading: 'There’s nothing to compare BetterIQ to.',
+    sub: 'No other club platform turns your own scorecards into an opposition dossier, a live selection brain and broadcast-grade team analysis. This is match prep most pro teams pay for — built from data you already have.',
+    points: [
+      'Opposition scouting, danger players and a printable captain’s cheat sheet for any upcoming opponent.',
+      'A best-available XI that updates as availability changes, with balance warnings.',
+      'Player trends, breakout and decline detection, and milestone forecasts.',
+      'Team analysis by innings phase — partnerships, collapses, par scores, how you win and lose.',
     ],
+    note: 'Built entirely from your synced scorecards — no manual entry and no ball-by-ball scoring required.',
+    cta: { line: 'The analyst your club never had.', label: 'Explore BetterIQ →', to: '/modules/betteriq' },
   },
-  {
-    section: 'Surface & presentation',
-    rows: [
-      { feature: 'Public, club-branded website', tip: 'Your own URL, your colours, your crest, your sponsors', playhq: false, cstatz: false, us: true },
-      { feature: 'Mobile-first, modern design', playhq: 'partial', cstatz: false, us: true },
-      { feature: 'Auto-generated season yearbook', playhq: false, cstatz: false, us: true },
-      { feature: 'Player profile pages (rich)', tip: 'Per-player URL with timeline, milestones, awards', playhq: false, cstatz: 'partial', us: true },
-      { feature: 'Honour boards & awards', playhq: false, cstatz: true, us: true },
-      { feature: 'Shareable social stat cards', tip: 'One-tap export of branded Instagram / X cards', playhq: false, cstatz: false, us: true },
-    ],
-  },
-  {
-    section: 'Setup & operations',
-    rows: [
-      { feature: 'Automatic sync from PlayHQ', tip: 'Official AU cricket data feed — no manual entry', playhq: true, cstatz: false, us: true },
-      { feature: 'Manual data entry required', tip: 'BetterStats pulls everything from PlayHQ — no scorer-to-spreadsheet copy work.', playhq: true, cstatz: true, us: false },
-      { feature: 'Setup time', textRow: true, playhq: 'Built-in', cstatz: '2–4 weeks', us: 'Under 1 hour' },
-      { feature: 'Onboarding & migration included', playhq: false, cstatz: false, us: true },
-      { feature: 'Selection, socials, fees & analytics modules', tip: 'One platform for availability/selection (BetterSelect), branded social posts (BetterSocials), match fees (BetterFees) and analytics + opposition scouting (BetterIQ) — not just stats.', playhq: false, cstatz: false, us: true },
-      { feature: 'Cost for a large club', tip: 'CricketStatz figures include their highest-tier subscription plus historical data charges. Better is a flat rate per club across three tiers — same fee for one team or fifty.', textRow: true, billing: true, playhq: '—', cstatz: '~$600/yr + ~$400 historical', us: { monthly: 'From $49 / month', annual: 'From $449 / year · 3 tiers' } },
-    ],
-  },
-]
+}
 
 // ============================================================
 // SCREENSHOTS — where to put real images

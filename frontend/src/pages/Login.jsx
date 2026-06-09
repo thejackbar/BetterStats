@@ -35,10 +35,10 @@ export default function Login() {
               className="w-8 h-8 rounded font-mono font-bold text-sm flex items-center justify-center text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
-              BS
+              BC
             </span>
             <span className="font-display font-bold text-xl tracking-wider uppercase text-pb-text">
-              BetterStats
+              Better Cricket
             </span>
           </div>
           <p className="font-mono text-[11px] tracking-wide3 text-pb-faint">CLUB ADMIN LOGIN</p>

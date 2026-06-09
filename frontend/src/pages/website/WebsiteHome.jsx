@@ -29,7 +29,7 @@ function HomeBody({ slug }) {
     title: `${site.name} — Official Club Website`,
     description: site.tagline || `News, history, teams and stats for ${site.name}.`,
     image: site.hero_image_url || club?.logo_url || null,
-    url: `https://betterstats.cricket/${slug}/website`,
+    url: `https://betterat.cricket/${slug}/website`,
   })
 
   const news = site.news || []

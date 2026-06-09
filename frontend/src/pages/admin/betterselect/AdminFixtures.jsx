@@ -239,10 +239,10 @@ export default function AdminFixtures() {
       {groups === null ? <PbSpinner message="Loading fixtures…" /> : (
         groups.length === 0 ? (
           <div className="pb-card px-5 py-12 text-center">
-            <Empty className="mb-4">{scope === 'upcoming' ? 'No upcoming fixtures.' : scope === 'past' ? 'No past fixtures.' : 'No fixtures yet.'}{canManage && scope !== 'past' && ' Sync from PlayHQ or add one manually.'}</Empty>
+            <Empty className="mb-4">{scope === 'upcoming' ? 'No upcoming fixtures.' : scope === 'past' ? 'No past fixtures.' : 'No fixtures yet.'}{canManage && scope !== 'past' && ' Sync fixtures or add one manually.'}</Empty>
             {canManage && (
               <div className="flex gap-2 justify-center">
-                <Btn variant="soft" sm icon="bolt" onClick={sync} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync PlayHQ'}</Btn>
+                <Btn variant="soft" sm icon="bolt" onClick={sync} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync fixtures'}</Btn>
                 <Btn variant="primary" sm icon="fixtures" onClick={() => setEditing(null)}>Add fixture</Btn>
               </div>
             )}

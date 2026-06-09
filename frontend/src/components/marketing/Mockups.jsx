@@ -32,7 +32,7 @@ function BrowserChrome({ url, children }) {
 // ── Mock 1: Club homepage (used in landing hero) ──────────────────────────
 export function MockClubHomepage() {
   return (
-    <BrowserChrome url="applecross.betterstats.cricket">
+    <BrowserChrome url="applecross.betterat.cricket">
       <div className="px-6 py-3 border-b pb-hairline bg-pb-surface flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center text-white font-bold text-xs">A</div>
@@ -107,7 +107,7 @@ export function MockClubHomepage() {
 // ── Mock 2: Heritage career profile (Bob Doyle '78-'99) ───────────────────
 export function MockHeritageCard() {
   return (
-    <BrowserChrome url="applecross.betterstats.cricket/players/r-doyle">
+    <BrowserChrome url="applecross.betterat.cricket/players/r-doyle">
       <div className="p-6 lg:p-8">
         <div className="flex items-start gap-5 mb-6">
           <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-emerald-700 to-emerald-900 border border-accent/30 flex items-center justify-center flex-shrink-0">
@@ -177,7 +177,7 @@ export function MockLeaderboard() {
     { p: 8, name: 'Charlie Day', games: 18, runs: 462, avg: 30.80, sr: 68.4, hs: 73 },
   ]
   return (
-    <BrowserChrome url="applecross.betterstats.cricket/leaderboard">
+    <BrowserChrome url="applecross.betterat.cricket/leaderboard">
       <div className="p-5">
         <div className="flex items-end justify-between mb-5">
           <div>
@@ -225,7 +225,7 @@ export function MockLeaderboard() {
 // ── Mock 4: Player profile ────────────────────────────────────────────────
 export function MockPlayerProfile() {
   return (
-    <BrowserChrome url="applecross.betterstats.cricket/players/jack-barendse">
+    <BrowserChrome url="applecross.betterat.cricket/players/jack-barendse">
       <div className="p-5">
         <div className="flex items-start gap-4 mb-6">
           <div className="w-16 h-16 rounded-md bg-gradient-to-br from-emerald-700 to-pb-bg border pb-hairline flex items-center justify-center">
@@ -275,7 +275,7 @@ export function MockPlayerProfile() {
 // ── Mock 5: Season yearbook ───────────────────────────────────────────────
 export function MockYearbook() {
   return (
-    <BrowserChrome url="applecross.betterstats.cricket/yearbook/2024-25">
+    <BrowserChrome url="applecross.betterat.cricket/yearbook/2024-25">
       <div className="p-6">
         <div className="text-center mb-5">
           <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint mb-2">Volume XIV · The Annual</p>

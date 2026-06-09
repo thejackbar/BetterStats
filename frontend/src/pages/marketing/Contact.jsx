@@ -10,11 +10,11 @@ const FORMSPREE_URL = `https://formspree.io/f/${FORMSPREE_ID}`
 const GRADES_OPTIONS = ['1–2 grades', '3–5 grades', '6–9 grades', '10+ grades']
 
 const STORAGE_OPTIONS = [
-  'Spreadsheets (Excel / Google Sheets)',
-  'MyCricket / PlayHQ only',
-  'Another stats software',
-  'Physical scorebooks only',
-  "We've largely lost our history",
+  'Spreadsheets only',
+  'Spreadsheets + a club website',
+  'Another stats tool',
+  'A mix',
+  'Not sure',
 ]
 
 const TIMELINE_OPTIONS = [
@@ -26,7 +26,7 @@ const TIMELINE_OPTIONS = [
 const EMPTY_FIELDS = {
   name: '', club: '', email: '', phone: '',
   association: '', grades: '', storage: '', timeline: '',
-  playhq: '', message: '',
+  clubUrl: '', message: '',
 }
 
 function Field({ label, id, required, optional, hint, error, children }) {
@@ -107,9 +107,9 @@ function ContactForm() {
           grades:      fields.grades,
           storage:     fields.storage,
           timeline:    fields.timeline,
-          playhq:      fields.playhq  || '—',
+          clubUrl:     fields.clubUrl || '—',
           message:     fields.message || '—',
-          _subject: `BetterStats enquiry — ${fields.club} · ${fields.association}`,
+          _subject: `Better Cricket enquiry — ${fields.club} · ${fields.association}`,
         }),
       })
       const data = await res.json()
@@ -231,19 +231,19 @@ function ContactForm() {
           </div>
         </Field>
 
-        {/* PlayHQ URL — optional */}
-        <Field label="PlayHQ club URL" id="playhq" optional
-          hint="Lets us pull your real data for a personalised demo.">
-          <input id="playhq" type="url" name="playhq"
-            placeholder="e.g. play.cricket.com.au/club/..."
-            value={fields.playhq} onChange={set('playhq')}
-            className={inputCls('playhq', errors)} />
+        {/* Club URL — optional */}
+        <Field label="Your club's website or association" id="clubUrl" optional
+          hint="Helps us put together a personalised demo with your real data.">
+          <input id="clubUrl" type="url" name="clubUrl"
+            placeholder="e.g. yourclubcc.com.au"
+            value={fields.clubUrl} onChange={set('clubUrl')}
+            className={inputCls('clubUrl', errors)} />
         </Field>
 
         {/* Message — optional */}
         <Field label="Anything else we should know?" id="message" optional>
           <textarea id="message" name="message" rows={3}
-            placeholder="Any extra context about your club's history, current setup, or what you're hoping to get out of BetterStats."
+            placeholder="Any extra context about your club's history, current setup, or what you're hoping to get out of Better Cricket."
             value={fields.message} onChange={set('message')}
             className={`${inputCls('message', errors)} resize-none`} />
         </Field>
@@ -333,10 +333,10 @@ function ContactPanel() {
 
 export default function Contact() {
   usePageMeta({
-    title: 'Contact — Request Access for Your Cricket Club | BetterStats',
-    description: 'Request access for your Australian cricket club, ask a question, or email the BetterStats team directly at betterstatsau@gmail.com.',
-    image: 'https://betterstats.cricket/og-image.png',
-    url: 'https://betterstats.cricket/contact',
+    title: 'Contact — Request Access for Your Cricket Club | Better Cricket',
+    description: 'Request access for your Australian cricket club, ask a question, or email the Better Cricket team directly at betterstatsau@gmail.com.',
+    image: 'https://betterat.cricket/og-image.png',
+    url: 'https://betterat.cricket/contact',
   })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">

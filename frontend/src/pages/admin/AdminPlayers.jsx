@@ -367,7 +367,7 @@ export default function AdminPlayers() {
               </div>
             </div>
             <div className="mb-3">
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">PlayHQ ID (optional)</label>
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Player ID (optional)</label>
               <input type="text" value={createForm.playhq_id}
                 onChange={e => setCreateForm(f => ({ ...f, playhq_id: e.target.value }))}
                 className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none focus:border-pb-amber"

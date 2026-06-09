@@ -49,7 +49,7 @@ function Hero() {
           Built in modules. <span className="gradient-text">Bought in tiers.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed">
-          Better is an operating system for your cricket club. Every club starts with the Core —
+          Better Cricket — everything your cricket club runs on. Every club starts with the Core —
           BetterStats — then adds the parts that fit how the club actually runs.
         </p>
       </div>
@@ -106,7 +106,7 @@ function TiersStrip() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
           {['good', 'better', 'best'].map((key) => {
             const t = TIER_INFO[key]
-            const desc = key === 'good' ? 'Core only' : key === 'better' ? 'Core + Select + Socials' : 'Everything + Fees + IQ'
+            const desc = key === 'good' ? 'Core only' : key === 'better' ? 'Core + Select + Socials' : 'Everything + Admin + IQ'
             return (
               <div key={key} className="surface p-6">
                 <p className="font-display font-bold text-xl mb-1">{t.label}</p>
@@ -129,7 +129,7 @@ function CTA() {
       <div className="max-w-[900px] mx-auto relative">
         <div className="surface-strong p-10 lg:p-14 text-center">
           <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">Start with the Core. <span className="gradient-text">Grow into the rest.</span></h2>
-          <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">Tell us your PlayHQ club ID and we’ll get your site live, then turn on modules whenever you’re ready.</p>
+          <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">Tell us your club details and we’ll get your site live, then turn on modules whenever you’re ready.</p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
             <Link to="/pricing" className="cta-secondary">See pricing</Link>
@@ -142,11 +142,11 @@ function CTA() {
 
 export default function Modules() {
   usePageMeta({
-    title: 'Modules — BetterSelect, BetterSocials, BetterFees & BetterIQ | Better',
+    title: 'Modules — BetterSelect, BetterSocials, BetterAdmin & BetterIQ | Better Cricket',
     description:
-      'The Better platform in parts: the BetterStats Core plus four bolt-on modules — BetterSelect (selection), BetterSocials (social posts), BetterFees (treasury) and BetterIQ (analytics & opposition scouting). Bundled into Good / Better / Best tiers.',
-    image: 'https://betterstats.cricket/og-image.png',
-    url: 'https://betterstats.cricket/modules',
+      'Better Cricket in parts: the BetterStats Core plus four bolt-on modules — BetterSelect (selection), BetterSocials (website & social posts), BetterAdmin (fees, comms & merch) and BetterIQ (analytics & opposition scouting). Bundled into Good / Better / Best tiers.',
+    image: 'https://betterat.cricket/og-image.png',
+    url: 'https://betterat.cricket/modules',
   })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">

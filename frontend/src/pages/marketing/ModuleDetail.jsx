@@ -3,7 +3,8 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
-import { FORM_URL } from '../../data/marketing'
+import ComparisonTable from '../../components/marketing/ComparisonTable'
+import { FORM_URL, COMPARISONS, COMPARISON_SOLO } from '../../data/marketing'
 import { moduleBySlug, MODULES_MARKETING, TIER_INFO } from '../../data/modules-marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
@@ -19,7 +20,7 @@ function ModuleMock({ m }) {
           <div className="w-2.5 h-2.5 rounded-full bg-emerald-400/70" />
         </div>
         <div className="ml-4 flex-1 max-w-md mx-auto bg-pb-surface2 rounded px-3 py-1 text-[11px] text-pb-dim font-mono text-center">
-          app.betterstats.cricket/admin/{m.slug}
+          app.betterat.cricket/admin/{m.slug}
         </div>
       </div>
       <div className="p-5">
@@ -54,14 +55,16 @@ export default function ModuleDetail() {
   const { slug } = useParams()
   const m = moduleBySlug(slug)
   usePageMeta({
-    title: m ? `${m.name} — ${m.tagline} | Better` : 'Modules | Better',
-    description: m ? `${m.name}: ${m.summary}` : 'The Better platform modules.',
-    image: 'https://betterstats.cricket/og-image.png',
-    url: m ? `https://betterstats.cricket/modules/${m.slug}` : 'https://betterstats.cricket/modules',
+    title: m ? `${m.name} — ${m.tagline} | Better Cricket` : 'Modules | Better Cricket',
+    description: m ? `${m.name}: ${m.summary}` : 'The Better Cricket platform modules.',
+    image: 'https://betterat.cricket/og-image.png',
+    url: m ? `https://betterat.cricket/modules/${m.slug}` : 'https://betterat.cricket/modules',
   })
   if (!m) return <Navigate to="/modules" replace />
 
   const siblings = MODULES_MARKETING.filter((x) => x.slug !== m.slug)
+  const comparison = m.compareKey ? COMPARISONS?.[m.compareKey] : null
+  const solo = m.compareKey ? COMPARISON_SOLO?.[m.compareKey] : null
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
@@ -197,6 +200,53 @@ export default function ModuleDetail() {
             </div>
           </div>
         </section>
+
+        {/* Comparison — table for most modules, "category of one" for BetterIQ */}
+        {comparison && (
+          <ComparisonTable comparison={comparison} showCTA={false} />
+        )}
+
+        {solo && (
+          <section className="px-4 sm:px-6 lg:px-10 py-24 border-t pb-hairline-t">
+            <div className="max-w-[1000px] mx-auto">
+              <Reveal>
+                <div className="text-center mb-10">
+                  <p className="pill-neutral inline-flex mb-5">{solo.eyebrow || 'Category of one'}</p>
+                  <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
+                    {solo.heading}
+                  </h2>
+                  {solo.sub && <p className="text-lg text-pb-dim max-w-2xl mx-auto">{solo.sub}</p>}
+                </div>
+              </Reveal>
+              <Reveal>
+                <div className="surface p-8 lg:p-10">
+                  <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+                    {(solo.points || []).map((p) => (
+                      <li key={p} className="flex items-start gap-3">
+                        <span className="tick mt-0.5">✓</span>
+                        <p className="text-sm text-pb-dim leading-relaxed">{p}</p>
+                      </li>
+                    ))}
+                  </ul>
+                  {solo.note && (
+                    <p className="text-sm text-pb-faint mt-8 pt-6 border-t pb-hairline text-center">
+                      {solo.note}
+                    </p>
+                  )}
+                </div>
+              </Reveal>
+              {solo.cta && (
+                <Reveal>
+                  <div className="text-center mt-10">
+                    <p className="text-base text-pb-dim mb-2 max-w-2xl mx-auto">
+                      <span className="gradient-text font-semibold">{solo.cta.line}</span>
+                    </p>
+                  </div>
+                </Reveal>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* Other modules */}
         <section className="px-4 sm:px-6 lg:px-10 py-20">

@@ -91,7 +91,7 @@ export default function AdminLadders() {
 
       {unlinked.length === 0 && noData.length > 0 && (
         <div className="rounded-lg px-4 py-2.5 mb-4 text-sm bg-pb-amber/10 border border-pb-amber/30 text-pb-amber">
-          {noData.map((t) => t.team_name).join(', ')} {noData.length === 1 ? 'is' : 'are'} linked to a grade, but Cricket Australia hasn’t published a ladder for {noData.length === 1 ? 'it' : 'them'} yet (or the linked grade is wrong — fix it on the <Link to="/admin/betterselect/teams" className="underline">Squads</Link> page).
+          {noData.map((t) => t.team_name).join(', ')} {noData.length === 1 ? 'is' : 'are'} linked to a grade, but no ladder has been published for {noData.length === 1 ? 'it' : 'them'} yet (or the linked grade is wrong — fix it on the <Link to="/admin/betterselect/teams" className="underline">Squads</Link> page).
         </div>
       )}
 

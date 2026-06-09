@@ -195,7 +195,7 @@ export default function AdminSeasons() {
           )}
         </div>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
-          Seasons are created automatically when data is synced from PlayHQ. Use the arrows to change the display order.
+          Seasons are created automatically when data is synced automatically. Use the arrows to change the display order.
         </p>
         {saveError && (
           <p className="text-red-500 text-sm mb-4">{saveError}</p>

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-const BASE_URL = 'https://betterstats.cricket'
+const BASE_URL = 'https://betterat.cricket'
 const JSON_LD_ID = 'route-jsonld'
 const CANONICAL_ID = 'route-canonical'
 
@@ -55,7 +55,7 @@ function setJsonLd(data) {
  * Per-route meta tag manager.
  *   - title / description: <title> + <meta name=description>
  *   - image: og:image + twitter:image (uses summary_large_image if present)
- *   - url:   og:url (defaults to current path on betterstats.cricket)
+ *   - url:   og:url (defaults to current path on betterat.cricket)
  *   - type:  og:type (default 'website')
  *   - jsonLd: optional schema.org JSON-LD object or array — injected as a
  *             scoped <script> and cleared on unmount.

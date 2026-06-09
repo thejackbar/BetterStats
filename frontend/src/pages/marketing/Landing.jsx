@@ -63,14 +63,20 @@ function Hero() {
             <span className="gradient-text">Better.</span>
           </h1>
           <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">
-            Better is the platform Australian cricket clubs run on. Start with automated stats and a public site worth showing off — then add selection, socials, fees and analytics, all fed straight from your PlayHQ and MyCricket data.
+            Better Cricket is the platform Australian cricket clubs run on. Start with automated stats and a public site worth showing off — then add selection, socials, club admin and analytics, all fed by your club's own match data — synced automatically, with no data entry.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-7">
+          <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-4">
             <Link to="/contact" className="cta-primary">
-              Get your club on BetterStats →
+              Get your club on Better Cricket →
             </Link>
             <a href="#showcase" className="cta-secondary">See it in action</a>
+          </div>
+
+          <div className="mb-7">
+            <Link to="/overview" className="text-sm text-accent font-medium hover:underline inline-flex items-center gap-1">
+              See everything Better Cricket does →
+            </Link>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-pb-faint">
@@ -85,7 +91,7 @@ function Hero() {
             <div className="relative product-shadow rounded-2xl">
               <ScreenshotOrMock
                 src={SCREENSHOT_PATHS.landingHeroCard}
-                alt="A 22-season career profile on BetterStats"
+                alt="A 22-season career profile on Better Cricket"
                 fallback={<MockHeritageCard />}
               />
             </div>
@@ -131,7 +137,7 @@ function ValueProps() {
     {
       eyebrow: '02 · For the Statistician',
       title: 'Every ball, every wicket, every catch — as far back as your data goes.',
-      desc: 'We pull MyCricket archives PlayHQ never imported. Career, season, all-time. Filter, sort, export. 30+ stat columns.',
+      desc: 'We bring in your full history, as far back as it goes. Career, season, all-time. Filter, sort, export. 30+ stat columns.',
       stat: 'Decades of indexed cricket data',
     },
     {
@@ -352,7 +358,7 @@ function ModulesTeaser() {
               Then add the parts that <span className="gradient-text">run your club.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              Four modules bolt straight onto the Core — selection, socials, fees and analytics. Turn on what you need.
+              Four modules bolt straight onto the Core — selection, socials, club admin and analytics. Turn on what you need.
             </p>
           </div>
         </Reveal>
@@ -372,7 +378,8 @@ function ModulesTeaser() {
           ))}
         </div>
         <div className="text-center mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Link to="/modules" className="cta-secondary">Tour all modules →</Link>
+          <Link to="/overview" className="cta-secondary">See everything Better Cricket does →</Link>
+          <Link to="/modules" className="text-sm text-accent hover:underline">Tour all modules →</Link>
           <Link to="/pricing" className="text-sm text-accent hover:underline">See Good / Better / Best pricing →</Link>
         </div>
       </div>
@@ -468,7 +475,7 @@ function Promise_() {
                 Player-first. <span className="gradient-text">Built by cricketers.</span>
               </h2>
               <p className="text-pb-dim leading-relaxed mb-5">
-                BetterStats is built by people who play. We listen to the captains, the committee members, the statisticians and the kids who just want to see their own century on a profile page.
+                Better Cricket is built by people who play. We listen to the captains, the committee members, the statisticians and the kids who just want to see their own century on a profile page.
               </p>
               <p className="text-pb-text font-medium mb-5">
                 If something is missing — tell us. If it's important to you, it's important to us.
@@ -489,7 +496,7 @@ function Promise_() {
                 Australian clubs, for now.
               </h3>
               <p className="text-sm text-pb-dim leading-relaxed mb-4">
-                BetterStats currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
+                Better Cricket currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
               </p>
               <p className="text-sm text-pb-dim leading-relaxed">
                 Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link> — it helps us prioritise where to head next.
@@ -516,7 +523,7 @@ function FinalCTA() {
               Your club's history is <br className="hidden md:block" /><span className="gradient-text">waiting to be told.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">
-              Tell us your PlayHQ club ID. We'll get your site live, fast.
+              Tell us about your club. We'll get your site live, fast — with your history already loaded.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-5">
               <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
@@ -533,10 +540,10 @@ function FinalCTA() {
 // ─── Page ────────────────────────────────────────────────────────────────
 export default function Landing() {
   usePageMeta({
-    title: 'Better — We do cricket, better | Cricket club platform',
-    description: 'Better is the platform Australian cricket clubs run on: automated stats and a public club site (BetterStats), plus selection, socials, fees and BetterIQ analytics — fed straight from PlayHQ and MyCricket, with no manual data entry.',
-    image: 'https://betterstats.cricket/og-image.png',
-    url: 'https://betterstats.cricket/',
+    title: 'Better Cricket — The platform Australian cricket clubs run on',
+    description: "The platform Australian cricket clubs run on: automated stats and a public club site (BetterStats core), plus BetterSelect, BetterSocials, BetterAdmin and BetterIQ analytics — all fed by your club's own match data, synced automatically with no manual data entry.",
+    image: 'https://betterat.cricket/og-image.png',
+    url: 'https://betterat.cricket/',
   })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
