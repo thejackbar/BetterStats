@@ -810,26 +810,36 @@ export function ResultsList({ palette: pal, meta = {}, results = [], club = {}, 
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={74} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 200, bottom: 150, display: 'flex', flexDirection: 'column' }}>
-        {rows.map((r, i) => {
-          const w = r.outcome === 'W'
-          const c = w ? WIN : LOSS
-          return (
-            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: '6px 150px minmax(0,1fr) 232px', alignItems: 'center', gap: 16, borderBottom: i < rows.length - 1 ? `1px solid ${pal.ink}1a` : 'none' }}>
-              <div style={{ width: 6, height: 52, background: c }} />
-              <div style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, lineHeight: 0.92 }}>{r.grade}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: -0.5, color: pal.ink, opacity: w ? 1 : 0.85, flexShrink: 0 }}>{r.us}</span>
-                <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: c, fontWeight: 700, flexShrink: 0 }}>{w ? 'DEF' : 'DEF BY'}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 0.5, lineHeight: 1, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85 }}>{r.opp} {r.them}</span>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: 200, bottom: 138, display: 'flex', flexDirection: 'column' }}>
+        {(() => {
+          // Scale type down as the grade count climbs so a full Saturday (9–10
+          // grades, some with long two-line names) never clips off the bottom.
+          const n = rows.length || 1
+          const gradeF = n >= 9 ? 19 : n >= 7 ? 22 : n >= 5 ? 25 : 28
+          const scoreF = n >= 9 ? 23 : n >= 7 ? 26 : 30
+          const oppF = n >= 9 ? 17 : n >= 7 ? 19 : 22
+          const badgeF = n >= 9 ? 16 : 20
+          const bar = n >= 9 ? 38 : 52
+          return rows.map((r, i) => {
+            const w = r.outcome === 'W'
+            const c = w ? WIN : LOSS
+            return (
+              <div key={i} style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'grid', gridTemplateColumns: '6px 172px minmax(0,1fr) 210px', alignItems: 'center', gap: 14, borderBottom: i < rows.length - 1 ? `1px solid ${pal.ink}1a` : 'none' }}>
+                <div style={{ width: 6, height: bar, background: c }} />
+                <div style={{ fontFamily: DISPLAY, fontSize: gradeF, letterSpacing: 0.5, lineHeight: 0.95, overflow: 'hidden' }}>{r.grade}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <span style={{ fontFamily: DISPLAY, fontSize: scoreF, letterSpacing: -0.5, color: pal.ink, opacity: w ? 1 : 0.85, flexShrink: 0 }}>{r.us}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: c, fontWeight: 700, flexShrink: 0 }}>{w ? 'DEF' : 'DEF BY'}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: oppF, letterSpacing: 0.5, lineHeight: 1, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85 }}>{r.opp} {r.them}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
+                  <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: pal.ink, opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.margin}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: badgeF, letterSpacing: 1, color: pal.primary, background: c, padding: '5px 12px', minWidth: 64, textAlign: 'center', flexShrink: 0 }}>{w ? 'WON' : 'LOST'}</span>
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
-                <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: pal.ink, opacity: 0.6, whiteSpace: 'nowrap' }}>{r.margin}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 1, color: pal.primary, background: c, padding: '5px 12px', minWidth: 72, textAlign: 'center', flexShrink: 0 }}>{w ? 'WON' : 'LOST'}</span>
-              </div>
-            </div>
-          )
-        })}
+            )
+          })
+        })()}
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
         <SponsorFooter palette={pal} sponsors={sponsors} />
@@ -856,15 +866,15 @@ export function ResultsScoreboard({ palette: pal, meta = {}, results = [], club 
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={66} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 188, bottom: 142, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr 1fr', gap: 18 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: 188, bottom: 142, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr 1fr', gap: 24 }}>
         {rows.slice(0, 6).map((r, i) => {
           const w = r.outcome === 'W'
           const c = w ? WIN : LOSS
           return (
-            <div key={i} style={{ position: 'relative', background: pal.secondary, borderTop: `3px solid ${c}`, padding: '18px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
-              <div style={{ position: 'absolute', right: -10, bottom: -40, fontFamily: DISPLAY, fontSize: 200, lineHeight: 0.7, color: c, opacity: 0.1, letterSpacing: -8 }}>{w ? 'W' : 'L'}</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap' }}>{r.grade}</div>
+            <div key={i} style={{ position: 'relative', background: pal.secondary, border: `1px solid ${pal.ink}22`, borderTop: `3px solid ${c}`, borderRadius: 4, padding: '18px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', right: 14, bottom: 8, fontFamily: DISPLAY, fontSize: 120, lineHeight: 1, color: c, opacity: 0.09, letterSpacing: -6, userSelect: 'none' }}>{w ? 'W' : 'L'}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, position: 'relative' }}>
+                <div style={{ fontFamily: DISPLAY, fontSize: 26, letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, overflow: 'hidden', paddingRight: 2 }}>{r.grade}</div>
                 <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1.5, padding: '4px 11px', background: c, color: pal.primary, flexShrink: 0 }}>{w ? 'WON' : 'LOST'}</span>
               </div>
               <div style={{ position: 'relative' }}>

@@ -290,6 +290,16 @@ function PerformerRow({ p, onChange, onRemove }) {
   )
 }
 
+// Up/down reorder control for roundup rows (fixtures & results).
+function RowReorder({ onUp, onDown, isFirst, isLast }) {
+  return (
+    <div className="flex flex-col gap-0.5 justify-center">
+      <button onClick={onUp} disabled={isFirst} className="text-pb-faintest hover:text-pb-text disabled:opacity-20 text-[10px] leading-none">▲</button>
+      <button onClick={onDown} disabled={isLast} className="text-pb-faintest hover:text-pb-text disabled:opacity-20 text-[10px] leading-none">▼</button>
+    </div>
+  )
+}
+
 function Field({ label, children }) {
   return (
     <div>
@@ -350,19 +360,43 @@ function clubTokens(name) {
     .filter((w) => w.length > 2 && !['cricket', 'club', 'the', 'district', 'junior', 'colts'].includes(w))
 }
 
-// Top 3 batters (most runs, fewer balls breaks ties), shaped for a performer row
-// — keeps the participant id so the designer can pull the player's profile photo.
+// Top 3 batters (most runs, fewer balls breaks ties), shaped for a performer row.
+// Name uses the scorecard's "F. SURNAME" short form (consistent across both
+// sides); keeps the participant id so the designer can pull a profile photo.
 function topBatters(t) {
   return [...(t?.batting || [])]
     .filter((b) => !b.didNotBat && (Number(b.r) > 0 || Number(b.b) > 0))
     .sort((a, b) => (Number(b.r) - Number(a.r)) || (Number(a.b) - Number(b.b)))
     .slice(0, 3)
     .map((b) => ({
-      last: b.last || b.first || '',
+      last: b.short || b.last || b.first || '',
       line: `${b.r}${b.notOut ? '*' : ''} (${b.b})`,
       pid: b.pid || null,
       first: b.first || '',
     }))
+}
+
+// Sensible grade ordering for roundup posts: senior numbered grades first
+// (1st, 2nd, 3rd…), then one-day/limited grades, then the rest — each by number.
+const _WORD_NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 }
+function gradeSortKey(grade) {
+  const s = (grade || '').toUpperCase().trim()
+  const ord = s.match(/(\d+)\s*(ST|ND|RD|TH)\b/)
+  if (ord) return [0, parseInt(ord[1], 10), s]
+  const firstWord = (s.split(/\s+/)[0] || '').toLowerCase()
+  if (_WORD_NUM[firstWord] && /GRADE|XI|TEAM/.test(s)) return [0, _WORD_NUM[firstWord], s]
+  if (/\bONE\s*DAY\b|\bT20\b|\bLIMITED\b|\bONEDAY\b/.test(s)) {
+    const num = s.match(/\d+/)
+    return [1, num ? parseInt(num[0], 10) : 99, s]
+  }
+  const anyNum = s.match(/\d+/)
+  return anyNum ? [2, parseInt(anyNum[0], 10), s] : [3, 99, s]
+}
+function sortByGrade(rows) {
+  return [...rows].sort((a, b) => {
+    const ka = gradeSortKey(a.grade), kb = gradeSortKey(b.grade)
+    return (ka[0] - kb[0]) || (ka[1] - kb[1]) || ka[2].localeCompare(kb[2])
+  })
 }
 
 // Top 3 bowlers (most wickets, then fewest runs / best economy).
@@ -373,7 +407,7 @@ function topBowlers(t) {
     .sort((a, b) => (Number(b.w) - Number(a.w)) || (Number(a.r) - Number(b.r)) || (Number(a.econ) - Number(b.econ)))
     .slice(0, 3)
     .map((b) => ({
-      last: b.last || b.first || '',
+      last: b.short || b.last || b.first || '',
       line: `${b.w}/${b.r}`,
       pid: b.pid || null,
       first: b.first || '',
@@ -765,7 +799,7 @@ export default function AdminSocialPost() {
   // ── Play.cricket fixtures / results round import ────────────────────────────
   const applyFxDate = useCallback((d, season) => {
     if (!d) return
-    setFixtures((d.fixtures || []).map(f => ({ ...f })))
+    setFixtures(sortByGrade((d.fixtures || []).map(f => ({ ...f }))))
     setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
   }, [])
   const importFixtures = useCallback(async () => {
@@ -781,7 +815,7 @@ export default function AdminSocialPost() {
 
   const applyRrDate = useCallback((d, season) => {
     if (!d) return
-    setResults((d.results || []).map(r => ({ ...r })))
+    setResults(sortByGrade((d.results || []).map(r => ({ ...r }))))
     setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
   }, [])
   const importResults = useCallback(async () => {
@@ -794,6 +828,15 @@ export default function AdminSocialPost() {
       applyRrDate(dates[0], data.season)
     } catch (e) { setRrImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
   }, [applyRrDate])
+
+  // Reorder a roundup row (fixtures / results) up or down.
+  const moveRow = (setter, idx, dir) => setter(rows => {
+    const j = idx + dir
+    if (j < 0 || j >= rows.length) return rows
+    const next = [...rows]
+    ;[next[idx], next[j]] = [next[j], next[idx]]
+    return next
+  })
 
   const patchScMeta = patch => setScorecardMatch(m => ({ ...m, meta: { ...m.meta, ...patch } }))
   const patchScTeam = (side, patch) => setScorecardMatch(m => ({ ...m, [side]: { ...m[side], ...patch } }))
@@ -1752,9 +1795,13 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Fixtures</h2>
-                  <span className="font-mono text-[9px] text-pb-faintest">{fixtures.length} grades</span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setFixtures(rows => sortByGrade(rows))}
+                      className="font-mono text-[9px] tracking-wide2 px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">↕ SORT BY GRADE</button>
+                    <span className="font-mono text-[9px] text-pb-faintest">{fixtures.length} grades</span>
+                  </div>
                 </div>
-                <p className="text-[11px] text-pb-faint mb-3">Round, date &amp; competition come from <strong>Match Info</strong> above.</p>
+                <p className="text-[11px] text-pb-faint mb-3">Round, date &amp; competition come from <strong>Match Info</strong> above. Drag-free reorder with ▲▼.</p>
                 <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
                   status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
                   onPull={importFixtures}
@@ -1764,7 +1811,8 @@ export default function AdminSocialPost() {
                     const set = (patch) => setFixtures(rows => rows.map((r, j) => j === i ? { ...r, ...patch } : r))
                     return (
                       <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5">
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 58px 20px' }}>
+                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '14px 1fr 58px 20px' }}>
+                          <RowReorder onUp={() => moveRow(setFixtures, i, -1)} onDown={() => moveRow(setFixtures, i, 1)} isFirst={i === 0} isLast={i === fixtures.length - 1} />
                           <input value={f.grade} onChange={e => set({ grade: e.target.value })} placeholder="Grade · 1ST XI"
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={f.ha} onChange={e => set({ ha: e.target.value })}
@@ -1800,9 +1848,13 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Results</h2>
-                  <span className="font-mono text-[9px] text-pb-faintest">{results.length} grades</span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setResults(rows => sortByGrade(rows))}
+                      className="font-mono text-[9px] tracking-wide2 px-2 py-0.5 rounded border pb-hairline text-pb-faint hover:text-pb-text">↕ SORT BY GRADE</button>
+                    <span className="font-mono text-[9px] text-pb-faintest">{results.length} grades</span>
+                  </div>
                 </div>
-                <p className="text-[11px] text-pb-faint mb-3">Round &amp; date come from <strong>Match Info</strong> above. W/L colour-codes the post.</p>
+                <p className="text-[11px] text-pb-faint mb-3">Round &amp; date come from <strong>Match Info</strong> above. W/L colour-codes the post. Reorder with ▲▼.</p>
                 <RoundImportBox hint="recent results" rowsKey="results"
                   status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
                   onPull={importResults}
@@ -1812,7 +1864,8 @@ export default function AdminSocialPost() {
                     const set = (patch) => setResults(rows => rows.map((x, j) => j === i ? { ...x, ...patch } : x))
                     return (
                       <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5">
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 72px 20px' }}>
+                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '14px 1fr 72px 20px' }}>
+                          <RowReorder onUp={() => moveRow(setResults, i, -1)} onDown={() => moveRow(setResults, i, 1)} isFirst={i === 0} isLast={i === results.length - 1} />
                           <input value={r.grade} onChange={e => set({ grade: e.target.value })} placeholder="Grade · 1ST XI"
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={r.outcome} onChange={e => set({ outcome: e.target.value })}
