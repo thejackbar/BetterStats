@@ -197,6 +197,49 @@ async def get_match_scorecard(match_id: str) -> Optional[dict]:
 # (grades.grassroots_id, COALESCE'd with id for legacy rows).
 _FIXTURE_STATUS_UPCOMING = 0
 _FIXTURE_STATUS_LIVE = 2
+_FIXTURE_STATUS_COMPLETED = 3
+
+
+async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> list[dict]:
+    """Completed matches for one grade, normalised (the results mirror of
+    ``get_grade_fixtures``).
+
+    Reuses ``get_grade_matches`` (same in-process cache). Returns
+    ``{id, home_team, away_team, played_at, round, venue, grade_id}`` for
+    matches in the terminal COMPLETED state (statusId 3). Scores/result are NOT
+    in the match list — the caller fetches ``get_match_scorecard(id)`` for those,
+    exactly like the single-scorecard import. ``since`` (YYYY-MM-DD) drops
+    anything older, keeping the scorecard fan-out bounded to recent rounds.
+    """
+    matches = await get_grade_matches(grade_id)
+    out: list[dict] = []
+    for m in matches:
+        try:
+            sid = int(m.get("statusId"))
+        except (TypeError, ValueError):
+            continue
+        if sid != _FIXTURE_STATUS_COMPLETED:
+            continue
+        sched = (m.get("matchSchedule") or [{}])
+        dt = (sched[0].get("startDateTime") if sched else "") or ""
+        day = dt[:10]
+        if not day:
+            continue
+        if since and day < since:
+            continue
+        teams = m.get("teams") or []
+        home = next((t.get("displayName") for t in teams if t.get("isHome")), None)
+        away = next((t.get("displayName") for t in teams if not t.get("isHome")), None)
+        out.append({
+            "id": m.get("id"),
+            "home_team": home,
+            "away_team": away,
+            "played_at": day,
+            "round": (m.get("round") or {}).get("name"),
+            "venue": (m.get("venue") or {}).get("name"),
+            "grade_id": grade_id,
+        })
+    return out
 
 
 async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> list[dict]:

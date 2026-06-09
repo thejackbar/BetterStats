@@ -16,7 +16,7 @@ from app.models.db import (
     Player, PlayerSeasonStats, BattingInnings, BowlingSpell,
     FieldingStat, FallOfWicket, Partnership, Milestone, User, Organisation, get_db,
 )
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_MERGES
 from app.auth.modules import require_module
 
@@ -814,6 +814,36 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
     except Exception as exc:
         log.exception("social scorecard %s failed", match_id)
         raise HTTPException(500, f"Scorecard parse error: {exc}") from exc
+
+
+@router.get("/social/fixtures", dependencies=[Depends(require_module("socials"))])
+async def get_social_fixtures(db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+    """Upcoming/live fixtures across the club's grades, grouped by match-day, for
+    the BetterSocials Fixtures roundup posts (the multi-match analogue of the
+    single-scorecard import)."""
+    from app.services.social_rounds import social_fixtures
+    try:
+        return await social_fixtures(db, club)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("social fixtures import failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Fixtures import error: {exc}") from exc
+
+
+@router.get("/social/results", dependencies=[Depends(require_module("socials"))])
+async def get_social_results(db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+    """Recent completed results across the club's grades, grouped by match-day,
+    for the BetterSocials Results roundup posts. Scores come from each match's
+    scorecard — the same Grassroots source as the single-scorecard import."""
+    from app.services.social_rounds import social_results
+    try:
+        return await social_results(db, club)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("social results import failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Results import error: {exc}") from exc
 
 
 async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
