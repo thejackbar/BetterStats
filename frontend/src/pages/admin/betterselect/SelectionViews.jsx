@@ -83,13 +83,13 @@ export function FixtureBar({ vm }) {
     <div className="rounded-xl px-4 py-2.5 mb-2.5 border"
       style={{ background: 'color-mix(in srgb, var(--pb-accent) 9%, var(--pb-surface))', borderColor: 'color-mix(in srgb, var(--pb-accent) 26%, transparent)' }}>
       <div className="flex items-center justify-between gap-3">{vm.contextLeft}</div>
-      <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 mt-1">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-between gap-x-3 gap-y-2 mt-1">
         <div className="min-w-0">
-          <h2 className="font-display font-bold text-[20px] leading-tight">{vm.title}</h2>
+          <h2 className="font-display font-bold text-[20px] leading-tight break-words">{vm.title}</h2>
           {vm.sub && <div className="text-[13.5px] text-pb-dim mt-0.5">{vm.sub}</div>}
         </div>
         {vm.canEdit && (
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             <SizePicker value={vm.format} onChange={vm.changeFormat} />
             <PickPill count={vm.count} target={vm.target} />
           </div>
@@ -348,14 +348,14 @@ export function TeamSheetView({ vm }) {
   return (
     <div>
       {/* Masthead */}
-      <div className="flex flex-wrap items-end justify-between gap-x-7 gap-y-3 px-5 sm:px-6 py-3.5 rounded-t-2xl border border-b-0 pb-hairline"
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-between gap-x-7 gap-y-3 px-5 sm:px-6 py-3.5 rounded-t-2xl border border-b-0 pb-hairline"
         style={{ background: 'linear-gradient(180deg, color-mix(in srgb, var(--pb-accent) 14%, var(--pb-surface)), var(--pb-surface))' }}>
-        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+        <div className="min-w-0 sm:flex-1 flex flex-col gap-0.5">
           <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-pb-accent">{vm.kicker}</div>
           <h2 className="font-display font-bold tracking-tight leading-tight m-0 break-words" style={{ fontSize: 'clamp(21px, 2.4vw, 26px)' }}>{vm.title}</h2>
           {vm.sub && <div className="text-[13px] text-pb-dim">{vm.sub}</div>}
         </div>
-        <div className="flex items-center gap-5">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           {vm.canEdit && <SizePicker value={vm.format} onChange={vm.changeFormat} />}
           <div className="font-display flex items-baseline gap-1"><b className="text-[38px] leading-none text-pb-accent font-bold pb-num">{vm.count}</b><span className="text-[17px] text-pb-faint">/ {vm.target || '∞'}</span></div>
           <div className="hidden sm:flex gap-3.5 font-display">
