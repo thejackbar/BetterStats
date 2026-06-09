@@ -137,21 +137,18 @@ function PlayerRow({ p, n }) {
   const out = p.availability === 'UNAVAILABLE'
   const concern = out || p.availability === 'MAYBE'
   return (
-    <div className={`relative flex items-center gap-2.5 px-2 py-1.5 rounded-lg min-h-[44px] hover:bg-pb-surface2 ${out ? 'opacity-60' : ''}`}>
-      <span className="font-mono text-xs font-semibold text-pb-faintest w-[18px] text-right shrink-0 pb-num">{n}</span>
-      <span className="w-[3px] self-stretch rounded-full my-1 shrink-0" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+    <div className={`relative flex items-center gap-2 px-2 py-1 rounded-lg min-h-[34px] hover:bg-pb-surface2 ${out ? 'opacity-60' : ''}`}>
+      <span className="font-mono text-[11px] font-semibold text-pb-faintest w-[16px] text-right shrink-0 pb-num">{n}</span>
+      <span className="w-[3px] self-stretch rounded-full my-0.5 shrink-0" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       <span className="relative shrink-0">
-        <Avatar player={p} size={26} />
-        <span className="absolute -right-0.5 -bottom-0.5"><Dot status={p.availability} size={9} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
+        <Avatar player={p} size={22} />
+        <span className="absolute -right-0.5 -bottom-0.5"><Dot status={p.availability} size={8} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
       </span>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="font-display font-semibold text-[14px] truncate">{p.display_name}</span>
-          {p.is_captain && <Tag>C</Tag>}{p.is_wicket_keeper && <Tag tone="amber">WK</Tag>}
-        </div>
-        {p.skill_positions?.length > 0 && <div className="mt-0.5"><RoleChips roles={p.skill_positions} muted /></div>}
-      </div>
-      {concern && <span className="font-mono text-[10px] font-semibold shrink-0" style={{ color: meta.cssVar }}>{out ? 'Out' : 'Maybe'}</span>}
+      <span className="font-display font-semibold text-[13.5px] truncate flex-1 min-w-0">{p.display_name}</span>
+      {p.is_captain && <Tag>C</Tag>}{p.is_wicket_keeper && <Tag tone="amber">WK</Tag>}
+      {concern
+        ? <span className="font-mono text-[10px] font-semibold shrink-0" style={{ color: meta.cssVar }}>{out ? 'Out' : 'Maybe'}</span>
+        : p.skill_positions?.length > 0 && <RoleChips roles={p.skill_positions} muted />}
     </div>
   )
 }
@@ -176,8 +173,8 @@ function FixtureRow({ fx, target, open, onToggle }) {
     <div className="border border-pb-hairline rounded-xl bg-pb-surface overflow-hidden transition-shadow hover:border-pb-hairline2"
       style={{ borderLeftWidth: 3, borderLeftColor: sv, boxShadow: open ? '0 1px 2px rgba(0,0,0,.05), 0 18px 40px -20px rgba(16,20,30,.22)' : 'none' }}>
       {/* Compact row */}
-      <div className="flex items-center gap-3 px-3.5 py-2.5 cursor-pointer hover:bg-pb-surface2" onClick={goBuild}>
-        <span className="shrink-0 w-[34px] h-[34px] rounded-lg inline-flex items-center justify-center font-mono font-bold text-[11px] bg-pb-surface2 text-pb-dim">{gradeBadge(fx)}</span>
+      <div className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-pb-surface2" onClick={goBuild}>
+        <span className="shrink-0 w-[30px] h-[30px] rounded-lg inline-flex items-center justify-center font-mono font-bold text-[11px] bg-pb-surface2 text-pb-dim">{gradeBadge(fx)}</span>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2 min-w-0">
             <span className="font-display font-bold text-[15px] tracking-tight whitespace-nowrap shrink-0">{squad}</span>
@@ -213,8 +210,8 @@ function FixtureRow({ fx, target, open, onToggle }) {
       {open && (
         <div className="border-t pb-hairline">
           {/* Balance + leadership */}
-          <div className="flex items-center justify-between gap-4 flex-wrap px-5 py-3 border-b pb-hairline">
-            <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap px-4 py-2 border-b pb-hairline">
+            <div className="flex items-center gap-3.5">
               {ROLE_CODES.map((c) => {
                 const low = (c === 'BWL' && a.count >= 8 && a.bowlers < 5) || (c === 'WKT' && a.count >= 8 && !a.keeperPresent)
                 return (
@@ -232,7 +229,7 @@ function FixtureRow({ fx, target, open, onToggle }) {
           </div>
 
           {/* Flags */}
-          <div className="flex flex-wrap gap-1.5 px-5 py-3">
+          <div className="flex flex-wrap gap-1.5 px-4 py-2">
             {a.flags.length > 0
               ? a.flags.map((f, i) => (
                 <span key={i} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-display font-semibold text-[11.5px]"
@@ -247,30 +244,30 @@ function FixtureRow({ fx, target, open, onToggle }) {
 
           {/* Availability breakdown */}
           {a.count > 0 && (
-            <div className="flex flex-wrap gap-4 px-5 pt-0 pb-1">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 pt-0 pb-0.5">
               {AVAIL_ORDER.map((s) => (
-                <span key={s} className="inline-flex items-center gap-1.5 text-[12.5px] text-pb-dim"><Dot status={s} size={8} /><b className="font-display font-bold text-pb-text pb-num">{a.avail[s] || 0}</b>{AVAILABILITY[s].label}</span>
+                <span key={s} className="inline-flex items-center gap-1.5 text-[12px] text-pb-dim"><Dot status={s} size={8} /><b className="font-display font-bold text-pb-text pb-num">{a.avail[s] || 0}</b>{AVAILABILITY[s].label}</span>
               ))}
             </div>
           )}
 
           {/* XI peek */}
           {a.count > 0 && (
-            <div className="grid sm:grid-cols-2 gap-x-6 gap-y-0.5 px-3 pt-1 pb-2">
+            <div className="grid sm:grid-cols-2 gap-x-5 gap-y-0 px-2.5 pt-0.5 pb-1.5">
               {(fx.lineup || []).map((p, i) => <PlayerRow key={p.player_id} p={p} n={p.batting_order ?? i + 1} />)}
             </div>
           )}
 
           {/* Footer */}
-          <div className="flex items-center justify-between gap-3.5 flex-wrap px-5 py-3 border-t pb-hairline" style={{ background: 'color-mix(in srgb, var(--pb-surface2) 45%, transparent)' }}>
+          <div className="flex items-center justify-between gap-3 flex-wrap px-4 py-2.5 border-t pb-hairline" style={{ background: 'color-mix(in srgb, var(--pb-surface2) 45%, transparent)' }}>
             <div className="flex items-center gap-2.5 min-w-0">
               <AvailBar avail={a.avail} />
               <span className="text-xs text-pb-dim whitespace-nowrap">{a.count} selected{a.count > a.target ? ` · ${a.count - a.target} in reserve` : ''}</span>
             </div>
             <button onClick={goBuild}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-display font-semibold text-[13.5px] transition hover:brightness-105 active:scale-[0.98]"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-display font-semibold text-[13px] transition hover:brightness-105 active:scale-[0.98]"
               style={{ background: sv, color: CTA_TEXT[a.status] }}>
-              {cta}<Icon name="arrow" size={16} />
+              {cta}<Icon name="arrow" size={15} />
             </button>
           </div>
         </div>
@@ -353,10 +350,10 @@ export default function AdminSelectionOverview() {
   return (
     <BetterSelectLayout title="Selection" actions={actions}>
       {/* Intro */}
-      <div className="flex items-end justify-between gap-5 flex-wrap mb-4">
+      <div className="flex items-end justify-between gap-5 flex-wrap mb-3">
         <div>
-          <h2 className="font-display font-bold text-[19px] tracking-tight">Upcoming selections</h2>
-          <p className="text-[13.5px] text-pb-dim mt-1">{counts.all} {counts.all === 1 ? 'team' : 'teams'} to pick. Open a team to build or edit its XI.</p>
+          <h2 className="font-display font-bold text-[18px] tracking-tight">Upcoming selections</h2>
+          <p className="text-[13px] text-pb-dim mt-0.5">{counts.all} {counts.all === 1 ? 'team' : 'teams'} to pick. Open a team to build or edit its XI.</p>
         </div>
         <div className="flex items-center gap-4">
           {counts.attention > 0 && <span className="inline-flex items-center gap-1.5 text-[13px] text-pb-dim"><span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--pb-red)' }} /><b className="font-display font-bold text-pb-red">{counts.attention}</b> need attention</span>}
@@ -365,9 +362,9 @@ export default function AdminSelectionOverview() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-2.5 flex-wrap mb-4">
-        <div className="flex items-center gap-2 bg-pb-surface border border-pb-hairline rounded-lg px-3 h-[38px] text-pb-faint flex-1 min-w-[200px] max-w-[300px] focus-within:border-pb-accent">
-          <Icon name="search" size={16} />
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <div className="flex items-center gap-2 bg-pb-surface border border-pb-hairline rounded-lg px-3 h-[34px] text-pb-faint flex-1 min-w-[200px] max-w-[300px] focus-within:border-pb-accent">
+          <Icon name="search" size={15} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a team or opponent…"
             className="bg-transparent border-0 outline-none text-pb-text text-sm w-full placeholder:text-pb-faint" />
         </div>
@@ -377,7 +374,7 @@ export default function AdminSelectionOverview() {
             const on = filter === fl.id
             return (
               <button key={fl.id} onClick={() => setFilter(fl.id)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border font-display font-semibold text-[12.5px] transition ${on ? '' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border font-display font-semibold text-[12.5px] transition ${on ? '' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}
                 style={on ? { color: fl.color, background: tint(fl.color, 13), borderColor: tint(fl.color, 45) } : undefined}>
                 {fl.label}<span className="font-mono text-[11px] opacity-85">{n}</span>
               </button>
@@ -398,14 +395,14 @@ export default function AdminSelectionOverview() {
           Try a different search or filter.
         </div>
       ) : groups.map((g) => (
-        <section key={g.day} className="mb-2">
-          <div className="sticky top-[57px] z-10 flex items-center gap-3 px-1 pt-3 pb-2 bg-pb-bg">
-            <span className="font-display font-bold text-[14px] tracking-tight whitespace-nowrap">{fmtDay(g.day)}</span>
+        <section key={g.day} className="mb-1.5">
+          <div className="sticky top-[57px] z-10 flex items-center gap-3 px-1 pt-2.5 pb-1.5 bg-pb-bg">
+            <span className="font-display font-bold text-[13.5px] tracking-tight whitespace-nowrap">{fmtDay(g.day)}</span>
             <span className="font-mono text-[11px] text-pb-faint whitespace-nowrap">{g.items.length} {g.items.length === 1 ? 'team' : 'teams'}</span>
             {g.attention > 0 && <span className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-red font-semibold whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-current" />{g.attention} need attention</span>}
             <span className="flex-1 h-px bg-pb-hairline min-w-[16px]" />
           </div>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1.5">
             {g.items.map(({ fx }) => (
               <FixtureRow key={fx.id} fx={fx} target={target} open={openKeys.has(fx.id)} onToggle={toggle} />
             ))}
