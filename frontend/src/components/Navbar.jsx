@@ -6,7 +6,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useClub } from "../hooks/useClub";
 import { useTheme } from "../contexts/ThemeContext";
 import NavbarPlayerSearch from "./NavbarPlayerSearch";
-import betterStatsLogo from "../assets/betterstatslogo_white.png";
+import BrandLogo from "./BrandLogo";
 import { SITE_VERSION } from '../version.js';
 
 export { SITE_VERSION };
@@ -172,11 +172,15 @@ export default function Navbar() {
             to={`/${slug}`}
             className="flex items-center gap-3 mr-6 shrink-0 group"
           >
-            <img
-              src={customLogo || betterStatsLogo}
-              alt={customLogo ? displayName : "Better Cricket"}
-              className="w-8 h-8 rounded object-contain"
-            />
+            {customLogo ? (
+              <img
+                src={customLogo}
+                alt={displayName}
+                className="w-8 h-8 rounded object-contain"
+              />
+            ) : (
+              <BrandLogo className="w-8 h-8 rounded object-contain" />
+            )}
             <div className="hidden md:block leading-tight">
               <div className="text-pb-text text-[13px] font-semibold tracking-tight">{displayName}</div>
               <div className="text-pb-faint text-[10px] font-mono tracking-wide2">
@@ -260,11 +264,7 @@ export default function Navbar() {
               <span className="hidden sm:block text-pb-faint text-[9px] font-mono tracking-wide2 uppercase">
                 Powered by
               </span>
-              <img
-                src={betterStatsLogo}
-                alt="Better Cricket"
-                className="w-6 h-6 object-contain opacity-75 group-hover:opacity-100 transition"
-              />
+              <BrandLogo className="w-6 h-6 object-contain opacity-75 group-hover:opacity-100 transition" />
             </Link>
           )}
 
@@ -350,7 +350,7 @@ export default function Navbar() {
                 onClick={() => setMobileOpen(false)}
                 className="flex items-center gap-2 py-2 text-pb-faint text-[10px] font-mono tracking-wide2 uppercase"
               >
-                <img src={betterStatsLogo} alt="" className="w-5 h-5 opacity-75" />
+                <BrandLogo alt="" className="w-5 h-5 opacity-75" />
                 Powered by Better Cricket
               </Link>
             )}

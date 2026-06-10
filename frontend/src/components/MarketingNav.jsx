@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
-import betterStatsLogo from '../assets/betterstatslogo_white.png'
+import BrandLogo from './BrandLogo'
 import { FORM_URL } from '../data/marketing'
 import { CORE_MARKETING, MODULES_MARKETING, TIER_INFO } from '../data/modules-marketing'
 
@@ -77,7 +77,7 @@ export default function MarketingNav() {
 
       <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-10 h-16 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2.5 group" aria-label="Better Cricket home">
-          <img src={betterStatsLogo} alt="Better Cricket" className="w-7 h-7 object-contain" />
+          <BrandLogo className="w-7 h-7 object-contain" />
           <span className="font-bold text-base tracking-tight text-pb-text group-hover:text-accent transition-colors">
             Better<span className="text-accent"> Cricket</span>
           </span>
