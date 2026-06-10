@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, klubpro_migration
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -217,6 +217,32 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_grade_merge_logs_org_active "
             "ON grade_merge_logs(org_id, alias_name) WHERE undone_at IS NULL"
+        ))
+        # Club onboarding requests — submissions from the public marketing Contact
+        # form (betterat.cricket/contact). Defensive idempotent create so the API
+        # boots even if alembic 079 hasn't run yet (mirrors that migration).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_onboarding_requests (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name TEXT NOT NULL,
+                club TEXT NOT NULL,
+                email TEXT NOT NULL,
+                phone TEXT,
+                association TEXT,
+                grades TEXT,
+                storage TEXT,
+                timeline TEXT,
+                club_url TEXT,
+                message TEXT,
+                status TEXT NOT NULL DEFAULT 'new',
+                source TEXT NOT NULL DEFAULT 'contact_form',
+                user_agent TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_onboarding_requests_created_at "
+            "ON club_onboarding_requests (created_at DESC)"
         ))
         # Season aliases — admin can mark one season as merged into another so
         # they display and aggregate as a single season (e.g. Summer 25/26 +
@@ -1015,6 +1041,7 @@ app.include_router(net_manager.router, dependencies=[Depends(require_module("sel
 # enabled-flag itself, so it is NOT wrapped in require_module.
 app.include_router(public_availability.router)                                            # BetterSelect (public)
 app.include_router(public_comms.router)                                                   # BetterComms (public unsubscribe)
+app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)
 app.include_router(ladders.router)  # standings power public club pages — not gated
 app.include_router(iq.router, dependencies=[Depends(require_module("iq"))])               # BetterIQ
 

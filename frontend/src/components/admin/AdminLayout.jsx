@@ -74,6 +74,7 @@ const SUPER_LINKS = [
   { to: '/admin/super', label: 'Platform Overview', exact: true },
   { to: '/admin/super/clubs', label: 'All Clubs' },
   { to: '/admin/super/users', label: 'Users' },
+  { to: '/admin/super/onboarding', label: 'Onboarding Requests' },
   { to: '/admin/usage', label: 'Usage' },
   { to: '/admin/super/migration', label: 'KlubPro Migration' },
 ]

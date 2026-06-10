@@ -1557,6 +1557,35 @@ class FeePayment(Base):
 
 # ─── BetterComms (BetterAdmin module) — bulk email ───────────────────────────
 
+class ClubOnboardingRequest(Base):
+    """A submission from the public marketing Contact form (betterat.cricket/contact).
+
+    A prospective club fills in the "Tell us about your club" form. On submit the
+    frontend still emails us via Formspree and also posts here, so every onboarding
+    enquiry is kept as a row staff can work through in the super-admin area.
+    Public and unauthenticated (the sender is a prospect with no club and no login),
+    so there is no organisation_id. ``status`` tracks the follow-up
+    (new -> contacted -> onboarded / closed).
+    """
+    __tablename__ = "club_onboarding_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(Text, nullable=False)
+    club = Column(Text, nullable=False)
+    email = Column(Text, nullable=False)
+    phone = Column(Text, nullable=True)
+    association = Column(Text, nullable=True)
+    grades = Column(Text, nullable=True)
+    storage = Column(Text, nullable=True)
+    timeline = Column(Text, nullable=True)
+    club_url = Column(Text, nullable=True)
+    message = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="new")  # new | contacted | onboarded | closed
+    source = Column(Text, nullable=False, server_default="contact_form")
+    user_agent = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class CommsContact(Base):
     """A single emailable contact in a club's audience.
 

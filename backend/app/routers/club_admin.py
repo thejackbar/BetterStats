@@ -14,7 +14,7 @@ from pathlib import Path
 
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
-    PlayerSyncRequest, Sponsor, get_db
+    PlayerSyncRequest, Sponsor, ClubOnboardingRequest, get_db
 )
 from sqlalchemy import text as _text
 import asyncio
@@ -1659,6 +1659,61 @@ async def list_users(
         }
         for r in rows
     ]
+
+
+@router.get("/super/onboarding-requests")
+async def list_onboarding_requests(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every club onboarding enquiry from the marketing Contact form, newest first."""
+    result = await db.execute(
+        select(ClubOnboardingRequest).order_by(ClubOnboardingRequest.created_at.desc())
+    )
+    return [
+        {
+            "id": str(r.id),
+            "name": r.name,
+            "club": r.club,
+            "email": r.email,
+            "phone": r.phone,
+            "association": r.association,
+            "grades": r.grades,
+            "storage": r.storage,
+            "timeline": r.timeline,
+            "club_url": r.club_url,
+            "message": r.message,
+            "status": r.status,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in result.scalars().all()
+    ]
+
+
+_ONBOARDING_STATUSES = {"new", "contacted", "onboarded", "closed"}
+
+
+class OnboardingStatusIn(BaseModel):
+    status: str
+
+
+@router.patch("/super/onboarding-requests/{request_id}")
+async def update_onboarding_request(
+    request_id: uuid.UUID,
+    payload: OnboardingStatusIn,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Move an enquiry through the follow-up states (new, contacted, onboarded, closed)."""
+    status_value = (payload.status or "").strip().lower()
+    if status_value not in _ONBOARDING_STATUSES:
+        raise HTTPException(status_code=422, detail="Unknown status.")
+    row = await db.get(ClubOnboardingRequest, request_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Request not found.")
+    row.status = status_value
+    await db.commit()
+    return {"ok": True, "status": status_value}
 
 
 @router.post("/super/users", status_code=201)

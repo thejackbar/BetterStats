@@ -84,6 +84,7 @@ const AdminYearbookDetail = lazy(() => import('./pages/admin/AdminYearbookDetail
 const SuperOverview = lazy(() => import('./pages/admin/SuperOverview'))
 const SuperClubs = lazy(() => import('./pages/admin/SuperClubs'))
 const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
+const SuperOnboarding = lazy(() => import('./pages/admin/SuperOnboarding'))
 const KlubproMigration = lazy(() => import('./pages/admin/klubpro/KlubproMigration'))
 const BetterSelectHome = lazy(() => import('./pages/admin/betterselect/BetterSelectHome'))
 const BsPlayers = lazy(() => import('./pages/admin/betterselect/BetterSelectPlayers'))
@@ -227,6 +228,7 @@ export default function App() {
           <Route path="/admin/super" element={<ProtectedRoute requireRole="super_admin"><SuperOverview /></ProtectedRoute>} />
           <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
+          <Route path="/admin/super/onboarding" element={<ProtectedRoute requireRole="super_admin"><SuperOnboarding /></ProtectedRoute>} />
           <Route path="/admin/super/migration" element={<ProtectedRoute requireRole="super_admin"><KlubproMigration /></ProtectedRoute>} />
 
           {/* BetterSelect module */}
