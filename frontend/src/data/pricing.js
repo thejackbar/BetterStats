@@ -46,16 +46,22 @@ export function priceFor(selectedKeys = []) {
 export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total  // 765
 
 // ── Competitor stack ─────────────────────────────────────────────────────────
-// The separate tools a club would otherwise pay for, with indicative annual RRP
-// in AUD. Squarespace / Canva / Mailchimp figures match the per-module
-// comparison tables already on the site; the rest are indicative. BetterIQ has
-// no off-the-shelf equivalent, so it is left out of the dollar total.
+// What a club would otherwise pay to match Better Cricket's scope, using each
+// tool's own published price (AUD; Pitchero converted from GBP) on a
+// representative plan. Conservative plans are used, so a busy multi-team club
+// pays more on the competitors and the gap only widens. Better Cricket replaces
+// the lot for one flat ALL_IN price, so the saving is the difference.
 export const COMPETITOR_STACK = [
-  { tool: 'CricketStatz',  forJob: 'Club stats',                replacedBy: 'BetterStats', cost: 100 },
-  { tool: 'Squarespace',   forJob: 'Public club website',       replacedBy: 'BetterSocials', cost: 300 },
-  { tool: 'Canva Pro',     forJob: 'Match-day social graphics', replacedBy: 'BetterSocials', cost: 165 },
-  { tool: 'A team app',    forJob: 'Availability and selection', replacedBy: 'BetterSelect', cost: 120 },
-  { tool: 'Mailchimp',     forJob: 'Member emails',             replacedBy: 'BetterAdmin', cost: 240 },
+  { tool: 'ClubStats', plan: 'Medium', forJob: 'Cricket stats & public site', replacedBy: 'BetterStats', cost: 399, note: '$299 to $599 by team count' },
+  { tool: 'Pitchero', plan: 'Standard', forJob: 'Website, app, membership & payments', replacedBy: 'BetterAdmin & BetterSelect', cost: 800, note: '£418 a year, converted to AUD' },
+  { tool: 'Canva Pro', forJob: 'Match-day social graphics', replacedBy: 'BetterSocials', cost: 165 },
 ]
 
-export const COMPETITOR_TOTAL = COMPETITOR_STACK.reduce((sum, c) => sum + c.cost, 0)  // 925
+export const COMPETITOR_TOTAL = COMPETITOR_STACK.reduce((sum, c) => sum + c.cost, 0)  // 1364
+export const SAVING = COMPETITOR_TOTAL - ALL_IN                                       // 599
+
+// Better Cricket loads your full history at no extra cost. The closest cricket
+// rival (ClubStats) charges a one-off historical-import fee on top of the
+// subscription, from $499 up to about $1,000 for big clubs. CricketStatz, the
+// desktop stats package, is another stats option at $199 to $798 a year.
+export const IMPORT_NOTE = 'from $499, up to about $1,000 for big clubs'
