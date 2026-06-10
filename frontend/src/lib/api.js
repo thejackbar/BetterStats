@@ -606,8 +606,15 @@ export const api = {
     })
   },
 
+  // Public marketing Contact form — store a club onboarding enquiry.
+  submitOnboarding: (payload) =>
+    request('/public/contact', { method: 'POST', body: JSON.stringify(payload) }),
+
   // Super admin
   superOverview: () => request('/club-admin/super/overview'),
+  superListOnboarding: () => request('/club-admin/super/onboarding-requests'),
+  superUpdateOnboarding: (id, status) =>
+    request(`/club-admin/super/onboarding-requests/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   // Re-scope the admin app to another club (super admin only). Pass null to
   // return to the staff member's home club. Returns the fresh /auth/me payload.
   switchClub: (clubId) =>

@@ -80,6 +80,33 @@ The canonical public domain is **`https://betterstats.cricket`** (no `www`). The
 - `CORS_ORIGINS` should be `https://betterstats.cricket` in the server `.env`, but note CORS is dormant in practice: the frontend calls the API via a same-origin relative `/api` path, so cross-origin checks never fire. Updating it is hygiene, not a functional requirement.
 - Any new build/config that references the public URL must point to `betterstats.cricket`.
 
+## Marketing Contact form → club onboarding requests (Jun 2026)
+
+The public Contact page (`betterat.cricket/contact`,
+`frontend/src/pages/marketing/Contact.jsx`) still emails enquiries via Formspree,
+and now also stores each one in BetterStats so staff can track onboarding. On
+submit the form fires a best-effort `POST /api/public/contact` (api
+`submitOnboarding`) alongside the Formspree post. Formspree stays the primary
+delivery and drives the success/error UI, so a failed store never blocks the form.
+
+- **Table** `club_onboarding_requests` (migration 079, mirrored idempotently in the
+  `main.py` lifespan): name / club / email / phone / association / grades / storage /
+  timeline / club_url / message, plus `status` (new | contacted | onboarded | closed),
+  source, user_agent, created_at. No `organisation_id` (the sender is a prospect, not
+  a member).
+- **Public router** `routers/public_contact.py` (`POST /public/contact`,
+  unauthenticated, NOT module-gated): validates name/club/email, clips every field,
+  stores one row.
+- **Super-admin UI** `/admin/super/onboarding` (`pages/admin/SuperOnboarding.jsx`,
+  `requireRole="super_admin"`, linked from AdminLayout `SUPER_LINKS`): lists requests
+  newest-first, filter by status, change a row's status. Backed by `GET` + `PATCH
+  /club-admin/super/onboarding-requests` in `club_admin.py`.
+- **Deploy note**: the store assumes `betterat.cricket` routes `/api` to
+  `betterstats-backend` the same way `betterstats.cricket` does (same frontend
+  container + nginx `/api` proxy). If the marketing domain is ever served separately
+  without that proxy, point the form at the absolute backend URL instead. It degrades
+  gracefully meanwhile, since Formspree still delivers the email.
+
 ## Version Numbers
 
 Each release lives in its own file under **`frontend/src/data/changelog/`** — never hand-edit `frontend/src/version.js` (it derives `SITE_VERSION` from the highest-sortKey entry in that folder). Drop a new `v-X-Y-Z.js` file when you ship:

@@ -3,6 +3,7 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import { FORMSPREE_ID, SUPPORT_EMAIL } from '../../data/marketing'
+import { api } from '../../lib/api'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 const FORMSPREE_URL = `https://formspree.io/f/${FORMSPREE_ID}`
@@ -94,6 +95,14 @@ function ContactForm() {
     if (Object.keys(errs).length) { setErrors(errs); return }
     setErrors({})
     setStatus('submitting')
+    // Also store the enquiry in the BetterStats DB so it shows up in the
+    // super-admin onboarding list. Best-effort: Formspree (below) is the primary
+    // delivery and drives success/error, so a failure here never blocks the form.
+    api.submitOnboarding({
+      name: fields.name, club: fields.club, email: fields.email, phone: fields.phone,
+      association: fields.association, grades: fields.grades, storage: fields.storage,
+      timeline: fields.timeline, clubUrl: fields.clubUrl, message: fields.message,
+    }).catch(() => {})
     try {
       const res = await fetch(FORMSPREE_URL, {
         method: 'POST',
@@ -129,7 +138,7 @@ function ContactForm() {
         <div className="w-14 h-14 rounded-full bg-accent/15 border border-accent/40 flex items-center justify-center mx-auto mb-5 text-2xl">✓</div>
         <h2 className="text-2xl font-bold mb-2">We've got it!</h2>
         <p className="text-pb-dim mb-6">
-          Thanks for reaching out. We'll be in touch within 24 hours — usually the same day.
+          Thanks for reaching out. We'll be in touch within 24 hours, usually the same day.
         </p>
         <button
           onClick={() => { setStatus('idle'); setFields(EMPTY_FIELDS) }}
@@ -156,7 +165,7 @@ function ContactForm() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Your name" id="name" required error={errors.name}>
             <input id="name" type="text" name="name" autoComplete="name"
-              placeholder="Jack Barendse"
+              placeholder="Adam Gilchrist"
               value={fields.name} onChange={set('name')}
               className={inputCls('name', errors)} />
           </Field>
@@ -172,7 +181,7 @@ function ContactForm() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Email address" id="email" required error={errors.email}>
             <input id="email" type="email" name="email" autoComplete="email"
-              placeholder="jack@applecrosscc.com.au"
+              placeholder="adam@applecrosscc.com"
               value={fields.email} onChange={set('email')}
               className={inputCls('email', errors)} />
           </Field>
@@ -250,7 +259,7 @@ function ContactForm() {
 
         {status === 'error' && (
           <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
-            Something went wrong — please try again or email us at{' '}
+            Something went wrong. Please try again, or email us at{' '}
             <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>.
           </p>
         )}
@@ -292,7 +301,7 @@ function ContactPanel() {
               Tell us about <span className="gradient-text">your club.</span>
             </h1>
             <p className="text-lg text-pb-dim leading-relaxed mb-8">
-              Drop your details and we'll come back with a short demo using your club's actual data — your colours, your players, your records.
+              Drop your details and we'll come back with a short demo built on your club's own data, in your colours and with your real players in it.
             </p>
 
             <div className="space-y-4">
