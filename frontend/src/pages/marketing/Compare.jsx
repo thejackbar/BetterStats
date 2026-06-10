@@ -14,25 +14,25 @@ const MODULE_COMPARES = [
     which: 'betterstats',
     eyebrow: 'BetterStats · the Core',
     intro:
-      'Every club gets BetterStats — your full reconciled history and a public site worth visiting. Here is how it sits next to the dedicated cricket-stats tools.',
+      'Every club gets BetterStats: your full reconciled history and a public site worth visiting. Here is how it sits next to the dedicated cricket-stats tools.',
   },
   {
     which: 'bettersocials',
     eyebrow: 'BetterSocials',
     intro:
-      'A designer and a website builder rolled into one — except this one already knows your cricket, so there is nothing to retype.',
+      "A designer and a website builder rolled into one, except this one already knows your club, so it already holds the information that matters and you don't have to retype it.",
   },
   {
     which: 'betterselect',
     eyebrow: 'BetterSelect',
     intro:
-      'Collecting availability and picking a side, stacked up against the group chats, spreadsheets and one-size-fits-all team apps clubs usually wrestle with.',
+      'Live player availability, net session attendance and current form feeding a streamlined, intelligent team-selection process, versus the usual unrelated tools clubs wrestle with: group chats, email, SMS, spreadsheets and generic team apps.',
   },
   {
     which: 'betteradmin',
     eyebrow: 'BetterAdmin',
     intro:
-      'Your back office — fees, comms and merch — next to the email tool and spreadsheets most clubs stitch together every month.',
+      'Your cricket club back office: fees, member comms and merch in one place, instead of an expensive bulk email tool and yet more spreadsheets that most clubs stitch together.',
   },
 ]
 
@@ -85,7 +85,7 @@ export default function Compare() {
   usePageMeta({
     title: 'Compare — Better Cricket vs the tools clubs already use',
     description:
-      'An honest, side-by-side look at how Better Cricket stacks up against the spreadsheets, website builders, design apps and email tools your club is already paying for — surface by surface.',
+      'An honest, side-by-side look at how Better Cricket stacks up against the spreadsheets, website builders, design apps and bulk email tools your club is already paying for, surface by surface.',
     image: 'https://betterat.cricket/og-image.png',
     url: 'https://betterat.cricket/compare',
   })
@@ -102,9 +102,9 @@ export default function Compare() {
               How Better Cricket <span className="gradient-text">stacks up.</span>
             </h1>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto leading-relaxed">
-              An honest look at where Better Cricket sits next to the tools your club already uses
-              — the spreadsheets, the website builder, the design app, the email tool and the group
-              chats. Whole platform first, then surface by surface.
+              An honest look at where Better Cricket sits next to the tools your club already uses:
+              the spreadsheets, the website builder, the design app, the bulk email tool and the group
+              chats. First we consider the whole platform, then we evaluate things surface by surface.
             </p>
           </div>
         </section>
