@@ -21,5 +21,6 @@ frontend/dist/
 *.log
 .DS_Store
 
-# Claude Code internal
-.claude/
+# Claude Code internal (local settings/state stay ignored; vendored skills are tracked)
+.claude/*
+!.claude/skills/

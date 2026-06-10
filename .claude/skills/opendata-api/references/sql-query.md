@@ -1,0 +1,290 @@
+# SQL Query
+
+Execute raw SQL against a dataset. Requires authentication.
+
+## Endpoint
+
+```
+POST /v1/datasets/{provider}/{dataset}/query
+```
+
+**Auth required:** API key (`Authorization: Bearer` header) or session cookie.
+
+## Request
+
+```json
+{
+  "sql": "SELECT year, AVG(score) as avg_score FROM data WHERE country = ? GROUP BY year ORDER BY year DESC",
+  "params": ["United States"],
+  "timeout_ms": 5000,
+  "row_limit": 1000
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `sql` | string | required | SQL query to execute |
+| `params` | any[] | null | Positional bind parameters for `?` placeholders |
+| `timeout_ms` | integer | 5000 | Query timeout in milliseconds (max 10000) |
+| `row_limit` | integer | 10000 | Max rows to return (max 10000) |
+| `response_format` | string | "columnar" | Response shape: `columnar` (compact) or `objects` (key-value per row) |
+
+## Parameterized Queries
+
+Use `?` placeholders with a `params` array to avoid string quoting issues. Each `?` in the SQL is replaced with the corresponding value from `params` (in order).
+
+```json
+{
+  "sql": "SELECT * FROM data WHERE country IN (?, ?, ?) AND year >= ?",
+  "params": ["United States", "Japan", "Germany", 2020]
+}
+```
+
+**Why use params:** Eliminates triple-nested escaping (SQL quotes inside JSON inside shell). The SQL contains no quotes at all. Values live in a plain JSON array.
+
+**Validation:** The number of `?` placeholders must exactly match the length of `params`. Mismatches return a 400 error with a clear message:
+
+```json
+{
+  "detail": {
+    "code": "PARAM_COUNT_MISMATCH",
+    "message": "Parameter count mismatch: SQL has 1 placeholder(s) but 2 parameter(s) provided",
+    "hint": "Each ? in the SQL requires exactly one parameter in the params array."
+  }
+}
+```
+
+**Backwards compatible:** The `params` field is optional. Queries without `?` placeholders work the same as before.
+
+## Response
+
+### Columnar format (default)
+
+The default response uses a compact columnar shape that saves ~45% tokens compared to the objects format.
+
+```json
+{
+  "columns": ["year", "avg_score"],
+  "types": ["integer", "float"],
+  "rows": [
+    [2024, 267.5],
+    [2023, 265.1]
+  ],
+  "row_count": 2,
+  "execution_time_ms": 42,
+  "truncated": false
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `columns` | string[] | Column names in result order |
+| `types` | string[] | Column types (string, integer, float, boolean, date, timestamp) |
+| `rows` | any[][] | Result rows as arrays (values in same order as `columns`) |
+| `row_count` | integer | Number of rows returned |
+| `execution_time_ms` | number | Server-side execution time |
+| `truncated` | boolean | `true` if results hit the row limit |
+
+### Objects format
+
+Pass `"response_format": "objects"` to get the traditional key-value format.
+
+```json
+{
+  "data": [
+    {"year": 2024, "avg_score": 267.5},
+    {"year": 2023, "avg_score": 265.1}
+  ],
+  "columns": ["year", "avg_score"],
+  "row_count": 2,
+  "execution_time_ms": 42,
+  "truncated": false
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data` | object[] | Query result rows as key-value objects |
+| `columns` | string[] | Column names in result order |
+| `row_count` | integer | Number of rows returned |
+| `execution_time_ms` | number | Server-side execution time |
+| `truncated` | boolean | `true` if results hit the row limit |
+
+## Table Naming
+
+The dataset is available as two table references:
+
+| Reference | Example |
+|-----------|---------|
+| `data` | `SELECT * FROM data` |
+| `"provider/dataset"` | `SELECT * FROM "nces/naep"` |
+
+Use `data` for single-dataset queries. The qualified name is useful for clarity or when cross-referencing in documentation.
+
+## Allowed SQL Features
+
+| Category | Allowed |
+|----------|---------|
+| Statements | SELECT only |
+| JOINs | All JOIN types, including cross-dataset joins via `POST /v1/query` |
+| Subqueries | Yes |
+| CTEs | Non-recursive only (`WITH ... AS`) |
+| Window functions | Yes |
+| CASE/WHEN | Yes |
+| UNION/INTERSECT/EXCEPT | Yes |
+
+## Allowed Functions
+
+**Aggregate:** COUNT, SUM, AVG, MIN, MAX, MEDIAN, ARRAY_AGG, STRING_AGG, GROUP_CONCAT
+
+**Math:** ABS, CEIL, CEILING, FLOOR, ROUND, TRUNC, SIGN, SQRT, POWER, EXP, LN, LOG
+
+**String:** CONCAT, SUBSTRING, LENGTH, UPPER, LOWER, TRIM, LTRIM, RTRIM, LPAD, RPAD, REPLACE, SPLIT_PART, REGEXP_REPLACE, REGEXP_MATCH
+
+**Date:** NOW, CURRENT_DATE, CURRENT_TIMESTAMP, DATE_TRUNC, DATE_PART, EXTRACT, MAKE_DATE, DATE_FROM_PARTS, MAKE_TIMESTAMP, AGE
+
+**Null handling:** COALESCE, NULLIF
+
+**Type casting:** CAST, TRY_CAST
+
+**Window:** ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE
+
+## Blocked Features
+
+- DDL/DML (CREATE, DROP, INSERT, UPDATE, DELETE, ALTER)
+- I/O functions (read_csv, read_parquet, read_json, httpfs, etc.)
+- PRAGMA and SET statements
+- Recursive CTEs (`WITH RECURSIVE`)
+- Multiple statements (semicolon-separated)
+- System functions and information_schema access
+
+## Cross-Dataset Joins
+
+Use `POST /v1/query` to join data across multiple datasets in a single SQL query.
+
+### Cross-Dataset Endpoint
+
+```
+POST /v1/query
+```
+
+Same auth, request body, and response shape as the per-dataset endpoint. The difference: table references in your SQL are resolved to datasets automatically.
+
+### Table Reference Syntax
+
+Reference datasets as `provider.dataset` (dot notation) or `"provider/dataset"` (quoted slash notation):
+
+```sql
+-- Dot notation (clean, works for simple names)
+FROM fred.gdp g JOIN fred.cpi c ON g.date = c.date
+
+-- Quoted slash notation (works for all names, including hyphens)
+FROM "fred/gdp" g JOIN "fred/unemployment-rate" u ON g.date = u.date
+```
+
+Use quoted slash notation for dataset names with hyphens (dot notation won't parse `fred.unemployment-rate` because the hyphen is a minus operator).
+
+### Cross-Dataset Examples
+
+**Economic indicators (with params):**
+```bash
+curl -X POST 'https://api.tryopendata.ai/v1/query' \
+  -H "Authorization: Bearer ${OPENDATA_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"sql": "SELECT g.date, g.value as gdp, u.value as unemployment FROM fred.gdp g JOIN \"fred/unemployment-rate\" u ON g.date = u.date WHERE EXTRACT(YEAR FROM g.date) >= ? ORDER BY g.date", "params": [2020]}'
+```
+
+**With CTEs:**
+```bash
+curl -X POST 'https://api.tryopendata.ai/v1/query' \
+  -H "Authorization: Bearer ${OPENDATA_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"sql": "WITH recent_gdp AS (SELECT date, value FROM fred.gdp WHERE EXTRACT(YEAR FROM date) >= 2020) SELECT r.date, r.value as gdp, c.value as cpi FROM recent_gdp r JOIN fred.cpi c ON r.date = c.date ORDER BY r.date"}'
+```
+
+### Cross-Dataset Limits
+
+| Limit | Value |
+|-------|-------|
+| Max datasets per query | 5 |
+| Combined parquet size | 150 MB |
+| Timeout | Same as per-dataset (5s default, 10s max) |
+| Row limit | Same as per-dataset (10,000 max) |
+
+### Cross-Dataset Error Codes
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `INVALID_TABLE_REF` | Bare table name without provider (use `provider.dataset` notation) |
+| 400 | `DATASET_LIMIT_EXCEEDED` | More than 5 datasets referenced |
+| 400 | `SIZE_LIMIT_EXCEEDED` | Combined parquet files exceed 150 MB |
+| 400 | `NO_DATASETS` | No dataset references found in query |
+| 404 | - | Referenced dataset not found |
+
+## Resource Limits
+
+| Limit | Default | Max |
+|-------|---------|-----|
+| Timeout | 5 seconds | 10 seconds |
+| Row limit | 10,000 | 10,000 |
+| Memory | 512 MB | 512 MB |
+
+## Troubleshooting
+
+**Query returns 400:** Check the error body for details. Common issues: invalid column name (use `GET .../columns` to verify schema), blocked function, or parameter count mismatch.
+
+**Query times out (408):** Add `LIMIT`, narrow `WHERE` filters, or reduce `timeout_ms`. For very large datasets, pre-filter with a CTE before aggregating.
+
+**REST alternative for simple aggregations:** If you only need `COUNT`, `AVG`, `SUM`, or `GROUP BY` without joins/CTEs/window functions, the REST endpoint (`?aggregate=avg(score)&group_by=year`) works for straightforward cases.
+
+## Error Codes
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `SQL_VALIDATION_ERROR` | SQL fails allowlist validation (blocked function, DDL, etc.) |
+| 400 | `PARAM_COUNT_MISMATCH` | Number of `?` placeholders doesn't match `params` array length |
+| 400 | `MISSING_PARAMS` | SQL has `?` placeholders but no `params` provided |
+| 404 | - | Dataset not found or has no Parquet files |
+| 408 | - | Query exceeded timeout |
+
+## Examples
+
+**Basic filter and sort:**
+```bash
+curl -X POST 'https://api.tryopendata.ai/v1/datasets/nces/naep/query' \
+  -H "Authorization: Bearer ${OPENDATA_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"sql": "SELECT * FROM data WHERE year >= 2020 ORDER BY year DESC LIMIT 10"}'
+```
+
+**Aggregation with GROUP BY:**
+```bash
+curl -X POST 'https://api.tryopendata.ai/v1/datasets/nces/naep/query' \
+  -H "Authorization: Bearer ${OPENDATA_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"sql": "SELECT jurisdiction, AVG(score) as avg_score FROM data WHERE year = 2024 GROUP BY jurisdiction ORDER BY avg_score DESC"}'
+```
+
+**Window function (with params):**
+```bash
+curl -X POST 'https://api.tryopendata.ai/v1/datasets/worldbank/gdp-per-capita/query' \
+  -H "Authorization: Bearer ${OPENDATA_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"sql": "SELECT country_name, year, gdp_per_capita, LAG(gdp_per_capita) OVER (PARTITION BY country_name ORDER BY year) as prev_year FROM data WHERE country_name = ? ORDER BY year DESC LIMIT 10", "params": ["United States"]}'
+```
+
+**CTE for top-N per group:**
+```bash
+curl -X POST 'https://api.tryopendata.ai/v1/datasets/nces/naep/query' \
+  -H "Authorization: Bearer ${OPENDATA_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"sql": "WITH ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY subject ORDER BY score DESC) as rn FROM data WHERE year = 2024) SELECT * FROM ranked WHERE rn <= 5"}'
+```
+
+**Year-over-year percent change:**
+```bash
+curl -X POST 'https://api.tryopendata.ai/v1/datasets/fred/gdp/query' \
+  -H "Authorization: Bearer ${OPENDATA_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"sql": "SELECT date, value as gdp, ROUND(100.0 * (value - LAG(value) OVER (ORDER BY date)) / LAG(value) OVER (ORDER BY date), 1) as yoy_pct_change FROM data WHERE EXTRACT(YEAR FROM date) >= 2020 ORDER BY date"}'
+```

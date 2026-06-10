@@ -1,0 +1,126 @@
+# Encoding Channels
+
+Charts (line, area, bar, arc, point, circle, text, rule, tick, rect) use encoding channels to map data fields to visual properties.
+
+For the full channel surface and `EncodingChannel` shape, load `Encoding` and `EncodingChannel` from `index.d.ts`. The behavioral notes below explain how the engine interprets channels at compile time — none of which is encoded in the types.
+
+## Inline Encoding Sugar
+
+These properties on an encoding channel provide VL-style shorthand that auto-generates the corresponding transform.
+
+| Property | Type | Effect |
+| --- | --- | --- |
+| `bin` | `boolean \| BinParams` | Auto-generates a `BinTransform` for this field. `true` uses defaults; pass `{ maxbins }` for control. |
+| `timeUnit` | `TimeUnit` | Auto-generates a `TimeUnitTransform`. Same units as the explicit transform (`year`, `month`, `yearmonth`, etc.). |
+| `sort` | `'ascending' \| 'descending' \| null` | Categorical domain sort order. `'ascending'` is the default. `null` preserves data order. **Warning:** `sort: 'ascending'/'descending'` on nominal/ordinal axes sorts domain strings alphabetically, not by quantitative value. To sort bars by their value, set `sort: null` and order rows in the data array (first row = bottom for horizontal bars, last row = top). |
+| `format` | `string` | d3-format string for tooltip/display values (e.g., `"$,.0f"`, `".1%"`). |
+| `title` | `string` | Custom label for tooltip display (overrides the field name). |
+
+```json
+{
+  "encoding": {
+    "x": { "field": "temperature", "type": "quantitative", "bin": true },
+    "y": { "field": "count", "type": "quantitative", "aggregate": "count" }
+  }
+}
+```
+
+```json
+{
+  "encoding": {
+    "x": { "field": "date", "type": "temporal", "timeUnit": "yearmonth" },
+    "y": { "field": "value", "type": "quantitative", "title": "Monthly avg", "format": ",.0f" }
+  }
+}
+```
+
+## Log Scale Axes
+
+D3 log scales treat `tickCount` as a subdivision density hint, not a literal count. At `tickCount: 5`, a log axis from $5 to $25k generates 20+ overlapping sub-power ticks. Use `tickCount: 3` or lower to get clean power-of-10 labels ($10, $100, $1k, $10k).
+
+Always pair log scales with SI-suffix formats (`"~s"` or `"$~s"`) for readable tick labels:
+
+```json
+{
+  "field": "revenue",
+  "type": "quantitative",
+  "scale": { "type": "log", "nice": false, "domain": [5, 30000] },
+  "axis": { "format": "$~s", "tickCount": 3 }
+}
+```
+
+| Scenario | tickCount |
+| --- | --- |
+| Log axis, any range | 3 or lower |
+| Linear axis | 5-6 (default) |
+
+## Stack Control
+
+The `stack` property on a quantitative encoding channel controls how multi-series bar/column/area charts handle overlapping values. Follows Vega-Lite conventions.
+
+**Defaults differ by mark:**
+
+| Mark | Default | Why |
+| --- | --- | --- |
+| `bar` (vertical column or horizontal bar) | **Stacked** (`"zero"`) when colored | Bars side-by-side overlap visually; stacking is the readable default |
+| `area` | **Overlap** (no stacking) when colored | Each series fills from baseline; semi-transparent layers show through |
+| `line` | n/a | Lines never stack -- they always overlay |
+
+**Values:**
+
+| Value | Behavior |
+| --- | --- |
+| `undefined` | Mark default (see table above). |
+| `true` / `"zero"` | Stacked from zero. Cumulative. |
+| `null` / `false` | Grouped/dodged on bars (side-by-side); overlap on area. |
+| `"normalize"` | Percentage stacking. Domain becomes [0, 1]; each category sums to 100%. |
+| `"center"` | Streamgraph. Stacked layers centered symmetrically around a baseline. |
+
+Set `stack` on the **quantitative** channel (x for horizontal bars, y for vertical columns and area).
+
+**Grouped horizontal bar:**
+```json
+{
+  "encoding": {
+    "x": { "field": "weeks", "type": "quantitative", "stack": null },
+    "y": { "field": "expense", "type": "nominal" },
+    "color": { "field": "era", "type": "nominal" }
+  }
+}
+```
+
+**Grouped vertical column:**
+```json
+{
+  "encoding": {
+    "x": { "field": "year", "type": "nominal" },
+    "y": { "field": "capacity", "type": "quantitative", "stack": null },
+    "color": { "field": "type", "type": "nominal" }
+  }
+}
+```
+
+**When to use grouped vs stacked:** Use stacked when values represent parts of a whole (e.g., budget breakdown by category). Use grouped when values are independent comparisons (e.g., 1984 vs 2024 costs) where stacking would misrepresent the data by making it look cumulative.
+
+## Conditional Encoding
+
+Use `condition` + `value` to apply different visual properties based on data values:
+
+```json
+{
+  "encoding": {
+    "color": {
+      "condition": { "test": { "field": "value", "gte": 0 }, "value": "#4CAF50" },
+      "value": "#F44336"
+    }
+  }
+}
+```
+
+When `condition.test` is true, the `condition.value` is used. Otherwise, the top-level `value` is the fallback. The `test` object uses the same filter predicate syntax as `FilterTransform` (see [data-transforms.md](data-transforms.md)).
+
+**Important:** Encoding channels require a `field` or `condition`. A bare `{ "value": "#hex" }` without a field or condition will fail validation. For constant colors across all marks, use `mark.fill` instead:
+
+```json
+{ "mark": { "type": "bar", "fill": "#1b7fa3" } }
+```
