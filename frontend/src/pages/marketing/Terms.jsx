@@ -44,7 +44,7 @@ export default function Terms() {
               Each club is provided with administrator login credentials. You are responsible for keeping your
               credentials confidential, for all activity that takes place under your account, and for ensuring
               that anyone you give access to is authorised to act for your club. Please notify us immediately at{' '}
-              <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a>{' '}
+              <a href="mailto:betteratcricket@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betteratcricket@gmail.com</a>{' '}
               if you believe your account has been accessed without authorisation.
             </p>
           </section>
@@ -92,7 +92,7 @@ export default function Terms() {
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">7. Availability &amp; support</h2>
             <p>
               We aim to keep the Service available and up to date, and we provide support by email at{' '}
-              <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a>.
+              <a href="mailto:betteratcricket@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betteratcricket@gmail.com</a>.
               We don't guarantee uninterrupted availability, and the Service may occasionally be unavailable for
               maintenance or for reasons outside our control. If we ever decide to discontinue the Service, we will
               give subscribers reasonable notice.
@@ -125,7 +125,7 @@ export default function Terms() {
             <p>
               Better Cricket is provided by BetterSports (ABN 32 624 335 397), Perth, Western Australia. Questions
               about these terms? Email{' '}
-              <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a>.
+              <a href="mailto:betteratcricket@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betteratcricket@gmail.com</a>.
             </p>
           </section>
         </div>
