@@ -9,7 +9,7 @@ import { CHANGELOG } from '../../data/changelog'
 import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
-import betterStatsLogo from '../../assets/betterstatslogo_white.png'
+import BrandLogo from '../BrandLogo'
 
 function compareVersions(a, b) {
   const parse = v => (v || '').replace('v', '').split('.').map(Number)
@@ -155,11 +155,7 @@ export default function AdminLayout({ children }) {
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
           <div className="flex items-center gap-3">
             <Link to="/" className="flex items-center gap-2 group">
-              <img
-                src={betterStatsLogo}
-                alt="Better Cricket"
-                className="w-7 h-7 object-contain"
-              />
+              <BrandLogo className="w-7 h-7 object-contain" />
               <span className="font-display font-bold text-base tracking-wider uppercase text-pb-text group-hover:text-pb-accent transition-colors">
                 Better Cricket
               </span>

@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner } from '../lib/presskit'
 import { fmt2, fmtCount, formatSeason } from '../lib/cricketFormat'
-import betterStatsLogo from '../assets/betterstatslogo_white.png'
+import betterStatsLogo from '../assets/bettercricket-white.svg'
 
 function hexWithAlpha(hex, alpha) {
   if (!hex || hex[0] !== '#' || hex.length !== 7) return `rgba(22,199,132,${alpha})`
