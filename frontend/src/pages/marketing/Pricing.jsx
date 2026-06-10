@@ -4,188 +4,160 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import PricingCalculator from '../../components/marketing/PricingCalculator'
-import { FORM_URL } from '../../data/marketing'
-import { TIER_INFO, TIER_ORDER, modulesInTier } from '../../data/modules-marketing'
+import { CORE, PRICED_MODULES, ALL_IN, COMPETITOR_STACK, COMPETITOR_TOTAL } from '../../data/pricing'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
-// JSON-LD — three tier offers (annual), kept for SEO.
+// JSON-LD — the Core plus each module as an annual offer, kept for SEO.
 const PRICING_JSONLD = {
   '@context': 'https://schema.org',
   '@type': 'Product',
   name: 'Better Cricket — Cricket Club Platform',
   description:
-    'A modular platform for Australian cricket clubs. Core stats and a public club site (BetterStats) plus bolt-on modules for selection, socials, club admin and analytics. Sold as Good / Better / Best tiers.',
+    'A modular platform for Australian cricket clubs. The Core (BetterStats) is $400 a year; add BetterSelect, BetterSocials and BetterAdmin for $100 each and BetterIQ for $200, with up to 15% off when you bundle. Annual licence, one price per club.',
   brand: { '@type': 'Brand', name: 'Better Cricket' },
   url: 'https://betterat.cricket/pricing',
   image: 'https://betterat.cricket/og-image.png',
-  offers: TIER_ORDER.map((key) => {
-    const t = TIER_INFO[key]
-    return {
+  offers: {
+    '@type': 'AggregateOffer',
+    priceCurrency: 'AUD',
+    lowPrice: String(CORE.price),
+    highPrice: String(ALL_IN),
+    offerCount: String(1 + PRICED_MODULES.length),
+    offers: [CORE, ...PRICED_MODULES].map((m) => ({
       '@type': 'Offer',
-      name: `${t.label} — annual`,
-      price: String(t.annual),
+      name: `${m.name} — annual`,
+      price: String(m.price),
       priceCurrency: 'AUD',
       availability: 'https://schema.org/InStock',
       url: 'https://betterat.cricket/pricing',
-      priceSpecification: { '@type': 'UnitPriceSpecification', price: String(t.annual), priceCurrency: 'AUD', unitText: 'ANN' },
-    }
-  }),
+    })),
+  },
 }
-
-const annualSaving = (t) => t.monthly * 12 - t.annual
 
 // ─── Hero ────────────────────────────────────────────────────────────────
 function Hero() {
   return (
-    <section className="relative pt-32 pb-12 px-4 sm:px-6 lg:px-10 overflow-hidden">
+    <section className="relative pt-32 pb-10 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
       <div className="max-w-[1000px] mx-auto relative text-center">
         <p className="pill mb-6 inline-flex"><span className="dot" />Flat per club · 1 team or 50, same price</p>
         <h1 className="font-display font-bold text-[44px] sm:text-[60px] lg:text-[80px] tracking-tight leading-[0.95] mb-6">
-          Good. Better. <span className="gradient-text">Best.</span>
+          Pick what you <span className="gradient-text">pay for.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed">
-          Every club gets the Core. Add the modules that run your season and your club —
-          one flat price, no per-player or per-team charges.
+          Every club starts with the Core. Add only the modules you want, with up to 15% off when you
+          bundle. One annual price, no per-player or per-team charges.
         </p>
       </div>
     </section>
   )
 }
 
-// ─── Tier cards ────────────────────────────────────────────────────────────
-function TierCard({ tierKey, billing }) {
-  const t = TIER_INFO[tierKey]
-  const isAnnual = billing === 'annual'
-  const recommended = tierKey === 'better'
-  const modules = modulesInTier(tierKey)
-  const includeLines = [
-    tierKey === 'good' ? 'Everything in BetterStats (Core)' : 'BetterStats (Core)',
-    ...modules.map((m) => m.name),
-  ]
-  return (
-    <div className={`relative surface p-7 lg:p-8 flex flex-col h-full ${recommended ? 'border-accent/40 bg-gradient-to-b from-accent/[0.06] to-transparent' : ''}`}>
-      {recommended && (
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-accent text-navy-950 rounded-full whitespace-nowrap">
-          <span className="text-[10px] font-bold uppercase tracking-wide3">★ Most popular</span>
-        </div>
-      )}
-      <p className="font-display font-bold text-2xl mb-1">{t.label}</p>
-      <p className="text-sm text-pb-dim mb-5 min-h-[40px]">{t.tagline}</p>
-
-      <div className="flex items-baseline gap-1.5 mb-1">
-        <span className="text-4xl font-bold tabular-nums">${isAnnual ? t.annual : t.monthly}</span>
-        <span className="text-sm text-pb-faint">/ {isAnnual ? 'year' : 'month'} AUD</span>
-      </div>
-      <p className="text-xs text-accent font-semibold mb-6 h-4">
-        {isAnnual ? `Save $${annualSaving(t)} vs monthly` : `or $${t.annual}/year`}
-      </p>
-
-      <p className="text-[10px] uppercase tracking-wide3 font-mono text-pb-faint mb-3">What’s included</p>
-      <ul className="space-y-2 mb-7 flex-1">
-        {includeLines.map((line) => (
-          <li key={line} className="flex items-center gap-2.5 text-sm"><span className="tick">✓</span>{line}</li>
-        ))}
-      </ul>
-
-      <a
-        href={FORM_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={`${recommended ? 'cta-primary' : 'cta-secondary'} w-full justify-center`}
-      >
-        Get {t.label} →
-      </a>
-    </div>
-  )
-}
-
-function Tiers({ billing, setBilling }) {
-  const isAnnual = billing === 'annual'
+// ─── Calculator (the main pricing tool) ────────────────────────────────────
+function Calculator() {
   return (
     <section className="px-4 sm:px-6 lg:px-10 pb-8">
-      <div className="max-w-[1100px] mx-auto">
-        <div className="flex justify-center mb-10">
-          <div className="tabbar">
-            <button className={billing === 'monthly' ? 'active' : ''} onClick={() => setBilling('monthly')}>Monthly</button>
-            <button className={isAnnual ? 'active' : ''} onClick={() => setBilling('annual')}>
-              Annual <span className="ml-1 text-[10px] font-bold opacity-80">2 MONTHS FREE</span>
-            </button>
-          </div>
-        </div>
-        <Reveal>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
-            {TIER_ORDER.map((key) => (
-              <TierCard key={key} tierKey={key} billing={billing} />
-            ))}
-          </div>
-        </Reveal>
-        <p className="text-center text-xs text-pb-faint mt-6 max-w-2xl mx-auto">
-          Annual is billed once and works out cheaper — it also rides out the April–September off-season.
-          Want just one module on a lower tier? À-la-carte add-ons are available — <Link to="/contact" className="text-accent hover:underline">ask us</Link>.
-        </p>
-      </div>
-    </section>
-  )
-}
-
-// ─── Calculator ──────────────────────────────────────────────────────────
-function Calculator({ billing }) {
-  return (
-    <section className="px-4 sm:px-6 lg:px-10 py-16 border-t pb-hairline bg-black/20">
       <div className="max-w-[1100px] mx-auto">
         <Reveal>
           <div className="text-center mb-8">
             <p className="pill-neutral inline-flex mb-5">Plan calculator</p>
-            <h2 className="font-display font-bold text-3xl md:text-5xl mb-3 tracking-tight">Not sure which tier?</h2>
-            <p className="text-pb-dim max-w-xl mx-auto">Tick the modules you want — we’ll tell you the tier and the price.</p>
+            <h2 className="font-display font-bold text-3xl md:text-5xl mb-3 tracking-tight">Build your plan, see the price.</h2>
+            <p className="text-pb-dim max-w-xl mx-auto">Tick the modules you want and the annual price updates as you go.</p>
           </div>
         </Reveal>
-        <Reveal><PricingCalculator billing={billing} /></Reveal>
+        <Reveal><PricingCalculator /></Reveal>
       </div>
     </section>
   )
 }
 
-// ─── Value table (what the Core replaces) ──────────────────────────────────
-function ValueTable() {
-  const rows = [
-    ['Branded public club site', 'Saves your committee', '~$1,200 in dev fees'],
-    ['Nightly automatic stats sync', 'Saves your statistician', '~3 hr/week'],
-    ['Historical sync — as far back as your data goes', 'Saves the archive project', 'Hours of work, once'],
-    ['Auto-built season yearbook', 'Saves your committee', '~2 weekends/yr'],
-    ['Shareable stat cards', 'Saves your social manager', '~30 min/week'],
-    ['Honour boards & awards', 'Saves the committee', 'A migraine'],
-  ]
+// ─── Module price list ─────────────────────────────────────────────────────
+function PriceList() {
+  const items = [CORE, ...PRICED_MODULES]
   return (
-    <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
+    <section className="px-4 sm:px-6 lg:px-10 py-14 border-t pb-hairline">
       <div className="max-w-[1100px] mx-auto">
         <Reveal>
-          <div className="text-center mb-10">
-            <p className="pill-neutral inline-flex mb-5">The Core, in context</p>
-            <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">What the entry tier replaces.</h2>
-            <p className="text-pb-dim max-w-xl mx-auto">Before you even add a module, the Good tier pays for itself.</p>
+          <div className="text-center mb-8">
+            <p className="pill-neutral inline-flex mb-5">The building blocks</p>
+            <h2 className="font-display font-bold text-3xl md:text-5xl mb-3 tracking-tight">One Core, then your modules.</h2>
+            <p className="text-pb-dim max-w-xl mx-auto">
+              Annual prices, AUD. Add any two modules for 10% off, or all four for 15% (the full set comes to ${ALL_IN}).
+            </p>
           </div>
         </Reveal>
-        <div className="surface overflow-hidden">
-          <div className="grid grid-cols-[1.5fr,1fr,1fr] gap-4 px-6 py-4 border-b pb-hairline bg-pb-surface2/20">
-            <p className="text-xs font-medium text-pb-faint uppercase tracking-wide3">What you get</p>
-            <p className="text-xs font-medium text-pb-faint uppercase tracking-wide3">Replaces</p>
-            <p className="text-xs font-medium text-accent uppercase tracking-wide3 text-right">Annual saving</p>
+        <Reveal>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            {items.map((m) => (
+              <div key={m.key} className={`surface p-5 text-center ${m.key === 'core' ? 'border-accent/40' : ''}`}>
+                <span
+                  className="w-10 h-10 rounded-lg flex items-center justify-center text-lg mx-auto mb-3 border"
+                  style={{ color: m.accent, borderColor: `${m.accent}55`, background: `${m.accent}14` }}
+                >
+                  {m.icon}
+                </span>
+                <p className="text-sm font-semibold">{m.name}</p>
+                {m.key === 'core' && <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-1">Core</p>}
+                <p className="text-2xl font-bold tabular-nums mt-1">${m.price}</p>
+                <p className="text-[11px] text-pb-faint">/ year</p>
+              </div>
+            ))}
           </div>
-          {rows.map((r, i) => (
-            <div key={r[0]} className={`grid grid-cols-[1.5fr,1fr,1fr] gap-4 px-6 py-4 items-center ${i < rows.length - 1 ? 'border-b pb-hairline' : ''}`}>
-              <p className="text-sm font-medium">{r[0]}</p>
-              <p className="text-sm text-pb-dim">{r[1]}</p>
-              <p className="text-sm text-accent font-semibold text-right">{r[2]}</p>
+        </Reveal>
+      </div>
+    </section>
+  )
+}
+
+// ─── Competitor comparison (replace the whole stack) ───────────────────────
+function ReplacesStack() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline bg-black/20">
+      <div className="max-w-[1000px] mx-auto">
+        <Reveal>
+          <div className="text-center mb-10">
+            <p className="pill-neutral inline-flex mb-5">One platform, one bill</p>
+            <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">Replace the whole stack.</h2>
+            <p className="text-pb-dim max-w-xl mx-auto">
+              Most clubs already pay for a few of these, run separately and stitched together by hand.
+              Better Cricket does the lot, fed by the same cricket data.
+            </p>
+          </div>
+        </Reveal>
+        <Reveal>
+          <div className="surface overflow-hidden">
+            <div className="grid grid-cols-[1.3fr_1fr_auto] gap-4 px-6 py-4 border-b pb-hairline bg-pb-surface2/20">
+              <p className="text-xs font-medium text-pb-faint uppercase tracking-wide3">Tool</p>
+              <p className="text-xs font-medium text-pb-faint uppercase tracking-wide3">For</p>
+              <p className="text-xs font-medium text-pb-faint uppercase tracking-wide3 text-right">Typical / year</p>
             </div>
-          ))}
-          <div className="grid grid-cols-[1.5fr,1fr,1fr] gap-4 px-6 py-5 bg-accent/[0.05]">
-            <p className="text-base font-bold">Good tier — the Core</p>
-            <p className="text-base text-pb-dim">BetterStats Annual</p>
-            <p className="text-base font-bold text-accent text-right">${TIER_INFO.good.annual} / year</p>
+            {COMPETITOR_STACK.map((c) => (
+              <div key={c.tool} className="grid grid-cols-[1.3fr_1fr_auto] gap-4 px-6 py-4 items-center border-b pb-hairline">
+                <div>
+                  <p className="text-sm font-medium">{c.tool}</p>
+                  <p className="text-[11px] text-pb-faint">Better Cricket: {c.replacedBy}</p>
+                </div>
+                <p className="text-sm text-pb-dim">{c.forJob}</p>
+                <p className="text-sm text-pb-dim tabular-nums text-right">${c.cost}</p>
+              </div>
+            ))}
+            <div className="grid grid-cols-[1.3fr_1fr_auto] gap-4 px-6 py-4 items-center border-b pb-hairline">
+              <p className="text-sm font-medium text-pb-dim">Separate tools, added up</p>
+              <p className="text-sm text-pb-faint">Five subscriptions to manage</p>
+              <p className="text-base font-bold tabular-nums text-right text-pb-dim">${COMPETITOR_TOTAL}</p>
+            </div>
+            <div className="grid grid-cols-[1.3fr_1fr_auto] gap-4 px-6 py-5 items-center bg-accent/[0.06]">
+              <p className="text-base font-bold">Better Cricket, all in</p>
+              <p className="text-sm text-pb-dim">Everything above, one platform</p>
+              <p className="text-lg font-bold tabular-nums text-right text-accent">${ALL_IN}</p>
+            </div>
           </div>
-        </div>
+        </Reveal>
+        <p className="text-center text-xs text-pb-faint mt-5 max-w-2xl mx-auto">
+          Competitor prices are indicative annual RRP in AUD and move around with plan and club size.
+          BetterIQ has no off-the-shelf equivalent, so it isn't counted in the stack total. The all-in
+          Better Cricket price is the Core plus all four modules, with the 15% bundle discount.
+        </p>
       </div>
     </section>
   )
@@ -195,17 +167,18 @@ function ValueTable() {
 function PricingFAQ() {
   const [open, setOpen] = useState(0)
   const faqs = [
-    { q: 'What’s the difference between the tiers?', a: 'Good is the Core — BetterStats stats and your public club site. Better adds BetterSelect (availability + selection) and BetterSocials (branded social posts) to run your season. Best adds BetterAdmin (fees, comms and merch) and BetterIQ (analytics + opposition scouting) to run the whole club.' },
-    { q: 'Does the price change based on club size?', a: 'No. Every tier is a flat rate — one team or fifty teams, juniors and seniors, men’s and women’s, the fee is the same. No per-team, per-player or per-grade pricing.' },
-    { q: 'Can I add a single module without moving up a tier?', a: 'Yes — any one module can be bolted onto a lower tier à-la-carte. We price add-ons so that two of them cost more than simply moving up a tier, so for most clubs the tier is the better deal. Get in touch and we’ll sort it.' },
-    { q: 'Monthly or annual?', a: 'Either. Annual is billed once and works out to roughly two months free — and it carries you through the April–September off-season without a monthly bill landing on a club with no fixtures.' },
-    { q: 'Can we change tiers later?', a: 'Yes. Move up or down at any time; entitlements flip the moment your plan changes.' },
-    { q: 'Are there any setup or migration fees?', a: 'There’s no flat setup fee. We do a short consultation, look at how much historical data your club has and how much clean-up it’ll need, then work out a low-cost plan that fits.' },
-    { q: 'Do you offer discounts for junior-only clubs?', a: 'Yes — junior-only clubs get a discount, but only if the senior club is already onboarded. Contact us for the discount code.' },
-    { q: 'How do we pay?', a: 'Right now it’s bank transfer / PayID — most clubs don’t have a card and we don’t want to put financial pressure on volunteers. Card payments are on the roadmap.' },
+    { q: 'How much does it cost?', a: "The Core (BetterStats) is $400 a year and includes your public stats site. BetterSelect, BetterSocials and BetterAdmin are $100 a year each, and BetterIQ is $200. Take any two modules for 10% off, or all four for 15%, which brings the Core plus every module to $765 a year." },
+    { q: 'Does the price change based on club size?', a: "No. Every price is a flat rate per club. One team or fifty teams, juniors and seniors, men's and women's, the price is the same. There's no per-team, per-player or per-grade pricing." },
+    { q: 'Can I add a single module?', a: "Yes. For a small additional annual charge, any single module can be added to your current subscription." },
+    { q: 'Monthly or annual?', a: "Better Cricket is an annual licence, billed once a year." },
+    { q: 'Can we add modules later?', a: "Yes. You can add new modules at any time and the entitlements switch on immediately. Adding a module is an annual commitment." },
+    { q: 'Are there any setup or migration fees?', a: "Up to two hours of dedicated support is included in your first year on the Core. If all of your club's match history is already uploaded, you should be up and running in no time, and we'll guide you through merging players and grades if needed." },
+    { q: 'Do you offer a free trial?', a: "Yes. We offer a 14-day free trial of every Better Cricket module, so you can try the lot before you commit." },
+    { q: 'Do you offer discounts for junior-only clubs?', a: "Yes. A junior club linked to a senior club that's currently subscribed to Better Cricket gets a discount. Contact us for the code." },
+    { q: 'How do we pay?', a: "Right now it's bank transfer or PayID. Most clubs don't have a card and we don't want to put financial pressure on volunteers. Card payments are on the roadmap." },
   ]
   return (
-    <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline bg-black/20">
+    <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
       <div className="max-w-[900px] mx-auto">
         <Reveal>
           <div className="text-center mb-10">
@@ -236,11 +209,10 @@ function PricingFAQ() {
 
 // ─── Page ────────────────────────────────────────────────────────────────
 export default function Pricing() {
-  const [billing, setBilling] = useState('annual')
   usePageMeta({
-    title: 'Pricing — Good / Better / Best tiers for cricket clubs | Better Cricket',
+    title: 'Pricing — modular plans for cricket clubs | Better Cricket',
     description:
-      'Simple, flat-rate pricing for Australian cricket clubs. Good $449/yr (Core stats + public site), Better $649/yr (+ selection & socials), Best $999/yr (+ BetterAdmin & BetterIQ analytics). One price per club regardless of size, billed monthly or annually.',
+      'Modular, flat-rate pricing for Australian cricket clubs. The Core (BetterStats) is $400 a year; add BetterSelect, BetterSocials and BetterAdmin for $100 each and BetterIQ for $200, with up to 15% off when you bundle. One annual price per club, whatever the size.',
     image: 'https://betterat.cricket/og-image.png',
     url: 'https://betterat.cricket/pricing',
     jsonLd: PRICING_JSONLD,
@@ -250,9 +222,9 @@ export default function Pricing() {
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
         <Hero />
-        <Tiers billing={billing} setBilling={setBilling} />
-        <Calculator billing={billing} />
-        <ValueTable />
+        <Calculator />
+        <PriceList />
+        <ReplacesStack />
         <PricingFAQ />
       </div>
       <MarketingFooter />

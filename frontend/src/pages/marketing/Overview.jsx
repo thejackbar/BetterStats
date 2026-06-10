@@ -21,9 +21,8 @@ import {
   CORE_MARKETING,
   MODULES_MARKETING,
   TIER_INFO,
-  TIER_ORDER,
-  modulesInTier,
 } from '../../data/modules-marketing'
+import { CORE, PRICED_MODULES } from '../../data/pricing'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 // Old way vs Better Cricket — kept tight and scannable.
@@ -288,46 +287,41 @@ function HowItWorks() {
 
 // ─── Pricing snapshot ────────────────────────────────────────────────────
 function PricingSnapshot() {
+  const items = [CORE, ...PRICED_MODULES]
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-24 border-t pb-hairline bg-black/20">
       <div className="max-w-[1100px] mx-auto">
         <Reveal>
-          <div className="text-center mb-14">
+          <div className="text-center mb-12">
             <p className="pill-neutral inline-flex mb-5">Pricing</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
-              Good. Better. <span className="gradient-text">Best.</span>
+              Pick what you <span className="gradient-text">pay for.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              One flat price per club — same fee for one team or fifty. No per-player charges.
+              One flat price per club, the same fee for one team or fifty. Start with the Core and add the
+              modules you want, with up to 15% off when you bundle.
             </p>
           </div>
         </Reveal>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {TIER_ORDER.map((tierKey, i) => {
-            const tier = TIER_INFO[tierKey]
-            const mods = modulesInTier(tierKey)
-            const featured = tierKey === 'better'
-            return (
-              <Reveal key={tierKey} delay={i * 90} className="h-full">
-                <div className={`surface p-7 h-full flex flex-col ${featured ? 'border-accent/40 bg-gradient-to-b from-accent/[0.05] to-transparent' : ''}`}>
-                  {featured && <p className="pill inline-flex mb-4 self-start"><span className="dot" />Most popular</p>}
-                  <p className="text-sm font-mono uppercase tracking-wide3 text-accent mb-2">{tier.label}</p>
-                  <p className="text-4xl font-bold tabular-nums mb-1">${tier.annual}<span className="text-base text-pb-faint font-normal">/yr</span></p>
-                  <p className="text-xs text-pb-faint mb-4">or ${tier.monthly}/mo · 2 months free annually</p>
-                  <p className="text-sm text-pb-dim leading-relaxed mb-5">{tier.tagline}</p>
-                  <ul className="space-y-2 mb-6 mt-auto">
-                    <li className="flex items-center gap-2 text-sm text-pb-dim"><span className="tick">✓</span>Everything in BetterStats (Core)</li>
-                    {mods.map((m) => (
-                      <li key={m.slug} className="flex items-center gap-2 text-sm text-pb-dim"><span className="tick">✓</span>{m.name}</li>
-                    ))}
-                  </ul>
-                </div>
-              </Reveal>
-            )
-          })}
-        </div>
+        <Reveal>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            {items.map((m) => (
+              <div key={m.key} className={`surface p-5 text-center ${m.key === 'core' ? 'border-accent/40' : ''}`}>
+                <span
+                  className="w-10 h-10 rounded-lg flex items-center justify-center text-lg mx-auto mb-3 border"
+                  style={{ color: m.accent, borderColor: `${m.accent}55`, background: `${m.accent}14` }}
+                >
+                  {m.icon}
+                </span>
+                <p className="text-sm font-semibold">{m.name}</p>
+                {m.key === 'core' && <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent">Core</p>}
+                <p className="text-2xl font-bold tabular-nums mt-1">${m.price}<span className="text-xs text-pb-faint font-normal">/yr</span></p>
+              </div>
+            ))}
+          </div>
+        </Reveal>
         <div className="text-center mt-10">
-          <Link to="/pricing" className="cta-secondary">See full pricing →</Link>
+          <Link to="/pricing" className="cta-secondary">Build your plan →</Link>
         </div>
       </div>
     </section>
@@ -381,7 +375,7 @@ function FinalCTA() {
               <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
               <Link to="/contact" className="cta-secondary">Talk to us</Link>
             </div>
-            <p className="text-xs text-pb-faint">From $449/yr · Good · Better · Best · Flat rate per club</p>
+            <p className="text-xs text-pb-faint">From $400/yr · One Core, your modules · Flat rate per club</p>
           </div>
         </div>
       </div>

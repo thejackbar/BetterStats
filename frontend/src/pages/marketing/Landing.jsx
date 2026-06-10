@@ -529,7 +529,7 @@ function FinalCTA() {
               <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
               <Link to="/pricing" className="cta-secondary">See pricing</Link>
             </div>
-            <p className="text-xs text-pb-faint">From $449/yr · Good · Better · Best · Flat rate per club</p>
+            <p className="text-xs text-pb-faint">From $400/yr · One Core, your modules · Flat rate per club</p>
           </div>
         </div>
       </div>
