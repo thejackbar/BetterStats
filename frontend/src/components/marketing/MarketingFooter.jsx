@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import BrandLogo from '../BrandLogo'
 import { MODULES_MARKETING } from '../../data/modules-marketing'
 
 export default function MarketingFooter() {
@@ -7,16 +8,14 @@ export default function MarketingFooter() {
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-10 py-16">
         <div className="grid grid-cols-12 gap-8 mb-12">
           <div className="col-span-12 md:col-span-4">
-            <Link to="/" className="flex items-center gap-2.5 mb-5">
-              <div className="w-8 h-8 rounded-md bg-accent flex items-center justify-center">
-                <span className="font-bold text-lg text-navy-950 leading-none">B</span>
-              </div>
+            <Link to="/" className="flex items-center gap-2.5 mb-5" aria-label="Better Cricket home">
+              <BrandLogo className="w-7 h-7 object-contain" />
               <span className="font-bold text-lg tracking-tight">
                 Better<span className="text-accent"> Cricket</span>
               </span>
             </Link>
             <p className="text-pb-dim text-sm leading-relaxed max-w-sm mb-6">
-              Everything an Australian cricket club runs on, in one place. BetterStats keeps your history; the modules run your season, your back office and your match prep.
+              Everything an Australian cricket club runs on, in one place — its history and stats, weekend selection, social posts, the back office and match-day prep.
             </p>
             <div className="flex gap-4 text-sm text-pb-dim">
               <a href="https://x.com/betterstatsau" target="_blank" rel="noopener noreferrer me" className="hover:text-pb-text transition-colors">Twitter</a>
