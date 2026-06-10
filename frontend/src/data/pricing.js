@@ -53,12 +53,14 @@ export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total  // 765
 // the lot for one flat ALL_IN price, so the saving is the difference.
 export const COMPETITOR_STACK = [
   { tool: 'ClubStats', plan: 'Medium', forJob: 'Cricket stats & public site', replacedBy: 'BetterStats', cost: 399, note: '$299 to $599 by team count' },
-  { tool: 'Pitchero', plan: 'Standard', forJob: 'Website, app, membership & payments', replacedBy: 'BetterAdmin & BetterSelect', cost: 800, note: '£418 a year, converted to AUD' },
+  { tool: 'Squarespace', forJob: 'Club website', replacedBy: 'BetterSocials', cost: 300 },
+  { tool: 'Mailchimp', forJob: 'Member emails', replacedBy: 'BetterAdmin', cost: 240 },
   { tool: 'Canva Pro', forJob: 'Match-day social graphics', replacedBy: 'BetterSocials', cost: 165 },
+  { tool: 'Pitchero', plan: 'Standard', forJob: 'Membership, payments & team admin', replacedBy: 'BetterAdmin & BetterSelect', cost: 800, note: '£418 a year, converted to AUD' },
 ]
 
-export const COMPETITOR_TOTAL = COMPETITOR_STACK.reduce((sum, c) => sum + c.cost, 0)  // 1364
-export const SAVING = COMPETITOR_TOTAL - ALL_IN                                       // 599
+export const COMPETITOR_TOTAL = COMPETITOR_STACK.reduce((sum, c) => sum + c.cost, 0)  // 1904
+export const SAVING = COMPETITOR_TOTAL - ALL_IN                                       // 1139
 
 // Better Cricket loads your full history at no extra cost. The closest cricket
 // rival (ClubStats) charges a one-off historical-import fee on top of the
