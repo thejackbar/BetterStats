@@ -16,7 +16,7 @@ function Hero() {
           The cricket platform <span className="gradient-text">your club deserves.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim leading-relaxed max-w-2xl mx-auto">
-          Better Cricket is one platform for everything your club runs on — its history and stats, weekend selection and availability, social posts, the back office, and match-day prep.
+          Better Cricket puts your whole club in one place: stats and history, weekend availability and selection, social posts, the back office, and match prep.
         </p>
       </div>
     </section>
@@ -31,13 +31,13 @@ function Story() {
           <p className="pill-neutral inline-flex mb-6">What we do</p>
           <div className="space-y-5 text-lg text-pb-dim leading-relaxed">
             <p>
-              Better Cricket was built by a group of people fed up with how much of running a club is held together by spreadsheets, group chats and whoever's been around longest. The history gets forgotten every time the systems clubs rely on change hands — and everything else, from selection and availability to fees and the socials, lives in a dozen disconnected places.
+              Better Cricket was built by a few people who were sick of how much of running a club rides on spreadsheets, group chats and whoever's been around longest. Every time the systems clubs depend on change hands, the history gets lost. And everything else (selection, availability, fees, the socials) ends up scattered across a dozen different places.
             </p>
             <p>
-              So we built one platform for all of it. <span className="text-pb-text">Better Cricket keeps your history alive and runs your season around it</span> — player profiles and records going back decades, weekend availability and smart selection, club-branded social posts, the back-office admin, and opposition and match-day prep. Each part talks to the others, because it's all the same club.
+              So we built one platform for all of it. <span className="text-pb-text">Better Cricket keeps your history online and runs your season around it</span>: player profiles and records going back decades, weekend availability and selection, club-branded social posts, the back office, and opposition and match prep. Each part feeds the others, because it's all the same club.
             </p>
             <p>
-              Australian cricket clubs are full of people who care about this — who hit the first century, who took the most wickets in a season, who sort the weekend XI and chase the fees. We want to give those clubs what they deserve: their whole club in one place, beautiful, automatic, and worth opening every week.
+              Australian cricket clubs are full of people who care about this: the player who hit the first century, the one who took the most wickets in a season, whoever sorts the weekend XI and chases the fees. We want to give those clubs their whole season in one place, kept current on its own and actually worth opening each week.
             </p>
           </div>
         </Reveal>
@@ -76,9 +76,9 @@ function Numbers() {
 function Principles() {
   const principles = [
     { n: '01', title: 'Cricketers first', desc: "Every product decision asks: what would a club statistician or committee volunteer actually want here? Built by people who keep a scorebook." },
-    { n: '02', title: 'One platform, the whole club', desc: "Stats, selection, availability, social posts, the back office and match prep in one place — no more juggling spreadsheets, group chats and half a dozen disconnected tools." },
-    { n: '03', title: 'Pick what you pay for', desc: "Every club gets BetterStats. From there you add only the modules you want — we never force you to take, or pay for, features your club will never use." },
-    { n: '04', title: "You're in full control", desc: "Your data, your club, your call — full CSV export anytime, your branding throughout, and only the modules you switch on." },
+    { n: '02', title: 'One platform, the whole club', desc: "Stats, selection, availability, social posts, the back office and match prep, all in one place. No more juggling spreadsheets, group chats and half a dozen disconnected tools." },
+    { n: '03', title: 'Pick what you pay for', desc: "Every club gets BetterStats. After that you add only the modules you want, and we won't make you take or pay for features your club will never use." },
+    { n: '04', title: "You're in full control", desc: "It's your data and your club. Export the lot to CSV whenever you like, run your own branding throughout, and switch on only the modules you want." },
   ]
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-20">
@@ -176,7 +176,7 @@ function ContactBlock() {
 export default function About() {
   usePageMeta({
     title: 'About — Better Cricket',
-    description: 'Better Cricket is one platform for everything an Australian cricket club runs on — its history and stats, weekend selection and availability, social posts, the back office and match-day prep.',
+    description: 'Better Cricket puts everything an Australian cricket club runs on in one place: stats and history, weekend availability and selection, social posts, the back office and match prep.',
     image: 'https://betterat.cricket/og-image.png',
     url: 'https://betterat.cricket/about',
   })
