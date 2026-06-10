@@ -15,7 +15,7 @@ export default function MarketingFooter() {
               </span>
             </Link>
             <p className="text-pb-dim text-sm leading-relaxed max-w-sm mb-6">
-              Everything an Australian cricket club runs on, in one place — its history and stats, weekend selection, social posts, the back office and match-day prep.
+              Everything an Australian cricket club runs on, in one place: stats and history, weekend selection, social posts, the back office and match prep.
             </p>
             <div className="flex gap-4 text-sm text-pb-dim">
               <a href="https://x.com/betterstatsau" target="_blank" rel="noopener noreferrer me" className="hover:text-pb-text transition-colors">Twitter</a>
@@ -57,7 +57,7 @@ export default function MarketingFooter() {
           <div className="col-span-6 md:col-span-2">
             <p className="text-sm font-semibold mb-4">Australian cricket</p>
             <p className="text-sm text-pb-dim mb-3 leading-relaxed">
-              Better Cricket keeps your club’s full history online and updates it automatically after every match — no spreadsheets, no data entry.
+              Better Cricket keeps your club's full history online and updates it automatically after every match. You don't keep spreadsheets or enter stats by hand.
             </p>
             <Link to="/about" className="text-sm text-accent hover:underline">Read our story →</Link>
           </div>

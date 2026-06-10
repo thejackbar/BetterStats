@@ -1,5 +1,18 @@
 # BetterStats — Claude Session Notes
 
+## Writing Voice — always run prose through the humanizer
+
+Any user-facing prose you write or edit (marketing copy, changelog entries, UI
+strings, docs, PR/commit bodies, longer chat replies) must go through the
+**`humanizer`** skill before it ships — it's vendored at
+`.claude/skills/humanizer/` so it's available in every web session. Apply its
+rules even when you don't invoke the skill explicitly: no em/en dashes, no
+forced rule-of-three triads, no promotional "AI vocabulary" (vibrant, seamless,
+testament, elevate…), no tailing negations ("no guessing", "no fuss"), plain
+`is`/`are`/`has` over "serves as"/"boasts". Keep the plain Australian
+cricket-club voice. Page-`<title>` separators use the site-wide `—` convention
+(structural, not prose) and are the one allowed exception.
+
 ## Server Deploy Command
 
 The box runs **all ~26 containers as ONE systemd-managed compose project, `bltbox_docker_app`** (`/etc/systemd/system/docker-compose-app.service`: `WorkingDirectory=/srv/docker`, `Environment="COMPOSE_PROJECT_NAME=bltbox_docker_app"`, `ExecStart=docker compose up -d`). BetterStats is defined inside the **central** file `/srv/docker/docker-compose.yaml` (NOT the retired `/srv/docker/betterstats/docker-compose.yml`).
