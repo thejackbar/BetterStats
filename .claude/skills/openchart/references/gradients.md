@@ -1,0 +1,212 @@
+# Gradient Fills
+
+Gradient fills can be applied to any chart mark that uses a `fill` property (bar, area, arc, point). Gradients follow Vega's gradient value type model: they can appear anywhere a color string can.
+
+## GradientDef
+
+For the field shape (`GradientStop`, `LinearGradient`, `RadialGradient`, `GradientDef`), load `index.d.ts`. The behavior worth knowing:
+
+- Coordinates are **[0,1] normalized space** relative to the mark's bounding box (not pixels).
+- Default linear gradient runs top-to-bottom (`x1:0, y1:0, x2:0, y2:1`). Set `x1:0, y1:0, x2:1, y2:0` for left-to-right.
+- Linear coords are `x1/y1/x2/y2`. Radial adds `r1/r2` for the inner/outer circle radii and a focal point at `x1/y1`.
+
+## Usage Patterns
+
+### Static gradient on all marks via mark.fill
+
+```json
+{
+  "mark": {
+    "type": "bar",
+    "fill": {
+      "gradient": "linear",
+      "stops": [
+        { "offset": 0, "color": "#1b7fa3" },
+        { "offset": 1, "color": "#1b7fa3", "opacity": 0.4 }
+      ]
+    }
+  }
+}
+```
+
+### Left-to-right gradient for horizontal bars
+
+```json
+{
+  "mark": {
+    "type": "bar",
+    "fill": {
+      "gradient": "linear",
+      "x1": 0, "y1": 0, "x2": 1, "y2": 0,
+      "stops": [
+        { "offset": 0, "color": "#1b7fa3", "opacity": 0.4 },
+        { "offset": 1, "color": "#1b7fa3" }
+      ]
+    }
+  }
+}
+```
+
+### Per-bar conditional gradients via color encoding
+
+Each bar gets a different gradient based on data values:
+
+```json
+{
+  "mark": "bar",
+  "encoding": {
+    "x": { "field": "metric", "type": "nominal" },
+    "y": { "field": "value", "type": "quantitative" },
+    "color": {
+      "condition": [
+        {
+          "test": { "field": "status", "equal": "good" },
+          "value": {
+            "gradient": "linear",
+            "stops": [
+              { "offset": 0, "color": "#059669" },
+              { "offset": 1, "color": "#a7f3d0" }
+            ]
+          }
+        },
+        {
+          "test": { "field": "status", "equal": "bad" },
+          "value": {
+            "gradient": "linear",
+            "stops": [
+              { "offset": 0, "color": "#dc2626" },
+              { "offset": 1, "color": "#dc2626", "opacity": 0.3 }
+            ]
+          }
+        }
+      ],
+      "value": "#94a3b8"
+    }
+  }
+}
+```
+
+### Area fade-to-transparent
+
+```json
+{
+  "mark": {
+    "type": "area",
+    "fill": {
+      "gradient": "linear",
+      "stops": [
+        { "offset": 0, "color": "#6366f1", "opacity": 0.85 },
+        { "offset": 1, "color": "#6366f1", "opacity": 0.1 }
+      ]
+    }
+  }
+}
+```
+
+### Radial gradient on donut slices
+
+```json
+{
+  "mark": { "type": "arc", "innerRadius": 40 },
+  "encoding": {
+    "y": { "field": "share", "type": "quantitative" },
+    "color": {
+      "condition": [
+        {
+          "test": { "field": "category", "equal": "Organic" },
+          "value": {
+            "gradient": "radial",
+            "stops": [
+              { "offset": 0, "color": "#0ea5e9" },
+              { "offset": 1, "color": "#0369a1" }
+            ]
+          }
+        }
+      ],
+      "value": "#94a3b8"
+    }
+  }
+}
+```
+
+### Multi-stop gradient (3+ colors)
+
+```json
+{
+  "gradient": "linear",
+  "stops": [
+    { "offset": 0, "color": "#059669" },
+    { "offset": 0.5, "color": "#34d399" },
+    { "offset": 1, "color": "#a7f3d0" }
+  ]
+}
+```
+
+## Direction Quick Reference
+
+| Direction | Coordinates |
+|-----------|-------------|
+| Top to bottom (default) | `x1:0, y1:0, x2:0, y2:1` |
+| Bottom to top | `x1:0, y1:1, x2:0, y2:0` |
+| Left to right | `x1:0, y1:0, x2:1, y2:0` |
+| Right to left | `x1:1, y1:0, x2:0, y2:0` |
+| Diagonal | `x1:0, y1:0, x2:1, y2:1` |
+
+## Horizontal bar auto-orientation
+
+The engine auto-orients default-direction gradients (top-to-bottom) to left-to-right for horizontal bars. If you specify a gradient with no coordinates or with the default `x1:0, y1:0, x2:0, y2:1`, horizontal bars will flip it to `x1:0, y1:0, x2:1, y2:0` automatically. Gradients with explicit non-default coordinates are left unchanged.
+
+For horizontal bars where `x: quantitative, y: nominal`, set left-to-right explicitly (`x1:0, y1:0, x2:1, y2:0`) or rely on auto-orientation by omitting coordinates.
+
+## Constant colors: use mark.fill, not encoding.color
+
+`encoding.color: { value: "#hex" }` does not work. The color encoding channel requires a `field` that maps to data columns. For a constant fill color across all marks:
+
+```json
+{ "mark": { "type": "bar", "fill": "#1b7fa3" } }
+```
+
+This works for both solid colors and gradient fills.
+
+## SVG rendering details
+
+Gradients create `<linearGradient>` or `<radialGradient>` elements in the SVG `<defs>`. The renderer uses `gradientUnits="objectBoundingBox"`, which means coordinates are relative to each mark's bounding box. Identical gradients are deduplicated (one SVG element shared by all marks with the same gradient definition).
+
+## Dark Mode Gradient Visibility
+
+When using `mark.fill` with gradient stops on area charts, the dark mode theme adapter (`adaptTheme()`) converts colors to darker values. This can make gradient fills completely invisible against the dark background.
+
+To preserve gradient visibility in dark mode:
+- Use lighter/brighter base colors in gradient stops. For a blue line (`#2563eb`), use `#5b93f5` or `#7aacff` in the gradient stops. For a red line (`#c44e52`), use `#e88a8d` or `#f0a0a3`.
+- Use higher opacity values in stops: 0.3-0.5 for the visible end, 0.05 for the fade end. The dark mode adapter will reduce these further.
+- Test in dark mode before shipping. A gradient that looks correct in light mode may be completely invisible in dark mode.
+
+```json
+{
+  "mark": {
+    "type": "area",
+    "stroke": "#2563eb",
+    "fill": {
+      "gradient": "linear",
+      "x1": 0, "y1": 1, "x2": 0, "y2": 0,
+      "stops": [
+        { "offset": 0, "color": "#5b93f5", "opacity": 0.05 },
+        { "offset": 1, "color": "#5b93f5", "opacity": 0.5 }
+      ]
+    }
+  }
+}
+```
+
+Note: use a lighter shade (`#5b93f5`) for gradient stops even though the line stroke is `#2563eb`.
+
+## Marks that don't support gradients
+
+- **line** marks use `stroke`, not `fill`. Line gradients along the path are not supported.
+- **text** marks always use flat fill colors.
+- **rule** and **tick** marks use stroke colors only.
+
+## Utilities
+
+- `isGradientDef(value)` - type guard to check if a value is a GradientDef
+- `getRepresentativeColor(fill)` - extracts a flat color from a gradient (returns last stop color). Used internally by tooltips, labels, and legends.
