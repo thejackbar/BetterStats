@@ -122,9 +122,11 @@ $765).
 - **Pricing page** (`pages/marketing/Pricing.jsx`) is **calculator-first**: the
   `PricingCalculator` (module picker, live annual total with the bundle discount)
   is the main tool, plus a module price list, a **competitor cost comparison**
-  ("replace the whole stack": Squarespace / Canva / Mailchimp / CricketStatz / a
-  team app vs the all-in BC price; competitor figures are indicative RRP, edit in
-  `pricing.js`) and a modular pricing FAQ.
+  ("One platform. One price.": the all-in BC price vs a stack of real competitors
+  with their own published prices, ClubStats / Pitchero / Canva, summed with the
+  `SAVING` highlighted; CricketStatz noted; Better Cricket includes historical
+  import where ClubStats charges a one-off fee, `IMPORT_NOTE`) and a modular
+  pricing FAQ. All competitor figures live in `pricing.js`.
 - **Monthly removed** from the public site (Pricing toggle, Overview snapshot,
   Landing/Features price lines, Terms clause, a blog callout). The dormant
   monthly toggle in `ComparisonTable` was left (no caller enables it). The in-app
