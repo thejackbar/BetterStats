@@ -44,7 +44,7 @@ export default function Terms() {
               Each club is provided with administrator login credentials. You are responsible for keeping your
               credentials confidential, for all activity that takes place under your account, and for ensuring
               that anyone you give access to is authorised to act for your club. Please notify us immediately at{' '}
-              <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a>{' '}
+              <a href="mailto:betteratcricket@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betteratcricket@gmail.com</a>{' '}
               if you believe your account has been accessed without authorisation.
             </p>
           </section>
@@ -61,15 +61,16 @@ export default function Terms() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">5. Subscription &amp; payment</h2>
             <p>
-              The Service is offered on flat per-club plans — <strong className="text-pb-text">Good</strong> ($449/year),{' '}
-              <strong className="text-pb-text">Better</strong> ($649/year) and <strong className="text-pb-text">Best</strong> ($999/year) —
-              with monthly options available ($49, $69 and $99 per month respectively). Annual plans include two months free.
+              The Service is offered on flat per-club plans: the <strong className="text-pb-text">Core</strong> (BetterStats)
+              is $400 per year, and you can add modules (<strong className="text-pb-text">BetterSelect</strong>,{' '}
+              <strong className="text-pb-text">BetterSocials</strong> and <strong className="text-pb-text">BetterAdmin</strong> at
+              $100 per year each, <strong className="text-pb-text">BetterIQ</strong> at $200), with a discount when you bundle.
               Pricing is per club regardless of how many grades, teams or players you run. The plan you select at
               sign-up, and what it includes, is set out on our{' '}
               <Link to="/pricing" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>pricing page</Link>.
             </p>
             <p className="mt-3">
-              Subscriptions are invoiced annually or monthly depending on the plan you choose. Access continues
+              Subscriptions are an annual licence, invoiced once a year. Access continues
               for the period you have paid for; we will contact you before each renewal. Fees are payable in
               Australian dollars. Except where required by Australian Consumer Law, fees already paid are
               non-refundable for partial periods.
@@ -92,7 +93,7 @@ export default function Terms() {
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">7. Availability &amp; support</h2>
             <p>
               We aim to keep the Service available and up to date, and we provide support by email at{' '}
-              <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a>.
+              <a href="mailto:betteratcricket@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betteratcricket@gmail.com</a>.
               We don't guarantee uninterrupted availability, and the Service may occasionally be unavailable for
               maintenance or for reasons outside our control. If we ever decide to discontinue the Service, we will
               give subscribers reasonable notice.
@@ -125,7 +126,7 @@ export default function Terms() {
             <p>
               Better Cricket is provided by BetterSports (ABN 32 624 335 397), Perth, Western Australia. Questions
               about these terms? Email{' '}
-              <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a>.
+              <a href="mailto:betteratcricket@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betteratcricket@gmail.com</a>.
             </p>
           </section>
         </div>

@@ -78,7 +78,7 @@ export const POSTS = [
       { type: 'p', text: 'When someone is deciding between two clubs in their area, they\'ll look both up online. A club with a full stats platform — showing team history, player profiles, season yearbooks going back years — signals something about how the club is run. That first impression matters.' },
       { type: 'h2', text: 'Alumni stay connected' },
       { type: 'p', text: 'Players who\'ve moved on from your club still care about their records. A public stats page that still shows their career achievements — with the stats they accumulated while they played — keeps those connections alive. They\'ll share their old player profile with friends long after they\'ve moved on.' },
-      { type: 'callout', text: 'Better Cricket gives your club a full public stats platform from $49/month — player profiles, leaderboards, all-time records, and season yearbooks, built from your club\'s full digital history.' },
+      { type: 'callout', text: 'Better Cricket gives your club a full public stats platform from $400 a year: player profiles, leaderboards, all-time records and season yearbooks, built from your club\'s full digital history.' },
     ],
   },
   {

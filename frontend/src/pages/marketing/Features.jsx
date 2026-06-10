@@ -310,10 +310,10 @@ function FeaturesCTA() {
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
       <div className="max-w-[900px] mx-auto relative">
         <div className="surface-strong p-10 lg:p-14 text-center">
-          <p className="pill mb-6 mx-auto"><span className="dot" />The Good tier · the Core</p>
+          <p className="pill mb-6 mx-auto"><span className="dot" />The Core · in every plan</p>
           <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">The Core, <span className="gradient-text">in every plan.</span></h2>
           <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">
-            Everything on this page is the Good tier — from $449/year, flat rate per club. Add modules whenever you’re ready.
+            Everything on this page is the Core, from $400 a year, flat rate per club. Add modules whenever you’re ready.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>

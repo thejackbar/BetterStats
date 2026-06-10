@@ -1,20 +1,14 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  MODULES_MARKETING,
-  TIER_INFO,
-  requiredTierForModules,
-  modulesInTier,
-} from '../../data/modules-marketing'
+import { CORE, PRICED_MODULES, priceFor } from '../../data/pricing'
 
 /**
- * Module-picker → tier + price calculator.
- *
- * Pick the modules you want; we resolve the lowest tier that unlocks them all
- * (the same tier → module map the app enforces) and show the price. `billing`
- * ('monthly' | 'annual') is owned by the parent so it tracks the page toggle.
+ * Modular plan builder. The Core (BetterStats) is always in; tick the modules
+ * you want and the annual price updates live, including the bundle discount
+ * (two modules 10% off, all four 15%). This is the main way the Pricing page
+ * shows what Better Cricket costs.
  */
-export default function PricingCalculator({ billing = 'annual' }) {
+export default function PricingCalculator() {
   const [selected, setSelected] = useState(() => new Set())
 
   const toggle = (key) =>
@@ -24,11 +18,7 @@ export default function PricingCalculator({ billing = 'annual' }) {
       return next
     })
 
-  const tierKey = requiredTierForModules([...selected])
-  const tier = TIER_INFO[tierKey]
-  const isAnnual = billing === 'annual'
-  const price = isAnnual ? tier.annual : tier.monthly
-  const included = modulesInTier(tierKey)
+  const { rate, discount, total, moduleCount, modules } = priceFor([...selected])
 
   return (
     <div className="surface p-6 lg:p-8">
@@ -38,21 +28,23 @@ export default function PricingCalculator({ billing = 'annual' }) {
           <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-1">Build your plan</p>
           <h3 className="text-2xl font-bold mb-1.5">Pick the modules you want.</h3>
           <p className="text-sm text-pb-dim mb-6">
-            Core (BetterStats) is always included. Choose your add-ons and we’ll show the tier you need.
+            The Core (BetterStats) is always included. Add any modules and the price updates as you go.
+            Take any two for 10% off, or all four for 15%.
           </p>
 
           <div className="space-y-2.5">
             {/* Core — always on, not toggleable */}
             <div className="flex items-center gap-3 p-3 rounded-xl border border-accent/30 bg-accent/[0.05]">
-              <span className="w-9 h-9 rounded-lg bg-accent/15 border border-accent/40 flex items-center justify-center text-accent text-lg flex-shrink-0">◆</span>
+              <span className="w-9 h-9 rounded-lg bg-accent/15 border border-accent/40 flex items-center justify-center text-accent text-lg flex-shrink-0">{CORE.icon}</span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold">BetterStats <span className="text-pb-faint font-normal">· Core</span></p>
-                <p className="text-xs text-pb-dim">Reconciled stats + your public club site</p>
+                <p className="text-xs text-pb-dim">{CORE.blurb}</p>
               </div>
-              <span className="text-[11px] font-mono text-accent uppercase tracking-wide3">Always in</span>
+              <span className="text-sm font-semibold tabular-nums mr-1">${CORE.price}</span>
+              <span className="text-[11px] font-mono text-accent uppercase tracking-wide3">In</span>
             </div>
 
-            {MODULES_MARKETING.map((m) => {
+            {PRICED_MODULES.map((m) => {
               const on = selected.has(m.key)
               return (
                 <button
@@ -74,8 +66,9 @@ export default function PricingCalculator({ billing = 'annual' }) {
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold">{m.name}</p>
-                    <p className="text-xs text-pb-dim truncate">{m.tagline}</p>
+                    <p className="text-xs text-pb-dim truncate">{m.blurb}</p>
                   </div>
+                  <span className="text-sm font-semibold tabular-nums mr-1">${m.price}</span>
                   <span className={`w-6 h-6 rounded-full flex items-center justify-center text-sm flex-shrink-0 ${on ? 'bg-accent text-navy-950' : 'bg-pb-surface2 text-pb-faint'}`}>
                     {on ? '✓' : '+'}
                   </span>
@@ -87,28 +80,48 @@ export default function PricingCalculator({ billing = 'annual' }) {
 
         {/* Result */}
         <div className="col-span-12 lg:col-span-5">
-          <div className="lg:sticky lg:top-24 surface-strong p-6 text-center">
-            <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-2">You need the</p>
-            <p className="text-3xl font-display font-bold mb-1 gradient-text">{tier.label}</p>
-            <p className="text-sm text-pb-dim mb-5">{tier.tagline}</p>
-
+          <div className="lg:sticky lg:top-24 surface-strong p-6">
+            <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-2 text-center">Your plan</p>
             <div className="flex items-baseline justify-center gap-1.5 mb-1">
-              <span className="text-5xl font-bold tabular-nums">${price}</span>
-              <span className="text-sm text-pb-faint">/ {isAnnual ? 'year' : 'month'}</span>
+              <span className="text-5xl font-bold tabular-nums">${total}</span>
+              <span className="text-sm text-pb-faint">/ year</span>
             </div>
-            <p className="text-[11px] text-pb-faint mb-5">AUD · flat rate, 1 team or 50</p>
+            <p className="text-[11px] text-pb-faint text-center mb-5">AUD · flat rate, 1 team or 50</p>
 
-            <div className="text-left border-t pb-hairline pt-4 mb-5">
-              <p className="text-[10px] uppercase tracking-wide3 font-mono text-pb-faint mb-2.5">Includes</p>
-              <ul className="space-y-1.5">
-                <li className="flex items-center gap-2 text-sm"><span className="tick">✓</span>BetterStats <span className="text-pb-faint">(Core)</span></li>
-                {included.map((m) => (
-                  <li key={m.key} className="flex items-center gap-2 text-sm"><span className="tick">✓</span>{m.name}</li>
-                ))}
-              </ul>
+            <div className="text-left border-t pb-hairline pt-4 mb-4 space-y-1.5 text-sm">
+              <div className="flex justify-between">
+                <span className="text-pb-dim">BetterStats <span className="text-pb-faint">(Core)</span></span>
+                <span className="tabular-nums">${CORE.price}</span>
+              </div>
+              {modules.map((m) => (
+                <div key={m.key} className="flex justify-between">
+                  <span className="text-pb-dim">{m.name}</span>
+                  <span className="tabular-nums">${m.price}</span>
+                </div>
+              ))}
+              {discount > 0 && (
+                <div className="flex justify-between text-accent">
+                  <span>Bundle discount ({Math.round(rate * 100)}%)</span>
+                  <span className="tabular-nums">-${discount}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-bold border-t pb-hairline pt-2 mt-2">
+                <span>Total / year</span>
+                <span className="tabular-nums">${total}</span>
+              </div>
             </div>
 
-            <Link to="/contact" className="cta-primary w-full justify-center">Get the {tier.label} plan →</Link>
+            {moduleCount < 2 && (
+              <p className="text-[11px] text-pb-faint text-center mb-4">Add another module to unlock 10% off.</p>
+            )}
+            {moduleCount >= 2 && moduleCount < 4 && (
+              <p className="text-[11px] text-accent text-center mb-4">10% bundle discount applied. Add all four for 15%.</p>
+            )}
+            {moduleCount === 4 && (
+              <p className="text-[11px] text-accent text-center mb-4">Everything in, 15% off.</p>
+            )}
+
+            <Link to="/contact" className="cta-primary w-full justify-center">Get this plan →</Link>
           </div>
         </div>
       </div>

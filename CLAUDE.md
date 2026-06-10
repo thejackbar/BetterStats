@@ -107,6 +107,34 @@ delivery and drives the success/error UI, so a failed store never blocks the for
   without that proxy, point the form at the absolute backend URL instead. It degrades
   gracefully meanwhile, since Formspree still delivers the email.
 
+## Public Marketing Pricing — modular model (Jun 2026)
+
+The **public** marketing pricing is a modular model, deliberately **decoupled**
+from the in-app entitlement registry (`frontend/src/lib/modules.js`, which still
+describes the Good/Better/Best tiers the backend enforces). Public model:
+**Core (BetterStats) $400/yr** plus modules **BetterSelect / BetterSocials /
+BetterAdmin $100 each** and **BetterIQ $200**, an **annual licence only** (no
+monthly). Bundle discount: any 2 modules 10% off, all 4 15% (Core + all four =
+$765).
+
+- **Source of truth**: `frontend/src/data/pricing.js` (`CORE`, `PRICED_MODULES`,
+  `priceFor`, `ALL_IN`, `COMPETITOR_STACK`, `COMPETITOR_TOTAL`). Edit prices here.
+- **Pricing page** (`pages/marketing/Pricing.jsx`) is **calculator-first**: the
+  `PricingCalculator` (module picker, live annual total with the bundle discount)
+  is the main tool, plus a module price list, a **competitor cost comparison**
+  ("replace the whole stack": Squarespace / Canva / Mailchimp / CricketStatz / a
+  team app vs the all-in BC price; competitor figures are indicative RRP, edit in
+  `pricing.js`) and a modular pricing FAQ.
+- **Monthly removed** from the public site (Pricing toggle, Overview snapshot,
+  Landing/Features price lines, Terms clause, a blog callout). The dormant
+  monthly toggle in `ComparisonTable` was left (no caller enables it). The in-app
+  `modules.js` `TIER_INFO` / `BILLING_CYCLES` were **left as-is** (backend-coupled
+  entitlement system, not marketing).
+- **Still tier-flavoured** (follow-up): module cards on Modules / ModuleDetail /
+  Features / Landing / Overview still badge a module with its old `{tier} tier`
+  label. Harmless, but worth swapping for the module price or dropping once the
+  tier-to-modular rebrand is finished.
+
 ## Version Numbers
 
 Each release lives in its own file under **`frontend/src/data/changelog/`** — never hand-edit `frontend/src/version.js` (it derives `SITE_VERSION` from the highest-sortKey entry in that folder). Drop a new `v-X-Y-Z.js` file when you ship:

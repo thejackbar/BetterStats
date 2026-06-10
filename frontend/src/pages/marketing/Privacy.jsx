@@ -90,7 +90,7 @@ export default function Privacy() {
             <p>
               You can ask to access the personal information we hold about you, or to have it corrected, by
               emailing{' '}
-              <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a>.
+              <a href="mailto:betteratcricket@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betteratcricket@gmail.com</a>.
               Players can also reach out through their club administrator. We'll respond within a reasonable time,
               and generally within 30 days.
             </p>
@@ -110,7 +110,7 @@ export default function Privacy() {
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Contact</h2>
             <p>
               BetterSports (ABN 32 624 335 397), trading as Better Cricket · Perth, Western Australia ·{' '}
-              <a href="mailto:betterstatsau@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betterstatsau@gmail.com</a>
+              <a href="mailto:betteratcricket@gmail.com" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>betteratcricket@gmail.com</a>
             </p>
           </section>
         </div>

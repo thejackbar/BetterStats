@@ -10,7 +10,7 @@ export const DOMAIN = 'betterat.cricket'
 export const BASE_URL = 'https://betterat.cricket'
 
 export const FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform?usp=header'
-export const SUPPORT_EMAIL = 'betterstatsau@gmail.com'
+export const SUPPORT_EMAIL = 'betteratcricket@gmail.com'
 
 // ── Formspree ────────────────────────────────────────────────────────────────
 // Sign up at https://formspree.io, create a form pointed at the support inbox,
