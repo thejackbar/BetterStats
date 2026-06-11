@@ -34,6 +34,10 @@ Send yourself a test first and check it on your phone, especially the dark initi
 5. **Links are `https://`** rather than the `http://` in your copy (same destination, avoids Gmail flagging the links).
 6. **UTM campaign is `welcome`** on the signature, header, footer and find-out-more links. One-word change to `followup` if you'd rather.
 
+## Voice
+
+The initial email's body copy was run through the project humanizer to sit with the rest of the site: em dashes taken out (the body, the signature and two module taglines), a doubled "chasing" reworded, and the sign-off split onto its own line. The two site taglines that used an em dash (BetterStats, BetterAdmin) read with a colon in the email instead, so the email itself stays dash-free. If you'd rather the cards quote the live site string exactly, those two are the only spots that differ.
+
 ## Dark-mode note (initial email)
 
 You asked for the dark background, so the initial email is dark navy throughout. One thing to watch: a few mail clients force their own dark-mode treatment and can shift dark emails slightly (mostly text/border contrast). Gmail on desktop and iOS renders it as built; the test send is mainly to confirm it on whatever you and your recipients read mail on. The follow-up email keeps the light body specifically to dodge that, so the two emails cover both approaches.
