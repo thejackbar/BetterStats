@@ -90,8 +90,8 @@ function Hero() {
             <div className="absolute -inset-5 bg-accent/8 blur-[60px] rounded-full" />
             <div className="relative product-shadow rounded-2xl">
               <ScreenshotOrMock
-                src={SCREENSHOT_PATHS.landingHeroCard}
-                alt="A 22-season career profile on Better Cricket"
+                src={SCREENSHOT_PATHS.frontPageProfile}
+                alt="A full player career profile on Better Cricket"
                 fallback={<MockHeritageCard />}
               />
             </div>
