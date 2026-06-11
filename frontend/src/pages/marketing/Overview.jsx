@@ -299,7 +299,7 @@ function PricingSnapshot() {
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
               One flat price per club, the same fee for one team or fifty. Start with the Core and add the
-              modules you want, with up to 15% off when you bundle.
+              modules you want, with up to 10% off when you bundle.
             </p>
           </div>
         </Reveal>

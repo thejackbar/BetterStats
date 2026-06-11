@@ -111,7 +111,7 @@ const CATEGORIES = [
     items: [
       {
         q: 'How much does it cost?',
-        a: "Better Cricket is modular. The Core (BetterStats) is $400 a year and includes your public stats site. From there you add only the modules you want: BetterSelect, BetterSocials and BetterAdmin are $100 a year each, and BetterIQ is $200. Take any two modules for 10% off, or all four for 15%, which brings the Core plus every module to $765 a year. Every price covers unlimited players, seasons and teams, whatever the club's size.",
+        a: "Better Cricket is modular. The Core (BetterStats) is $400 a year and includes your public stats site. From there you add only the modules you want: BetterSelect, BetterSocials and BetterAdmin are $100 a year each, and BetterIQ is $200. Take any two modules for 5% off, or all four for 10%, which brings the Core plus every module to $810 a year. Every price covers unlimited players, seasons and teams, whatever the club's size.",
       },
       {
         q: 'What does each module include?',

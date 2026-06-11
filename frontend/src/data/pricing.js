@@ -24,11 +24,11 @@ export const PRICED_MODULES = [
   { key: 'iq',      name: 'BetterIQ',      price: 200, icon: '◇', accent: '#a78bfa', blurb: 'Deep analytics and opposition scouting' },
 ]
 
-// Bundle discount on the whole price: pick any 2 or 3 modules for 10% off, all 4
-// for 15%. (The brief sets 2 -> 10% and 4 -> 15%; 3 modules takes the 10% band.)
+// Bundle discount on the whole price: pick any 2 or 3 modules for 5% off, all 4
+// for 10%. (2 or 3 modules take the 5% band; the full set takes 10%.)
 export function discountRate(moduleCount) {
-  if (moduleCount >= 4) return 0.15
-  if (moduleCount >= 2) return 0.10
+  if (moduleCount >= 4) return 0.10
+  if (moduleCount >= 2) return 0.05
   return 0
 }
 
@@ -43,7 +43,7 @@ export function priceFor(selectedKeys = []) {
 }
 
 // The everything price (Core + every module), for headline copy.
-export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total  // 765
+export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total  // 810
 
 // ── Competitor stack ─────────────────────────────────────────────────────────
 // What a club would otherwise pay to match Better Cricket's scope, using each
@@ -60,7 +60,7 @@ export const COMPETITOR_STACK = [
 ]
 
 export const COMPETITOR_TOTAL = COMPETITOR_STACK.reduce((sum, c) => sum + c.cost, 0)  // 1904
-export const SAVING = COMPETITOR_TOTAL - ALL_IN                                       // 1139
+export const SAVING = COMPETITOR_TOTAL - ALL_IN                                       // 1094
 
 // Better Cricket loads your full history at no extra cost. The closest cricket
 // rival (ClubStats) charges a one-off historical-import fee on top of the
