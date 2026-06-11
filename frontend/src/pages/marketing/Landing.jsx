@@ -359,7 +359,7 @@ function ModulesTeaser() {
               Then add the parts that <span className="gradient-text">run your club.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              Four modules bolt straight onto the Core — selection, socials, club admin and analytics. Turn on what you need.
+              Four modules bolt straight onto BetterStats — selection, socials, club admin and analytics. Turn on what you need.
             </p>
           </div>
         </Reveal>

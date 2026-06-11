@@ -5,8 +5,8 @@ import Reveal from '../../components/marketing/Reveal'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
 import ComparisonTable from '../../components/marketing/ComparisonTable'
 import { FORM_URL, COMPARISONS, COMPARISON_SOLO } from '../../data/marketing'
-import { moduleBySlug, MODULES_MARKETING } from '../../data/modules-marketing'
-import { PRICED_MODULES } from '../../data/pricing'
+import { moduleBySlug, MODULES_MARKETING, CORE_MARKETING } from '../../data/modules-marketing'
+import { CORE, PRICED_MODULES } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
@@ -46,9 +46,10 @@ function ModuleMock({ m }) {
   )
 }
 
-function modulePrice(key) {
-  const m = PRICED_MODULES.find((p) => p.key === key)
-  return m ? `$${m.price} a year.` : null
+function modulePrice(m) {
+  if (m.isCore) return `$${CORE.price} a year.`
+  const p = PRICED_MODULES.find((x) => x.key === m.key)
+  return p ? `$${p.price} a year.` : null
 }
 
 export default function ModuleDetail() {
@@ -62,7 +63,7 @@ export default function ModuleDetail() {
   })
   if (!m) return <Navigate to="/modules" replace />
 
-  const siblings = MODULES_MARKETING.filter((x) => x.slug !== m.slug)
+  const siblings = [CORE_MARKETING, ...MODULES_MARKETING].filter((x) => x.slug !== m.slug)
   const comparison = m.compareKey ? COMPARISONS?.[m.compareKey] : null
   const solo = m.compareKey ? COMPARISON_SOLO?.[m.compareKey] : null
 
@@ -90,7 +91,9 @@ export default function ModuleDetail() {
               <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">{m.summary}</p>
               <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3">
                 <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Get this on your club →</a>
-                <Link to="/pricing" className="cta-secondary">See pricing</Link>
+                {m.deepTour
+                  ? <Link to={m.deepTour} className="cta-secondary">Full feature tour →</Link>
+                  : <Link to="/pricing" className="cta-secondary">See pricing</Link>}
               </div>
             </div>
             <Reveal className="col-span-12 lg:col-span-6">
@@ -190,9 +193,11 @@ export default function ModuleDetail() {
         <section className="px-4 sm:px-6 lg:px-10 py-16 border-t pb-hairline bg-black/20">
           <div className="max-w-[900px] mx-auto surface-strong p-8 lg:p-10 text-center">
             <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-3">Pricing</p>
-            <h2 className="font-display font-bold text-2xl md:text-3xl mb-3 tracking-tight">{modulePrice(m.key) || 'Included in every plan.'}</h2>
+            <h2 className="font-display font-bold text-2xl md:text-3xl mb-3 tracking-tight">{modulePrice(m) || 'Included in every plan.'}</h2>
             <p className="text-pb-dim max-w-xl mx-auto mb-7">
-              Every plan includes BetterStats. Add {m.name} on its own, or bundle modules for up to 10% off. The calculator on the pricing page works out your total.
+              {m.isCore
+                ? 'BetterStats is included in every Better Cricket plan. Add the modules that fit how your club runs, and bundle for up to 10% off.'
+                : <>Every plan includes BetterStats. Add {m.name} on its own, or bundle modules for up to 10% off. The calculator on the pricing page works out your total.</>}
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <Link to="/pricing" className="cta-primary">See pricing & calculator →</Link>

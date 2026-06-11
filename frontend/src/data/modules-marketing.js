@@ -24,8 +24,39 @@ export const CORE_MARKETING = {
   icon: '◆',
   accent: BRAND.stats.accent,
   logo: BRAND.stats.logo,
+  key: 'core',
+  audience: 'The foundation · every club',
+  compareKey: 'betterstats',
   tagline: 'Your club’s memory — every player, every season, kept forever.',
-  to: '/features',
+  // The standard module page; its deeper feature tour lives on /features.
+  to: '/modules/betterstats',
+  deepTour: '/features',
+  summary:
+    'BetterStats turns your club’s match data into a living history and a public site to be proud of. Connect once and every batting, bowling and fielding stat flows in on its own, reconciled across decades and ready as profiles, leaderboards, records, scorecards, yearbooks and shareable cards.',
+  highlights: [
+    'Your full match history, imported once',
+    'Every stat reconciled and kept forever',
+    'A public, club-branded website',
+    'Profiles, leaderboards, records and yearbooks',
+  ],
+  features: [
+    { title: 'Automatic stats sync', desc: 'Connect your club once and your whole match history is imported, then every new game flows in on its own. No data entry, no spreadsheets to maintain.' },
+    { title: 'Reconciled across decades', desc: 'Names, teams and seasons are matched and de-duplicated, so a player’s whole career reads as one record, back to your earliest digitised season.' },
+    { title: 'Rich player profiles', desc: 'Every player gets a profile with career and season batting, bowling and fielding, milestones, club rank badges and a photo.' },
+    { title: 'Leaderboards and club records', desc: 'Live leaderboards and all-time records for runs, wickets, catches, partnerships and more, updated after every sync.' },
+    { title: 'Scorecards and match archive', desc: 'Full match scorecards and a browsable archive of every game, straight from your synced data.' },
+    { title: 'Season yearbooks', desc: 'Publish a polished yearbook for any season, with the standout performances and the year’s awards.' },
+    { title: 'Awards and honour boards', desc: 'Record season awards and honour boards, shown on player profiles and across the club site.' },
+    { title: 'Shareable stat cards', desc: 'Every player has a clean, club-branded stat card, one tap to share on Instagram, Facebook or X.' },
+  ],
+  note: 'BetterStats is the base every club runs on. BetterSelect, BetterSocials, BetterAdmin and BetterIQ all bolt straight onto the same data.',
+  screenshot: '/marketing/player-profile.jpg',
+  gallery: [
+    { src: '/marketing/leaderboard.jpg', caption: 'Live club leaderboards' },
+    { src: '/marketing/yearbook.jpg', caption: 'Auto-generated season yearbooks' },
+    { src: '/marketing/showcase-scorecard.jpg', caption: 'Full match scorecards' },
+    { src: '/marketing/hero-career-card.jpg', caption: 'Shareable player stat cards' },
+  ],
 }
 
 // Showcase image for the Modules hub hero.
@@ -184,6 +215,7 @@ export const MODULES_MARKETING = [
 ]
 
 export function moduleBySlug(slug) {
+  if (slug === CORE_MARKETING.slug) return CORE_MARKETING
   return MODULES_MARKETING.find((m) => m.slug === slug) || null
 }
 

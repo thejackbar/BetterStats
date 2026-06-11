@@ -155,7 +155,7 @@ export const COMPARISONS = {
   betterstats: {
     eyebrow: 'Compare',
     heading: 'Your stats deserve better than a stats tool.',
-    sub: 'BetterStats is the Core every club gets: your full reconciled history and a public site to be proud of. Here is how it sits next to the dedicated cricket-stats tools.',
+    sub: 'BetterStats is included in every plan: your full reconciled history and a public site to be proud of. Here is how it sits next to the dedicated cricket-stats tools.',
     columns: [
       { key: 'clubstats', name: 'ClubStats', tag: 'Stats site', sub: 'clubstats.cricket' },
       { key: 'cstatz', name: 'CricketStatz', tag: 'Stats software', sub: 'Long-running desktop package' },

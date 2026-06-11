@@ -169,7 +169,7 @@ function Core() {
           <div className="text-center mb-12">
             <p className="pill-neutral inline-flex mb-5">The whole platform</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
-              Start with the Core. <span className="gradient-text">Add what you need.</span>
+              Start with BetterStats. <span className="gradient-text">Add what you need.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
               Every club gets BetterStats. The modules bolt straight on — same data, one login.
@@ -296,7 +296,7 @@ function PricingSnapshot() {
               Pick what you <span className="gradient-text">pay for.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              One flat price per club, the same fee for one team or fifty. Start with the Core and add the
+              One flat price per club, the same fee for one team or fifty. Start with BetterStats and add the
               modules you want, with up to 10% off when you bundle.
             </p>
           </div>
