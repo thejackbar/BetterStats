@@ -6,6 +6,7 @@ import { api } from '../../lib/api'
 import { useClubTheme } from '../../hooks/useClubTheme'
 import { Icon } from '../../pages/admin/betterselect/ui'
 import { moduleBrand } from '../../lib/moduleBrand'
+import ModuleLockup from '../ModuleLockup'
 
 const BRAND = moduleBrand('select')
 
@@ -72,10 +73,7 @@ export default function BetterSelectLayout({ children, title, actions, headerLef
         </div>
       </div>
       {/* Module lockup — which Better module this surface is */}
-      <div className="flex items-center gap-2 mt-3">
-        <img src={BRAND.logo} alt="" className="w-7 h-7 rounded-lg shrink-0" />
-        <span className="font-display font-bold text-[15px] leading-none">Better<span style={{ color: 'var(--pb-accent)' }}>Select</span></span>
-      </div>
+      <ModuleLockup name="BetterSelect" logo={BRAND.logo} className="mt-3" />
       <Link to="/admin" className="block mt-3 text-[11px] font-mono text-pb-faintest hover:text-pb-faint">← Back to admin</Link>
     </div>
   )

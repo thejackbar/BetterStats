@@ -7,6 +7,7 @@ import { useClubTheme } from '../../hooks/useClubTheme'
 import { Icon } from '../../pages/admin/betteriq/ui'
 import { ContextBar } from '../../pages/admin/betteriq/Context'
 import { moduleBrand } from '../../lib/moduleBrand'
+import ModuleLockup from '../ModuleLockup'
 import '../../pages/admin/betteriq/iq-theme.css'
 
 const IQ_BRAND = moduleBrand('iq')
@@ -95,10 +96,7 @@ export default function IQLayout({ children, title, eyebrow, actions }) {
         </div>
       </div>
       {/* Module lockup — which Better module this surface is */}
-      <div className="flex items-center gap-2.5 mt-3">
-        <img src={IQ_BRAND.logo} alt="" className="shrink-0" style={{ width: 28, height: 28, borderRadius: 9 }} />
-        <span className="iq-display font-bold" style={{ fontSize: 15, lineHeight: 1 }}>Better<span style={{ color: 'var(--pb-accent)' }}>IQ</span></span>
-      </div>
+      <ModuleLockup name="BetterIQ" logo={IQ_BRAND.logo} className="mt-3" textClassName="iq-display font-bold text-[15px] leading-none" />
       <Link to="/admin" className="mt-3 block iq-mono text-left whitespace-nowrap transition-colors hover:text-pb-faint" style={{ fontSize: 11, color: 'var(--pb-faintest)' }}>← Back to admin</Link>
     </div>
   )

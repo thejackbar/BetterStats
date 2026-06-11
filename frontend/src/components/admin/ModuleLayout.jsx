@@ -5,6 +5,7 @@ import { api } from '../../lib/api'
 import { useClubTheme } from '../../hooks/useClubTheme'
 import { Icon } from '../../pages/admin/betterselect/ui'
 import { moduleBrand } from '../../lib/moduleBrand'
+import ModuleLockup from '../ModuleLockup'
 
 // Generic chrome for a Better module surface (BetterFees, BetterSocials, …) —
 // a focused sidebar with just that module's tools, separate from the main admin
@@ -65,10 +66,7 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
         </div>
       </div>
       {/* Module lockup — which Better module this surface is */}
-      <div className="flex items-center gap-2 mt-3">
-        <img src={brand.logo} alt="" className="w-7 h-7 rounded-lg shrink-0" />
-        <span className="font-display font-bold text-[15px] leading-none">Better<span style={{ color: 'var(--pb-accent)' }}>{moduleName}</span></span>
-      </div>
+      <ModuleLockup name={`Better${moduleName}`} logo={brand.logo} className="mt-3" />
       <Link to="/admin" className="block mt-3 text-[11px] font-mono text-pb-faintest hover:text-pb-faint">← Back to admin</Link>
     </div>
   )

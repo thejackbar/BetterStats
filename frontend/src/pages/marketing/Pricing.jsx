@@ -5,6 +5,7 @@ import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import PricingCalculator from '../../components/marketing/PricingCalculator'
 import { CORE, PRICED_MODULES, ALL_IN, COMPETITOR_STACK, COMPETITOR_TOTAL, SAVING, IMPORT_NOTE } from '../../data/pricing'
+import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 // JSON-LD — the Core plus each module as an annual offer, kept for SEO.
@@ -98,7 +99,7 @@ function PriceList() {
                     >
                       {m.icon}
                     </span>}
-                <p className="text-sm font-semibold">{m.name}</p>
+                <p className="text-sm font-semibold"><ModuleWordmark name={m.name} accent={m.accent} /></p>
                 {m.key === 'core' && <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-1">Core</p>}
                 <p className="text-2xl font-bold tabular-nums mt-1">${m.price}</p>
                 <p className="text-[11px] text-pb-faint">/ year</p>

@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import BrandLogo from './BrandLogo'
+import ModuleLockup, { ModuleWordmark } from './ModuleLockup'
 import { FORM_URL } from '../data/marketing'
 import { CORE_MARKETING, MODULES_MARKETING, TIER_INFO } from '../data/modules-marketing'
 
@@ -114,7 +115,7 @@ export default function MarketingNav() {
                       <img src={m.logo} alt="" className="w-9 h-9 rounded-lg flex-shrink-0" />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold group-hover:text-accent transition-colors">{m.name}</p>
+                          <p className="text-sm font-semibold"><ModuleWordmark name={m.name} accent={m.accent} /></p>
                           <span className="pill-neutral text-[9px]">{m.badge}</span>
                         </div>
                         <p className="text-xs text-pb-dim leading-snug">{m.tagline}</p>
@@ -184,8 +185,7 @@ export default function MarketingNav() {
               className="flex items-center gap-2.5 py-2"
               onClick={() => setOpen(false)}
             >
-              <img src={m.logo} alt="" className="w-7 h-7 rounded-md flex-shrink-0" />
-              <span className="text-sm font-medium text-pb-text">{m.name}</span>
+              <ModuleLockup name={m.name} logo={m.logo} accent={m.accent} size={28} logoClassName="rounded-md" textClassName="text-sm font-display font-bold leading-none" />
               <span className="pill-neutral text-[9px] ml-auto">{m.badge}</span>
             </Link>
           ))}

@@ -6,6 +6,7 @@ import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
 import ComparisonTable from '../../components/marketing/ComparisonTable'
 import { FORM_URL, COMPARISONS, COMPARISON_SOLO } from '../../data/marketing'
 import { moduleBySlug, MODULES_MARKETING, TIER_INFO } from '../../data/modules-marketing'
+import ModuleLockup, { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 // Themed faux app-window shown until a real screenshot is dropped at
@@ -27,7 +28,7 @@ function ModuleMock({ m }) {
         <div className="flex items-center gap-3 mb-5">
           <img src={m.logo} alt="" className="w-9 h-9 rounded-lg" />
           <div>
-            <p className="font-bold text-sm">{m.name}</p>
+            <p className="font-bold text-sm"><ModuleWordmark name={m.name} accent={m.accent} /></p>
             <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint">{m.audience}</p>
           </div>
         </div>
@@ -85,7 +86,7 @@ export default function ModuleDetail() {
                 <span className="pill-neutral">{TIER_INFO[m.tier].label} tier · {m.audience}</span>
               </div>
               <h1 className="font-display font-bold text-[40px] sm:text-[52px] lg:text-[64px] tracking-tight leading-[0.95] mb-6">
-                {m.name}
+                <ModuleWordmark name={m.name} accent={m.accent} />
               </h1>
               <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">{m.summary}</p>
               <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3">
@@ -257,7 +258,7 @@ export default function ModuleDetail() {
                 <Link key={s.slug} to={`/modules/${s.slug}`} className="surface p-5 hover:border-accent/30 transition-colors group flex items-center gap-3">
                   <img src={s.logo} alt="" className="w-10 h-10 rounded-lg flex-shrink-0" />
                   <div className="min-w-0">
-                    <p className="font-semibold text-sm group-hover:text-accent transition-colors">{s.name}</p>
+                    <p className="font-semibold text-sm"><ModuleWordmark name={s.name} accent={s.accent} /></p>
                     <p className="text-xs text-pb-dim truncate">{TIER_INFO[s.tier].label} tier</p>
                   </div>
                 </Link>
