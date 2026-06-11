@@ -43,7 +43,7 @@ export function MockClubHomepage() {
         </div>
       </div>
 
-      <div className="px-6 lg:px-8 py-7 grid grid-cols-12 gap-5">
+      <div className="px-6 lg:px-8 py-7 grid grid-cols-1 lg:grid-cols-12 gap-5">
         <div className="col-span-12 lg:col-span-7">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-[10px] font-mono uppercase tracking-wide3 text-accent">● Live · Round 14</span>

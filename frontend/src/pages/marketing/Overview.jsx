@@ -48,7 +48,7 @@ function Hero() {
   return (
     <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 hero-glow pointer-events-none" />
-      <div className="max-w-[1280px] mx-auto relative z-10 grid grid-cols-12 gap-10 items-center">
+      <div className="max-w-[1280px] mx-auto relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
         <div className="col-span-12 lg:col-span-6">
           <div className="pill mb-7 inline-flex"><span className="dot" />The one-page tour</div>
           <h1 className="font-display font-bold text-[44px] sm:text-[58px] lg:text-[76px] tracking-tight leading-[0.92] mb-6">
@@ -177,7 +177,7 @@ function Core() {
         </Reveal>
         <Reveal>
           <div className="surface p-6 lg:p-8 border-accent/30 bg-gradient-to-b from-accent/[0.05] to-transparent">
-            <div className="grid grid-cols-12 gap-8 items-center">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
               <div className="col-span-12 lg:col-span-5">
                 <div className="flex items-center gap-3 mb-4">
                   <img src={CORE_MARKETING.logo} alt="" className="w-11 h-11 rounded-xl" />
@@ -211,7 +211,7 @@ function ModuleRow({ m, flip }) {
   const bullets = isIQ ? solo.points.slice(0, 4) : (m.highlights || []).slice(0, 4)
   return (
     <Reveal>
-      <div className="grid grid-cols-12 gap-8 lg:gap-12 items-center">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
         <div className={`col-span-12 lg:col-span-6 ${flip ? 'lg:order-2' : ''}`}>
           <div className="product-shadow rounded-2xl">
             <ScreenshotOrMock src={m.screenshot} alt={`${m.name}: ${m.tagline}`} fallback={<Placeholder icon={m.icon} accent={m.accent} label={m.name} />} />

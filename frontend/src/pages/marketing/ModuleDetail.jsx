@@ -75,7 +75,7 @@ export default function ModuleDetail() {
         {/* Hero */}
         <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
           <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
-          <div className="max-w-[1280px] mx-auto relative grid grid-cols-12 gap-10 items-center">
+          <div className="max-w-[1280px] mx-auto relative grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
             <div className="col-span-12 lg:col-span-6">
               <div className="flex items-center gap-2.5 mb-6 text-sm">
                 <Link to="/modules" className="text-pb-faint hover:text-pb-text">Modules</Link>
