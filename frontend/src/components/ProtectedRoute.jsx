@@ -18,8 +18,8 @@ export default function ProtectedRoute({ children, requireRole, requireModule })
     return <Navigate to="/admin" replace />
   }
 
-  // Module entitlement gate — clubs whose tier doesn't include the module are
-  // bounced back to the dashboard, where the locked tile explains the upsell.
+  // Module entitlement gate — clubs not entitled to the module are bounced back
+  // to the dashboard, where the locked tile explains the add-on.
   if (requireModule && !hasModule(requireModule)) {
     return <Navigate to="/admin" replace />
   }

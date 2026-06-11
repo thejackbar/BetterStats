@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
-import { dashboardTiles, tierInfo, tierLabel, statusLabel, statusIsLive, TIER } from '../../lib/modules'
+import { dashboardTiles, statusLabel, statusIsLive } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { formatSeason } from '../../lib/cricketFormat'
@@ -21,13 +21,12 @@ function ModuleName({ name }) {
 }
 
 function ModuleTile({ mod, entitled }) {
-  const tier = tierInfo(mod.requiredTier)
   const brand = moduleBrand(mod.key)
   // Scope the module's accent colour to this tile only — every var(--pb-accent)
   // inside (the name suffix, arrow, tint, border) becomes the module colour.
   const brandVars = { '--pb-accent': brand.accent, '--pb-accent-rgb': brand.accentRgb }
 
-  // Greenfield module (BetterIQ) — never opens yet, regardless of tier.
+  // Greenfield module (BetterIQ) — never opens yet, regardless of entitlement.
   if (!mod.built) {
     return (
       <div className="pb-card p-5 opacity-70" style={brandVars}>
@@ -63,7 +62,7 @@ function ModuleTile({ mod, entitled }) {
     )
   }
 
-  // Locked → upsell to the tier that unlocks it.
+  // Locked → not entitled. It's an add-on the club can turn on.
   return (
     <div className="pb-card p-5 opacity-75" style={{ ...brandVars, borderStyle: 'dashed' }}>
       <div className="flex items-center justify-between gap-4">
@@ -72,13 +71,12 @@ function ModuleTile({ mod, entitled }) {
           <ModuleName name={mod.name} />
         </div>
         <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-0.5 uppercase">
-          {tier.label} plan
+          Add-on
         </span>
       </div>
       <div className="text-pb-faint text-sm mt-1">{mod.blurb}</div>
       <div className="text-pb-faintest text-xs mt-2">
-        Included in the <span className="text-pb-faint">{tier.label}</span> plan
-        {tier.annual ? <> — from ${tier.annual}/yr</> : null}.
+        Available as an add-on. <Link to="/pricing" className="underline hover:text-pb-faint">See pricing</Link>.
       </div>
     </div>
   )
@@ -95,7 +93,7 @@ export default function AdminDashboard() {
   }, [])
 
   const isSuper = user?.role === 'super_admin'
-  const planTier = user?.entitlements?.tier || TIER.GOOD
+  const activeModules = user?.entitlements?.modules || []
   const planStatus = user?.entitlements?.status || 'active'
   const renewalDate = user?.entitlements?.renewal_date
 
@@ -141,13 +139,11 @@ export default function AdminDashboard() {
             'Super admin — all modules available'
           ) : (
             <>
-              Plan: <span className="text-pb-faint">{tierLabel(planTier)}</span>
+              Plan: <span className="text-pb-faint">{activeModules.length ? `Core + ${activeModules.length} module${activeModules.length > 1 ? 's' : ''}` : 'Core (BetterStats)'}</span>
               {planStatus !== 'active' && (
                 <span className={statusIsLive(planStatus) ? 'text-pb-faint' : 'text-pb-red'}> · {statusLabel(planStatus)}</span>
               )}
-              {renewalDate
-                ? <> · renews {new Date(renewalDate).toLocaleDateString('en-AU')}</>
-                : <> — {tierInfo(planTier).tagline}</>}
+              {renewalDate && <> · renews {new Date(renewalDate).toLocaleDateString('en-AU')}</>}
             </>
           )}
         </p>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
-import { TIER_ORDER, TIER_INFO, tierLabel, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
+import { MODULE_TOGGLES, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
 
@@ -18,7 +18,7 @@ export default function SuperClubs() {
   const [editId, setEditId] = useState(null)
   const [editForm, setEditForm] = useState({
     name: '', slug: '', short_name: '', contact_email: '',
-    tier: 'good', subscription_status: 'active', renewal_date: '', billing_cycle: '',
+    module_overrides: [], subscription_status: 'active', renewal_date: '', billing_cycle: '',
   })
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [syncing, setSyncing] = useState(null)
@@ -123,7 +123,7 @@ export default function SuperClubs() {
       slug: club.slug || '',
       short_name: club.short_name || '',
       contact_email: club.contact_email || '',
-      tier: club.tier || 'good',
+      module_overrides: [...(club.module_overrides || [])],
       subscription_status: club.subscription_status || 'active',
       renewal_date: club.renewal_date || '',
       billing_cycle: club.billing_cycle || '',
@@ -318,7 +318,7 @@ export default function SuperClubs() {
                       className="font-mono text-[9px] uppercase tracking-wide2 ml-2 px-1.5 py-0.5 rounded border pb-hairline text-pb-faint"
                       title={club.modules?.length ? `Modules: ${club.modules.join(', ')}` : 'Core only'}
                     >
-                      {tierLabel(club.tier)}
+                      {club.modules?.length ? `Core +${club.modules.length}` : 'Core'}
                     </span>
                   </div>
                   <div className={`font-mono text-[10px] mt-0.5 ${statusIsLive(club.subscription_status) ? 'text-pb-faintest' : 'text-pb-red'}`}>
@@ -394,15 +394,28 @@ export default function SuperClubs() {
                         onChange={e => setEditForm(f => ({ ...f, contact_email: e.target.value }))}
                         className={INPUT_CLS} />
                     </div>
-                    <div>
-                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Tier (plan)</label>
-                      <select value={editForm.tier}
-                        onChange={e => setEditForm(f => ({ ...f, tier: e.target.value }))}
-                        className={INPUT_CLS}>
-                        {TIER_ORDER.map(t => (
-                          <option key={t} value={t}>{TIER_INFO[t].label} — ${TIER_INFO[t].annual}/yr</option>
-                        ))}
-                      </select>
+                    <div className="col-span-2">
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Modules (entitlements)</label>
+                      <div className="flex flex-wrap gap-2">
+                        {MODULE_TOGGLES.map(tog => {
+                          const on = tog.modules.every(m => editForm.module_overrides.includes(m))
+                          return (
+                            <button
+                              key={tog.key}
+                              type="button"
+                              onClick={() => setEditForm(f => {
+                                const set = new Set(f.module_overrides)
+                                tog.modules.forEach(m => (on ? set.delete(m) : set.add(m)))
+                                return { ...f, module_overrides: [...set] }
+                              })}
+                              className={`font-mono text-[11px] px-2.5 py-1.5 rounded border transition-colors ${on ? 'border-pb-accent/50 bg-pb-accent/10' : 'border-pb-hairline text-pb-faint bg-pb-surface2'}`}
+                              style={on ? { color: 'var(--pb-accent)', borderColor: 'color-mix(in srgb, var(--pb-accent) 50%, transparent)' } : {}}
+                            >
+                              {on ? '✓ ' : '+ '}{tog.label}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
                     <div>
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Subscription status</label>
@@ -432,8 +445,8 @@ export default function SuperClubs() {
                     </div>
                   </div>
                   <p className="font-mono text-[10px] text-pb-faintest">
-                    Good = Core only · Better = + BetterSelect + BetterSocials · Best = everything (+ BetterFees + BetterIQ).
-                    Paused / Cancelled fall back to Core only regardless of tier.
+                    Core (BetterStats) is always on. Tick the modules this club has paid for. BetterAdmin covers BetterFees + BetterComms.
+                    Paused / Cancelled fall back to Core only regardless of modules.
                   </p>
                   <div className="flex gap-2">
                     <button type="submit" disabled={saving}

@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
-import { tierLabel, statusLabel, statusIsLive, TIER_INFO, TIER_ORDER, MODULE } from '../../lib/modules'
+import { statusLabel, statusIsLive, SUBSCRIPTION_STATUSES, MODULE } from '../../lib/modules'
+import { priceFor } from '../../data/pricing'
 import AdminLayout from '../../components/admin/AdminLayout'
 
 // Better HQ — the internal staff control room. Fleet KPIs, the platform tools
@@ -46,6 +47,15 @@ function relativeDays(iso) {
 
 function fmtMoney(n) {
   return '$' + Math.round(n).toLocaleString('en-AU')
+}
+
+// Map backend module keys → the public modular pricing keys, so ARR uses the
+// same prices as the public calculator. BetterAdmin = fees + comms.
+const PRICING_KEY = { select: 'select', socials: 'socials', iq: 'iq', fees: 'admin', comms: 'admin' }
+
+function clubAnnual(c) {
+  const keys = [...new Set((c.modules || []).map(m => PRICING_KEY[m]).filter(Boolean))]
+  return priceFor(keys).total
 }
 
 function Kpi({ label, value, sub, accent }) {
@@ -112,10 +122,11 @@ export default function SuperOverview() {
   const t = data?.totals
   const allClubs = data?.clubs || []
 
-  // Estimated ARR — annual list price of every club on a live subscription.
+  // Estimated ARR — annual list price (Core + modules, bundle discount applied)
+  // of every club on a live subscription.
   const arr = useMemo(
     () => allClubs.filter(c => statusIsLive(c.subscription_status))
-      .reduce((sum, c) => sum + (TIER_INFO[c.tier]?.annual || 0), 0),
+      .reduce((sum, c) => sum + clubAnnual(c), 0),
     [allClubs]
   )
 
@@ -179,7 +190,7 @@ export default function SuperOverview() {
               <Kpi label="Users" value={t.users} sub={`${t.super_admins} staff`} />
               <Kpi label="Players" value={t.players.toLocaleString()} />
               <Kpi label="Games" value={t.games.toLocaleString()} />
-              <Kpi label="Best tier" value={t.by_tier?.best || 0} sub={TIER_ORDER.map(k => `${t.by_tier?.[k] || 0} ${tierLabel(k)}`).join(' · ')} />
+              <Kpi label="On modules" value={allClubs.filter(c => (c.modules || []).length).length} sub={`of ${t.clubs} clubs`} />
             </div>
 
             {/* HQ tools — module-style tiles */}
@@ -225,17 +236,10 @@ export default function SuperOverview() {
               {/* Subscriptions + module adoption */}
               <div className="space-y-5">
                 <div className="pb-card p-4">
-                  <h2 className="font-display font-bold text-sm text-pb-text mb-3">Subscriptions</h2>
+                  <h2 className="font-display font-bold text-sm text-pb-text mb-3">Subscription status</h2>
                   <div className="space-y-2.5">
-                    {TIER_ORDER.map(k => (
-                      <Bar key={k} label={tierLabel(k)} value={t.by_tier?.[k] || 0} max={t.clubs} hint="clubs" />
-                    ))}
-                  </div>
-                  <div className="mt-3 pt-3 border-t pb-hairline-t flex flex-wrap gap-x-3 gap-y-1">
-                    {Object.entries(t.by_status || {}).map(([k, v]) => (
-                      <span key={k} className={`font-mono text-[10px] ${statusIsLive(k) ? 'text-pb-faint' : 'text-pb-red'}`}>
-                        {v} {statusLabel(k)}
-                      </span>
+                    {SUBSCRIPTION_STATUSES.map(s => (
+                      <Bar key={s.key} label={s.label} value={t.by_status?.[s.key] || 0} max={t.clubs} hint="clubs" />
                     ))}
                   </div>
                 </div>
@@ -283,7 +287,7 @@ export default function SuperOverview() {
                       <span className="text-pb-text text-sm">{c.name}</span>
                       <span className="font-mono text-[10px] text-pb-faintest ml-2">/{c.slug}</span>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-0.5 rounded border pb-hairline text-pb-faint">{tierLabel(c.tier)}</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-0.5 rounded border pb-hairline text-pb-faint" title={c.modules?.length ? `Modules: ${c.modules.join(', ')}` : 'Core only'}>{c.modules?.length ? `Core +${c.modules.length}` : 'Core'}</span>
                         <span className={`font-mono text-[9px] ${statusIsLive(c.subscription_status) ? 'text-pb-faintest' : 'text-pb-red'}`}>
                           {statusLabel(c.subscription_status)}
                         </span>

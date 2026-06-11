@@ -2,14 +2,14 @@
 //
 // The platform is **Better Cricket** (from BetterSports). Every club gets the
 // **Core (BetterStats)** — data ingestion, reconciled stats and the public club
-// site — and bolts on the modules below. Prices live in src/lib/modules.js
-// (TIER_INFO) so the public pages and the in-app entitlement system never drift.
+// site — and bolts on the modules below. Public prices live in
+// src/data/pricing.js (the modular pricing model + calculator).
 //
 // The bolt-ons mirror the in-app umbrella tiles: BetterSelect, BetterSocials
 // (the post designer + the club website), BetterAdmin (the back office — fees,
 // comms and merch) and BetterIQ.
 
-import { MODULE, TIER, TIER_INFO, TIER_ORDER } from '../lib/modules'
+import { MODULE } from '../lib/modules'
 import { MODULE_BRAND as BRAND } from '../lib/moduleBrand'
 
 // ── BetterStats — the always-on base module ─────────────────────────────────
@@ -20,7 +20,6 @@ export const CORE_MARKETING = {
   slug: 'betterstats',
   name: 'BetterStats',
   isCore: true,
-  tier: TIER.GOOD,
   icon: '◆',
   accent: BRAND.stats.accent,
   logo: BRAND.stats.logo,
@@ -68,7 +67,6 @@ export const MODULES_MARKETING = [
     slug: 'betterselect',
     key: MODULE.SELECT,
     name: 'BetterSelect',
-    tier: TIER.BETTER,
     icon: '◎',
     accent: BRAND.select.accent,
     logo: BRAND.select.logo,
@@ -114,7 +112,6 @@ export const MODULES_MARKETING = [
     slug: 'bettersocials',
     key: MODULE.SOCIALS,
     name: 'BetterSocials',
-    tier: TIER.BETTER,
     icon: '◈',
     accent: BRAND.socials.accent,
     logo: BRAND.socials.logo,
@@ -152,7 +149,6 @@ export const MODULES_MARKETING = [
     slug: 'betteradmin',
     key: 'admin',
     name: 'BetterAdmin',
-    tier: TIER.BEST,
     icon: '◉',
     accent: BRAND.admin.accent,
     logo: BRAND.admin.logo,
@@ -186,7 +182,6 @@ export const MODULES_MARKETING = [
     slug: 'betteriq',
     key: MODULE.IQ,
     name: 'BetterIQ',
-    tier: TIER.BEST,
     icon: '◇',
     accent: BRAND.iq.accent,
     logo: BRAND.iq.logo,
@@ -229,24 +224,3 @@ export function moduleBySlug(slug) {
   if (slug === CORE_MARKETING.slug) return CORE_MARKETING
   return MODULES_MARKETING.find((m) => m.slug === slug) || null
 }
-
-const tierIndex = (tier) => Math.max(0, TIER_ORDER.indexOf(tier))
-
-// The lowest tier that unlocks every module in `selectedKeys`.
-// No modules selected → Good (Core only).
-export function requiredTierForModules(selectedKeys) {
-  let idx = 0
-  for (const key of selectedKeys || []) {
-    const m = MODULES_MARKETING.find((x) => x.key === key)
-    if (m) idx = Math.max(idx, tierIndex(m.tier))
-  }
-  return TIER_ORDER[idx]
-}
-
-// The modules a tier bundles (drives the tier cards on /pricing).
-export function modulesInTier(tier) {
-  const ti = tierIndex(tier)
-  return MODULES_MARKETING.filter((m) => tierIndex(m.tier) <= ti)
-}
-
-export { TIER, TIER_INFO, TIER_ORDER }

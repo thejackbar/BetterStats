@@ -25,7 +25,7 @@ from app.auth.capabilities import (
     MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, RUN_HARD_REFRESH, RUN_SYNC,
 )
 from app.auth.modules import (
-    ALL_TIERS, ALL_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
+    ALL_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
 )
 from datetime import date as _date
 from app.services import playhq_client
@@ -1354,7 +1354,7 @@ async def super_overview(
         # grouped per-table aggregates below replace the old per-club correlated
         # subqueries that tripped a statement timeout at fleet scale.
         org_rows = (await db.execute(_text(
-            "SELECT id::text AS id, name, slug, tier, subscription_status, is_active, "
+            "SELECT id::text AS id, name, slug, subscription_status, is_active, "
             "module_overrides, created_at FROM organisations ORDER BY name"
         ))).mappings().all()
 
@@ -1379,20 +1379,17 @@ async def super_overview(
         login_by = {r["org"]: r["last_login"] for r in member_rows}
 
         clubs = []
-        by_tier: dict[str, int] = {}
         by_status: dict[str, int] = {}
         module_adoption: dict[str, int] = {}
         active_clubs = total_players = total_games = 0
         for r in org_rows:
             oid = r["id"]
-            tier = r["tier"] or "good"
             status_ = r["subscription_status"] or "active"
-            by_tier[tier] = by_tier.get(tier, 0) + 1
             by_status[status_] = by_status.get(status_, 0) + 1
             # Reuse the entitlement helper on a lightweight stand-in (raw values),
             # so we don't need a full ORM object.
             mods = sorted(org_entitled_modules(SimpleNamespace(
-                tier=tier, subscription_status=status_, module_overrides=r["module_overrides"] or [],
+                subscription_status=status_, module_overrides=r["module_overrides"] or [],
             )))
             for m in mods:
                 module_adoption[m] = module_adoption.get(m, 0) + 1
@@ -1408,7 +1405,6 @@ async def super_overview(
                 "id": oid,
                 "name": r["name"],
                 "slug": r["slug"],
-                "tier": tier,
                 "subscription_status": status_,
                 "is_active": r["is_active"],
                 "modules": mods,
@@ -1433,7 +1429,6 @@ async def super_overview(
                 "super_admins": super_admins,
                 "players": total_players,
                 "games": total_games,
-                "by_tier": by_tier,
                 "by_status": by_status,
                 "module_adoption": module_adoption,
             },
@@ -1461,7 +1456,6 @@ async def list_all_clubs(
             "short_name": o.short_name,
             "is_active": o.is_active,
             "contact_email": o.contact_email,
-            "tier": o.tier,
             "module_overrides": list(o.module_overrides or []),
             "modules": sorted(org_entitled_modules(o)),
             "subscription_status": o.subscription_status,
@@ -1521,7 +1515,6 @@ class ClubUpdate(BaseModel):
     primary_color: Optional[str] = None
     accent_color: Optional[str] = None
     is_active: Optional[bool] = None
-    tier: Optional[str] = None
     module_overrides: Optional[list[str]] = None
     subscription_status: Optional[str] = None
     renewal_date: Optional[_date] = None
@@ -1558,10 +1551,6 @@ async def patch_club(
             raise HTTPException(status_code=422, detail="Name cannot be empty")
         fields["name"] = name
 
-    if "tier" in fields:
-        if fields["tier"] not in ALL_TIERS:
-            raise HTTPException(status_code=422, detail=f"Tier must be one of: {', '.join(ALL_TIERS)}")
-
     if "module_overrides" in fields:
         overrides = fields["module_overrides"] or []
         unknown = [m for m in overrides if m not in ALL_MODULES]
@@ -1585,7 +1574,6 @@ async def patch_club(
         "slug": org.slug,
         "name": org.name,
         "is_active": org.is_active,
-        "tier": org.tier,
         "module_overrides": list(org.module_overrides or []),
         "modules": sorted(org_entitled_modules(org)),
         "subscription_status": org.subscription_status,

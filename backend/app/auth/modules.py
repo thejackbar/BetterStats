@@ -1,20 +1,19 @@
-"""Module entitlements — the Better ecosystem's per-club module gating.
+"""Module entitlements: the Better ecosystem's per-club module gating.
 
-The Better platform is sold as **Good / Better / Best** tier bundles. Each tier
-unlocks a set of modules; a club may also hold à-la-carte ``module_overrides``
-that grant individual modules on top of its tier.
+The Better platform is modular. Every club gets Core (BetterStats) and turns on
+the individual modules it pays for. A club's ``module_overrides`` is the explicit
+list of modules it holds, and it's the single source of truth for entitlement.
 
 This module is the single source of truth for:
   - the module registry (keys + display metadata),
-  - the tier → modules map,
   - resolving a club's effective entitlements, and
   - the ``require_module()`` FastAPI dependency that gates module routes.
 
-**Core (BetterStats)** — data ingestion, reconciled stats and the public site —
-is always on for every club and is intentionally *not* a gateable module: it's
-the product every club gets.
+Core (BetterStats), data ingestion, reconciled stats and the public site, is
+always on for every club and is intentionally not a gateable module: it's the
+product every club gets.
 
-Keep the registry + tier map in sync with ``frontend/src/lib/modules.js``.
+Keep the registry in sync with ``frontend/src/lib/modules.js``.
 """
 from __future__ import annotations
 
@@ -48,32 +47,6 @@ MODULE_META: dict[str, dict] = {
 }
 
 
-# ─── Tiers ───────────────────────────────────────────────────────────────────
-
-TIER_GOOD = "good"
-TIER_BETTER = "better"
-TIER_BEST = "best"
-
-ALL_TIERS = (TIER_GOOD, TIER_BETTER, TIER_BEST)
-DEFAULT_TIER = TIER_GOOD
-
-# Good = Core only · Better = + Select + Socials · Best = everything.
-TIER_MODULES: dict[str, frozenset[str]] = {
-    TIER_GOOD: frozenset(),
-    TIER_BETTER: frozenset({MODULE_SELECT, MODULE_SOCIALS}),
-    TIER_BEST: frozenset({MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ, MODULE_COMMS}),
-}
-
-# The lowest tier each module appears in — drives the upsell ("Upgrade to …").
-MODULE_REQUIRED_TIER: dict[str, str] = {
-    MODULE_SELECT: TIER_BETTER,
-    MODULE_SOCIALS: TIER_BETTER,
-    MODULE_FEES: TIER_BEST,
-    MODULE_IQ: TIER_BEST,
-    MODULE_COMMS: TIER_BEST,
-}
-
-
 # ─── Subscription status (Phase 3) ───────────────────────────────────────────
 # Reflects the manual-invoicing state and gates entitlement. active/trial/
 # past_due keep modules live (past_due is a grace period — don't cut a club off
@@ -100,26 +73,18 @@ def org_subscription_active(org) -> bool:
 
 # ─── Entitlement resolution ──────────────────────────────────────────────────
 
-def tier_modules(tier: str | None) -> frozenset[str]:
-    return TIER_MODULES.get(tier or DEFAULT_TIER, frozenset())
-
-
 def org_entitled_modules(org) -> set[str]:
     """The set of module keys a club may use right now.
 
-    = the modules its tier bundles, plus any à-la-carte overrides — but only
-    while the subscription is active. A lapsed (paused/cancelled) club falls
-    back to Core only.
+    The club's explicit module list (``module_overrides``), kept only while the
+    subscription is active. A lapsed (paused/cancelled) club falls back to Core
+    only. Core (BetterStats) is always on and is never in this set.
     """
     if org is None:
         return set()
     if not org_subscription_active(org):
         return set()
-    mods = set(tier_modules(getattr(org, "tier", None)))
-    for m in (getattr(org, "module_overrides", None) or []):
-        if m in ALL_MODULES:
-            mods.add(m)
-    return mods
+    return {m for m in (getattr(org, "module_overrides", None) or []) if m in ALL_MODULES}
 
 
 def org_has_module(org, module: str) -> bool:
@@ -138,7 +103,6 @@ def entitlement_summary(org, role: str | None = None) -> dict:
         mods = org_entitled_modules(org)
     renewal = getattr(org, "renewal_date", None) if org is not None else None
     return {
-        "tier": (getattr(org, "tier", None) or DEFAULT_TIER) if org is not None else DEFAULT_TIER,
         "modules": sorted(mods),
         "overrides": list(getattr(org, "module_overrides", None) or []) if org is not None else [],
         "status": (getattr(org, "subscription_status", None) or DEFAULT_STATUS) if org is not None else DEFAULT_STATUS,
@@ -183,7 +147,7 @@ def require_module(module: str):
         club = await db.get(Organisation, membership.club_id)
         if club is None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club not found")
-        # Super admins operate cross-club — never gate them by a single club's tier.
+        # Super admins operate cross-club, never gated by a single club's modules.
         if membership.role == "super_admin":
             return club
         if not org_has_module(club, module):
@@ -193,7 +157,6 @@ def require_module(module: str):
                 detail={
                     "code": "module_not_entitled",
                     "module": module,
-                    "required_tier": MODULE_REQUIRED_TIER.get(module),
                     "message": f"{meta.get('name', module)} is not included in your club's plan.",
                 },
             )

@@ -3,7 +3,8 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import { FORM_URL } from '../../data/marketing'
-import { CORE_MARKETING, MODULES_MARKETING, TIER_INFO, HUB_SHOWCASE } from '../../data/modules-marketing'
+import { CORE_MARKETING, MODULES_MARKETING, HUB_SHOWCASE } from '../../data/modules-marketing'
+import { CORE, PRICED_MODULES, ALL_IN } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
@@ -42,7 +43,7 @@ function Hero() {
       <div className="max-w-[1000px] mx-auto relative text-center">
         <p className="pill mb-6 inline-flex"><span className="dot" />The Better platform</p>
         <h1 className="font-display font-bold text-[44px] sm:text-[60px] lg:text-[78px] tracking-tight leading-[0.95] mb-6">
-          Built in modules. <span className="gradient-text">Bought in tiers.</span>
+          Built in modules. <span className="gradient-text">Pick what you run.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed">
           Better Cricket is everything your cricket club runs on. Every club starts with BetterStats,
@@ -88,29 +89,26 @@ function Grid() {
   )
 }
 
-function TiersStrip() {
+function PricingStrip() {
+  const moduleFrom = Math.min(...PRICED_MODULES.map((m) => m.price))
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline bg-black/20 mt-12">
       <div className="max-w-[1000px] mx-auto text-center">
         <Reveal>
-          <p className="pill-neutral inline-flex mb-5">Bundled into tiers</p>
-          <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">Good, Better, Best.</h2>
+          <p className="pill-neutral inline-flex mb-5">One Core, your modules</p>
+          <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">Pick the modules you want.</h2>
           <p className="text-pb-dim max-w-xl mx-auto mb-10">
-            The modules are sold as three flat-rate bundles. Pick a tier, or use the calculator to match a tier to the modules you want.
+            Every club starts with BetterStats at ${CORE.price} a year, then adds the modules it wants from ${moduleFrom}. Bundle two or more and save, up to $146 off the full set (${ALL_IN} for the lot).
           </p>
         </Reveal>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-          {['good', 'better', 'best'].map((key) => {
-            const t = TIER_INFO[key]
-            const desc = key === 'good' ? 'Core only' : key === 'better' ? 'Core + Select + Socials' : 'Everything + Admin + IQ'
-            return (
-              <div key={key} className="surface p-6">
-                <p className="font-display font-bold text-xl mb-1">{t.label}</p>
-                <p className="text-sm text-pb-dim mb-4">{desc}</p>
-                <p className="text-3xl font-bold tabular-nums">${t.annual}<span className="text-sm text-pb-faint font-normal">/yr</span></p>
-              </div>
-            )
-          })}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-10">
+          {[CORE, ...PRICED_MODULES].map((m) => (
+            <div key={m.key} className={`surface p-5 ${m.key === 'core' ? 'border-accent/40' : ''}`}>
+              <p className="font-display font-bold text-sm mb-1"><ModuleWordmark name={m.name} accent={m.accent} /></p>
+              {m.key === 'core' && <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-1">Core</p>}
+              <p className="text-2xl font-bold tabular-nums mt-1">${m.price}<span className="text-xs text-pb-faint font-normal">/yr</span></p>
+            </div>
+          ))}
         </div>
         <Link to="/pricing" className="cta-primary">See full pricing & calculator →</Link>
       </div>
@@ -151,7 +149,7 @@ export default function Modules() {
         <Hero />
         <Showcase />
         <Grid />
-        <TiersStrip />
+        <PricingStrip />
         <CTA />
       </div>
       <MarketingFooter />

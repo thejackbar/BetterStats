@@ -137,7 +137,7 @@ export default function IQLayout({ children, title, eyebrow, actions }) {
           <Brand />
           <div className="flex-1 overflow-y-auto iq-scroll"><NavList /></div>
           <div className="px-5 py-4 iq-mono" style={{ fontSize: 10, letterSpacing: '0.16em', color: 'var(--pb-faintest)', borderTop: '1px solid var(--pb-hairline)', textTransform: 'uppercase' }}>
-            Best tier · Analytics
+            BetterIQ · Analytics
           </div>
         </aside>
 

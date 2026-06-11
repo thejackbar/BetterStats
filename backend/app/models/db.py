@@ -84,10 +84,11 @@ class Organisation(Base):
     public_show_opening = Column(Boolean, nullable=False, server_default="false", default=False)
     public_show_gender = Column(Boolean, nullable=False, server_default="false", default=False)
     # ─── Better ecosystem entitlements (migration 056) ───────────────────────
-    # Subscription tier (good/better/best) bundles a set of modules; see
-    # app/auth/modules.py for the tier→module map. module_overrides grants
-    # individual modules à la carte on top of the tier. Core (BetterStats) is
-    # always on and is not a gateable module.
+    # module_overrides is the explicit list of modules a club holds, and the
+    # single source of truth for entitlement (see app/auth/modules.py). Core
+    # (BetterStats) is always on for every club and is not a gateable module.
+    # `tier` is the retired Good/Better/Best plan field, kept for history only
+    # (migration 080 backfilled module_overrides from it); it is no longer read.
     tier = Column(Text, nullable=False, server_default="good", default="good")
     module_overrides = Column(JSONB, nullable=False, server_default="[]", default=list)
     # ─── Subscription state (migration 057) ──────────────────────────────────

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { MODULE, tierInfo } from '../../lib/modules'
+import { MODULE } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
 
@@ -18,7 +18,7 @@ function ModuleName({ name }) {
   )
 }
 
-function SubCard({ name, blurb, to, built, entitled, requiredTier }) {
+function SubCard({ name, blurb, to, built, entitled }) {
   if (built && entitled) {
     return (
       <Link
@@ -45,12 +45,11 @@ function SubCard({ name, blurb, to, built, entitled, requiredTier }) {
       </div>
     )
   }
-  const tier = tierInfo(requiredTier)
   return (
     <div className="pb-card p-5 opacity-75" style={{ borderStyle: 'dashed' }}>
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2 text-pb-faint"><span aria-hidden>🔒</span><ModuleName name={name} /></div>
-        <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-0.5 uppercase">{tier.label} plan</span>
+        <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-0.5 uppercase">Add-on</span>
       </div>
       <div className="text-pb-faint text-sm mt-1">{blurb}</div>
     </div>
@@ -71,15 +70,15 @@ export default function BetterAdminHome() {
         <p className="text-pb-faint text-sm mb-6">Your club's back office — money, comms and merch in one place.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <SubCard
-            name="BetterFees" to="/admin/fees" built entitled={hasModule(MODULE.FEES)} requiredTier="best"
+            name="BetterFees" to="/admin/fees" built entitled={hasModule(MODULE.FEES)}
             blurb="Fee schedules and match-day payment tracking for the treasurer."
           />
           <SubCard
-            name="BetterComms" to="/admin/comms" built entitled={hasModule(MODULE.COMMS)} requiredTier="best"
+            name="BetterComms" to="/admin/comms" built entitled={hasModule(MODULE.COMMS)}
             blurb="Bulk email to your member database — newsletters and announcements."
           />
           <SubCard
-            name="BetterMerch" built={false} entitled={false} requiredTier="best"
+            name="BetterMerch" built={false} entitled={false}
             blurb="Track merch stock and sales. Coming soon."
           />
         </div>
