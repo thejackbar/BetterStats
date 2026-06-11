@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
-import { FORM_URL } from '../../data/marketing'
 import { CORE_MARKETING, MODULES_MARKETING, HUB_SHOWCASE } from '../../data/modules-marketing'
 import { CORE, PRICED_MODULES, ALL_IN } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
@@ -125,7 +124,7 @@ function CTA() {
           <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">Start with BetterStats. <span className="gradient-text">Grow into the rest.</span></h2>
           <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">Tell us your club details and we’ll get your site live, then turn on modules whenever you’re ready.</p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
+            <Link to="/contact" className="cta-primary">Request club access →</Link>
             <Link to="/pricing" className="cta-secondary">See pricing</Link>
           </div>
         </div>

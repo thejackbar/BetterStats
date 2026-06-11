@@ -1581,6 +1581,17 @@ class ClubOnboardingRequest(Base):
     timeline = Column(Text, nullable=True)
     club_url = Column(Text, nullable=True)
     message = Column(Text, nullable=True)
+    # Added migration 081 (extra onboarding questions, mirrored from the old
+    # Google Form): role at the club, year founded, whether data is in PlayHQ,
+    # whether they hold historical data, what they're most interested in
+    # (comma-joined), how they heard of us, and their preferred contact method.
+    role = Column(Text, nullable=True)
+    founded_year = Column(Text, nullable=True)
+    playhq_status = Column(Text, nullable=True)
+    has_historical = Column(Text, nullable=True)
+    interests = Column(Text, nullable=True)
+    heard_about = Column(Text, nullable=True)
+    contact_method = Column(Text, nullable=True)
     status = Column(Text, nullable=False, server_default="new")  # new | contacted | onboarded | closed
     source = Column(Text, nullable=False, server_default="contact_form")
     user_agent = Column(Text, nullable=True)

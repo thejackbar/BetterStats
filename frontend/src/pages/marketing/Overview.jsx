@@ -13,7 +13,6 @@ import {
 import {
   HOW_IT_WORKS,
   TESTIMONIALS,
-  FORM_URL,
   COMPARISON_SOLO,
   SCREENSHOT_PATHS,
 } from '../../data/marketing'
@@ -60,7 +59,7 @@ function Hero() {
             Stats. A public site. Selection. Socials. Admin. Analytics. <span className="text-pb-text">Better Cricket is all of it</span>, one login, fed by one match feed, with no spreadsheets to keep and no data entry.
           </p>
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-6">
-            <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
+            <Link to="/contact" className="cta-primary">Request club access →</Link>
             <a href="#showcase" className="cta-secondary">See it in action</a>
           </div>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-pb-faint">
@@ -370,7 +369,7 @@ function FinalCTA() {
               Tell us about your club and we’ll get your site live, fast, with your history already loaded.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-5">
-              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
+              <Link to="/contact" className="cta-primary">Request club access →</Link>
               <Link to="/contact" className="cta-secondary">Talk to us</Link>
             </div>
             <p className="text-xs text-pb-faint">From $399/yr · One Core, your modules · Flat rate per club</p>

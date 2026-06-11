@@ -17,7 +17,6 @@ import {
   LANDING_FEATURES,
   TESTIMONIALS,
   HOW_IT_WORKS,
-  FORM_URL,
   SCREENSHOT_PATHS,
 } from '../../data/marketing'
 import { MODULES_MARKETING } from '../../data/modules-marketing'
@@ -297,7 +296,7 @@ function Showcase() {
                   <li key={f} className="flex items-center gap-3 text-sm"><span className="tick">✓</span>{f}</li>
                 ))}
               </ul>
-              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Try on your club →</a>
+              <Link to="/contact" className="cta-primary">Try on your club →</Link>
             </div>
           </Reveal>
           <Reveal className="col-span-12 lg:col-span-7">
@@ -526,7 +525,7 @@ function FinalCTA() {
               Tell us about your club. We'll get your site live fast, with your history already loaded.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-5">
-              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
+              <Link to="/contact" className="cta-primary">Request club access →</Link>
               <Link to="/pricing" className="cta-secondary">See pricing</Link>
             </div>
             <p className="text-xs text-pb-faint">From $399/yr · One Core, your modules · Flat rate per club</p>

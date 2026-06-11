@@ -4,7 +4,7 @@ import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
 import ComparisonTable from '../../components/marketing/ComparisonTable'
-import { FORM_URL, COMPARISONS, COMPARISON_SOLO } from '../../data/marketing'
+import { COMPARISONS, COMPARISON_SOLO } from '../../data/marketing'
 import { moduleBySlug, MODULES_MARKETING, CORE_MARKETING } from '../../data/modules-marketing'
 import { CORE, PRICED_MODULES } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
@@ -90,7 +90,7 @@ export default function ModuleDetail() {
               </h1>
               <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">{m.summary}</p>
               <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3">
-                <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Get Your Club on BetterCricket today!</a>
+                <Link to="/contact" className="cta-primary">Get Your Club on BetterCricket today!</Link>
                 {m.deepTour
                   ? <Link to={m.deepTour} className="cta-secondary">Full feature tour →</Link>
                   : <Link to="/pricing" className="cta-secondary">See pricing</Link>}
@@ -201,7 +201,7 @@ export default function ModuleDetail() {
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <Link to="/pricing" className="cta-primary">See pricing & calculator →</Link>
-              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-secondary">Request access</a>
+              <Link to="/contact" className="cta-secondary">Request access</Link>
             </div>
           </div>
         </section>

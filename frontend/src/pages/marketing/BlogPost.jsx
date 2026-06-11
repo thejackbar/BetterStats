@@ -4,7 +4,6 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { getPost, POSTS } from '../../data/blog'
-import { FORM_URL } from '../../data/marketing'
 
 function formatDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -116,16 +115,14 @@ export default function BlogPost() {
           <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Want this for your club?</p>
           <h2 className="font-display font-bold text-2xl text-pb-text mb-4 tracking-tight">Get automated stats for your cricket club.</h2>
           <div className="flex flex-col sm:flex-row gap-3">
-            <a
-              href={FORM_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Request access (opens in new tab)"
+            <Link
+              to="/contact"
+              aria-label="Request access"
               className="inline-block px-6 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
               REQUEST ACCESS
-            </a>
+            </Link>
             <Link
               to="/features"
               className="inline-block px-6 py-3 border pb-hairline rounded font-mono text-[11px] tracking-wide3 font-semibold text-pb-dim hover:text-pb-text transition-colors"

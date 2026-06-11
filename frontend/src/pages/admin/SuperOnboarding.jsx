@@ -114,11 +114,15 @@ export default function SuperOnboarding() {
                 {visible.map((r) => (
                   <tr key={r.id} className="border-b pb-hairline align-top hover:bg-pb-surface2/40">
                     <td className="px-3 py-2.5 whitespace-nowrap text-pb-dim">{fmtDate(r.created_at)}</td>
-                    <td className="px-3 py-2.5 font-medium text-pb-text">{r.club}</td>
+                    <td className="px-3 py-2.5 font-medium text-pb-text">
+                      {r.club}
+                      {r.founded_year && <div className="font-normal text-pb-faint text-xs">est. {r.founded_year}</div>}
+                    </td>
                     <td className="px-3 py-2.5">
-                      <div className="text-pb-text">{r.name}</div>
+                      <div className="text-pb-text">{r.name}{r.role && <span className="text-pb-faint font-normal"> · {r.role}</span>}</div>
                       <a href={`mailto:${r.email}`} className="text-accent hover:underline block">{r.email}</a>
                       {r.phone && <div className="text-pb-faint text-xs">{r.phone}</div>}
+                      {r.contact_method && <div className="text-pb-faint text-xs">Prefers {r.contact_method.toLowerCase()}</div>}
                       {r.club_url && (
                         <a href={r.club_url.startsWith('http') ? r.club_url : `https://${r.club_url}`}
                           target="_blank" rel="noopener noreferrer"
@@ -126,11 +130,20 @@ export default function SuperOnboarding() {
                           {r.club_url}
                         </a>
                       )}
+                      {r.heard_about && <div className="text-pb-faint text-xs italic">via {r.heard_about}</div>}
                     </td>
                     <td className="px-3 py-2.5 text-pb-dim">{r.association || '-'}</td>
                     <td className="px-3 py-2.5 text-pb-dim whitespace-nowrap">{r.grades || '-'}</td>
                     <td className="px-3 py-2.5 text-pb-dim whitespace-nowrap">{r.timeline || '-'}</td>
-                    <td className="px-3 py-2.5 text-pb-dim">{r.storage || '-'}</td>
+                    <td className="px-3 py-2.5 text-pb-dim max-w-[220px]">
+                      <div>{r.storage || '-'}</div>
+                      {(r.playhq_status || r.has_historical) && (
+                        <div className="text-pb-faint text-xs mt-0.5">
+                          PlayHQ: {r.playhq_status || '?'}{r.has_historical ? ` · historical: ${r.has_historical}` : ''}
+                        </div>
+                      )}
+                      {r.interests && <div className="text-pb-faint text-xs mt-0.5">Wants: {r.interests}</div>}
+                    </td>
                     <td className="px-3 py-2.5 text-pb-dim max-w-[240px]">
                       {r.message ? <span title={r.message} className="line-clamp-3">{r.message}</span> : <span className="text-pb-faint">-</span>}
                     </td>

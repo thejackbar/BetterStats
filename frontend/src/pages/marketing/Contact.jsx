@@ -24,10 +24,27 @@ const TIMELINE_OPTIONS = [
   'Just exploring for now',
 ]
 
+const PLAYHQ_OPTIONS = ['Yes', 'No', 'Only recent data']
+const HISTORICAL_OPTIONS = ['Yes', 'No']
+const CONTACT_METHOD_OPTIONS = ['Email', 'Phone']
+const INTEREST_OPTIONS = [
+  'Player statistics',
+  'Team statistics',
+  'Automatic data syncing',
+  'Historical statistics',
+  'Automatic yearbooks',
+  'Opposition analysis (BetterIQ)',
+  'Other',
+]
+
 const EMPTY_FIELDS = {
   name: '', club: '', email: '', phone: '',
-  association: '', grades: '', storage: '', timeline: '',
-  clubUrl: '', message: '',
+  role: '', founded: '',
+  association: '', grades: '',
+  playhq: '', historical: '',
+  storage: '', interests: [],
+  timeline: '', contactMethod: '',
+  clubUrl: '', heard: '', message: '',
 }
 
 function Field({ label, id, required, optional, hint, error, children }) {
@@ -75,6 +92,11 @@ function ContactForm() {
 
   const set = (key) => (e) => setFields(f => ({ ...f, [key]: e.target.value }))
 
+  const toggleInterest = (opt) => setFields(f => ({
+    ...f,
+    interests: f.interests.includes(opt) ? f.interests.filter(x => x !== opt) : [...f.interests, opt],
+  }))
+
   function validate() {
     const e = {}
     if (!fields.name.trim())        e.name        = 'Your name is required.'
@@ -82,10 +104,13 @@ function ContactForm() {
     if (!fields.email.trim())       e.email       = 'Email address is required.'
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email)) e.email = 'Please enter a valid email.'
     if (!fields.phone.trim())       e.phone       = 'Phone number is required.'
+    if (!fields.role.trim())        e.role        = 'Your role at the club is required.'
     if (!fields.association.trim()) e.association = 'Association or competition is required.'
     if (!fields.grades)             e.grades      = 'Please select the number of grades.'
+    if (!fields.playhq)             e.playhq      = 'Please tell us about your PlayHQ data.'
     if (!fields.storage)            e.storage     = 'Please select your current stats setup.'
     if (!fields.timeline)           e.timeline    = 'Please select a timeline.'
+    if (!fields.contactMethod)      e.contactMethod = 'Please choose a preferred contact method.'
     return e
   }
 
@@ -100,24 +125,35 @@ function ContactForm() {
     // delivery and drives success/error, so a failure here never blocks the form.
     api.submitOnboarding({
       name: fields.name, club: fields.club, email: fields.email, phone: fields.phone,
-      association: fields.association, grades: fields.grades, storage: fields.storage,
-      timeline: fields.timeline, clubUrl: fields.clubUrl, message: fields.message,
+      role: fields.role, founded: fields.founded,
+      association: fields.association, grades: fields.grades,
+      playhq: fields.playhq, historical: fields.historical,
+      storage: fields.storage, interests: fields.interests.join(', '),
+      timeline: fields.timeline, contactMethod: fields.contactMethod,
+      clubUrl: fields.clubUrl, heard: fields.heard, message: fields.message,
     }).catch(() => {})
     try {
       const res = await fetch(FORMSPREE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
-          name:        fields.name,
-          club:        fields.club,
-          email:       fields.email,
-          phone:       fields.phone,
-          association: fields.association,
-          grades:      fields.grades,
-          storage:     fields.storage,
-          timeline:    fields.timeline,
-          clubUrl:     fields.clubUrl || '—',
-          message:     fields.message || '—',
+          name:          fields.name,
+          club:          fields.club,
+          email:         fields.email,
+          phone:         fields.phone,
+          role:          fields.role,
+          founded:       fields.founded || '—',
+          association:   fields.association,
+          grades:        fields.grades,
+          playhq:        fields.playhq,
+          historical:    fields.historical || '—',
+          storage:       fields.storage,
+          interests:     fields.interests.join(', ') || '—',
+          timeline:      fields.timeline,
+          contactMethod: fields.contactMethod,
+          clubUrl:       fields.clubUrl || '—',
+          heard:         fields.heard || '—',
+          message:       fields.message || '—',
           _subject: `Better Cricket enquiry — ${fields.club} · ${fields.association}`,
         }),
       })
@@ -193,6 +229,22 @@ function ContactForm() {
           </Field>
         </div>
 
+        {/* Role + Year founded */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Your role at the club" id="role" required error={errors.role}>
+            <input id="role" type="text" name="role"
+              placeholder="e.g. President, Secretary, Statistician"
+              value={fields.role} onChange={set('role')}
+              className={inputCls('role', errors)} />
+          </Field>
+          <Field label="What year was your club founded?" id="founded" optional>
+            <input id="founded" type="text" name="founded" inputMode="numeric"
+              placeholder="e.g. 1923"
+              value={fields.founded} onChange={set('founded')}
+              className={inputCls('founded', errors)} />
+          </Field>
+        </div>
+
         {/* Association + Grades */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Association / competition" id="association" required error={errors.association}>
@@ -214,6 +266,32 @@ function ContactForm() {
           </Field>
         </div>
 
+        {/* Data location: PlayHQ + historical */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Is your club's data already in PlayHQ?" id="playhq" required error={errors.playhq}>
+            <div className="relative">
+              <select id="playhq" name="playhq"
+                value={fields.playhq} onChange={set('playhq')}
+                className={selectCls('playhq', errors)}>
+                <option value="" disabled>Select…</option>
+                {PLAYHQ_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+              <ChevronIcon />
+            </div>
+          </Field>
+          <Field label="Do you have historical data for your club?" id="historical" optional>
+            <div className="relative">
+              <select id="historical" name="historical"
+                value={fields.historical} onChange={set('historical')}
+                className={selectCls('historical', errors)}>
+                <option value="" disabled>Select…</option>
+                {HISTORICAL_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+              <ChevronIcon />
+            </div>
+          </Field>
+        </div>
+
         {/* Current stats storage */}
         <Field label="How do you currently store your historical data?" id="storage" required error={errors.storage}>
           <div className="relative">
@@ -227,27 +305,68 @@ function ContactForm() {
           </div>
         </Field>
 
-        {/* When hoping to start */}
-        <Field label="When are you hoping to get started?" id="timeline" required error={errors.timeline}>
-          <div className="relative">
-            <select id="timeline" name="timeline"
-              value={fields.timeline} onChange={set('timeline')}
-              className={selectCls('timeline', errors)}>
-              <option value="" disabled>Select…</option>
-              {TIMELINE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <ChevronIcon />
+        {/* What they're most interested in */}
+        <Field label="What are you most interested in?" id="interests" optional
+          hint="Tick anything that's a priority, it helps us tailor your demo.">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {INTEREST_OPTIONS.map(opt => {
+              const on = fields.interests.includes(opt)
+              return (
+                <button key={opt} type="button" onClick={() => toggleInterest(opt)}
+                  aria-pressed={on}
+                  className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-left border transition-colors ${
+                    on ? 'border-accent/60 bg-accent/[0.08] text-white' : 'border-pb-hairline bg-[#161b27] text-pb-dim hover:border-accent/30'
+                  }`}>
+                  <span className={`w-4 h-4 rounded flex items-center justify-center text-[10px] flex-shrink-0 border ${on ? 'bg-accent text-navy-950 border-accent' : 'border-pb-hairline'}`}>{on ? '✓' : ''}</span>
+                  {opt}
+                </button>
+              )
+            })}
           </div>
         </Field>
 
-        {/* Club URL — optional */}
-        <Field label="Your club's website or association" id="clubUrl" optional
-          hint="Helps us put together a personalised demo with your real data.">
-          <input id="clubUrl" type="url" name="clubUrl"
-            placeholder="e.g. yourclubcc.com.au"
-            value={fields.clubUrl} onChange={set('clubUrl')}
-            className={inputCls('clubUrl', errors)} />
-        </Field>
+        {/* Timeline + preferred contact method */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="When are you hoping to get started?" id="timeline" required error={errors.timeline}>
+            <div className="relative">
+              <select id="timeline" name="timeline"
+                value={fields.timeline} onChange={set('timeline')}
+                className={selectCls('timeline', errors)}>
+                <option value="" disabled>Select…</option>
+                {TIMELINE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <ChevronIcon />
+            </div>
+          </Field>
+          <Field label="Preferred contact method" id="contactMethod" required error={errors.contactMethod}>
+            <div className="relative">
+              <select id="contactMethod" name="contactMethod"
+                value={fields.contactMethod} onChange={set('contactMethod')}
+                className={selectCls('contactMethod', errors)}>
+                <option value="" disabled>Select…</option>
+                {CONTACT_METHOD_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <ChevronIcon />
+            </div>
+          </Field>
+        </div>
+
+        {/* Club URL + how they heard — optional */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Your club's website or association" id="clubUrl" optional
+            hint="Helps us build a demo with your real data.">
+            <input id="clubUrl" type="url" name="clubUrl"
+              placeholder="e.g. yourclubcc.com.au"
+              value={fields.clubUrl} onChange={set('clubUrl')}
+              className={inputCls('clubUrl', errors)} />
+          </Field>
+          <Field label="How did you hear about us?" id="heard" optional>
+            <input id="heard" type="text" name="heard"
+              placeholder="e.g. a mate's club, Facebook, search"
+              value={fields.heard} onChange={set('heard')}
+              className={inputCls('heard', errors)} />
+          </Field>
+        </div>
 
         {/* Message — optional */}
         <Field label="Anything else we should know?" id="message" optional>

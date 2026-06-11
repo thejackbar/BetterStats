@@ -244,6 +244,15 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_club_onboarding_requests_created_at "
             "ON club_onboarding_requests (created_at DESC)"
         ))
+        # Extra onboarding questions mirrored from the old Google Form
+        # (migration 081). Idempotent so the API boots even before alembic runs.
+        for _col in (
+            "role", "founded_year", "playhq_status", "has_historical",
+            "interests", "heard_about", "contact_method",
+        ):
+            await conn.execute(text(
+                f"ALTER TABLE club_onboarding_requests ADD COLUMN IF NOT EXISTS {_col} TEXT"
+            ))
         # Season aliases — admin can mark one season as merged into another so
         # they display and aggregate as a single season (e.g. Summer 25/26 +
         # Winter 25/26 → 2025/26). Soft model: no row rewrites; downstream

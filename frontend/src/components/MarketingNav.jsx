@@ -2,7 +2,6 @@ import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import BrandLogo from './BrandLogo'
 import ModuleLockup, { ModuleWordmark } from './ModuleLockup'
-import { FORM_URL } from '../data/marketing'
 import { CORE_MARKETING, MODULES_MARKETING } from '../data/modules-marketing'
 
 const LINKS = [
@@ -142,15 +141,13 @@ export default function MarketingNav() {
               </Link>
             )
           })}
-          <a
-            href={FORM_URL}
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            to="/contact"
             className="ml-3 cta-primary !text-[13px] !py-2.5 !px-4 whitespace-nowrap"
-            aria-label="Request access for your club (opens in new tab)"
+            aria-label="Request access for your club"
           >
             Request access
-          </a>
+          </Link>
         </div>
 
         {/* Mobile hamburger */}
@@ -196,15 +193,13 @@ export default function MarketingNav() {
               {link.label}
             </Link>
           ))}
-          <a
-            href={FORM_URL}
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            to="/contact"
             className="mt-2 cta-primary !py-3 justify-center"
             onClick={() => setOpen(false)}
           >
             Request access
-          </a>
+          </Link>
         </div>
       )}
     </nav>

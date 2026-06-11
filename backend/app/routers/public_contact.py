@@ -34,6 +34,14 @@ class ContactIn(BaseModel):
     timeline: Optional[str] = None
     clubUrl: Optional[str] = None
     message: Optional[str] = None
+    # Extra onboarding questions (mirrored from the old Google Form).
+    role: Optional[str] = None
+    founded: Optional[str] = None
+    playhq: Optional[str] = None
+    historical: Optional[str] = None
+    interests: Optional[str] = None
+    heard: Optional[str] = None
+    contactMethod: Optional[str] = None
 
 
 def _clip(value: Optional[str], limit: int) -> Optional[str]:
@@ -73,6 +81,13 @@ async def submit_contact(
         timeline=_clip(payload.timeline, 100),
         club_url=_clip(payload.clubUrl, 500),
         message=_clip(payload.message, 4000),
+        role=_clip(payload.role, 120),
+        founded_year=_clip(payload.founded, 20),
+        playhq_status=_clip(payload.playhq, 50),
+        has_historical=_clip(payload.historical, 50),
+        interests=_clip(payload.interests, 400),
+        heard_about=_clip(payload.heard, 200),
+        contact_method=_clip(payload.contactMethod, 20),
         source="contact_form",
         user_agent=_clip(request.headers.get("user-agent"), 500),
     )

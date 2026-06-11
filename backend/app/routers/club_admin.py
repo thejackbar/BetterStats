@@ -1671,6 +1671,13 @@ async def list_onboarding_requests(
             "timeline": r.timeline,
             "club_url": r.club_url,
             "message": r.message,
+            "role": r.role,
+            "founded_year": r.founded_year,
+            "playhq_status": r.playhq_status,
+            "has_historical": r.has_historical,
+            "interests": r.interests,
+            "heard_about": r.heard_about,
+            "contact_method": r.contact_method,
             "status": r.status,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }

@@ -11,7 +11,7 @@ import {
   MockYearbook,
   MockHeritageCard,
 } from '../../components/marketing/Mockups'
-import { FORM_URL, SCREENSHOT_PATHS } from '../../data/marketing'
+import { SCREENSHOT_PATHS } from '../../data/marketing'
 import { MODULES_MARKETING } from '../../data/modules-marketing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
@@ -268,7 +268,7 @@ function FeatureBlock({ f, idx }) {
                   </li>
                 ))}
               </ul>
-              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary !text-sm !py-2.5 !px-5">Get Your Club on BetterCricket today!</a>
+              <Link to="/contact" className="cta-primary !text-sm !py-2.5 !px-5">Get Your Club on BetterCricket today!</Link>
             </div>
             <div className="col-span-12 lg:col-span-7 lg:[direction:ltr]">
               <div className="relative product-shadow rounded-2xl">
@@ -316,7 +316,7 @@ function FeaturesCTA() {
             Everything on this page is BetterStats, from $399 a year, flat rate per club. Add modules whenever you’re ready.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
+            <Link to="/contact" className="cta-primary">Request club access →</Link>
             <Link to="/pricing" className="cta-secondary">See pricing</Link>
           </div>
         </div>

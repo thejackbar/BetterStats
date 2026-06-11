@@ -9,7 +9,6 @@ export const ABN = '32 624 335 397'
 export const DOMAIN = 'betterat.cricket'
 export const BASE_URL = 'https://betterat.cricket'
 
-export const FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeDdUcFct4NzBYSTuzC03yZ9021cLxQmV77mi6-z9fHCcYGrQ/viewform?usp=header'
 export const SUPPORT_EMAIL = 'betteratcricket@gmail.com'
 
 // ── Formspree ────────────────────────────────────────────────────────────────
