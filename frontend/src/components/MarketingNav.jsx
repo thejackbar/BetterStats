@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import BrandLogo from './BrandLogo'
 import ModuleLockup, { ModuleWordmark } from './ModuleLockup'
 import { FORM_URL } from '../data/marketing'
-import { CORE_MARKETING, MODULES_MARKETING, TIER_INFO } from '../data/modules-marketing'
+import { CORE_MARKETING, MODULES_MARKETING } from '../data/modules-marketing'
 
 const LINKS = [
   { to: '/pricing', label: 'Pricing' },
@@ -15,8 +15,8 @@ const LINKS = [
 
 // Core + bolt-on modules, for the "Modules" dropdown.
 const MODULE_LINKS = [
-  { slug: CORE_MARKETING.slug, name: CORE_MARKETING.name, icon: CORE_MARKETING.icon, logo: CORE_MARKETING.logo, accent: CORE_MARKETING.accent, tagline: CORE_MARKETING.tagline, to: CORE_MARKETING.to, badge: 'Core' },
-  ...MODULES_MARKETING.map((m) => ({ slug: m.slug, name: m.name, icon: m.icon, logo: m.logo, accent: m.accent, tagline: m.tagline, to: `/modules/${m.slug}`, badge: `${TIER_INFO[m.tier].label} tier` })),
+  { slug: CORE_MARKETING.slug, name: CORE_MARKETING.name, icon: CORE_MARKETING.icon, logo: CORE_MARKETING.logo, accent: CORE_MARKETING.accent, tagline: CORE_MARKETING.tagline, to: CORE_MARKETING.to },
+  ...MODULES_MARKETING.map((m) => ({ slug: m.slug, name: m.name, icon: m.icon, logo: m.logo, accent: m.accent, tagline: m.tagline, to: `/modules/${m.slug}` })),
 ]
 
 export default function MarketingNav() {
@@ -114,10 +114,7 @@ export default function MarketingNav() {
                     <Link key={m.slug} to={m.to} className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-pb-surface2/50 transition-colors group">
                       <img src={m.logo} alt="" className="w-9 h-9 rounded-lg flex-shrink-0" />
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold"><ModuleWordmark name={m.name} accent={m.accent} /></p>
-                          <span className="pill-neutral text-[9px]">{m.badge}</span>
-                        </div>
+                        <p className="text-sm font-semibold"><ModuleWordmark name={m.name} accent={m.accent} /></p>
                         <p className="text-xs text-pb-dim leading-snug">{m.tagline}</p>
                       </div>
                     </Link>
@@ -186,7 +183,6 @@ export default function MarketingNav() {
               onClick={() => setOpen(false)}
             >
               <ModuleLockup name={m.name} logo={m.logo} accent={m.accent} size={28} logoClassName="rounded-md" textClassName="text-sm font-display font-bold leading-none" />
-              <span className="pill-neutral text-[9px] ml-auto">{m.badge}</span>
             </Link>
           ))}
           <div className="border-t pb-hairline my-2" />

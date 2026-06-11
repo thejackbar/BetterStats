@@ -20,7 +20,6 @@ import {
 import {
   CORE_MARKETING,
   MODULES_MARKETING,
-  TIER_INFO,
 } from '../../data/modules-marketing'
 import { CORE, PRICED_MODULES } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
@@ -185,13 +184,13 @@ function Core() {
                   <img src={CORE_MARKETING.logo} alt="" className="w-11 h-11 rounded-xl" />
                   <div>
                     <p className="text-xl font-bold"><ModuleWordmark name="BetterStats" accent={CORE_MARKETING.accent} /></p>
-                    <p className="text-[11px] font-mono uppercase tracking-wide3 text-accent">The Core · every club</p>
+                    <p className="text-[11px] font-mono uppercase tracking-wide3 text-accent">In every plan</p>
                   </div>
                 </div>
                 <p className="text-pb-dim leading-relaxed mb-5">
                   Your club’s full reconciled history and a public site to be proud of — profiles, leaderboards, records, scorecards, yearbooks, awards and shareable stat cards. All automatic.
                 </p>
-                <Link to={CORE_MARKETING.to} className="inline-flex items-center gap-1 text-sm text-accent font-medium">Tour the Core →</Link>
+                <Link to={CORE_MARKETING.to} className="inline-flex items-center gap-1 text-sm text-accent font-medium">Tour BetterStats →</Link>
               </div>
               <div className="col-span-12 lg:col-span-7">
                 <div className="product-shadow rounded-2xl">
@@ -223,9 +222,7 @@ function ModuleRow({ m, flip }) {
           <div className="flex items-center gap-2.5 mb-4">
             <img src={m.logo} alt="" className="w-10 h-10 rounded-xl" />
             <span className="text-xl font-bold"><ModuleWordmark name={m.name} accent={m.accent} /></span>
-            {isIQ
-              ? <span className="pill inline-flex !text-[10px]"><span className="dot" />Category of one</span>
-              : <span className="pill-neutral text-[10px]">{TIER_INFO[m.tier].label} tier</span>}
+            {isIQ && <span className="pill inline-flex !text-[10px]"><span className="dot" />Category of one</span>}
           </div>
           <h3 className="text-2xl lg:text-3xl font-bold leading-tight mb-3 tracking-tight">{m.tagline}</h3>
           <p className="text-pb-dim leading-relaxed mb-5">{isIQ ? solo.sub : m.summary}</p>

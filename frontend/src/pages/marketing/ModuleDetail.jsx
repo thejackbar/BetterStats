@@ -5,8 +5,9 @@ import Reveal from '../../components/marketing/Reveal'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
 import ComparisonTable from '../../components/marketing/ComparisonTable'
 import { FORM_URL, COMPARISONS, COMPARISON_SOLO } from '../../data/marketing'
-import { moduleBySlug, MODULES_MARKETING, TIER_INFO } from '../../data/modules-marketing'
-import ModuleLockup, { ModuleWordmark } from '../../components/ModuleLockup'
+import { moduleBySlug, MODULES_MARKETING } from '../../data/modules-marketing'
+import { PRICED_MODULES } from '../../data/pricing'
+import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 // Themed faux app-window shown until a real screenshot is dropped at
@@ -45,11 +46,9 @@ function ModuleMock({ m }) {
   )
 }
 
-function tierBlurb(tier) {
-  const t = TIER_INFO[tier]
-  if (tier === 'better') return `Part of the Better and Best tiers — from $${t.annual}/yr.`
-  if (tier === 'best') return `Part of the Best tier — $${t.annual}/yr.`
-  return `Included in every tier — from $${t.annual}/yr.`
+function modulePrice(key) {
+  const m = PRICED_MODULES.find((p) => p.key === key)
+  return m ? `$${m.price} a year.` : null
 }
 
 export default function ModuleDetail() {
@@ -83,7 +82,7 @@ export default function ModuleDetail() {
               </div>
               <div className="flex items-center gap-3 mb-5">
                 <img src={m.logo} alt="" className="w-12 h-12 rounded-xl" />
-                <span className="pill-neutral">{TIER_INFO[m.tier].label} tier · {m.audience}</span>
+                <span className="pill-neutral">{m.audience}</span>
               </div>
               <h1 className="font-display font-bold text-[40px] sm:text-[52px] lg:text-[64px] tracking-tight leading-[0.95] mb-6">
                 <ModuleWordmark name={m.name} accent={m.accent} />
@@ -187,13 +186,13 @@ export default function ModuleDetail() {
           </section>
         )}
 
-        {/* Tier band */}
+        {/* Pricing band */}
         <section className="px-4 sm:px-6 lg:px-10 py-16 border-t pb-hairline bg-black/20">
           <div className="max-w-[900px] mx-auto surface-strong p-8 lg:p-10 text-center">
-            <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-3">Plan</p>
-            <h2 className="font-display font-bold text-2xl md:text-3xl mb-3 tracking-tight">{tierBlurb(m.tier)}</h2>
+            <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-3">Pricing</p>
+            <h2 className="font-display font-bold text-2xl md:text-3xl mb-3 tracking-tight">{modulePrice(m.key) || 'Included in every plan.'}</h2>
             <p className="text-pb-dim max-w-xl mx-auto mb-7">
-              Every plan also includes the BetterStats Core. Not sure which tier you need? The calculator on the pricing page matches a tier to the modules you pick.
+              Every plan includes BetterStats. Add {m.name} on its own, or bundle modules for up to 10% off. The calculator on the pricing page works out your total.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <Link to="/pricing" className="cta-primary">See pricing & calculator →</Link>
@@ -259,7 +258,7 @@ export default function ModuleDetail() {
                   <img src={s.logo} alt="" className="w-10 h-10 rounded-lg flex-shrink-0" />
                   <div className="min-w-0">
                     <p className="font-semibold text-sm"><ModuleWordmark name={s.name} accent={s.accent} /></p>
-                    <p className="text-xs text-pb-dim truncate">{TIER_INFO[s.tier].label} tier</p>
+                    <p className="text-xs text-pb-dim truncate">{s.tagline}</p>
                   </div>
                 </Link>
               ))}

@@ -4,7 +4,7 @@ import { CORE, PRICED_MODULES, priceFor } from '../../data/pricing'
 import { ModuleWordmark } from './../ModuleLockup'
 
 /**
- * Modular plan builder. The Core (BetterStats) is always in; tick the modules
+ * Modular plan builder. BetterStats is always in; tick the modules
  * you want and the annual price updates live, including the bundle discount
  * (two modules 5% off, all four 10%). This is the main way the Pricing page
  * shows what Better Cricket costs.
@@ -29,7 +29,7 @@ export default function PricingCalculator() {
           <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-1">Build your plan</p>
           <h3 className="text-2xl font-bold mb-1.5">Pick the modules you want.</h3>
           <p className="text-sm text-pb-dim mb-6">
-            The Core (BetterStats) is always included. Add any modules and the price updates as you go.
+            BetterStats is always included. Add any modules and the price updates as you go.
             Take any two for 5% off, or all four for 10%.
           </p>
 

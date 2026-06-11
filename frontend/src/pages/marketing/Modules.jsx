@@ -10,16 +10,14 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 function ModuleCard({ m, delay }) {
   const isCore = m.isCore
   const to = isCore ? m.to : `/modules/${m.slug}`
-  const badge = isCore ? 'Core · every club' : `${TIER_INFO[m.tier].label} tier`
   return (
     <Reveal delay={delay} className="h-full">
       <Link to={to} className="surface p-7 h-full flex flex-col transition-colors group block"
         style={{ '--card-accent': m.accent }}
         onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${m.accent}55` }}
         onMouseLeave={(e) => { e.currentTarget.style.borderColor = '' }}>
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center mb-5">
           <img src={m.logo} alt="" className="w-11 h-11 rounded-xl" />
-          <span className="pill-neutral text-[10px]">{badge}</span>
         </div>
         <h3 className="text-xl font-bold mb-2"><ModuleWordmark name={m.name} accent={m.accent} /></h3>
         <p className="text-sm text-pb-dim leading-relaxed mb-5">{m.tagline}</p>
@@ -31,7 +29,7 @@ function ModuleCard({ m, delay }) {
           </ul>
         )}
         <span className="mt-auto pt-4 border-t pb-hairline text-sm font-medium inline-flex items-center gap-1" style={{ color: m.accent }}>
-          {isCore ? 'Tour the Core' : `Explore ${m.name}`} <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+          {isCore ? 'Tour BetterStats' : `Explore ${m.name}`} <span className="group-hover:translate-x-0.5 transition-transform">→</span>
         </span>
       </Link>
     </Reveal>
