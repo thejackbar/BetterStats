@@ -30,9 +30,16 @@ const CONTACT_METHOD_OPTIONS = ['Email', 'Phone']
 const INTEREST_OPTIONS = [
   'Player statistics',
   'Team statistics',
-  'Automatic data syncing',
   'Historical statistics',
+  'Automatic data syncing',
   'Automatic yearbooks',
+  'Player availability',
+  'Team selection',
+  'Net management',
+  'Social media posts',
+  'Club website',
+  'Fee tracking',
+  'Bulk email to members',
   'Opposition analysis (BetterIQ)',
   'Other',
 ]
