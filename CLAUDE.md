@@ -114,8 +114,8 @@ from the in-app entitlement registry (`frontend/src/lib/modules.js`, which still
 describes the Good/Better/Best tiers the backend enforces). Public model:
 **Core (BetterStats) $400/yr** plus modules **BetterSelect / BetterSocials /
 BetterAdmin $100 each** and **BetterIQ $200**, an **annual licence only** (no
-monthly). Bundle discount: any 2 modules 10% off, all 4 15% (Core + all four =
-$765).
+monthly). Bundle discount: any 2 modules 5% off, all 4 10% (Core + all four =
+$810).
 
 - **Source of truth**: `frontend/src/data/pricing.js` (`CORE`, `PRICED_MODULES`,
   `priceFor`, `ALL_IN`, `COMPETITOR_STACK`, `COMPETITOR_TOTAL`). Edit prices here.

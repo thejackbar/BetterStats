@@ -5,7 +5,7 @@ import { CORE, PRICED_MODULES, priceFor } from '../../data/pricing'
 /**
  * Modular plan builder. The Core (BetterStats) is always in; tick the modules
  * you want and the annual price updates live, including the bundle discount
- * (two modules 10% off, all four 15%). This is the main way the Pricing page
+ * (two modules 5% off, all four 10%). This is the main way the Pricing page
  * shows what Better Cricket costs.
  */
 export default function PricingCalculator() {
@@ -29,7 +29,7 @@ export default function PricingCalculator() {
           <h3 className="text-2xl font-bold mb-1.5">Pick the modules you want.</h3>
           <p className="text-sm text-pb-dim mb-6">
             The Core (BetterStats) is always included. Add any modules and the price updates as you go.
-            Take any two for 10% off, or all four for 15%.
+            Take any two for 5% off, or all four for 10%.
           </p>
 
           <div className="space-y-2.5">
@@ -112,13 +112,13 @@ export default function PricingCalculator() {
             </div>
 
             {moduleCount < 2 && (
-              <p className="text-[11px] text-pb-faint text-center mb-4">Add another module to unlock 10% off.</p>
+              <p className="text-[11px] text-pb-faint text-center mb-4">Add another module to unlock 5% off.</p>
             )}
             {moduleCount >= 2 && moduleCount < 4 && (
-              <p className="text-[11px] text-accent text-center mb-4">10% bundle discount applied. Add all four for 15%.</p>
+              <p className="text-[11px] text-accent text-center mb-4">5% bundle discount applied. Add all four for 10%.</p>
             )}
             {moduleCount === 4 && (
-              <p className="text-[11px] text-accent text-center mb-4">Everything in, 15% off.</p>
+              <p className="text-[11px] text-accent text-center mb-4">Everything in, 10% off.</p>
             )}
 
             <Link to="/contact" className="cta-primary w-full justify-center">Get this plan →</Link>
