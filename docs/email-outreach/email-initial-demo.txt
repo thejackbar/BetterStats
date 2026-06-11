@@ -1,0 +1,29 @@
+Subject: How many volunteer hours did your club burn this week?
+
+Hi [first name],
+
+Quick question: how many hours did your volunteers spend this week chasing availability, picking teams, posting to socials and chasing fees?
+
+If you're like most clubs we know, the answer is "too many." We know because we've been those volunteers — we're Jack and Elton, and between us we've done just about every thankless job in community cricket.
+
+We waited for PlayHQ to build what clubs actually asked for. Club history. Easy availability and selection. Help with the social media grind. It never came. So we built BetterCricket ourselves.
+
+It handles availability, selection, socials, fees and admin — and on top of that, it gives your club statistical analysis nobody's ever put in front of community cricketers before.
+
+Explore the modules:
+- BetterStats — Your club's memory, every player, every season, kept forever. https://betterat.cricket/modules/betterstats
+- BetterSelect — Availability and team selection, sorted for every grade in minutes. https://betterat.cricket/modules/betterselect
+- BetterSocials — Your public website plus match-day posts your community actually reposts. https://betterat.cricket/modules/bettersocials
+- BetterAdmin — Run the back office: fees, comms and merch in one place. https://betterat.cricket/modules/betteradmin
+- BetterIQ — Broadcast-grade analytics and an opposition scout for your club. https://betterat.cricket/modules/betteriq
+
+See it running at a real club right now:
+https://betterat.cricket/applecross
+
+And because it replaces the subscriptions you're probably already paying for, most clubs save up to $1,000 a year.
+
+Find out more here, or reply and let's chat about your club:
+https://betterat.cricket/?utm_source=ca&utm_medium=email&utm_campaign=welcome
+
+Jack & Elton
+BetterCricket — built by club cricketers, for club cricketers
