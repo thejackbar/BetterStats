@@ -4,6 +4,7 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
+import ZoomableImage from '../../components/marketing/ZoomableImage'
 import Comparison3Way from '../../components/marketing/Comparison3Way'
 import {
   MockLeaderboard,
@@ -175,12 +176,13 @@ function ShortCard({ s, delay }) {
       <div className="surface h-full overflow-hidden">
         {s.src && !imgFailed && (
           <div className="border-b pb-hairline overflow-hidden h-44 rounded-t-[calc(1rem-1px)]">
-            <img
+            <ZoomableImage
               src={s.src}
               alt={s.title}
+              caption={s.desc}
               className="w-full h-full object-cover object-top"
+              wrapperClassName="h-full"
               onError={() => setImgFailed(true)}
-              loading="lazy"
             />
           </div>
         )}

@@ -305,6 +305,18 @@
 }
 .glow-pulse { animation: pulseGlow 6s ease-in-out infinite; }
 
+/* ── Screenshot lightbox (click-to-enlarge) ───────────────────────────────── */
+@keyframes bs-lightbox-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bs-lightbox-zoom {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.bs-lightbox-backdrop { animation: bs-lightbox-fade 0.15s ease-out; }
+.bs-lightbox-figure   { animation: bs-lightbox-zoom 0.2s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .bs-lightbox-backdrop, .bs-lightbox-figure { animation: none; }
+}
+
 /* ── Rich text (website CMS content + WYSIWYG editor body) ─────────────────
    Tailwind preflight strips default heading/list styling, so the HTML our
    club admins author needs explicit rules. Shared by the editor and the
