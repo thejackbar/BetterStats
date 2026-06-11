@@ -319,6 +319,7 @@ export const COMPARISON_SOLO = {
 export const SCREENSHOT_PATHS = {
   // Landing hero
   landingHeroCard:        '/marketing/hero-career-card.jpg',
+  frontPageProfile:       '/marketing/front-page-profile.jpg',
   // Landing showcase tabs
   showcaseLeaderboard:    '/marketing/leaderboard.jpg',
   showcaseProfile:        '/marketing/player-profile.jpg',

@@ -49,12 +49,11 @@ export const CORE_MARKETING = {
     { title: 'Shareable stat cards', desc: 'Every player has a clean, club-branded stat card, one tap to share on Instagram, Facebook or X.' },
   ],
   note: 'BetterStats is the base every club runs on. BetterSelect, BetterSocials, BetterAdmin and BetterIQ all bolt straight onto the same data.',
-  screenshot: '/marketing/player-profile.jpg',
+  screenshot: '/marketing/hero-career-card.jpg',
   gallery: [
     { src: '/marketing/leaderboard.jpg', caption: 'Live club leaderboards' },
     { src: '/marketing/yearbook.jpg', caption: 'Auto-generated season yearbooks' },
     { src: '/marketing/showcase-scorecard.jpg', caption: 'Full match scorecards' },
-    { src: '/marketing/hero-career-card.jpg', caption: 'Shareable player stat cards' },
     { src: '/marketing/feature-opposition.jpg', caption: 'Per-player opposition analysis' },
     { src: '/marketing/feature-games.jpg', caption: 'A browsable match archive' },
     { src: '/marketing/feature-whitelabel.jpg', caption: "Make the public site your club's own" },
