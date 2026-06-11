@@ -338,6 +338,10 @@ export const SCREENSHOT_PATHS = {
   shortCompare:           '/marketing/short-compare.jpg',
   shortAwards:            '/marketing/short-awards.jpg',
   shortAdmin:             '/marketing/short-admin.jpg',
+  shortOpposition:        '/marketing/feature-opposition.jpg',
+  shortGames:             '/marketing/feature-games.jpg',
+  // Club branding & back office (sponsors/milestones used directly in the Core gallery)
+  featuresWhitelabel:     '/marketing/feature-whitelabel.jpg',
   // About page
   aboutFounder:           '/marketing/founder.jpg',
 }

@@ -137,6 +137,22 @@ const HERO_SECTIONS = [
     src: SCREENSHOT_PATHS.shortCompare,
     mock: <MockPlayerProfile />,
   },
+  {
+    n: '08',
+    eyebrow: 'Club Branding & Admin',
+    title: "Make it your club's own.",
+    desc: 'BetterStats runs your public site in your colours and looks after the back office behind it. Set your crest, palette and fonts, place your sponsors across the site, and keep the database clean without touching a spreadsheet.',
+    bullets: [
+      'White-label the public site: your crest, club colours and display fonts, in dark or light',
+      'Place your sponsors across the site and in every season yearbook',
+      'Merge duplicate players or rename a grade in a couple of clicks',
+      'A milestone tracker so nobody’s 100th game slips by',
+      'A notification centre for syncs, new milestones and pending requests',
+      'Trigger a manual sync any time, with separate logins for your committee',
+    ],
+    src: SCREENSHOT_PATHS.featuresWhitelabel,
+    mock: <MockPlayerProfile />,
+  },
 ]
 
 const SHORT_SECTIONS = [
@@ -164,6 +180,16 @@ const SHORT_SECTIONS = [
     title: 'Admin Tools',
     desc: 'Everything your stats volunteers need: display name overrides, grade renames, CSV import/export, manual sync trigger, and multiple admin logins.',
     src: SCREENSHOT_PATHS.shortAdmin,
+  },
+  {
+    title: 'Opposition Analysis',
+    desc: "Every player's record broken down by opponent, so you can see who they pile runs on and who has had their number. Handy reading before a big game.",
+    src: SCREENSHOT_PATHS.shortOpposition,
+  },
+  {
+    title: 'Match Archive',
+    desc: 'Browse every game the club has played, filter by season and grade, and open the full scorecard for any one of them.',
+    src: SCREENSHOT_PATHS.shortGames,
   },
 ]
 
