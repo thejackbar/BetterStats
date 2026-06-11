@@ -1,7 +1,10 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { MODULE, tierInfo } from '../../lib/modules'
+import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
+
+const BRAND = moduleBrand('socials')
 
 // BetterSocials — the club's outward face. The public Website (Core, every club)
 // plus the social Post Designer (Better tier). Each card opens its own surface,
@@ -47,10 +50,13 @@ export default function BetterSocialsHome() {
   const { hasModule } = useAuth()
   return (
     <AdminLayout>
-      <div className="max-w-3xl">
-        <h1 className="font-display font-bold text-2xl text-pb-text mb-1">
-          Better<span style={{ color: 'var(--pb-accent)' }}>Socials</span>
-        </h1>
+      <div className="max-w-3xl" style={{ '--pb-accent': BRAND.accent, '--pb-accent-rgb': BRAND.accentRgb }}>
+        <div className="flex items-center gap-3 mb-1">
+          <img src={BRAND.logo} alt="" className="w-9 h-9 rounded-lg" />
+          <h1 className="font-display font-bold text-2xl text-pb-text">
+            Better<span style={{ color: 'var(--pb-accent)' }}>Socials</span>
+          </h1>
+        </div>
         <p className="text-pb-faint text-sm mb-6">Your club's outward face — a public website and social posts in one place.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <SubCard

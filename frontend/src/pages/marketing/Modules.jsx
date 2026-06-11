@@ -12,26 +12,24 @@ function ModuleCard({ m, delay }) {
   const badge = isCore ? 'Core · every club' : `${TIER_INFO[m.tier].label} tier`
   return (
     <Reveal delay={delay} className="h-full">
-      <Link to={to} className="surface p-7 h-full flex flex-col hover:border-accent/30 transition-colors group block">
+      <Link to={to} className="surface p-7 h-full flex flex-col transition-colors group block"
+        style={{ '--card-accent': m.accent }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${m.accent}55` }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = '' }}>
         <div className="flex items-center justify-between mb-5">
-          <span
-            className="w-11 h-11 rounded-xl flex items-center justify-center text-xl text-navy-950"
-            style={{ background: m.accent }}
-          >
-            {m.icon}
-          </span>
+          <img src={m.logo} alt="" className="w-11 h-11 rounded-xl" />
           <span className="pill-neutral text-[10px]">{badge}</span>
         </div>
-        <h3 className="text-xl font-bold mb-2 group-hover:text-accent transition-colors">{m.name}</h3>
+        <h3 className="text-xl font-bold mb-2">{m.name}</h3>
         <p className="text-sm text-pb-dim leading-relaxed mb-5">{m.tagline}</p>
         {!isCore && (
           <ul className="space-y-1.5 mb-6">
             {m.highlights.slice(0, 3).map((h) => (
-              <li key={h} className="flex items-start gap-2 text-xs text-pb-dim"><span className="tick mt-0.5">✓</span>{h}</li>
+              <li key={h} className="flex items-start gap-2 text-xs text-pb-dim"><span className="mt-0.5" style={{ color: m.accent }}>✓</span>{h}</li>
             ))}
           </ul>
         )}
-        <span className="mt-auto pt-4 border-t pb-hairline text-sm text-accent font-medium inline-flex items-center gap-1">
+        <span className="mt-auto pt-4 border-t pb-hairline text-sm font-medium inline-flex items-center gap-1" style={{ color: m.accent }}>
           {isCore ? 'Tour the Core' : `Explore ${m.name}`} <span className="group-hover:translate-x-0.5 transition-transform">→</span>
         </span>
       </Link>

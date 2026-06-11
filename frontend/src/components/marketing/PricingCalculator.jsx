@@ -35,7 +35,7 @@ export default function PricingCalculator() {
           <div className="space-y-2.5">
             {/* Core — always on, not toggleable */}
             <div className="flex items-center gap-3 p-3 rounded-xl border border-accent/30 bg-accent/[0.05]">
-              <span className="w-9 h-9 rounded-lg bg-accent/15 border border-accent/40 flex items-center justify-center text-accent text-lg flex-shrink-0">{CORE.icon}</span>
+              <img src={CORE.logo} alt="" className="w-9 h-9 rounded-lg flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold">BetterStats <span className="text-pb-faint font-normal">· Core</span></p>
                 <p className="text-xs text-pb-dim">{CORE.blurb}</p>
@@ -56,14 +56,11 @@ export default function PricingCalculator() {
                     on ? 'border-accent/50 bg-accent/[0.07]' : 'border-pb-hairline hover:border-accent/30 bg-pb-surface2/20'
                   }`}
                 >
-                  <span
-                    className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg flex-shrink-0 border ${
-                      on ? 'border-transparent text-navy-950' : 'border-pb-hairline text-pb-dim'
-                    }`}
-                    style={on ? { background: m.accent } : undefined}
-                  >
-                    {m.icon}
-                  </span>
+                  <img
+                    src={m.logo}
+                    alt=""
+                    className={`w-9 h-9 rounded-lg flex-shrink-0 transition-all ${on ? '' : 'grayscale opacity-60'}`}
+                  />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold">{m.name}</p>
                     <p className="text-xs text-pb-dim truncate">{m.blurb}</p>

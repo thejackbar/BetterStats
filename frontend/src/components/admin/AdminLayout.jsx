@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 import { dashboardTiles, tierLabel } from '../../lib/modules'
+import { moduleBrand } from '../../lib/moduleBrand'
 import { api } from '../../lib/api'
 import { SITE_VERSION } from '../../version'
 import { CHANGELOG } from '../../data/changelog'
@@ -281,20 +282,27 @@ export default function AdminLayout({ children }) {
               <div className="pb-1 px-2 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Modules</div>
               {dashboardTiles().map(mod => {
                 const entitled = mod.alwaysOpen || (mod.isGroup ? mod.members.some(m => hasModule(m.key)) : hasModule(mod.key))
+                const brand = moduleBrand(mod.key)
+                const suffix = mod.name.startsWith('Better') ? mod.name.slice('Better'.length) : null
+                const Label = ({ muted }) => (
+                  <span className="truncate">
+                    {suffix
+                      ? <>Better<span style={muted ? undefined : { color: brand.accent }}>{suffix}</span></>
+                      : mod.name}
+                  </span>
+                )
                 if (mod.built && entitled) {
                   return (
                     <Link
                       key={mod.key}
                       to={mod.to}
                       onClick={() => setMobileOpen(false)}
-                      className={`block px-2 py-1.5 rounded transition-colors font-display font-bold text-[13px] ${
-                        isActive(mod.to)
-                          ? 'bg-pb-surface2 text-pb-text'
-                          : 'text-pb-text hover:bg-pb-surface2'
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded transition-colors font-display font-bold text-[13px] text-pb-text ${
+                        isActive(mod.to) ? 'bg-pb-surface2' : 'hover:bg-pb-surface2'
                       }`}
-                      style={isActive(mod.to) ? { color: 'var(--pb-accent)' } : {}}
                     >
-                      {mod.name}
+                      <img src={brand.logo} alt="" className="w-4 h-4 rounded shrink-0" />
+                      <Label />
                     </Link>
                   )
                 }
@@ -303,10 +311,11 @@ export default function AdminLayout({ children }) {
                   <div
                     key={mod.key}
                     title={locked ? `Included in the ${tierLabel(mod.requiredTier)} plan` : 'Coming soon'}
-                    className="flex items-center justify-between px-2 py-1.5 rounded font-display font-bold text-[13px] text-pb-faintest opacity-50 cursor-default select-none"
+                    className="flex items-center gap-2 px-2 py-1.5 rounded font-display font-bold text-[13px] text-pb-faintest cursor-default select-none"
                   >
-                    <span>{mod.name}</span>
-                    <span className="font-mono text-[9px]">{locked ? '🔒' : 'SOON'}</span>
+                    <img src={brand.logo} alt="" className="w-4 h-4 rounded shrink-0 grayscale opacity-50" />
+                    <Label muted />
+                    <span className="font-mono text-[9px] ml-auto">{locked ? '🔒' : 'SOON'}</span>
                   </div>
                 )
               })}

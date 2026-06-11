@@ -1,7 +1,10 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { MODULE, tierInfo } from '../../lib/modules'
+import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
+
+const BRAND = moduleBrand('admin')
 
 // BetterAdmin — the club back-office umbrella. One hub for the operational
 // modules (BetterFees + BetterComms today, BetterMerch next). Each card opens
@@ -58,10 +61,13 @@ export default function BetterAdminHome() {
   const { hasModule } = useAuth()
   return (
     <AdminLayout>
-      <div className="max-w-3xl">
-        <h1 className="font-display font-bold text-2xl text-pb-text mb-1">
-          Better<span style={{ color: 'var(--pb-accent)' }}>Admin</span>
-        </h1>
+      <div className="max-w-3xl" style={{ '--pb-accent': BRAND.accent, '--pb-accent-rgb': BRAND.accentRgb }}>
+        <div className="flex items-center gap-3 mb-1">
+          <img src={BRAND.logo} alt="" className="w-9 h-9 rounded-lg" />
+          <h1 className="font-display font-bold text-2xl text-pb-text">
+            Better<span style={{ color: 'var(--pb-accent)' }}>Admin</span>
+          </h1>
+        </div>
         <p className="text-pb-faint text-sm mb-6">Your club's back office — money, comms and merch in one place.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <SubCard

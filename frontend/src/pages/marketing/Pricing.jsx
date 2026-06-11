@@ -90,12 +90,14 @@ function PriceList() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {items.map((m) => (
               <div key={m.key} className={`surface p-5 text-center ${m.key === 'core' ? 'border-accent/40' : ''}`}>
-                <span
-                  className="w-10 h-10 rounded-lg flex items-center justify-center text-lg mx-auto mb-3 border"
-                  style={{ color: m.accent, borderColor: `${m.accent}55`, background: `${m.accent}14` }}
-                >
-                  {m.icon}
-                </span>
+                {m.logo
+                  ? <img src={m.logo} alt="" className="w-10 h-10 rounded-lg mx-auto mb-3" />
+                  : <span
+                      className="w-10 h-10 rounded-lg flex items-center justify-center text-lg mx-auto mb-3 border"
+                      style={{ color: m.accent, borderColor: `${m.accent}55`, background: `${m.accent}14` }}
+                    >
+                      {m.icon}
+                    </span>}
                 <p className="text-sm font-semibold">{m.name}</p>
                 {m.key === 'core' && <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-1">Core</p>}
                 <p className="text-2xl font-bold tabular-nums mt-1">${m.price}</p>

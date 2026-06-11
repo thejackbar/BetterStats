@@ -181,7 +181,7 @@ function Core() {
             <div className="grid grid-cols-12 gap-8 items-center">
               <div className="col-span-12 lg:col-span-5">
                 <div className="flex items-center gap-3 mb-4">
-                  <span className="w-11 h-11 rounded-xl flex items-center justify-center text-xl text-navy-950" style={{ background: CORE_MARKETING.accent }}>{CORE_MARKETING.icon}</span>
+                  <img src={CORE_MARKETING.logo} alt="" className="w-11 h-11 rounded-xl" />
                   <div>
                     <p className="text-xl font-bold">BetterStats</p>
                     <p className="text-[11px] font-mono uppercase tracking-wide3 text-accent">The Core · every club</p>
@@ -220,7 +220,7 @@ function ModuleRow({ m, flip }) {
         </div>
         <div className={`col-span-12 lg:col-span-6 ${flip ? 'lg:order-1' : ''}`}>
           <div className="flex items-center gap-2.5 mb-4">
-            <span className="w-10 h-10 rounded-xl flex items-center justify-center text-lg text-navy-950" style={{ background: m.accent }}>{m.icon}</span>
+            <img src={m.logo} alt="" className="w-10 h-10 rounded-xl" />
             <span className="text-xl font-bold">{m.name}</span>
             {isIQ
               ? <span className="pill inline-flex !text-[10px]"><span className="dot" />Category of one</span>
