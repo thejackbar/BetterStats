@@ -14,7 +14,7 @@ const PRICING_JSONLD = {
   '@type': 'Product',
   name: 'Better Cricket — Cricket Club Platform',
   description:
-    'A modular platform for Australian cricket clubs. The Core (BetterStats) is $400 a year; add BetterSelect, BetterSocials and BetterAdmin for $100 each and BetterIQ for $200, with up to 10% off when you bundle. Annual licence, one price per club.',
+    'A modular platform for Australian cricket clubs. BetterStats is $400 a year; add BetterSelect, BetterSocials and BetterAdmin for $100 each and BetterIQ for $200, with up to 10% off when you bundle. Annual licence, one price per club.',
   brand: { '@type': 'Brand', name: 'Better Cricket' },
   url: 'https://betterat.cricket/pricing',
   image: 'https://betterat.cricket/og-image.png',
@@ -184,7 +184,7 @@ function ReplacesStack() {
                   <span className="text-sm text-pb-faint">/ year</span>
                 </div>
                 <p className="text-sm text-pb-dim mt-3 max-w-xs mx-auto">
-                  The Core and all four modules, one login, fed by your own cricket data. Your full history loaded, with no import fee and no retyping.
+                  BetterStats and all four modules, one login, fed by your own cricket data. Your full history loaded, with no import fee and no retyping.
                 </p>
               </div>
               <div className="mt-4 rounded-xl bg-accent/10 border border-accent/30 px-5 py-4 text-center">
@@ -209,7 +209,7 @@ function ReplacesStack() {
 function PricingFAQ() {
   const [open, setOpen] = useState(0)
   const faqs = [
-    { q: 'How much does it cost?', a: "The Core (BetterStats) is $400 a year and includes your public stats site. BetterSelect, BetterSocials and BetterAdmin are $100 a year each, and BetterIQ is $200. Take any two modules for 5% off, or all four for 10%, which brings the Core plus every module to $810 a year." },
+    { q: 'How much does it cost?', a: "BetterStats is $400 a year and includes your public stats site. BetterSelect, BetterSocials and BetterAdmin are $100 a year each, and BetterIQ is $200. Take any two modules for 5% off, or all four for 10%, which brings BetterStats plus every module to $810 a year." },
     { q: 'Does the price change based on club size?', a: "No. Every price is a flat rate per club. One team or fifty teams, juniors and seniors, men's and women's, the price is the same. There's no per-team, per-player or per-grade pricing." },
     { q: 'Can I add a single module?', a: "Yes. For a small additional annual charge, any single module can be added to your current subscription." },
     { q: 'Monthly or annual?', a: "Better Cricket is an annual licence, billed once a year." },
@@ -254,7 +254,7 @@ export default function Pricing() {
   usePageMeta({
     title: 'Pricing — modular plans for cricket clubs | Better Cricket',
     description:
-      'Modular, flat-rate pricing for Australian cricket clubs. The Core (BetterStats) is $400 a year; add BetterSelect, BetterSocials and BetterAdmin for $100 each and BetterIQ for $200, with up to 10% off when you bundle. One annual price per club, whatever the size.',
+      'Modular, flat-rate pricing for Australian cricket clubs. BetterStats is $400 a year; add BetterSelect, BetterSocials and BetterAdmin for $100 each and BetterIQ for $200, with up to 10% off when you bundle. One annual price per club, whatever the size.',
     image: 'https://betterat.cricket/og-image.png',
     url: 'https://betterat.cricket/pricing',
     jsonLd: PRICING_JSONLD,

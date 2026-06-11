@@ -12,7 +12,7 @@ import {
   MockHeritageCard,
 } from '../../components/marketing/Mockups'
 import { FORM_URL, SCREENSHOT_PATHS } from '../../data/marketing'
-import { MODULES_MARKETING, TIER_INFO } from '../../data/modules-marketing'
+import { MODULES_MARKETING } from '../../data/modules-marketing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
@@ -199,9 +199,9 @@ function Hero() {
     <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
       <div className="max-w-[900px] mx-auto relative text-center">
-        <p className="pill mb-6 inline-flex"><span className="dot" />The Core · in every plan</p>
+        <p className="pill mb-6 inline-flex"><span className="dot" />In every plan</p>
         <h1 className="font-display font-bold text-[44px] sm:text-[60px] lg:text-[80px] tracking-tight leading-[0.95] mb-6">
-          The Core: <span className="gradient-text">BetterStats.</span>
+          <span className="gradient-text">BetterStats.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-xl mx-auto leading-relaxed">
           Your club’s reconciled history and a public site to be proud of — included in every Better Cricket plan. Here’s everything it does.
@@ -218,18 +218,17 @@ function BeyondCore() {
       <div className="max-w-[1200px] mx-auto">
         <Reveal>
           <div className="text-center mb-12">
-            <p className="pill-neutral inline-flex mb-5">Beyond the Core</p>
+            <p className="pill-neutral inline-flex mb-5">The other modules</p>
             <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">There’s more than stats.</h2>
-            <p className="text-pb-dim max-w-xl mx-auto">Everything above is the Core. Bolt on the modules that run your season and your club.</p>
+            <p className="text-pb-dim max-w-xl mx-auto">Everything above is BetterStats. Bolt on the modules that run your season and your club.</p>
           </div>
         </Reveal>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {MODULES_MARKETING.map((m, i) => (
             <Reveal key={m.slug} delay={(i % 4) * 70} className="h-full">
               <Link to={`/modules/${m.slug}`} className="surface p-6 h-full flex flex-col hover:border-accent/30 transition-colors group block">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center mb-4">
                   <img src={m.logo} alt="" className="w-10 h-10 rounded-xl" />
-                  <span className="pill-neutral text-[10px]">{TIER_INFO[m.tier].label}</span>
                 </div>
                 <h3 className="text-lg font-semibold mb-1.5"><ModuleWordmark name={m.name} accent={m.accent} /></h3>
                 <p className="text-sm text-pb-dim leading-relaxed mb-4 flex-1">{m.tagline}</p>
@@ -311,10 +310,10 @@ function FeaturesCTA() {
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
       <div className="max-w-[900px] mx-auto relative">
         <div className="surface-strong p-10 lg:p-14 text-center">
-          <p className="pill mb-6 mx-auto"><span className="dot" />The Core · in every plan</p>
-          <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">The Core, <span className="gradient-text">in every plan.</span></h2>
+          <p className="pill mb-6 mx-auto"><span className="dot" />In every plan</p>
+          <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">BetterStats, <span className="gradient-text">in every plan.</span></h2>
           <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">
-            Everything on this page is the Core, from $400 a year, flat rate per club. Add modules whenever you’re ready.
+            Everything on this page is BetterStats, from $400 a year, flat rate per club. Add modules whenever you’re ready.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>

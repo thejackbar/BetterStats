@@ -67,7 +67,7 @@ const CATEGORIES = [
     items: [
       {
         q: 'What is Better Cricket?',
-        a: "Better Cricket is a modular platform for Australian club cricket, owned by BetterSports. The Core module is BetterStats: it brings in every batting, bowling and fielding stat and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. On top of the Core you can add modules: BetterSelect (player availability, team selection and net manager), BetterSocials (social-post generation and a CRM to manage your club's website), BetterAdmin (member fee management, bulk emailing, and merch and stock management, coming soon) and BetterIQ (deep analytics and opposition scouting).",
+        a: "Better Cricket is a modular platform for Australian club cricket, owned by BetterSports. Every club starts with BetterStats: it brings in every batting, bowling and fielding stat and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. On top of BetterStats you can add modules: BetterSelect (player availability, team selection and net manager), BetterSocials (social-post generation and a CRM to manage your club's website), BetterAdmin (member fee management, bulk emailing, and merch and stock management, coming soon) and BetterIQ (deep analytics and opposition scouting).",
       },
       {
         q: 'Do we have to change how our club scores or registers to use Better Cricket?',
@@ -111,11 +111,11 @@ const CATEGORIES = [
     items: [
       {
         q: 'How much does it cost?',
-        a: "Better Cricket is modular. The Core (BetterStats) is $400 a year and includes your public stats site. From there you add only the modules you want: BetterSelect, BetterSocials and BetterAdmin are $100 a year each, and BetterIQ is $200. Take any two modules for 5% off, or all four for 10%, which brings the Core plus every module to $810 a year. Every price covers unlimited players, seasons and teams, whatever the club's size.",
+        a: "Better Cricket is modular. BetterStats is $400 a year and includes your public stats site. From there you add only the modules you want: BetterSelect, BetterSocials and BetterAdmin are $100 a year each, and BetterIQ is $200. Take any two modules for 5% off, or all four for 10%, which brings BetterStats plus every module to $810 a year. Every price covers unlimited players, seasons and teams, whatever the club's size.",
       },
       {
         q: 'What does each module include?',
-        a: "The Core (BetterStats) brings in every batting, bowling and fielding stat and turns it into your public club site, with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. BetterSelect adds player availability, team selection and the net manager. BetterSocials adds social-post generation and a CRM with template pages and your club stats to run your public website. BetterAdmin adds member fee management, bulk emailing, and merch and stock management (coming soon). BetterIQ adds deep analytics and opposition scouting.",
+        a: "BetterStats brings in every batting, bowling and fielding stat and turns it into your public club site, with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. BetterSelect adds player availability, team selection and the net manager. BetterSocials adds social-post generation and a CRM with template pages and your club stats to run your public website. BetterAdmin adds member fee management, bulk emailing, and merch and stock management (coming soon). BetterIQ adds deep analytics and opposition scouting.",
       },
       {
         q: 'Can I add just one module?',

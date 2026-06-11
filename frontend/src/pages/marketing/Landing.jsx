@@ -20,7 +20,7 @@ import {
   FORM_URL,
   SCREENSHOT_PATHS,
 } from '../../data/marketing'
-import { MODULES_MARKETING, TIER_INFO } from '../../data/modules-marketing'
+import { MODULES_MARKETING } from '../../data/modules-marketing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
@@ -318,9 +318,9 @@ function Features() {
       <div className="max-w-[1200px] mx-auto">
         <Reveal>
           <div className="text-center mb-14">
-            <p className="pill-neutral inline-flex mb-5">The Core · every club</p>
+            <p className="pill-neutral inline-flex mb-5">In every plan</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
-              Every club starts with <span className="gradient-text">the Core.</span>
+              Every club starts with <span className="gradient-text">BetterStats.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
               BetterStats — your reconciled history and a public site to be proud of. Included in every plan.
@@ -369,7 +369,6 @@ function ModulesTeaser() {
               <Link to={`/modules/${m.slug}`} className="surface p-6 h-full flex flex-col hover:border-accent/30 transition-colors group block">
                 <div className="flex items-center justify-between mb-4">
                   <img src={m.logo} alt="" className="w-10 h-10 rounded-xl" />
-                  <span className="pill-neutral text-[10px]">{TIER_INFO[m.tier].label}</span>
                 </div>
                 <h3 className="text-lg font-semibold mb-1.5"><ModuleWordmark name={m.name} accent={m.accent} /></h3>
                 <p className="text-sm text-pb-dim leading-relaxed mb-4 flex-1">{m.tagline}</p>

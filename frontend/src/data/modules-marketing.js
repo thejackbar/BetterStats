@@ -12,9 +12,10 @@
 import { MODULE, TIER, TIER_INFO, TIER_ORDER } from '../lib/modules'
 import { MODULE_BRAND as BRAND } from '../lib/moduleBrand'
 
-// ── The Core (sold as the "Good" tier) ──────────────────────────────────────
-// Not a gateable module, but described here so the Modules hub can introduce it
-// alongside the bolt-ons. Its deep feature tour lives on /features.
+// ── BetterStats — the always-on base module ─────────────────────────────────
+// Required for every club and not separately gateable, but marketed as a module
+// like the rest. Described here so the Modules hub can introduce it alongside
+// the bolt-ons. Its deep feature tour lives on /features.
 export const CORE_MARKETING = {
   slug: 'betterstats',
   name: 'BetterStats',
