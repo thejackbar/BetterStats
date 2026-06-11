@@ -76,7 +76,7 @@ export default function ModuleDetail() {
         <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
           <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
           <div className="max-w-[1280px] mx-auto relative grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
-            <div className="col-span-12 lg:col-span-6">
+            <div className="col-span-1 lg:col-span-6">
               <div className="flex items-center gap-2.5 mb-6 text-sm">
                 <Link to="/modules" className="text-pb-faint hover:text-pb-text">Modules</Link>
                 <span className="text-pb-faintest">/</span>
@@ -97,7 +97,7 @@ export default function ModuleDetail() {
                   : <Link to="/pricing" className="cta-secondary">See pricing</Link>}
               </div>
             </div>
-            <Reveal className="col-span-12 lg:col-span-6">
+            <Reveal className="col-span-1 lg:col-span-6">
               <div className="relative">
                 <div className="absolute -inset-5 bg-accent/8 blur-[60px] rounded-full" />
                 <div className="relative product-shadow rounded-2xl">

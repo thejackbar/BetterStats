@@ -25,7 +25,7 @@ export default function PricingCalculator() {
     <div className="surface p-6 lg:p-8">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Picker */}
-        <div className="col-span-12 lg:col-span-7">
+        <div className="col-span-1 lg:col-span-7">
           <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-1">Build your plan</p>
           <h3 className="text-2xl font-bold mb-1.5">Pick the modules you want.</h3>
           <p className="text-sm text-pb-dim mb-6">
@@ -77,7 +77,7 @@ export default function PricingCalculator() {
         </div>
 
         {/* Result */}
-        <div className="col-span-12 lg:col-span-5">
+        <div className="col-span-1 lg:col-span-5">
           <div className="lg:sticky lg:top-24 surface-strong p-6">
             <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-2 text-center">Your plan</p>
             <div className="flex items-baseline justify-center gap-1.5 mb-1">

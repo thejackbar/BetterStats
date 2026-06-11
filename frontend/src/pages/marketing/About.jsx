@@ -107,7 +107,7 @@ function Promise_() {
     <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
       <div className="max-w-[1100px] mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-stretch">
-          <Reveal className="col-span-12 md:col-span-7">
+          <Reveal className="col-span-1 md:col-span-7">
             <div className="surface p-8 lg:p-10 h-full border-accent/30 bg-gradient-to-b from-accent/[0.05] to-transparent">
               <div className="flex items-center gap-3 mb-5">
                 <div className="icon-tile">★</div>
@@ -126,7 +126,7 @@ function Promise_() {
             </div>
           </Reveal>
 
-          <Reveal delay={120} className="col-span-12 md:col-span-5">
+          <Reveal delay={120} className="col-span-1 md:col-span-5">
             <div className="surface p-8 h-full">
               <div className="flex items-center gap-3 mb-5">
                 <div className="icon-tile">🇦🇺</div>

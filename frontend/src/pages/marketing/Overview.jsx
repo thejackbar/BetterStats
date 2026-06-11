@@ -49,7 +49,7 @@ function Hero() {
     <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 hero-glow pointer-events-none" />
       <div className="max-w-[1280px] mx-auto relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
-        <div className="col-span-12 lg:col-span-6">
+        <div className="col-span-1 lg:col-span-6">
           <div className="pill mb-7 inline-flex"><span className="dot" />The one-page tour</div>
           <h1 className="font-display font-bold text-[44px] sm:text-[58px] lg:text-[76px] tracking-tight leading-[0.92] mb-6">
             Run your whole club.<br />
@@ -68,7 +68,7 @@ function Hero() {
             <span className="flex items-center gap-2"><span className="tick">✓</span>Built by cricketers</span>
           </div>
         </div>
-        <Reveal className="col-span-12 lg:col-span-6">
+        <Reveal className="col-span-1 lg:col-span-6">
           <div className="relative">
             <div className="absolute -inset-5 bg-accent/8 blur-[60px] rounded-full" />
             <div className="relative product-shadow rounded-2xl">
@@ -178,7 +178,7 @@ function Core() {
         <Reveal>
           <div className="surface p-6 lg:p-8 border-accent/30 bg-gradient-to-b from-accent/[0.05] to-transparent">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-              <div className="col-span-12 lg:col-span-5">
+              <div className="col-span-1 lg:col-span-5">
                 <div className="flex items-center gap-3 mb-4">
                   <img src={CORE_MARKETING.logo} alt="" className="w-11 h-11 rounded-xl" />
                   <div>
@@ -191,7 +191,7 @@ function Core() {
                 </p>
                 <Link to={CORE_MARKETING.to} className="inline-flex items-center gap-1 text-sm text-accent font-medium">Tour BetterStats →</Link>
               </div>
-              <div className="col-span-12 lg:col-span-7">
+              <div className="col-span-1 lg:col-span-7">
                 <div className="product-shadow rounded-2xl">
                   <ScreenshotOrMock src={SCREENSHOT_PATHS.featuresProfile || SCREENSHOT_PATHS.showcaseProfile} alt="BetterStats player profile" fallback={<MockPlayerProfile />} />
                 </div>
@@ -212,12 +212,12 @@ function ModuleRow({ m, flip }) {
   return (
     <Reveal>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
-        <div className={`col-span-12 lg:col-span-6 ${flip ? 'lg:order-2' : ''}`}>
+        <div className={`col-span-1 lg:col-span-6 ${flip ? 'lg:order-2' : ''}`}>
           <div className="product-shadow rounded-2xl">
             <ScreenshotOrMock src={m.screenshot} alt={`${m.name}: ${m.tagline}`} fallback={<Placeholder icon={m.icon} accent={m.accent} label={m.name} />} />
           </div>
         </div>
-        <div className={`col-span-12 lg:col-span-6 ${flip ? 'lg:order-1' : ''}`}>
+        <div className={`col-span-1 lg:col-span-6 ${flip ? 'lg:order-1' : ''}`}>
           <div className="flex items-center gap-2.5 mb-4">
             <img src={m.logo} alt="" className="w-10 h-10 rounded-xl" />
             <span className="text-xl font-bold"><ModuleWordmark name={m.name} accent={m.accent} /></span>

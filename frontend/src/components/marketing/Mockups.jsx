@@ -44,7 +44,7 @@ export function MockClubHomepage() {
       </div>
 
       <div className="px-6 lg:px-8 py-7 grid grid-cols-1 lg:grid-cols-12 gap-5">
-        <div className="col-span-12 lg:col-span-7">
+        <div className="col-span-1 lg:col-span-7">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-[10px] font-mono uppercase tracking-wide3 text-accent">● Live · Round 14</span>
             <span className="text-[10px] font-mono text-pb-faint">2025/26 SEASON</span>
@@ -78,7 +78,7 @@ export function MockClubHomepage() {
           </div>
         </div>
 
-        <div className="col-span-12 lg:col-span-5 bg-pb-surface2 rounded-lg p-4 border pb-hairline">
+        <div className="col-span-1 lg:col-span-5 bg-pb-surface2 rounded-lg p-4 border pb-hairline">
           <div className="flex items-center justify-between mb-3">
             <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent">Season leaders · 1st Grade</p>
             <p className="text-[10px] font-mono text-pb-faint">Runs</p>
