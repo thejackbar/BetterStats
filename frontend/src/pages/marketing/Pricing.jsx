@@ -110,6 +110,31 @@ function PriceList() {
 }
 
 // ─── Competitor comparison (replace the whole stack) ───────────────────────
+function ImportIncluded() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 py-14">
+      <div className="max-w-[1000px] mx-auto">
+        <Reveal>
+          <div className="surface-strong border-accent/40 bg-gradient-to-b from-accent/[0.08] to-transparent p-8 lg:p-10 text-center relative overflow-hidden">
+            <div className="absolute inset-0 dot-grid opacity-20 pointer-events-none" />
+            <div className="relative">
+              <p className="pill inline-flex mb-5"><span className="dot" />Included · no extra charge</p>
+              <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">
+                We don't charge for <span className="gradient-text">historical imports.</span>
+              </h2>
+              <p className="text-lg text-pb-dim max-w-2xl mx-auto leading-relaxed">
+                Bringing your club's old data across is included in your plan, with no setup or import fee.
+                Our easy import tool does most of the work, and Better Cricket support will help you load your
+                full history into BetterStats and get every season looking right.
+              </p>
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  )
+}
+
 function ReplacesStack() {
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline bg-black/20">
@@ -238,6 +263,7 @@ export default function Pricing() {
         <Hero />
         <Calculator />
         <PriceList />
+        <ImportIncluded />
         <ReplacesStack />
         <PricingFAQ />
       </div>
