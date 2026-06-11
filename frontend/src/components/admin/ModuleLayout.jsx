@@ -62,10 +62,14 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
           : <span className="w-8 h-8 rounded bg-pb-accent/15 text-pb-accent font-display font-bold flex items-center justify-center shrink-0">{(club?.name || 'B')[0]}</span>}
         <div className="min-w-0">
           <div className="font-display font-bold text-sm leading-tight truncate" title={club?.name || ''}>{club?.name || 'BetterStats'}</div>
-          <div className="font-mono text-[10px] text-pb-faint">Better<span style={{ color: 'var(--pb-accent)' }}>{moduleName}</span></div>
         </div>
       </div>
-      <Link to="/admin" className="block mt-2 text-[11px] font-mono text-pb-faintest hover:text-pb-faint">← Back to admin</Link>
+      {/* Module lockup — which Better module this surface is */}
+      <div className="flex items-center gap-2 mt-3">
+        <img src={brand.logo} alt="" className="w-7 h-7 rounded-lg shrink-0" />
+        <span className="font-display font-bold text-[15px] leading-none">Better<span style={{ color: 'var(--pb-accent)' }}>{moduleName}</span></span>
+      </div>
+      <Link to="/admin" className="block mt-3 text-[11px] font-mono text-pb-faintest hover:text-pb-faint">← Back to admin</Link>
     </div>
   )
 
