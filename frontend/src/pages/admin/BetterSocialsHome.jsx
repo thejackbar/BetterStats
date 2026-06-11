@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { MODULE, tierInfo } from '../../lib/modules'
+import { MODULE } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
 
@@ -18,7 +18,7 @@ function ModuleName({ name }) {
   )
 }
 
-function SubCard({ name, blurb, to, entitled, requiredTier }) {
+function SubCard({ name, blurb, to, entitled }) {
   if (entitled) {
     return (
       <Link
@@ -34,12 +34,11 @@ function SubCard({ name, blurb, to, entitled, requiredTier }) {
       </Link>
     )
   }
-  const tier = tierInfo(requiredTier)
   return (
     <div className="pb-card p-5 opacity-75" style={{ borderStyle: 'dashed' }}>
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2 text-pb-faint"><span aria-hidden>🔒</span><ModuleName name={name} /></div>
-        <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-0.5 uppercase">{tier.label} plan</span>
+        <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-0.5 uppercase">Add-on</span>
       </div>
       <div className="text-pb-faint text-sm mt-1">{blurb}</div>
     </div>
@@ -60,11 +59,11 @@ export default function BetterSocialsHome() {
         <p className="text-pb-faint text-sm mb-6">Your club's outward face — a public website and social posts in one place.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <SubCard
-            name="BetterWebsite" to="/admin/website" entitled requiredTier="good"
+            name="BetterWebsite" to="/admin/website" entitled
             blurb="Build your public club website — news, pages, menus, honours, committee and galleries."
           />
           <SubCard
-            name="BetterPosts" to="/admin/social-post" entitled={hasModule(MODULE.SOCIALS)} requiredTier="better"
+            name="BetterPosts" to="/admin/social-post" entitled={hasModule(MODULE.SOCIALS)}
             blurb="Auto-post lineups, scorecards, milestones and match summaries."
           />
         </div>

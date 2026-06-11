@@ -1,9 +1,10 @@
-// Module + tier registry — keep in sync with backend/app/auth/modules.py.
+// Module registry — keep in sync with backend/app/auth/modules.py.
 //
-// The Better ecosystem is sold as Good / Better / Best tier bundles. Core
-// (BetterStats — data ingestion, reconciled stats and the public site) is
-// always on for every club and is NOT a gateable module. The entries below are
-// the bolt-on modules, each rendered as a tile on the admin dashboard.
+// The Better ecosystem is modular: every club gets Core (BetterStats: data
+// ingestion, reconciled stats and the public site), always on and never a
+// gateable module, then turns on the bolt-on modules it pays for. The entries
+// below are those bolt-on modules, each rendered as a tile on the admin
+// dashboard.
 
 import { CAP } from './capabilities'
 
@@ -15,22 +16,7 @@ export const MODULE = {
   COMMS: 'comms',
 }
 
-export const TIER = { GOOD: 'good', BETTER: 'better', BEST: 'best' }
-export const TIER_ORDER = [TIER.GOOD, TIER.BETTER, TIER.BEST]
-
-// Working price ladder — locked 2026-06-01 (Ecosystem Master Plan).
-// NOTE: the master plan's "Risks & Open Decisions" note quotes $350/$650/$990,
-// but the detailed "Price ladder (working ladder)" table — used here — quotes
-// $449/$649/$999 + monthly $49/$69/$99. This object is the single source of
-// truth; edit here if the ladder changes.
-export const TIER_INFO = {
-  [TIER.GOOD]:   { key: TIER.GOOD,   label: 'Good',   annual: 449, monthly: 49, tagline: 'Your history and a public site to be proud of' },
-  [TIER.BETTER]: { key: TIER.BETTER, label: 'Better', annual: 649, monthly: 69, tagline: 'Run the season: availability, selection and socials' },
-  [TIER.BEST]:   { key: TIER.BEST,   label: 'Best',   annual: 999, monthly: 99, tagline: 'Run the whole club: money plus an analytics brain' },
-}
-
 // Module registry — the admin dashboard renders one tile per entry, in order.
-// - requiredTier: the lowest tier that bundles the module (drives the upsell)
 // - built:        false → tile shows "Coming soon" instead of opening
 // - caps:         capabilities that let a club_member actually use the module
 export const MODULE_INFO = [
@@ -39,7 +25,6 @@ export const MODULE_INFO = [
     name: 'BetterSelect',
     blurb: 'Availability and smart team selection — plan your weekends.',
     to: '/admin/betterselect',
-    requiredTier: TIER.BETTER,
     built: true,
     caps: [CAP.MANAGE_FIXTURES, CAP.MANAGE_SELECTIONS],
   },
@@ -48,7 +33,6 @@ export const MODULE_INFO = [
     name: 'BetterSocials',
     blurb: 'Auto-post lineups, scorecards, milestones and match summaries.',
     to: '/admin/social-post',
-    requiredTier: TIER.BETTER,
     built: true,
     caps: [CAP.MANAGE_SOCIAL],
     group: 'socials',  // shown under the BetterSocials umbrella (with the Website)
@@ -58,7 +42,6 @@ export const MODULE_INFO = [
     name: 'BetterFees',
     blurb: 'Fee schedules and match-day payment tracking for the treasurer.',
     to: '/admin/fees',
-    requiredTier: TIER.BEST,
     built: true,
     caps: [CAP.MANAGE_FEES],
     group: 'admin',  // shown under the BetterAdmin umbrella tile
@@ -68,7 +51,6 @@ export const MODULE_INFO = [
     name: 'BetterComms',
     blurb: 'Bulk email to your member database — newsletters and announcements.',
     to: '/admin/comms',
-    requiredTier: TIER.BEST,
     built: true,
     caps: [CAP.MANAGE_COMMS],
     group: 'admin',
@@ -78,7 +60,6 @@ export const MODULE_INFO = [
     name: 'BetterIQ',
     blurb: 'AI + stats deep-dive: opposition scouting, selection analysis, trends.',
     to: '/admin/betteriq',
-    requiredTier: TIER.BEST,
     built: true,
     caps: [CAP.MANAGE_IQ],
   },
@@ -88,15 +69,14 @@ export const MODULE_INFO = [
 // presented together as one **BetterAdmin** umbrella tile on the dashboard /
 // sidebar — the club's back office in one place.
 export const MODULE_GROUPS = {
-  // BetterSocials is an umbrella too: the Post Designer (Better tier) plus the
-  // club Website (Core — every club). alwaysOpen keeps the hub reachable for
+  // BetterSocials is an umbrella too: the Post Designer (the socials module)
+  // plus the club Website (Core, every club). alwaysOpen keeps the hub reachable for
   // every club so the Core website is never gated behind the socials module.
   socials: {
     key: 'bettersocials',
     name: 'BetterSocials',
     blurb: 'Your public website plus auto-posts for lineups, scorecards and milestones.',
     to: '/admin/bettersocials',
-    requiredTier: TIER.BETTER,
     alwaysOpen: true,
   },
   admin: {
@@ -104,7 +84,6 @@ export const MODULE_GROUPS = {
     name: 'BetterAdmin',
     blurb: 'Run the back office — fees, comms and merch in one place.',
     to: '/admin/betteradmin',
-    requiredTier: TIER.BEST,
   },
 }
 
@@ -130,13 +109,16 @@ export function dashboardTiles() {
   return tiles
 }
 
-export function tierLabel(tier) {
-  return TIER_INFO[tier]?.label || TIER_INFO[TIER.GOOD].label
-}
-
-export function tierInfo(tier) {
-  return TIER_INFO[tier] || TIER_INFO[TIER.GOOD]
-}
+// The modular toggles a super admin grants per club. BetterAdmin is the
+// back-office umbrella, so its toggle covers both backend module keys (fees +
+// comms). `modules` are the backend entitlement keys (app/auth/modules.py
+// ALL_MODULES); Core (BetterStats) is always on and isn't a toggle.
+export const MODULE_TOGGLES = [
+  { key: 'select',  label: 'BetterSelect',  modules: ['select'] },
+  { key: 'socials', label: 'BetterSocials', modules: ['socials'] },
+  { key: 'admin',   label: 'BetterAdmin',   modules: ['fees', 'comms'] },
+  { key: 'iq',      label: 'BetterIQ',       modules: ['iq'] },
+]
 
 // Subscription statuses — keep in sync with backend ALL_STATUSES /
 // ACTIVE_STATUSES. `live` = entitlements stay active for that status.

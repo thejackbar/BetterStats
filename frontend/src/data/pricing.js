@@ -1,9 +1,10 @@
 // Modular Better Cricket pricing for the public marketing pages.
 //
-// Decoupled on purpose from the in-app entitlement registry (src/lib/modules.js,
-// which still describes the Good/Better/Best tiers the backend enforces). The
-// public model the club sees is simpler: one Core plus the modules you choose,
-// billed as an annual licence. Edit the numbers here.
+// This is the public, marketing-facing price model: one Core plus the modules
+// you choose, billed as an annual licence. The in-app entitlement registry
+// (src/lib/modules.js) holds the per-module gating the backend enforces; the
+// two are kept separate so marketing copy and entitlement logic can move
+// independently. Edit the numbers here.
 //
 // Colours + logos come from the shared module-brand registry so the calculator
 // matches the dashboard tiles and the rest of the marketing site.

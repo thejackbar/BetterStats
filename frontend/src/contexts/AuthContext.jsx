@@ -78,17 +78,17 @@ export function AuthProvider({ children }) {
     return Array.isArray(user.capabilities) && user.capabilities.includes(cap)
   }, [user])
 
-  // Module entitlement — driven by the club's tier (+ à-la-carte overrides),
-  // sent by the backend on /auth/me + /auth/login as `entitlements.modules`.
-  // Super admins act cross-club and are entitled to everything.
+  // Module entitlement — the club's explicit module list, sent by the backend
+  // on /auth/me + /auth/login as `entitlements.modules`. Super admins act
+  // cross-club and are entitled to everything.
   const hasModule = useCallback((moduleKey) => {
     if (!user) return false
     if (user.role === 'super_admin') return true
     // Backward-compat / fail-open: an older backend (or a not-yet-migrated one)
     // doesn't send `entitlements` at all. Don't hide the modules in that case —
     // only gate when the backend explicitly provides the modules list. A club
-    // genuinely on a lower tier still gets an (empty) modules array, so real
-    // gating is unaffected.
+    // with no modules still gets an (empty) modules array, so real gating is
+    // unaffected.
     const mods = user.entitlements?.modules
     if (!Array.isArray(mods)) return true
     return mods.includes(moduleKey)

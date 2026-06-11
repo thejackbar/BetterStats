@@ -109,13 +109,16 @@ delivery and drives the success/error UI, so a failed store never blocks the for
 
 ## Public Marketing Pricing — modular model (Jun 2026)
 
-The **public** marketing pricing is a modular model, deliberately **decoupled**
-from the in-app entitlement registry (`frontend/src/lib/modules.js`, which still
-describes the Good/Better/Best tiers the backend enforces). Public model:
-**Core (BetterStats) $400/yr** plus modules **BetterSelect / BetterSocials /
-BetterAdmin $100 each** and **BetterIQ $200**, an **annual licence only** (no
-monthly). Bundle discount: any 2 modules 5% off, all 4 10% (Core + all four =
-$810).
+The **public** marketing pricing and the in-app entitlement model are both
+**modular** now (the Good/Better/Best tiers were retired, see "Modular
+entitlements" below). The public price model is still kept separate from the
+entitlement registry (`frontend/src/lib/modules.js`) so marketing copy and
+gating logic move independently. Public model: **Core (BetterStats) $399/yr**
+plus modules **BetterSelect / BetterSocials / BetterAdmin $149 each** and
+**BetterIQ $249**, an **annual licence only** (no monthly). Bundle discount is a
+**set dollar amount** keyed on module count (2 modules save $48, 3 save $97, all
+4 save $146), so Core + all four = **$949** (see `BUNDLE_DISCOUNT` in
+`pricing.js`).
 
 - **Source of truth**: `frontend/src/data/pricing.js` (`CORE`, `PRICED_MODULES`,
   `priceFor`, `ALL_IN`, `COMPETITOR_STACK`, `COMPETITOR_TOTAL`). Edit prices here.
@@ -130,12 +133,33 @@ $810).
 - **Monthly removed** from the public site (Pricing toggle, Overview snapshot,
   Landing/Features price lines, Terms clause, a blog callout). The dormant
   monthly toggle in `ComparisonTable` was left (no caller enables it). The in-app
-  `modules.js` `TIER_INFO` / `BILLING_CYCLES` were **left as-is** (backend-coupled
-  entitlement system, not marketing).
-- **Still tier-flavoured** (follow-up): module cards on Modules / ModuleDetail /
-  Features / Landing / Overview still badge a module with its old `{tier} tier`
-  label. Harmless, but worth swapping for the module price or dropping once the
-  tier-to-modular rebrand is finished.
+  `BILLING_CYCLES` constant remains (a super admin can still record a club's
+  billing cycle); `TIER_INFO` and the whole tier model were removed (below).
+
+## Modular entitlements — tiers retired (v8.12, Jun 2026)
+
+The Good/Better/Best plan tiers are **retired and not returning.** A club's
+`module_overrides` (the explicit list of module keys it holds) is now the
+**single source of truth** for entitlement, gated only by `subscription_status`
+(`backend/app/auth/modules.py::org_entitled_modules` = the module list while the
+sub is active, else Core only). Core (BetterStats) is always on and is never a
+gateable module.
+
+- **Migration 080** backfilled every club's `module_overrides` from its old tier
+  (`best` → all 5, `better` → select+socials, `good` → none) so **no club lost
+  access**. Additive and idempotent.
+- `organisations.tier` is **kept but deprecated** (no longer read anywhere;
+  retained for history, not dropped). Don't read it.
+- **Super admins** assign a club's modules via per-module checkboxes
+  (`MODULE_TOGGLES` in `lib/modules.js`; **BetterAdmin = fees + comms**) in
+  `SuperClubs.jsx` — there's no tier dropdown.
+- `/auth/me` + `/auth/login` no longer return `entitlements.tier` (just
+  `modules`, `overrides`, `status`, `renewal_date`, `billing_cycle`). Frontend
+  gating already reads `entitlements.modules` (`AuthContext.hasModule`).
+- **Don't reintroduce** `TIER` / `TIER_INFO` / `TIER_ORDER` / `requiredTier` /
+  `tier_modules` / `MODULE_REQUIRED_TIER` anywhere. Locked modules read as
+  "add-ons", not a higher tier. (BetterFees membership/fee-schedule *tiers* are a
+  different, unrelated feature — leave those.)
 
 ## Version Numbers
 

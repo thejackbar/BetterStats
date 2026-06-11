@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
-import { dashboardTiles, tierLabel } from '../../lib/modules'
+import { dashboardTiles } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
 import ModuleLockup from '../ModuleLockup'
 import { api } from '../../lib/api'
@@ -329,7 +329,7 @@ export default function AdminLayout({ children }) {
                 return (
                   <div
                     key={mod.key}
-                    title={locked ? `Included in the ${tierLabel(mod.requiredTier)} plan` : 'Coming soon'}
+                    title={locked ? 'Available as an add-on' : 'Coming soon'}
                     className="flex items-center gap-2 px-2 py-1.5 rounded font-display font-bold text-[13px] text-pb-faintest cursor-default select-none"
                   >
                     <img src={brand.logo} alt="" className="w-4 h-4 rounded shrink-0 grayscale opacity-50" />
