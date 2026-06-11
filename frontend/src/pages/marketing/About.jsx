@@ -31,13 +31,10 @@ function Story() {
           <p className="pill-neutral inline-flex mb-6">What we do</p>
           <div className="space-y-5 text-lg text-pb-dim leading-relaxed">
             <p>
-              Better Cricket was built by a few people who were sick of how much of running a club rides on spreadsheets, group chats and whoever's been around longest. Every time the systems clubs depend on change hands, the history gets lost. And everything else (selection, availability, fees, the socials) ends up scattered across a dozen different places.
+              Better Cricket was built by people who know cricket inside out and have run clubs themselves. We've picked the side, chased the fees and kept the scorebook, so we know how much of the week still runs on spreadsheets and group chats.
             </p>
             <p>
-              So we built one platform for all of it. <span className="text-pb-text">Better Cricket keeps your history online and runs your season around it</span>: player profiles and records going back decades, weekend availability and selection, club-branded social posts, the back office, and opposition and match prep. Each part feeds the others, because it's all the same club.
-            </p>
-            <p>
-              Australian cricket clubs are full of people who care about this: the player who hit the first century, the one who took the most wickets in a season, whoever sorts the weekend XI and chases the fees. We want to give those clubs their whole season in one place, kept current on its own and actually worth opening each week.
+              We built one platform to do those everyday jobs better, and to look after your club's history while we're at it. <span className="text-pb-text">It's our way of giving back to the clubs, and to the players, families and volunteers who keep them going.</span>
             </p>
           </div>
         </Reveal>
