@@ -45,7 +45,7 @@ function Hero() {
           Built in modules. <span className="gradient-text">Bought in tiers.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed">
-          Better Cricket — everything your cricket club runs on. Every club starts with BetterStats,
+          Better Cricket is everything your cricket club runs on. Every club starts with BetterStats,
           then adds the parts that fit how the club actually runs.
         </p>
       </div>
@@ -63,7 +63,7 @@ function Showcase() {
             <div className="relative product-shadow rounded-2xl overflow-hidden border pb-hairline">
               <img
                 src={HUB_SHOWCASE}
-                alt="The Better admin dashboard — one tile per module"
+                alt="The Better admin dashboard, one tile per module"
                 className="block w-full h-auto"
                 loading="lazy"
               />
@@ -140,7 +140,7 @@ export default function Modules() {
   usePageMeta({
     title: 'Modules — BetterSelect, BetterSocials, BetterAdmin & BetterIQ | Better Cricket',
     description:
-      'Better Cricket in parts: the BetterStats Core plus four bolt-on modules — BetterSelect (selection), BetterSocials (website & social posts), BetterAdmin (fees, comms & merch) and BetterIQ (analytics & opposition scouting). Bundled into Good / Better / Best tiers.',
+      'Better Cricket in parts: the BetterStats Core plus four bolt-on modules, BetterSelect (selection), BetterSocials (website & social posts), BetterAdmin (fees, comms & merch) and BetterIQ (analytics & opposition scouting). Start with the BetterStats Core and add the modules you want.',
     image: 'https://betterat.cricket/og-image.png',
     url: 'https://betterat.cricket/modules',
   })

@@ -33,7 +33,7 @@ export default function Terms() {
             <p>
               Better Cricket helps your club keep its records, statistics and history online, and run its
               season, back office and match preparation through the modules included in your plan. Some
-              information published through the Service — such as club statistics pages — is public by design.
+              information published through the Service, such as club statistics pages, is public by design.
               We may add, change or remove features from time to time as the Service evolves.
             </p>
           </section>
@@ -62,9 +62,9 @@ export default function Terms() {
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">5. Subscription &amp; payment</h2>
             <p>
               The Service is offered on flat per-club plans: the <strong className="text-pb-text">Core</strong> (BetterStats)
-              is $400 per year, and you can add modules (<strong className="text-pb-text">BetterSelect</strong>,{' '}
+              is $399 per year, and you can add modules (<strong className="text-pb-text">BetterSelect</strong>,{' '}
               <strong className="text-pb-text">BetterSocials</strong> and <strong className="text-pb-text">BetterAdmin</strong> at
-              $100 per year each, <strong className="text-pb-text">BetterIQ</strong> at $200), with a discount when you bundle.
+              $149 per year each, <strong className="text-pb-text">BetterIQ</strong> at $249), with a discount when you bundle.
               Pricing is per club regardless of how many grades, teams or players you run. The plan you select at
               sign-up, and what it includes, is set out on our{' '}
               <Link to="/pricing" className="hover:underline" style={{ color: 'var(--pb-accent)' }}>pricing page</Link>.
@@ -82,7 +82,7 @@ export default function Terms() {
             <p>
               Your club's data remains yours. We process it to provide the Service, and you can export your club's
               data as CSV at any time. The statistics shown in the Service are derived from your club's own match
-              data — the records your club produces and maintains. While we work hard to keep everything accurate,
+              data, the records your club produces and maintains. While we work hard to keep everything accurate,
               we don't guarantee that every statistic is complete or error-free, and you remain responsible for the
               accuracy of the data your club provides. We may use de-identified, aggregated information to operate,
               secure and improve the Service.

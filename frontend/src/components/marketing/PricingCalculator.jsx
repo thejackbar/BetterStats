@@ -5,9 +5,9 @@ import { ModuleWordmark } from './../ModuleLockup'
 
 /**
  * Modular plan builder. BetterStats is always in; tick the modules
- * you want and the annual price updates live, including the bundle discount
- * (two modules 5% off, all four 10%). This is the main way the Pricing page
- * shows what Better Cricket costs.
+ * you want and the annual price updates live, including the set-dollar bundle
+ * discount (two modules save $48, three $97, all four $146). This is the main
+ * way the Pricing page shows what Better Cricket costs.
  */
 export default function PricingCalculator() {
   const [selected, setSelected] = useState(() => new Set())
@@ -19,7 +19,7 @@ export default function PricingCalculator() {
       return next
     })
 
-  const { rate, discount, total, moduleCount, modules } = priceFor([...selected])
+  const { discount, total, moduleCount, modules } = priceFor([...selected])
 
   return (
     <div className="surface p-6 lg:p-8">
@@ -30,7 +30,7 @@ export default function PricingCalculator() {
           <h3 className="text-2xl font-bold mb-1.5">Pick the modules you want.</h3>
           <p className="text-sm text-pb-dim mb-6">
             BetterStats is always included. Add any modules and the price updates as you go.
-            Take any two for 5% off, or all four for 10%.
+            Add two or more and the bundle discount kicks in, up to $146 off when you take all four.
           </p>
 
           <div className="space-y-2.5">
@@ -99,7 +99,7 @@ export default function PricingCalculator() {
               ))}
               {discount > 0 && (
                 <div className="flex justify-between text-accent">
-                  <span>Bundle discount ({Math.round(rate * 100)}%)</span>
+                  <span>Bundle discount</span>
                   <span className="tabular-nums">-${discount}</span>
                 </div>
               )}
@@ -110,16 +110,16 @@ export default function PricingCalculator() {
             </div>
 
             {moduleCount < 2 && (
-              <p className="text-[11px] text-pb-faint text-center mb-4">Add another module to unlock 5% off.</p>
+              <p className="text-[11px] text-pb-faint text-center mb-4">Add another module to unlock the bundle discount.</p>
             )}
             {moduleCount >= 2 && moduleCount < 4 && (
-              <p className="text-[11px] text-accent text-center mb-4">5% bundle discount applied. Add all four for 10%.</p>
+              <p className="text-[11px] text-accent text-center mb-4">You're saving ${discount} with the bundle. Add all four to save $146.</p>
             )}
             {moduleCount === 4 && (
-              <p className="text-[11px] text-accent text-center mb-4">Everything in, 10% off.</p>
+              <p className="text-[11px] text-accent text-center mb-4">Everything in, $146 off the lot.</p>
             )}
 
-            <Link to="/contact" className="cta-primary w-full justify-center">Get this plan →</Link>
+            <Link to="/contact" className="cta-primary w-full justify-center">Get Your Club on BetterCricket today!</Link>
           </div>
         </div>
       </div>

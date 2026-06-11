@@ -13,7 +13,7 @@ export const CORE = {
   key: 'core',
   name: 'BetterStats',
   label: 'Core',
-  price: 400,
+  price: 399,
   icon: '◆',
   accent: BRAND.stats.accent,
   logo: BRAND.stats.logo,
@@ -23,18 +23,20 @@ export const CORE = {
 // The bolt-on modules and their annual price. Logos/accents come from the shared
 // brand registry so the calculator looks like the dashboard.
 export const PRICED_MODULES = [
-  { key: 'select',  name: 'BetterSelect',  price: 100, icon: '◎', accent: BRAND.select.accent,  logo: BRAND.select.logo,  blurb: 'Player availability, team selection and net manager' },
-  { key: 'socials', name: 'BetterSocials', price: 100, icon: '◈', accent: BRAND.socials.accent, logo: BRAND.socials.logo, blurb: 'Social-post generation and a CRM for your club website' },
-  { key: 'admin',   name: 'BetterAdmin',   price: 100, icon: '⬢', accent: BRAND.admin.accent,   logo: BRAND.admin.logo,   blurb: 'Member fees, bulk emailing and merch (coming soon)' },
-  { key: 'iq',      name: 'BetterIQ',      price: 200, icon: '◇', accent: BRAND.iq.accent,      logo: BRAND.iq.logo,      blurb: 'Deep analytics and opposition scouting' },
+  { key: 'select',  name: 'BetterSelect',  price: 149, icon: '◎', accent: BRAND.select.accent,  logo: BRAND.select.logo,  blurb: 'Player availability, team selection and net manager' },
+  { key: 'socials', name: 'BetterSocials', price: 149, icon: '◈', accent: BRAND.socials.accent, logo: BRAND.socials.logo, blurb: 'Social-post generation and a CRM for your club website' },
+  { key: 'admin',   name: 'BetterAdmin',   price: 149, icon: '⬢', accent: BRAND.admin.accent,   logo: BRAND.admin.logo,   blurb: 'Member fees, bulk emailing and merch (coming soon)' },
+  { key: 'iq',      name: 'BetterIQ',      price: 249, icon: '◇', accent: BRAND.iq.accent,      logo: BRAND.iq.logo,      blurb: 'Deep analytics and opposition scouting' },
 ]
 
-// Bundle discount on the whole price: pick any 2 or 3 modules for 5% off, all 4
-// for 10%. (2 or 3 modules take the 5% band; the full set takes 10%.)
-export function discountRate(moduleCount) {
-  if (moduleCount >= 4) return 0.10
-  if (moduleCount >= 2) return 0.05
-  return 0
+// Bundle discount in whole dollars, keyed on how many modules you add (not a
+// percentage). It lines up with the published bundle prices: add two modules
+// and you save $48, three saves $97, all four saves $146. So every bundle lands
+// on a tidy price and the full set (Core + all four) comes to $949.
+export const BUNDLE_DISCOUNT = { 0: 0, 1: 0, 2: 48, 3: 97, 4: 146 }
+
+export function bundleDiscount(moduleCount) {
+  return BUNDLE_DISCOUNT[moduleCount] ?? 0
 }
 
 // Price a selection of module keys. Returns the subtotal, the discount and the
@@ -42,13 +44,13 @@ export function discountRate(moduleCount) {
 export function priceFor(selectedKeys = []) {
   const mods = PRICED_MODULES.filter((m) => selectedKeys.includes(m.key))
   const subtotal = CORE.price + mods.reduce((sum, m) => sum + m.price, 0)
-  const rate = discountRate(mods.length)
-  const discount = Math.round(subtotal * rate)
-  return { subtotal, rate, discount, total: subtotal - discount, moduleCount: mods.length, modules: mods }
+  const discount = bundleDiscount(mods.length)
+  return { subtotal, discount, total: subtotal - discount, moduleCount: mods.length, modules: mods }
 }
 
-// The everything price (Core + every module), for headline copy.
-export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total  // 810
+// The full-set saving (Core + every module) and the everything price, for copy.
+export const MAX_BUNDLE_SAVING = bundleDiscount(PRICED_MODULES.length)             // 146
+export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total            // 949
 
 // ── Competitor stack ─────────────────────────────────────────────────────────
 // What a club would otherwise pay to match Better Cricket's scope, using each
@@ -65,7 +67,7 @@ export const COMPETITOR_STACK = [
 ]
 
 export const COMPETITOR_TOTAL = COMPETITOR_STACK.reduce((sum, c) => sum + c.cost, 0)  // 1904
-export const SAVING = COMPETITOR_TOTAL - ALL_IN                                       // 1094
+export const SAVING = COMPETITOR_TOTAL - ALL_IN                                       // 955
 
 // Better Cricket loads your full history at no extra cost. The closest cricket
 // rival (ClubStats) charges a one-off historical-import fee on top of the

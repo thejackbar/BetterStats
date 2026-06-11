@@ -28,7 +28,7 @@ function PostThumb({ src, title }) {
 export default function Blog() {
   usePageMeta({
     title: 'Blog — Cricket Stats Guides & Club Tips | Better Cricket',
-    description: 'Cricket statistics guides and club management tips from the Better Cricket team — batting averages, bowling economy, historical data, and more.',
+    description: 'Cricket statistics guides and club management tips from the Better Cricket team: batting averages, bowling economy, historical data and more.',
     image: 'https://betterat.cricket/og-image.png',
     url: 'https://betterat.cricket/blog',
   })
@@ -39,7 +39,7 @@ export default function Blog() {
       <div id="main-content" tabIndex="-1" className="max-w-3xl mx-auto px-4 py-16 pt-28">
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">Stats guides & club tips</p>
         <h1 className="font-display font-bold text-[48px] md:text-[60px] tracking-tight text-pb-text mb-4 leading-tight">Blog.</h1>
-        <p className="text-pb-dim text-lg mb-12">Cricket statistics explained — for club players, captains, and committee members.</p>
+        <p className="text-pb-dim text-lg mb-12">Cricket statistics explained, for club players, captains and committee members.</p>
 
         <div className="space-y-0">
           {POSTS.map((post) => (

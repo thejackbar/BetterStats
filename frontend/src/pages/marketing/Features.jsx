@@ -26,13 +26,13 @@ const HERO_SECTIONS = [
     n: '01',
     eyebrow: 'Automatic Stats Sync',
     title: 'Connect once. Sync forever.',
-    desc: 'Connect your club once and your whole match history is imported — then every new game flows in on its own. Stats stay current after every match, with zero data entry and no spreadsheets to maintain.',
+    desc: 'Connect your club once and your whole match history is imported. From then on every new game flows in on its own. Stats stay current after every match, with zero data entry and no spreadsheets to keep up.',
     bullets: [
       'Connect once and your full match history is imported automatically',
       'Simple CSV templates to fill any gaps in older data',
       'Batting, bowling, and fielding stats captured per player per game',
       'Season aggregates and career totals computed automatically',
-      'Stays current after every match — nothing to trigger, no data entry',
+      'Stays current after every match, with nothing to trigger and no data entry',
       'Admin-triggered hard refresh available for on-demand updates',
     ],
     src: SCREENSHOT_PATHS.featuresLeaderboard,
@@ -42,11 +42,11 @@ const HERO_SECTIONS = [
     n: '02',
     eyebrow: 'Player Profiles',
     title: 'A career page worth visiting.',
-    desc: "Every player gets a rich, public profile page with their full career stats, season history, and achievements — automatically kept up to date.",
+    desc: "Every player gets a public profile page with their full career stats, season history, and achievements, automatically kept up to date.",
     bullets: [
       'Career batting, bowling, and fielding totals with animated stat counters',
       'Season-by-season breakdown with colour-coded best/worst seasons',
-      'Career progression charts — runs over time, averages by season',
+      'Career progression charts: runs over time, averages by season',
       'Dismissal breakdown chart showing how they typically got out',
       'Partnership data and batting position analysis',
       'Achievements: milestone badges (500 runs, 50 wickets, 100 games…)',
@@ -60,10 +60,10 @@ const HERO_SECTIONS = [
     n: '03',
     eyebrow: 'Player Merge Tool',
     title: 'One player. One profile. Stats stop splitting.',
-    desc: "Duplicate profiles for the same player used to scatter stats across two or three records. The Player Merge Tool fixes that — and keeps it fixed.",
+    desc: "Duplicate profiles for the same player used to scatter stats across two or three records. The Player Merge Tool fixes that and keeps it fixed.",
     bullets: [
       'Smart sorting suggests which profiles likely belong to the same player',
-      'One click to merge — all batting, bowling, fielding history combines',
+      'One click to merge: all batting, bowling, fielding history combines',
       'Just as easy to undo if you change your mind',
       'Every future sync routes new matches into the merged profile',
       'No more career averages spread across two records',
@@ -91,7 +91,7 @@ const HERO_SECTIONS = [
     n: '05',
     eyebrow: 'Season Yearbooks',
     title: 'The annual that writes itself.',
-    desc: "A proper, shareable digital season publication for every year. Auto-populated with stats, honours, and results — then topped up with editorial content by your admin team.",
+    desc: "A proper, shareable digital season publication for every year. Auto-populated with stats, honours, and results, then topped up with editorial content by your admin team.",
     bullets: [
       'Overview tab: season W/L/D record, win rate, progression chart',
       'Batting, bowling, fielding, all-rounder honours auto-populated',
@@ -101,7 +101,7 @@ const HERO_SECTIONS = [
       "Editorial sections: President's Report, Coach's Report, Sponsor's Message",
       'Honour board: record club positions and holders',
       'AI-assisted season narrative generator',
-      "Publish/unpublish control — draft until you're ready",
+      "Publish/unpublish control: draft until you're ready",
     ],
     src: SCREENSHOT_PATHS.featuresYearbook,
     mock: <MockYearbook />,
@@ -110,7 +110,7 @@ const HERO_SECTIONS = [
     n: '06',
     eyebrow: 'Club Records',
     title: 'All-time records. Always current.',
-    desc: 'All-time and season-best records across batting, bowling, partnerships, all-rounders, and team achievements — always current.',
+    desc: 'All-time and season-best records across batting, bowling, partnerships, all-rounders, and team achievements, always kept current.',
     bullets: [
       'Batting: most career runs, highest individual score, best average, most hundreds/fifties',
       'Bowling: most career wickets, best innings figures, best economy, most five-fors',
@@ -126,7 +126,7 @@ const HERO_SECTIONS = [
     n: '07',
     eyebrow: 'Player Comparison',
     title: 'Side-by-side, head-to-head.',
-    desc: "Compare any two players over their full careers — and use the same view as a form indicator when you've got a tough selection to make.",
+    desc: "Compare any two players over their full careers, then use the same view as a form indicator when you've got a tough selection to make.",
     bullets: [
       'Batting, bowling and fielding compared row by row',
       'Career totals and per-season splits side by side',
@@ -142,7 +142,7 @@ const HERO_SECTIONS = [
 const SHORT_SECTIONS = [
   {
     title: 'Match Scorecards',
-    desc: 'Full scorecards for every game — batting, bowling, fall of wickets, and partnerships — linked directly from player profiles.',
+    desc: 'Full scorecards for every game (batting, bowling, fall of wickets, and partnerships) linked directly from player profiles.',
     src: SCREENSHOT_PATHS.shortScorecard,
   },
   {
@@ -152,17 +152,17 @@ const SHORT_SECTIONS = [
   },
   {
     title: 'Shareable Player Cards',
-    desc: 'Every player profile has a clean, branded stat card — career or season view, club rank badges, milestone indicators, one-tap native share.',
+    desc: 'Every player profile has a clean, branded stat card: career or season view, club rank badges, milestone indicators, one-tap native share.',
     src: SCREENSHOT_PATHS.featuresCards,
   },
   {
     title: 'Awards & Honours',
-    desc: "Your club's full honours history in one place — annual awards, hall of fame, office bearers, association honours, and premierships. CSV bulk import for back-filling.",
+    desc: "Your club's full honours history in one place: annual awards, hall of fame, office bearers, association honours, and premierships. CSV bulk import for back-filling.",
     src: SCREENSHOT_PATHS.shortAwards,
   },
   {
     title: 'Admin Tools',
-    desc: 'Display name overrides, grade renames, CSV import/export, manual sync trigger, multiple admin logins — everything your stats volunteers need.',
+    desc: 'Everything your stats volunteers need: display name overrides, grade renames, CSV import/export, manual sync trigger, and multiple admin logins.',
     src: SCREENSHOT_PATHS.shortAdmin,
   },
 ]
@@ -204,7 +204,7 @@ function Hero() {
           <span className="gradient-text">BetterStats.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-xl mx-auto leading-relaxed">
-          Your club’s reconciled history and a public site to be proud of — included in every Better Cricket plan. Here’s everything it does.
+          Your club’s reconciled history and a public site to be proud of, included in every Better Cricket plan. Here’s everything it does.
         </p>
       </div>
     </section>
@@ -268,7 +268,7 @@ function FeatureBlock({ f, idx }) {
                   </li>
                 ))}
               </ul>
-              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary !text-sm !py-2.5 !px-5">Get this on your club →</a>
+              <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary !text-sm !py-2.5 !px-5">Get Your Club on BetterCricket today!</a>
             </div>
             <div className="col-span-12 lg:col-span-7 lg:[direction:ltr]">
               <div className="relative product-shadow rounded-2xl">
@@ -313,7 +313,7 @@ function FeaturesCTA() {
           <p className="pill mb-6 mx-auto"><span className="dot" />In every plan</p>
           <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">BetterStats, <span className="gradient-text">in every plan.</span></h2>
           <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">
-            Everything on this page is BetterStats, from $400 a year, flat rate per club. Add modules whenever you’re ready.
+            Everything on this page is BetterStats, from $399 a year, flat rate per club. Add modules whenever you’re ready.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
