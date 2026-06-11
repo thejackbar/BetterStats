@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react'
 import { useClubData, useRecentGames } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
+import { useAuth } from '../contexts/AuthContext'
+import { CAP } from '../lib/capabilities'
 import { api } from '../lib/api'
 import SeasonSelector from '../components/SeasonSelector'
 import ClubInactive from './ClubInactive'
@@ -136,6 +138,13 @@ export default function Dashboard() {
   const [syncing, setSyncing] = useState(false)
   const [syncDone, setSyncDone] = useState(false)
 
+  // Sync is an admin-only action — only show it to a signed-in admin who can
+  // actually run it for THIS club. Super admins can sync any club; everyone
+  // else only their own. Public visitors (and admins of other clubs) never see it.
+  const { user, hasCapability } = useAuth()
+  const canSync = hasCapability(CAP.RUN_SYNC) &&
+    (user?.role === 'super_admin' || user?.club_id === orgId)
+
   useEffect(() => {
     if (!orgId) return
     setStatsLoading(true)
@@ -193,13 +202,15 @@ export default function Dashboard() {
             summary && <span key="p"><span className="text-pb-text">{fmtCount(summary.total_players)}</span> PLAYERS</span>,
           ].filter(Boolean)}
           actions={[
-            <Btn key="sync" onClick={handleSync} disabled={syncing}>
-              {syncing ? 'Syncing…' : syncDone ? '✓ Synced' : 'Sync ↻'}
-            </Btn>,
+            canSync && (
+              <Btn key="sync" onClick={handleSync} disabled={syncing}>
+                {syncing ? 'Syncing…' : syncDone ? '✓ Synced' : 'Sync ↻'}
+              </Btn>
+            ),
             <Link key="lb" to={`/${clubSlug}/leaderboard`} className="font-mono text-[11px] tracking-wide2 px-3.5 py-2 rounded text-[#08110b] hover:opacity-90 transition" style={{ background: "var(--pb-accent)" }}>
               Leaderboard →
             </Link>,
-          ]}
+          ].filter(Boolean)}
         />
 
         {/* Season / Grade filter */}
