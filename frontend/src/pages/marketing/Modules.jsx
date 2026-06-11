@@ -8,8 +8,7 @@ import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 function ModuleCard({ m, delay }) {
-  const isCore = m.isCore
-  const to = isCore ? m.to : `/modules/${m.slug}`
+  const to = `/modules/${m.slug}`
   return (
     <Reveal delay={delay} className="h-full">
       <Link to={to} className="surface p-7 h-full flex flex-col transition-colors group block"
@@ -21,7 +20,7 @@ function ModuleCard({ m, delay }) {
         </div>
         <h3 className="text-xl font-bold mb-2"><ModuleWordmark name={m.name} accent={m.accent} /></h3>
         <p className="text-sm text-pb-dim leading-relaxed mb-5">{m.tagline}</p>
-        {!isCore && (
+        {m.highlights && (
           <ul className="space-y-1.5 mb-6">
             {m.highlights.slice(0, 3).map((h) => (
               <li key={h} className="flex items-start gap-2 text-xs text-pb-dim"><span className="mt-0.5" style={{ color: m.accent }}>✓</span>{h}</li>
@@ -29,7 +28,7 @@ function ModuleCard({ m, delay }) {
           </ul>
         )}
         <span className="mt-auto pt-4 border-t pb-hairline text-sm font-medium inline-flex items-center gap-1" style={{ color: m.accent }}>
-          {isCore ? 'Tour BetterStats' : `Explore ${m.name}`} <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+          Explore {m.name} <span className="group-hover:translate-x-0.5 transition-transform">→</span>
         </span>
       </Link>
     </Reveal>
@@ -46,8 +45,8 @@ function Hero() {
           Built in modules. <span className="gradient-text">Bought in tiers.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed">
-          Better Cricket — everything your cricket club runs on. Every club starts with the Core —
-          BetterStats — then adds the parts that fit how the club actually runs.
+          Better Cricket — everything your cricket club runs on. Every club starts with BetterStats,
+          then adds the parts that fit how the club actually runs.
         </p>
       </div>
     </section>
@@ -125,7 +124,7 @@ function CTA() {
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
       <div className="max-w-[900px] mx-auto relative">
         <div className="surface-strong p-10 lg:p-14 text-center">
-          <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">Start with the Core. <span className="gradient-text">Grow into the rest.</span></h2>
+          <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">Start with BetterStats. <span className="gradient-text">Grow into the rest.</span></h2>
           <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">Tell us your club details and we’ll get your site live, then turn on modules whenever you’re ready.</p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>

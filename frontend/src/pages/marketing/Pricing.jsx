@@ -8,7 +8,7 @@ import { CORE, PRICED_MODULES, ALL_IN, COMPETITOR_STACK, COMPETITOR_TOTAL, SAVIN
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
-// JSON-LD — the Core plus each module as an annual offer, kept for SEO.
+// JSON-LD — BetterStats plus each module as an annual offer, kept for SEO.
 const PRICING_JSONLD = {
   '@context': 'https://schema.org',
   '@type': 'Product',
@@ -46,7 +46,7 @@ function Hero() {
           Pick what you <span className="gradient-text">pay for.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed">
-          Every club starts with the Core. Add only the modules you want, with up to 10% off when you
+          Every club starts with BetterStats. Add only the modules you want, with up to 10% off when you
           bundle. One annual price, no per-player or per-team charges.
         </p>
       </div>
@@ -214,7 +214,7 @@ function PricingFAQ() {
     { q: 'Can I add a single module?', a: "Yes. For a small additional annual charge, any single module can be added to your current subscription." },
     { q: 'Monthly or annual?', a: "Better Cricket is an annual licence, billed once a year." },
     { q: 'Can we add modules later?', a: "Yes. You can add new modules at any time and the entitlements switch on immediately. Adding a module is an annual commitment." },
-    { q: 'Are there any setup or migration fees?', a: "Up to two hours of dedicated support is included in your first year on the Core. If all of your club's match history is already uploaded, you should be up and running in no time, and we'll guide you through merging players and grades if needed." },
+    { q: 'Are there any setup or migration fees?', a: "Up to two hours of dedicated support is included in your first year on BetterStats. If all of your club's match history is already uploaded, you should be up and running in no time, and we'll guide you through merging players and grades if needed." },
     { q: 'Do you offer a free trial?', a: "Yes. We offer a 14-day free trial of every Better Cricket module, so you can try the lot before you commit." },
     { q: 'Do you offer discounts for junior-only clubs?', a: "Yes. A junior club linked to a senior club that's currently subscribed to Better Cricket gets a discount. Contact us for the code." },
     { q: 'How do we pay?', a: "Right now it's bank transfer or PayID. Most clubs don't have a card and we don't want to put financial pressure on volunteers. Card payments are on the roadmap." },

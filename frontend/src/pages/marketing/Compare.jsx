@@ -12,7 +12,7 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 const MODULE_COMPARES = [
   {
     which: 'betterstats',
-    eyebrow: 'BetterStats · the Core',
+    eyebrow: 'BetterStats',
     intro:
       'Every club gets BetterStats: your full reconciled history and a public site worth visiting. Here is how it sits next to the dedicated cricket-stats tools.',
   },
