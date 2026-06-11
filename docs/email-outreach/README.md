@@ -32,7 +32,9 @@ Send yourself a test first and check it on your phone, especially the dark initi
 3. **Each card shows the module name + its one-line tagline + an "Explore →" link**, not the three feature bullets from the site. Five cards with three bullets each makes the email very long; the bullets live on the page each card clicks through to. Easy to add a couple of bullets per card if you want it richer.
 4. **The "find out more" button goes to the homepage** (`betterat.cricket/?utm...welcome`), matching the "Find out more here" line in your copy. The follow-up email's second button instead goes to `/contact` (the site's "Get Your Club" CTA). The Google Form URL is still in the repo (`frontend/src/data/marketing.js`, `FORM_URL`) if you'd prefer to point a button straight at the form.
 5. **Links are `https://`** rather than the `http://` in your copy (same destination, avoids Gmail flagging the links).
-6. **UTM campaign is `welcome`** on the signature, header, footer and find-out-more links. One-word change to `followup` if you'd rather.
+6. **Every link carries `?utm_source=ca&utm_medium=email&utm_campaign=welcome`** now: the header wordmark, all five module cards, the See-a-club button, Find-out-more, the new Request-a-free-trial button, the signature and the footer. One-word change to `followup` if you'd rather.
+7. **The 14-day free trial is the closing CTA.** The trial line sits at the bottom above a green "Request a free trial" button that goes to the contact page (`/contact`), the same destination as the follow-up email's "Get your club" button. It was moved there from mid-email so it doesn't read twice.
+8. **Wording is pitched at premier/grade clubs.** "community cricket" / "community cricketers" became "club cricket" / "club cricketers". (The BetterSocials tagline's "your community actually reposts" is left as-is, since there it means the club's followers, not the level of cricket.)
 
 ## Voice
 
