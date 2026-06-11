@@ -6,7 +6,10 @@ import { api } from '../../lib/api'
 import { useClubTheme } from '../../hooks/useClubTheme'
 import { Icon } from '../../pages/admin/betteriq/ui'
 import { ContextBar } from '../../pages/admin/betteriq/Context'
+import { moduleBrand } from '../../lib/moduleBrand'
 import '../../pages/admin/betteriq/iq-theme.css'
+
+const IQ_BRAND = moduleBrand('iq')
 
 // Club branding is identical across BetterIQ pages — fetch once per session and
 // reuse (mirrors BetterSelectLayout's cache).
@@ -89,10 +92,12 @@ export default function IQLayout({ children, title, eyebrow, actions }) {
           : <div className="flex items-center justify-center shrink-0 iq-display font-bold" style={{ width: 38, height: 38, borderRadius: 11, fontSize: 16, background: 'linear-gradient(150deg, var(--iq-violet-bright), var(--iq-violet-deep))', color: '#fff', boxShadow: '0 6px 18px -8px var(--pb-accent)' }}>{(club?.name || 'B')[0]}</div>}
         <div className="min-w-0">
           <div className="iq-display font-bold text-[15px] leading-none truncate" title={club?.name || ''}>{club?.name || 'BetterStats'}</div>
-          <div className="iq-mono mt-1" style={{ fontSize: 11, letterSpacing: '0.04em', color: 'var(--pb-faint)' }}>
-            Better<span style={{ color: 'var(--pb-accent)', fontWeight: 700 }}>IQ</span>
-          </div>
         </div>
+      </div>
+      {/* Module lockup — which Better module this surface is */}
+      <div className="flex items-center gap-2.5 mt-3">
+        <img src={IQ_BRAND.logo} alt="" className="shrink-0" style={{ width: 28, height: 28, borderRadius: 9 }} />
+        <span className="iq-display font-bold" style={{ fontSize: 15, lineHeight: 1 }}>Better<span style={{ color: 'var(--pb-accent)' }}>IQ</span></span>
       </div>
       <Link to="/admin" className="mt-3 block iq-mono text-left whitespace-nowrap transition-colors hover:text-pb-faint" style={{ fontSize: 11, color: 'var(--pb-faintest)' }}>← Back to admin</Link>
     </div>
