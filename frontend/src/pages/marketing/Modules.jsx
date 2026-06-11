@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
+import ZoomableImage from '../../components/marketing/ZoomableImage'
 import { CORE_MARKETING, MODULES_MARKETING, HUB_SHOWCASE } from '../../data/modules-marketing'
 import { CORE, PRICED_MODULES, ALL_IN } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
@@ -61,11 +62,11 @@ function Showcase() {
           <div className="relative">
             <div className="absolute -inset-6 bg-accent/8 blur-[70px] rounded-full pointer-events-none" />
             <div className="relative product-shadow rounded-2xl overflow-hidden border pb-hairline">
-              <img
+              <ZoomableImage
                 src={HUB_SHOWCASE}
                 alt="The Better admin dashboard, one tile per module"
+                caption="The Better admin dashboard, one tile per module"
                 className="block w-full h-auto"
-                loading="lazy"
               />
             </div>
           </div>

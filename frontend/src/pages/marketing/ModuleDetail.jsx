@@ -3,6 +3,7 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
+import ZoomableImage from '../../components/marketing/ZoomableImage'
 import ComparisonTable from '../../components/marketing/ComparisonTable'
 import { COMPARISONS, COMPARISON_SOLO } from '../../data/marketing'
 import { moduleBySlug, MODULES_MARKETING, CORE_MARKETING } from '../../data/modules-marketing'
@@ -179,7 +180,7 @@ export default function ModuleDetail() {
                 {m.gallery.map((g, i) => (
                   <Reveal key={g.src} delay={(i % 2) * 80}>
                     <figure className="surface overflow-hidden product-shadow">
-                      <img src={g.src} alt={g.caption} loading="lazy" className="block w-full h-auto border-b pb-hairline" />
+                      <ZoomableImage src={g.src} alt={g.caption} caption={g.caption} className="block w-full h-auto border-b pb-hairline" />
                       <figcaption className="px-4 py-3 text-sm text-pb-dim">{g.caption}</figcaption>
                     </figure>
                   </Reveal>

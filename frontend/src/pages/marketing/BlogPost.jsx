@@ -3,6 +3,7 @@ import { Link, useParams, Navigate } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import { usePageMeta } from '../../hooks/usePageMeta'
+import ZoomableImage from '../../components/marketing/ZoomableImage'
 import { getPost, POSTS } from '../../data/blog'
 
 function formatDate(iso) {
@@ -14,10 +15,12 @@ function HeroImage({ src, title }) {
   if (!src || failed) return null
   return (
     <div className="mb-10 rounded-xl overflow-hidden border pb-hairline h-56 sm:h-72">
-      <img
+      <ZoomableImage
         src={src}
         alt={title}
+        caption={title}
         className="w-full h-full object-cover object-top"
+        wrapperClassName="h-full"
         onError={() => setFailed(true)}
         loading="eager"
       />
