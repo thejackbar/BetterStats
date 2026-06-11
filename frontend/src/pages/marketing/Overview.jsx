@@ -27,9 +27,9 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 
 // Old way vs Better Cricket — kept tight and scannable.
 const PROBLEMS = [
-  { old: 'History trapped in a spreadsheet only one volunteer understands.', fix: 'Your full history online — every player, every season, kept forever.' },
+  { old: 'History trapped in a spreadsheet only one volunteer understands.', fix: 'Your full history online: every player, every season, kept forever.' },
   { old: 'A DIY website nobody updates, with stats that are always stale.', fix: 'A club-branded site wired to your match data. Always current.' },
-  { old: 'Selection by group chat. Posts by hand. Fees in a spreadsheet.', fix: 'Selection, socials, fees and comms — one platform, one player list.' },
+  { old: 'Selection by group chat. Posts by hand. Fees in a spreadsheet.', fix: 'Selection, socials, fees and comms on one platform, one player list.' },
   { old: 'No clue who the danger batter is until they’ve hurt you.', fix: 'An opposition scout built from your own scorecards.' },
 ]
 
@@ -57,7 +57,7 @@ function Hero() {
             <span className="gradient-text">From one place.</span>
           </h1>
           <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-7 max-w-xl">
-            Stats. A public site. Selection. Socials. Admin. Analytics. <span className="text-pb-text">Better Cricket is all of it</span> — one login, fed by one match feed. No spreadsheets. No data entry.
+            Stats. A public site. Selection. Socials. Admin. Analytics. <span className="text-pb-text">Better Cricket is all of it</span>, one login, fed by one match feed, with no spreadsheets to keep and no data entry.
           </p>
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-6">
             <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
@@ -104,7 +104,7 @@ function Showcase() {
               A club site they’ll <span className="gradient-text">actually open.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              Every player, every record, every season — live, mobile, and branded as yours.
+              Every player, every record, every season: live, mobile, and branded as yours.
             </p>
           </div>
         </Reveal>
@@ -172,7 +172,7 @@ function Core() {
               Start with BetterStats. <span className="gradient-text">Add what you need.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              Every club gets BetterStats. The modules bolt straight on — same data, one login.
+              Every club gets BetterStats. The modules bolt straight on: same data, one login.
             </p>
           </div>
         </Reveal>
@@ -188,7 +188,7 @@ function Core() {
                   </div>
                 </div>
                 <p className="text-pb-dim leading-relaxed mb-5">
-                  Your club’s full reconciled history and a public site to be proud of — profiles, leaderboards, records, scorecards, yearbooks, awards and shareable stat cards. All automatic.
+                  Your club’s full reconciled history and a public site to be proud of: profiles, leaderboards, records, scorecards, yearbooks, awards and shareable stat cards. All automatic.
                 </p>
                 <Link to={CORE_MARKETING.to} className="inline-flex items-center gap-1 text-sm text-accent font-medium">Tour BetterStats →</Link>
               </div>
@@ -215,7 +215,7 @@ function ModuleRow({ m, flip }) {
       <div className="grid grid-cols-12 gap-8 lg:gap-12 items-center">
         <div className={`col-span-12 lg:col-span-6 ${flip ? 'lg:order-2' : ''}`}>
           <div className="product-shadow rounded-2xl">
-            <ScreenshotOrMock src={m.screenshot} alt={`${m.name} — ${m.tagline}`} fallback={<Placeholder icon={m.icon} accent={m.accent} label={m.name} />} />
+            <ScreenshotOrMock src={m.screenshot} alt={`${m.name}: ${m.tagline}`} fallback={<Placeholder icon={m.icon} accent={m.accent} label={m.name} />} />
           </div>
         </div>
         <div className={`col-span-12 lg:col-span-6 ${flip ? 'lg:order-1' : ''}`}>
@@ -297,7 +297,7 @@ function PricingSnapshot() {
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
               One flat price per club, the same fee for one team or fifty. Start with BetterStats and add the
-              modules you want, with up to 10% off when you bundle.
+              modules you want, with a bundle discount of up to $146 off the full set.
             </p>
           </div>
         </Reveal>
@@ -367,13 +367,13 @@ function FinalCTA() {
               One platform. <span className="gradient-text">Your whole club.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">
-              Tell us about your club and we’ll get your site live, fast — with your history already loaded.
+              Tell us about your club and we’ll get your site live, fast, with your history already loaded.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-5">
               <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
               <Link to="/contact" className="cta-secondary">Talk to us</Link>
             </div>
-            <p className="text-xs text-pb-faint">From $400/yr · One Core, your modules · Flat rate per club</p>
+            <p className="text-xs text-pb-faint">From $399/yr · One Core, your modules · Flat rate per club</p>
           </div>
         </div>
       </div>
@@ -385,7 +385,7 @@ function FinalCTA() {
 export default function Overview() {
   usePageMeta({
     title: 'Overview — Everything Better Cricket does | The cricket club platform',
-    description: 'A one-page tour of Better Cricket: automated stats and a public club site (BetterStats), plus BetterSelect, BetterSocials, BetterAdmin and BetterIQ. The whole platform Australian cricket clubs run on — no manual data entry.',
+    description: 'A one-page tour of Better Cricket: automated stats and a public club site (BetterStats), plus BetterSelect, BetterSocials, BetterAdmin and BetterIQ. The whole platform Australian cricket clubs run on, with no manual data entry.',
     image: 'https://betterat.cricket/og-image.png',
     url: 'https://betterat.cricket/overview',
   })

@@ -120,7 +120,7 @@ function Promise_() {
                 Better Cricket is built by cricketers, for cricketers. We listen to the captains, committee members, statisticians and the kids who just want to see their own century on a profile page.
               </p>
               <p className="text-pb-text font-medium mb-6">
-                If something is missing — tell us. If it's important to you, it's important to us.
+                If something is missing, tell us. If it's important to you, it's important to us.
               </p>
               <Link to="/contact" className="cta-primary !text-sm !py-2.5 !px-5">Send us a feature request →</Link>
             </div>
@@ -139,7 +139,7 @@ function Promise_() {
                 Better Cricket currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
               </p>
               <p className="text-sm text-pb-dim leading-relaxed">
-                Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link> — it helps us prioritise.
+                Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link>. It helps us prioritise.
               </p>
             </div>
           </Reveal>
@@ -156,7 +156,7 @@ function ContactBlock() {
         <p className="pill-neutral inline-flex mb-5">Get in touch</p>
         <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">Have a question? <span className="gradient-text">Drop us a line.</span></h2>
         <p className="text-lg text-pb-dim mb-8">
-          Wondering if Better Cricket is right for your club? Email <a href={`mailto:${SUPPORT_EMAIL}`} className="text-accent hover:underline">{SUPPORT_EMAIL}</a>{' '}— happy to chat.
+          Wondering if Better Cricket is right for your club? Email <a href={`mailto:${SUPPORT_EMAIL}`} className="text-accent hover:underline">{SUPPORT_EMAIL}</a>{' '}and we're happy to chat.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <Link to="/contact" className="cta-primary">Get in touch →</Link>

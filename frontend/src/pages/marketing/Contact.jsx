@@ -8,7 +8,7 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 
 const FORMSPREE_URL = `https://formspree.io/f/${FORMSPREE_ID}`
 
-const GRADES_OPTIONS = ['1–2 grades', '3–5 grades', '6–9 grades', '10+ grades']
+const GRADES_OPTIONS = ['1 to 2 grades', '3 to 5 grades', '6 to 9 grades', '10+ grades']
 
 const STORAGE_OPTIONS = [
   'Spreadsheets only',

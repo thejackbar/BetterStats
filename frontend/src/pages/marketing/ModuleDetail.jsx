@@ -90,7 +90,7 @@ export default function ModuleDetail() {
               </h1>
               <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">{m.summary}</p>
               <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3">
-                <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Get this on your club →</a>
+                <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Get Your Club on BetterCricket today!</a>
                 {m.deepTour
                   ? <Link to={m.deepTour} className="cta-secondary">Full feature tour →</Link>
                   : <Link to="/pricing" className="cta-secondary">See pricing</Link>}
@@ -196,8 +196,8 @@ export default function ModuleDetail() {
             <h2 className="font-display font-bold text-2xl md:text-3xl mb-3 tracking-tight">{modulePrice(m) || 'Included in every plan.'}</h2>
             <p className="text-pb-dim max-w-xl mx-auto mb-7">
               {m.isCore
-                ? 'BetterStats is included in every Better Cricket plan. Add the modules that fit how your club runs, and bundle for up to 10% off.'
-                : <>Every plan includes BetterStats. Add {m.name} on its own, or bundle modules for up to 10% off. The calculator on the pricing page works out your total.</>}
+                ? 'BetterStats is included in every Better Cricket plan. Add the modules that fit how your club runs, and bundle two or more to save, up to $146 off the full set.'
+                : <>Every plan includes BetterStats. Add {m.name} on its own, or bundle two or more modules and save, up to $146 off the full set. The calculator on the pricing page works out your total.</>}
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <Link to="/pricing" className="cta-primary">See pricing & calculator →</Link>

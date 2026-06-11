@@ -26,7 +26,7 @@ const MODULE_COMPARES = [
     which: 'betterselect',
     eyebrow: 'BetterSelect',
     intro:
-      'Live player availability, net session attendance and current form feeding a streamlined, intelligent team-selection process, versus the usual unrelated tools clubs wrestle with: group chats, email, SMS, spreadsheets and generic team apps.',
+      'Live player availability, net attendance and current form, all feeding a smarter team-selection process, instead of the usual scatter of unrelated tools: group chats, email, SMS, spreadsheets and generic team apps.',
   },
   {
     which: 'betteradmin',
@@ -134,7 +134,7 @@ export default function Compare() {
                 Stop stitching five tools together every weekend. We bring your history across,
                 set it all up and have your club live in under an hour.
               </p>
-              <Link to="/contact" className="cta-primary">Get your club on Better Cricket →</Link>
+              <Link to="/contact" className="cta-primary">Get Your Club on BetterCricket today!</Link>
             </Reveal>
           </div>
         </section>

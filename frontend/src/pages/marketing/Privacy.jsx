@@ -31,7 +31,7 @@ export default function Privacy() {
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">What we collect</h2>
             <ul className="space-y-2 ml-4 list-disc">
               <li><strong className="text-pb-text">Club and player information:</strong> Player names and cricket statistics derived from your club's own match data, along with club details such as name, contact email and branding preferences.</li>
-              <li><strong className="text-pb-text">Admin account information:</strong> The username and password used to sign in to a club's admin area. Passwords are stored only as a secure hash — never in plain text.</li>
+              <li><strong className="text-pb-text">Admin account information:</strong> The username and password used to sign in to a club's admin area. Passwords are stored only as a secure hash, never in plain text.</li>
               <li><strong className="text-pb-text">Usage and analytics data:</strong> Standard web logs and analytics such as IP address, device and browser details, and pages viewed, used to keep the Service secure and to understand and improve how it's used.</li>
             </ul>
           </section>
@@ -49,7 +49,7 @@ export default function Privacy() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Where match data comes from</h2>
             <p>
-              The statistics in Better Cricket are derived from your club's own match data — the records your club
+              The statistics in Better Cricket are derived from your club's own match data, the records your club
               produces and maintains. We are not the source of that underlying data, and we don't guarantee that
               every figure is complete or error-free. If something looks wrong, your club administrator can correct
               or update it.
@@ -59,7 +59,7 @@ export default function Privacy() {
           <section>
             <h2 className="font-display font-bold text-xl text-pb-text mb-3">Public club pages</h2>
             <p>
-              Club statistics pages are public by design — player names and their performance statistics are shown
+              Club statistics pages are public by design. Player names and their performance statistics are shown
               on these pages so that clubs and their communities can follow and celebrate their cricket. If an
               individual would prefer their statistics not to appear, they can contact their club administrator or
               email us, and we'll work with the club to address the request.

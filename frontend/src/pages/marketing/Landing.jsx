@@ -64,12 +64,12 @@ function Hero() {
             <span className="gradient-text">Better.</span>
           </h1>
           <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">
-            Better Cricket is the platform Australian cricket clubs run on. Start with automated stats and a public site worth showing off — then add selection, socials, club admin and analytics, all fed by your club's own match data — synced automatically, with no data entry.
+            Better Cricket is the platform Australian cricket clubs run on. Start with automated stats and a public site worth showing off, then add selection, socials, club admin and analytics, all fed by your club's own match data and synced automatically, so you never enter it by hand.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-4">
             <Link to="/contact" className="cta-primary">
-              Get your club on Better Cricket →
+              Get Your Club on BetterCricket today!
             </Link>
             <a href="#showcase" className="cta-secondary">See it in action</a>
           </div>
@@ -131,20 +131,20 @@ function ValueProps() {
   const cards = [
     {
       eyebrow: '01 · For the Committee',
-      title: 'Replace your club site, honour board, and history project — in one weekend.',
+      title: 'Replace your club site, honour board and history project in one weekend.',
       desc: 'A public, branded club website that updates itself. Stop wrangling WordPress. Stop nagging the captain for scorecards.',
       stat: 'Under 1 hour to set up',
     },
     {
       eyebrow: '02 · For the Statistician',
-      title: 'Every ball, every wicket, every catch — as far back as your data goes.',
-      desc: 'We bring in your full history, as far back as it goes. Career, season, all-time. Filter, sort, export. 30+ stat columns.',
+      title: 'Every ball, every wicket, every catch, as far back as your data goes.',
+      desc: 'We bring in your full history, as far back as it goes, with career, season and all-time views. Filter, sort and export across 30+ stat columns.',
       stat: 'Decades of indexed cricket data',
     },
     {
       eyebrow: '03 · For the Players',
       title: 'A career page worth bragging about.',
-      desc: 'Real profiles. Form charts. Milestone alerts. One-tap stat cards your players will actually repost.',
+      desc: 'Real profiles with form charts and milestone alerts, plus one-tap stat cards your players will actually repost.',
       stat: 'Per-player profile pages',
     },
   ]
@@ -234,7 +234,7 @@ function Showcase() {
       id: 'yearbook',
       label: 'Yearbook',
       headline: 'The annual that writes itself.',
-      body: 'A shareable publication, auto-populated each season — honours, top performers, biggest moments. Permanent URL.',
+      body: 'A shareable publication, auto-populated each season with honours, top performers and biggest moments. Permanent URL.',
       features: ['Auto-populated each season', 'Honours & awards', 'Print-ready PDF', 'Permanent URL per year'],
       src: SCREENSHOT_PATHS.showcaseYearbook,
       mock: <div className="max-w-md mx-auto"><MockYearbook /></div>,
@@ -243,7 +243,7 @@ function Showcase() {
       id: 'scorecard',
       label: 'Scorecards',
       headline: 'Every ball. Every wicket. Going back decades.',
-      body: 'Full scorecards for every match — batting lineups, dismissals, fall of wickets, and partnerships. Linked from player profiles and yearbooks.',
+      body: 'Full scorecards for every match: batting lineups, dismissals, fall of wickets and partnerships. Linked from player profiles and yearbooks.',
       features: ['Batting & bowling per match', 'Fall of wickets by innings', 'Partnership records per game', 'Linked from player profiles'],
       src: SCREENSHOT_PATHS.showcaseScorecard,
       mock: <MockLeaderboard />,
@@ -252,7 +252,7 @@ function Showcase() {
       id: 'analysis',
       label: 'Analysis',
       headline: 'Deeper stats for the curious.',
-      body: 'Dismissal breakdowns, runs by grade, bowling analysis by wicket position, opposition stats, and StatLab — a custom query builder for any question your statistician can dream up.',
+      body: 'Dismissal breakdowns, runs by grade, bowling analysis by wicket position, opposition stats, and StatLab, a custom query builder for any question your statistician can dream up.',
       features: ['Dismissal type breakdown charts', 'Runs & wickets by grade', 'Opposition analysis per player', 'StatLab custom query builder'],
       src: SCREENSHOT_PATHS.showcaseAnalysis,
       mock: <MockLeaderboard />,
@@ -323,7 +323,7 @@ function Features() {
               Every club starts with <span className="gradient-text">BetterStats.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              BetterStats — your reconciled history and a public site to be proud of. Included in every plan.
+              BetterStats: your reconciled history and a public site to be proud of. Included in every plan.
             </p>
           </div>
         </Reveal>
@@ -359,7 +359,7 @@ function ModulesTeaser() {
               Then add the parts that <span className="gradient-text">run your club.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              Four modules bolt straight onto BetterStats — selection, socials, club admin and analytics. Turn on what you need.
+              Four modules bolt straight onto BetterStats: selection, socials, club admin and analytics. Turn on what you need.
             </p>
           </div>
         </Reveal>
@@ -380,7 +380,7 @@ function ModulesTeaser() {
         <div className="text-center mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
           <Link to="/overview" className="cta-secondary">See everything Better Cricket does →</Link>
           <Link to="/modules" className="text-sm text-accent hover:underline">Tour all modules →</Link>
-          <Link to="/pricing" className="text-sm text-accent hover:underline">See Good / Better / Best pricing →</Link>
+          <Link to="/pricing" className="text-sm text-accent hover:underline">See modular pricing →</Link>
         </div>
       </div>
     </section>
@@ -478,7 +478,7 @@ function Promise_() {
                 Better Cricket is built by people who play. We listen to the captains, the committee members, the statisticians and the kids who just want to see their own century on a profile page.
               </p>
               <p className="text-pb-text font-medium mb-5">
-                If something is missing — tell us. If it's important to you, it's important to us.
+                If something is missing, tell us. If it's important to you, it's important to us.
               </p>
               <Link to="/contact" className="inline-flex items-center gap-2 text-accent text-sm font-medium hover:underline">
                 Send us a feature request →
@@ -499,7 +499,7 @@ function Promise_() {
                 Better Cricket currently supports Australian cricket clubs. We're already looking at new regions and want to bring the same platform to leagues elsewhere soon.
               </p>
               <p className="text-sm text-pb-dim leading-relaxed">
-                Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link> — it helps us prioritise where to head next.
+                Outside Australia and want this for your league? <Link to="/contact" className="text-accent hover:underline">Let us know</Link>. It helps us prioritise where to head next.
               </p>
             </div>
           </Reveal>
@@ -523,13 +523,13 @@ function FinalCTA() {
               Your club's history is <br className="hidden md:block" /><span className="gradient-text">waiting to be told.</span>
             </h2>
             <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">
-              Tell us about your club. We'll get your site live, fast — with your history already loaded.
+              Tell us about your club. We'll get your site live fast, with your history already loaded.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-5">
               <a href={FORM_URL} target="_blank" rel="noopener noreferrer" className="cta-primary">Request club access →</a>
               <Link to="/pricing" className="cta-secondary">See pricing</Link>
             </div>
-            <p className="text-xs text-pb-faint">From $400/yr · One Core, your modules · Flat rate per club</p>
+            <p className="text-xs text-pb-faint">From $399/yr · One Core, your modules · Flat rate per club</p>
           </div>
         </div>
       </div>
@@ -541,7 +541,7 @@ function FinalCTA() {
 export default function Landing() {
   usePageMeta({
     title: 'Better Cricket — The platform Australian cricket clubs run on',
-    description: "The platform Australian cricket clubs run on: automated stats and a public club site (BetterStats core), plus BetterSelect, BetterSocials, BetterAdmin and BetterIQ analytics — all fed by your club's own match data, synced automatically with no manual data entry.",
+    description: "The platform Australian cricket clubs run on: automated stats and a public club site (BetterStats core), plus BetterSelect, BetterSocials, BetterAdmin and BetterIQ analytics, all fed by your club's own match data and synced automatically, with no manual data entry.",
     image: 'https://betterat.cricket/og-image.png',
     url: 'https://betterat.cricket/',
   })

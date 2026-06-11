@@ -37,19 +37,19 @@ export const LANDING_FEATURES = [
   {
     n: '03',
     title: 'Season Yearbook',
-    desc: 'A shareable web-publication for every season — auto-populated with stats, honours, photos, editorial.',
+    desc: 'A shareable web-publication for every season, auto-populated with stats, honours, photos and editorial.',
     stat: 'Auto-generated',
   },
   {
     n: '04',
     title: 'Awards & Honours',
-    desc: 'Log every club award, association honour, hall of fame inductee, office bearer — going back decades.',
+    desc: 'Log every club award, association honour, hall of fame inductee and office bearer, going back decades.',
     stat: 'Full history',
   },
   {
     n: '05',
     title: 'Match Scorecards',
-    desc: 'Every ball, every wicket, every catch — your whole match history, synced automatically and kept current.',
+    desc: 'Every ball, every wicket, every catch: your whole match history, synced automatically and kept current.',
     stat: 'Full history',
   },
   {
@@ -79,7 +79,7 @@ export const HOW_IT_WORKS = [
   {
     n: '01',
     title: 'We start your first sync',
-    desc: 'You give us your club details and we pull every scrap of available history into Better Cricket — automatically, no spreadsheets to hand over.',
+    desc: 'You give us your club details and we pull every scrap of available history into Better Cricket automatically, with no spreadsheets to hand over.',
     mins: '5 minutes',
   },
   {
@@ -154,7 +154,7 @@ export const COMPARISONS = {
   // BetterStats (Core) — the public stats + site, vs dedicated stats tools.
   betterstats: {
     eyebrow: 'Compare',
-    heading: 'Your stats deserve better than a stats tool.',
+    heading: 'Your stats deserve better than a spreadsheet.',
     sub: 'BetterStats is included in every plan: your full reconciled history and a public site to be proud of. Here is how it sits next to the dedicated cricket-stats tools.',
     columns: [
       { key: 'clubstats', name: 'ClubStats', tag: 'Stats site', sub: 'clubstats.cricket' },
@@ -186,19 +186,19 @@ export const COMPARISONS = {
         rows: [
           { feature: 'Syncs automatically, no data entry', tip: 'Your match history flows in and keeps itself current', values: { clubstats: 'partial', cstatz: false, us: true } },
           { feature: 'Onboarding & migration included', values: { clubstats: false, cstatz: false, us: true } },
-          { feature: 'Setup time', textRow: true, values: { clubstats: 'Days', cstatz: '2–4 weeks', us: 'Under 1 hour' } },
+          { feature: 'Setup time', textRow: true, values: { clubstats: 'Days', cstatz: '2 to 4 weeks', us: 'Under 1 hour' } },
           { feature: 'Bolt-on club modules', tip: 'Selection, socials, admin and analytics on the same data', values: { clubstats: false, cstatz: false, us: true } },
         ],
       },
     ],
-    cta: { line: "It is included in every plan. Get your club's history online in under an hour.", label: 'Get your club on Better Cricket →', to: '/contact' },
+    cta: { line: "It is included in every plan. Get your club's history online in under an hour.", label: 'Get Your Club on BetterCricket today!', to: '/contact' },
   },
 
   // BetterSocials — vs design + website tools.
   bettersocials: {
     eyebrow: 'Compare',
-    heading: 'A designer and a website builder that already know your cricket.',
-    sub: 'BetterSocials turns your match data into share-ready posts and runs your public website. No design skills, no retyping scorecards into a blank canvas.',
+    heading: 'The designer and website builder that already knows your cricket.',
+    sub: 'BetterSocials turns your match data into share-ready posts and runs your public website, with the design and the typing already done for you.',
     columns: [
       { key: 'canva', name: 'Canva', tag: 'Design app', sub: 'Blank-canvas graphics' },
       { key: 'squarespace', name: 'Squarespace', tag: 'Website builder', sub: 'Generic site templates' },
