@@ -55,6 +55,11 @@ export const CORE_MARKETING = {
     { src: '/marketing/yearbook.jpg', caption: 'Auto-generated season yearbooks' },
     { src: '/marketing/showcase-scorecard.jpg', caption: 'Full match scorecards' },
     { src: '/marketing/hero-career-card.jpg', caption: 'Shareable player stat cards' },
+    { src: '/marketing/feature-opposition.jpg', caption: 'Per-player opposition analysis' },
+    { src: '/marketing/feature-games.jpg', caption: 'A browsable match archive' },
+    { src: '/marketing/feature-whitelabel.jpg', caption: "Make the public site your club's own" },
+    { src: '/marketing/feature-sponsors.jpg', caption: 'Your sponsors across the site' },
+    { src: '/marketing/feature-milestones.jpg', caption: 'A milestone tracker for the whole club' },
   ],
 }
 
