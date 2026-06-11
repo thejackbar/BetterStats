@@ -20,7 +20,7 @@ Explore the modules:
 - BetterIQ: Broadcast-grade analytics and an opposition scout for your club. https://betterat.cricket/modules/betteriq
 
 See it running at a real club right now:
-https://betterat.cricket/applecross
+https://betterat.cricket/applecross?utm_source=ca&utm_medium=email&utm_campaign=welcome
 
 And because it replaces the subscriptions you're probably already paying for, most clubs save up to $1,000 a year.
 
