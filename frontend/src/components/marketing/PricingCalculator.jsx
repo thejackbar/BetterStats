@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CORE, PRICED_MODULES, priceFor } from '../../data/pricing'
+import { ModuleWordmark } from './../ModuleLockup'
 
 /**
  * Modular plan builder. The Core (BetterStats) is always in; tick the modules
@@ -37,7 +38,7 @@ export default function PricingCalculator() {
             <div className="flex items-center gap-3 p-3 rounded-xl border border-accent/30 bg-accent/[0.05]">
               <img src={CORE.logo} alt="" className="w-9 h-9 rounded-lg flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold">BetterStats <span className="text-pb-faint font-normal">· Core</span></p>
+                <p className="text-sm font-semibold"><ModuleWordmark name="BetterStats" accent={CORE.accent} /> <span className="text-pb-faint font-normal">· Core</span></p>
                 <p className="text-xs text-pb-dim">{CORE.blurb}</p>
               </div>
               <span className="text-sm font-semibold tabular-nums mr-1">${CORE.price}</span>
@@ -62,7 +63,7 @@ export default function PricingCalculator() {
                     className={`w-9 h-9 rounded-lg flex-shrink-0 transition-all ${on ? '' : 'grayscale opacity-60'}`}
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold">{m.name}</p>
+                    <p className="text-sm font-semibold"><ModuleWordmark name={m.name} accent={m.accent} /></p>
                     <p className="text-xs text-pb-dim truncate">{m.blurb}</p>
                   </div>
                   <span className="text-sm font-semibold tabular-nums mr-1">${m.price}</span>

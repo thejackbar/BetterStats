@@ -23,6 +23,7 @@ import {
   TIER_INFO,
 } from '../../data/modules-marketing'
 import { CORE, PRICED_MODULES } from '../../data/pricing'
+import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 // Old way vs Better Cricket — kept tight and scannable.
@@ -183,7 +184,7 @@ function Core() {
                 <div className="flex items-center gap-3 mb-4">
                   <img src={CORE_MARKETING.logo} alt="" className="w-11 h-11 rounded-xl" />
                   <div>
-                    <p className="text-xl font-bold">BetterStats</p>
+                    <p className="text-xl font-bold"><ModuleWordmark name="BetterStats" accent={CORE_MARKETING.accent} /></p>
                     <p className="text-[11px] font-mono uppercase tracking-wide3 text-accent">The Core · every club</p>
                   </div>
                 </div>
@@ -221,7 +222,7 @@ function ModuleRow({ m, flip }) {
         <div className={`col-span-12 lg:col-span-6 ${flip ? 'lg:order-1' : ''}`}>
           <div className="flex items-center gap-2.5 mb-4">
             <img src={m.logo} alt="" className="w-10 h-10 rounded-xl" />
-            <span className="text-xl font-bold">{m.name}</span>
+            <span className="text-xl font-bold"><ModuleWordmark name={m.name} accent={m.accent} /></span>
             {isIQ
               ? <span className="pill inline-flex !text-[10px]"><span className="dot" />Category of one</span>
               : <span className="pill-neutral text-[10px]">{TIER_INFO[m.tier].label} tier</span>}

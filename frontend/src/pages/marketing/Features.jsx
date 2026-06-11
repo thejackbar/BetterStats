@@ -13,6 +13,7 @@ import {
 } from '../../components/marketing/Mockups'
 import { FORM_URL, SCREENSHOT_PATHS } from '../../data/marketing'
 import { MODULES_MARKETING, TIER_INFO } from '../../data/modules-marketing'
+import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 // ============================================================
@@ -230,7 +231,7 @@ function BeyondCore() {
                   <img src={m.logo} alt="" className="w-10 h-10 rounded-xl" />
                   <span className="pill-neutral text-[10px]">{TIER_INFO[m.tier].label}</span>
                 </div>
-                <h3 className="text-lg font-semibold mb-1.5 group-hover:text-accent transition-colors">{m.name}</h3>
+                <h3 className="text-lg font-semibold mb-1.5"><ModuleWordmark name={m.name} accent={m.accent} /></h3>
                 <p className="text-sm text-pb-dim leading-relaxed mb-4 flex-1">{m.tagline}</p>
                 <span className="text-sm font-medium inline-flex items-center gap-1" style={{ color: m.accent }}>Explore <span className="group-hover:translate-x-0.5 transition-transform">→</span></span>
               </Link>

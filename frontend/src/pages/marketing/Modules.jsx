@@ -4,6 +4,7 @@ import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import { FORM_URL } from '../../data/marketing'
 import { CORE_MARKETING, MODULES_MARKETING, TIER_INFO, HUB_SHOWCASE } from '../../data/modules-marketing'
+import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
 function ModuleCard({ m, delay }) {
@@ -20,7 +21,7 @@ function ModuleCard({ m, delay }) {
           <img src={m.logo} alt="" className="w-11 h-11 rounded-xl" />
           <span className="pill-neutral text-[10px]">{badge}</span>
         </div>
-        <h3 className="text-xl font-bold mb-2">{m.name}</h3>
+        <h3 className="text-xl font-bold mb-2"><ModuleWordmark name={m.name} accent={m.accent} /></h3>
         <p className="text-sm text-pb-dim leading-relaxed mb-5">{m.tagline}</p>
         {!isCore && (
           <ul className="space-y-1.5 mb-6">
