@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 import { dashboardTiles, tierLabel } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
+import ModuleLockup from '../ModuleLockup'
 import { api } from '../../lib/api'
 import { SITE_VERSION } from '../../version'
 import { CHANGELOG } from '../../data/changelog'
@@ -245,6 +246,24 @@ export default function AdminLayout({ children }) {
           shrink-0 border-r pb-hairline-r pt-3 pb-6 px-1.5
         `}>
           <nav>
+            {/* The core surface is BetterStats — its lockup sits at the top of
+                the main admin sidebar, mirroring how each module surface shows
+                its own lockup. The "Stats" suffix stays the fixed brand green
+                (--pb-brand), never the club's white-label accent. */}
+            <Link
+              to="/admin"
+              onClick={() => setMobileOpen(false)}
+              className="block px-2 py-2 mb-1 border-b pb-hairline-b"
+            >
+              <ModuleLockup
+                name="BetterStats"
+                logo={moduleBrand('stats').logo}
+                accent="var(--pb-brand)"
+                size={24}
+                textClassName="font-display font-bold text-[14px] leading-none"
+              />
+            </Link>
+
             {/* Better HQ — staff-only platform tools. Pinned to the TOP because
                 for a super admin this is their primary surface (the club admin
                 sections below are whichever club they're acting as). */}
