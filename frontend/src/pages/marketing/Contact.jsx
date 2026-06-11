@@ -420,7 +420,7 @@ function ContactPanel() {
     <section className="relative pt-32 pb-20 px-4 sm:px-6 lg:px-10 overflow-hidden">
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
       <div className="max-w-[1100px] mx-auto relative">
-        <div className="grid grid-cols-12 gap-10">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
           <div className="col-span-12 lg:col-span-4">
             <p className="pill mb-6 inline-flex"><span className="dot" />Reply within 24 hours</p>
             <h1 className="font-display font-bold text-[40px] sm:text-[52px] lg:text-[56px] tracking-tight leading-[0.95] mb-6">

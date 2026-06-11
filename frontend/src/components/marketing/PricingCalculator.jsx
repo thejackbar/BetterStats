@@ -23,7 +23,7 @@ export default function PricingCalculator() {
 
   return (
     <div className="surface p-6 lg:p-8">
-      <div className="grid grid-cols-12 gap-8 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Picker */}
         <div className="col-span-12 lg:col-span-7">
           <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-1">Build your plan</p>

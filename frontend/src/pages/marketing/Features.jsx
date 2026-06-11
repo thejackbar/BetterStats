@@ -252,7 +252,7 @@ function FeatureBlock({ f, idx }) {
     <section className={`px-4 sm:px-6 lg:px-10 py-20 ${idx % 2 === 1 ? 'bg-black/20 border-y pb-hairline' : ''}`}>
       <div className="max-w-[1200px] mx-auto">
         <Reveal>
-          <div className={`grid grid-cols-12 gap-10 lg:gap-16 items-center ${flip ? 'lg:flex-row-reverse lg:[direction:rtl]' : ''}`}>
+          <div className={`grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-16 items-center ${flip ? 'lg:flex-row-reverse lg:[direction:rtl]' : ''}`}>
             <div className="col-span-12 lg:col-span-5 lg:[direction:ltr]">
               <div className="flex items-center gap-3 mb-5">
                 <div className="w-10 h-10 rounded-xl bg-accent/15 border border-accent/40 flex items-center justify-center text-accent font-bold">{f.n}</div>

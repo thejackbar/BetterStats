@@ -52,7 +52,7 @@ function Hero() {
       </div>
       <div className="absolute inset-0 hero-glow pointer-events-none" />
 
-      <div className="max-w-[1280px] mx-auto relative z-10 grid grid-cols-12 gap-10 items-center">
+      <div className="max-w-[1280px] mx-auto relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
         <div className="col-span-12 lg:col-span-6">
           <div className="pill mb-7 inline-flex">
             <span className="dot" />
@@ -286,7 +286,7 @@ function Showcase() {
           </div>
         </div>
 
-        <div className="grid grid-cols-12 gap-8 items-start" key={tab}>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start" key={tab}>
           <Reveal className="col-span-12 lg:col-span-5">
             <div className="lg:sticky lg:top-24">
               <h3 className="text-3xl lg:text-4xl font-bold leading-tight mb-4">{current.headline}</h3>
@@ -463,7 +463,7 @@ function Promise_() {
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
       <div className="max-w-[1100px] mx-auto">
-        <div className="grid grid-cols-12 gap-8 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-stretch">
           <Reveal className="col-span-12 md:col-span-7">
             <div className="surface p-8 lg:p-10 h-full border-accent/30 bg-gradient-to-b from-accent/[0.05] to-transparent">
               <div className="flex items-center gap-3 mb-5">

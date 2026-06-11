@@ -6,8 +6,8 @@ export default function MarketingFooter() {
   return (
     <footer className="border-t pb-hairline bg-pb-bg">
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-10 py-16">
-        <div className="grid grid-cols-12 gap-8 mb-12">
-          <div className="col-span-12 md:col-span-4">
+        <div className="grid grid-cols-2 md:grid-cols-12 gap-8 mb-12">
+          <div className="col-span-2 md:col-span-4">
             <Link to="/" className="flex items-center gap-2.5 mb-5" aria-label="Better Cricket home">
               <BrandLogo className="w-7 h-7 object-contain" />
               <span className="font-bold text-lg tracking-tight">
@@ -24,7 +24,7 @@ export default function MarketingFooter() {
             </div>
           </div>
 
-          <div className="col-span-6 md:col-span-2">
+          <div className="col-span-1 md:col-span-2">
             <p className="text-sm font-semibold mb-4">Modules</p>
             <ul className="space-y-2.5">
               <li><Link to="/modules" className="text-sm text-pb-dim hover:text-pb-text">Overview</Link></li>
@@ -34,7 +34,7 @@ export default function MarketingFooter() {
             </ul>
           </div>
 
-          <div className="col-span-6 md:col-span-2">
+          <div className="col-span-1 md:col-span-2">
             <p className="text-sm font-semibold mb-4">Product</p>
             <ul className="space-y-2.5">
               <li><Link to="/features" className="text-sm text-pb-dim hover:text-pb-text">Core (BetterStats)</Link></li>
@@ -44,7 +44,7 @@ export default function MarketingFooter() {
             </ul>
           </div>
 
-          <div className="col-span-6 md:col-span-2">
+          <div className="col-span-1 md:col-span-2">
             <p className="text-sm font-semibold mb-4">Company</p>
             <ul className="space-y-2.5">
               <li><Link to="/about" className="text-sm text-pb-dim hover:text-pb-text">About</Link></li>
@@ -54,7 +54,7 @@ export default function MarketingFooter() {
             </ul>
           </div>
 
-          <div className="col-span-6 md:col-span-2">
+          <div className="col-span-1 md:col-span-2">
             <p className="text-sm font-semibold mb-4">Australian cricket</p>
             <p className="text-sm text-pb-dim mb-3 leading-relaxed">
               Better Cricket keeps your club's full history online and updates it automatically after every match. You don't keep spreadsheets or enter stats by hand.
