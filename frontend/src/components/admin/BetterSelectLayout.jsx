@@ -5,6 +5,9 @@ import { CAP } from '../../lib/capabilities'
 import { api } from '../../lib/api'
 import { useClubTheme } from '../../hooks/useClubTheme'
 import { Icon } from '../../pages/admin/betterselect/ui'
+import { moduleBrand } from '../../lib/moduleBrand'
+
+const BRAND = moduleBrand('select')
 
 // Club branding is identical for every BetterSelect page, so fetch the club
 // settings once per session and reuse them — navigating between tools shouldn't
@@ -66,7 +69,7 @@ export default function BetterSelectLayout({ children, title, actions, headerLef
           : <span className="w-8 h-8 rounded bg-pb-accent/15 text-pb-accent font-display font-bold flex items-center justify-center shrink-0">{(club?.name || 'B')[0]}</span>}
         <div className="min-w-0">
           <div className="font-display font-bold text-sm leading-tight truncate" title={club?.name || ''}>{club?.name || 'BetterStats'}</div>
-          <div className="font-mono text-[10px] text-pb-faint">Better<span className="text-pb-brand">Select</span></div>
+          <div className="font-mono text-[10px] text-pb-faint">Better<span style={{ color: 'var(--pb-accent)' }}>Select</span></div>
         </div>
       </div>
       <Link to="/admin" className="block mt-2 text-[11px] font-mono text-pb-faintest hover:text-pb-faint">← Back to admin</Link>
@@ -74,15 +77,15 @@ export default function BetterSelectLayout({ children, title, actions, headerLef
   )
 
   return (
-    // BetterSelect is BetterStats-branded chrome, NOT the club's white-labelled
-    // public site. A club's accent can be any colour (e.g. Applecross is red),
-    // which reads as alarming/error-like on headers, labels and status dots.
-    // Re-point --pb-accent to the fixed brand green for everything inside this
+    // BetterSelect is module-branded chrome, NOT the club's white-labelled public
+    // site. A club's accent can be any colour (e.g. Applecross is red), which
+    // reads as alarming/error-like on headers, labels and status dots. Re-point
+    // --pb-accent to BetterSelect's own brand colour for everything inside this
     // module — custom properties inherit, so this one override cascades to every
     // child (text-pb-accent, bg-pb-accent, color-mix tints, the lot) without
     // touching the rest of the app, where the club accent still applies.
     <div className="min-h-screen bg-pb-bg text-pb-text flex"
-      style={{ '--pb-accent': 'var(--pb-brand)', '--pb-accent-rgb': '22 199 132' }}>
+      style={{ '--pb-accent': BRAND.accent, '--pb-accent-rgb': BRAND.accentRgb }}>
       {/* Sidebar */}
       <aside className="w-60 border-r pb-hairline bg-pb-surface hidden md:flex flex-col sticky top-0 h-screen">
         <Brand />

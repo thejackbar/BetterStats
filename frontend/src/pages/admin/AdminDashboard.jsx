@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
 import { dashboardTiles, tierInfo, tierLabel, statusLabel, statusIsLive, TIER } from '../../lib/modules'
+import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { formatSeason } from '../../lib/cricketFormat'
 
@@ -21,13 +22,20 @@ function ModuleName({ name }) {
 
 function ModuleTile({ mod, entitled }) {
   const tier = tierInfo(mod.requiredTier)
+  const brand = moduleBrand(mod.key)
+  // Scope the module's accent colour to this tile only — every var(--pb-accent)
+  // inside (the name suffix, arrow, tint, border) becomes the module colour.
+  const brandVars = { '--pb-accent': brand.accent, '--pb-accent-rgb': brand.accentRgb }
 
   // Greenfield module (BetterIQ) — never opens yet, regardless of tier.
   if (!mod.built) {
     return (
-      <div className="pb-card p-5 opacity-70">
+      <div className="pb-card p-5 opacity-70" style={brandVars}>
         <div className="flex items-center justify-between gap-4">
-          <ModuleName name={mod.name} />
+          <div className="flex items-center gap-3">
+            <img src={brand.logo} alt="" className="w-8 h-8 rounded-lg shrink-0" />
+            <ModuleName name={mod.name} />
+          </div>
           <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-0.5">SOON</span>
         </div>
         <div className="text-pb-faint text-sm mt-1">{mod.blurb}</div>
@@ -41,10 +49,13 @@ function ModuleTile({ mod, entitled }) {
       <Link
         to={mod.to}
         className="block pb-card p-5 border-pb-accent/30 hover:border-pb-accent/50 transition-colors group"
-        style={{ background: 'color-mix(in srgb, var(--pb-accent) 6%, transparent)' }}
+        style={{ ...brandVars, background: 'color-mix(in srgb, var(--pb-accent) 6%, transparent)' }}
       >
         <div className="flex items-center justify-between gap-4">
-          <ModuleName name={mod.name} />
+          <div className="flex items-center gap-3">
+            <img src={brand.logo} alt="" className="w-8 h-8 rounded-lg shrink-0" />
+            <ModuleName name={mod.name} />
+          </div>
           <span className="text-2xl group-hover:translate-x-1 transition-transform" style={{ color: 'var(--pb-accent)' }}>→</span>
         </div>
         <div className="text-pb-faint text-sm mt-1">{mod.blurb}</div>
@@ -54,10 +65,10 @@ function ModuleTile({ mod, entitled }) {
 
   // Locked → upsell to the tier that unlocks it.
   return (
-    <div className="pb-card p-5 opacity-75" style={{ borderStyle: 'dashed' }}>
+    <div className="pb-card p-5 opacity-75" style={{ ...brandVars, borderStyle: 'dashed' }}>
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2 text-pb-faint">
-          <span aria-hidden>🔒</span>
+        <div className="flex items-center gap-2.5 text-pb-faint">
+          <img src={brand.logo} alt="" className="w-8 h-8 rounded-lg shrink-0 grayscale opacity-70" />
           <ModuleName name={mod.name} />
         </div>
         <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-0.5 uppercase">

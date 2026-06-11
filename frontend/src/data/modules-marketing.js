@@ -10,6 +10,7 @@
 // comms and merch) and BetterIQ.
 
 import { MODULE, TIER, TIER_INFO, TIER_ORDER } from '../lib/modules'
+import { MODULE_BRAND as BRAND } from '../lib/moduleBrand'
 
 // ── The Core (sold as the "Good" tier) ──────────────────────────────────────
 // Not a gateable module, but described here so the Modules hub can introduce it
@@ -20,7 +21,8 @@ export const CORE_MARKETING = {
   isCore: true,
   tier: TIER.GOOD,
   icon: '◆',
-  accent: '#34d399',
+  accent: BRAND.stats.accent,
+  logo: BRAND.stats.logo,
   tagline: 'Your club’s memory — every player, every season, kept forever.',
   to: '/features',
 }
@@ -36,7 +38,8 @@ export const MODULES_MARKETING = [
     name: 'BetterSelect',
     tier: TIER.BETTER,
     icon: '◎',
-    accent: '#34d399',
+    accent: BRAND.select.accent,
+    logo: BRAND.select.logo,
     audience: 'For captains & selectors',
     compareKey: 'betterselect',
     tagline: 'Availability and smart team selection — sort your weekend XI in minutes.',
@@ -70,7 +73,8 @@ export const MODULES_MARKETING = [
     name: 'BetterSocials',
     tier: TIER.BETTER,
     icon: '◈',
-    accent: '#38bdf8',
+    accent: BRAND.socials.accent,
+    logo: BRAND.socials.logo,
     audience: 'For the social-media manager',
     compareKey: 'bettersocials',
     tagline: 'Your public website plus match-day posts your community actually reposts.',
@@ -107,7 +111,8 @@ export const MODULES_MARKETING = [
     name: 'BetterAdmin',
     tier: TIER.BEST,
     icon: '◉',
-    accent: '#fbbf24',
+    accent: BRAND.admin.accent,
+    logo: BRAND.admin.logo,
     audience: 'For the treasurer & secretary',
     compareKey: 'betteradmin',
     tagline: 'Run the back office — fees, comms and merch in one place.',
@@ -140,7 +145,8 @@ export const MODULES_MARKETING = [
     name: 'BetterIQ',
     tier: TIER.BEST,
     icon: '◇',
-    accent: '#a78bfa',
+    accent: BRAND.iq.accent,
+    logo: BRAND.iq.logo,
     audience: 'For the coach & captain',
     compareKey: 'betteriq',
     tagline: 'Broadcast-grade analytics and an opposition scout for your club.',

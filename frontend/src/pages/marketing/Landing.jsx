@@ -367,12 +367,12 @@ function ModulesTeaser() {
             <Reveal key={m.slug} delay={(i % 4) * 70} className="h-full">
               <Link to={`/modules/${m.slug}`} className="surface p-6 h-full flex flex-col hover:border-accent/30 transition-colors group block">
                 <div className="flex items-center justify-between mb-4">
-                  <span className="w-10 h-10 rounded-xl flex items-center justify-center text-lg text-navy-950" style={{ background: m.accent }}>{m.icon}</span>
+                  <img src={m.logo} alt="" className="w-10 h-10 rounded-xl" />
                   <span className="pill-neutral text-[10px]">{TIER_INFO[m.tier].label}</span>
                 </div>
                 <h3 className="text-lg font-semibold mb-1.5 group-hover:text-accent transition-colors">{m.name}</h3>
                 <p className="text-sm text-pb-dim leading-relaxed mb-4 flex-1">{m.tagline}</p>
-                <span className="text-sm text-accent font-medium inline-flex items-center gap-1">Explore <span className="group-hover:translate-x-0.5 transition-transform">→</span></span>
+                <span className="text-sm font-medium inline-flex items-center gap-1" style={{ color: m.accent }}>Explore <span className="group-hover:translate-x-0.5 transition-transform">→</span></span>
               </Link>
             </Reveal>
           ))}

@@ -14,8 +14,8 @@ const LINKS = [
 
 // Core + bolt-on modules, for the "Modules" dropdown.
 const MODULE_LINKS = [
-  { slug: CORE_MARKETING.slug, name: CORE_MARKETING.name, icon: CORE_MARKETING.icon, accent: CORE_MARKETING.accent, tagline: CORE_MARKETING.tagline, to: CORE_MARKETING.to, badge: 'Core' },
-  ...MODULES_MARKETING.map((m) => ({ slug: m.slug, name: m.name, icon: m.icon, accent: m.accent, tagline: m.tagline, to: `/modules/${m.slug}`, badge: `${TIER_INFO[m.tier].label} tier` })),
+  { slug: CORE_MARKETING.slug, name: CORE_MARKETING.name, icon: CORE_MARKETING.icon, logo: CORE_MARKETING.logo, accent: CORE_MARKETING.accent, tagline: CORE_MARKETING.tagline, to: CORE_MARKETING.to, badge: 'Core' },
+  ...MODULES_MARKETING.map((m) => ({ slug: m.slug, name: m.name, icon: m.icon, logo: m.logo, accent: m.accent, tagline: m.tagline, to: `/modules/${m.slug}`, badge: `${TIER_INFO[m.tier].label} tier` })),
 ]
 
 export default function MarketingNav() {
@@ -111,7 +111,7 @@ export default function MarketingNav() {
                 <div className="bg-pb-surface border pb-hairline rounded-xl p-2 shadow-[0_24px_60px_-15px_rgba(0,0,0,0.85)]">
                   {MODULE_LINKS.map((m) => (
                     <Link key={m.slug} to={m.to} className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-pb-surface2/50 transition-colors group">
-                      <span className="w-9 h-9 rounded-lg flex items-center justify-center text-lg text-navy-950 flex-shrink-0" style={{ background: m.accent }}>{m.icon}</span>
+                      <img src={m.logo} alt="" className="w-9 h-9 rounded-lg flex-shrink-0" />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-semibold group-hover:text-accent transition-colors">{m.name}</p>
@@ -184,7 +184,7 @@ export default function MarketingNav() {
               className="flex items-center gap-2.5 py-2"
               onClick={() => setOpen(false)}
             >
-              <span className="w-7 h-7 rounded-md flex items-center justify-center text-sm text-navy-950 flex-shrink-0" style={{ background: m.accent }}>{m.icon}</span>
+              <img src={m.logo} alt="" className="w-7 h-7 rounded-md flex-shrink-0" />
               <span className="text-sm font-medium text-pb-text">{m.name}</span>
               <span className="pill-neutral text-[9px] ml-auto">{m.badge}</span>
             </Link>

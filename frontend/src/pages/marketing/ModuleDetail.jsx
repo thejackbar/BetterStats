@@ -25,7 +25,7 @@ function ModuleMock({ m }) {
       </div>
       <div className="p-5">
         <div className="flex items-center gap-3 mb-5">
-          <span className="w-9 h-9 rounded-lg flex items-center justify-center text-lg text-navy-950" style={{ background: m.accent }}>{m.icon}</span>
+          <img src={m.logo} alt="" className="w-9 h-9 rounded-lg" />
           <div>
             <p className="font-bold text-sm">{m.name}</p>
             <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint">{m.audience}</p>
@@ -81,7 +81,7 @@ export default function ModuleDetail() {
                 <span className="text-pb-dim">{m.name}</span>
               </div>
               <div className="flex items-center gap-3 mb-5">
-                <span className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl text-navy-950" style={{ background: m.accent }}>{m.icon}</span>
+                <img src={m.logo} alt="" className="w-12 h-12 rounded-xl" />
                 <span className="pill-neutral">{TIER_INFO[m.tier].label} tier · {m.audience}</span>
               </div>
               <h1 className="font-display font-bold text-[40px] sm:text-[52px] lg:text-[64px] tracking-tight leading-[0.95] mb-6">
@@ -255,7 +255,7 @@ export default function ModuleDetail() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {siblings.map((s) => (
                 <Link key={s.slug} to={`/modules/${s.slug}`} className="surface p-5 hover:border-accent/30 transition-colors group flex items-center gap-3">
-                  <span className="w-10 h-10 rounded-lg flex items-center justify-center text-lg text-navy-950 flex-shrink-0" style={{ background: s.accent }}>{s.icon}</span>
+                  <img src={s.logo} alt="" className="w-10 h-10 rounded-lg flex-shrink-0" />
                   <div className="min-w-0">
                     <p className="font-semibold text-sm group-hover:text-accent transition-colors">{s.name}</p>
                     <p className="text-xs text-pb-dim truncate">{TIER_INFO[s.tier].label} tier</p>

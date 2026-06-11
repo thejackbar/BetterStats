@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
 import { useClubTheme } from '../../hooks/useClubTheme'
 import { Icon } from '../../pages/admin/betterselect/ui'
+import { moduleBrand } from '../../lib/moduleBrand'
 
 // Generic chrome for a Better module surface (BetterFees, BetterSocials, …) —
 // a focused sidebar with just that module's tools, separate from the main admin
@@ -24,6 +25,10 @@ function loadClubBranding() {
 }
 
 export default function ModuleLayout({ moduleName, nav = [], children, title, actions }) {
+  // Each module surface wears its own brand colour (BetterSocials magenta,
+  // BetterFees / BetterComms the BetterAdmin amber). moduleName ("Socials" /
+  // "Fees" / "Comms") resolves to the right brand via the shared registry.
+  const brand = moduleBrand((moduleName || '').toLowerCase())
   const { user, logout, hasCapability } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
@@ -57,7 +62,7 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
           : <span className="w-8 h-8 rounded bg-pb-accent/15 text-pb-accent font-display font-bold flex items-center justify-center shrink-0">{(club?.name || 'B')[0]}</span>}
         <div className="min-w-0">
           <div className="font-display font-bold text-sm leading-tight truncate" title={club?.name || ''}>{club?.name || 'BetterStats'}</div>
-          <div className="font-mono text-[10px] text-pb-faint">Better<span className="text-pb-brand">{moduleName}</span></div>
+          <div className="font-mono text-[10px] text-pb-faint">Better<span style={{ color: 'var(--pb-accent)' }}>{moduleName}</span></div>
         </div>
       </div>
       <Link to="/admin" className="block mt-2 text-[11px] font-mono text-pb-faintest hover:text-pb-faint">← Back to admin</Link>
@@ -65,14 +70,14 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
   )
 
   return (
-    // Module chrome is BetterStats-branded, NOT the club's white-labelled public
-    // site. A club's accent can be any colour (e.g. Applecross is red), which
-    // reads as alarming on headers/labels/status dots. Re-point --pb-accent to
-    // the fixed brand green for everything inside the module — custom properties
-    // inherit, so this one override cascades to every child without touching the
-    // rest of the app.
+    // Module chrome wears the module's own brand colour, NOT the club's
+    // white-labelled public site. A club's accent can be any colour (e.g.
+    // Applecross is red), which reads as alarming on headers/labels/status dots.
+    // Re-point --pb-accent to the module's brand colour for everything inside the
+    // module — custom properties inherit, so this one override cascades to every
+    // child without touching the rest of the app.
     <div className="min-h-screen bg-pb-bg text-pb-text flex"
-      style={{ '--pb-accent': 'var(--pb-brand)', '--pb-accent-rgb': '22 199 132' }}>
+      style={{ '--pb-accent': brand.accent, '--pb-accent-rgb': brand.accentRgb }}>
       {/* Sidebar */}
       <aside className="w-60 border-r pb-hairline bg-pb-surface hidden md:flex flex-col sticky top-0 h-screen">
         <Brand />

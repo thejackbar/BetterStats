@@ -4,6 +4,10 @@
 // which still describes the Good/Better/Best tiers the backend enforces). The
 // public model the club sees is simpler: one Core plus the modules you choose,
 // billed as an annual licence. Edit the numbers here.
+//
+// Colours + logos come from the shared module-brand registry so the calculator
+// matches the dashboard tiles and the rest of the marketing site.
+import { MODULE_BRAND as BRAND } from '../lib/moduleBrand'
 
 export const CORE = {
   key: 'core',
@@ -11,17 +15,18 @@ export const CORE = {
   label: 'Core',
   price: 400,
   icon: '◆',
-  accent: '#34d399',
+  accent: BRAND.stats.accent,
+  logo: BRAND.stats.logo,
   blurb: 'Reconciled stats and your public club site',
 }
 
-// The bolt-on modules and their annual price. Icons/accents mirror the in-app
-// module tiles so the calculator looks like the dashboard.
+// The bolt-on modules and their annual price. Logos/accents come from the shared
+// brand registry so the calculator looks like the dashboard.
 export const PRICED_MODULES = [
-  { key: 'select',  name: 'BetterSelect',  price: 100, icon: '◎', accent: '#34d399', blurb: 'Player availability, team selection and net manager' },
-  { key: 'socials', name: 'BetterSocials', price: 100, icon: '◈', accent: '#38bdf8', blurb: 'Social-post generation and a CRM for your club website' },
-  { key: 'admin',   name: 'BetterAdmin',   price: 100, icon: '⬢', accent: '#f59e0b', blurb: 'Member fees, bulk emailing and merch (coming soon)' },
-  { key: 'iq',      name: 'BetterIQ',      price: 200, icon: '◇', accent: '#a78bfa', blurb: 'Deep analytics and opposition scouting' },
+  { key: 'select',  name: 'BetterSelect',  price: 100, icon: '◎', accent: BRAND.select.accent,  logo: BRAND.select.logo,  blurb: 'Player availability, team selection and net manager' },
+  { key: 'socials', name: 'BetterSocials', price: 100, icon: '◈', accent: BRAND.socials.accent, logo: BRAND.socials.logo, blurb: 'Social-post generation and a CRM for your club website' },
+  { key: 'admin',   name: 'BetterAdmin',   price: 100, icon: '⬢', accent: BRAND.admin.accent,   logo: BRAND.admin.logo,   blurb: 'Member fees, bulk emailing and merch (coming soon)' },
+  { key: 'iq',      name: 'BetterIQ',      price: 200, icon: '◇', accent: BRAND.iq.accent,      logo: BRAND.iq.logo,      blurb: 'Deep analytics and opposition scouting' },
 ]
 
 // Bundle discount on the whole price: pick any 2 or 3 modules for 5% off, all 4
