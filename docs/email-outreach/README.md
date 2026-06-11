@@ -38,6 +38,15 @@ Send yourself a test first and check it on your phone, especially the dark initi
 
 The initial email's body copy was run through the project humanizer to sit with the rest of the site: em dashes taken out (the body, the signature and two module taglines), a doubled "chasing" reworded, and the sign-off split onto its own line. The two site taglines that used an em dash (BetterStats, BetterAdmin) read with a colon in the email instead, so the email itself stays dash-free. If you'd rather the cards quote the live site string exactly, those two are the only spots that differ.
 
+## Logo in the header (initial email)
+
+The initial email's header now shows the Better Cricket mark flush against the wordmark, with no gap between them. Two things to know about it:
+
+- **It has to be deployed before it shows.** Email clients can't read the repo's `bettercricket-white.svg` (it's a bundled asset, and Gmail doesn't render SVG at all), so the mark was flattened to a PNG at `frontend/public/bettercricket-mark-white.png`. The email points at `https://betterat.cricket/bettercricket-mark-white.png`, which only goes live once the frontend is deployed. Until then the image 404s and you'll just see the wordmark text.
+- **Gmail blocks images from unknown senders by default**, so a first-time recipient may see the wordmark text until they click "display images." That's why the styled "Better Cricket" text stays in the header next to the logo: if the image is blocked or not yet deployed, the brand still reads. The logo's alt text is empty on purpose so a blocked image doesn't print "Better Cricket" twice.
+
+The PNG was built by compositing the two layers inside `bettercricket-white.svg` at their SVG offsets, trimming to the artwork, and exporting white-on-transparent at 96px tall (shown at 33x28 in the header).
+
 ## Dark-mode note (initial email)
 
 You asked for the dark background, so the initial email is dark navy throughout. One thing to watch: a few mail clients force their own dark-mode treatment and can shift dark emails slightly (mostly text/border contrast). Gmail on desktop and iOS renders it as built; the test send is mainly to confirm it on whatever you and your recipients read mail on. The follow-up email keeps the light body specifically to dodge that, so the two emails cover both approaches.
