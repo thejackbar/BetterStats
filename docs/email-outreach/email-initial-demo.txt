@@ -10,6 +10,8 @@ We waited for PlayHQ to build what clubs actually asked for. Club history. Easy 
 
 It handles availability, selection, socials, fees and admin. On top of that, it gives your club statistical analysis nobody's ever put in front of community cricketers before.
 
+We're offering a 14-day free trial, so you can try everything before paying a cent.
+
 Explore the modules:
 - BetterStats: Your club's memory, every player, every season, kept forever. https://betterat.cricket/modules/betterstats
 - BetterSelect: Availability and team selection, sorted for every grade in minutes. https://betterat.cricket/modules/betterselect
