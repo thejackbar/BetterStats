@@ -24,6 +24,7 @@ import { Radar, BAT_AXES, BOWL_AXES, PhaseStrip, buildRadar } from './viz'
 import KeyPlayersCard from './KeyPlayersCard'
 import AnyClubSearch from './AnyClubSearch'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
+import { useClubPlayers, careerOnlyEntries, entryWithThreat } from './clubPlayers'
 import { useIQFilter, seasonIdsInRange, seasonLabel } from './Context'
 import Dropdown from '../../../components/Dropdown'
 
@@ -617,13 +618,19 @@ function OppPlayerScout({ dossier, tags, onSaveTag, orgGuid }) {
     for (const d of [...(dossier.danger_batters || []), ...(dossier.danger_bowlers || [])]) m.set(d.player_id, d)
     return m
   }, [dossier])
+  // Current-season squad + everyone else CA's aggregates have seen at this
+  // club in the last five years, so a player who hasn't appeared this season
+  // is still searchable (their profile leans on the career/deep cards).
+  const clubPlayers = useClubPlayers(orgGuid, dossier.opponent?.name)
+  const careerOnly = useMemo(() => careerOnlyEntries(index, clubPlayers), [index, clubPlayers])
   const all = useMemo(() => [...index.entries()].map(([id, v]) => ({ id, ...v })), [index])
-  if (!all.length) return null
+  const everyone = useMemo(() => [...all, ...careerOnly], [all, careerOnly])
+  if (!everyone.length) return null
   const t = q.trim().toLowerCase()
-  const matches = (t ? all.filter(p => p.name.toLowerCase().includes(t)) : all).slice(0, 30)
-  const selected = sel ? index.get(sel) : null
+  const matches = (t ? everyone.filter(p => p.name.toLowerCase().includes(t)) : everyone).slice(0, 30)
+  const selected = sel ? entryWithThreat(index.get(sel) || careerOnly.find(p => p.id === sel) || null, dossier) : null
   return (
-    <Card eyebrow="search any of their squad" title="Scout a player">
+    <Card eyebrow="search anyone at this club" title="Scout a player">
       <div ref={ref} className="relative max-w-sm" onFocusCapture={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}>
         <Search value={q} onChange={(v) => { setQ(v); setOpen(true) }} placeholder="Search an opponent player…" className="w-full" />
         <Dropdown
@@ -638,7 +645,11 @@ function OppPlayerScout({ dossier, tags, onSaveTag, orgGuid }) {
             <button key={p.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { setSel(p.id); setQ(''); setOpen(false) }}
               className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
               <span className="font-medium truncate">{p.name}</span>
-              <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">{p.bat?.runs ? runsPhrase(p.bat.runs, p.bat.average) : ''}{p.bowl?.wickets ? ` · ${wktsPhrase(p.bowl.wickets)}` : ''}</span>
+              <span className="text-pb-faintest text-[11px] iq-num whitespace-nowrap">
+                {p.careerOnly
+                  ? `${p.career?.runs ? runsPhrase(p.career.runs, p.career.average) : ''}${p.career?.wickets ? ` · ${wktsPhrase(p.career.wickets)}` : ''}${(p.career?.runs || p.career?.wickets) ? ' · 5yr' : '5yr'}`
+                  : `${p.bat?.runs ? runsPhrase(p.bat.runs, p.bat.average) : ''}${p.bowl?.wickets ? ` · ${wktsPhrase(p.bowl.wickets)}` : ''}`}
+              </span>
             </button>
           ))}
         </Dropdown>

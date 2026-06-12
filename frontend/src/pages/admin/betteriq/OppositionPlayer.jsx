@@ -10,7 +10,7 @@
  * status === 'building') / iqOpponentTags / iqSaveOpponentTag, plus URL params
  * ?opponent=<opp_key> and ?player=<participant_id>.
  */
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import Dropdown from '../../../components/Dropdown'
 import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
@@ -18,6 +18,7 @@ import { api } from '../../../lib/api'
 import { Icon, Tag, Btn, Search, Empty, PageIntro, Note, runsPhrase, wktsPhrase } from './ui'
 import AnyClubSearch from './AnyClubSearch'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
+import { useClubPlayers, careerOnlyEntries, entryWithThreat, bestNameMatch, isOrgGuid } from './clubPlayers'
 
 const POLL_MS = 2500
 
@@ -126,7 +127,19 @@ export default function OppositionPlayer() {
   }, [dossier])
   const all = useMemo(() => [...index.entries()].map(([id, v]) => ({ id, ...v }))
     .sort((a, b) => (b.bat?.runs || 0) - (a.bat?.runs || 0) || (b.bowl?.wickets || 0) - (a.bowl?.wickets || 0)), [index])
-  const selected = sel ? index.get(sel) : null
+
+  // The club's full five-year roster, merged behind the current-season squad —
+  // a player who hasn't appeared this season (e.g. S Morgan) is still
+  // searchable and selectable, with the career/deep cards as their profile.
+  const orgGuid = dossier?.opponent?.org_id || (club && isOrgGuid(club.opp_key) ? club.opp_key : null)
+  const clubPlayers = useClubPlayers(orgGuid, club?.name)
+  const careerOnly = useMemo(() => careerOnlyEntries(index, clubPlayers), [index, clubPlayers])
+  const everyone = useMemo(() => [...all, ...careerOnly], [all, careerOnly])
+  const selected = useMemo(() => {
+    if (!sel) return null
+    const e = index.get(sel) || careerOnly.find(p => p.id === sel) || null
+    return entryWithThreat(e, dossier)
+  }, [sel, index, careerOnly, dossier])
 
   // Debounced opponent-player search (player-first entry).
   useEffect(() => {
@@ -140,25 +153,32 @@ export default function OppositionPlayer() {
   }, [pSearch])
 
   // Once a club's live squad is ready, resolve a pending player name (from the
-  // player-first search) to a participant and select them.
+  // player-first search) to a participant and select them. The vs-us index
+  // holds short names ("S Morgan") while rosters/aggregates hold "Simon Morgan"
+  // / "Morgan, Simon", so this is a token/initial scorer, not a substring test.
+  // A player absent from the current-season squad resolves against the
+  // five-year list instead — wait for it before giving up on the name.
   useEffect(() => {
-    if (status !== 'ready' || !pendingNameRef.current || !all.length) return
+    if (status !== 'ready' || !pendingNameRef.current || !everyone.length) return
     const want = pendingNameRef.current
-    const surname = want.split(/[ ,]+/).filter(Boolean).pop() || want
-    let hit = all.find(p => p.name.toLowerCase() === want)
-      || all.find(p => p.name.toLowerCase().includes(want) || want.includes(p.name.toLowerCase()))
-      || all.find(p => p.name.toLowerCase().includes(surname))
+    const hit = bestNameMatch(want, everyone)
+    const fiveYearPending = orgGuid && (!clubPlayers || clubPlayers.status === 'building')
+    if (!hit && fiveYearPending) return
     pendingNameRef.current = null
     if (hit) {
       setSel(hit.id)
-      if (club) setSearchParams({ opponent: club.opp_key, player: hit.id }, { replace: true })
+      if (club) {
+        const sp = { opponent: club.opp_key, player: hit.id }
+        if (club.name) sp.name = club.name
+        setSearchParams(sp, { replace: true })
+      }
     }
-  }, [status, all])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, everyone, clubPlayers])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const cq = clubQ.trim().toLowerCase()
   const clubMatches = (cq ? opponents.filter(o => (o.name || '').toLowerCase().includes(cq)) : opponents).slice(0, 40)
   const pq = playerQ.trim().toLowerCase()
-  const playerMatches = pq ? all.filter(p => p.name.toLowerCase().includes(pq)) : all
+  const playerMatches = pq ? everyone.filter(p => p.name.toLowerCase().includes(pq)) : everyone
   const clubRef = useRef(null)
   const playerRef = useRef(null)
 
@@ -283,28 +303,42 @@ export default function OppositionPlayer() {
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[260px_1fr] items-start">
-            {/* Squad list */}
+            {/* Squad list — current-season squad first, then everyone else CA's
+                aggregates have seen at this club in the last five years. */}
             <div className="iq-card p-2 lg:sticky lg:top-20">
               <div className="iq-eyebrow px-2 py-2">Squad ({all.length})</div>
               <div className="max-h-[64vh] overflow-y-auto iq-scroll">
                 {playerMatches.length === 0
-                  ? <Empty className="px-2.5 py-2">{all.length === 0 ? 'No current-season players.' : 'No match.'}</Empty>
-                  : playerMatches.map(p => {
+                  ? <Empty className="px-2.5 py-2">{everyone.length === 0
+                      ? (clubPlayers?.status === 'building' ? 'Pulling their five-year player list…' : 'No players found.')
+                      : 'No match.'}</Empty>
+                  : playerMatches.map((p, i) => {
                     const on = p.id === sel
                     const danger = tags[p.id]?.is_danger || enriched.get(p.id)?.alert?.level === 'danger'
+                    const firstCareer = p.careerOnly && (i === 0 || !playerMatches[i - 1].careerOnly)
                     return (
-                      <button key={p.id} onClick={() => pickPlayer(p.id)}
-                        className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left transition"
-                        style={{ borderRadius: 9, background: on ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}>
-                        <span className="font-medium text-[13.5px] truncate flex items-center gap-1.5" style={{ color: on ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
-                          {p.name}
-                          {p.bat?.form === 'hot' && <Icon name="flame" size={12} style={{ color: 'var(--pb-red)' }} />}
-                          {danger && <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--pb-red)' }} />}
-                        </span>
-                        <span className="iq-mono text-pb-faint shrink-0" style={{ fontSize: 10.5 }}>{p.bat?.runs ? runsPhrase(p.bat.runs) : ''}{p.bowl?.wickets ? ` · ${wktsPhrase(p.bowl.wickets)}` : ''}</span>
-                      </button>
+                      <Fragment key={p.id}>
+                        {firstCareer && <div className="iq-eyebrow px-2 pt-3 pb-1">Last five years</div>}
+                        <button onClick={() => pickPlayer(p.id)}
+                          className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left transition"
+                          style={{ borderRadius: 9, background: on ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}>
+                          <span className="font-medium text-[13.5px] truncate flex items-center gap-1.5" style={{ color: on ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
+                            {p.name}
+                            {p.bat?.form === 'hot' && <Icon name="flame" size={12} style={{ color: 'var(--pb-red)' }} />}
+                            {danger && <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--pb-red)' }} />}
+                          </span>
+                          <span className="iq-mono text-pb-faint shrink-0" style={{ fontSize: 10.5 }}>
+                            {p.careerOnly
+                              ? `${p.career?.runs ? runsPhrase(p.career.runs) : ''}${p.career?.wickets ? `${p.career?.runs ? ' · ' : ''}${wktsPhrase(p.career.wickets)}` : ''}`
+                              : `${p.bat?.runs ? runsPhrase(p.bat.runs) : ''}${p.bowl?.wickets ? ` · ${wktsPhrase(p.bowl.wickets)}` : ''}`}
+                          </span>
+                        </button>
+                      </Fragment>
                     )
                   })}
+                {clubPlayers?.status === 'building' && everyone.length > 0 && (
+                  <div className="iq-eyebrow px-2 pt-3 pb-2 animate-pulse">Pulling their five-year list…</div>
+                )}
               </div>
             </div>
 
@@ -313,7 +347,7 @@ export default function OppositionPlayer() {
               {selected
                 ? <OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={club.name} playerId={sel} tag={tags[sel]} onSaveTag={saveTag}
                     dossierBatting={dossier?.batting || []} dossierBowling={dossier?.bowling || []}
-                    orgGuid={dossier?.opponent?.org_id || null} />
+                    orgGuid={orgGuid} />
                 : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile — radar, scoring zones, form, five-year history, dismissal patterns and record vs us.</Empty></div>}
             </div>
           </div>

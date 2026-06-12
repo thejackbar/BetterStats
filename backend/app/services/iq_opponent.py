@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 7
+DOSSIER_VERSION = 8
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -397,10 +397,12 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
     ``_scout_grade`` builds from live Grassroots, so the rest of ``_assemble``
     runs unchanged (no duplicated synthesis).
 
-    Scoped to their latest season. ``pid`` = their players' raw participant GUID
-    (``grassroots_id``) so the vs-us records (parsed from the GR head-to-head
-    cards, whose participantId is that same GUID) key-align. Returns
-    ``(bat, bowl, field, fow, dates, teams)``.
+    Scoped to their latest season **that holds game-level rows** — a stats-less
+    season row (e.g. a freshly-seeded comp with no games synced yet) used to pin
+    the whole dossier to an empty year, the "SQUAD (0)" symptom. ``pid`` = their
+    players' raw participant GUID (``grassroots_id``) so the vs-us records
+    (parsed from the GR head-to-head cards, whose participantId is that same
+    GUID) key-align. Returns ``(bat, bowl, field, fow, dates, teams)``.
     """
     bat: dict = {}
     bowl: dict = {}
@@ -410,7 +412,16 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
     teams: list[dict] = []
 
     yr = (await session.execute(
-        text("SELECT MAX(year) FROM seasons WHERE organisation_id = CAST(:org AS UUID) AND year IS NOT NULL"),
+        text(
+            """
+            SELECT MAX(s.year) FROM seasons s
+            WHERE s.organisation_id = CAST(:org AS UUID) AND s.year IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM grades gr JOIN games g ON g.grade_id = gr.id
+                WHERE gr.season_id = s.id
+              )
+            """
+        ),
         {"org": opp_org_id},
     )).scalar()
     if yr is None:
@@ -1184,18 +1195,26 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
     # no re-storing their stats. Everything downstream (finalise, danger sorting,
     # enrichment, game plan, partnerships) is shape-identical, so it's unchanged.
     synced_org = await _synced_opponent_org(session, opp_key)
+    db_built = False
     if synced_org:
         season_bat, season_bowl, season_field, season_fow, season_dates, db_teams = \
             await _db_season_accumulators(session, synced_org)
-        if not teams and db_teams:
-            teams = db_teams
-        scout_grades = teams
-        teams_scouted = len(db_teams)
         season_matches = len(
             {m for b in season_bat.values() for m in b["matches"]}
             | {m for b in season_bowl.values() for m in b["matches"]}
         )
-    else:
+        if season_matches:
+            db_built = True
+            if not teams and db_teams:
+                teams = db_teams
+            scout_grades = teams
+            teams_scouted = len(db_teams)
+        else:
+            # Synced club but no usable game-level rows (aggregate-only sync, a
+            # failed sync, …) — fall through to the live scout rather than ship
+            # an empty squad with full head-to-head (the Murdoch SQUAD (0) bug).
+            season_bat, season_bowl, season_field, season_fow, season_dates = {}, {}, {}, {}, []
+    if not db_built:
         # Live Grassroots scouting: one chosen team, or the whole club (default, so
         # no player is missed just because they play a different grade).
         if team_grade_id:
@@ -1346,7 +1365,7 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
 
     coverage = "rich" if season_matches else ("history_only" if h2h_games else "none")
     notes = []
-    if synced_org and season_matches:
+    if db_built and season_matches:
         notes.append(
             f"Built from our own database — {opp_name or 'this opponent'} is a synced "
             f"BetterStats club ({season_matches} of their matches this season)."
