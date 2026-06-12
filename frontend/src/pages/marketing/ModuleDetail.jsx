@@ -166,14 +166,50 @@ export default function ModuleDetail() {
           </div>
         </section>
 
-        {/* Gallery */}
+        {/* Deep dives — the module's best four screens, each with real copy */}
+        {m.showcase && m.showcase.length > 0 && (
+          <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
+            <div className="max-w-[1280px] mx-auto">
+              <Reveal>
+                <div className="text-center mb-16">
+                  <p className="pill-neutral inline-flex mb-5">See it in action</p>
+                  <h2 className="font-display font-bold text-3xl md:text-5xl tracking-tight">{m.name}, screen by screen.</h2>
+                </div>
+              </Reveal>
+              <div className="space-y-20 lg:space-y-28">
+                {m.showcase.map((s, i) => (
+                  <div key={s.src} className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                    <Reveal className={`col-span-1 lg:col-span-5 ${i % 2 === 1 ? 'lg:order-2' : ''}`}>
+                      <div className="lg:sticky lg:top-24">
+                        <h3 className="text-3xl lg:text-4xl font-bold leading-tight mb-4">{s.headline}</h3>
+                        <p className="text-pb-dim leading-relaxed mb-6">{s.body}</p>
+                        <ul className="space-y-2.5">
+                          {s.points.map((p) => (
+                            <li key={p} className="flex items-center gap-3 text-sm"><span className="tick">✓</span>{p}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </Reveal>
+                    <Reveal className={`col-span-1 lg:col-span-7 ${i % 2 === 1 ? 'lg:order-1' : ''}`}>
+                      <div className="product-shadow rounded-2xl overflow-hidden">
+                        <ZoomableImage src={s.src} alt={s.headline} caption={s.headline} className="block w-full h-auto" />
+                      </div>
+                    </Reveal>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Gallery — the screenshots that didn't make the deep-dive cut */}
         {m.gallery && m.gallery.length > 0 && (
           <section className="px-4 sm:px-6 lg:px-10 py-16 border-t pb-hairline">
             <div className="max-w-[1100px] mx-auto">
               <Reveal>
                 <div className="text-center mb-10">
-                  <p className="pill-neutral inline-flex mb-5">See it in action</p>
-                  <h2 className="font-display font-bold text-3xl md:text-5xl tracking-tight">{m.name}, on screen.</h2>
+                  <p className="pill-neutral inline-flex mb-5">{m.showcase && m.showcase.length > 0 ? 'And the rest' : 'See it in action'}</p>
+                  <h2 className="font-display font-bold text-3xl md:text-5xl tracking-tight">More of {m.name}, on screen.</h2>
                 </div>
               </Reveal>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
