@@ -16,9 +16,10 @@
  * New OPTIONAL props (safe defaults) extend it without breaking that call:
  *   - dossierBatting / dossierBowling — peer groups for the radar.
  */
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { api } from '../../../lib/api'
 import {
-  Sparkline, Card, Stat, Note, Tag, Btn, Initials, StackedBar, a2,
+  Sparkline, Card, Stat, Note, Tag, Btn, Initials, StackedBar, Bar, a2,
   fmtCount, fmtOvers, fmtPct, oversToBalls,
 } from './ui'
 import { Radar, WagonWheel, ZONE_LABELS, buildRadar } from './viz'
@@ -247,8 +248,253 @@ function ScoutingTags({ playerId, name, tag, onSave }) {
   )
 }
 
+/* ── 5-year history (CA aggregates + scorecard deep pass) ────────────────────
+   Both ride the same build/poll contract as the dossier: the backend answers
+   `{status:'building'}` until the cached payload is ready. The career slice is
+   near-instant once the club's blob has been built once; the deep pass scans
+   only the grades this player appeared in (a minute or two first time, then
+   cached for a week). Needs the club's CA org GUID (dossier `opponent.org_id`),
+   so these render for any club — including ones we've never played. */
+
+const HIST_POLL_MS = 3000
+
+function usePolledScout(fetcher, deps) {
+  const [data, setData] = useState(null)
+  const timerRef = useRef(null)
+  useEffect(() => {
+    setData(null)
+    let alive = true
+    const poll = () => {
+      fetcher().then(d => {
+        if (!alive) return
+        setData(d)
+        if (d?.status === 'building') timerRef.current = setTimeout(poll, HIST_POLL_MS)
+      }).catch(() => { if (alive) setData({ status: 'error' }) })
+    }
+    poll()
+    return () => { alive = false; if (timerRef.current) clearTimeout(timerRef.current) }
+  }, deps)  // eslint-disable-line react-hooks/exhaustive-deps
+  return data
+}
+
+function HistoryBuilding({ children }) {
+  return (
+    <div className="flex items-center gap-3 text-pb-faint text-[13px] py-2">
+      <span className="inline-block iq-spin shrink-0" style={{ width: 18, height: 18, borderRadius: 99, border: '2.5px solid var(--pb-surface3)', borderTopColor: 'var(--pb-accent)' }} />
+      <span>{children}</span>
+    </div>
+  )
+}
+
+function PlayerCareerCard({ orgGuid, playerId, clubName }) {
+  const data = usePolledScout(
+    () => api.iqPlayerCareer({ org: orgGuid, player: playerId, clubName }),
+    [orgGuid, playerId],
+  )
+  const windowLabel = data?.window ? `${data.window.from_year}–${data.window.to_year}` : 'last 5 years'
+  const p = data?.player
+  const showBowl = p && (p.totals?.wickets || 0) > 0
+  return (
+    <Card eyebrow={`career · ${windowLabel}`} title="Last five years"
+      right={p ? <Tag tone="faint">{fmtCount(p.totals?.matches)} matches</Tag> : null}>
+      {!data || data.status === 'building' ? (
+        <HistoryBuilding>Pulling their last five years from PlayHQ — quick the first time, instant after.</HistoryBuilding>
+      ) : data.status === 'error' ? (
+        <Note>Couldn't pull their career history just now — try again shortly.</Note>
+      ) : data.status !== 'ready' ? (
+        <Note>{data.message || 'No Cricket Australia history available for this club.'}</Note>
+      ) : !p ? (
+        <Note>No CA season records found for this player in the last five years — they may be new, or recorded under a different club.</Note>
+      ) : (
+        <div className="overflow-x-auto iq-scroll -mx-1">
+          <table className="w-full text-[13px]">
+            <thead><tr className="iq-eyebrow text-left" style={{ fontSize: 9.5 }}>
+              <th className="py-1.5 px-1.5 font-medium">Year</th>
+              <th className="py-1.5 px-1.5 font-medium text-right">M</th>
+              <th className="py-1.5 px-1.5 font-medium text-right">Runs</th>
+              <th className="py-1.5 px-1.5 font-medium text-right">Avg</th>
+              <th className="py-1.5 px-1.5 font-medium text-right">HS</th>
+              <th className="py-1.5 px-1.5 font-medium text-right">50/100</th>
+              {showBowl && <>
+                <th className="py-1.5 px-1.5 font-medium text-right">Wkts</th>
+                <th className="py-1.5 px-1.5 font-medium text-right">Avg</th>
+                <th className="py-1.5 px-1.5 font-medium text-right">Econ</th>
+              </>}
+              <th className="py-1.5 px-1.5 font-medium text-right">Ct</th>
+            </tr></thead>
+            <tbody>
+              {(p.seasons || []).map(s => (
+                <tr key={s.year} style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+                  <td className="py-2 px-1.5 iq-num font-medium">{s.year}</td>
+                  <td className="py-2 px-1.5 text-right iq-num text-pb-faint">{fmtCount(s.matches)}</td>
+                  <td className="py-2 px-1.5 text-right iq-num font-semibold">{fmtCount(s.runs)}</td>
+                  <td className="py-2 px-1.5 text-right iq-num">{a2(s.average)}</td>
+                  <td className="py-2 px-1.5 text-right iq-num">{s.high_score ?? '—'}</td>
+                  <td className="py-2 px-1.5 text-right iq-num text-pb-faint">{s.fifties || 0}/{s.hundreds || 0}</td>
+                  {showBowl && <>
+                    <td className="py-2 px-1.5 text-right iq-num font-semibold">{fmtCount(s.wickets)}</td>
+                    <td className="py-2 px-1.5 text-right iq-num">{a2(s.bowling_average)}</td>
+                    <td className="py-2 px-1.5 text-right iq-num text-pb-faint">{a2(s.economy)}</td>
+                  </>}
+                  <td className="py-2 px-1.5 text-right iq-num text-pb-faint">{fmtCount(s.catches)}</td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: '1px solid var(--pb-hairline2)' }} className="font-semibold">
+                <td className="py-2 px-1.5">Total</td>
+                <td className="py-2 px-1.5 text-right iq-num">{fmtCount(p.totals?.matches)}</td>
+                <td className="py-2 px-1.5 text-right iq-num">{fmtCount(p.totals?.runs)}</td>
+                <td className="py-2 px-1.5 text-right iq-num">{a2(p.totals?.average)}</td>
+                <td className="py-2 px-1.5 text-right iq-num">{p.totals?.high_score ?? '—'}</td>
+                <td className="py-2 px-1.5 text-right iq-num">{p.totals?.fifties || 0}/{p.totals?.hundreds || 0}</td>
+                {showBowl && <>
+                  <td className="py-2 px-1.5 text-right iq-num">{fmtCount(p.totals?.wickets)}</td>
+                  <td className="py-2 px-1.5 text-right iq-num">{a2(p.totals?.bowling_average)}</td>
+                  <td className="py-2 px-1.5 text-right iq-num">{a2(p.totals?.economy)}</td>
+                </>}
+                <td className="py-2 px-1.5 text-right iq-num">{fmtCount(p.totals?.catches)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <Note>Season totals straight from Cricket Australia, for this club only — seasons at a previous club won't show here.</Note>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function PlayerDeepDive({ orgGuid, playerId, playerName, clubName }) {
+  const data = usePolledScout(
+    () => api.iqPlayerDeep({ org: orgGuid, player: playerId, playerName, clubName }),
+    [orgGuid, playerId],
+  )
+  if (!data || data.status === 'building') {
+    return (
+      <Card eyebrow="deep dive · building" title="How he plays">
+        <HistoryBuilding>Scanning their scorecards across the last five years for dismissal patterns and batting positions — a minute or two the first time, then cached for a week. The rest of the profile is ready now.</HistoryBuilding>
+      </Card>
+    )
+  }
+  if (data.status === 'error') {
+    return <Card eyebrow="deep dive" title="How he plays"><Note>Couldn't run the deep scan just now — try again shortly.</Note></Card>
+  }
+  if (data.status === 'unavailable') return null
+  if (!data.batting && !data.bowling) {
+    return (
+      <Card eyebrow="deep dive · last 5 years" title="How he plays">
+        <Note>None of the scorecards we scanned ({data.coverage?.scorecards ?? 0}) had this player on a team sheet — the career table above still stands.</Note>
+      </Card>
+    )
+  }
+  const b = data.batting
+  const bw = data.bowling
+  const conv = b?.conversion
+  const bandsMax = Math.max(1, ...(b?.bands || []).map(x => x.count))
+  return (
+    <div className="space-y-5">
+      {data.summary && (
+        <Card accent eyebrow="deep dive · last 5 years" title="How he plays">
+          <div className="text-[14px] leading-relaxed" style={{ color: 'var(--pb-accent)' }}>{data.summary}</div>
+        </Card>
+      )}
+      <div className="grid gap-5 lg:grid-cols-2 items-start">
+        {b?.dismissals?.length > 0 && (
+          <Card eyebrow="last 5 years" title="How he gets out">
+            <StackedBar data={b.dismissals.map(d => ({ type: d.type, count: d.count, pct: d.pct }))} />
+          </Card>
+        )}
+        {b?.by_position?.length > 0 && (
+          <Card eyebrow="last 5 years" title="By batting position">
+            <div className="space-y-2">
+              {b.by_position.map(p => (
+                <div key={p.bucket} className="flex items-center justify-between gap-3 text-[13px]">
+                  <span className="font-medium">{p.bucket}</span>
+                  <span className="iq-num text-pb-dim whitespace-nowrap">{p.innings} inns · {fmtCount(p.runs)} runs{p.average != null ? ` @ ${a2(p.average)}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+        {conv && b?.innings_count >= 5 && (
+          <Card eyebrow="last 5 years" title="Starts & conversion">
+            <div className="grid grid-cols-3 gap-4">
+              <Stat label="Reaches 25" value={conv.start_pct != null ? `${conv.start_pct}%` : '—'} count={false} />
+              <Stat label="25 → 50" value={conv.fifty_conv_pct != null ? `${conv.fifty_conv_pct}%` : '—'} count={false} />
+              <Stat label="50 → 100" value={conv.hundred_conv_pct != null ? `${conv.hundred_conv_pct}%` : '—'} count={false} />
+            </div>
+            {b?.bands?.length > 0 && (
+              <div className="space-y-1.5 mt-4">
+                {b.bands.map((band, i) => (
+                  <div key={band.band} className="flex items-center gap-3 text-[12.5px]">
+                    <span className="w-12 shrink-0 iq-mono text-pb-faint" style={{ fontSize: 10.5 }}>{band.band}</span>
+                    <div className="flex-1"><Bar pct={(band.count / bandsMax) * 100} color="var(--pb-accent)" h={7} delay={i * 0.05} /></div>
+                    <span className="w-6 text-right iq-num text-pb-dim shrink-0">{band.count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+        {bw && bw.wickets > 0 && (
+          <Card eyebrow="last 5 years" title="Bowling by year">
+            <div className="overflow-x-auto iq-scroll -mx-1">
+              <table className="w-full text-[13px]">
+                <thead><tr className="iq-eyebrow text-left" style={{ fontSize: 9.5 }}>
+                  <th className="py-1.5 px-1.5 font-medium">Year</th>
+                  <th className="py-1.5 px-1.5 font-medium text-right">Ov</th>
+                  <th className="py-1.5 px-1.5 font-medium text-right">Wkts</th>
+                  <th className="py-1.5 px-1.5 font-medium text-right">Avg</th>
+                  <th className="py-1.5 px-1.5 font-medium text-right">Econ</th>
+                </tr></thead>
+                <tbody>
+                  {(bw.by_year || []).map(y => (
+                    <tr key={y.year} style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+                      <td className="py-2 px-1.5 iq-num font-medium">{y.year}</td>
+                      <td className="py-2 px-1.5 text-right iq-num text-pb-faint">{fmtOvers(y.overs)}</td>
+                      <td className="py-2 px-1.5 text-right iq-num font-semibold">{fmtCount(y.wickets)}</td>
+                      <td className="py-2 px-1.5 text-right iq-num">{a2(y.average)}</td>
+                      <td className="py-2 px-1.5 text-right iq-num text-pb-faint">{a2(y.economy)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {bw.best && <div className="text-pb-faint text-[12px] mt-3 iq-num">Best in window: {bw.best}</div>}
+          </Card>
+        )}
+      </div>
+      {b?.recent?.length > 0 && (
+        <Card eyebrow="most recent first" title="Recent innings">
+          <div className="overflow-x-auto iq-scroll -mx-1">
+            <table className="w-full text-[13px]">
+              <thead><tr className="iq-eyebrow text-left" style={{ fontSize: 9.5 }}>
+                <th className="py-1.5 px-1.5 font-medium">Date</th>
+                <th className="py-1.5 px-1.5 font-medium text-right">Score</th>
+                <th className="py-1.5 px-1.5 font-medium">vs</th>
+                <th className="py-1.5 px-1.5 font-medium">Grade</th>
+                <th className="py-1.5 px-1.5 font-medium">Out</th>
+              </tr></thead>
+              <tbody>
+                {b.recent.map((inn, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+                    <td className="py-2 px-1.5 iq-num whitespace-nowrap text-pb-faint">{inn.date || '—'}</td>
+                    <td className="py-2 px-1.5 text-right iq-num font-semibold whitespace-nowrap">{inn.runs}{inn.not_out ? '*' : ''}{inn.balls ? <span className="text-pb-faintest font-normal"> ({inn.balls})</span> : null}</td>
+                    <td className="py-2 px-1.5 truncate max-w-[160px]">{inn.vs || '—'}</td>
+                    <td className="py-2 px-1.5 text-pb-faint truncate max-w-[140px]">{inn.grade || '—'}</td>
+                    <td className="py-2 px-1.5 text-pb-faint text-[11.5px] capitalize">{inn.not_out ? 'not out' : (inn.dismissal || '—')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+      {data.coverage?.notes?.length > 0 && <Note>{data.coverage.notes.join(' ')}</Note>}
+    </div>
+  )
+}
+
 /* The full per-player profile. */
-export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, onSaveTag, dossierBatting = [], dossierBowling = [] }) {
+export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, onSaveTag, dossierBatting = [], dossierBowling = [], orgGuid = null }) {
   if (!entry) return null
   const { bat, bowl } = entry
   const battingHand = tag?.batting_hand || ''
@@ -378,6 +624,16 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
 
       {!bat?.innings && !bowl?.wickets && (
         <Note>No current-season scorecard data for this player yet — only their scouting tags below apply.</Note>
+      )}
+
+      {/* 5-year history — career aggregates first (near-instant), then the
+          scorecard deep pass (built in the background, cached a week). Renders
+          for any club with a CA org GUID, played before or not. */}
+      {orgGuid && playerId && (
+        <>
+          <PlayerCareerCard orgGuid={orgGuid} playerId={playerId} clubName={opponentName} />
+          <PlayerDeepDive orgGuid={orgGuid} playerId={playerId} playerName={entry.name} clubName={opponentName} />
+        </>
       )}
 
       {/* Editable scouting tags */}

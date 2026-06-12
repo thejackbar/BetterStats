@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 6
+DOSSIER_VERSION = 7
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -823,12 +823,14 @@ async def _target_season_grades(session: AsyncSession, org_id: str, opp_key: str
 
 async def _discover_opponent_teams(
     session: AsyncSession, org_id: str, opp_key: str | None, opp_name: str | None, grade_hint: str | None
-) -> tuple[list[dict], str | None]:
+) -> tuple[list[dict], str | None, bool]:
     """The opponent's teams this season = the grades they field a side in.
 
-    Returns ``([{grade_id, grade_name, team_name, matches}], opp_org_id)`` — each
-    entry a selectable 'team'. ``opp_org_id`` is resolved opportunistically from
-    the first matching team's owning org (handy when we only had a club name).
+    Returns ``([{grade_id, grade_name, team_name, matches}], opp_org_id,
+    external)`` — each entry a selectable 'team'. ``opp_org_id`` is resolved
+    opportunistically from the first matching team's owning org (handy when we
+    only had a club name). ``external`` flags that the teams came from the
+    club's OWN org endpoints rather than our grades (see below).
     """
     opp_org_id = opp_key if _is_uuid(opp_key) else None
     season_grades = await _target_season_grades(session, org_id, opp_key, grade_hint)
@@ -858,7 +860,20 @@ async def _discover_opponent_teams(
         if count:
             teams.append({"grade_id": gid, "grade_name": gname, "team_name": team_name or gname, "matches": count})
     teams.sort(key=lambda d: (_team_rank(d["team_name"]), d["grade_name"] or ""))
-    return teams, opp_org_id
+
+    external = False
+    if not teams and opp_org_id:
+        # The club fields no side in any grade we hold — a different association,
+        # the division we've just been relegated into, or any club picked from
+        # the CA-wide search. Enumerate THEIR seasons/teams from the public org
+        # endpoints instead; the grade GUIDs feed _scout_grade unchanged.
+        from app.services import iq_scout  # lazy: iq_scout imports our helpers
+        try:
+            teams = await iq_scout.external_club_teams(opp_org_id)
+            external = bool(teams)
+        except Exception as e:
+            logger.warning(f"BetterIQ: external team discovery failed for {opp_org_id}: {e}")
+    return teams, opp_org_id, external
 
 
 async def _scout_grade(
@@ -1150,7 +1165,7 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
     our_games = await _our_games_vs(session, org_id, opp_key)
 
     # Discover the opponent's teams (= the grades they field a side in this season).
-    teams, opp_org_id = await _discover_opponent_teams(session, org_id, opp_key, opp_name, grade_hint)
+    teams, opp_org_id, external_discovery = await _discover_opponent_teams(session, org_id, opp_key, opp_name, grade_hint)
     if opp_name is None:
         opp_name = next((t["team_name"] for t in teams), None)
 
@@ -1338,6 +1353,12 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         )
     elif team_grade_id and season_matches:
         notes.append(f"Focused on {selected_team_name or 'one team'} — {season_matches} recent matches in this grade.")
+    elif external_discovery and season_matches:
+        notes.append(
+            f"{opp_name or 'This club'} plays outside our competitions — squad & form "
+            f"scouted from Cricket Australia's public data ({season_matches} matches "
+            f"across {teams_scouted} of their teams)."
+        )
     elif season_matches:
         notes.append(
             f"Squad & form built live from {season_matches} matches across "
@@ -1350,7 +1371,9 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
     notes.append("Based on scorecards (no ball-by-ball), so no phase or ball-level matchup data.")
 
     return {
-        "opponent": {"opp_key": opp_key, "name": opp_name},
+        # org_id = the opponent's CA organisation GUID when known — the key the
+        # 5-year player career + deep-pass endpoints (iq_scout) are driven by.
+        "opponent": {"opp_key": opp_key, "name": opp_name, "org_id": opp_org_id},
         "coverage": {"level": coverage, "notes": notes},
         "teams": teams,
         "selected_team": team_grade_id,

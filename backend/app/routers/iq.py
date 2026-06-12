@@ -22,6 +22,7 @@ from app.services import iq_opponent
 from app.services import iq_phases
 from app.services import iq_radar
 from app.services import iq_review
+from app.services import iq_scout
 from app.services import iq_selection
 from app.services import iq_team
 from app.services import iq_trends
@@ -41,10 +42,11 @@ async def opposition_opponents(
 
 @router.get("/opposition/report")
 async def opposition_report(
-    opponent: str | None = Query(None, description="opp_key from the opponents list"),
+    opponent: str | None = Query(None, description="opp_key from the opponents list (or any CA org GUID)"),
     fixture_id: str | None = Query(None, description="resolve the opponent from an upcoming fixture"),
     grade: str | None = Query(None, description="scope the record to one grade (by name) — the card's Grade toggle"),
     season_ids: str | None = Query(None, description="comma-separated season ids to scope the record — the card's Season toggle"),
+    name: str | None = Query(None, description="display name for a club outside our history (CA-wide search)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
@@ -57,15 +59,16 @@ async def opposition_report(
     seasons = [s for s in (season_ids.split(",") if season_ids else []) if s.strip()]
     return await iq_service.opposition_report(
         db, str(club.id), opponent=opponent, fixture_id=fixture_id,
-        grade=grade, season_ids=seasons or None,
+        grade=grade, season_ids=seasons or None, display_name=name,
     )
 
 
 @router.get("/opposition/dossier")
 async def opposition_dossier(
-    opponent: str | None = Query(None, description="opp_key from the opponents list"),
+    opponent: str | None = Query(None, description="opp_key from the opponents list (or any CA org GUID)"),
     fixture_id: str | None = Query(None, description="resolve the opponent (and grade) from a fixture"),
     team: str | None = Query(None, description="narrow the scout to one of the opponent's teams (a grade_id); omit for the whole club"),
+    name: str | None = Query(None, description="display name for a club outside our history (CA-wide search)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
@@ -74,9 +77,11 @@ async def opposition_dossier(
     ``{status: 'building'}`` until ready, then the assembled payload. Poll it.
 
     By default scouts the whole club (every team/grade) so no player is missed;
-    pass ``team`` (a grade_id from the payload's ``teams``) to focus on one side."""
+    pass ``team`` (a grade_id from the payload's ``teams``) to focus on one side.
+    ``opponent`` can be ANY Cricket Australia org GUID (from the club search) —
+    a club outside our competitions is discovered via its own org endpoints."""
     opp_key, name, grade_id = await iq_service.resolve_opponent(
-        db, str(club.id), opponent=opponent, fixture_id=fixture_id
+        db, str(club.id), opponent=opponent, fixture_id=fixture_id, display_name=name
     )
     # A never-before-played opponent has no opp_key — but if a fixture gives us
     # their grade + name we can still scout them live (key the cache on name).
@@ -113,12 +118,13 @@ async def refresh_opposition_dossier(
     opponent: str | None = Query(None),
     fixture_id: str | None = Query(None),
     team: str | None = Query(None, description="narrow the scout to one of the opponent's teams (a grade_id)"),
+    name: str | None = Query(None, description="display name for a club outside our history"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Force a rebuild of the dossier (Refresh button), bypassing the cache TTL."""
     opp_key, name, grade_id = await iq_service.resolve_opponent(
-        db, str(club.id), opponent=opponent, fixture_id=fixture_id
+        db, str(club.id), opponent=opponent, fixture_id=fixture_id, display_name=name
     )
     key = opp_key or (name if grade_id else None)
     if not key:
@@ -174,6 +180,53 @@ async def save_opposition_player_tag(
 ):
     """Add/update colour & detail on one opponent player (a manual scouting tag)."""
     return await iq_service.upsert_opponent_tag(db, str(club.id), player_id, body, user_id=str(user.id))
+
+
+@router.get("/opposition/player-career")
+async def opposition_player_career(
+    org: str = Query(..., description="the opponent club's CA organisation GUID (dossier's opponent.org_id)"),
+    player: str = Query(..., description="the player's CA participant GUID (dossier player_id)"),
+    club_name: str | None = Query(None, description="club display name (for the cache + payload)"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Last-5-years season-by-season career for ANY player at ANY club, from
+    CA's public season-aggregate endpoints. The whole club is built once and
+    cached (7 days); this slices the one player. Poll while ``building``."""
+    return await iq_scout.get_player_career(db, str(club.id), org, player, club_name=club_name)
+
+
+@router.get("/opposition/player-deep")
+async def opposition_player_deep(
+    org: str = Query(..., description="the opponent club's CA organisation GUID"),
+    player: str = Query(..., description="the player's CA participant GUID"),
+    player_name: str | None = Query(None),
+    club_name: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Scorecard-level deep dive on one external player across the career
+    window — dismissal patterns, batting position, conversion. Scans only the
+    grades the player actually appeared in (bounded), so the first build takes
+    a minute or two; poll while ``building``, cached 7 days after."""
+    return await iq_scout.get_or_start_player_deep(
+        db, str(club.id), org, player, player_name=player_name, club_name=club_name
+    )
+
+
+@router.post("/opposition/player-deep/refresh")
+async def refresh_opposition_player_deep(
+    org: str = Query(...),
+    player: str = Query(...),
+    player_name: str | None = Query(None),
+    club_name: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Force a rebuild of one player's deep dive, bypassing the cache TTL."""
+    return await iq_scout.get_or_start_player_deep(
+        db, str(club.id), org, player, player_name=player_name, club_name=club_name, force=True
+    )
 
 
 # ─── Selection analysis (Phase 2) ────────────────────────────────────────────

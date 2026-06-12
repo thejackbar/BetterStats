@@ -452,14 +452,21 @@ async def resolve_opponent(
     *,
     opponent: str | None = None,
     fixture_id: str | None = None,
+    display_name: str | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     """Public resolver → (opp_key, display_name, grade_id).
 
     Wraps ``_resolve_opp_key`` and additionally surfaces the fixture's grade_id
     (so the live dossier knows which league-wide grade to scout for current
     form). grade_id is None when resolving from an explicit opponent key.
+    ``display_name`` is the caller-supplied club name, used when resolution
+    can't do better than echoing the key back — an external club picked from
+    the CA-wide search has no history here, so its "name" would otherwise be
+    the raw org GUID.
     """
     opp_key, name = await _resolve_opp_key(session, org_id, opponent=opponent, fixture_id=fixture_id)
+    if display_name and (not name or name == opp_key):
+        name = display_name
     grade_id = None
     if fixture_id:
         res = await session.execute(
@@ -1133,6 +1140,7 @@ async def opposition_report(
     fixture_id: str | None = None,
     grade: str | None = None,
     season_ids: list[str] | None = None,
+    display_name: str | None = None,
 ) -> dict:
     """Assemble the full opposition scouting report for one opponent.
 
@@ -1141,8 +1149,12 @@ async def opposition_report(
     ``season_ids`` optionally scope the head-to-head record, our record vs them,
     venues, last meeting and bowler match-ups — the record card's
     All-time/Season/Grade toggle. Both empty ⇒ all-time/all-grades.
+    ``display_name`` overrides a name resolution that could only echo the key
+    (an external club from the CA-wide search shows its real name, not a GUID).
     """
     opp_key, name = await _resolve_opp_key(session, org_id, opponent=opponent, fixture_id=fixture_id)
+    if display_name and (not name or name == opp_key):
+        name = display_name
 
     if not opp_key:
         # A named-but-unplayed opponent (e.g. from a fixture) — honest empty state.
