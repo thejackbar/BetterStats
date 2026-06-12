@@ -14,8 +14,11 @@ const STORAGE_OPTIONS = [
   'Spreadsheets only',
   'Spreadsheets + a club website',
   'Another stats tool',
+  'Word/PDF',
+  'Hard Copy',
   'A mix',
   'Not sure',
+  'Other',
 ]
 
 const TIMELINE_OPTIONS = [
@@ -115,7 +118,7 @@ function ContactForm() {
     if (!fields.association.trim()) e.association = 'Association or competition is required.'
     if (!fields.grades)             e.grades      = 'Please select the number of grades.'
     if (!fields.playhq)             e.playhq      = 'Please tell us about your PlayHQ data.'
-    if (!fields.storage)            e.storage     = 'Please select your current stats setup.'
+    if (!fields.historical)         e.historical  = 'Please tell us about your historical data.'
     if (!fields.timeline)           e.timeline    = 'Please select a timeline.'
     if (!fields.contactMethod)      e.contactMethod = 'Please choose a preferred contact method.'
     return e
@@ -286,7 +289,7 @@ function ContactForm() {
               <ChevronIcon />
             </div>
           </Field>
-          <Field label="Do you have historical data for your club?" id="historical" optional>
+          <Field label="Do you have historical data for your club?" id="historical" required error={errors.historical}>
             <div className="relative">
               <select id="historical" name="historical"
                 value={fields.historical} onChange={set('historical')}
@@ -300,7 +303,7 @@ function ContactForm() {
         </div>
 
         {/* Current stats storage */}
-        <Field label="How do you currently store your historical data?" id="storage" required error={errors.storage}>
+        <Field label="How do you currently store your historical data?" id="storage" optional>
           <div className="relative">
             <select id="storage" name="storage"
               value={fields.storage} onChange={set('storage')}
