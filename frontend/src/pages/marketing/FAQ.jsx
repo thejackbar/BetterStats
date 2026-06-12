@@ -219,7 +219,7 @@ function FAQList() {
   return (
     <section className="px-4 sm:px-6 lg:px-10 py-12">
       <div className="max-w-[1100px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-10">
-        <aside className="col-span-12 md:col-span-3">
+        <aside className="col-span-1 md:col-span-3">
           <div className="md:sticky md:top-24">
             <p className="pill-neutral inline-flex mb-4">Jump to</p>
             <nav className="space-y-2">
@@ -232,7 +232,7 @@ function FAQList() {
           </div>
         </aside>
 
-        <div className="col-span-12 md:col-span-9 space-y-12">
+        <div className="col-span-1 md:col-span-9 space-y-12">
           {CATEGORIES.map((cat) => (
             <div key={cat.id} id={`cat-${cat.id}`}>
               <h2 className="text-2xl font-bold mb-5 scroll-mt-24">{cat.title}</h2>

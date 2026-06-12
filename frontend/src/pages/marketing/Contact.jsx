@@ -421,7 +421,7 @@ function ContactPanel() {
       <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
       <div className="max-w-[1100px] mx-auto relative">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-          <div className="col-span-12 lg:col-span-4">
+          <div className="col-span-1 lg:col-span-4">
             <p className="pill mb-6 inline-flex"><span className="dot" />Reply within 24 hours</p>
             <h1 className="font-display font-bold text-[40px] sm:text-[52px] lg:text-[56px] tracking-tight leading-[0.95] mb-6">
               Tell us about <span className="gradient-text">your club.</span>
@@ -455,7 +455,7 @@ function ContactPanel() {
             </div>
           </div>
 
-          <div className="col-span-12 lg:col-span-8">
+          <div className="col-span-1 lg:col-span-8">
             <Reveal>
               <ContactForm />
             </Reveal>

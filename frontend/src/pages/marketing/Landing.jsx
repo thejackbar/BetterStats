@@ -53,7 +53,7 @@ function Hero() {
       <div className="absolute inset-0 hero-glow pointer-events-none" />
 
       <div className="max-w-[1280px] mx-auto relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
-        <div className="col-span-12 lg:col-span-6">
+        <div className="col-span-1 lg:col-span-6">
           <div className="pill mb-7 inline-flex">
             <span className="dot" />
             For Australian cricket clubs · Since 2026
@@ -85,7 +85,7 @@ function Hero() {
           </div>
         </div>
 
-        <Reveal className="col-span-12 lg:col-span-6">
+        <Reveal className="col-span-1 lg:col-span-6">
           <div className="relative">
             <div className="absolute -inset-5 bg-accent/8 blur-[60px] rounded-full" />
             <div className="relative product-shadow rounded-2xl">
@@ -287,7 +287,7 @@ function Showcase() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start" key={tab}>
-          <Reveal className="col-span-12 lg:col-span-5">
+          <Reveal className="col-span-1 lg:col-span-5">
             <div className="lg:sticky lg:top-24">
               <h3 className="text-3xl lg:text-4xl font-bold leading-tight mb-4">{current.headline}</h3>
               <p className="text-pb-dim leading-relaxed mb-6">{current.body}</p>
@@ -299,7 +299,7 @@ function Showcase() {
               <Link to="/contact" className="cta-primary">Try on your club →</Link>
             </div>
           </Reveal>
-          <Reveal className="col-span-12 lg:col-span-7">
+          <Reveal className="col-span-1 lg:col-span-7">
             <div className="product-shadow rounded-2xl">
               <ScreenshotOrMock src={current.src} alt={current.label} fallback={current.mock} />
             </div>
@@ -464,7 +464,7 @@ function Promise_() {
     <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
       <div className="max-w-[1100px] mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-stretch">
-          <Reveal className="col-span-12 md:col-span-7">
+          <Reveal className="col-span-1 md:col-span-7">
             <div className="surface p-8 lg:p-10 h-full border-accent/30 bg-gradient-to-b from-accent/[0.05] to-transparent">
               <div className="flex items-center gap-3 mb-5">
                 <div className="icon-tile">★</div>
@@ -485,7 +485,7 @@ function Promise_() {
             </div>
           </Reveal>
 
-          <Reveal delay={120} className="col-span-12 md:col-span-5">
+          <Reveal delay={120} className="col-span-1 md:col-span-5">
             <div className="surface p-8 h-full">
               <div className="flex items-center gap-3 mb-5">
                 <div className="icon-tile">🇦🇺</div>
