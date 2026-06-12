@@ -16,6 +16,7 @@ import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import { Icon, Tag, Btn, Search, Empty, PageIntro, Note, runsPhrase, wktsPhrase } from './ui'
+import AnyClubSearch from './AnyClubSearch'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
 
 const POLL_MS = 2500
@@ -51,12 +52,13 @@ export default function OppositionPlayer() {
     return saved
   }
 
-  // Build/poll a club's live dossier.
+  // Build/poll a club's live dossier. `name` rides along so a club outside our
+  // history (CA-wide search → opp_key is a bare org GUID) still shows its name.
   const loadClub = (c, keepPlayer = false) => {
     stopPoll()
     setClub(c); setDossier(null); setStatus('building'); setClubQ(''); setClubOpen(false); setPlayerQ('')
     if (!keepPlayer) setSel(null)
-    const params = { opponent: c.opp_key }
+    const params = { opponent: c.opp_key, name: c.name }
     const poll = () => {
       api.iqOppositionDossier(params).then(d => {
         setDossier(d); setStatus(d.status)
@@ -69,6 +71,7 @@ export default function OppositionPlayer() {
   const pickClub = (c) => {
     loadClub(c)
     const sp = { opponent: c.opp_key }
+    if (c.name) sp.name = c.name
     setSearchParams(sp, { replace: true })
   }
   // Player-first: pick an opposition player → load their club, then select them
@@ -82,17 +85,27 @@ export default function OppositionPlayer() {
   const pickPlayer = (id) => {
     setSel(id); setPlayerQ('')
     const sp = { opponent: club.opp_key, player: id }
+    if (club.name) sp.name = club.name
     setSearchParams(sp, { replace: true })
   }
   const changeClub = () => {
     stopPoll(); setClub(null); setDossier(null); setSel(null); setStatus(null); setSearchParams({}, { replace: true })
   }
 
-  // Seed from the URL once the opponent list has arrived.
+  // Seed from the URL. A club outside our history won't be in the opponents
+  // list — its ?name= param is enough to load it without waiting for the list.
   useEffect(() => {
-    if (seededRef.current || !opponents.length) return
+    if (seededRef.current) return
     const opp = searchParams.get('opponent')
     const player = searchParams.get('player')
+    const nameParam = searchParams.get('name')
+    if (opp && nameParam) {
+      seededRef.current = true
+      if (player) setSel(player)
+      loadClub({ opp_key: opp, name: nameParam }, !!player)
+      return
+    }
+    if (!opponents.length) return
     if (opp) {
       const match = opponents.find(o => o.opp_key === opp)
       if (match) {
@@ -154,7 +167,7 @@ export default function OppositionPlayer() {
       title="Opposition player"
       actions={club ? <Btn variant="ghost" sm icon="back" onClick={changeClub}>Change club</Btn> : null}
     >
-      <PageIntro>Scout any individual in an opponent's squad — their form, how they get out, their record against us, and your own scouting notes (and scoring zones) that travel with them.</PageIntro>
+      <PageIntro>Scout any individual at any club — their form, five-year history, how they get out, their record against us, and your own scouting notes (and scoring zones) that travel with them.</PageIntro>
 
       {/* Club picker */}
       {!club && (
@@ -183,6 +196,15 @@ export default function OppositionPlayer() {
                   ))}
               </Dropdown>
             </div>
+          </div>
+
+          {/* CA-wide club search — scout a club we've NEVER met (new grade after
+              relegation/promotion, another association, anyone on PlayHQ). */}
+          <div className="flex flex-wrap items-center gap-3 mb-5">
+            <span className="iq-eyebrow">Any club</span>
+            <AnyClubSearch className="flex-1 min-w-[260px] max-w-md"
+              placeholder="…or search every club on PlayHQ"
+              onPick={(org) => pickClub({ opp_key: org.id, name: org.name })} />
           </div>
 
           {/* Player-first search — jump straight to an opposition player */}
@@ -290,8 +312,9 @@ export default function OppositionPlayer() {
             <div>
               {selected
                 ? <OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={club.name} playerId={sel} tag={tags[sel]} onSaveTag={saveTag}
-                    dossierBatting={dossier?.batting || []} dossierBowling={dossier?.bowling || []} />
-                : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile — radar, scoring zones, form, dismissal patterns and record vs us.</Empty></div>}
+                    dossierBatting={dossier?.batting || []} dossierBowling={dossier?.bowling || []}
+                    orgGuid={dossier?.opponent?.org_id || null} />
+                : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile — radar, scoring zones, form, five-year history, dismissal patterns and record vs us.</Empty></div>}
             </div>
           </div>
 

@@ -22,6 +22,7 @@ import {
 } from './ui'
 import { Radar, BAT_AXES, BOWL_AXES, PhaseStrip, buildRadar } from './viz'
 import KeyPlayersCard from './KeyPlayersCard'
+import AnyClubSearch from './AnyClubSearch'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
 import { useIQFilter, seasonIdsInRange, seasonLabel } from './Context'
 import Dropdown from '../../../components/Dropdown'
@@ -42,7 +43,7 @@ function ScoutPicker({ data, onPick, onMatch }) {
 
   return (
     <div className="iq-fade">
-      <PageIntro>Pick an upcoming fixture or any club you've met — we'll pull a broadcast-grade scouting report from your scorecards and their live form.</PageIntro>
+      <PageIntro>Pick an upcoming fixture, a club you've met, or search any club in the country — we'll pull a broadcast-grade scouting report from your scorecards and their live form.</PageIntro>
 
       {upcoming.length > 0 && (
         <>
@@ -72,6 +73,19 @@ function ScoutPicker({ data, onPick, onMatch }) {
           </div>
         </>
       )}
+
+      {/* Scout ANY club — the whole CA registry, not just clubs in our history.
+          Relegated into a new grade, a different association, never met them:
+          all scoutable from the org GUID alone. */}
+      <div className="iq-eyebrow mb-3">Scout any club</div>
+      <div className="iq-card p-4 mb-9">
+        <div className="text-pb-faint text-[12.5px] mb-3 leading-relaxed">
+          Never played them? Search every club on PlayHQ — new opposition after relegation or promotion,
+          a side from another association, anyone. We'll build their squad and form live, with a
+          five-year history for any of their players.
+        </div>
+        <AnyClubSearch className="max-w-md" onPick={(org) => onPick({ opponent: org.id, name: org.name })} />
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div className="iq-eyebrow">All opponents ({opponents.length})</div>
@@ -592,7 +606,7 @@ function SquadTable({ dossier }) {
 
 /* ── Opposition player scout — search any of their squad for a full profile ─ */
 
-function OppPlayerScout({ dossier, tags, onSaveTag }) {
+function OppPlayerScout({ dossier, tags, onSaveTag, orgGuid }) {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
   const [sel, setSel] = useState(null)
@@ -630,8 +644,8 @@ function OppPlayerScout({ dossier, tags, onSaveTag }) {
         </Dropdown>
       </div>
       {selected
-        ? <div className="mt-4"><OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={dossier.opponent?.name} playerId={sel} tag={tags?.[sel]} onSaveTag={onSaveTag} /></div>
-        : <div className="text-pb-faintest text-[12px] mt-3">Pick a player for their season form, dismissal patterns, scouting tags and full record against us.</div>}
+        ? <div className="mt-4"><OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={dossier.opponent?.name} playerId={sel} tag={tags?.[sel]} onSaveTag={onSaveTag} orgGuid={orgGuid} /></div>
+        : <div className="text-pb-faintest text-[12px] mt-3">Pick a player for their season form, dismissal patterns, five-year history, scouting tags and full record against us.</div>}
     </Card>
   )
 }
@@ -746,12 +760,14 @@ export default function OppositionScout() {
     return saved
   }
 
-  // Seed selection from the URL (?fixture= or ?opponent=).
+  // Seed selection from the URL (?fixture= or ?opponent=, plus ?name= for a
+  // club outside our history — without it an external pick reloads as a GUID).
   useEffect(() => {
     const fixtureId = searchParams.get('fixture')
     const opponent = searchParams.get('opponent')
-    if (fixtureId) setSelected({ fixtureId })
-    else if (opponent) setSelected({ opponent })
+    const name = searchParams.get('name') || undefined
+    if (fixtureId) setSelected({ fixtureId, name })
+    else if (opponent) setSelected({ opponent, name })
   }, [])  // once, on mount
 
   const stopPoll = () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
@@ -785,7 +801,7 @@ export default function OppositionScout() {
     // scope change refetches in place so the card/toggle doesn't flicker.
     if (reportSel.current !== selected) { setReport(null); reportSel.current = selected }
     api.iqOppositionReport({
-      opponent: selected.opponent, fixtureId: selected.fixtureId,
+      opponent: selected.opponent, fixtureId: selected.fixtureId, name: selected.name,
       grade: effGrade || undefined, seasonIds: effSeasonIds || undefined,
     })
       .then(r => { if (alive) setReport(r) }).catch(() => { if (alive) setReport({ error: true }) })
@@ -799,7 +815,7 @@ export default function OppositionScout() {
     setDossier(null)
     if (!selected) return
     let alive = true
-    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team: teamGradeId }
+    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team: teamGradeId, name: selected.name }
     const poll = () => {
       api.iqOppositionDossier(params).then(d => {
         if (!alive) return
@@ -821,6 +837,7 @@ export default function OppositionScout() {
     const sp = {}
     if (sel.fixtureId) sp.fixture = sel.fixtureId
     else if (sel.opponent) sp.opponent = sel.opponent
+    if (sel.name) sp.name = sel.name
     setSearchParams(sp, { replace: true })
   }
   const clearSelection = () => { setSelected(null); setTeamsList([]); setSearchParams({}, { replace: true }) }
@@ -841,7 +858,7 @@ export default function OppositionScout() {
   const refresh = () => {
     if (!selected) return
     setDossier({ status: 'building' })
-    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team: teamGradeId }
+    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team: teamGradeId, name: selected.name }
     api.iqRefreshDossier(params)
       .then(d => {
         setDossier(d)
@@ -987,8 +1004,8 @@ export default function OppositionScout() {
             {/* Innings phases — estimated from ball-by-ball games (recent only) */}
             <InningsPhases selected={selected} />
 
-            {/* Scout any of their players — full profile + record vs us + tags */}
-            <OppPlayerScout dossier={dossier} tags={tags} onSaveTag={saveTag} />
+            {/* Scout any of their players — full profile + 5-year history + tags */}
+            <OppPlayerScout dossier={dossier} tags={tags} onSaveTag={saveTag} orgGuid={dossier.opponent?.org_id || null} />
 
             <WinLose win={dossier.how_they_win} lose={dossier.how_they_lose} />
 

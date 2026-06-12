@@ -1119,8 +1119,8 @@ export const api = {
   // Instant report from data we already hold (head-to-head, our record vs them).
   // `grade` (a grade name) and `seasonIds` (array of season ids) scope the
   // historical sections to match the record card's All-time/Season/Grade toggle.
-  iqOppositionReport: ({ opponent, fixtureId, grade, seasonIds } = {}) => {
-    const qs = _iqQs(opponent, fixtureId)
+  iqOppositionReport: ({ opponent, fixtureId, grade, seasonIds, name } = {}) => {
+    const qs = _iqQs(opponent, fixtureId, null, name)
     const extra = new URLSearchParams()
     if (grade) extra.set('grade', grade)
     if (seasonIds && seasonIds.length) extra.set('season_ids', seasonIds.join(','))
@@ -1129,18 +1129,28 @@ export const api = {
   },
   // Live dossier (squad + form + deep vs-us). Poll until status === 'ready'.
   // `team` (a grade_id from the dossier's `teams`) narrows the scout to one side;
-  // omit it for the whole club.
-  iqOppositionDossier: ({ opponent, fixtureId, team } = {}) =>
-    request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId, team)}`),
+  // omit it for the whole club. `opponent` can be ANY CA org GUID (club search):
+  // a club outside our competitions is discovered via its own org endpoints.
+  iqOppositionDossier: ({ opponent, fixtureId, team, name } = {}) =>
+    request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId, team, name)}`),
   // Live ladder standing for an upcoming opponent (our row + theirs).
   iqOpponentLadder: ({ opponent, fixtureId } = {}) =>
     request(`/iq/opposition/ladder?${_iqQs(opponent, fixtureId)}`),
   iqMatchOpponent: ({ opponentName, oppKey, displayName } = {}) =>
     request(`/iq/opposition/match?opponent_name=${encodeURIComponent(opponentName)}&opp_key=${encodeURIComponent(oppKey)}${displayName ? `&display_name=${encodeURIComponent(displayName)}` : ''}`, { method: 'POST' }),
-  iqRefreshDossier: ({ opponent, fixtureId, team } = {}) =>
-    request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId, team)}`, { method: 'POST' }),
+  iqRefreshDossier: ({ opponent, fixtureId, team, name } = {}) =>
+    request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId, team, name)}`, { method: 'POST' }),
   // Search opposition players by name across every opponent we've faced.
   iqSearchOpponentPlayers: (q) => request(`/iq/opposition/player-search?q=${encodeURIComponent(q)}`),
+  // Last-5-years season-by-season career for any player at any club (CA season
+  // aggregates; the whole club is cached once, sliced per player). Poll while
+  // status === 'building'. `org` = the club's CA org GUID (dossier opponent.org_id).
+  iqPlayerCareer: ({ org, player, clubName } = {}) =>
+    request(`/iq/opposition/player-career?org=${encodeURIComponent(org)}&player=${encodeURIComponent(player)}${clubName ? `&club_name=${encodeURIComponent(clubName)}` : ''}`),
+  // Scorecard-level deep dive on one external player (dismissals, positions,
+  // conversion across the window). First build takes a minute or two; poll.
+  iqPlayerDeep: ({ org, player, playerName, clubName } = {}) =>
+    request(`/iq/opposition/player-deep?org=${encodeURIComponent(org)}&player=${encodeURIComponent(player)}${playerName ? `&player_name=${encodeURIComponent(playerName)}` : ''}${clubName ? `&club_name=${encodeURIComponent(clubName)}` : ''}`),
   // Manual scouting tags for opponent players (handedness, bowler type, notes…).
   iqOpponentTags: () => request('/iq/opposition/player-tags'),
   iqSaveOpponentTag: (playerId, body) =>
@@ -1256,10 +1266,13 @@ export const api = {
     request('/club-admin/comms/settings', { method: 'PUT', body: JSON.stringify(data) }),
 }
 
-function _iqQs(opponent, fixtureId, team) {
+function _iqQs(opponent, fixtureId, team, name) {
   const qs = new URLSearchParams()
   if (opponent) qs.set('opponent', opponent)
   if (fixtureId) qs.set('fixture_id', fixtureId)
   if (team) qs.set('team', team)
+  // Display name for a club outside our history (picked from the CA-wide club
+  // search) — without it the backend can only echo the org GUID back.
+  if (name) qs.set('name', name)
   return qs.toString()
 }
