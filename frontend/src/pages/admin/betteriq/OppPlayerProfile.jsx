@@ -20,7 +20,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../../lib/api'
 import {
   Sparkline, Card, Stat, Note, Tag, Btn, Initials, StackedBar, Bar, a2,
-  fmtCount, fmtOvers, fmtPct, oversToBalls,
+  LoadingBar, fmtCount, fmtOvers, fmtPct, oversToBalls,
 } from './ui'
 import { Radar, WagonWheel, ZONE_LABELS, buildRadar } from './viz'
 
@@ -277,11 +277,10 @@ function usePolledScout(fetcher, deps) {
   return data
 }
 
-function HistoryBuilding({ children }) {
+function HistoryBuilding({ children, expectedMs = 10000 }) {
   return (
-    <div className="flex items-center gap-3 text-pb-faint text-[13px] py-2">
-      <span className="inline-block iq-spin shrink-0" style={{ width: 18, height: 18, borderRadius: 99, border: '2.5px solid var(--pb-surface3)', borderTopColor: 'var(--pb-accent)' }} />
-      <span>{children}</span>
+    <div className="py-2">
+      <LoadingBar label={children} expectedMs={expectedMs} labelClassName="text-pb-faint text-[13px]" />
     </div>
   )
 }
@@ -370,7 +369,7 @@ function PlayerDeepDive({ orgGuid, playerId, playerName, clubName }) {
   if (!data || data.status === 'building') {
     return (
       <Card eyebrow="deep dive · building" title="How he plays">
-        <HistoryBuilding>Scanning their scorecards across the last five years for dismissal patterns and batting positions — a minute or two the first time, then cached for a week. The rest of the profile is ready now.</HistoryBuilding>
+        <HistoryBuilding expectedMs={90000}>Scanning their scorecards across the last five years for dismissal patterns and batting positions — a minute or two the first time, then cached for a week. The rest of the profile is ready now.</HistoryBuilding>
       </Card>
     )
   }

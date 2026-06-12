@@ -7,7 +7,7 @@ import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import {
   Icon, CountUp, ResultPills, SplitBar, Card, Tag, Btn, Search, Empty,
-  Initials, PageIntro, Note, a2, fmtCount, fmtPct, runsPhrase,
+  Initials, PageIntro, Note, a2, LoadingBar, fmtCount, fmtPct, runsPhrase,
 } from './ui'
 
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
@@ -202,7 +202,7 @@ export default function MatchPreview() {
             {/* Ladder + H2H */}
             <div className="grid gap-5 lg:grid-cols-2 items-start">
               <Card eyebrow="grade ladder" title="Where we sit" right={ladder?.grade_name ? <span className="text-pb-faint text-[11px] truncate max-w-[150px]">{ladder.grade_name}</span> : null}>
-                {ladder === null ? <div className="animate-pulse text-pb-faint text-sm">Loading standings…</div>
+                {ladder === null ? <LoadingBar label="Loading standings…" expectedMs={6000} />
                   : ladder.available ? (
                     <>
                       <LadderTable ladder={ladder} oppName={oppName} />
@@ -217,7 +217,7 @@ export default function MatchPreview() {
               </Card>
 
               <Card eyebrow={h2h?.meetings ? `${h2h.meetings} meetings` : 'head-to-head'} title="Head-to-head" right={h2h?.win_pct != null ? <Tag tone="faint">{fmtPct(h2h.win_pct)} win</Tag> : null}>
-                {report === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div>
+                {report === null ? <LoadingBar label="Loading…" expectedMs={4500} />
                   : h2h && h2h.meetings > 0 ? (
                     <>
                       <div className="flex items-end gap-6">
@@ -264,7 +264,7 @@ export default function MatchPreview() {
             {/* Danger + edge */}
             <div className="grid gap-5 lg:grid-cols-2 items-start">
               <Card eyebrow="watch them" title="Their danger players" right={<Btn variant="ghost" sm onClick={goScout}>Full scout</Btn>}>
-                {report === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div>
+                {report === null ? <LoadingBar label="Loading…" expectedMs={4500} />
                   : danger.length > 0 ? (
                     <div className="space-y-2.5">
                       {danger.map((d, i) => (
@@ -284,7 +284,7 @@ export default function MatchPreview() {
               </Card>
 
               <Card eyebrow="our edge" title="Players who own this match-up">
-                {report === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div>
+                {report === null ? <LoadingBar label="Loading…" expectedMs={4500} />
                   : (edgeBat.length > 0 || edgeBowl.length > 0) ? (
                     <div className="space-y-2.5">
                       {edgeBat.map((e, i) => (
@@ -344,7 +344,7 @@ export default function MatchPreview() {
         <PageIntro>A pre-game one-pager for your next match — the lean, the ladder, your head-to-head, their danger players and where your edge is. Pick an upcoming fixture, or search an opponent.</PageIntro>
 
         {opp === null ? (
-          <Card><div className="animate-pulse text-pb-faint text-sm">Loading fixtures…</div></Card>
+          <Card><LoadingBar label="Loading fixtures…" expectedMs={4500} /></Card>
         ) : (
           <div className="space-y-6">
             {upcoming.length > 0 && (

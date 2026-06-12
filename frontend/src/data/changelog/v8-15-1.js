@@ -1,11 +1,11 @@
 export default {
   version: 'v8.15.1',
-  date: '2026-06-13',
-  sortKey: '2026-06-13T01:30:00Z',
-  title: 'Opposition player fixes: five-year list and empty squads',
+  date: '2026-06-12',
+  sortKey: '2026-06-12T20:00:00Z',
+  title: 'Progress bars that show a real percentage',
   items: [
-    'Picking a player from the opposition player search now lands on their profile even when they have not played this season: the club page lists everyone CA has seen at that club in the last five years (under a "Last five years" divider), not just the current-season squad, and the name matching now copes with short names like "S Morgan" against "Morgan, Simon".',
-    'A synced opposition club with no usable game data for its latest season (the Murdoch "SQUAD (0)" case) now falls back to live scouting instead of showing an empty squad with full head-to-head.',
-    'Players outside the current squad still show their record against us when they are on the historically-hurt-us shelf.',
+    'The Data Sync page now shows a live progress bar while a sync or full rebuild runs: which phase it is in (season totals, finding matches, saving scorecards) and how far through, like 2,140 of 3,950 games. It also picks up runs started elsewhere, such as the weekly job, when you open the page mid-sync.',
+    'Every loading state in BetterIQ now shows a percentage bar instead of a pulsing placeholder: the overview, team analysis, player trends, match review, selection analysis, match preview, opposition scouting, the live dossier build and the cheat sheet.',
+    'Fix Missing Totals and Clean Opposition Stats on the Data Sync page show a progress bar while they run too.',
   ],
 }

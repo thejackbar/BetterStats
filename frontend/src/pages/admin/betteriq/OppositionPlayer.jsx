@@ -15,7 +15,7 @@ import Dropdown from '../../../components/Dropdown'
 import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
-import { Icon, Tag, Btn, Search, Empty, PageIntro, Note, runsPhrase, wktsPhrase } from './ui'
+import { Icon, Tag, Btn, Search, Empty, PageIntro, Note, LoadingBar, runsPhrase, wktsPhrase } from './ui'
 import AnyClubSearch from './AnyClubSearch'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
 import { useClubPlayers, careerOnlyEntries, entryWithThreat, bestNameMatch, isOrgGuid } from './clubPlayers'
@@ -284,9 +284,9 @@ export default function OppositionPlayer() {
       {/* Building / error states */}
       {club && status === 'building' && (
         <div className="iq-card iq-accent-card p-8 text-center iq-fade">
-          <div className="inline-block iq-spin" style={{ width: 30, height: 30, borderRadius: 99, border: '3px solid var(--pb-surface3)', borderTopColor: 'var(--pb-accent)', marginBottom: 14 }} />
           <div className="iq-display font-bold text-[16px]">Building {club.name}'s squad…</div>
           <div className="text-pb-faint text-[13px] mt-1.5 max-w-md mx-auto">Pulling their recent scorecards live — first time can take up to a minute.</div>
+          <div className="max-w-md mx-auto mt-5"><LoadingBar expectedMs={35000} /></div>
         </div>
       )}
       {club && (status === 'error' || status === 'unavailable') && (

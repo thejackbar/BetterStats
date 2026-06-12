@@ -3,6 +3,7 @@
    real ES modules. Every BetterIQ screen imports its chrome from here so the
    broadcast look stays consistent. */
 import { useState, useEffect, useRef, useMemo } from 'react'
+import LoadingBarInner from '../../../components/ProgressBar'
 
 /* ── Icons ─────────────────────────────────────────────────────────────────── */
 const ICONS = {
@@ -321,6 +322,19 @@ export function Search({ value, onChange, placeholder = 'Search…', className =
 }
 export function Empty({ children, className = '' }) {
   return <div className={`text-pb-faint text-sm ${className}`}>{children}</div>
+}
+
+/* ── Loading — percentage bars for every fetch ──────────────────────────────
+   LoadingBar = bare bar + % (drop inside a Card or column while loading).
+   LoadingCard = the iq-card placeholder that used to be the "Loading…" pulse.
+   expectedMs tunes the climb to the call's typical duration. */
+export { default as LoadingBar, ProgressBar, useLoadingProgress } from '../../../components/ProgressBar'
+export function LoadingCard({ label = 'Loading…', expectedMs = 6000, className = '' }) {
+  return (
+    <div className={`iq-card p-6 ${className}`}>
+      <LoadingBarInner label={label} expectedMs={expectedMs} />
+    </div>
+  )
 }
 
 /* surname helper */
