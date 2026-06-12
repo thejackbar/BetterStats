@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import LoadingBar, { ProgressBar } from '../../components/ProgressBar'
 import { useToast } from '../../contexts/ToastContext'
 
 function fmtDuration(startedAt, completedAt) {
@@ -16,6 +17,16 @@ function fmtTime(iso) {
     day: 'numeric', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
+}
+
+/* Phase + counters reported by the backend mid-run (sync.py merges
+   progress_* keys into the run's stats every few seconds of work). */
+function syncProgressLabel(s) {
+  const phase = s.progress_phase || 'Starting'
+  if (s.progress_done != null && s.progress_total != null) {
+    return `${phase} · ${Number(s.progress_done).toLocaleString()} / ${Number(s.progress_total).toLocaleString()}`
+  }
+  return phase
 }
 
 function StatPill({ label, value, highlight }) {
@@ -100,10 +111,19 @@ export default function AdminSync() {
     return () => { clearInterval(interval); clearTimeout(timeout) }
   }, [polling, orgId, fetchLogs])
 
+  // Keep polling while a run is live — including runs this tab didn't trigger
+  // (the weekly job, another admin) — so the progress bar stays current.
   useEffect(() => {
-    if (!polling || !lastTriggered || !logs.length) return
+    if (!logs.length) return
     const latest = logs[0]
-    if (latest.status !== 'running' && new Date(latest.started_at) >= new Date(lastTriggered)) {
+    if (latest.status === 'running') {
+      if (!polling) setPolling(true)
+      return
+    }
+    if (!polling) return
+    // Latest run is finished: stop, unless we just triggered one whose row
+    // hasn't appeared in the log yet.
+    if (!lastTriggered || new Date(latest.started_at) >= new Date(lastTriggered)) {
       setPolling(false)
       setSyncing(false)
       setHardRefreshing(false)
@@ -190,6 +210,8 @@ export default function AdminSync() {
     }
   }
 
+  const runningLog = logs.find(l => l.status === 'running')
+
   return (
     <AdminLayout>
       <div className="max-w-3xl">
@@ -245,6 +267,7 @@ export default function AdminSync() {
                 headline reads 0 despite having visible innings. No new data pulled —
                 runs in seconds.
               </p>
+              {backfilling && <LoadingBar expectedMs={12000} className="mt-2" />}
             </div>
           </div>
 
@@ -270,6 +293,7 @@ export default function AdminSync() {
                 in those games. Fixes inflated match counts (e.g. a current club member who played against us
                 having those games attributed to their club record). Runs in seconds.
               </p>
+              {cleaningOpp && <LoadingBar expectedMs={8000} className="mt-2" />}
             </div>
           </div>
 
@@ -298,11 +322,18 @@ export default function AdminSync() {
             </div>
           </div>
 
-          {(syncing || hardRefreshing) && (
-            <p className="font-mono text-[10px] text-pb-faint mt-3 pt-3 pb-hairline-t">
-              Running in background — this page will update automatically.
-              A full rebuild can take an hour or longer.
-            </p>
+          {(syncing || hardRefreshing || runningLog) && (
+            <div className="mt-3 pt-3 pb-hairline-t">
+              <ProgressBar
+                pct={runningLog?.stats?.progress_pct ?? 0}
+                label={syncProgressLabel(runningLog?.stats || {})}
+                labelClassName="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint"
+              />
+              <p className="font-mono text-[10px] text-pb-faint mt-2">
+                Running in background — this page will update automatically.
+                A full rebuild can take an hour or longer.
+              </p>
+            </div>
           )}
           {settings && (
             <div className="mt-4 pt-4 pb-hairline-t">
@@ -489,6 +520,15 @@ export default function AdminSync() {
                         {isError ? 'ERROR' : isRunning ? 'RUNNING' : 'OK'}
                       </span>
                     </div>
+
+                    {isRunning && (
+                      <ProgressBar
+                        pct={s.progress_pct ?? 0}
+                        label={syncProgressLabel(s)}
+                        labelClassName="font-mono text-[10px] text-pb-faint"
+                        className="mb-3"
+                      />
+                    )}
 
                     {isError ? (
                       <p className="font-mono text-[10px] text-pb-red">{entry.error}</p>

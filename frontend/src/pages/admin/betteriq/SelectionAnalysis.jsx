@@ -8,7 +8,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
-import { Icon, Btn, Tag, Empty, Search, Card, Note, PageIntro, Initials, a2, runsPhrase, wktsPhrase } from './ui'
+import { Icon, Btn, Tag, Empty, Search, Card, Note, PageIntro, Initials, a2, LoadingCard, runsPhrase, wktsPhrase } from './ui'
 
 /* ── role + scoring model (ported from the design, fed by real fields) ─────── */
 const ROLE_CHIP = {
@@ -415,14 +415,14 @@ export default function SelectionAnalysis() {
     return (
       <IQLayout>
         <PageIntro>BetterSelect picks the team — BetterIQ checks the balance, rebuilds the best available side as availability changes, and justifies the pick. Choose a fixture with a saved lineup.</PageIntro>
-        {rows === null ? <div className="iq-card p-5 iq-pulse text-pb-faint text-sm">Loading lineups…</div> : <LineupPicker rows={rows} onPick={pick} />}
+        {rows === null ? <LoadingCard label="Loading lineups…" expectedMs={4500} /> : <LineupPicker rows={rows} onPick={pick} />}
       </IQLayout>
     )
   }
 
   return (
     <IQLayout actions={<Btn variant="ghost" sm icon="back" onClick={clear}>Change fixture</Btn>}>
-      {data === null && !err && <div className="iq-card p-5 iq-pulse text-pb-faint text-sm">Analysing the XI…</div>}
+      {data === null && !err && <LoadingCard label="Analysing the XI…" expectedMs={6000} />}
       {err && <div className="iq-card p-5"><Empty>Couldn't load this lineup. It may have been removed — pick another fixture.</Empty></div>}
       {/* Even with nothing saved we can still help — the eligible pool lets us
           build a best XI from scratch. Only truly empty pools dead-end. */}

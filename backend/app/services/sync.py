@@ -257,6 +257,20 @@ async def update_sync_run(run_id: uuid.UUID, stats: dict) -> None:
             await session.commit()
 
 
+def _progress(stats: dict, phase: str, pct: float,
+              done: Optional[int] = None, total: Optional[int] = None) -> None:
+    """Stamp live-progress keys onto a stats dict. update_sync_run merges them
+    into the run row so the admin Data Sync page can draw a real percentage
+    bar; finish_sync_run strips them again. `pct` is the overall 0-100
+    position across the WHOLE sync (phases own fixed slices of the range), so
+    the bar never moves backwards between phases. done/total are the current
+    phase's counters (None clears a previous phase's counts on merge)."""
+    stats["progress_phase"] = phase
+    stats["progress_pct"] = max(0, min(100, round(pct)))
+    stats["progress_done"] = done
+    stats["progress_total"] = total
+
+
 async def finish_sync_run(run_id: uuid.UUID, stats: dict, error: str = "") -> None:
     """Mark a run as final. Stats here are merged on top of whatever is in the
     DB — preserves intermediate updates from sub-phases."""
@@ -267,6 +281,10 @@ async def finish_sync_run(run_id: uuid.UUID, stats: dict, error: str = "") -> No
             return
         merged = dict(run.stats or {})
         merged.update(stats)
+        # Progress keys only matter while the run is live — drop them so
+        # finished history rows don't carry a stale "Saving scorecards · 97%".
+        for k in ("progress_phase", "progress_pct", "progress_done", "progress_total"):
+            merged.pop(k, None)
         run.stats = merged
         flag_modified(run, "stats")
         run.status = "error" if error else "success"
@@ -505,6 +523,9 @@ async def sync_organisation(
 
         seasons = await playhq_client.get_seasons(org_id_str)
         logger.info(f"Found {len(seasons)} seasons")
+        if run_id:
+            _progress(stats, "Season totals", 1, 0, len(seasons))
+            await update_sync_run(run_id, stats)
 
         # grassroots_id -> player_id for this org's existing players. New players
         # (incl. the second club of a shared CA GUID) are minted as
@@ -535,7 +556,7 @@ async def sync_organisation(
             if _ggid:
                 org_grade_map[str(_ggid)] = _grid
 
-        for season_data in seasons:
+        for season_idx, season_data in enumerate(seasons, start=1):
             raw_season_id = (season_data.get("id") or "").strip()
             if not _parse_uuid(raw_season_id):
                 continue
@@ -748,6 +769,10 @@ async def sync_organisation(
             stats["season_stats"] += len(player_data)
             logger.info(f"Season {season_data.get('name')}: {len(player_data)} players synced")
             if run_id:
+                # Season totals own 1→40% of the overall bar.
+                _progress(stats, "Season totals",
+                          1 + 39 * season_idx / max(len(seasons), 1),
+                          season_idx, len(seasons))
                 await update_sync_run(run_id, stats)
 
             # Per-grade aggregate sync — same CA endpoints + `gradeId` param.
@@ -840,6 +865,9 @@ async def sync_organisation(
                 await session.rollback()
 
         # Recompute milestones for all players in this org
+        if run_id:
+            _progress(stats, "Milestones", 41)
+            await update_sync_run(run_id, stats)
         all_pids_res = await session.execute(
             select(Player.id).where(Player.organisation_id == org_id)
         )
@@ -859,6 +887,10 @@ async def sync_organisation(
         except Exception as e:
             import traceback as _tb2
             logger.error(f"Grassroots game-level sync failed for {org_id_str}: {e}\n{_tb2.format_exc()}")
+
+        if run_id:
+            _progress(stats, "Finalising", 99)
+            await update_sync_run(run_id, stats)
 
         # CA's aggregate API sometimes omits low-volume players for old seasons,
         # leaving them with scorecard rows but no player_season_stats row. Every
@@ -1412,7 +1444,7 @@ async def sync_grassroots_game_level_data(
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
     match_to_opp: dict[str, tuple[str | None, str]] = {}  # match_id → (opp_org_id, opp_club_name)
-    for grade_guid, season_id, grade_name, _our_grade_id in grades:
+    for grade_idx, (grade_guid, season_id, grade_name, _our_grade_id) in enumerate(grades, start=1):
         stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
         try:
             matches = await gr.get_grade_matches(grade_guid)
@@ -1447,11 +1479,16 @@ async def sync_grassroots_game_level_data(
                 )
                 match_to_opp[mid] = (opp_id, opp_name)
         if run_id:
+            # Match discovery owns 42→55% of the overall bar.
+            _progress(stats, "Finding matches",
+                      42 + 13 * grade_idx / max(len(grades), 1),
+                      grade_idx, len(grades))
             await update_sync_run(run_id, stats)
 
     stats["gr_matches_seen"] = len(seen_match_ids)
     logger.info(f"GR-sync: discovered {len(seen_match_ids)} unique match IDs across {stats['gr_teams_scanned']} grades")
     if run_id:
+        _progress(stats, "Saving scorecards", 55, 0, len(seen_match_ids))
         await update_sync_run(run_id, stats)
 
     # Bulk-update is_final on all discovered games (backfills existing rows).
@@ -1888,6 +1925,10 @@ async def sync_grassroots_game_level_data(
             # session has already auto-closed; just move on
 
         if run_id and processed % 25 == 0:
+            # Scorecards own 55→99% of the overall bar — the long phase.
+            _progress(stats, "Saving scorecards",
+                      55 + 44 * processed / max(len(seen_match_ids), 1),
+                      processed, len(seen_match_ids))
             await update_sync_run(run_id, stats)
             logger.info(f"GR-sync: processed {processed}/{len(seen_match_ids)} games, stats={stats}")
 

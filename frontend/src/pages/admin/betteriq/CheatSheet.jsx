@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import './iq-theme.css'
-import { Icon, CountUp, ResultPills, SplitBar, Tag, Btn, Empty, a2, surname, runsPhrase, wktsPhrase } from './ui'
+import { Icon, CountUp, ResultPills, SplitBar, Tag, Btn, Empty, a2, surname, LoadingBar, runsPhrase, wktsPhrase } from './ui'
 import { api } from '../../../lib/api'
 
 /* BetterIQ — Captain's Cheat Sheet (analytics brief §16.6).
@@ -238,7 +238,8 @@ export default function CheatSheet() {
                     line={runsPhrase(b.runs ?? 0, b.average)}
                     note={dismissPlan(b.name) || b.plan || b.key_note} />
                 ))
-                : <Empty className="text-pb-faint text-[11.5px]">{building ? 'Loading…' : 'No standout batters identified.'}</Empty>}
+                : building ? <LoadingBar label="Loading…" expectedMs={35000} labelClassName="text-pb-faint text-[11.5px]" />
+                  : <Empty className="text-pb-faint text-[11.5px]">No standout batters identified.</Empty>}
             </Column>
 
             <div style={{ width: 1, background: 'var(--pb-hairline)' }} />
@@ -250,7 +251,8 @@ export default function CheatSheet() {
                     line={wktsPhrase(b.wickets ?? 0, b.average)}
                     note={b.plan || b.key_note} />
                 ))
-                : <Empty className="text-pb-faint text-[11.5px]">{building ? 'Loading…' : 'No standout bowlers identified.'}</Empty>}
+                : building ? <LoadingBar label="Loading…" expectedMs={35000} labelClassName="text-pb-faint text-[11.5px]" />
+                  : <Empty className="text-pb-faint text-[11.5px]">No standout bowlers identified.</Empty>}
             </Column>
 
             <div style={{ width: 1, background: 'var(--pb-hairline)' }} />

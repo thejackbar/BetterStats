@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
-import { Card, Note, Tag, Btn, Empty, PageIntro, fmtCount, fmtOvers } from './ui'
+import { Card, Note, Tag, Btn, Empty, PageIntro, LoadingCard, fmtCount, fmtOvers } from './ui'
 
 const ord = (k) => ({ 1: '1st', 2: '2nd', 3: '3rd' }[k] || `${k}th`)
 
@@ -58,7 +58,7 @@ function GamePicker({ games, selected, onPick }) {
 /* ── Detail: an automatic post-match read of the selected game ───────────── */
 function GameReviewDetail({ review }) {
   if (review === null) {
-    return <div className="iq-card p-6 animate-pulse text-pb-faint text-sm">Reviewing the game…</div>
+    return <LoadingCard label="Reviewing the game…" expectedMs={5000} />
   }
   if (review?.error || !review?.game) {
     return <div className="iq-card p-6"><Empty>Couldn't load this game.</Empty></div>
@@ -229,7 +229,7 @@ export default function MatchReview() {
       <PageIntro>An automatic read of every completed game — the scoreline, what swung it, and who delivered.</PageIntro>
 
       {games === null ? (
-        <div className="iq-card p-6 animate-pulse text-pb-faint text-sm">Loading games…</div>
+        <LoadingCard label="Loading games…" expectedMs={4500} />
       ) : games.length === 0 ? (
         <div className="iq-card p-6"><Empty>No completed games to review yet.</Empty></div>
       ) : (

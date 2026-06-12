@@ -7,7 +7,7 @@ import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import {
   Icon, Card, Stat, Note, Tag, Bar, Gauge, SplitBar, StackedBar,
-  Initials, KV, Empty, Tabs, PageIntro, Delta, a2,
+  Initials, KV, Empty, Tabs, PageIntro, Delta, a2, LoadingCard,
   fmtCount, fmtOvers, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart, PhaseStrip } from './viz'
@@ -45,7 +45,7 @@ function WinLoseList({ items, tone }) {
 /* ── Win rate over time (range mode only) ───────────────────────────────── */
 function SeasonCompare({ rows, loading }) {
   if (loading) {
-    return <div className="iq-card p-6 animate-pulse text-pb-faint text-sm">Comparing seasons…</div>
+    return <LoadingCard label="Comparing seasons…" expectedMs={9000} />
   }
   const usable = (rows || []).filter(r => r.win_pct !== null && r.win_pct !== undefined)
   if (usable.length < 2) return null
@@ -672,13 +672,13 @@ export default function TeamAnalysis() {
     <IQLayout title="Team analysis">
       <PageIntro>The opposition lens, pointed at us — how we win and lose, our batting & bowling shape, and where we're strong or fragile. Use the filter above to focus a season or compare across years.</PageIntro>
 
-      {!ready && <div className="iq-card p-6 animate-pulse text-pb-faint text-sm">Loading…</div>}
+      {!ready && <LoadingCard label="Loading…" expectedMs={2500} />}
 
       {ready && (
         <>
           <div className="mb-6"><Tabs value={tab} onChange={setTab} tabs={TABS} /></div>
 
-          {data === null && !err && <div className="iq-card p-6 animate-pulse text-pb-faint text-sm">Crunching our games…</div>}
+          {data === null && !err && <LoadingCard label="Crunching our games…" expectedMs={9000} />}
           {err && <div className="iq-card p-6"><Empty>Couldn't load team analysis.</Empty></div>}
 
           {data && data.record && (
