@@ -18,6 +18,7 @@ import { api } from '../../../lib/api'
 import {
   Icon, Bar, Gauge, ResultPills, SplitBar, StackedBar, Heatmap,
   Card, Stat, Note, Tag, Btn, Segmented, Search, Empty, PageIntro, a2,
+  LoadingBar, LoadingCard,
   fmtCount, fmtOvers, runsPhrase, wktsPhrase,
 } from './ui'
 import { Radar, BAT_AXES, BOWL_AXES, PhaseStrip, buildRadar } from './viz'
@@ -697,9 +698,9 @@ function MatchOpponentModal({ opponents, fixture, onPick, onClose }) {
 function BuildingCard({ oppName }) {
   return (
     <div className="iq-card iq-accent-card p-8 text-center iq-fade">
-      <div className="inline-block iq-spin" style={{ width: 30, height: 30, borderRadius: 99, border: '3px solid var(--pb-surface3)', borderTopColor: 'var(--pb-accent)', marginBottom: 14 }} />
       <div className="iq-display font-bold text-[16px]">Building their dossier…</div>
       <div className="text-pb-faint text-[13px] mt-1.5 max-w-md mx-auto">Pulling {oppName}'s recent scorecards and their record against us. The head-to-head above is ready now — this can take up to a minute the first time.</div>
+      <div className="max-w-md mx-auto mt-5"><LoadingBar expectedMs={35000} /></div>
     </div>
   )
 }
@@ -893,7 +894,7 @@ export default function OppositionScout() {
     return (
       <IQLayout title="Opposition analysis">
         {list === null
-          ? <div className="iq-card p-6 iq-pulse text-pb-faint text-sm">Loading opponents…</div>
+          ? <LoadingCard label="Loading opponents…" expectedMs={4500} />
           : <ScoutPicker data={list} onPick={pick} onMatch={startMatch} />}
         {matching && <MatchOpponentModal opponents={list?.opponents || []} fixture={matching} onPick={applyMatch} onClose={() => setMatching(null)} />}
       </IQLayout>
@@ -940,7 +941,7 @@ export default function OppositionScout() {
       <div className="space-y-5">
         {/* Instant: command strip */}
         {report === null ? (
-          <div className="iq-card p-8 iq-pulse text-pb-faint text-sm">Loading head-to-head…</div>
+          <LoadingCard label="Loading head-to-head…" expectedMs={5500} />
         ) : report.error ? (
           <div className="iq-card p-6"><Empty>Couldn't load the head-to-head just now.</Empty></div>
         ) : (

@@ -16,7 +16,7 @@ import IQLayout from '../../../components/admin/IQLayout'
 import {
   Sparkline, SplitBar, StackedBar,
   Card, Stat, Note, Tag, Btn, Segmented, Search, Empty, surname,
-  Tabs, PageIntro, Delta, Initials, KV, a2,
+  Tabs, PageIntro, Delta, Initials, KV, a2, LoadingBar, LoadingCard,
   fmtCount, fmtOvers, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
 import { Radar, AreaChart } from './viz'
@@ -551,7 +551,7 @@ function DeepDiveTab({ detail, deep, bdeep, radar, radarLoading }) {
 
       <div className="grid gap-5 lg:grid-cols-2 items-start">
         {radarLoading && !radar ? (
-          <Card eyebrow="profile vs squad average" title="Player radar"><div className="animate-pulse text-pb-faint text-sm py-16 text-center">Building radar…</div></Card>
+          <Card eyebrow="profile vs squad average" title="Player radar"><div className="py-16"><LoadingBar label="Building radar…" expectedMs={5000} /></div></Card>
         ) : <PlayerRadarCard radar={radar} />}
         <ReliabilityCard deep={deep} />
         {hasDeep && <ConversionCard deep={deep} />}
@@ -658,7 +658,9 @@ function CompareTab({ aId, players, detailA }) {
           <div className="flex flex-col items-center">
             {ra && rb
               ? <Radar key={aId + bId} axes={ra.axes} values={ra.values} compareValues={rb.values} compareColor={AMBER} size={260} />
-              : <div className="text-pb-faint text-sm py-16 w-[260px] text-center">{radarA === null || radarB === null ? 'Loading radar…' : 'No batting radar to overlay for this pair.'}</div>}
+              : (radarA === null || radarB === null)
+                ? <div className="py-16 w-[260px]"><LoadingBar label="Loading radar…" expectedMs={5000} /></div>
+                : <div className="text-pb-faint text-sm py-16 w-[260px] text-center">No batting radar to overlay for this pair.</div>}
             <div className="flex items-center gap-4 mt-2 text-[11.5px]">
               <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 3, background: ACCENT, borderRadius: 2 }} />{surname(nameA)}</span>
               <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 3, background: AMBER, borderRadius: 2 }} />{surname(nameB)}</span>
@@ -670,7 +672,7 @@ function CompareTab({ aId, players, detailA }) {
               <div style={{ minWidth: 92 }} />
               <div className="font-bold iq-display truncate" style={{ color: AMBER }}>{surname(nameB)}</div>
             </div>
-            {detailB === null ? <div className="animate-pulse text-pb-faint text-sm py-6">Loading stats…</div>
+            {detailB === null ? <div className="py-6"><LoadingBar label="Loading stats…" expectedMs={4500} /></div>
               : rows.map(r => <CompareRow key={r.label} {...r} />)}
           </div>
         </div>
@@ -713,7 +715,7 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
     return () => { alive = false }
   }, [playerId, seasonId])
 
-  if (detail === null) return <div className="iq-card p-6 animate-pulse text-pb-faint text-sm">Loading trajectory…</div>
+  if (detail === null) return <LoadingCard label="Loading trajectory…" expectedMs={5000} />
   if (detail?.error) return <div className="iq-card p-6"><Empty>Couldn't load this player.</Empty></div>
 
   return (
@@ -789,7 +791,7 @@ function Overview({ overview, players, squads, squad, setSquad, pickerPlayers, o
       {/* Form movers — surfaced first */}
       <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr] items-start mb-9">
         <Card eyebrow="this season vs career-before-it" title="Form movers">
-          {m === null ? <div className="animate-pulse text-pb-faint text-sm">Loading…</div>
+          {m === null ? <LoadingBar label="Loading…" expectedMs={6000} />
             : noMovers ? <Empty>Not enough multi-season history among current players to spot movers yet.</Empty>
               : (
                 <div className="grid sm:grid-cols-2 gap-x-8 gap-y-5">

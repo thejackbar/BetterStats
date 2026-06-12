@@ -9,7 +9,7 @@ import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import {
   Icon, CountUp, Bar, ResultPills, Card, Note, Tag, Btn, Initials, Delta, a2,
-  fmtCount, runsPhrase, wktsPhrase,
+  LoadingBar, fmtCount, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart, DonutStat } from './viz'
 import { useIQFilter } from './Context'
@@ -386,7 +386,11 @@ function SectionHead({ children, sub }) {
 
 /* ── Loading skeleton ─────────────────────────────────────────────────────── */
 function Skeleton({ h = 120 }) {
-  return <div className="iq-card animate-pulse" style={{ height: h }} />
+  return (
+    <div className="iq-card flex items-center px-6" style={{ height: h }}>
+      <LoadingBar label="Loading…" expectedMs={6000} className="w-full" />
+    </div>
+  )
 }
 
 /* ── Page ─────────────────────────────────────────────────────────────────── */

@@ -2039,7 +2039,7 @@ async def hard_refresh_org(
     rows anyway so the WHERE filter is a no-op for them. Runs in the
     background; poll GET /club-admin/sync-runs/{run_id} for progress.
     """
-    from app.services.sync import sync_organisation, start_sync_run, finish_sync_run
+    from app.services.sync import sync_organisation, start_sync_run, finish_sync_run, update_sync_run
     from app.services.rate_limit import enforce
     org_id_str = str(club.id)
 
@@ -2064,6 +2064,7 @@ async def hard_refresh_org(
     async def _run():
         _logger.info(f"HardRefresh: starting for org {org_id_str} (run_id={run_id})")
         try:
+            await update_sync_run(run_id, {"progress_phase": "Clearing stored games", "progress_pct": 0})
             # Wipe phase — games with batting rows whose seasons belong to this org.
             from app.models.db import async_session_maker
             from sqlalchemy import text as _t
