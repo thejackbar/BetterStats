@@ -24,3 +24,6 @@ frontend/dist/
 # Claude Code internal (local settings/state stay ignored; vendored skills are tracked)
 .claude/*
 !.claude/skills/
+
+# Generated sync-watch snapshots (tools/sync_watch.py output)
+sync_snapshots/
