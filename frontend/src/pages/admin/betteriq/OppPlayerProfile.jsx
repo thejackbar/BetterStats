@@ -622,7 +622,9 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
       )}
 
       {!bat?.innings && !bowl?.wickets && (
-        <Note>No current-season scorecard data for this player yet — only their scouting tags below apply.</Note>
+        <Note>{orgGuid
+          ? 'Not seen in the current-season matches we scanned — their five-year history below is the read.'
+          : 'No current-season scorecard data for this player yet — only their scouting tags below apply.'}</Note>
       )}
 
       {/* 5-year history — career aggregates first (near-instant), then the

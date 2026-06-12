@@ -382,6 +382,46 @@ async def get_player_career(
     }
 
 
+async def get_club_players(
+    session: AsyncSession, our_org_id: str, org_guid: str,
+    *, club_name: str | None = None, force: bool = False,
+) -> dict:
+    """Every player at a club across the career window — a light list for the
+    scout pages' search/selection. The dossier squad only covers players seen in
+    the current-season scan, which silently hid anyone who hasn't played this
+    season (the "found him in search, gone on the club page" bug); this list is
+    the career blob's full roster, so a 5-year veteran is always selectable."""
+    if not _is_uuid(org_guid):
+        return {"status": "unavailable", "message": "No Cricket Australia organisation id for this club."}
+    d = await _get_or_start(
+        session, our_org_id, _career_key(org_guid), CAREER_VERSION,
+        lambda: _build_career(org_guid, club_name), name=club_name, force=force,
+    )
+    if d.get("status") != "ready":
+        return d
+    players = []
+    for p in d.get("players") or []:
+        t = p.get("totals") or {}
+        seasons = p.get("seasons") or []
+        players.append({
+            "player_id": p.get("player_id"),
+            "name": p.get("name"),
+            "matches": t.get("matches"),
+            "runs": t.get("runs"),
+            "average": t.get("average"),
+            "wickets": t.get("wickets"),
+            "catches": t.get("catches"),
+            "last_year": seasons[0]["year"] if seasons else None,
+        })
+    return {
+        "status": "ready",
+        "org": d.get("org"),
+        "window": d.get("window"),
+        "built_at": d.get("built_at"),
+        "players": players,
+    }
+
+
 # ─── per-player deep pass (scorecards across the window) ─────────────────────
 
 _POSITION_BUCKETS = ["Opening", "First drop", "Middle order", "Lower order", "Tail"]

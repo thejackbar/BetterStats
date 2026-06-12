@@ -182,6 +182,19 @@ async def save_opposition_player_tag(
     return await iq_service.upsert_opponent_tag(db, str(club.id), player_id, body, user_id=str(user.id))
 
 
+@router.get("/opposition/club-players")
+async def opposition_club_players(
+    org: str = Query(..., description="the club's CA organisation GUID"),
+    club_name: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Every player at a club across the last 5 years (from the cached career
+    blob) — lets the scout pages list/select players who haven't appeared in the
+    current-season scan. Poll while ``building``."""
+    return await iq_scout.get_club_players(db, str(club.id), org, club_name=club_name)
+
+
 @router.get("/opposition/player-career")
 async def opposition_player_career(
     org: str = Query(..., description="the opponent club's CA organisation GUID (dossier's opponent.org_id)"),

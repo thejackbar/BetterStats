@@ -1142,6 +1142,11 @@ export const api = {
     request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId, team, name)}`, { method: 'POST' }),
   // Search opposition players by name across every opponent we've faced.
   iqSearchOpponentPlayers: (q) => request(`/iq/opposition/player-search?q=${encodeURIComponent(q)}`),
+  // Every player at a club across the last 5 years (light list from the cached
+  // career blob) — so a player who hasn't appeared this season is still
+  // searchable/selectable on the scout pages. Poll while status === 'building'.
+  iqClubPlayers: ({ org, clubName } = {}) =>
+    request(`/iq/opposition/club-players?org=${encodeURIComponent(org)}${clubName ? `&club_name=${encodeURIComponent(clubName)}` : ''}`),
   // Last-5-years season-by-season career for any player at any club (CA season
   // aggregates; the whole club is cached once, sliced per player). Poll while
   // status === 'building'. `org` = the club's CA org GUID (dossier opponent.org_id).

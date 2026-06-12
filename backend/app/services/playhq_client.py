@@ -18,14 +18,30 @@ def _base_params(extra: dict = None) -> dict:
     return params
 
 
+# The CA proxy rejects search strings over 20 characters with a 400
+# ('MaximumLength'), so a pasted full club name ("Murdoch University Melville
+# Cricket Club") returned nothing. Clip to whole words under the limit — the
+# search matches on the leading words anyway.
+_MAX_SEARCH_LEN = 20
+
+
 async def search_organisations(query: str) -> list:
+    query = (query or "").strip()
+    if len(query) > _MAX_SEARCH_LEN:
+        clipped = query[:_MAX_SEARCH_LEN]
+        if query[_MAX_SEARCH_LEN] != " " and " " in clipped:
+            clipped = clipped.rsplit(" ", 1)[0]
+        query = clipped.strip()
     async with httpx.AsyncClient() as client:
         r = await client.get(
             f"{BASE_URL}/orgsproducts/organisation/search",
             params=_base_params({"searchString": query}),
             timeout=DEFAULT_TIMEOUT,
         )
-        r.raise_for_status()
+        if r.status_code >= 400:
+            # A bad query shouldn't 500 the caller's endpoint — empty is honest.
+            logger.warning(f"search_organisations: {r.status_code} for {query!r}: {r.text[:120]}")
+            return []
         data = r.json()
         orgs = data.get("data", data.get("organisations", data if isinstance(data, list) else []))
         # Expose the Grassroots organisation GUID as `id` — that is the key
