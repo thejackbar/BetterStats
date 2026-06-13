@@ -63,6 +63,62 @@ function synthesise({ report, ladder, team }) {
   return bits
 }
 
+// A plain-text pre-game brief for the group chat, built from the instant data
+// we already hold (no extra fetch). Light emoji, plain cricket-club voice.
+function buildTeamTalk({ report, ladder, team, oppName, meta }) {
+  const L = []
+  const ordL = (n) => (n == null ? null : ({ 1: '1st', 2: '2nd', 3: '3rd' }[n] || `${n}th`))
+  const sub = [meta?.played_on, meta?.home_away, meta?.grade_name].filter(Boolean).join(' · ')
+  L.push(`🏏 vs ${oppName}${sub ? `\n${sub}` : ''}`)
+
+  const h2h = report?.head_to_head
+  if (h2h?.meetings > 0) {
+    L.push(`\n🤝 Record vs them: ${h2h.wins}-${h2h.losses} from ${h2h.meetings}${h2h.win_pct != null ? ` (${Math.round(h2h.win_pct)}% wins)` : ''}`)
+  }
+  const lm = report?.last_meeting
+  if (lm && (lm.result || lm.our_runs != null)) {
+    const r = lm.result === 'WIN' ? 'Won' : lm.result === 'LOSS' ? 'Lost' : (lm.result || 'Drew')
+    L.push(`Last meeting: ${r}${(lm.our_runs != null || lm.opp_runs != null) ? ` ${lm.our_runs ?? '?'}-${lm.opp_runs ?? '?'}` : ''}${lm.played_at ? ` (${lm.played_at})` : ''}`)
+  }
+  if (ladder?.available && ladder.our_row?.rank && ladder.opponent_row?.rank) {
+    L.push(`📊 Ladder: we're ${ordL(ladder.our_row.rank)}, they're ${ordL(ladder.opponent_row.rank)}.`)
+  }
+
+  const danger = (report?.their_danger_batters || []).slice(0, 3)
+  if (danger.length) {
+    L.push('\n⚠️ Watch out for:')
+    danger.forEach(d => {
+      const bits = []
+      if (d.runs) bits.push(`${d.runs} runs${d.average != null ? ` @ ${d.average}` : ''} vs us`)
+      if (d.times_out) bits.push(`out to us ${d.times_out}×`)
+      L.push(`• ${d.name}${bits.length ? ` — ${bits.join(', ')}` : ''}`)
+    })
+  }
+  const dom = (report?.matchups?.bowler_dominance || []).slice(0, 2).filter(m => m.bowler && m.batter)
+  if (dom.length) {
+    L.push('\n🎯 Match-ups in our favour:')
+    dom.forEach(m => L.push(`• Save ${m.bowler} for ${m.batter} — ${m.dismissals}× dismissed`))
+  }
+  const eb = (report?.our_performers?.batting || []).slice(0, 2)
+  const ew = (report?.our_performers?.bowling || []).slice(0, 1)
+  if (eb.length || ew.length) {
+    L.push('\n💪 Our edge against them:')
+    eb.forEach(e => L.push(`• ${e.name} — ${e.runs} runs${e.average != null ? ` @ ${e.average}` : ''}`))
+    ew.forEach(e => L.push(`• ${e.name} — ${e.wickets} wkts${e.average != null ? ` @ ${e.average}` : ''}`))
+  }
+
+  const inn = team?.innings
+  const tail = []
+  if (inn?.bat_first?.win_pct != null && inn?.chasing?.win_pct != null && Math.abs(inn.bat_first.win_pct - inn.chasing.win_pct) >= 8) {
+    const bf = inn.bat_first.win_pct >= inn.chasing.win_pct
+    tail.push(`🪙 Win the toss: ${bf ? 'bat first' : 'have a chase'} (we win ${Math.round(Math.max(inn.bat_first.win_pct, inn.chasing.win_pct))}% that way).`)
+  }
+  if (inn?.par?.par_score != null) tail.push(`📈 Par here is about ${inn.par.par_score} batting first.`)
+  if (tail.length) L.push('\n' + tail.join('\n'))
+
+  return L.join('\n').replace(/\n{3,}/g, '\n\n')
+}
+
 /* Ladder table — our row + the opponent row, styled like the reference. */
 function LadderTable({ ladder, oppName }) {
   const rows = [
@@ -114,6 +170,7 @@ export default function MatchPreview() {
   const [report, setReport] = useState(null)
   const [ladder, setLadder] = useState(null)
   const [q, setQ] = useState('')
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     api.iqListOpponents().then(setOpp).catch(() => setOpp({ opponents: [], upcoming: [] }))
@@ -170,6 +227,11 @@ export default function MatchPreview() {
     const edgeBowl = (report?.our_performers?.bowling || []).slice(0, 1)
     const lmTone = lm?.result === 'WIN' ? 'var(--pb-brand)' : lm?.result === 'LOSS' ? 'var(--pb-red)' : 'var(--pb-amber)'
     const lmLabel = lm?.result === 'WIN' ? 'Won' : lm?.result === 'LOSS' ? 'Lost' : (lm?.result || '—')
+    const teamTalk = report && !report.error ? buildTeamTalk({ report, ladder, team, oppName, meta: m }) : ''
+    const copyTeamTalk = () => {
+      if (!teamTalk) return
+      navigator.clipboard?.writeText(teamTalk).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }).catch(() => {})
+    }
 
     return (
       <IQLayout title="Match preview" actions={<Btn variant="ghost" sm icon="back" onClick={clear}>All fixtures</Btn>}>
@@ -187,6 +249,7 @@ export default function MatchPreview() {
               </div>
             </div>
             <div className="flex items-center gap-2.5">
+              <Btn variant="ghost" sm icon={copied ? 'check' : 'share'} onClick={copyTeamTalk} disabled={!teamTalk}>{copied ? 'Copied' : 'Copy team talk'}</Btn>
               <Btn variant="ghost" sm icon="print" onClick={goCheatSheet} disabled={!sel.opponent}>Cheat sheet</Btn>
               <Btn variant="primary" sm icon="search" onClick={goScout}>Full scout</Btn>
             </div>
@@ -204,6 +267,15 @@ export default function MatchPreview() {
                     </li>
                   ))}
                 </ul>
+              </Card>
+            )}
+
+            {/* Team talk — copy/paste straight into the group chat */}
+            {teamTalk && (
+              <Card eyebrow="for the group chat" title="Team talk"
+                right={<Btn variant="soft" sm icon={copied ? 'check' : 'share'} onClick={copyTeamTalk}>{copied ? 'Copied' : 'Copy'}</Btn>}>
+                <pre className="whitespace-pre-wrap text-[13px] leading-relaxed" style={{ fontFamily: 'inherit', margin: 0 }}>{teamTalk}</pre>
+                <Note>Built from the record and form we already hold — paste it into the team chat, or open the full scout for the detail.</Note>
               </Card>
             )}
 

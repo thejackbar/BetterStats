@@ -102,6 +102,7 @@ const IqOppositionPlayer = lazy(() => import('./pages/admin/betteriq/OppositionP
 const IqSelection = lazy(() => import('./pages/admin/betteriq/SelectionAnalysis'))
 const IqTrends = lazy(() => import('./pages/admin/betteriq/PlayerTrends'))
 const IqPlayerHub = lazy(() => import('./pages/admin/betteriq/PlayerHub'))
+const IqAsk = lazy(() => import('./pages/admin/betteriq/AskIQ'))
 const IqTeam = lazy(() => import('./pages/admin/betteriq/TeamAnalysis'))
 const IqReview = lazy(() => import('./pages/admin/betteriq/MatchReview'))
 const IqPreview = lazy(() => import('./pages/admin/betteriq/MatchPreview'))
@@ -251,6 +252,7 @@ export default function App() {
           <Route path="/admin/betteriq/opposition-player" element={<ProtectedRoute requireModule="iq"><IqOppositionPlayer /></ProtectedRoute>} />
           <Route path="/admin/betteriq/selection" element={<ProtectedRoute requireModule="iq"><IqSelection /></ProtectedRoute>} />
           <Route path="/admin/betteriq/player" element={<ProtectedRoute requireModule="iq"><IqPlayerHub /></ProtectedRoute>} />
+          <Route path="/admin/betteriq/ask" element={<ProtectedRoute requireModule="iq"><IqAsk /></ProtectedRoute>} />
           <Route path="/admin/betteriq/trends" element={<ProtectedRoute requireModule="iq"><IqTrends /></ProtectedRoute>} />
           <Route path="/admin/betteriq/team" element={<ProtectedRoute requireModule="iq"><IqTeam /></ProtectedRoute>} />
           <Route path="/admin/betteriq/review" element={<ProtectedRoute requireModule="iq"><IqReview /></ProtectedRoute>} />

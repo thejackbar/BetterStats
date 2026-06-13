@@ -18,6 +18,7 @@ from app.auth.capabilities import MANAGE_IQ, require_cap
 from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club, get_current_user
 from app.services import iq as iq_service
+from app.services import iq_ask
 from app.services import iq_opponent
 from app.services import iq_phases
 from app.services import iq_players
@@ -291,6 +292,23 @@ async def all_players(
     """Every player in the club (full history, light career summary) — the
     unified Player-search roster, not just the current season."""
     return await iq_players.list_all_players(db, str(club.id))
+
+
+@router.post("/ask")
+async def ask_iq(
+    question: str = Body(..., embed=True, description="a plain-language question about the club's data"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Natural-language Q&A grounded in the club's own data (rate-limited)."""
+    from app.services.rate_limit import enforce
+
+    enforce(f"iq_ask:{club.id}", limit=20, window_sec=3600,
+            detail="That's a lot of questions for now — try again in a bit.")
+    q = (question or "").strip()
+    if len(q) < 3:
+        raise HTTPException(status_code=400, detail="Ask a question.")
+    return await iq_ask.answer(db, str(club.id), club.name, q)
 
 
 @router.get("/trends/players")
