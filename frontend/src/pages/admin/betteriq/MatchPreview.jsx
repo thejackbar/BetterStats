@@ -187,13 +187,26 @@ export default function MatchPreview() {
 
   const load = (f) => {
     const s = { fixtureId: f.fixture_id || null, opponent: f.opp_key || null, meta: f }
-    setSel(s); setReport(null); setLadder(null); setQ('')
+    setSel(s); setQ('')
     setSearchParams(f.fixture_id ? { fixture: f.fixture_id } : (f.opp_key ? { opponent: f.opp_key } : {}), { replace: true })
-    const params = { opponent: s.opponent, fixtureId: s.fixtureId }
-    api.iqOppositionReport(params).then(setReport).catch(() => setReport({ error: true }))
-    api.iqOpponentLadder(params).then(setLadder).catch(() => setLadder({ available: false }))
   }
   const clear = () => { setSel(null); setReport(null); setLadder(null); setSearchParams({}, {}) }
+
+  // The report scopes to a grade so the danger players / our edge are THIS side,
+  // not the whole club. Use the global Grade filter when set, else the selected
+  // fixture's own grade. Re-fetches when either changes, so the top filter is live.
+  const effGrade = gradeFilter || (sel?.meta?.grade_name ? gradeBase(sel.meta.grade_name) : null)
+  useEffect(() => {
+    if (!sel) { setReport(null); setLadder(null); return }
+    let alive = true
+    setReport(null); setLadder(null)
+    const base = { opponent: sel.opponent, fixtureId: sel.fixtureId }
+    api.iqOppositionReport({ ...base, grade: effGrade || undefined })
+      .then(d => { if (alive) setReport(d) }).catch(() => { if (alive) setReport({ error: true }) })
+    api.iqOpponentLadder(base)
+      .then(d => { if (alive) setLadder(d) }).catch(() => { if (alive) setLadder({ available: false }) })
+    return () => { alive = false }
+  }, [sel, effGrade])
 
   // Follow the global Grade filter: narrow the upcoming-fixture list to that
   // grade (fixtures carry the raw, sponsor-decorated grade name, so normalise).
@@ -246,6 +259,9 @@ export default function MatchPreview() {
                 {m.played_on && <span className="inline-flex items-center gap-1.5"><Icon name="fixtures" size={14} className="text-pb-faint" />{m.played_on}</span>}
                 {(m.home_away || m.venue) && <span className="inline-flex items-center gap-1.5"><Icon name="target" size={14} className="text-pb-faint" />{[m.home_away, m.venue].filter(Boolean).join(' · ')}</span>}
                 {(m.grade_name || m.team_name) && <span className="iq-mono text-pb-faint">{[m.team_name, m.grade_name].filter(Boolean).join(' · ')}</span>}
+                {effGrade
+                  ? <Tag tone="accent">{effGrade}{gradeFilter ? ' · filtered' : ' · this grade'}</Tag>
+                  : <Tag tone="faint">all grades</Tag>}
               </div>
             </div>
             <div className="flex items-center gap-2.5">
