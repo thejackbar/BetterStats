@@ -1168,6 +1168,10 @@ export const api = {
   iqSelectionAnalysis: (fixtureId) =>
     request(`/iq/selection/analysis?fixture_id=${encodeURIComponent(fixtureId)}`),
 
+  // Every player in OUR club (full history, light career summary) — backs the
+  // unified Player search, which spans our players and any external club.
+  iqAllPlayers: () => request('/iq/players'),
+
   // ─── BetterIQ: Player trends & development ──────────────
   iqTrendsOverview: (seasonId, gradeId) => {
     const qs = new URLSearchParams()

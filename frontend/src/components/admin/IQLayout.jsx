@@ -28,6 +28,7 @@ function loadClubBranding() {
 // per-route key the ContextBar reads. `title`/`actions` props still override.
 const ROUTES = [
   { key: 'overview', to: '/admin/betteriq', exact: true, label: 'Overview', icon: 'overview', eyebrow: 'BetterIQ', title: 'Overview', cap: null },
+  { key: 'player', to: '/admin/betteriq/player', label: 'Player search', icon: 'search', eyebrow: 'BetterIQ', title: 'Player search', cap: CAP.MANAGE_IQ },
   { group: 'Scout the opposition' },
   { key: 'preview', to: '/admin/betteriq/preview', label: 'Match preview', icon: 'fixtures', eyebrow: 'Scout the opposition', title: 'Match preview', cap: CAP.MANAGE_IQ },
   { key: 'opposition', to: '/admin/betteriq/opposition', label: 'Opposition club', icon: 'search', eyebrow: 'Scout the opposition', title: 'Opposition analysis', cap: CAP.MANAGE_IQ },
