@@ -19,7 +19,8 @@ async def list_all_players(session: AsyncSession, org_id: str) -> list[dict]:
             """
             SELECT p.id::text AS player_id,
                    COALESCE(p.display_name_override, p.name) AS name,
-                   p.player_role,
+                   p.player_role, p.skill_positions,
+                   MAX(t.name) AS squad,
                    COALESCE(SUM(pss.matches) FILTER (WHERE s.organisation_id = CAST(:org AS UUID)), 0) AS matches,
                    COALESCE(SUM(pss.runs) FILTER (WHERE s.organisation_id = CAST(:org AS UUID)), 0) AS runs,
                    COALESCE(SUM(pss.wickets) FILTER (WHERE s.organisation_id = CAST(:org AS UUID)), 0) AS wickets,
@@ -27,6 +28,7 @@ async def list_all_players(session: AsyncSession, org_id: str) -> list[dict]:
             FROM players p
             LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             LEFT JOIN seasons s ON s.id = pss.season_id
+            LEFT JOIN teams t ON t.id = p.squad_team_id
             WHERE p.organisation_id = CAST(:org AS UUID)
             GROUP BY p.id, name, p.player_role
             ORDER BY last_year DESC NULLS LAST, runs DESC
@@ -34,15 +36,19 @@ async def list_all_players(session: AsyncSession, org_id: str) -> list[dict]:
         ),
         {"org": org_id},
     )
-    return [
-        {
+    out = []
+    for r in res.mappings():
+        sp = r["skill_positions"] or []
+        keeper = ("WKT" in sp) or bool(r["player_role"] and "KEEP" in (r["player_role"] or "").upper())
+        out.append({
             "player_id": r["player_id"],
             "name": r["name"],
             "player_role": r["player_role"],
+            "is_keeper": keeper,
+            "squad": r["squad"],
             "matches": int(r["matches"] or 0),
             "runs": int(r["runs"] or 0),
             "wickets": int(r["wickets"] or 0),
             "last_year": r["last_year"],
-        }
-        for r in res.mappings()
-    ]
+        })
+    return out

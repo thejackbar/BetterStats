@@ -79,11 +79,11 @@ function PlayerSearch({ players, onPick, placeholder = 'Search a player…' }) {
           <div className="px-2.5 py-2 text-pb-faint text-sm">{players.length === 0 ? 'No current-season players found.' : 'No match.'}</div>
         ) : matches.map(p => (
           <button key={p.player_id} type="button" onClick={() => { onPick(p.player_id); setQ(''); setOpen(false) }}
-            className="w-full flex items-center justify-between gap-3 px-2.5 py-2 text-left transition" style={{ borderRadius: 8 }}
+            className="w-full flex flex-col gap-0.5 px-2.5 py-2 text-left transition overflow-hidden" style={{ borderRadius: 8 }}
             onMouseEnter={e => { e.currentTarget.style.background = 'var(--pb-surface2)' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
-            <span className="font-medium text-[13.5px] truncate">{p.name}</span>
-            <span className="iq-mono text-pb-faintest text-[11px] whitespace-nowrap">
+            <span className="font-medium text-[13.5px] truncate w-full">{p.name}</span>
+            <span className="iq-mono text-pb-faintest text-[11px] truncate w-full">
               {p.matches} {p.matches === 1 ? 'game' : 'games'}{p.runs ? ` · ${runsPhrase(p.runs, p.bat_avg)}` : ''}{p.wickets ? ` · ${wktsPhrase(p.wickets, p.bowl_avg)}` : ''}
             </span>
           </button>
