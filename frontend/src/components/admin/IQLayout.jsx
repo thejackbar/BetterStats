@@ -35,7 +35,7 @@ const ROUTES = [
   { key: 'opposition-player', to: '/admin/betteriq/opposition-player', label: 'Opposition player', icon: 'player', eyebrow: 'Scout the opposition', title: 'Opposition player', cap: CAP.MANAGE_IQ },
   { group: 'Know your club' },
   { key: 'selection', to: '/admin/betteriq/selection', label: 'Selection', icon: 'selection', eyebrow: 'Know your club', title: 'Selection analysis', cap: CAP.MANAGE_IQ },
-  { key: 'trends', to: '/admin/betteriq/trends', label: 'Player trends', icon: 'trend', eyebrow: 'Know your club', title: 'Player trends', cap: CAP.MANAGE_IQ },
+  { key: 'trends', to: '/admin/betteriq/trends', label: 'Form & trends', icon: 'trend', eyebrow: 'Know your club', title: 'Form & trends', cap: CAP.MANAGE_IQ },
   { key: 'team', to: '/admin/betteriq/team', label: 'Team analysis', icon: 'teams', eyebrow: 'Know your club', title: 'Team analysis', cap: CAP.MANAGE_IQ },
   { key: 'review', to: '/admin/betteriq/review', label: 'Match review', icon: 'overview', eyebrow: 'Know your club', title: 'Match review', cap: CAP.MANAGE_IQ },
 ]

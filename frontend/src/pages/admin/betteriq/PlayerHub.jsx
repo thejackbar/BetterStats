@@ -18,7 +18,7 @@ import {
   Card, Stat, Tag, Btn, Search, Empty, Note, PageIntro, Initials, surname,
   Segmented, LoadingCard, LoadingBar, a2, fmtCount, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
-import { AreaChart } from './viz'
+import { AreaChart, Radar } from './viz'
 import AnyClubSearch from './AnyClubSearch'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
 import { DeepDiveTab } from './PlayerDeepDive'
@@ -221,8 +221,26 @@ function ComparePanel({ aId, aDetail, ourPlayers }) {
   const [bClub, setBClub] = useState(null)   // { org, name } for the opposition drill
   const [bCareer, setBCareer] = useState(null)
   const [q, setQ] = useState('')
+  // Radars only exist for OUR players (normalised against our squad), so the
+  // overlay shows when both sides are internal; an external opponent has none.
+  const [radarA, setRadarA] = useState(null)
+  const [radarB, setRadarB] = useState(null)
 
   const roster = useClubPlayers(bClub?.org || null, bClub?.name)
+
+  useEffect(() => {
+    let alive = true
+    setRadarA(null)
+    api.iqPlayerRadar(aId).then(d => { if (alive) setRadarA(d) }).catch(() => { if (alive) setRadarA(null) })
+    return () => { alive = false }
+  }, [aId])
+  useEffect(() => {
+    if (b?.kind !== 'internal') { setRadarB(null); return }
+    let alive = true
+    setRadarB(null)
+    api.iqPlayerRadar(b.id).then(d => { if (alive) setRadarB(d) }).catch(() => { if (alive) setRadarB(null) })
+    return () => { alive = false }
+  }, [b])
 
   // B's career: internal in one call; external is the polled career blob (the
   // same one the roster builds, so it's usually ready by the time you pick).
@@ -300,16 +318,29 @@ function ComparePanel({ aId, aDetail, ourPlayers }) {
         : bCareer?.building ? <LoadingCard label={`Building ${b.name}'s career…`} expectedMs={30000} />
         : bCareer?.error ? <Empty>{bCareer.message || "Couldn't load that player's career."}</Empty>
         : bCareer?.loading ? <LoadingCard label="Loading…" expectedMs={4000} />
-        : (
-          <div className="max-w-xl mx-auto mt-1">
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 pb-1">
-              <div className="text-right font-bold iq-display truncate" style={{ color: 'var(--pb-accent)' }}>{surname(A.name || '')}</div>
-              <div style={{ minWidth: 92 }} />
-              <div className="font-bold iq-display truncate" style={{ color: 'var(--iq-c-amber)' }}>{surname(B?.name || b.name || '')}</div>
+        : (() => {
+          const ra = radarA?.bat && radarA.bat.values?.length ? radarA.bat : null
+          const rb = radarB?.bat && radarB.bat.values?.length ? radarB.bat : null
+          return (
+            <div className="max-w-xl mx-auto mt-1">
+              {ra && rb && (
+                <div className="flex flex-col items-center mb-5">
+                  <Radar key={`${aId}-${b.id}`} axes={ra.axes} values={ra.values} compareValues={rb.values} compareColor="var(--iq-c-amber)" size={240} />
+                  <div className="flex items-center gap-4 mt-2 text-[11.5px]">
+                    <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 3, background: 'var(--pb-accent)', borderRadius: 2 }} />{surname(A.name || '')}</span>
+                    <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 3, background: 'var(--iq-c-amber)', borderRadius: 2 }} />{surname(B?.name || b.name || '')}</span>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 pb-1">
+                <div className="text-right font-bold iq-display truncate" style={{ color: 'var(--pb-accent)' }}>{surname(A.name || '')}</div>
+                <div style={{ minWidth: 92 }} />
+                <div className="font-bold iq-display truncate" style={{ color: 'var(--iq-c-amber)' }}>{surname(B?.name || b.name || '')}</div>
+              </div>
+              {rows.map(r => <CmpRow key={r.label} {...r} />)}
             </div>
-            {rows.map(r => <CmpRow key={r.label} {...r} />)}
-          </div>
-        )}
+          )
+        })()}
       <Note>Career totals on each side, greener figure the stronger. Your player is their full recorded history; an opposition player is the last ~10 years from Cricket Australia, so a long career can read low.</Note>
     </Card>
   )
