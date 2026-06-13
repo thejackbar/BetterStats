@@ -15,7 +15,7 @@ import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import {
-  Card, Stat, Tag, Btn, Search, Empty, Note, PageIntro, Initials,
+  Card, Stat, Tag, Btn, Search, Empty, Note, PageIntro, Initials, surname,
   Segmented, LoadingCard, LoadingBar, a2, fmtCount, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart } from './viz'
@@ -178,8 +178,144 @@ function CareerView({ detail }) {
   )
 }
 
-/* ── Our-player profile (career ↔ vs-club) ───────────────────────────────── */
-function OurPlayerProfile({ pid }) {
+/* ── Cross-club compare (your player vs anyone) ──────────────────────────── */
+// Fold an internal trends payload / external career blob into one career shape.
+function normInternal(detail) {
+  const b = detail?.career?.batting || {}, bo = detail?.career?.bowling || {}, fl = detail?.career?.fielding || {}
+  return {
+    name: detail?.player?.name,
+    runs: b.total_runs ?? 0, batAvg: b.average, hundreds: b.hundreds ?? 0, fifties: b.fifties ?? 0,
+    wickets: bo.total_wickets ?? 0, bowlAvg: bo.average, econ: bo.economy,
+    catches: (fl.total_catches_non_wk ?? 0) + (fl.total_catches_wk ?? 0),
+  }
+}
+function normExternal(player) {
+  const t = player?.totals || {}
+  return {
+    name: player?.name,
+    runs: t.runs ?? 0, batAvg: t.average, hundreds: t.hundreds ?? 0, fifties: t.fifties ?? 0,
+    wickets: t.wickets ?? 0, bowlAvg: t.bowling_average, econ: t.economy, catches: t.catches ?? 0,
+  }
+}
+// Which side is stronger for a metric (null when equal/incomparable).
+function cmp(a, b, dir) {
+  const na = Number(a), nb = Number(b)
+  if (!isFinite(na) || !isFinite(nb) || na === nb) return null
+  return dir === 'low' ? (na < nb ? 'a' : 'b') : (na > nb ? 'a' : 'b')
+}
+function CmpRow({ label, a, b, better }) {
+  const col = (s) => (better === s ? 'var(--pb-brand)' : 'var(--pb-text)')
+  return (
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 py-2.5" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+      <div className="iq-num font-semibold text-right text-[15px]" style={{ color: col('a') }}>{a}</div>
+      <div className="iq-eyebrow text-center" style={{ fontSize: 9, minWidth: 92 }}>{label}</div>
+      <div className="iq-num font-semibold text-[15px]" style={{ color: col('b') }}>{b}</div>
+    </div>
+  )
+}
+
+function ComparePanel({ aId, aDetail, ourPlayers }) {
+  const [src, setSrc] = useState('ours')     // 'ours' | 'opp'
+  const [b, setB] = useState(null)           // { kind:'internal'|'external', id, org?, name }
+  const [bClub, setBClub] = useState(null)   // { org, name } for the opposition drill
+  const [bCareer, setBCareer] = useState(null)
+  const [q, setQ] = useState('')
+
+  const roster = useClubPlayers(bClub?.org || null, bClub?.name)
+
+  // B's career: internal in one call; external is the polled career blob (the
+  // same one the roster builds, so it's usually ready by the time you pick).
+  useEffect(() => {
+    if (!b) { setBCareer(null); return }
+    let alive = true, timer = null
+    setBCareer({ loading: true })
+    if (b.kind === 'internal') {
+      api.iqTrendsPlayer(b.id).then(d => { if (alive) setBCareer({ ready: true, ...normInternal(d) }) }).catch(() => { if (alive) setBCareer({ error: true }) })
+    } else {
+      const poll = () => api.iqPlayerCareer({ org: b.org, player: b.id, clubName: b.name }).then(d => {
+        if (!alive) return
+        if (d.status === 'building') { setBCareer({ building: true }); timer = setTimeout(poll, 2500); return }
+        if (d.status === 'ready' && d.player) setBCareer({ ready: true, ...normExternal(d.player) })
+        else setBCareer({ error: true, message: d.message })
+      }).catch(() => { if (alive) setBCareer({ error: true }) })
+      poll()
+    }
+    return () => { alive = false; if (timer) clearTimeout(timer) }
+  }, [b])
+
+  const A = useMemo(() => normInternal(aDetail), [aDetail])
+  const B = bCareer?.ready ? bCareer : null
+  const rows = [
+    { label: 'Runs', a: fmtCount(A.runs), b: B ? fmtCount(B.runs) : '—', better: B ? cmp(A.runs, B.runs, 'high') : null },
+    { label: 'Bat avg', a: a2(A.batAvg), b: B ? a2(B.batAvg) : '—', better: B ? cmp(A.batAvg, B.batAvg, 'high') : null },
+    { label: '100s / 50s', a: `${A.hundreds}/${A.fifties}`, b: B ? `${B.hundreds}/${B.fifties}` : '—', better: null },
+    { label: 'Wickets', a: fmtCount(A.wickets), b: B ? fmtCount(B.wickets) : '—', better: B ? cmp(A.wickets, B.wickets, 'high') : null },
+    { label: 'Bowl avg', a: a2(A.bowlAvg), b: B ? a2(B.bowlAvg) : '—', better: B ? cmp(A.bowlAvg, B.bowlAvg, 'low') : null },
+    { label: 'Economy', a: a2(A.econ), b: B ? a2(B.econ) : '—', better: B ? cmp(A.econ, B.econ, 'low') : null },
+    { label: 'Catches', a: fmtCount(A.catches), b: B ? fmtCount(B.catches) : '—', better: B ? cmp(A.catches, B.catches, 'high') : null },
+  ]
+
+  const ql = q.trim().toLowerCase()
+  const ourMatches = ql ? ourPlayers.filter(p => p.player_id !== aId && (p.name || '').toLowerCase().includes(ql)).slice(0, 10) : []
+  const rosterList = roster?.status === 'ready' ? (roster.players || []) : []
+  const rosterMatches = (ql ? rosterList.filter(p => (p.name || '').toLowerCase().includes(ql)) : rosterList).slice(0, 14)
+
+  const pickSrc = (v) => { setSrc(v); setB(null); setBClub(null); setBCareer(null); setQ('') }
+
+  return (
+    <Card eyebrow="head to head" title={`${A.name || 'Your player'} vs ${B?.name || (b ? b.name : 'pick a player')}`}>
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <Segmented sm value={src} onChange={pickSrc} options={[{ value: 'ours', label: 'Your club' }, { value: 'opp', label: 'Opposition' }]} />
+        {src === 'ours'
+          ? <div className="flex-1 min-w-[220px] max-w-sm"><Search value={q} onChange={setQ} placeholder="Search your players…" /></div>
+          : <div className="flex-1 min-w-[220px] max-w-sm"><AnyClubSearch placeholder="Pick a club to compare against…" onPick={(org) => { setBClub({ org: org.id, name: org.name }); setB(null); setBCareer(null); setQ('') }} /></div>}
+      </div>
+
+      {src === 'ours' && ql && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {ourMatches.length === 0 ? <Empty>No match in your squad.</Empty> : ourMatches.map(p => (
+            <button key={p.player_id} onClick={() => { setB({ kind: 'internal', id: p.player_id, name: p.name }); setQ('') }}
+              className="text-[12.5px] px-2.5 py-1.5" style={{ background: 'var(--pb-surface2)', borderRadius: 8, border: '1px solid var(--pb-hairline2)' }}>{p.name}</button>
+          ))}
+        </div>
+      )}
+      {src === 'opp' && bClub && (
+        <div className="mb-4">
+          <div className="iq-eyebrow mb-2">{bClub.name}{roster?.status === 'building' ? ' · pulling roster…' : ''}</div>
+          <Search value={q} onChange={setQ} placeholder={`Search ${bClub.name} players…`} className="max-w-sm mb-2.5" />
+          <div className="flex flex-wrap gap-2">
+            {rosterMatches.length === 0
+              ? <Empty>{roster?.status === 'building' ? 'Pulling their player list…' : 'No players found.'}</Empty>
+              : rosterMatches.map(p => (
+                <button key={p.player_id} onClick={() => setB({ kind: 'external', id: p.player_id, org: bClub.org, name: p.name })}
+                  className="text-[12.5px] px-2.5 py-1.5" style={{ background: b?.id === p.player_id ? 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' : 'var(--pb-surface2)', borderRadius: 8, border: '1px solid var(--pb-hairline2)' }}>
+                  {p.name}{p.runs ? ` · ${runsPhrase(p.runs)}` : ''}</button>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {!b ? <Empty>Pick a player to compare {A.name || 'your player'} against.</Empty>
+        : bCareer?.building ? <LoadingCard label={`Building ${b.name}'s career…`} expectedMs={30000} />
+        : bCareer?.error ? <Empty>{bCareer.message || "Couldn't load that player's career."}</Empty>
+        : bCareer?.loading ? <LoadingCard label="Loading…" expectedMs={4000} />
+        : (
+          <div className="max-w-xl mx-auto mt-1">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 pb-1">
+              <div className="text-right font-bold iq-display truncate" style={{ color: 'var(--pb-accent)' }}>{surname(A.name || '')}</div>
+              <div style={{ minWidth: 92 }} />
+              <div className="font-bold iq-display truncate" style={{ color: 'var(--iq-c-amber)' }}>{surname(B?.name || b.name || '')}</div>
+            </div>
+            {rows.map(r => <CmpRow key={r.label} {...r} />)}
+          </div>
+        )}
+      <Note>Career totals on each side, greener figure the stronger. Your player is their full recorded history; an opposition player is the last ~10 years from Cricket Australia, so a long career can read low.</Note>
+    </Card>
+  )
+}
+
+/* ── Our-player profile (career ↔ vs-club ↔ compare) ─────────────────────── */
+function OurPlayerProfile({ pid, ourPlayers }) {
   const [detail, setDetail] = useState(null)
   const [oppRows, setOppRows] = useState(null)
   const [view, setView] = useState('career')
@@ -214,12 +350,14 @@ function OurPlayerProfile({ pid }) {
       <Segmented value={view} onChange={setView} options={[
         { value: 'career', label: 'Career (all clubs)' },
         { value: 'vs', label: 'vs a club' },
+        { value: 'compare', label: 'Compare' },
       ]} />
 
       {view === 'career' && <CareerView detail={detail} />}
       {view === 'vs' && (oppRows === null
         ? <LoadingCard label="Loading head-to-head…" expectedMs={4000} />
         : <VsClubView rows={oppRows} />)}
+      {view === 'compare' && <ComparePanel aId={pid} aDetail={detail} ourPlayers={ourPlayers} />}
     </div>
   )
 }
@@ -486,7 +624,7 @@ export default function PlayerHub() {
   return (
     <IQLayout title="Player search" actions={showingProfile ? <Btn variant="ghost" sm icon="back" onClick={clearAll}>All players</Btn> : null}>
       {pid ? (
-        <OurPlayerProfile pid={pid} />
+        <OurPlayerProfile pid={pid} ourPlayers={ourPlayers} />
       ) : external ? (
         <ExternalClubView club={external.club} initialPlayerName={external.playerName} />
       ) : (
