@@ -20,6 +20,7 @@ from app.routers.auth import get_current_club, get_current_user
 from app.services import iq as iq_service
 from app.services import iq_opponent
 from app.services import iq_phases
+from app.services import iq_players
 from app.services import iq_radar
 from app.services import iq_review
 from app.services import iq_scout
@@ -280,6 +281,16 @@ async def trends_overview(
     """Club-wide development: breakout/decline movers + emerging, for the selected
     season and (optionally) grade."""
     return await iq_trends.trends_overview(db, str(club.id), season_id=season_id, grade_id=grade_id)
+
+
+@router.get("/players")
+async def all_players(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Every player in the club (full history, light career summary) — the
+    unified Player-search roster, not just the current season."""
+    return await iq_players.list_all_players(db, str(club.id))
 
 
 @router.get("/trends/players")

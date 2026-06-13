@@ -18,6 +18,8 @@ from collections import defaultdict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.iq_filters import season_grade_clause
+
 
 def _ordinal(n: int) -> str:
     return {1: "1st", 2: "2nd", 3: "3rd"}.get(n, f"{n}th")
@@ -27,12 +29,9 @@ async def list_review_games(session: AsyncSession, org_id: str, limit: int = 40,
                             season_id: str | None = None, grade_id: str | None = None) -> list[dict]:
     """Recent completed games to review — newest first (a lightweight picker).
     Optionally scoped to one season and/or grade (grade matched by NAME, the IQ
-    filter convention) so the Overview's form/results follow the global filter."""
-    clauses = ""
-    if season_id:
-        clauses += " AND gr.season_id = CAST(:season AS UUID)"
-    if grade_id:
-        clauses += " AND gr.name = :grade"
+    filter convention; the season is year-expanded — see iq_filters) so the
+    Overview's form/results follow the global filter."""
+    clauses = season_grade_clause(season_id, grade_id)
     res = await session.execute(
         text(
             f"""

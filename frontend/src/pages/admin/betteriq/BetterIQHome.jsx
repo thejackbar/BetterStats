@@ -12,7 +12,7 @@ import {
   LoadingBar, fmtCount, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart, DonutStat } from './viz'
-import { useIQFilter } from './Context'
+import { useIQFilter, effectiveSeasonId } from './Context'
 import { formatSeason } from '../../../lib/cricketFormat'
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
@@ -397,7 +397,7 @@ function Skeleton({ h = 120 }) {
 export default function BetterIQHome() {
   const navigate = useNavigate()
   const { ctx } = useIQFilter()
-  const seasonId = ctx?.season?.to?.id || undefined
+  const seasonId = effectiveSeasonId(ctx)
   const gradeId = ctx?.team?.id || undefined
 
   const [opponents, setOpponents] = useState(undefined) // undefined = loading
