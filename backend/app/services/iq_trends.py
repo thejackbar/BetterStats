@@ -30,6 +30,7 @@ from app.services.aggregations import (
     get_upcoming_milestones_for_org,
 )
 from app.services import milestone_rules
+from app.services.iq_filters import grade_base
 
 # A "mover" needs enough of a recent sample to be real, and enough prior history
 # to have a baseline — otherwise a hot week looks like a breakout.
@@ -67,7 +68,7 @@ def _movers_src(grade_id: str | None) -> str:
     grade) table for that grade NAME. Both expose batting_innings / runs /
     not_outs / wickets / runs_conceded, so the rest of the query is identical."""
     if grade_id:
-        return "player_season_grade_stats st JOIN grades gr ON gr.id = st.grade_id AND gr.name = :grade"
+        return f"player_season_grade_stats st JOIN grades gr ON gr.id = st.grade_id AND {grade_base('gr.name')} = :grade"
     return "player_season_stats st"
 
 

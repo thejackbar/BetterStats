@@ -9,6 +9,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import { Icon, Btn, Tag, Empty, Search, Card, Note, PageIntro, Initials, a2, LoadingCard, runsPhrase, wktsPhrase } from './ui'
+import { useIQFilter, gradeBase } from './Context'
 
 /* ── role + scoring model (ported from the design, fed by real fields) ─────── */
 const ROLE_CHIP = {
@@ -394,12 +395,21 @@ function Analysis({ data, fixtureId, onNavigate }) {
 export default function SelectionAnalysis() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { ctx } = useIQFilter()
+  const gradeFilter = ctx?.team?.id || null
   const [rows, setRows] = useState(null)
   const [fixtureId, setFixtureId] = useState(searchParams.get('fixture') || null)
   const [data, setData] = useState(null)
   const [err, setErr] = useState(false)
 
   useEffect(() => { api.iqSelectionLineups().then(setRows).catch(() => setRows([])) }, [])
+
+  // Follow the global Grade filter — narrow the fixture picker to that grade
+  // (rows carry the raw, sponsor-decorated grade name, so normalise to match).
+  const visibleRows = useMemo(() => {
+    if (!rows || !gradeFilter) return rows
+    return rows.filter(r => gradeBase(r.grade_name) === gradeFilter)
+  }, [rows, gradeFilter])
   useEffect(() => {
     if (!fixtureId) { setData(null); return }
     let alive = true
@@ -415,7 +425,7 @@ export default function SelectionAnalysis() {
     return (
       <IQLayout>
         <PageIntro>BetterSelect picks the team — BetterIQ checks the balance, rebuilds the best available side as availability changes, and justifies the pick. Choose a fixture with a saved lineup.</PageIntro>
-        {rows === null ? <LoadingCard label="Loading lineups…" expectedMs={4500} /> : <LineupPicker rows={rows} onPick={pick} />}
+        {rows === null ? <LoadingCard label="Loading lineups…" expectedMs={4500} /> : <LineupPicker rows={visibleRows} onPick={pick} />}
       </IQLayout>
     )
   }

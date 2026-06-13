@@ -1,10 +1,11 @@
 /* BetterIQ — Match preview: a fast pre-game one-pager (instant data only).
    Restyled to the v2 high-fidelity design; wired to the real instant report,
    ladder and team-overview endpoints. Never calls the live dossier. */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
+import { useIQFilter, gradeBase } from './Context'
 import {
   Icon, CountUp, ResultPills, SplitBar, Card, Tag, Btn, Search, Empty,
   Initials, PageIntro, Note, a2, LoadingBar, fmtCount, fmtPct, runsPhrase,
@@ -105,6 +106,8 @@ function LadderTable({ ladder, oppName }) {
 export default function MatchPreview() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const { ctx } = useIQFilter()
+  const gradeFilter = ctx?.team?.id || null         // global Grade filter (base name)
   const [opp, setOpp] = useState(null)              // {opponents, upcoming}
   const [team, setTeam] = useState(null)            // team overview (par/record)
   const [sel, setSel] = useState(null)              // {fixtureId, opponent, meta}
@@ -135,7 +138,12 @@ export default function MatchPreview() {
   }
   const clear = () => { setSel(null); setReport(null); setLadder(null); setSearchParams({}, {}) }
 
-  const upcoming = opp?.upcoming || []
+  // Follow the global Grade filter: narrow the upcoming-fixture list to that
+  // grade (fixtures carry the raw, sponsor-decorated grade name, so normalise).
+  const upcoming = useMemo(() => {
+    const all = opp?.upcoming || []
+    return gradeFilter ? all.filter(f => gradeBase(f.grade_name) === gradeFilter) : all
+  }, [opp, gradeFilter])
   const oppList = opp?.opponents || []
   const t = q.trim().toLowerCase()
   const oppMatches = (t ? oppList.filter(o => (o.name || '').toLowerCase().includes(t)) : oppList).slice(0, 20)
@@ -349,7 +357,7 @@ export default function MatchPreview() {
           <div className="space-y-6">
             {upcoming.length > 0 && (
               <div>
-                <div className="iq-eyebrow mb-3">Upcoming fixtures</div>
+                <div className="iq-eyebrow mb-3">Upcoming fixtures{gradeFilter ? ` · ${gradeFilter}` : ''}</div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {upcoming.map(f => (
                     <button key={f.fixture_id} onClick={() => load(f)} className="iq-card text-left transition hover:brightness-110">
@@ -388,7 +396,9 @@ export default function MatchPreview() {
             </div>
 
             {upcoming.length === 0 && !q && (
-              <Card><Empty>No upcoming fixtures with an opponent — search a club above to preview them.</Empty></Card>
+              <Card><Empty>{gradeFilter
+                ? `No upcoming fixtures in ${gradeFilter} — clear the grade filter, or search a club above.`
+                : 'No upcoming fixtures with an opponent — search a club above to preview them.'}</Empty></Card>
             )}
           </div>
         )}

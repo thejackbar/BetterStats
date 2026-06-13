@@ -10,16 +10,19 @@
  * against every side, your club included). Opposition / any-club picks open the
  * existing opposition scout, which already carries career + record-vs-us.
  */
-import { useState, useEffect, useMemo } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import {
-  Card, Stat, Tag, Btn, Search, Empty, Note, PageIntro, Initials,
-  Segmented, LoadingCard, a2, fmtCount, fmtPct, runsPhrase, wktsPhrase,
+  Card, Stat, Tag, Btn, Search, Empty, Note, PageIntro, Initials, surname,
+  Segmented, LoadingCard, LoadingBar, a2, fmtCount, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart } from './viz'
 import AnyClubSearch from './AnyClubSearch'
+import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
+import { DeepDiveTab } from './PlayerDeepDive'
+import { useClubPlayers, careerOnlyEntries, entryWithThreat, bestNameMatch, isOrgGuid } from './clubPlayers'
 import { formatSeason } from '../../../lib/cricketFormat'
 
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
@@ -171,24 +174,178 @@ function CareerView({ detail }) {
           </Card>
         </div>
       )}
-      <Note>Want the deep dive (conversion, dismissals, radar, milestones)? Open this player in <b style={{ color: 'var(--pb-text)' }}>Player trends</b>.</Note>
+      <Note>Open the <b style={{ color: 'var(--pb-text)' }}>Deep dive</b> tab for conversion, dismissals, radar, reliability and milestones.</Note>
     </div>
   )
 }
 
-/* ── Our-player profile (career ↔ vs-club) ───────────────────────────────── */
-function OurPlayerProfile({ pid }) {
+/* ── Cross-club compare (your player vs anyone) ──────────────────────────── */
+// Fold an internal trends payload / external career blob into one career shape.
+function normInternal(detail) {
+  const b = detail?.career?.batting || {}, bo = detail?.career?.bowling || {}, fl = detail?.career?.fielding || {}
+  return {
+    name: detail?.player?.name,
+    runs: b.total_runs ?? 0, batAvg: b.average, hundreds: b.hundreds ?? 0, fifties: b.fifties ?? 0,
+    wickets: bo.total_wickets ?? 0, bowlAvg: bo.average, econ: bo.economy,
+    catches: (fl.total_catches_non_wk ?? 0) + (fl.total_catches_wk ?? 0),
+  }
+}
+function normExternal(player) {
+  const t = player?.totals || {}
+  return {
+    name: player?.name,
+    runs: t.runs ?? 0, batAvg: t.average, hundreds: t.hundreds ?? 0, fifties: t.fifties ?? 0,
+    wickets: t.wickets ?? 0, bowlAvg: t.bowling_average, econ: t.economy, catches: t.catches ?? 0,
+  }
+}
+// Which side is stronger for a metric (null when equal/incomparable).
+function cmp(a, b, dir) {
+  const na = Number(a), nb = Number(b)
+  if (!isFinite(na) || !isFinite(nb) || na === nb) return null
+  return dir === 'low' ? (na < nb ? 'a' : 'b') : (na > nb ? 'a' : 'b')
+}
+function CmpRow({ label, a, b, better }) {
+  const col = (s) => (better === s ? 'var(--pb-brand)' : 'var(--pb-text)')
+  return (
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 py-2.5" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
+      <div className="iq-num font-semibold text-right text-[15px]" style={{ color: col('a') }}>{a}</div>
+      <div className="iq-eyebrow text-center" style={{ fontSize: 9, minWidth: 92 }}>{label}</div>
+      <div className="iq-num font-semibold text-[15px]" style={{ color: col('b') }}>{b}</div>
+    </div>
+  )
+}
+
+function ComparePanel({ aId, aDetail, ourPlayers }) {
+  const [src, setSrc] = useState('ours')     // 'ours' | 'opp'
+  const [b, setB] = useState(null)           // { kind:'internal'|'external', id, org?, name }
+  const [bClub, setBClub] = useState(null)   // { org, name } for the opposition drill
+  const [bCareer, setBCareer] = useState(null)
+  const [q, setQ] = useState('')
+
+  const roster = useClubPlayers(bClub?.org || null, bClub?.name)
+
+  // B's career: internal in one call; external is the polled career blob (the
+  // same one the roster builds, so it's usually ready by the time you pick).
+  useEffect(() => {
+    if (!b) { setBCareer(null); return }
+    let alive = true, timer = null
+    setBCareer({ loading: true })
+    if (b.kind === 'internal') {
+      api.iqTrendsPlayer(b.id).then(d => { if (alive) setBCareer({ ready: true, ...normInternal(d) }) }).catch(() => { if (alive) setBCareer({ error: true }) })
+    } else {
+      const poll = () => api.iqPlayerCareer({ org: b.org, player: b.id, clubName: b.name }).then(d => {
+        if (!alive) return
+        if (d.status === 'building') { setBCareer({ building: true }); timer = setTimeout(poll, 2500); return }
+        if (d.status === 'ready' && d.player) setBCareer({ ready: true, ...normExternal(d.player) })
+        else setBCareer({ error: true, message: d.message })
+      }).catch(() => { if (alive) setBCareer({ error: true }) })
+      poll()
+    }
+    return () => { alive = false; if (timer) clearTimeout(timer) }
+  }, [b])
+
+  const A = useMemo(() => normInternal(aDetail), [aDetail])
+  const B = bCareer?.ready ? bCareer : null
+  const rows = [
+    { label: 'Runs', a: fmtCount(A.runs), b: B ? fmtCount(B.runs) : '—', better: B ? cmp(A.runs, B.runs, 'high') : null },
+    { label: 'Bat avg', a: a2(A.batAvg), b: B ? a2(B.batAvg) : '—', better: B ? cmp(A.batAvg, B.batAvg, 'high') : null },
+    { label: '100s / 50s', a: `${A.hundreds}/${A.fifties}`, b: B ? `${B.hundreds}/${B.fifties}` : '—', better: null },
+    { label: 'Wickets', a: fmtCount(A.wickets), b: B ? fmtCount(B.wickets) : '—', better: B ? cmp(A.wickets, B.wickets, 'high') : null },
+    { label: 'Bowl avg', a: a2(A.bowlAvg), b: B ? a2(B.bowlAvg) : '—', better: B ? cmp(A.bowlAvg, B.bowlAvg, 'low') : null },
+    { label: 'Economy', a: a2(A.econ), b: B ? a2(B.econ) : '—', better: B ? cmp(A.econ, B.econ, 'low') : null },
+    { label: 'Catches', a: fmtCount(A.catches), b: B ? fmtCount(B.catches) : '—', better: B ? cmp(A.catches, B.catches, 'high') : null },
+  ]
+
+  const ql = q.trim().toLowerCase()
+  const ourMatches = ql ? ourPlayers.filter(p => p.player_id !== aId && (p.name || '').toLowerCase().includes(ql)).slice(0, 10) : []
+  const rosterList = roster?.status === 'ready' ? (roster.players || []) : []
+  const rosterMatches = (ql ? rosterList.filter(p => (p.name || '').toLowerCase().includes(ql)) : rosterList).slice(0, 14)
+
+  const pickSrc = (v) => { setSrc(v); setB(null); setBClub(null); setBCareer(null); setQ('') }
+
+  return (
+    <Card eyebrow="head to head" title={`${A.name || 'Your player'} vs ${B?.name || (b ? b.name : 'pick a player')}`}>
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <Segmented sm value={src} onChange={pickSrc} options={[{ value: 'ours', label: 'Your club' }, { value: 'opp', label: 'Opposition' }]} />
+        {src === 'ours'
+          ? <div className="flex-1 min-w-[220px] max-w-sm"><Search value={q} onChange={setQ} placeholder="Search your players…" /></div>
+          : <div className="flex-1 min-w-[220px] max-w-sm"><AnyClubSearch placeholder="Pick a club to compare against…" onPick={(org) => { setBClub({ org: org.id, name: org.name }); setB(null); setBCareer(null); setQ('') }} /></div>}
+      </div>
+
+      {src === 'ours' && ql && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {ourMatches.length === 0 ? <Empty>No match in your squad.</Empty> : ourMatches.map(p => (
+            <button key={p.player_id} onClick={() => { setB({ kind: 'internal', id: p.player_id, name: p.name }); setQ('') }}
+              className="text-[12.5px] px-2.5 py-1.5" style={{ background: 'var(--pb-surface2)', borderRadius: 8, border: '1px solid var(--pb-hairline2)' }}>{p.name}</button>
+          ))}
+        </div>
+      )}
+      {src === 'opp' && bClub && (
+        <div className="mb-4">
+          <div className="iq-eyebrow mb-2">{bClub.name}{roster?.status === 'building' ? ' · pulling roster…' : ''}</div>
+          <Search value={q} onChange={setQ} placeholder={`Search ${bClub.name} players…`} className="max-w-sm mb-2.5" />
+          <div className="flex flex-wrap gap-2">
+            {rosterMatches.length === 0
+              ? <Empty>{roster?.status === 'building' ? 'Pulling their player list…' : 'No players found.'}</Empty>
+              : rosterMatches.map(p => (
+                <button key={p.player_id} onClick={() => setB({ kind: 'external', id: p.player_id, org: bClub.org, name: p.name })}
+                  className="text-[12.5px] px-2.5 py-1.5" style={{ background: b?.id === p.player_id ? 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' : 'var(--pb-surface2)', borderRadius: 8, border: '1px solid var(--pb-hairline2)' }}>
+                  {p.name}{p.runs ? ` · ${runsPhrase(p.runs)}` : ''}</button>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {!b ? <Empty>Pick a player to compare {A.name || 'your player'} against.</Empty>
+        : bCareer?.building ? <LoadingCard label={`Building ${b.name}'s career…`} expectedMs={30000} />
+        : bCareer?.error ? <Empty>{bCareer.message || "Couldn't load that player's career."}</Empty>
+        : bCareer?.loading ? <LoadingCard label="Loading…" expectedMs={4000} />
+        : (
+          <div className="max-w-xl mx-auto mt-1">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 pb-1">
+              <div className="text-right font-bold iq-display truncate" style={{ color: 'var(--pb-accent)' }}>{surname(A.name || '')}</div>
+              <div style={{ minWidth: 92 }} />
+              <div className="font-bold iq-display truncate" style={{ color: 'var(--iq-c-amber)' }}>{surname(B?.name || b.name || '')}</div>
+            </div>
+            {rows.map(r => <CmpRow key={r.label} {...r} />)}
+          </div>
+        )}
+      <Note>Career totals on each side, greener figure the stronger. Your player is their full recorded history; an opposition player is the last ~10 years from Cricket Australia, so a long career can read low.</Note>
+    </Card>
+  )
+}
+
+/* ── Our-player profile (career ↔ vs-club ↔ compare) ─────────────────────── */
+function OurPlayerProfile({ pid, ourPlayers }) {
   const [detail, setDetail] = useState(null)
   const [oppRows, setOppRows] = useState(null)
   const [view, setView] = useState('career')
+  // Deep-dive data, lazy-loaded the first time the Deep dive tab is opened.
+  const [deep, setDeep] = useState(null)
+  const [bdeep, setBdeep] = useState(null)
+  const [radar, setRadar] = useState(null)
+  const [radarLoading, setRadarLoading] = useState(false)
+  const deepFetched = useRef(false)
 
   useEffect(() => {
     let alive = true
     setDetail(null); setOppRows(null)
+    deepFetched.current = false; setDeep(null); setBdeep(null); setRadar(null)
     api.iqTrendsPlayer(pid).then(d => { if (alive) setDetail(d) }).catch(() => { if (alive) setDetail({ error: true }) })
     api.getPlayerByOpposition(pid).then(d => { if (alive) setOppRows(Array.isArray(d) ? d : []) }).catch(() => { if (alive) setOppRows([]) })
     return () => { alive = false }
   }, [pid])
+
+  useEffect(() => {
+    if (view !== 'deep' || deepFetched.current) return
+    deepFetched.current = true
+    let alive = true
+    setRadarLoading(true)
+    api.iqPlayerDeepDive(pid).then(d => { if (alive) setDeep(d) }).catch(() => { if (alive) setDeep(null) })
+    api.iqBowlerDeepDive(pid).then(d => { if (alive) setBdeep(d) }).catch(() => { if (alive) setBdeep(null) })
+    api.iqPlayerRadar(pid).then(d => { if (alive) setRadar(d) }).catch(() => { if (alive) setRadar(null) }).finally(() => { if (alive) setRadarLoading(false) })
+    return () => { alive = false }
+  }, [view, pid])
 
   if (detail === null) return <LoadingCard label="Loading player…" expectedMs={4000} />
   if (detail?.error) return <Card><Empty>Couldn't load this player.</Empty></Card>
@@ -211,13 +368,19 @@ function OurPlayerProfile({ pid }) {
 
       <Segmented value={view} onChange={setView} options={[
         { value: 'career', label: 'Career (all clubs)' },
+        { value: 'deep', label: 'Deep dive' },
         { value: 'vs', label: 'vs a club' },
+        { value: 'compare', label: 'Compare' },
       ]} />
 
       {view === 'career' && <CareerView detail={detail} />}
+      {view === 'deep' && (deep === null && !deepFetched.current
+        ? <LoadingCard label="Loading deep dive…" expectedMs={5000} />
+        : <DeepDiveTab detail={detail} deep={deep} bdeep={bdeep} radar={radar} radarLoading={radarLoading} />)}
       {view === 'vs' && (oppRows === null
         ? <LoadingCard label="Loading head-to-head…" expectedMs={4000} />
         : <VsClubView rows={oppRows} />)}
+      {view === 'compare' && <ComparePanel aId={pid} aDetail={detail} ourPlayers={ourPlayers} />}
     </div>
   )
 }
@@ -294,7 +457,7 @@ function SearchLanes({ ourPlayers, onPickOurs, onPickExternal }) {
               : (
                 <div className="space-y-1">
                   {ext.slice(0, 12).map((r, i) => (
-                    <button key={`${r.opp_key}-${i}`} onClick={() => onPickExternal({ opp_key: r.opp_key, name: r.club_name })}
+                    <button key={`${r.opp_key}-${i}`} onClick={() => onPickExternal({ opp_key: r.opp_key, name: r.club_name }, r.name)}
                       className="w-full flex items-center justify-between gap-3 px-2 py-2 text-left transition" style={{ borderRadius: 9 }}
                       onMouseEnter={e => { e.currentTarget.style.background = 'var(--pb-surface2)' }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
@@ -337,29 +500,156 @@ function SearchLanes({ ourPlayers, onPickOurs, onPickExternal }) {
   )
 }
 
+/* ── External club / player profile (in-page, reuses the opposition scout) ─── */
+function ExternalClubView({ club, initialPlayerName }) {
+  const [dossier, setDossier] = useState(null)
+  const [status, setStatus] = useState('building')
+  const [sel, setSel] = useState(null)
+  const [playerQ, setPlayerQ] = useState('')
+  const [tags, setTags] = useState({})
+  const pollRef = useRef(null)
+  const pendingNameRef = useRef(null)
+
+  useEffect(() => { api.iqOpponentTags().then(d => setTags(d || {})).catch(() => setTags({})) }, [])
+
+  // Build/poll the club's live dossier (same contract as the opposition scout).
+  useEffect(() => {
+    let alive = true
+    setDossier(null); setStatus('building'); setSel(null)
+    pendingNameRef.current = (initialPlayerName || '').trim().toLowerCase() || null
+    const params = { opponent: club.opp_key, name: club.name }
+    const poll = () => {
+      api.iqOppositionDossier(params).then(d => {
+        if (!alive) return
+        setDossier(d); setStatus(d.status)
+        if (d.status === 'building') pollRef.current = setTimeout(poll, 2500)
+      }).catch(() => { if (alive) setStatus('error') })
+    }
+    poll()
+    return () => { alive = false; if (pollRef.current) clearTimeout(pollRef.current) }
+  }, [club.opp_key, club.name, initialPlayerName])
+
+  const saveTag = async (playerId, body) => {
+    const saved = await api.iqSaveOpponentTag(playerId, body)
+    setTags(t => ({ ...t, [playerId]: saved }))
+    return saved
+  }
+
+  const index = useMemo(() => buildOppPlayerIndex(dossier), [dossier])
+  const enriched = useMemo(() => {
+    const m = new Map()
+    for (const d of [...(dossier?.danger_batters || []), ...(dossier?.danger_bowlers || [])]) m.set(d.player_id, d)
+    return m
+  }, [dossier])
+  const all = useMemo(() => [...index.entries()].map(([id, v]) => ({ id, ...v }))
+    .sort((a, b) => (b.bat?.runs || 0) - (a.bat?.runs || 0) || (b.bowl?.wickets || 0) - (a.bowl?.wickets || 0)), [index])
+  const orgGuid = dossier?.opponent?.org_id || (isOrgGuid(club.opp_key) ? club.opp_key : null)
+  const clubPlayers = useClubPlayers(orgGuid, club.name)
+  const careerOnly = useMemo(() => careerOnlyEntries(index, clubPlayers), [index, clubPlayers])
+  const everyone = useMemo(() => [...all, ...careerOnly], [all, careerOnly])
+  const selected = useMemo(() => {
+    if (!sel) return null
+    const e = index.get(sel) || careerOnly.find(p => p.id === sel) || null
+    return entryWithThreat(e, dossier)
+  }, [sel, index, careerOnly, dossier])
+
+  // Once the squad is ready, resolve a pending player name (from the search) and
+  // select them — names come in several shapes, so this is a token scorer.
+  useEffect(() => {
+    if (status !== 'ready' || !pendingNameRef.current || !everyone.length) return
+    const hit = bestNameMatch(pendingNameRef.current, everyone)
+    const rosterPending = orgGuid && (!clubPlayers || clubPlayers.status === 'building')
+    if (!hit && rosterPending) return
+    pendingNameRef.current = null
+    if (hit) setSel(hit.id)
+  }, [status, everyone, clubPlayers])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pq = playerQ.trim().toLowerCase()
+  const playerMatches = pq ? everyone.filter(p => p.name.toLowerCase().includes(pq)) : everyone
+
+  if (status === 'building') return (
+    <div className="iq-card iq-accent-card p-8 text-center iq-fade">
+      <div className="iq-display font-bold text-[16px]">Building {club.name}'s squad…</div>
+      <div className="text-pb-faint text-[13px] mt-1.5 max-w-md mx-auto">Pulling their recent scorecards live — the first time can take up to a minute.</div>
+      <div className="max-w-md mx-auto mt-5"><LoadingBar expectedMs={35000} /></div>
+    </div>
+  )
+  if (status === 'error' || status === 'unavailable') return (
+    <div className="iq-card p-6"><Empty>Couldn't build a live dossier for {club.name} right now — try again shortly.</Empty></div>
+  )
+
+  return (
+    <div className="iq-fade">
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <span className="iq-eyebrow">Club</span>
+        <span className="px-3 py-1.5 iq-display font-semibold text-[13px]" style={{ borderRadius: 99, background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)', border: '1px solid color-mix(in srgb, var(--pb-accent) 35%, transparent)' }}>{club.name}</span>
+        <div className="flex-1 min-w-[220px] max-w-xs"><Search value={playerQ} onChange={setPlayerQ} placeholder={`Search ${club.name} players…`} className="w-full" /></div>
+      </div>
+      <div className="grid gap-6 lg:grid-cols-[260px_1fr] items-start">
+        <div className="iq-card p-2 lg:sticky lg:top-20">
+          <div className="iq-eyebrow px-2 py-2">Squad ({all.length})</div>
+          <div className="max-h-[64vh] overflow-y-auto iq-scroll">
+            {playerMatches.length === 0
+              ? <Empty className="px-2.5 py-2">{everyone.length === 0
+                  ? (clubPlayers?.status === 'building' ? 'Pulling their player history…' : 'No players found.')
+                  : 'No match.'}</Empty>
+              : playerMatches.map((p, i) => {
+                const on = p.id === sel
+                const danger = tags[p.id]?.is_danger || enriched.get(p.id)?.alert?.level === 'danger'
+                const firstCareer = p.careerOnly && (i === 0 || !playerMatches[i - 1].careerOnly)
+                return (
+                  <Fragment key={p.id}>
+                    {firstCareer && <div className="iq-eyebrow px-2 pt-3 pb-1">Earlier years</div>}
+                    <button onClick={() => setSel(p.id)}
+                      className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left transition"
+                      style={{ borderRadius: 9, background: on ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}>
+                      <span className="font-medium text-[13.5px] truncate flex items-center gap-1.5" style={{ color: on ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
+                        {p.name}
+                        {danger && <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--pb-red)' }} />}
+                      </span>
+                      <span className="iq-mono text-pb-faint shrink-0" style={{ fontSize: 10.5 }}>
+                        {p.careerOnly ? (p.career?.runs ? runsPhrase(p.career.runs) : '') : (p.bat?.runs ? runsPhrase(p.bat.runs) : '')}
+                      </span>
+                    </button>
+                  </Fragment>
+                )
+              })}
+          </div>
+        </div>
+        <div>
+          {selected
+            ? <OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={club.name} playerId={sel} tag={tags[sel]} onSaveTag={saveTag}
+                dossierBatting={dossier?.batting || []} dossierBowling={dossier?.bowling || []} orgGuid={orgGuid} />
+            : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile: career, dismissal patterns and record against you.</Empty></div>}
+        </div>
+      </div>
+      {dossier?.coverage?.notes?.length > 0 && <Note>{dossier.coverage.notes.join(' ')}</Note>}
+    </div>
+  )
+}
+
 /* ── Page ────────────────────────────────────────────────────────────────── */
 export default function PlayerHub() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const navigate = useNavigate()
   const [ourPlayers, setOurPlayers] = useState([])
+  const [external, setExternal] = useState(null)  // { club, playerName }
   const pid = searchParams.get('player') || null
 
   useEffect(() => {
     api.iqAllPlayers().then(d => setOurPlayers(Array.isArray(d) ? d : [])).catch(() => setOurPlayers([]))
   }, [])
 
-  const pickOurs = (id) => setSearchParams({ player: id }, { replace: false })
-  const clearPlayer = () => setSearchParams({}, { replace: false })
-  const pickExternal = (club) => {
-    const sp = new URLSearchParams({ opponent: club.opp_key })
-    if (club.name) sp.set('name', club.name)
-    navigate(`/admin/betteriq/opposition-player?${sp.toString()}`)
-  }
+  const pickOurs = (id) => { setExternal(null); setSearchParams({ player: id }, { replace: false }) }
+  const pickExternal = (club, playerName) => { setSearchParams({}, { replace: false }); setExternal({ club, playerName: playerName || null }) }
+  const clearAll = () => { setExternal(null); setSearchParams({}, { replace: false }) }
 
+  const showingProfile = pid || external
   return (
-    <IQLayout title="Player search" actions={pid ? <Btn variant="ghost" sm icon="back" onClick={clearPlayer}>All players</Btn> : null}>
+    <IQLayout title="Player search" actions={showingProfile ? <Btn variant="ghost" sm icon="back" onClick={clearAll}>All players</Btn> : null}>
       {pid ? (
-        <OurPlayerProfile pid={pid} />
+        <OurPlayerProfile pid={pid} ourPlayers={ourPlayers} />
+      ) : external ? (
+        <ExternalClubView club={external.club} initialPlayerName={external.playerName} />
       ) : (
         <>
           <PageIntro>One search for any player. Pull up one of your own for their career and their record against any club, or scout an opposition player at any club in Australia.</PageIntro>

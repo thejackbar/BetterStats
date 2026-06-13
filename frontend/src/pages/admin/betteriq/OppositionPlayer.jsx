@@ -187,7 +187,7 @@ export default function OppositionPlayer() {
       title="Opposition player"
       actions={club ? <Btn variant="ghost" sm icon="back" onClick={changeClub}>Change club</Btn> : null}
     >
-      <PageIntro>Scout any individual at any club — their form, five-year history, how they get out, their record against us, and your own scouting notes (and scoring zones) that travel with them.</PageIntro>
+      <PageIntro>Scout any individual at any club — their form, season history, how they get out, their record against us, and your own scouting notes (and scoring zones) that travel with them.</PageIntro>
 
       {/* Club picker */}
       {!club && (
@@ -310,7 +310,7 @@ export default function OppositionPlayer() {
               <div className="max-h-[64vh] overflow-y-auto iq-scroll">
                 {playerMatches.length === 0
                   ? <Empty className="px-2.5 py-2">{everyone.length === 0
-                      ? (clubPlayers?.status === 'building' ? 'Pulling their five-year player list…' : 'No players found.')
+                      ? (clubPlayers?.status === 'building' ? 'Pulling their player history…' : 'No players found.')
                       : 'No match.'}</Empty>
                   : playerMatches.map((p, i) => {
                     const on = p.id === sel
@@ -318,7 +318,7 @@ export default function OppositionPlayer() {
                     const firstCareer = p.careerOnly && (i === 0 || !playerMatches[i - 1].careerOnly)
                     return (
                       <Fragment key={p.id}>
-                        {firstCareer && <div className="iq-eyebrow px-2 pt-3 pb-1">Last five years</div>}
+                        {firstCareer && <div className="iq-eyebrow px-2 pt-3 pb-1">Earlier years</div>}
                         <button onClick={() => pickPlayer(p.id)}
                           className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left transition"
                           style={{ borderRadius: 9, background: on ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}>
@@ -337,7 +337,7 @@ export default function OppositionPlayer() {
                     )
                   })}
                 {clubPlayers?.status === 'building' && everyone.length > 0 && (
-                  <div className="iq-eyebrow px-2 pt-3 pb-2 animate-pulse">Pulling their five-year list…</div>
+                  <div className="iq-eyebrow px-2 pt-3 pb-2 animate-pulse">Pulling their player history…</div>
                 )}
               </div>
             </div>
@@ -348,7 +348,7 @@ export default function OppositionPlayer() {
                 ? <OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={club.name} playerId={sel} tag={tags[sel]} onSaveTag={saveTag}
                     dossierBatting={dossier?.batting || []} dossierBowling={dossier?.bowling || []}
                     orgGuid={orgGuid} />
-                : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile — radar, scoring zones, form, five-year history, dismissal patterns and record vs us.</Empty></div>}
+                : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile — radar, scoring zones, form, season history, dismissal patterns and record vs us.</Empty></div>}
             </div>
           </div>
 
