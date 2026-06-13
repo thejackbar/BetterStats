@@ -1200,10 +1200,11 @@ export const api = {
   // ─── BetterIQ: Team self-analysis ───────────────────────
   iqTeamSeasons: () => request('/iq/team/seasons'),
   iqTeamGrades: (seasonId) => request(`/iq/team/grades${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
-  iqTeamOverview: (seasonId, gradeId) => {
+  iqTeamOverview: (seasonId, gradeId, seasonIds) => {
     const qs = new URLSearchParams()
     if (seasonId) qs.set('season_id', seasonId)
     if (gradeId) qs.set('grade_id', gradeId)
+    if (Array.isArray(seasonIds)) seasonIds.forEach(id => id && qs.append('season_ids', id))
     const s = qs.toString()
     return request(`/iq/team/overview${s ? `?${s}` : ''}`)
   },
