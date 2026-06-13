@@ -1171,6 +1171,8 @@ export const api = {
   // Every player in OUR club (full history, light career summary) — backs the
   // unified Player search, which spans our players and any external club.
   iqAllPlayers: () => request('/iq/players'),
+  // Natural-language question grounded in the club's own data.
+  iqAsk: (question) => request('/iq/ask', { method: 'POST', body: JSON.stringify({ question }) }),
 
   // ─── BetterIQ: Player trends & development ──────────────
   iqTrendsOverview: (seasonId, gradeId) => {
