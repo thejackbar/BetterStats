@@ -12,6 +12,8 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.iq_filters import season_member_clause
+
 MIN_BAT_INN = 3      # ignore tiny samples when building the squad baseline
 MIN_BOWL_INN = 3
 
@@ -85,7 +87,7 @@ def _normalise(player, peers, axes, lower_better=()):
 
 
 async def player_radar(session: AsyncSession, org_id: str, player_id: str, season_id: str | None = None) -> dict:
-    clause = "AND pss.season_id = CAST(:season AS UUID)" if season_id else ""
+    clause = season_member_clause("pss.season_id", season_id)
     rows = (await session.execute(text(f"""
         SELECT pss.player_id::text AS pid,
                SUM(pss.runs) AS runs, SUM(pss.batting_innings) AS binn, SUM(pss.not_outs) AS no,

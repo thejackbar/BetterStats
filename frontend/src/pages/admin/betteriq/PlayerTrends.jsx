@@ -20,7 +20,7 @@ import {
   fmtCount, fmtOvers, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
 import { Radar, AreaChart } from './viz'
-import { useIQFilter, seasonsInRange } from './Context'
+import { useIQFilter, seasonsInRange, effectiveSeasonId } from './Context'
 import { formatSeason } from '../../../lib/cricketFormat'
 import { api } from '../../../lib/api'
 
@@ -829,7 +829,7 @@ function Overview({ overview, players, squads, squad, setSquad, pickerPlayers, o
 export default function PlayerTrends() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { ctx, seasons } = useIQFilter()
-  const seasonId = ctx?.season?.to?.id || undefined
+  const seasonId = effectiveSeasonId(ctx)
   const gradeId = ctx?.team?.id || undefined
   const [overview, setOverview] = useState(null)
   const [players, setPlayers] = useState([])

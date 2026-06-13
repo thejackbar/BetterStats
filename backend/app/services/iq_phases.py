@@ -20,6 +20,8 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.iq_filters import season_grade_clause
+
 from app.services import grassroots_scores_client as gr
 
 logger = logging.getLogger(__name__)
@@ -162,15 +164,11 @@ async def _aggregate(pairs, fallback_not=None, who="They", verb="score"):
 
 
 # ``grade`` is a grade NAME (BetterIQ filters grades by name to collapse the
-# per-season/per-club grade ids — see iq_team.team_grades), scoped to the chosen
-# season when one is set.
+# per-season/per-club grade ids — see iq_team.team_grades); the season is
+# year-expanded (one picked row scopes every sibling row of that real season —
+# see iq_filters).
 def _scope(season_id, grade_id):
-    clauses = []
-    if season_id:
-        clauses.append("AND gr.season_id = CAST(:season AS UUID)")
-    if grade_id:
-        clauses.append("AND gr.name = :grade")
-    return " ".join(clauses)
+    return season_grade_clause(season_id, grade_id)
 
 
 async def team_phases(session: AsyncSession, org_id: str, season_id=None, grade_id=None, side="bat") -> dict:

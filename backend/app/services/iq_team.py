@@ -23,6 +23,8 @@ import statistics
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.iq_filters import season_grade_clause
+
 logger = logging.getLogger(__name__)
 
 
@@ -98,15 +100,11 @@ async def team_grades(session: AsyncSession, org_id: str, season_id: str | None)
 
 # Scope clause for the per-game functions. ``grade`` is a grade NAME (see
 # ``team_grades``) — matching by name collapses the per-season/per-club grade ids
-# so picking "1st Grade" works across a single season, a range, or all-time. A
-# season + grade narrows to that season's grade; ``gr`` is the grades alias.
+# so picking "1st Grade" works across a single season, a range, or all-time. The
+# season is year-expanded (one picked row scopes every sibling row of that real
+# season — see ``iq_filters``); ``gr`` is the grades alias.
 def _scope(season_id: str | None, grade_id: str | None) -> str:
-    clauses = []
-    if season_id:
-        clauses.append("AND gr.season_id = CAST(:season AS UUID)")
-    if grade_id:
-        clauses.append("AND gr.name = :grade")
-    return " ".join(clauses)
+    return season_grade_clause(season_id, grade_id)
 
 
 async def _per_game(session: AsyncSession, org_id: str, season_id: str | None, grade_id: str | None = None) -> list[dict]:

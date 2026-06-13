@@ -39,7 +39,22 @@ function _subscribe(l) { _listeners.add(l); return () => _listeners.delete(l) }
 function _saveCtx() { try { sessionStorage.setItem(SS_KEY, JSON.stringify(_ctx)) } catch { /* ignore */ } }
 function _loadCtx() { try { return JSON.parse(sessionStorage.getItem(SS_KEY) || 'null') } catch { return null } }
 
-function _seasonById(id) { return (_seasons || []).find(s => s.id === id) || null }
+// `_seasons` entries are now per-YEAR (see `_ensureLoaded`); match a saved id
+// against the representative id first, then any sibling row id it folds in.
+function _seasonById(id) {
+  if (!id) return null
+  return (_seasons || []).find(s => s.id === id)
+    || (_seasons || []).find(s => (s.ids || []).includes(id))
+    || null
+}
+
+// The cricket YEAR of a raw season row — its `year`, else the 4-digit year in
+// its name ("Summer 2010/11" → 2010), else null (undated, kept on its own).
+function _rowYear(s) {
+  if (s.year != null && s.year !== '') return Number(s.year)
+  const m = String(s.name || '').match(/(\d{4})/)
+  return m ? Number(m[1]) : null
+}
 
 function _reconcile(saved) {
   if (!saved || !saved.season || !_seasons?.length) return null
@@ -51,13 +66,11 @@ function _reconcile(saved) {
   // a previous build) so it falls back to "All grades" instead of filtering to
   // nothing.
   let team = saved.team && saved.team.name ? saved.team : { id: null, name: 'All grades' }
-  if (team.id != null && !(_grades || []).some(g => g.id === team.id)) {
+  if (team.id != null && !(_grades || []).some(g => g.id === team.id || g.name === team.id)) {
     team = { id: null, name: 'All grades' }
   }
-  return {
-    team,
-    season: { mode: saved.season.mode === 'range' ? 'range' : 'single', from, to },
-  }
+  const mode = saved.season.mode === 'range' ? 'range' : saved.season.mode === 'all' ? 'all' : 'single'
+  return { team, season: { mode, from, to } }
 }
 
 async function _ensureLoaded() {
@@ -67,9 +80,20 @@ async function _ensureLoaded() {
       let seasons = [], grades = []
       try { seasons = (await api.iqTeamSeasons()) || [] } catch { /* ignore */ }
       try { grades = (await api.iqTeamGrades()) || [] } catch { /* ignore */ }
-      _seasons = seasons
-        .map(s => ({ id: s.season_id || s.id, name: s.name, year: s.year, label: shortSeason(s.name) }))
-        .sort((a, b) => sortKey(a) - sortKey(b))
+      // Collapse the raw season ROWS into one entry per cricket YEAR. A club's
+      // "2024/25" is often several rows (MyCricket vs PlayHQ ids, separate
+      // comps), so every year entry keeps all its row ids in `ids` — a single
+      // pick then scopes the whole year (backend year-expands it), not one
+      // slice, and the picker shows each year once. Undated rows stand alone.
+      const byYear = new Map()
+      for (const s of seasons) {
+        const id = s.season_id || s.id
+        const yr = _rowYear({ year: s.year, name: s.name })
+        const key = yr != null ? `y${yr}` : `id${id}`
+        if (!byYear.has(key)) byYear.set(key, { id, ids: [], year: yr, name: s.name, label: shortSeason(s.name) })
+        byYear.get(key).ids.push(id)
+      }
+      _seasons = [...byYear.values()].sort((a, b) => sortKey(a) - sortKey(b))
       _grades = (grades || []).map(g => ({ id: g.grade_id || g.id, name: g.name, season_id: g.season_id || null }))
       const newest = _seasons[_seasons.length - 1] || null
       _ctx = _reconcile(_loadCtx()) || {
@@ -93,16 +117,28 @@ export function useIQFilter() {
 /* ── derived helpers for screens ──────────────────────────────────────────── */
 export function seasonsInRange(ctx, seasons) {
   if (!ctx || !ctx.season || !seasons?.length) return []
+  if (ctx.season.mode === 'all') return seasons
   if (ctx.season.mode === 'single') return [ctx.season.to].filter(Boolean)
   const a = sortKey(ctx.season.from), b = sortKey(ctx.season.to)
   const lo = Math.min(a, b), hi = Math.max(a, b)
   return seasons.filter(s => sortKey(s) >= lo && sortKey(s) <= hi)
 }
-export function seasonIdsInRange(ctx, seasons) { return seasonsInRange(ctx, seasons).map(s => s.id) }
+// Every underlying season-row id in scope — the union of each in-range year's
+// folded rows, so grade options and per-season filters see the whole year.
+export function seasonIdsInRange(ctx, seasons) {
+  return seasonsInRange(ctx, seasons).flatMap(s => (s.ids && s.ids.length ? s.ids : [s.id])).filter(Boolean)
+}
+// The single representative season-row id a page sends to the backend; undefined
+// in "All seasons" mode (all-time, no season scope). The backend year-expands it.
+export function effectiveSeasonId(ctx) {
+  if (!ctx || !ctx.season || ctx.season.mode === 'all') return undefined
+  return ctx.season.to?.id || undefined
+}
 export function seasonSpanCount(ctx, seasons) { return Math.max(1, seasonsInRange(ctx, seasons).length) }
 export function seasonLabel(ctx, seasons) {
   if (!ctx || !ctx.season) return '—'
   const s = ctx.season
+  if (s.mode === 'all') return 'All seasons'
   if (s.mode === 'single') return s.to?.label || '—'
   const inRange = seasonsInRange(ctx, seasons)
   if (seasons?.length && inRange.length === seasons.length) return 'All seasons'
@@ -233,16 +269,35 @@ function SeasonList({ seasons, season, mode, onChange, anchor, setAnchor }) {
   )
 }
 
-function SeasonPicker({ season, seasons, onChange, allowRange }) {
+/* Single-year dropdown (the "This season" detail). */
+function YearPicker({ season, seasons, onChange }) {
+  const newestFirst = [...seasons].reverse()
+  return (
+    <Popover width={230} trigger={open => <PillTrigger icon="clock" sub="Season" label={season.to?.label || '—'} open={open} accent />}>
+      {close => (
+        <div className="space-y-0.5 overflow-y-auto iq-scroll" style={{ maxHeight: 300 }}>
+          {newestFirst.map(s => {
+            const active = s.id === season.to?.id
+            return (
+              <button key={s.id} onClick={() => { onChange({ mode: 'single', from: s, to: s }); close() }}
+                className="w-full flex items-center justify-between gap-3 px-2.5 py-2 text-left transition" style={{ borderRadius: 8, background: active ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--pb-surface2)' }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}>
+                <span className="font-medium text-[13.5px] truncate" style={{ color: active ? 'var(--pb-accent)' : 'var(--pb-text)' }}>{formatSeason(s) || s.label}</span>
+                {active && <Icon name="check" size={14} className="shrink-0" style={{ color: 'var(--pb-accent)' }} />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </Popover>
+  )
+}
+
+/* Two-endpoint range picker (the "Compare" detail) — list + quick presets. */
+function RangePicker({ season, seasons, onChange }) {
   const [anchor, setAnchor] = useState(null)
-  if (!seasons?.length) return null
   const newest = seasons[seasons.length - 1]
-  const mode = allowRange ? season.mode : 'single'
-  const setMode = m => {
-    setAnchor(null)
-    if (m === 'single') onChange({ mode: 'single', from: season.to, to: season.to })
-    else { const ti = seasons.findIndex(s => s.id === season.to?.id); onChange({ mode: 'range', from: seasons[Math.max(0, ti - 1)], to: season.to }) }
-  }
   const presets = [
     { label: 'This + last', range: [seasons[Math.max(0, seasons.length - 2)], newest] },
     { label: 'Last 3', range: [seasons[Math.max(0, seasons.length - 3)], newest] },
@@ -251,39 +306,61 @@ function SeasonPicker({ season, seasons, onChange, allowRange }) {
   ]
   const spanCount = Math.abs(seasons.findIndex(s => s.id === season.to?.id) - seasons.findIndex(s => s.id === season.from?.id)) + 1
   return (
-    <Popover width={300} trigger={open => <PillTrigger icon="clock" sub="Season" label={mode === 'single' ? (season.to?.label || '—') : `${season.from?.label} → ${season.to?.label}`} open={open} accent />}>
+    <Popover width={300} trigger={open => <PillTrigger icon="clock" sub="Compare" label={`${season.from?.label} → ${season.to?.label}`} open={open} accent />}>
       {() => (
         <div>
-          {allowRange && (
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <Segmented sm value={season.mode} onChange={setMode}
-                options={[{ value: 'single', label: 'Single' }, { value: 'range', label: 'Compare' }]} />
-              {season.mode === 'range' && (
-                <span className="iq-mono text-[10px]" style={{ color: anchor != null ? 'var(--pb-accent)' : 'var(--pb-faint)' }}>
-                  {anchor != null ? 'pick the other end' : `${spanCount} season${spanCount > 1 ? 's' : ''}`}
-                </span>
-              )}
-            </div>
-          )}
-          {allowRange && season.mode === 'range' && (
-            <div className="mb-3">
-              <div className="flex flex-wrap gap-1.5">
-                {presets.map(p => {
-                  const active = season.from?.id === p.range[0]?.id && season.to?.id === p.range[1]?.id
-                  return (
-                    <button key={p.label} onClick={() => { setAnchor(null); onChange({ mode: 'range', from: p.range[0], to: p.range[1] }) }}
-                      className="iq-display font-semibold text-[11.5px] transition" style={{ padding: '5px 9px', borderRadius: 8,
-                        background: active ? 'color-mix(in srgb, var(--pb-accent) 16%, transparent)' : 'var(--pb-surface2)',
-                        color: active ? 'var(--pb-accent)' : 'var(--pb-dim)', border: `1px solid ${active ? 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' : 'var(--pb-hairline2)'}` }}>{p.label}</button>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-          <SeasonList seasons={seasons} season={season} mode={mode} onChange={onChange} anchor={anchor} setAnchor={setAnchor} />
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <span className="iq-eyebrow" style={{ fontSize: 9 }}>Pick two end seasons</span>
+            <span className="iq-mono text-[10px]" style={{ color: anchor != null ? 'var(--pb-accent)' : 'var(--pb-faint)' }}>
+              {anchor != null ? 'pick the other end' : `${spanCount} season${spanCount > 1 ? 's' : ''}`}
+            </span>
+          </div>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {presets.map(p => {
+              const active = season.from?.id === p.range[0]?.id && season.to?.id === p.range[1]?.id
+              return (
+                <button key={p.label} onClick={() => { setAnchor(null); onChange({ mode: 'range', from: p.range[0], to: p.range[1] }) }}
+                  className="iq-display font-semibold text-[11.5px] transition" style={{ padding: '5px 9px', borderRadius: 8,
+                    background: active ? 'color-mix(in srgb, var(--pb-accent) 16%, transparent)' : 'var(--pb-surface2)',
+                    color: active ? 'var(--pb-accent)' : 'var(--pb-dim)', border: `1px solid ${active ? 'color-mix(in srgb, var(--pb-accent) 40%, transparent)' : 'var(--pb-hairline2)'}` }}>{p.label}</button>
+              )
+            })}
+          </div>
+          <SeasonList seasons={seasons} season={season} mode="range" onChange={onChange} anchor={anchor} setAnchor={setAnchor} />
         </div>
       )}
     </Popover>
+  )
+}
+
+/* The plain This season / All seasons / Compare control the user asked for.
+   The mode toggle is always visible; the detail picker only shows when it adds
+   a choice (a year to pick, or a range to set). "All seasons" is all-time. */
+function SeasonControl({ season, seasons, allowRange, onChange }) {
+  if (!seasons?.length) return null
+  const newest = seasons[seasons.length - 1]
+  const oldest = seasons[0]
+  const mode = allowRange ? season.mode : (season.mode === 'all' ? 'all' : 'single')
+  const opts = [{ value: 'single', label: 'This season' }, { value: 'all', label: 'All seasons' }]
+  if (allowRange) opts.push({ value: 'range', label: 'Compare' })
+  const setMode = (m) => {
+    if (m === mode) return
+    if (m === 'single') onChange({ mode: 'single', from: season.to || newest, to: season.to || newest })
+    else if (m === 'all') onChange({ mode: 'all', from: oldest, to: newest })
+    else {
+      const ti = seasons.findIndex(s => s.id === season.to?.id)
+      const toS = ti >= 0 ? seasons[ti] : newest
+      const fromS = seasons[Math.max(0, (ti >= 0 ? ti : seasons.length - 1) - 1)]
+      onChange({ mode: 'range', from: fromS, to: toS })
+    }
+  }
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <Segmented sm value={mode} onChange={setMode} options={opts} />
+      {mode === 'single' && <YearPicker season={season} seasons={seasons} onChange={onChange} />}
+      {mode === 'range' && <RangePicker season={season} seasons={seasons} onChange={onChange} />}
+      {mode === 'all' && <span className="iq-mono text-pb-faint" style={{ fontSize: 11 }}>{seasons.length} seasons · all-time</span>}
+    </div>
   )
 }
 
@@ -314,14 +391,16 @@ export function ContextBar({ route }) {
   }, [visibleGrades])  // eslint-disable-line react-hooks/exhaustive-deps
   if (!filters || (!filters.team && !filters.season)) return null
   if (!ready || !ctx) return null
-  const isRange = ctx.season.mode === 'range'
+  // Only call it a comparison when the route actually offers Compare (a stale
+  // 'range' carried over from another route shouldn't show the tag here).
+  const isRange = filters.season === 'range' && ctx.season.mode === 'range'
   return (
     <div className="sticky z-20 flex items-center gap-3 flex-wrap px-5 md:px-8 py-3"
       style={{ top: 64, background: 'color-mix(in srgb, var(--pb-bg) 86%, transparent)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', borderBottom: '1px solid var(--pb-hairline)' }}>
       <span className="iq-eyebrow hidden sm:block" style={{ fontSize: 9 }}>Showing</span>
       {filters.team && <TeamPicker value={ctx.team} grades={visibleGrades} onChange={t => setCtx({ ...ctx, team: t })} label={filters.teamLabel || 'Team'} />}
       {filters.season
-        ? <SeasonPicker season={ctx.season} seasons={seasons} onChange={s => setCtx({ ...ctx, season: s })} allowRange={filters.season === 'range'} />
+        ? <SeasonControl season={ctx.season} seasons={seasons} onChange={s => setCtx({ ...ctx, season: s })} allowRange={filters.season === 'range'} />
         : <div className="flex items-center gap-2 px-3" style={{ height: 38, borderRadius: 10, background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline)' }}>
             <Icon name="clock" size={14} className="text-pb-faint" />
             <span className="iq-display font-semibold text-[13px]">{seasons[seasons.length - 1]?.label || 'Current'}</span>

@@ -11,7 +11,7 @@ import {
   fmtCount, fmtOvers, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart, PhaseStrip } from './viz'
-import { useIQFilter, seasonsInRange } from './Context'
+import { useIQFilter, seasonsInRange, effectiveSeasonId } from './Context'
 
 const TABS = [
   { value: 'overview', label: 'Overview' },
@@ -631,7 +631,7 @@ export default function TeamAnalysis() {
   const [compareRows, setCompareRows] = useState([])
   const [compareLoading, setCompareLoading] = useState(false)
 
-  const seasonId = ctx?.season?.to?.id || null
+  const seasonId = effectiveSeasonId(ctx) || null
   const teamId = ctx?.team?.id || null
   const isRange = ctx?.season?.mode === 'range'
 
