@@ -145,12 +145,21 @@ export function seasonLabel(ctx, seasons) {
   return `${s.from?.label || '?'} → ${s.to?.label || '?'}`
 }
 
-/* per-route filter capability */
+/* Frontend mirror of the backend ``grade_base`` (iq_filters): strip a trailing
+   sponsor parenthetical with no digit, so a fixture's raw grade name ("B Grade
+   (DXC Technology)") matches the merged base name the Grade filter lists. */
+export function gradeBase(name) {
+  return String(name || '').replace(/\s*\([^)0-9]*\)\s*$/, '')
+}
+
+/* per-route filter capability. ``preview`` and ``selection`` use the grade only
+   (to narrow the fixture list); ``opposition-player`` scouts one chosen club's
+   players, which the global Season/Grade filter has nothing to narrow, so it
+   shows no bar. */
 export const ROUTE_FILTERS = {
   overview: { team: true, season: 'single' },
   preview: { team: true, season: false },
   opposition: { team: true, season: 'range', teamLabel: 'Their grade' },
-  'opposition-player': { team: true, season: 'range', teamLabel: 'Their grade' },
   selection: { team: true, season: false },
   trends: { team: true, season: 'range' },
   team: { team: true, season: 'range' },
