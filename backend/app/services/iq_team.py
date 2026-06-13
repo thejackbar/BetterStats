@@ -17,8 +17,10 @@ venues) comes from a single query.
 """
 from __future__ import annotations
 
+import contextvars
 import logging
 import statistics
+import uuid as _uuid
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +28,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.iq_filters import grade_base, season_grade_clause
 
 logger = logging.getLogger(__name__)
+
+# Compare (range) mode: team_overview scopes its cards to an explicit set of
+# season-row ids (every row across the in-range years), passed via this
+# task-local var rather than threading a new arg through the ~14 per-game
+# sub-functions. Ids are validated as UUIDs and inlined (server-generated DB
+# ids, never user text), so there's no extra bind param to thread either.
+_RANGE_SEASONS: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "iq_team_range_seasons", default=None
+)
+
+
+def _uuid_list(values) -> list[str]:
+    out: list[str] = []
+    for v in values or []:
+        try:
+            out.append(str(_uuid.UUID(str(v))))
+        except (ValueError, TypeError, AttributeError):
+            pass
+    return out
+
 
 
 async def _safe(session: AsyncSession, factory, default):
@@ -105,8 +127,16 @@ async def team_grades(session: AsyncSession, org_id: str, season_id: str | None)
 # ``team_grades``) — matching by name collapses the per-season/per-club grade ids
 # so picking "1st Grade" works across a single season, a range, or all-time. The
 # season is year-expanded (one picked row scopes every sibling row of that real
-# season — see ``iq_filters``); ``gr`` is the grades alias.
+# season — see ``iq_filters``); in Compare mode it's the explicit in-range set
+# (``_RANGE_SEASONS``). ``gr`` is the grades alias.
 def _scope(season_id: str | None, grade_id: str | None) -> str:
+    sids = _RANGE_SEASONS.get()
+    if sids:
+        in_list = ", ".join("'" + s + "'::uuid" for s in sids)
+        parts = [f"AND gr.season_id IN ({in_list})"]
+        if grade_id:
+            parts.append(f"AND {grade_base('gr.name')} = :grade")
+        return " ".join(parts)
     return season_grade_clause(season_id, grade_id)
 
 
@@ -1125,7 +1155,22 @@ async def _batting_extra(session: AsyncSession, org_id: str, season_id: str | No
     }
 
 
-async def team_overview(session: AsyncSession, org_id: str, season_id: str | None = None, grade_id: str | None = None) -> dict:
+async def team_overview(session: AsyncSession, org_id: str, season_id: str | None = None,
+                        grade_id: str | None = None, season_ids: list[str] | None = None) -> dict:
+    """Our team self-analysis. ``season_ids`` (Compare mode) scopes every card to
+    that explicit set of season rows; otherwise ``season_id`` is the single (or
+    all-time when None) season, year-expanded by ``_scope``."""
+    ids = _uuid_list(season_ids) if season_ids else None
+    if not ids:
+        return await _team_overview_impl(session, org_id, season_id, grade_id)
+    token = _RANGE_SEASONS.set(ids)
+    try:
+        return await _team_overview_impl(session, org_id, season_id, grade_id)
+    finally:
+        _RANGE_SEASONS.reset(token)
+
+
+async def _team_overview_impl(session: AsyncSession, org_id: str, season_id: str | None = None, grade_id: str | None = None) -> dict:
     games = await _per_game(session, org_id, season_id, grade_id)
     decided = [g for g in games if g["result"] in ("WIN", "LOSS")]
 

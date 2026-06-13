@@ -401,12 +401,13 @@ async def team_grades(
 async def team_overview(
     season_id: str | None = Query(None, description="filter to one season; omit for all-time"),
     grade_id: str | None = Query(None, description="filter to one grade/team within the season"),
+    season_ids: list[str] | None = Query(None, description="Compare mode: scope every card to this set of season rows"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Our own win/loss, batting & bowling profile, bat-first vs chase, score
     bands, venues, partnerships and a how-we-win/lose read."""
-    return await iq_team.team_overview(db, str(club.id), season_id=season_id, grade_id=grade_id)
+    return await iq_team.team_overview(db, str(club.id), season_id=season_id, grade_id=grade_id, season_ids=season_ids)
 
 
 @router.get("/team/mvp")

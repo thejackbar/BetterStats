@@ -2,7 +2,7 @@
    Reads the GLOBAL Season + Team filter (useIQFilter). Single-season pulls one
    overview; a season RANGE additionally plots win-rate-over-time across the
    in-range seasons. Every section is guarded — any sub-object may be null. */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import {
@@ -11,7 +11,7 @@ import {
   fmtCount, fmtOvers, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart, PhaseStrip } from './viz'
-import { useIQFilter, seasonsInRange, effectiveSeasonId } from './Context'
+import { useIQFilter, seasonsInRange, seasonIdsInRange, effectiveSeasonId } from './Context'
 
 const TABS = [
   { value: 'overview', label: 'Overview' },
@@ -634,17 +634,21 @@ export default function TeamAnalysis() {
   const seasonId = effectiveSeasonId(ctx) || null
   const teamId = ctx?.team?.id || null
   const isRange = ctx?.season?.mode === 'range'
+  // In Compare mode every card aggregates the whole range, not just the "to"
+  // season — pass the in-range season-row ids so the backend scopes to all of them.
+  const rangeIds = useMemo(() => (isRange ? seasonIdsInRange(ctx, seasons) : null), [isRange, ctx, seasons])
+  const rangeKey = rangeIds ? rangeIds.join(',') : ''
 
-  // Single-season / headline overview (always for the chosen "to" season).
+  // Headline overview: a single season, all-time, or (Compare) the whole range.
   useEffect(() => {
     if (!ctx) return
     let alive = true
     setData(null); setErr(false)
-    api.iqTeamOverview(seasonId || undefined, teamId || undefined)
+    api.iqTeamOverview(seasonId || undefined, teamId || undefined, rangeIds || undefined)
       .then(d => { if (alive) setData(d) })
       .catch(() => { if (alive) setErr(true) })
     return () => { alive = false }
-  }, [ctx, seasonId, teamId])
+  }, [ctx, seasonId, teamId, rangeKey])
 
   // Win-rate-over-time across the in-range seasons (range mode only).
   useEffect(() => {
