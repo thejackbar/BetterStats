@@ -10,16 +10,18 @@
  * against every side, your club included). Opposition / any-club picks open the
  * existing opposition scout, which already carries career + record-vs-us.
  */
-import { useState, useEffect, useMemo } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import {
   Card, Stat, Tag, Btn, Search, Empty, Note, PageIntro, Initials,
-  Segmented, LoadingCard, a2, fmtCount, fmtPct, runsPhrase, wktsPhrase,
+  Segmented, LoadingCard, LoadingBar, a2, fmtCount, fmtPct, runsPhrase, wktsPhrase,
 } from './ui'
 import { AreaChart } from './viz'
 import AnyClubSearch from './AnyClubSearch'
+import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
+import { useClubPlayers, careerOnlyEntries, entryWithThreat, bestNameMatch, isOrgGuid } from './clubPlayers'
 import { formatSeason } from '../../../lib/cricketFormat'
 
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
@@ -294,7 +296,7 @@ function SearchLanes({ ourPlayers, onPickOurs, onPickExternal }) {
               : (
                 <div className="space-y-1">
                   {ext.slice(0, 12).map((r, i) => (
-                    <button key={`${r.opp_key}-${i}`} onClick={() => onPickExternal({ opp_key: r.opp_key, name: r.club_name })}
+                    <button key={`${r.opp_key}-${i}`} onClick={() => onPickExternal({ opp_key: r.opp_key, name: r.club_name }, r.name)}
                       className="w-full flex items-center justify-between gap-3 px-2 py-2 text-left transition" style={{ borderRadius: 9 }}
                       onMouseEnter={e => { e.currentTarget.style.background = 'var(--pb-surface2)' }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
@@ -337,29 +339,156 @@ function SearchLanes({ ourPlayers, onPickOurs, onPickExternal }) {
   )
 }
 
+/* ── External club / player profile (in-page, reuses the opposition scout) ─── */
+function ExternalClubView({ club, initialPlayerName }) {
+  const [dossier, setDossier] = useState(null)
+  const [status, setStatus] = useState('building')
+  const [sel, setSel] = useState(null)
+  const [playerQ, setPlayerQ] = useState('')
+  const [tags, setTags] = useState({})
+  const pollRef = useRef(null)
+  const pendingNameRef = useRef(null)
+
+  useEffect(() => { api.iqOpponentTags().then(d => setTags(d || {})).catch(() => setTags({})) }, [])
+
+  // Build/poll the club's live dossier (same contract as the opposition scout).
+  useEffect(() => {
+    let alive = true
+    setDossier(null); setStatus('building'); setSel(null)
+    pendingNameRef.current = (initialPlayerName || '').trim().toLowerCase() || null
+    const params = { opponent: club.opp_key, name: club.name }
+    const poll = () => {
+      api.iqOppositionDossier(params).then(d => {
+        if (!alive) return
+        setDossier(d); setStatus(d.status)
+        if (d.status === 'building') pollRef.current = setTimeout(poll, 2500)
+      }).catch(() => { if (alive) setStatus('error') })
+    }
+    poll()
+    return () => { alive = false; if (pollRef.current) clearTimeout(pollRef.current) }
+  }, [club.opp_key, club.name, initialPlayerName])
+
+  const saveTag = async (playerId, body) => {
+    const saved = await api.iqSaveOpponentTag(playerId, body)
+    setTags(t => ({ ...t, [playerId]: saved }))
+    return saved
+  }
+
+  const index = useMemo(() => buildOppPlayerIndex(dossier), [dossier])
+  const enriched = useMemo(() => {
+    const m = new Map()
+    for (const d of [...(dossier?.danger_batters || []), ...(dossier?.danger_bowlers || [])]) m.set(d.player_id, d)
+    return m
+  }, [dossier])
+  const all = useMemo(() => [...index.entries()].map(([id, v]) => ({ id, ...v }))
+    .sort((a, b) => (b.bat?.runs || 0) - (a.bat?.runs || 0) || (b.bowl?.wickets || 0) - (a.bowl?.wickets || 0)), [index])
+  const orgGuid = dossier?.opponent?.org_id || (isOrgGuid(club.opp_key) ? club.opp_key : null)
+  const clubPlayers = useClubPlayers(orgGuid, club.name)
+  const careerOnly = useMemo(() => careerOnlyEntries(index, clubPlayers), [index, clubPlayers])
+  const everyone = useMemo(() => [...all, ...careerOnly], [all, careerOnly])
+  const selected = useMemo(() => {
+    if (!sel) return null
+    const e = index.get(sel) || careerOnly.find(p => p.id === sel) || null
+    return entryWithThreat(e, dossier)
+  }, [sel, index, careerOnly, dossier])
+
+  // Once the squad is ready, resolve a pending player name (from the search) and
+  // select them — names come in several shapes, so this is a token scorer.
+  useEffect(() => {
+    if (status !== 'ready' || !pendingNameRef.current || !everyone.length) return
+    const hit = bestNameMatch(pendingNameRef.current, everyone)
+    const rosterPending = orgGuid && (!clubPlayers || clubPlayers.status === 'building')
+    if (!hit && rosterPending) return
+    pendingNameRef.current = null
+    if (hit) setSel(hit.id)
+  }, [status, everyone, clubPlayers])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pq = playerQ.trim().toLowerCase()
+  const playerMatches = pq ? everyone.filter(p => p.name.toLowerCase().includes(pq)) : everyone
+
+  if (status === 'building') return (
+    <div className="iq-card iq-accent-card p-8 text-center iq-fade">
+      <div className="iq-display font-bold text-[16px]">Building {club.name}'s squad…</div>
+      <div className="text-pb-faint text-[13px] mt-1.5 max-w-md mx-auto">Pulling their recent scorecards live — the first time can take up to a minute.</div>
+      <div className="max-w-md mx-auto mt-5"><LoadingBar expectedMs={35000} /></div>
+    </div>
+  )
+  if (status === 'error' || status === 'unavailable') return (
+    <div className="iq-card p-6"><Empty>Couldn't build a live dossier for {club.name} right now — try again shortly.</Empty></div>
+  )
+
+  return (
+    <div className="iq-fade">
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <span className="iq-eyebrow">Club</span>
+        <span className="px-3 py-1.5 iq-display font-semibold text-[13px]" style={{ borderRadius: 99, background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)', border: '1px solid color-mix(in srgb, var(--pb-accent) 35%, transparent)' }}>{club.name}</span>
+        <div className="flex-1 min-w-[220px] max-w-xs"><Search value={playerQ} onChange={setPlayerQ} placeholder={`Search ${club.name} players…`} className="w-full" /></div>
+      </div>
+      <div className="grid gap-6 lg:grid-cols-[260px_1fr] items-start">
+        <div className="iq-card p-2 lg:sticky lg:top-20">
+          <div className="iq-eyebrow px-2 py-2">Squad ({all.length})</div>
+          <div className="max-h-[64vh] overflow-y-auto iq-scroll">
+            {playerMatches.length === 0
+              ? <Empty className="px-2.5 py-2">{everyone.length === 0
+                  ? (clubPlayers?.status === 'building' ? 'Pulling their player history…' : 'No players found.')
+                  : 'No match.'}</Empty>
+              : playerMatches.map((p, i) => {
+                const on = p.id === sel
+                const danger = tags[p.id]?.is_danger || enriched.get(p.id)?.alert?.level === 'danger'
+                const firstCareer = p.careerOnly && (i === 0 || !playerMatches[i - 1].careerOnly)
+                return (
+                  <Fragment key={p.id}>
+                    {firstCareer && <div className="iq-eyebrow px-2 pt-3 pb-1">Earlier years</div>}
+                    <button onClick={() => setSel(p.id)}
+                      className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left transition"
+                      style={{ borderRadius: 9, background: on ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent' }}>
+                      <span className="font-medium text-[13.5px] truncate flex items-center gap-1.5" style={{ color: on ? 'var(--pb-accent)' : 'var(--pb-text)' }}>
+                        {p.name}
+                        {danger && <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--pb-red)' }} />}
+                      </span>
+                      <span className="iq-mono text-pb-faint shrink-0" style={{ fontSize: 10.5 }}>
+                        {p.careerOnly ? (p.career?.runs ? runsPhrase(p.career.runs) : '') : (p.bat?.runs ? runsPhrase(p.bat.runs) : '')}
+                      </span>
+                    </button>
+                  </Fragment>
+                )
+              })}
+          </div>
+        </div>
+        <div>
+          {selected
+            ? <OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={club.name} playerId={sel} tag={tags[sel]} onSaveTag={saveTag}
+                dossierBatting={dossier?.batting || []} dossierBowling={dossier?.bowling || []} orgGuid={orgGuid} />
+            : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile: career, dismissal patterns and record against you.</Empty></div>}
+        </div>
+      </div>
+      {dossier?.coverage?.notes?.length > 0 && <Note>{dossier.coverage.notes.join(' ')}</Note>}
+    </div>
+  )
+}
+
 /* ── Page ────────────────────────────────────────────────────────────────── */
 export default function PlayerHub() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const navigate = useNavigate()
   const [ourPlayers, setOurPlayers] = useState([])
+  const [external, setExternal] = useState(null)  // { club, playerName }
   const pid = searchParams.get('player') || null
 
   useEffect(() => {
     api.iqAllPlayers().then(d => setOurPlayers(Array.isArray(d) ? d : [])).catch(() => setOurPlayers([]))
   }, [])
 
-  const pickOurs = (id) => setSearchParams({ player: id }, { replace: false })
-  const clearPlayer = () => setSearchParams({}, { replace: false })
-  const pickExternal = (club) => {
-    const sp = new URLSearchParams({ opponent: club.opp_key })
-    if (club.name) sp.set('name', club.name)
-    navigate(`/admin/betteriq/opposition-player?${sp.toString()}`)
-  }
+  const pickOurs = (id) => { setExternal(null); setSearchParams({ player: id }, { replace: false }) }
+  const pickExternal = (club, playerName) => { setSearchParams({}, { replace: false }); setExternal({ club, playerName: playerName || null }) }
+  const clearAll = () => { setExternal(null); setSearchParams({}, { replace: false }) }
 
+  const showingProfile = pid || external
   return (
-    <IQLayout title="Player search" actions={pid ? <Btn variant="ghost" sm icon="back" onClick={clearPlayer}>All players</Btn> : null}>
+    <IQLayout title="Player search" actions={showingProfile ? <Btn variant="ghost" sm icon="back" onClick={clearAll}>All players</Btn> : null}>
       {pid ? (
         <OurPlayerProfile pid={pid} />
+      ) : external ? (
+        <ExternalClubView club={external.club} initialPlayerName={external.playerName} />
       ) : (
         <>
           <PageIntro>One search for any player. Pull up one of your own for their career and their record against any club, or scout an opposition player at any club in Australia.</PageIntro>
