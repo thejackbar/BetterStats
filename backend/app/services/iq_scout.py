@@ -64,12 +64,17 @@ from app.services.sync import _caught_by_keeper, _innings_keeper_names
 logger = logging.getLogger(__name__)
 
 # Payload schema versions — bump on shape changes so stale caches rebuild.
-CAREER_VERSION = 1
+CAREER_VERSION = 2     # bumped: career window widened 5 → 10 years
 DEEP_VERSION = 1
 
-CAREER_YEARS = 5
-# A club year can span several CA season rows (summer comp, T20 comp, juniors…).
-MAX_CAREER_SEASON_ROWS = 16
+# How far back the external "full career, all clubs" view reaches. The aggregate
+# calls are light (~3 per season row, cached 7 days), so we pull a decade of
+# season-by-season totals; scorecard-level detail (the deep pass below) stays in
+# a recent window for speed.
+CAREER_YEARS = 10
+# A club year can span several CA season rows (summer comp, T20 comp, juniors…),
+# so the row cap is well above CAREER_YEARS to actually reach the full decade.
+MAX_CAREER_SEASON_ROWS = 30
 # Aggregate-stats calls in flight at once (the gr scorecard client has its own).
 _AGG_SEMAPHORE = asyncio.Semaphore(4)
 
