@@ -21,6 +21,7 @@ import {
 import { AreaChart } from './viz'
 import AnyClubSearch from './AnyClubSearch'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
+import { DeepDiveTab } from './PlayerDeepDive'
 import { useClubPlayers, careerOnlyEntries, entryWithThreat, bestNameMatch, isOrgGuid } from './clubPlayers'
 import { formatSeason } from '../../../lib/cricketFormat'
 
@@ -173,7 +174,7 @@ function CareerView({ detail }) {
           </Card>
         </div>
       )}
-      <Note>Want the deep dive (conversion, dismissals, radar, milestones)? Open this player in <b style={{ color: 'var(--pb-text)' }}>Player trends</b>.</Note>
+      <Note>Open the <b style={{ color: 'var(--pb-text)' }}>Deep dive</b> tab for conversion, dismissals, radar, reliability and milestones.</Note>
     </div>
   )
 }
@@ -319,14 +320,32 @@ function OurPlayerProfile({ pid, ourPlayers }) {
   const [detail, setDetail] = useState(null)
   const [oppRows, setOppRows] = useState(null)
   const [view, setView] = useState('career')
+  // Deep-dive data, lazy-loaded the first time the Deep dive tab is opened.
+  const [deep, setDeep] = useState(null)
+  const [bdeep, setBdeep] = useState(null)
+  const [radar, setRadar] = useState(null)
+  const [radarLoading, setRadarLoading] = useState(false)
+  const deepFetched = useRef(false)
 
   useEffect(() => {
     let alive = true
     setDetail(null); setOppRows(null)
+    deepFetched.current = false; setDeep(null); setBdeep(null); setRadar(null)
     api.iqTrendsPlayer(pid).then(d => { if (alive) setDetail(d) }).catch(() => { if (alive) setDetail({ error: true }) })
     api.getPlayerByOpposition(pid).then(d => { if (alive) setOppRows(Array.isArray(d) ? d : []) }).catch(() => { if (alive) setOppRows([]) })
     return () => { alive = false }
   }, [pid])
+
+  useEffect(() => {
+    if (view !== 'deep' || deepFetched.current) return
+    deepFetched.current = true
+    let alive = true
+    setRadarLoading(true)
+    api.iqPlayerDeepDive(pid).then(d => { if (alive) setDeep(d) }).catch(() => { if (alive) setDeep(null) })
+    api.iqBowlerDeepDive(pid).then(d => { if (alive) setBdeep(d) }).catch(() => { if (alive) setBdeep(null) })
+    api.iqPlayerRadar(pid).then(d => { if (alive) setRadar(d) }).catch(() => { if (alive) setRadar(null) }).finally(() => { if (alive) setRadarLoading(false) })
+    return () => { alive = false }
+  }, [view, pid])
 
   if (detail === null) return <LoadingCard label="Loading player…" expectedMs={4000} />
   if (detail?.error) return <Card><Empty>Couldn't load this player.</Empty></Card>
@@ -349,11 +368,15 @@ function OurPlayerProfile({ pid, ourPlayers }) {
 
       <Segmented value={view} onChange={setView} options={[
         { value: 'career', label: 'Career (all clubs)' },
+        { value: 'deep', label: 'Deep dive' },
         { value: 'vs', label: 'vs a club' },
         { value: 'compare', label: 'Compare' },
       ]} />
 
       {view === 'career' && <CareerView detail={detail} />}
+      {view === 'deep' && (deep === null && !deepFetched.current
+        ? <LoadingCard label="Loading deep dive…" expectedMs={5000} />
+        : <DeepDiveTab detail={detail} deep={deep} bdeep={bdeep} radar={radar} radarLoading={radarLoading} />)}
       {view === 'vs' && (oppRows === null
         ? <LoadingCard label="Loading head-to-head…" expectedMs={4000} />
         : <VsClubView rows={oppRows} />)}
