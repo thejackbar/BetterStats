@@ -31,12 +31,26 @@ def season_member_clause(column: str, season_id) -> str:
     return f"AND {column} IN {_SEASON_YEAR_SET}" if season_id else ""
 
 
+def grade_base(col: str) -> str:
+    """SQL expression: a grade name with a trailing sponsor parenthetical
+    stripped, so "B Grade (DXC Technology)" and "B Grade" read as the SAME
+    competition grade (CA decorates the grade name with the season's sponsor, so
+    the same grade gets a different name year to year).
+
+    Only a parenthetical with NO digit is stripped — sponsors are alphabetic
+    ("(Solo Energy)", "(Raikot Group)"), whereas a genuine sub-grade usually
+    carries a number ("(Div 1)", "(Section 2)"), so numbered grades stay
+    distinct. The filter both lists and matches grades on this base, so picking
+    "B Grade" scopes every sponsor variant of it."""
+    return f"regexp_replace({col}, '\\s*\\([^)0-9]*\\)\\s*$', '')"
+
+
 def season_grade_clause(season_id, grade_id, *, grade_alias: str = "gr") -> str:
-    """Combined season (year-expanded) + grade (by name) filter for the per-game
-    IQ queries, where the grades table is aliased ``gr`` by default."""
+    """Combined season (year-expanded) + grade (by name base) filter for the
+    per-game IQ queries, where the grades table is aliased ``gr`` by default."""
     parts = []
     if season_id:
         parts.append(season_member_clause(f"{grade_alias}.season_id", season_id))
     if grade_id:
-        parts.append(f"AND {grade_alias}.name = :grade")
+        parts.append(f"AND {grade_base(grade_alias + '.name')} = :grade")
     return " ".join(p for p in parts if p)

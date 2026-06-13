@@ -23,7 +23,7 @@ import statistics
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.iq_filters import season_grade_clause
+from app.services.iq_filters import grade_base, season_grade_clause
 
 logger = logging.getLogger(__name__)
 
@@ -71,26 +71,29 @@ async def team_grades(session: AsyncSession, org_id: str, season_id: str | None)
     """Grades (teams) the club fielded — for the team filter.
 
     A CA grade is per-season *and* per-club (the same competition grade gets a new
-    ``grades`` row keyed on a fresh uuid5 every season), so listing raw ids gives
-    one "1st Grade" row per season. The filter is meant to mean "show me 1st Grade"
-    across whatever seasons are in view, so we de-duplicate by NAME and key the
-    filter on the name — ``_scope`` matches ``gr.name`` (scoped to the chosen
-    season when one is set). The returned ``grade_id`` IS the name.
+    ``grades`` row keyed on a fresh uuid5 every season), AND CA decorates the grade
+    name with that season's sponsor ("B Grade" one year, "B Grade (DXC Technology)"
+    the next), so listing raw names gives the same grade several times. We
+    de-duplicate by the sponsor-stripped NAME (``grade_base``) and key the filter
+    on it — ``_scope`` matches the same base, scoped to the chosen season — so
+    picking "B Grade" covers every sponsor variant across whatever seasons are in
+    view. The returned ``grade_id`` IS that base name.
 
     Each row also carries ``season_id`` so the global Team filter can scope its
     options to the selected season — a club only fielded a given grade in some
     seasons, and offering one it didn't field returned an empty dashboard."""
     season_clause = "AND gr.season_id = CAST(:season AS UUID)" if season_id else ""
+    base = grade_base("gr.name")
     res = await session.execute(
         text(
             f"""
-            SELECT gr.name AS name, gr.season_id::text AS season_id
+            SELECT {base} AS name, gr.season_id::text AS season_id
             FROM grades gr
             JOIN seasons s ON s.id = gr.season_id
             WHERE s.organisation_id = CAST(:org AS UUID) {season_clause}
               AND EXISTS (SELECT 1 FROM v_effective_games g WHERE g.grade_id = gr.id)
-            GROUP BY gr.name, gr.season_id
-            ORDER BY gr.name
+            GROUP BY {base}, gr.season_id
+            ORDER BY 1
             """
         ),
         {"org": org_id, "season": season_id},
@@ -919,7 +922,7 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
                          + COALESCE(SUM(psg.stumpings), 0) AS dis
                 FROM players p
                 JOIN player_season_grade_stats psg ON psg.player_id = p.id
-                JOIN grades gr ON gr.id = psg.grade_id AND gr.name = :grade
+                JOIN grades gr ON gr.id = psg.grade_id AND {grade_base('gr.name')} = :grade
                 JOIN seasons s ON s.id = psg.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
                 GROUP BY p.id, p.display_name_override, p.name
                 HAVING GREATEST(COALESCE(SUM(psg.matches), 0), COALESCE(SUM(psg.batting_innings), 0),

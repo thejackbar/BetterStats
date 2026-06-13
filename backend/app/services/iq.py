@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import Organisation
 from app.services import grassroots_scores_client
 from app.services.club_match import club_match_keys
+from app.services.iq_filters import grade_base
 
 
 # The opponent key + display name for a game, from our club's perspective.
@@ -64,7 +65,7 @@ def _opp_scope(grade: str | None, season_ids: list[str] | None, params: dict) ->
     clauses: list[str] = []
     if grade:
         params["grade"] = grade
-        clauses.append("AND gr.name = :grade")
+        clauses.append(f"AND {grade_base('gr.name')} = :grade")
     if season_ids:
         keys = []
         for i, sid in enumerate(season_ids):

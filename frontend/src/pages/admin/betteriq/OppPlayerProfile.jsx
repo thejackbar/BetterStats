@@ -290,20 +290,20 @@ function PlayerCareerCard({ orgGuid, playerId, clubName }) {
     () => api.iqPlayerCareer({ org: orgGuid, player: playerId, clubName }),
     [orgGuid, playerId],
   )
-  const windowLabel = data?.window ? `${data.window.from_year}–${data.window.to_year}` : 'last 5 years'
+  const windowLabel = data?.window ? `${data.window.from_year}–${data.window.to_year}` : 'recent seasons'
   const p = data?.player
   const showBowl = p && (p.totals?.wickets || 0) > 0
   return (
-    <Card eyebrow={`career · ${windowLabel}`} title="Last five years"
+    <Card eyebrow={`career · ${windowLabel}`} title="Season by season"
       right={p ? <Tag tone="faint">{fmtCount(p.totals?.matches)} matches</Tag> : null}>
       {!data || data.status === 'building' ? (
-        <HistoryBuilding>Pulling their last five years from PlayHQ — quick the first time, instant after.</HistoryBuilding>
+        <HistoryBuilding>Pulling their season history from PlayHQ — quick the first time, instant after.</HistoryBuilding>
       ) : data.status === 'error' ? (
         <Note>Couldn't pull their career history just now — try again shortly.</Note>
       ) : data.status !== 'ready' ? (
         <Note>{data.message || 'No Cricket Australia history available for this club.'}</Note>
       ) : !p ? (
-        <Note>No CA season records found for this player in the last five years — they may be new, or recorded under a different club.</Note>
+        <Note>No CA season records found for this player — they may be new, or recorded under a different club.</Note>
       ) : (
         <div className="overflow-x-auto iq-scroll -mx-1">
           <table className="w-full text-[13px]">
@@ -369,7 +369,7 @@ function PlayerDeepDive({ orgGuid, playerId, playerName, clubName }) {
   if (!data || data.status === 'building') {
     return (
       <Card eyebrow="deep dive · building" title="How he plays">
-        <HistoryBuilding expectedMs={90000}>Scanning their scorecards across the last five years for dismissal patterns and batting positions — a minute or two the first time, then cached for a week. The rest of the profile is ready now.</HistoryBuilding>
+        <HistoryBuilding expectedMs={90000}>Scanning their recent scorecards for dismissal patterns and batting positions — a minute or two the first time, then cached for a week. The rest of the profile is ready now.</HistoryBuilding>
       </Card>
     )
   }
@@ -379,7 +379,7 @@ function PlayerDeepDive({ orgGuid, playerId, playerName, clubName }) {
   if (data.status === 'unavailable') return null
   if (!data.batting && !data.bowling) {
     return (
-      <Card eyebrow="deep dive · last 5 years" title="How he plays">
+      <Card eyebrow="deep dive · recent seasons" title="How he plays">
         <Note>None of the scorecards we scanned ({data.coverage?.scorecards ?? 0}) had this player on a team sheet — the career table above still stands.</Note>
       </Card>
     )
@@ -391,18 +391,18 @@ function PlayerDeepDive({ orgGuid, playerId, playerName, clubName }) {
   return (
     <div className="space-y-5">
       {data.summary && (
-        <Card accent eyebrow="deep dive · last 5 years" title="How he plays">
+        <Card accent eyebrow="deep dive · recent seasons" title="How he plays">
           <div className="text-[14px] leading-relaxed" style={{ color: 'var(--pb-accent)' }}>{data.summary}</div>
         </Card>
       )}
       <div className="grid gap-5 lg:grid-cols-2 items-start">
         {b?.dismissals?.length > 0 && (
-          <Card eyebrow="last 5 years" title="How he gets out">
+          <Card eyebrow="recent seasons" title="How he gets out">
             <StackedBar data={b.dismissals.map(d => ({ type: d.type, count: d.count, pct: d.pct }))} />
           </Card>
         )}
         {b?.by_position?.length > 0 && (
-          <Card eyebrow="last 5 years" title="By batting position">
+          <Card eyebrow="recent seasons" title="By batting position">
             <div className="space-y-2">
               {b.by_position.map(p => (
                 <div key={p.bucket} className="flex items-center justify-between gap-3 text-[13px]">
@@ -414,7 +414,7 @@ function PlayerDeepDive({ orgGuid, playerId, playerName, clubName }) {
           </Card>
         )}
         {conv && b?.innings_count >= 5 && (
-          <Card eyebrow="last 5 years" title="Starts & conversion">
+          <Card eyebrow="recent seasons" title="Starts & conversion">
             <div className="grid grid-cols-3 gap-4">
               <Stat label="Reaches 25" value={conv.start_pct != null ? `${conv.start_pct}%` : '—'} count={false} />
               <Stat label="25 → 50" value={conv.fifty_conv_pct != null ? `${conv.fifty_conv_pct}%` : '—'} count={false} />
@@ -434,7 +434,7 @@ function PlayerDeepDive({ orgGuid, playerId, playerName, clubName }) {
           </Card>
         )}
         {bw && bw.wickets > 0 && (
-          <Card eyebrow="last 5 years" title="Bowling by year">
+          <Card eyebrow="recent seasons" title="Bowling by year">
             <div className="overflow-x-auto iq-scroll -mx-1">
               <table className="w-full text-[13px]">
                 <thead><tr className="iq-eyebrow text-left" style={{ fontSize: 9.5 }}>
@@ -623,7 +623,7 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
 
       {!bat?.innings && !bowl?.wickets && (
         <Note>{orgGuid
-          ? 'Not seen in the current-season matches we scanned — their five-year history below is the read.'
+          ? 'Not seen in the current-season matches we scanned — their season history below is the read.'
           : 'No current-season scorecard data for this player yet — only their scouting tags below apply.'}</Note>
       )}
 

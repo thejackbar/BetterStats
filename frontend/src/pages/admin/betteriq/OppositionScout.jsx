@@ -84,7 +84,7 @@ function ScoutPicker({ data, onPick, onMatch }) {
         <div className="text-pb-faint text-[12.5px] mb-3 leading-relaxed">
           Never played them? Search every club on PlayHQ — new opposition after relegation or promotion,
           a side from another association, anyone. We'll build their squad and form live, with a
-          five-year history for any of their players.
+          season history for any of their players.
         </div>
         <AnyClubSearch className="max-w-md" onPick={(org) => onPick({ opponent: org.id, name: org.name })} />
       </div>
@@ -657,7 +657,7 @@ function OppPlayerScout({ dossier, tags, onSaveTag, orgGuid }) {
       </div>
       {selected
         ? <div className="mt-4"><OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={dossier.opponent?.name} playerId={sel} tag={tags?.[sel]} onSaveTag={onSaveTag} orgGuid={orgGuid} /></div>
-        : <div className="text-pb-faintest text-[12px] mt-3">Pick a player for their season form, dismissal patterns, five-year history, scouting tags and full record against us.</div>}
+        : <div className="text-pb-faintest text-[12px] mt-3">Pick a player for their season form, dismissal patterns, season history, scouting tags and full record against us.</div>}
     </Card>
   )
 }
