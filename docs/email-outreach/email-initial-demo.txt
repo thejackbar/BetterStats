@@ -2,11 +2,14 @@ Subject: The stats page PlayHQ never built for your club
 
 Hi [first name],
 
-PlayHQ has refused to build clubs a proper stats page. So we did.
+PlayHQ has refused to build the tools clubs actually want and need. So we did.
 
 We're Jack and Elton. BetterStats imports your full match history once and keeps it current: career and season stats, leaderboards, all-time records, player profiles and season yearbooks, all on your club's own site.
 
 We didn't stop at stats. The same data runs availability and selection, match-day social posts, fees and admin, and an opposition scout for your captains. One place instead of five separate tools.
+
+Have a look at a club already running on it:
+https://betterat.cricket/applecross?utm_source=ca&utm_medium=email&utm_campaign=welcome
 
 Explore the modules:
 - BetterStats: Your club's memory, every player, every season, kept forever. https://betterat.cricket/modules/betterstats?utm_source=ca&utm_medium=email&utm_campaign=welcome
@@ -14,9 +17,6 @@ Explore the modules:
 - BetterSocials: Your public website plus match-day posts your community actually reposts. https://betterat.cricket/modules/bettersocials?utm_source=ca&utm_medium=email&utm_campaign=welcome
 - BetterAdmin: Run the back office, fees, comms and merch in one place. https://betterat.cricket/modules/betteradmin?utm_source=ca&utm_medium=email&utm_campaign=welcome
 - BetterIQ: Broadcast-grade analytics and an opposition scout for your club. https://betterat.cricket/modules/betteriq?utm_source=ca&utm_medium=email&utm_campaign=welcome
-
-Have a look at a club already running on it:
-https://betterat.cricket/applecross?utm_source=ca&utm_medium=email&utm_campaign=welcome
 
 It replaces a few of the subscriptions clubs already pay for, so most spend less overall, often by around $1,000 a year.
 
