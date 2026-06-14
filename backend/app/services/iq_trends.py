@@ -945,6 +945,7 @@ async def list_players(session: AsyncSession, org_id: str, season_id: str | None
         text(
             f"""
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                   p.player_role, p.skill_positions,
                    t.id::text AS squad_id, t.name AS squad_name,
                    COALESCE(SUM(st.runs), 0) AS runs,
                    COALESCE(SUM(st.batting_innings), 0) AS inns,
@@ -973,10 +974,13 @@ async def list_players(session: AsyncSession, org_id: str, season_id: str | None
         outs = r["inns"] - r["not_outs"]
         bat_avg = round(r["runs"] / outs, 2) if outs > 0 else None
         bowl_avg = round(r["conceded"] / r["wickets"], 2) if r["wickets"] else None
+        sp = r["skill_positions"] or []
+        keeper = ("WKT" in sp) or bool(r["player_role"] and "KEEP" in (r["player_role"] or "").upper())
         out.append({
             "player_id": r["id"], "name": r["name"], "runs": r["runs"],
             "wickets": r["wickets"], "matches": r["matches"],
             "bat_avg": bat_avg, "bowl_avg": bowl_avg,
+            "role": r["player_role"], "is_keeper": keeper,
             "squad_id": r["squad_id"], "squad_name": r["squad_name"],
         })
     return out

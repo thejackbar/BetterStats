@@ -15,9 +15,11 @@ import json
 import logging
 import re
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
+from app.models.db import async_session_maker
 from app.services import iq_players, iq_team, iq_trends
 from app.services.aggregations import get_player_by_opposition
 
@@ -36,10 +38,22 @@ _SYSTEM = (
     "clubs or numbers. Find a player with find_players before asking for their detail; "
     "use grades to learn the exact grade names before filtering by grade. Read the "
     "tool results and answer in a few sentences, plain Australian cricket-club tone "
-    "(no corporate words, no em dashes). If the tools don't cover what was asked, say "
-    "so plainly and point to where in BetterIQ to look (Opposition scout for a "
-    "specific opponent, Player search for one player, Team analysis for the side). "
-    "Numbers in the tool results are the truth; don't round away meaning."
+    "(no corporate words, no em dashes). Numbers in the tool results are the truth.\n"
+    "Selection sense:\n"
+    "- For picking/dropping/promoting/relegating between teams, judge by who is "
+    "actually IN that side now — each player's 'squad' (their BetterSelect team like "
+    "'1st XI', '2nd XI') is the selection signal. Don't guess the XI from season "
+    "averages alone.\n"
+    "- A club's grade and its same-numbered XI are usually the same team, so '2nd XI' "
+    "and '2nd Grade' mean the same side. If a grade name returns nothing, filter the "
+    "full current squad by 'squad' instead.\n"
+    "- Wicketkeepers ('keeper': true) earn their spot with the gloves, so don't call a "
+    "keeper a 'specialist batter' or judge them on runs alone; weigh their keeping.\n"
+    "- Genuine bowlers and all-rounders earn their spot with wickets, so a low batting "
+    "average isn't a reason to drop them.\n"
+    "If the tools don't cover what was asked, say so plainly and point to where in "
+    "BetterIQ to look (Opposition scout for an opponent, Player search for one player, "
+    "Team analysis for the side)."
 )
 
 
@@ -48,7 +62,7 @@ _SYSTEM = (
 TOOLS = [
     {
         "name": "find_players",
-        "description": "Find players in the club by name (or list the whole roster when no query). Returns each player's id, role, career matches/runs/wickets and last active year. Use this to get a player_id before calling player_detail or player_vs_club.",
+        "description": "Find players in the club by name (or list the whole roster when no query). Returns each player's id, role, whether they keep wicket, their selection squad (their BetterSelect team, e.g. '1st XI'), and career matches/runs/wickets. Use this to get a player_id before calling player_detail or player_vs_club.",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string", "description": "part of a player's name; omit to list everyone"}},
@@ -87,7 +101,7 @@ TOOLS = [
     },
     {
         "name": "current_squad",
-        "description": "Players with games this season and their form (runs/average, wickets/average), optionally scoped to one grade. Use for 'who's playing/available in grade X' and selection questions.",
+        "description": "Players who've played this season with their form (runs/average, wickets/average), their selection squad (BetterSelect team like '1st XI'/'2nd XI'), role and whether they keep wicket. Returns the list of squads present too. Use for selection questions: a player's SQUAD is which side they're picked in, and a grade and its same-numbered XI are usually the same team, so filter by squad to answer 'who's in the 2nd XI'. Optionally pass a grade name; if it matches nothing it falls back to the whole squad.",
         "input_schema": {
             "type": "object",
             "properties": {"grade": {"type": "string", "description": "optional grade name (from grades)"}},
@@ -132,6 +146,7 @@ async def _tool_find_players(session, org_id, *, query=None):
     players = players[:40]
     return {"count": len(players), "players": [
         {"player_id": p["player_id"], "name": p["name"], "role": p.get("player_role"),
+         "keeper": p.get("is_keeper"), "squad": p.get("squad"),
          "matches": p["matches"], "runs": p["runs"], "wickets": p["wickets"], "last_year": p["last_year"]}
         for p in players
     ]}
@@ -141,19 +156,38 @@ async def _tool_player_detail(session, org_id, *, player_id):
     pid = await _resolve_pid(session, org_id, player_id)
     if not pid:
         return {"error": "No player found for that id/name. Call find_players first."}
-    trend = await iq_trends.player_trend(session, org_id, pid)
+    # Role / keeper from the player row (cheap; so a keeper isn't read as a bat).
+    role = keeper = None
+    try:
+        meta = (await session.execute(
+            text("SELECT player_role, skill_positions FROM players WHERE id = CAST(:pid AS UUID)"),
+            {"pid": pid},
+        )).mappings().first()
+        if meta:
+            sp = meta["skill_positions"] or []
+            role = meta["player_role"]
+            keeper = ("WKT" in sp) or bool(role and "KEEP" in (role or "").upper())
+    except Exception:
+        pass
+    try:
+        trend = await iq_trends.player_trend(session, org_id, pid)
+    except Exception:
+        logger.exception("iq_ask player_detail trend failed")
+        trend = None
     if not trend:
-        return {"error": "No data for that player."}
+        return {"player_id": pid, "role": role, "keeper": keeper,
+                "note": "Couldn't load this player's full profile — use find_players / current_squad numbers instead."}
     deep = None
     try:
         deep = await iq_trends.player_deep_dive(session, org_id, pid)
     except Exception:
-        await session.rollback()
+        logger.exception("iq_ask player_detail deep failed")
     b = (trend.get("career") or {}).get("batting") or {}
     bo = (trend.get("career") or {}).get("bowling") or {}
     recent = [(x.get("runs"), bool(x.get("not_out"))) for x in (trend.get("recent_form") or {}).get("batting", [])][:6]
     out = {
         "name": (trend.get("player") or {}).get("name"),
+        "role": role, "keeper": keeper,
         "verdict": trend.get("verdict"),
         "batting": {"runs": b.get("total_runs"), "average": _round(b.get("average")), "100s": b.get("hundreds"), "50s": b.get("fifties")},
         "bowling": {"wickets": bo.get("total_wickets"), "average": _round(bo.get("average")), "economy": _round(bo.get("economy"))},
@@ -232,12 +266,28 @@ async def _tool_form_movers(session, org_id):
 
 async def _tool_current_squad(session, org_id, *, grade=None):
     players = await iq_trends.list_players(session, org_id, grade_id=grade) or []
-    players = sorted(players, key=lambda p: (p.get("runs") or 0), reverse=True)[:30]
-    return {"grade": grade or "all grades", "players": [
-        {"name": p["name"], "matches": p.get("matches"), "runs": p.get("runs"), "bat_avg": _round(p.get("bat_avg")),
-         "wickets": p.get("wickets"), "bowl_avg": _round(p.get("bowl_avg")), "squad": p.get("squad_name")}
-        for p in players
-    ]}
+    note = None
+    if grade and not players:
+        # A grade name that matched nothing — fall back to the whole current squad
+        # so the model can filter by the selection squad itself (the XI and the
+        # same-numbered grade are usually the same side).
+        players = await iq_trends.list_players(session, org_id) or []
+        note = (f"No current-season players under grade '{grade}'. Showing the whole current squad; "
+                "filter by 'squad' (the selection team, e.g. '2nd XI') yourself — a grade and its "
+                "same-numbered XI are usually the same side.")
+    players = sorted(players, key=lambda p: (p.get("runs") or 0), reverse=True)[:40]
+    squads = sorted({p.get("squad_name") for p in players if p.get("squad_name")})
+    return {
+        "grade": grade or "all grades",
+        "note": note,
+        "squads": squads,
+        "players": [
+            {"name": p["name"], "squad": p.get("squad_name"), "role": p.get("role"), "keeper": p.get("is_keeper"),
+             "matches": p.get("matches"), "runs": p.get("runs"), "bat_avg": _round(p.get("bat_avg")),
+             "wickets": p.get("wickets"), "bowl_avg": _round(p.get("bowl_avg"))}
+            for p in players
+        ],
+    }
 
 
 async def _tool_grades(session, org_id):
@@ -257,18 +307,18 @@ _DISPATCH = {
 }
 
 
-async def _run_tool(session: AsyncSession, org_id: str, name: str, args: dict) -> dict:
+async def _run_tool(org_id: str, name: str, args: dict) -> dict:
     fn = _DISPATCH.get(name)
     if not fn:
         return {"error": f"unknown tool {name}"}
+    # A fresh session per tool: a heavy/timed-out query aborts only its own
+    # transaction (auto-rolled back here), never poisoning later tool calls in
+    # the loop, and each tool gets a live connection between the slow model turns.
     try:
-        return await fn(session, org_id, **(args or {}))
+        async with async_session_maker() as session:
+            return await fn(session, org_id, **(args or {}))
     except Exception as e:
         logger.exception("iq_ask tool %s failed", name)
-        try:
-            await session.rollback()
-        except Exception:
-            pass
         return {"error": f"that lookup failed ({str(e)[:120]})"}
 
 
@@ -300,7 +350,7 @@ async def answer(session: AsyncSession, org_id: str, club_name: str, question: s
             results = []
             for block in resp.content:
                 if block.type == "tool_use":
-                    out = await _run_tool(session, org_id, block.name, block.input)
+                    out = await _run_tool(org_id, block.name, block.input)
                     results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(out, default=str)})
             messages.append({"role": "user", "content": results})
 

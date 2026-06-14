@@ -14,6 +14,13 @@ const SUGGESTIONS = [
   'Who are our most economical bowlers this season?',
 ]
 
+// Render **bold** as actual bold (the model uses markdown bold for its picks).
+// Plain text + <strong> only, so it's injection-safe; newlines are kept by the
+// pre-wrap container around it.
+function renderRich(text) {
+  return String(text || '').split(/\*\*/).map((seg, i) => (i % 2 === 1 ? <strong key={i}>{seg}</strong> : seg))
+}
+
 function Bubble({ side, children }) {
   const mine = side === 'q'
   return (
@@ -83,7 +90,7 @@ export default function AskIQ() {
                 ? <div className="max-w-[80%]"><div className="px-3.5 py-3" style={{ borderRadius: 14, background: 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' }}><LoadingBar label="Reading your data…" expectedMs={7000} /></div></div>
                 : x.error
                   ? <Bubble side="a"><span style={{ color: 'var(--pb-amber)' }}>{x.error}</span></Bubble>
-                  : <Bubble side="a"><span className="whitespace-pre-wrap">{x.answer}</span></Bubble>}
+                  : <Bubble side="a"><span className="whitespace-pre-wrap">{renderRich(x.answer)}</span></Bubble>}
             </div>
           ))}
           <div ref={endRef} />
