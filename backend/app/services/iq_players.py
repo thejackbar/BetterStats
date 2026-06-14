@@ -30,7 +30,7 @@ async def list_all_players(session: AsyncSession, org_id: str) -> list[dict]:
             LEFT JOIN seasons s ON s.id = pss.season_id
             LEFT JOIN teams t ON t.id = p.squad_team_id
             WHERE p.organisation_id = CAST(:org AS UUID)
-            GROUP BY p.id, name, p.player_role
+            GROUP BY p.id
             ORDER BY last_year DESC NULLS LAST, runs DESC
             """
         ),
