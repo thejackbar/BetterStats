@@ -1172,7 +1172,7 @@ export const api = {
   // unified Player search, which spans our players and any external club.
   iqAllPlayers: () => request('/iq/players'),
   // Natural-language question grounded in the club's own data.
-  iqAsk: (question) => request('/iq/ask', { method: 'POST', body: JSON.stringify({ question }) }),
+  iqAsk: (question, history = []) => request('/iq/ask', { method: 'POST', body: JSON.stringify({ question, history }) }),
 
   // ─── BetterIQ: Player trends & development ──────────────
   iqTrendsOverview: (seasonId, gradeId) => {

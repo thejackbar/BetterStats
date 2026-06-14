@@ -297,6 +297,7 @@ async def all_players(
 @router.post("/ask")
 async def ask_iq(
     question: str = Body(..., embed=True, description="a plain-language question about the club's data"),
+    history: list | None = Body(None, embed=True, description="prior [{question, answer}] turns so a follow-up keeps its subject"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
@@ -308,7 +309,7 @@ async def ask_iq(
     q = (question or "").strip()
     if len(q) < 3:
         raise HTTPException(status_code=400, detail="Ask a question.")
-    return await iq_ask.answer(db, str(club.id), club.name, q)
+    return await iq_ask.answer(db, str(club.id), club.name, q, history=history)
 
 
 @router.get("/trends/players")

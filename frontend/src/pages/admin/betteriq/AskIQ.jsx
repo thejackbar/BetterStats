@@ -49,11 +49,13 @@ export default function AskIQ() {
   const ask = async (question) => {
     const text = (question ?? q).trim()
     if (!text || busy) return
+    // Carry the answered turns so far so a follow-up keeps its subject.
+    const history = thread.filter(x => x.answer && !x.error).map(x => ({ question: x.question, answer: x.answer }))
     setQ(''); setBusy(true)
     setThread(t => [...t, { question: text, loading: true }])
     const finish = (patch) => setThread(t => t.map((x, i) => (i === t.length - 1 ? { question: text, ...patch } : x)))
     try {
-      const r = await api.iqAsk(text)
+      const r = await api.iqAsk(text, history)
       if (r?.available) finish({ answer: r.answer })
       else finish({ error: r?.message || 'Natural-language answers aren\'t available right now.' })
     } catch (e) {

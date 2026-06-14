@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 MODEL = "claude-opus-4-8"
 MAX_TOKENS = 1500
 MAX_STEPS = 6          # tool-call round trips before we force a final answer
+MAX_HISTORY_TURNS = 8  # prior Q&A pairs carried in so follow-ups keep their subject
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-", re.I)
 
 _SYSTEM = (
@@ -322,7 +323,13 @@ async def _run_tool(org_id: str, name: str, args: dict) -> dict:
         return {"error": f"that lookup failed ({str(e)[:120]})"}
 
 
-async def answer(session: AsyncSession, org_id: str, club_name: str, question: str) -> dict:
+async def answer(
+    session: AsyncSession,
+    org_id: str,
+    club_name: str,
+    question: str,
+    history: list | None = None,
+) -> dict:
     if not settings.anthropic_api_key:
         return {"available": False, "message": "Natural-language answers aren't switched on for this server yet."}
     try:
@@ -331,7 +338,23 @@ async def answer(session: AsyncSession, org_id: str, club_name: str, question: s
         return {"available": False, "message": "The AI package isn't installed on this server."}
 
     client = anthropic_sdk.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    messages = [{"role": "user", "content": f"Club: {club_name}\nQuestion: {question.strip()[:600]}"}]
+
+    # Seed the prior turns so a follow-up ("how does he take his wickets") keeps
+    # its subject. We carry only the plain question/answer text, not the tool
+    # round-trips — the model re-calls whatever tools it needs; the history just
+    # tells it who/what the thread is about. Clipped and capped so the context
+    # stays small, and validated here so a malformed client body can't poison it.
+    messages: list = []
+    for turn in (history or [])[-MAX_HISTORY_TURNS:]:
+        if not isinstance(turn, dict):
+            continue
+        prev_q = str(turn.get("question") or "").strip()[:600]
+        prev_a = str(turn.get("answer") or "").strip()[:1500]
+        if not prev_q:
+            continue
+        messages.append({"role": "user", "content": prev_q})
+        messages.append({"role": "assistant", "content": prev_a or "(no answer)"})
+    messages.append({"role": "user", "content": f"Club: {club_name}\nQuestion: {question.strip()[:600]}"})
 
     try:
         for _ in range(MAX_STEPS):
