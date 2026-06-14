@@ -51,9 +51,12 @@ _SYSTEM = (
     "keeper a 'specialist batter' or judge them on runs alone; weigh their keeping.\n"
     "- Genuine bowlers and all-rounders earn their spot with wickets, so a low batting "
     "average isn't a reason to drop them.\n"
-    "If the tools don't cover what was asked, say so plainly and point to where in "
-    "BetterIQ to look (Opposition scout for an opponent, Player search for one player, "
-    "Team analysis for the side)."
+    "If one tool errors or returns nothing, try another or answer from what you have "
+    "(form_movers already gives rising/declining; current_squad gives this-season form) "
+    "rather than telling the user the tools are broken — only say a tool failed if you "
+    "genuinely can't answer at all. If the tools don't cover what was asked, say so "
+    "plainly and point to where in BetterIQ to look (Opposition scout for an opponent, "
+    "Player search for one player, Team analysis for the side)."
 )
 
 
@@ -70,7 +73,7 @@ TOOLS = [
     },
     {
         "name": "player_detail",
-        "description": "One player's profile: career batting & bowling, recent form (last innings), starts/conversion, best batting position, who they dominate or struggle against, and a rising/declining verdict. Needs the player_id from find_players.",
+        "description": "One player's profile: career batting & bowling, recent form (last innings), starts/conversion, best batting position, who they dominate or struggle against, their rising/declining verdict, and their win impact (team win% with vs without him — who turns up in the wins). Needs the player_id from find_players.",
         "input_schema": {
             "type": "object",
             "properties": {"player_id": {"type": "string"}},
@@ -204,6 +207,15 @@ async def _tool_player_detail(session, org_id, *, player_id):
             out["best_position"] = {"bucket": bestpos.get("bucket") or bestpos.get("position"), "average": _round(bestpos.get("average"))}
         if deep.get("reliability"):
             out["reliability"] = deep["reliability"].get("profile")
+        sv = deep.get("selection_value")
+        if sv:
+            # Who turns up in the wins: team win% with vs without him.
+            out["win_impact"] = {
+                "team_win_pct_with": (sv.get("with") or {}).get("win_pct"),
+                "team_win_pct_without": (sv.get("without") or {}).get("win_pct"),
+                "swing_pts": sv.get("swing"),
+                "games_with": (sv.get("with") or {}).get("games"),
+            }
         if deep.get("scouting_note"):
             out["note"] = deep["scouting_note"]
     return out
