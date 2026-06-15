@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { PbSpinner, Btn } from '../../lib/presskit'
 import { formatSeason } from '../../lib/cricketFormat'
+import BookmarkButton from '../../components/admin/BookmarkButton'
 
 function _seasonSlug(name) {
   if (!name) return ''
@@ -75,9 +76,12 @@ export default function AdminYearbook() {
           <h1 className="text-xl font-semibold text-white">Yearbooks</h1>
           <p className="text-sm text-white/40 mt-0.5">Manage season yearbooks — publish to make them publicly accessible.</p>
         </div>
-        <Btn onClick={generateStubs} disabled={generating}>
-          {generating ? 'Generating…' : 'Generate Missing Stubs'}
-        </Btn>
+        <div className="flex items-center gap-2 shrink-0">
+          <BookmarkButton pageLabel="Yearbooks" />
+          <Btn onClick={generateStubs} disabled={generating}>
+            {generating ? 'Generating…' : 'Generate Missing Stubs'}
+          </Btn>
+        </div>
       </div>
 
       {msg && (

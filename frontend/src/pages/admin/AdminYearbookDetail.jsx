@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { PbSpinner, Btn } from '../../lib/presskit'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import { formatSeason } from '../../lib/cricketFormat'
+import BookmarkButton from '../../components/admin/BookmarkButton'
 
 // Yearbook image paths can be either legacy on-disk relative paths
 // ("yearbooks/{org_id}/...") or new DB-backed serving URLs ("/api/images/...").
@@ -832,6 +833,7 @@ export default function AdminYearbookDetail() {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <BookmarkButton pageLabel={`Yearbook · ${seasonName}`} />
           <Link
             to={`/${org.slug}/yearbook`}
             target="_blank"
