@@ -59,6 +59,77 @@ function commonPrefixWord(names) {
 }
 const stripPrefix = (prefix, name) => (prefix && name?.startsWith(prefix) ? name.slice(prefix.length) : name)
 
+// ── Team switcher (which of our teams this fixture is for) ───────────────────
+// Seniority rank for ordering a matchday's teams (1 = top team). Prefer the
+// explicit Team.sequence; fall back to the first number in the team/grade name
+// (mirrors the backend's _guess_sequence); unranked teams sink to the bottom.
+function teamSeq(f) {
+  if (f?.team_sequence && f.team_sequence > 0) return f.team_sequence
+  const m = (f?.team_name || f?.grade_name || '').match(/(\d+)/)
+  return m ? parseInt(m[1], 10) : 999
+}
+const teamNameOf = (f) => f?.team_name || f?.grade_name || f?.opponent_name || f?.label || 'Team'
+const oppLabelOf = (f) =>
+  f?.home_away === 'BYE' ? 'BYE' : `${f?.home_away === 'AWAY' ? '@ ' : 'vs '}${f?.opponent_name || f?.label || 'TBC'}`
+
+// A dropdown of the teams playing on this fixture's date (current team shown,
+// switch to any other) flanked by ◀ / ▶ to jump one team higher / lower in the
+// club hierarchy. The arrows grey out when there's no team above / below.
+function TeamSwitcher({ fixtureId, fx, fixtures, navigate, shortTeam }) {
+  const dayKey = fx?.played_on || null
+  const group = useMemo(() => {
+    let g = (fixtures || []).filter((f) => (f.played_on || null) === dayKey)
+    // The overview is upcoming-only — inject the current fixture if it's absent
+    // (e.g. opening a past fixture directly) so the control stays consistent.
+    if (fixtureId && fx && !g.some((f) => f.id === fixtureId)) {
+      g = [{ id: fixtureId, team_name: fx.team_name, grade_name: fx.grade_name, team_sequence: fx.team_sequence,
+             opponent_name: fx.opponent_name, label: fx.label, home_away: fx.home_away, played_on: fx.played_on }, ...g]
+    }
+    return g.slice().sort((a, b) => teamSeq(a) - teamSeq(b) || teamNameOf(a).localeCompare(teamNameOf(b)))
+  }, [fixtures, dayKey, fixtureId, fx])
+
+  const idx = group.findIndex((f) => f.id === fixtureId)
+  const cur = idx >= 0 ? group[idx] : null
+  const higher = idx > 0 ? group[idx - 1] : null
+  const lower = idx >= 0 && idx < group.length - 1 ? group[idx + 1] : null
+  const go = (id) => id && navigate(`/admin/betterselect/select/${id}`)
+  const optLabel = (f) => [shortTeam(f), oppLabelOf(f)].filter(Boolean).join(' · ')
+  const destName = (f) => shortTeam(f) || oppLabelOf(f)
+
+  if (group.length === 0) return null
+
+  const Arrow = ({ to, side }) => (
+    <button type="button" onClick={() => go(to?.id)} disabled={!to}
+      title={to ? `${side === 'left' ? 'Higher' : 'Lower'} team: ${destName(to)}` : `No ${side === 'left' ? 'higher' : 'lower'} team today`}
+      aria-label={to ? `Switch to ${destName(to)}` : undefined}
+      className={`shrink-0 w-[26px] h-[26px] rounded-md inline-flex items-center justify-center border transition ${
+        to ? 'border-pb-hairline2 text-pb-dim hover:text-pb-accent hover:border-pb-accent/50' : 'border-pb-hairline text-pb-faintest opacity-40 cursor-not-allowed'
+      }`}>
+      <Icon name="chevron" size={15} style={{ transform: side === 'left' ? 'rotate(180deg)' : 'none' }} />
+    </button>
+  )
+
+  return (
+    <div className="flex items-center gap-1 min-w-0" title="Team being selected">
+      <Arrow to={higher} side="left" />
+      {group.length > 1 ? (
+        <div className="relative min-w-0">
+          <select value={fixtureId} onChange={(e) => go(e.target.value)} title="Switch team for this matchday"
+            className="appearance-none bg-pb-surface border border-pb-hairline2 rounded-md pl-2.5 pr-7 py-1 font-display font-bold text-[12.5px] text-pb-text max-w-[210px] truncate cursor-pointer hover:border-pb-accent/50">
+            {group.map((f) => <option key={f.id} value={f.id} style={{ color: '#000' }}>{optLabel(f)}</option>)}
+          </select>
+          <Icon name="chevron" size={12} className="pointer-events-none absolute right-2 top-1/2 text-pb-faint" style={{ transform: 'translateY(-50%) rotate(90deg)' }} />
+        </div>
+      ) : (
+        <span className="font-display font-bold text-[12.5px] text-pb-text max-w-[210px] truncate px-1" title={cur ? optLabel(cur) : ''}>
+          {cur ? optLabel(cur) : '—'}
+        </span>
+      )}
+      <Arrow to={lower} side="right" />
+    </div>
+  )
+}
+
 function fmtHeader(fx) {
   if (!fx) return { title: 'Selection', sub: '', kicker: 'Team sheet' }
   const us = fx.home_away === 'AWAY' ? (fx.away_team || 'Us') : (fx.home_team || 'Us')
@@ -181,6 +252,17 @@ export default function AdminSelection() {
       .map((n) => ({ value: n, label: squadShort(n), count: counts[n] }))
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [data, squadShort])
+
+  // Shorten team names for the switcher + heading ("Applecross 3rd XI" → "3rd
+  // XI") by stripping the shared club prefix across all our teams' fixtures.
+  const teamPrefix = useMemo(
+    () => commonPrefixWord(allFixtures.map((f) => f.team_name || f.grade_name).filter(Boolean)),
+    [allFixtures]
+  )
+  const shortTeam = useCallback((f) => {
+    const n = f?.team_name || f?.grade_name
+    return n ? (stripPrefix(teamPrefix, n) || n) : null
+  }, [teamPrefix])
 
   const facets = useMemo(() => [
     { key: 'squad', type: 'multi' }, { key: 'avail', type: 'multi' }, { key: 'role', type: 'multi' },
@@ -396,20 +478,12 @@ export default function AdminSelection() {
   const canAutofill = format > 0 && slots.some((x) => x == null)
   const hasPrev = (prevXI?.player_ids?.length || 0) > 0
 
+  const teamName = shortTeam(fx)
   const contextLeft = (
-    <>
+    <div className="flex items-center gap-2.5 min-w-0">
       <Link to="/admin/betterselect/selection" className="text-[11px] text-pb-faint hover:text-pb-text whitespace-nowrap">← All teams</Link>
-      {allFixtures.length > 1 && (
-        <select value={fixtureId} onChange={(e) => navigate(`/admin/betterselect/select/${e.target.value}`)}
-          className="bg-pb-surface border pb-hairline rounded-md px-2 py-1 text-[11px] text-pb-text max-w-[55%] truncate">
-          {allFixtures.map((f) => (
-            <option key={f.id} value={f.id} style={{ color: '#000' }}>
-              {(f.home_away === 'AWAY' ? '@ ' : 'vs ') + (f.opponent_name || f.label || 'TBC')}{f.played_on ? ` · ${f.played_on}` : ''}
-            </option>
-          ))}
-        </select>
-      )}
-    </>
+      {fx && <TeamSwitcher fixtureId={fixtureId} fx={fx} fixtures={allFixtures} navigate={navigate} shortTeam={shortTeam} />}
+    </div>
   )
 
   const filterBar = (
@@ -418,7 +492,7 @@ export default function AdminSelection() {
   )
 
   const vm = {
-    title, sub, kicker, contextLeft, filterBar, squadShort, canEdit,
+    title, sub, kicker, teamName, contextLeft, filterBar, squadShort, canEdit,
     poolById, pool, slots, capId, wkId, focus, format, count, target, balance,
     filledSet: usedIds, canAutofill, hasPrev,
     changeFormat, tapPlayer, placeInSlot, removeAt, swapSlots, setFocus, toggleCap, toggleWk,

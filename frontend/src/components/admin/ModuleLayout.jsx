@@ -6,6 +6,7 @@ import { useClubTheme } from '../../hooks/useClubTheme'
 import { Icon } from '../../pages/admin/betterselect/ui'
 import { moduleBrand } from '../../lib/moduleBrand'
 import ModuleLockup from '../ModuleLockup'
+import ModuleSwitcher from './ModuleSwitcher'
 
 // Generic chrome for a Better module surface (BetterFees, BetterSocials, …) —
 // a focused sidebar with just that module's tools, separate from the main admin
@@ -92,6 +93,7 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
           <div className="absolute inset-0 bg-black/60" onClick={() => setMobileOpen(false)} />
           <aside className="absolute left-0 top-0 bottom-0 w-60 bg-pb-surface border-r pb-hairline flex flex-col">
             <Brand />
+            <div className="px-3 py-2.5 border-b pb-hairline"><ModuleSwitcher wrap className="flex" onNavigate={() => setMobileOpen(false)} /></div>
             <nav className="flex-1 overflow-y-auto py-2"><NavItems onNavigate={() => setMobileOpen(false)} /></nav>
           </aside>
         </div>
@@ -106,6 +108,7 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
               ? <h1 className="font-display font-bold text-lg md:text-xl">{title}</h1>
               : <span className="font-mono text-[11px] tracking-wide2 text-pb-faint">Better<span className="text-pb-accent">{moduleName}</span></span>}
           </div>
+          <ModuleSwitcher className="hidden md:flex min-w-0" />
           <div className="flex items-center gap-3">
             {actions}
             <div className="hidden sm:flex items-center gap-2 text-sm text-pb-faint">

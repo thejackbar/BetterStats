@@ -50,6 +50,28 @@ class User(Base):
     memberships = relationship("ClubMembership", back_populates="user")
 
 
+class UserBookmark(Base):
+    """A page an admin user has starred for quick access in the sidebar.
+
+    Keyed to the user (not the club) — the admin routes are identical whatever
+    club a super admin is acting as, so the same favourites follow them. ``path``
+    is an internal route (e.g. ``/admin/players``); ``label`` is the display name
+    captured when it was bookmarked. ``sort_order`` keeps the list stable
+    (append-on-add for now; leaves room to reorder later). See migration 082.
+    """
+    __tablename__ = "user_bookmarks"
+    __table_args__ = (
+        UniqueConstraint("user_id", "path", name="uq_user_bookmark_path"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    path = Column(Text, nullable=False)
+    label = Column(Text, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False, server_default="0")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Organisation(Base):
     __tablename__ = "organisations"
 
