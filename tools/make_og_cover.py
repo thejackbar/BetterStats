@@ -84,43 +84,55 @@ def main():
     bbox = mark.getbbox()
     if bbox:
         mark = mark.crop(bbox)
-    target_h = 372
+    target_h = 326
     scale = target_h / mark.height
     mark = mark.resize((int(mark.width * scale), target_h), Image.LANCZOS)
 
     # Anchor by the right edge so the arrow never clips off-canvas.
-    right_margin = 76
+    right_margin = 70
     paste_x = W - right_margin - mark.width
     paste_y = (H - mark.height) // 2
     mark_cx = paste_x + mark.width // 2
     mark_cy = H // 2
 
-    glow = radial_glow((W, H), (mark_cx, mark_cy), 240, ACCENT, 52)
+    glow = radial_glow((W, H), (mark_cx, mark_cy), 230, ACCENT, 52)
     img = Image.alpha_composite(img, glow)
     img.alpha_composite(mark, (paste_x, paste_y))
 
     d = ImageDraw.Draw(img)
 
-    # --- left-hand text block ---
+    # --- left-hand text block: brand eyebrow + tagline hero + module strip ---
     x = 80
+    text_limit = paste_x - 36  # keep a gutter between the copy and the mark
+
     # accent rule
-    d.rounded_rectangle([x, 150, x + 64, 158], radius=4, fill=ACCENT)
+    d.rounded_rectangle([x, 96, x + 64, 104], radius=4, fill=ACCENT)
 
-    f_word = font(F_BOLD, 104)
-    d.text((x - 4, 178), "Better", font=f_word, fill=WHITE)
-    d.text((x - 4, 292), "Cricket", font=f_word, fill=ACCENT)
+    # brand eyebrow
+    f_eye = font(F_BOLD, 22)
+    draw_spaced(d, (x, 122), "BETTER CRICKET", f_eye, SLATE, tracking=3)
 
-    f_tag = font(F_REG, 31)
-    d.text((x, 428), "The platform Australian", font=f_tag, fill=SLATE)
-    d.text((x, 468), "cricket clubs run on", font=f_tag, fill=SLATE)
+    # tagline hero ("better." in accent, the brand pun). Size to fit the column.
+    hero_lines = [("Making your", WHITE), ("cricket club", WHITE), ("better.", ACCENT)]
+    hero_size = 76
+    while hero_size > 40:
+        f_hero = font(F_BOLD, hero_size)
+        if max(d.textlength(t, font=f_hero) for t, _ in hero_lines) <= text_limit - x:
+            break
+        hero_size -= 2
+    step = hero_size + 12
+    y0 = 176
+    for i, (text, colour) in enumerate(hero_lines):
+        d.text((x - 4, y0 + i * step), text, font=f_hero, fill=colour)
 
-    # module line, letter-spaced uppercase
+    # module strip, letter-spaced uppercase
     f_mod = font(F_BOLD, 18)
     draw_spaced(
-        d, (x, 540),
+        d, (x, 500),
         "STATS  ·  SELECTION  ·  SOCIALS  ·  ADMIN  ·  ANALYTICS",
         f_mod, FAINT, tracking=1.5,
     )
+    print(f"mark={mark.width}x{mark.height} paste_x={paste_x} text_limit={text_limit} hero_size={hero_size}")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     img.convert("RGB").save(OUT, "PNG", optimize=True)

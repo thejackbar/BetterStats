@@ -42,9 +42,9 @@ ALLOWED_HOSTS = {
 # The wide 1200x630 social card. Square og-image.png stays the favicon/app icon.
 OG_COVER = "/og-cover.png"
 COVER_W, COVER_H = 1200, 630
-COVER_ALT = "Better Cricket, the platform Australian cricket clubs run on"
+COVER_ALT = "Better Cricket, making your cricket club better"
 
-HOME_TITLE = "Better Cricket — The platform Australian cricket clubs run on"
+HOME_TITLE = "Making your cricket club better"
 HOME_DESC = (
     "Your club's match history becomes a proper website: player profiles, "
     "leaderboards, records and season yearbooks, updated automatically after "
