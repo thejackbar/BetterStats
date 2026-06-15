@@ -1,0 +1,16 @@
+{
+  "name": "Better Cricket",
+  "short_name": "Better Cricket",
+  "description": "The platform Australian cricket clubs run on: automated stats, a public club website, selection, socials, club admin and analytics.",
+  "lang": "en-AU",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "icons": [
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "/favicon.png", "type": "image/png", "sizes": "256x256", "purpose": "any" },
+    { "src": "/apple-touch-icon.png", "type": "image/png", "sizes": "180x180", "purpose": "maskable" }
+  ]
+}
