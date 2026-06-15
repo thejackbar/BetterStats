@@ -8,6 +8,7 @@ import { Icon } from '../../pages/admin/betterselect/ui'
 import { moduleBrand } from '../../lib/moduleBrand'
 import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
+import BookmarkButton from './BookmarkButton'
 
 const BRAND = moduleBrand('select')
 
@@ -47,6 +48,11 @@ export default function BetterSelectLayout({ children, title, actions, headerLef
   useClubTheme(club)  // inject the club's white-label palette (accent etc.)
 
   const items = NAV.filter(i => i.cap == null || hasCapability(i.cap))
+
+  // Label stored when bookmarking the current page.
+  const activeNav = items.find(i => i.exact ? location.pathname === i.to : location.pathname.startsWith(i.to))
+  const pageName = title || activeNav?.label
+  const bookmarkLabel = 'BetterSelect' + (pageName ? ` · ${pageName}` : '')
 
   const NavItems = ({ onNavigate }) => (
     <>
@@ -118,6 +124,7 @@ export default function BetterSelectLayout({ children, title, actions, headerLef
           <ModuleSwitcher className="hidden md:flex min-w-0" />
           <div className="flex items-center gap-3">
             {actions}
+            <BookmarkButton pageLabel={bookmarkLabel} />
             <div className="hidden sm:flex items-center gap-2 text-sm text-pb-faint">
               <span>{user?.display_name || user?.username}</span>
               <button onClick={async () => { await logout(); navigate('/login') }} className="text-pb-faint hover:text-pb-text underline">Logout</button>

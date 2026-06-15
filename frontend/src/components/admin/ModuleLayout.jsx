@@ -7,6 +7,7 @@ import { Icon } from '../../pages/admin/betterselect/ui'
 import { moduleBrand } from '../../lib/moduleBrand'
 import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
+import BookmarkButton from './BookmarkButton'
 
 // Generic chrome for a Better module surface (BetterFees, BetterSocials, …) —
 // a focused sidebar with just that module's tools, separate from the main admin
@@ -40,6 +41,12 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
   useClubTheme(club)  // inject the club's white-label palette first…
 
   const items = nav.filter(i => i.cap == null || hasCapability(i.cap))
+
+  // Label stored when bookmarking the current page — module name + page so the
+  // bookmark reads clearly alongside ones from other surfaces.
+  const activeNav = items.find(i => i.exact ? location.pathname === i.to : location.pathname.startsWith(i.to))
+  const pageName = title || activeNav?.label
+  const bookmarkLabel = `Better${moduleName}` + (pageName ? ` · ${pageName}` : '')
 
   const NavItems = ({ onNavigate }) => (
     <>
@@ -111,6 +118,7 @@ export default function ModuleLayout({ moduleName, nav = [], children, title, ac
           <ModuleSwitcher className="hidden md:flex min-w-0" />
           <div className="flex items-center gap-3">
             {actions}
+            <BookmarkButton pageLabel={bookmarkLabel} />
             <div className="hidden sm:flex items-center gap-2 text-sm text-pb-faint">
               <span>{user?.display_name || user?.username}</span>
               <button onClick={async () => { await logout(); navigate('/login') }} className="text-pb-faint hover:text-pb-text underline">Logout</button>

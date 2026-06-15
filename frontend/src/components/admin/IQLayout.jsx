@@ -9,6 +9,7 @@ import { ContextBar } from '../../pages/admin/betteriq/Context'
 import { moduleBrand } from '../../lib/moduleBrand'
 import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
+import BookmarkButton from './BookmarkButton'
 import '../../pages/admin/betteriq/iq-theme.css'
 
 const IQ_BRAND = moduleBrand('iq')
@@ -170,6 +171,7 @@ export default function IQLayout({ children, title, eyebrow, actions }) {
             <ModuleSwitcher className="hidden md:flex min-w-0" />
             <div className="flex items-center gap-2.5 shrink-0">
               {actions}
+              <BookmarkButton pageLabel={`BetterIQ · ${head.title}`} />
               <ThemeToggle theme={theme} onToggle={toggleTheme} />
               <div className="hidden sm:flex items-center gap-2.5 pl-2.5" style={{ borderLeft: '1px solid var(--pb-hairline)' }}>
                 <div className="text-right leading-tight whitespace-nowrap">
