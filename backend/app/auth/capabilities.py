@@ -42,6 +42,7 @@ MANAGE_FIXTURES = "manage_fixtures"           # BetterSelect: fixtures (partner 
 MANAGE_SELECTIONS = "manage_selections"       # BetterSelect: teams, availability, team selection
 MANAGE_IQ = "manage_iq"                       # BetterIQ: opposition analysis + scouting dossiers
 MANAGE_COMMS = "manage_comms"                 # BetterComms: contacts + bulk email campaigns
+MANAGE_MERCH = "manage_merch"                 # BetterMerch: stock register (apparel, equipment, food/drink)
 
 ALL_CAPABILITIES = (
     MANAGE_SETTINGS,
@@ -64,6 +65,7 @@ ALL_CAPABILITIES = (
     MANAGE_SELECTIONS,
     MANAGE_IQ,
     MANAGE_COMMS,
+    MANAGE_MERCH,
 )
 
 

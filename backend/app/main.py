@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration, bookmarks
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration, bookmarks, merch
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -884,6 +884,104 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_kp_backups_batch "
             "ON klubpro_migration_backups(batch_id)"
         ))
+        # BetterMerch (migration 083) — club stock register. Idempotent mirror so
+        # the API boots before alembic runs (same pattern as the blocks above).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS merch_products (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                category TEXT NOT NULL DEFAULT 'apparel',
+                name TEXT NOT NULL,
+                description TEXT,
+                unit_cost NUMERIC(10,2),
+                unit_price NUMERIC(10,2),
+                low_stock_threshold INTEGER,
+                supplier TEXT,
+                notes TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_products_org ON merch_products(organisation_id, category)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS merch_variants (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id UUID NOT NULL REFERENCES merch_products(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                label TEXT NOT NULL DEFAULT 'Standard',
+                size TEXT,
+                colour TEXT,
+                sku TEXT,
+                unit_cost NUMERIC(10,2),
+                unit_price NUMERIC(10,2),
+                quantity INTEGER NOT NULL DEFAULT 0,
+                low_stock_threshold INTEGER,
+                expiry_date DATE,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_variants_product ON merch_variants(product_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_variants_org ON merch_variants(organisation_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS merch_movements (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                variant_id UUID NOT NULL REFERENCES merch_variants(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL DEFAULT 'adjustment',
+                delta INTEGER NOT NULL DEFAULT 0,
+                quantity_after INTEGER,
+                unit_cost NUMERIC(10,2),
+                unit_price NUMERIC(10,2),
+                player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                amount NUMERIC(10,2),
+                paid BOOLEAN NOT NULL DEFAULT true,
+                paid_at DATE,
+                payment_method TEXT,
+                note TEXT,
+                occurred_on DATE,
+                created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_movements_variant ON merch_movements(variant_id, created_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_movements_org ON merch_movements(organisation_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_movements_player ON merch_movements(player_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS merch_assets (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                asset_tag TEXT,
+                purchase_cost NUMERIC(10,2),
+                purchase_date DATE,
+                condition TEXT NOT NULL DEFAULT 'good',
+                service_due_date DATE,
+                replace_due_date DATE,
+                status TEXT NOT NULL DEFAULT 'in_service',
+                notes TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_assets_org ON merch_assets(organisation_id)"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
@@ -1055,6 +1153,7 @@ app.include_router(usage.router)
 # admin.py (it shares the admin router). See app/auth/modules.py.
 app.include_router(fees.router, dependencies=[Depends(require_module("fees"))])           # BetterFees (BetterAdmin)
 app.include_router(comms.router, dependencies=[Depends(require_module("comms"))])         # BetterComms (BetterAdmin)
+app.include_router(merch.router, dependencies=[Depends(require_module("merch"))])         # BetterMerch (BetterAdmin)
 app.include_router(fixtures.router, dependencies=[Depends(require_module("select"))])     # BetterSelect
 app.include_router(teams.router, dependencies=[Depends(require_module("select"))])        # BetterSelect
 app.include_router(availability.router, dependencies=[Depends(require_module("select"))]) # BetterSelect

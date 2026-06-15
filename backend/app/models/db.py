@@ -1578,6 +1578,124 @@ class FeePayment(Base):
     member_season = relationship("FeeMemberSeason", back_populates="payments")
 
 
+# ─── BetterMerch (BetterAdmin module) — club stock register ──────────────────
+# One engine, three category templates: apparel (sized/coloured variants),
+# equipment (quantity OR individual assets), food_drink (canteen/bar stock with
+# expiry). Stock always lives on a variant (a product has at least one); every
+# change writes a movement so the running balance is fast to read and the
+# history is kept. Individual high-value equipment lives in merch_assets.
+
+MERCH_CATEGORIES = ("apparel", "equipment", "food_drink")
+# Signed movements: received/+ , sold/issued/used/write_off/- , adjustment/±,
+# stocktake sets an absolute count (delta = new − old).
+MERCH_MOVEMENT_KINDS = ("received", "sold", "issued", "used", "adjustment", "stocktake", "write_off")
+MERCH_ASSET_CONDITIONS = ("new", "good", "fair", "poor", "retired")
+MERCH_ASSET_STATUSES = ("in_service", "out_for_repair", "retired")
+
+
+class MerchProduct(Base):
+    """A catalogue line in the club stock register — the 'what'. Stock lives on
+    its variants (always at least one). `category` picks the template; the
+    `unit_cost`/`unit_price`/`low_stock_threshold` here are defaults a variant
+    can override."""
+    __tablename__ = "merch_products"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    category = Column(Text, nullable=False, server_default="apparel")
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    unit_cost = Column(Numeric(10, 2), nullable=True)   # default cost to buy
+    unit_price = Column(Numeric(10, 2), nullable=True)  # default cost to sell
+    low_stock_threshold = Column(Integer, nullable=True)  # default reorder point (NULL = no alert)
+    supplier = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    variants = relationship("MerchVariant", back_populates="product", cascade="all, delete-orphan")
+
+
+class MerchVariant(Base):
+    """One stock-keeping line under a product (a size/colour, or just 'Standard'
+    for an un-varied product). `quantity` is the running on-hand balance; every
+    change writes a MerchMovement. `unit_cost`/`unit_price` here override the
+    product default; `low_stock_threshold` overrides too. `expiry_date` is the
+    food/drink batch best-before."""
+    __tablename__ = "merch_variants"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("merch_products.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    label = Column(Text, nullable=False, server_default="Standard")
+    size = Column(Text, nullable=True)
+    colour = Column(Text, nullable=True)
+    sku = Column(Text, nullable=True)
+    unit_cost = Column(Numeric(10, 2), nullable=True)
+    unit_price = Column(Numeric(10, 2), nullable=True)
+    quantity = Column(Integer, nullable=False, server_default="0")
+    low_stock_threshold = Column(Integer, nullable=True)
+    expiry_date = Column(Date, nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    product = relationship("MerchProduct", back_populates="variants")
+    movements = relationship("MerchMovement", back_populates="variant", cascade="all, delete-orphan")
+
+
+class MerchMovement(Base):
+    """One change to a variant's stock — the in/out audit log. `delta` is signed.
+    `player_id` records who an item went to; for a sale/issue with money owed,
+    `amount`/`paid` track the merch owing (kept inside BetterMerch, separate from
+    BetterFees). `quantity_after` snapshots the balance for the audit trail."""
+    __tablename__ = "merch_movements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    variant_id = Column(UUID(as_uuid=True), ForeignKey("merch_variants.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(Text, nullable=False, server_default="adjustment")
+    delta = Column(Integer, nullable=False, server_default="0")
+    quantity_after = Column(Integer, nullable=True)
+    unit_cost = Column(Numeric(10, 2), nullable=True)
+    unit_price = Column(Numeric(10, 2), nullable=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    amount = Column(Numeric(10, 2), nullable=True)            # total money for this movement
+    paid = Column(Boolean, nullable=False, server_default="true")  # sales/issues: settled or owing
+    paid_at = Column(Date, nullable=True)
+    payment_method = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    occurred_on = Column(Date, nullable=True)                # business date of the movement
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    variant = relationship("MerchVariant", back_populates="movements")
+    player = relationship("Player")
+
+
+class MerchAsset(Base):
+    """An individual high-value piece of equipment (bowling machine, covers,
+    sight screen) tracked as one item with its own condition and service/replace
+    dates for cashflow planning. Quantity is implicitly 1; not stock-counted."""
+    __tablename__ = "merch_assets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    asset_tag = Column(Text, nullable=True)                  # serial / club asset tag
+    purchase_cost = Column(Numeric(10, 2), nullable=True)
+    purchase_date = Column(Date, nullable=True)
+    condition = Column(Text, nullable=False, server_default="good")
+    service_due_date = Column(Date, nullable=True)
+    replace_due_date = Column(Date, nullable=True)
+    status = Column(Text, nullable=False, server_default="in_service")
+    notes = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 # ─── BetterComms (BetterAdmin module) — bulk email ───────────────────────────
 
 class ClubOnboardingRequest(Base):
