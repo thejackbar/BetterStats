@@ -554,7 +554,7 @@ async def list_movements(
     return {"movements": [_movement_out(mv, p, v, pl) for mv, p, v, pl in rows]}
 
 
-@router.post("/movements", dependencies=[_require])
+@router.post("/movements")
 async def create_movement(
     body: MovementIn,
     current_user: User = Depends(require_cap(MANAGE_MERCH)),
