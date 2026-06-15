@@ -304,6 +304,60 @@ export const api = {
     request('/club-admin/fees/payments/import/commit', {
       method: 'POST', body: JSON.stringify({ items }),
     }),
+  // ─── BetterMerch (BetterAdmin module) — club stock register ─────────────────
+  merchOverview: () => request('/club-admin/merch/overview'),
+  merchAlerts: () => request('/club-admin/merch/alerts'),
+  merchListProducts: ({ category, q, includeInactive } = {}) => {
+    const p = new URLSearchParams()
+    if (category) p.set('category', category)
+    if (q) p.set('q', q)
+    if (includeInactive) p.set('include_inactive', 'true')
+    const qs = p.toString()
+    return request(`/club-admin/merch/products${qs ? `?${qs}` : ''}`)
+  },
+  merchGetProduct: (id) => request(`/club-admin/merch/products/${id}`),
+  merchCreateProduct: (data) =>
+    request('/club-admin/merch/products', { method: 'POST', body: JSON.stringify(data) }),
+  merchUpdateProduct: (id, data) =>
+    request(`/club-admin/merch/products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  merchDeleteProduct: (id) =>
+    request(`/club-admin/merch/products/${id}`, { method: 'DELETE' }),
+  merchAddVariant: (productId, data) =>
+    request(`/club-admin/merch/products/${productId}/variants`, { method: 'POST', body: JSON.stringify(data) }),
+  merchUpdateVariant: (id, data) =>
+    request(`/club-admin/merch/variants/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  merchDeleteVariant: (id) =>
+    request(`/club-admin/merch/variants/${id}`, { method: 'DELETE' }),
+  merchListMovements: ({ variantId, productId, playerId, kind, unpaidOnly, limit } = {}) => {
+    const p = new URLSearchParams()
+    if (variantId) p.set('variant_id', variantId)
+    if (productId) p.set('product_id', productId)
+    if (playerId) p.set('player_id', playerId)
+    if (kind) p.set('kind', kind)
+    if (unpaidOnly) p.set('unpaid_only', 'true')
+    if (limit) p.set('limit', String(limit))
+    const qs = p.toString()
+    return request(`/club-admin/merch/movements${qs ? `?${qs}` : ''}`)
+  },
+  merchRecordMovement: (data) =>
+    request('/club-admin/merch/movements', { method: 'POST', body: JSON.stringify(data) }),
+  merchUpdateMovement: (id, data) =>
+    request(`/club-admin/merch/movements/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  merchDeleteMovement: (id) =>
+    request(`/club-admin/merch/movements/${id}`, { method: 'DELETE' }),
+  merchListAssets: ({ includeInactive } = {}) =>
+    request(`/club-admin/merch/assets${includeInactive ? '?include_inactive=true' : ''}`),
+  merchCreateAsset: (data) =>
+    request('/club-admin/merch/assets', { method: 'POST', body: JSON.stringify(data) }),
+  merchUpdateAsset: (id, data) =>
+    request(`/club-admin/merch/assets/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  merchDeleteAsset: (id) =>
+    request(`/club-admin/merch/assets/${id}`, { method: 'DELETE' }),
+  merchSearchPlayers: (q) =>
+    request(`/club-admin/merch/players${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  merchPlayer: (playerId) => request(`/club-admin/merch/players/${playerId}/merch`),
+  merchReportSummary: () => request('/club-admin/merch/reports/summary'),
+  merchExportUrl: () => `${BASE}/club-admin/merch/reports/export`,
   // ─── BetterImport — overlap-safe historical CSV/XLSX import ──────────────────
   importPreview: (file) => uploadFile('/club-admin/imports/preview', file),
   importResolve: (payload) =>

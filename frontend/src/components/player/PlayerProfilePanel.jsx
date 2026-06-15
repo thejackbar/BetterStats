@@ -334,7 +334,7 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
 }
 
 /* ── Profile panel ────────────────────────────────────────────────────────── */
-export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit, onEditAvail, canEditAvail, onClose, onPhotoChange }) {
+export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit, onEditAvail, canEditAvail, onClose, onPhotoChange, footer }) {
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }))
   const squad = profile.squad
   const handLabel = (BAT_HANDS.find((h) => h[0] === (draft.batting_hand || '')) || [])[1]
@@ -389,6 +389,7 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
           canEdit={canEdit} playerId={profile.id} playerName={profile.name}
           photoUrl={profile.photo_url} onPhotoChange={onPhotoChange} />
       </div>
+      {footer}
     </div>
   )
 }

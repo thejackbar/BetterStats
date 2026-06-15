@@ -78,6 +78,11 @@ const AdminFeePayments = lazy(() => import('./pages/admin/AdminFeePayments'))
 const AdminFeePaymentImport = lazy(() => import('./pages/admin/AdminFeePaymentImport'))
 const AdminFeeBulkPayment = lazy(() => import('./pages/admin/AdminFeeBulkPayment'))
 const AdminFeeReports = lazy(() => import('./pages/admin/AdminFeeReports'))
+const BetterMerchHome = lazy(() => import('./pages/admin/bettermerch/BetterMerchHome'))
+const MerchStock = lazy(() => import('./pages/admin/bettermerch/MerchStock'))
+const MerchAssets = lazy(() => import('./pages/admin/bettermerch/MerchAssets'))
+const MerchActivity = lazy(() => import('./pages/admin/bettermerch/MerchActivity'))
+const MerchReports = lazy(() => import('./pages/admin/bettermerch/MerchReports'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
 const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
@@ -222,6 +227,11 @@ export default function App() {
           <Route path="/admin/fees/payments/bulk" element={<ProtectedRoute requireModule="fees"><AdminFeeBulkPayment /></ProtectedRoute>} />
           <Route path="/admin/fees/reports" element={<ProtectedRoute requireModule="fees"><AdminFeeReports /></ProtectedRoute>} />
           <Route path="/admin/fees/member/:memberId" element={<ProtectedRoute requireModule="fees"><AdminFeeMemberDetail /></ProtectedRoute>} />
+          <Route path="/admin/merch" element={<ProtectedRoute requireModule="merch"><BetterMerchHome /></ProtectedRoute>} />
+          <Route path="/admin/merch/stock" element={<ProtectedRoute requireModule="merch"><MerchStock /></ProtectedRoute>} />
+          <Route path="/admin/merch/equipment" element={<ProtectedRoute requireModule="merch"><MerchAssets /></ProtectedRoute>} />
+          <Route path="/admin/merch/activity" element={<ProtectedRoute requireModule="merch"><MerchActivity /></ProtectedRoute>} />
+          <Route path="/admin/merch/reports" element={<ProtectedRoute requireModule="merch"><MerchReports /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
           <Route path="/admin/website" element={<ProtectedRoute><AdminWebsite /></ProtectedRoute>} />

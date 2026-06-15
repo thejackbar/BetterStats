@@ -78,8 +78,8 @@ export default function BetterAdminHome() {
             blurb="Bulk email to your member database — newsletters and announcements."
           />
           <SubCard
-            name="BetterMerch" built={false} entitled={false}
-            blurb="Track merch stock and sales. Coming soon."
+            name="BetterMerch" to="/admin/merch" built entitled={hasModule(MODULE.MERCH)}
+            blurb="Track club stock — apparel, equipment and canteen — with low-stock alerts."
           />
         </div>
       </div>

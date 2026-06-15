@@ -9,6 +9,7 @@ import { PbSpinner } from '../../lib/presskit'
 import { bowls, bowlingLabel } from '../../lib/playerAttributes'
 import { Profile, draftFromProfile, patchFromDraft } from '../../components/player/PlayerProfilePanel'
 import { Avatar, RoleChips, Icon, QuickAvailModal } from './betterselect/ui'
+import PlayerMerchPanel from './bettermerch/PlayerMerchPanel'
 import '../../styles/players-list.css'
 
 // ---------------------------------------------------------------------------
@@ -42,6 +43,8 @@ const nameOf = (p) => p.display_name || p.display_name_override || p.name || ''
 // without closing. The detail panel itself is unchanged.
 // ---------------------------------------------------------------------------
 function ProfileModal({ playerId, teams, canEdit, index, total, onPrev, onNext, onClose, onSaved }) {
+  const { hasModule, hasCapability } = useAuth()
+  const showMerch = hasModule('merch') && hasCapability(CAP.MANAGE_MERCH)
   const [profile, setProfile] = useState(null)
   const [draft, setDraft] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -144,7 +147,8 @@ function ProfileModal({ playerId, teams, canEdit, index, total, onPrev, onNext, 
             : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
                 dirty={dirty} saved={saved} onSave={onSave} canEdit={canEdit}
                 canEditAvail={canEdit} onEditAvail={(pl, date) => setAvailEdit({ player: pl, date })}
-                onClose={onClose} onPhotoChange={onPhotoChange} />}
+                onClose={onClose} onPhotoChange={onPhotoChange}
+                footer={showMerch ? <PlayerMerchPanel playerId={playerId} /> : null} />}
         </div>
       </div>
       {availEdit && (
