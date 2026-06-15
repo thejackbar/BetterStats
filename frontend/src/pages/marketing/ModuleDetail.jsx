@@ -56,11 +56,43 @@ function modulePrice(m) {
 export default function ModuleDetail() {
   const { slug } = useParams()
   const m = moduleBySlug(slug)
+
+  const priced = m ? (PRICED_MODULES.find((x) => x.key === m.key) || (m.slug === 'betterstats' ? CORE : null)) : null
+  // Breadcrumb + product structured data so each module page is read as a
+  // priced product sitting under Modules, not an orphan page.
+  const jsonLd = m ? [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://betterat.cricket/' },
+        { '@type': 'ListItem', position: 2, name: 'Modules', item: 'https://betterat.cricket/modules' },
+        { '@type': 'ListItem', position: 3, name: m.name, item: `https://betterat.cricket/modules/${m.slug}` },
+      ],
+    },
+    ...(priced ? [{
+      '@context': 'https://schema.org',
+      '@type': 'Product',
+      name: `${m.name} — Better Cricket`,
+      description: m.summary,
+      brand: { '@type': 'Brand', name: 'Better Cricket' },
+      url: `https://betterat.cricket/modules/${m.slug}`,
+      offers: {
+        '@type': 'Offer',
+        price: String(priced.price),
+        priceCurrency: 'AUD',
+        availability: 'https://schema.org/InStock',
+        url: 'https://betterat.cricket/pricing',
+      },
+    }] : []),
+  ] : undefined
+
   usePageMeta({
     title: m ? `${m.name} — ${m.tagline} | Better Cricket` : 'Modules | Better Cricket',
     description: m ? `${m.name}: ${m.summary}` : 'The Better Cricket platform modules.',
     image: 'https://betterat.cricket/og-cover.png',
     url: m ? `https://betterat.cricket/modules/${m.slug}` : 'https://betterat.cricket/modules',
+    jsonLd,
   })
   if (!m) return <Navigate to="/modules" replace />
 

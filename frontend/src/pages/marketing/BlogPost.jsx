@@ -67,11 +67,48 @@ export default function BlogPost() {
   const { slug } = useParams()
   const post = getPost(slug)
 
+  const postUrl = post ? `https://betterat.cricket/blog/${post.slug}` : ''
+  const postImage = post?.image ? `https://betterat.cricket${post.image}` : 'https://betterat.cricket/og-cover.png'
+
+  // BlogPosting + breadcrumb structured data so search and AI engines read the
+  // article cleanly (headline, date, publisher) and show it in the right place.
+  const jsonLd = post ? [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'BlogPosting',
+      headline: post.title,
+      description: post.description,
+      image: postImage,
+      datePublished: post.date,
+      dateModified: post.date,
+      inLanguage: 'en-AU',
+      author: { '@type': 'Organization', name: 'Better Cricket', url: 'https://betterat.cricket/' },
+      publisher: {
+        '@type': 'Organization',
+        name: 'BetterSports',
+        logo: { '@type': 'ImageObject', url: 'https://betterat.cricket/og-image.png' },
+      },
+      mainEntityOfPage: { '@type': 'WebPage', '@id': postUrl },
+      url: postUrl,
+    },
+    {
+      '@context': 'https://schema.org',
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://betterat.cricket/' },
+        { '@type': 'ListItem', position: 2, name: 'Blog', item: 'https://betterat.cricket/blog' },
+        { '@type': 'ListItem', position: 3, name: post.title, item: postUrl },
+      ],
+    },
+  ] : undefined
+
   usePageMeta(post ? {
     title: `${post.title} | Better Cricket`,
     description: post.description,
-    image: post.image ? `https://betterat.cricket${post.image}` : 'https://betterat.cricket/og-cover.png',
-    url: `https://betterat.cricket/blog/${post.slug}`,
+    image: postImage,
+    url: postUrl,
+    type: 'article',
+    jsonLd,
   } : {})
 
   if (!post) return <Navigate to="/blog" replace />

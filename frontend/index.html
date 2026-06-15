@@ -13,6 +13,7 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
 
     <!-- Open Graph -->
     <meta property="og:site_name" content="Better Cricket" />
@@ -51,7 +52,7 @@
           "identifier": { "@type": "PropertyValue", "propertyID": "ABN", "value": "32 624 335 397" },
           "url": "https://betterat.cricket/",
           "logo": "https://betterat.cricket/og-image.png",
-          "email": "betterstatsau@gmail.com",
+          "email": "betteratcricket@gmail.com",
           "areaServed": { "@type": "Country", "name": "Australia" },
           "description": "BetterSports makes Better Cricket — the platform Australian cricket clubs run on. It keeps a club's full match history online and automatically turns it into a public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards, then adds modules for team selection, social posts, club admin and analytics.",
           "founder": { "@type": "Person", "name": "Jack Barendse" },
@@ -62,7 +63,7 @@
           "contactPoint": {
             "@type": "ContactPoint",
             "contactType": "customer support",
-            "email": "betterstatsau@gmail.com",
+            "email": "betteratcricket@gmail.com",
             "areaServed": "AU",
             "availableLanguage": ["en"]
           }
@@ -89,29 +90,55 @@
           "operatingSystem": "Web",
           "url": "https://betterat.cricket/",
           "description": "The platform Australian cricket clubs run on — automated stats, a public club website, player profiles, leaderboards, records and season yearbooks, plus team selection, social posts, club admin and analytics. No manual data entry.",
-          "offers": [
-            {
-              "@type": "Offer",
-              "name": "Good — annual",
-              "price": "449",
-              "priceCurrency": "AUD",
-              "url": "https://betterat.cricket/pricing"
-            },
-            {
-              "@type": "Offer",
-              "name": "Better — annual",
-              "price": "649",
-              "priceCurrency": "AUD",
-              "url": "https://betterat.cricket/pricing"
-            },
-            {
-              "@type": "Offer",
-              "name": "Best — annual",
-              "price": "999",
-              "priceCurrency": "AUD",
-              "url": "https://betterat.cricket/pricing"
-            }
-          ]
+          "offers": {
+            "@type": "AggregateOffer",
+            "priceCurrency": "AUD",
+            "lowPrice": "399",
+            "highPrice": "949",
+            "offerCount": "5",
+            "offers": [
+              {
+                "@type": "Offer",
+                "name": "BetterStats (Core) — annual",
+                "price": "399",
+                "priceCurrency": "AUD",
+                "availability": "https://schema.org/InStock",
+                "url": "https://betterat.cricket/pricing"
+              },
+              {
+                "@type": "Offer",
+                "name": "BetterSelect — annual",
+                "price": "149",
+                "priceCurrency": "AUD",
+                "availability": "https://schema.org/InStock",
+                "url": "https://betterat.cricket/pricing"
+              },
+              {
+                "@type": "Offer",
+                "name": "BetterSocials — annual",
+                "price": "149",
+                "priceCurrency": "AUD",
+                "availability": "https://schema.org/InStock",
+                "url": "https://betterat.cricket/pricing"
+              },
+              {
+                "@type": "Offer",
+                "name": "BetterAdmin — annual",
+                "price": "149",
+                "priceCurrency": "AUD",
+                "availability": "https://schema.org/InStock",
+                "url": "https://betterat.cricket/pricing"
+              },
+              {
+                "@type": "Offer",
+                "name": "BetterIQ — annual",
+                "price": "249",
+                "priceCurrency": "AUD",
+                "availability": "https://schema.org/InStock",
+                "url": "https://betterat.cricket/pricing"
+              }
+            ]
+          }
         }
       ]
     }

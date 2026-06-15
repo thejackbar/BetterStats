@@ -9,6 +9,26 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
+// Blog index structured data — lists every post so search and AI engines can
+// discover the full set from one page.
+const BLOG_JSONLD = {
+  '@context': 'https://schema.org',
+  '@type': 'Blog',
+  name: 'Better Cricket Blog',
+  description: 'Cricket statistics guides and club management tips for Australian cricket clubs.',
+  url: 'https://betterat.cricket/blog',
+  inLanguage: 'en-AU',
+  publisher: { '@type': 'Organization', name: 'BetterSports', url: 'https://betterat.cricket/' },
+  blogPost: POSTS.map((p) => ({
+    '@type': 'BlogPosting',
+    headline: p.title,
+    description: p.description,
+    url: `https://betterat.cricket/blog/${p.slug}`,
+    datePublished: p.date,
+    ...(p.image ? { image: `https://betterat.cricket${p.image}` } : {}),
+  })),
+}
+
 function PostThumb({ src, title }) {
   const [failed, setFailed] = useState(false)
   if (!src || failed) return null
@@ -31,6 +51,7 @@ export default function Blog() {
     description: 'Cricket statistics guides and club management tips from the Better Cricket team: batting averages, bowling economy, historical data and more.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/blog',
+    jsonLd: BLOG_JSONLD,
   })
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
