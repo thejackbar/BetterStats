@@ -322,16 +322,23 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     players = pl_res.scalars().all()
 
     # Fixture's team sequence + grade gender, for autofill tier + gender wall.
+    # Also capture the team/grade display names + seniority so the selection
+    # board can show (and switch between) which of our teams is being picked.
     fx_team_seq: int | None = None
+    fx_team_name: str | None = None
     if fx.team_id:
         fx_team_obj = await db.get(Team, fx.team_id)
-        if fx_team_obj and (fx_team_obj.sequence or 0) > 0:
-            fx_team_seq = fx_team_obj.sequence
+        if fx_team_obj:
+            fx_team_name = fx_team_obj.short_name or fx_team_obj.name
+            if (fx_team_obj.sequence or 0) > 0:
+                fx_team_seq = fx_team_obj.sequence
     fx_is_women = False
+    fx_grade_name: str | None = None
     if fx.grade_id:
         fx_grade_obj = await db.get(Grade, fx.grade_id)
         if fx_grade_obj:
             fx_is_women = (fx_grade_obj.fee_format == "women")
+            fx_grade_name = fx_grade_obj.display_name_override or fx_grade_obj.name
 
     # Per-squad-team metadata: sequence + women's-grade flag.
     squad_meta: dict[str, tuple[int, bool]] = {}
@@ -433,6 +440,9 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "away_team": fx.away_team,
             "team_id": str(fx.team_id) if fx.team_id else None,
             "grade_id": str(fx.grade_id) if fx.grade_id else None,
+            "team_name": fx_team_name,
+            "grade_name": fx_grade_name,
+            "team_sequence": fx_team_seq,
         },
         "lineup": [
             {

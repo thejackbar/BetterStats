@@ -85,6 +85,7 @@ export function FixtureBar({ vm }) {
       <div className="flex items-center justify-between gap-3">{vm.contextLeft}</div>
       <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-between gap-x-3 gap-y-2 mt-1">
         <div className="min-w-0">
+          {vm.teamName && <div className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.16em] text-pb-accent leading-none mb-1">{vm.teamName}</div>}
           <h2 className="font-display font-bold text-[20px] leading-tight break-words">{vm.title}</h2>
           {vm.sub && <div className="text-[13.5px] text-pb-dim mt-0.5">{vm.sub}</div>}
         </div>
@@ -348,10 +349,12 @@ export function TeamSheetView({ vm }) {
   return (
     <div>
       {/* Masthead */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-between gap-x-7 gap-y-3 px-5 sm:px-6 py-3.5 rounded-t-2xl border border-b-0 pb-hairline"
+      <div className="px-5 sm:px-6 py-3.5 rounded-t-2xl border border-b-0 pb-hairline"
         style={{ background: 'linear-gradient(180deg, color-mix(in srgb, var(--pb-accent) 14%, var(--pb-surface)), var(--pb-surface))' }}>
+        {vm.contextLeft && <div className="flex items-center gap-3 mb-3">{vm.contextLeft}</div>}
+        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-between gap-x-7 gap-y-3">
         <div className="min-w-0 sm:flex-1 flex flex-col gap-0.5">
-          <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-pb-accent">{vm.kicker}</div>
+          <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-pb-accent">{vm.teamName || vm.kicker}</div>
           <h2 className="font-display font-bold tracking-tight leading-tight m-0 break-words" style={{ fontSize: 'clamp(21px, 2.4vw, 26px)' }}>{vm.title}</h2>
           {vm.sub && <div className="text-[13px] text-pb-dim">{vm.sub}</div>}
         </div>
@@ -369,6 +372,7 @@ export function TeamSheetView({ vm }) {
               )
             })}
           </div>
+        </div>
         </div>
       </div>
 

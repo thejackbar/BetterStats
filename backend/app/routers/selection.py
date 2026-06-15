@@ -78,9 +78,12 @@ async def selection_overview(
     if not fixtures:
         return {"fixtures": [], "default_team_size": club.default_team_size}
 
-    # Team names, to show which of our teams each fixture belongs to.
+    # Team names + seniority, to show which of our teams each fixture belongs to
+    # and order a matchday's teams (1st XI → 2nd → …) in the team switcher.
     tm_res = await db.execute(select(Team).where(Team.organisation_id == club.id))
-    team_names = {str(t.id): (t.short_name or t.name) for t in tm_res.scalars().all()}
+    teams = tm_res.scalars().all()
+    team_names = {str(t.id): (t.short_name or t.name) for t in teams}
+    team_seqs = {str(t.id): t.sequence for t in teams}
 
     # Grade label per fixture (drives the small grade badge).
     grade_ids = {f.grade_id for f in fixtures if f.grade_id}
@@ -157,6 +160,7 @@ async def selection_overview(
             "round": f.round,
             "venue": f.venue,
             "team_name": team_names.get(str(f.team_id)) if f.team_id else None,
+            "team_sequence": team_seqs.get(str(f.team_id)) if f.team_id else None,
             "grade_name": grade_names.get(str(f.grade_id)) if f.grade_id else None,
             "lineup": lineup,
         })
