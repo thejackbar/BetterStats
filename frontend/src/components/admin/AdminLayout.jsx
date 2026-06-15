@@ -1,10 +1,11 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 import { dashboardTiles } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
 import ModuleLockup from '../ModuleLockup'
+import { useBookmarks } from '../../hooks/useBookmarks'
 import { api } from '../../lib/api'
 import { SITE_VERSION } from '../../version'
 import { CHANGELOG } from '../../data/changelog'
@@ -99,6 +100,27 @@ export default function AdminLayout({ children }) {
     items: s.items.filter(i => i.cap == null || hasCapability(i.cap)),
   })).filter(s => s.items.length > 0)
 
+  // Per-user page bookmarks — favourites pinned to the top of the sidebar.
+  const { bookmarks, isBookmarked, toggle, remove } = useBookmarks(!!user)
+
+  // Give a bookmarked page a sensible name. Known nav routes carry their own
+  // label; anything else (a deep/dynamic page) falls back to a tidied-up last
+  // path segment so the bookmark still reads cleanly.
+  const labelForPath = useMemo(() => {
+    const map = {}
+    NAV_SECTIONS.forEach(s => s.items.forEach(i => { map[i.to] = i.label }))
+    SUPER_LINKS.forEach(l => { map[l.to] = l.label })
+    dashboardTiles().forEach(m => { if (m.to) map[m.to] = m.name })
+    return (path) => {
+      if (map[path]) return map[path]
+      const seg = path.split('/').filter(Boolean).pop() || 'Page'
+      return seg.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+    }
+  }, [])
+
+  const currentPath = location.pathname
+  const currentBookmarked = isBookmarked(currentPath)
+
   // Open the modal immediately, then fetch the summary in the background.
   // If we wait for the fetch to resolve and it errors, the modal silently
   // never opens — which presents as "clicking the bell does nothing".
@@ -181,6 +203,22 @@ export default function AdminLayout({ children }) {
                 VIEW PUBLIC PAGE
               </Link>
             )}
+            <button
+              onClick={() => toggle(currentPath, labelForPath(currentPath))}
+              className="w-8 h-8 flex items-center justify-center rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition"
+              title={currentBookmarked ? 'Remove this page from bookmarks' : 'Bookmark this page'}
+              aria-label={currentBookmarked ? 'Remove this page from bookmarks' : 'Bookmark this page'}
+              aria-pressed={currentBookmarked}
+            >
+              <svg
+                width="16" height="16" viewBox="0 0 24 24"
+                fill={currentBookmarked ? 'currentColor' : 'none'}
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                style={currentBookmarked ? { color: 'var(--pb-accent)' } : undefined}
+              >
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+              </svg>
+            </button>
             <NotificationBell onOpen={openBell} refreshTrigger={bellRefresh} />
             <span className="hidden sm:block font-mono text-[11px] text-pb-faint">
               {user?.display_name || user?.username}
@@ -263,6 +301,48 @@ export default function AdminLayout({ children }) {
                 textClassName="font-display font-bold text-[14px] leading-none"
               />
             </Link>
+
+            {/* Bookmarks — the user's own favourites, pinned to the top for
+                quick access (mirrors HubSpot's Bookmarks menu). Hidden until
+                they star a page; the header bookmark icon is how pages get
+                added/removed. */}
+            {bookmarks.length > 0 && (
+              <div className="pb-2 mb-1 border-b pb-hairline-b">
+                <div className="pb-1 px-2 font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
+                  Bookmarks
+                </div>
+                {bookmarks.map(bm => {
+                  const active = location.pathname === bm.path
+                  return (
+                    <div key={bm.path} className="group relative flex items-center">
+                      <Link
+                        to={bm.path}
+                        onClick={() => setMobileOpen(false)}
+                        title={bm.label}
+                        className={`flex-1 min-w-0 block pl-2 pr-7 py-1.5 rounded transition-colors font-mono text-[11px] tracking-wide2 truncate ${
+                          active
+                            ? 'bg-pb-surface2 text-pb-text'
+                            : 'text-pb-faint hover:text-pb-text hover:bg-pb-surface2'
+                        }`}
+                        style={active ? { color: 'var(--pb-accent)' } : {}}
+                      >
+                        {bm.label.toUpperCase()}
+                      </Link>
+                      <button
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); remove(bm.path) }}
+                        className="absolute right-1 w-5 h-5 flex items-center justify-center rounded text-pb-faintest hover:text-pb-text hover:bg-pb-surface2 transition opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                        title={`Remove ${bm.label} from bookmarks`}
+                        aria-label={`Remove ${bm.label} from bookmarks`}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                          <path d="M6 6l12 12M18 6L6 18" />
+                        </svg>
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
 
             {/* Better HQ — staff-only platform tools. Pinned to the TOP because
                 for a super admin this is their primary surface (the club admin

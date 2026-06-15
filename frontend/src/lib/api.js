@@ -452,6 +452,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ app_version: appVersion || null }),
     }),
+  // Admin sidebar bookmarks (per-user favourites)
+  listBookmarks: () => request('/club-admin/bookmarks'),
+  addBookmark: (path, label) =>
+    request('/club-admin/bookmarks', {
+      method: 'POST',
+      body: JSON.stringify({ path, label: label || null }),
+    }),
+  removeBookmark: (path) =>
+    request(`/club-admin/bookmarks?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+
   // Club user management
   adminListClubUsers: () => request('/club-admin/users'),
   adminListCapabilities: () => request('/club-admin/users/capabilities'),
