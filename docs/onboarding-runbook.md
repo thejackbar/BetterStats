@@ -16,8 +16,8 @@ role.
 
 - A `super_admin` account (the operator — you).
 - The club's name as it appears in Cricket Australia / PlayHQ search.
-- The tier the club has agreed to (Good / Better / Best).
-- A contact email and a desired URL slug (e.g. `applecross` → `betterstats.cricket/applecross`).
+- The modules the club has agreed to (BetterStats Core plus any of BetterSelect, BetterSocials, BetterAdmin, BetterIQ).
+- A contact email and a desired URL slug (e.g. `applecross` → `betterat.cricket/applecross`).
 
 ---
 
@@ -84,7 +84,7 @@ If a player shows 0s despite having scorecards, use **Fix Missing Totals**
 1. Back on **All Clubs**, toggle the club to **Active**.
    - Inactive clubs can't log in (non-super users are blocked at `/auth/login`)
      and the public page shows the inactive state.
-2. Confirm the public page loads at `betterstats.cricket/{slug}`.
+2. Confirm the public page loads at `betterat.cricket/{slug}`.
 
 Done. The club admin can now log in and will land on the module-tile dashboard
 showing exactly what their tier unlocks.
