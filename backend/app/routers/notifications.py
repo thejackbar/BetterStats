@@ -13,6 +13,8 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_user, get_current_club
 from app.services.aggregations import get_upcoming_milestones_for_org
+from app.auth.modules import org_has_module
+from app.services.merch import merch_alerts as get_merch_alerts
 
 
 async def _user_can_manage_reports(db: AsyncSession, user: User, club: Organisation) -> bool:
@@ -90,10 +92,19 @@ async def get_notifications_count(
             .where(SavedReport.status == "pending")
         ) or 0
 
+    # BetterMerch standing alerts (low stock / service due / expiring). Like the
+    # pending-request counts above, this is current state, not "since last seen"
+    # — a low-stock badge stands until the club restocks. Only for clubs holding
+    # the module.
+    merch_alert_count = 0
+    if org_has_module(club, "merch"):
+        merch_alert_count = (await get_merch_alerts(db, club.id))["total"]
+
     return {
-        "unseen_count": sync_count + milestone_count + pending_count + pending_reports_count,
+        "unseen_count": sync_count + milestone_count + pending_count + pending_reports_count + merch_alert_count,
         "failed_sync_count": failed_sync_count,
         "pending_reports_count": pending_reports_count,
+        "merch_alert_count": merch_alert_count,
         "last_seen_version": current_user.last_seen_app_version,
     }
 
@@ -154,7 +165,12 @@ async def get_notifications_summary(
             .where(SavedReport.status == "pending")
         ) or 0
 
-    unseen_count = len(sync_runs) + len(milestone_rows) + pending_count + pending_reports_count
+    # BetterMerch alerts for clubs holding the module.
+    merch = {"low_stock": [], "expiring": [], "service_due": [], "total": 0}
+    if org_has_module(club, "merch"):
+        merch = await get_merch_alerts(db, club.id)
+
+    unseen_count = len(sync_runs) + len(milestone_rows) + pending_count + pending_reports_count + merch["total"]
     failed_sync_count = sum(1 for r in sync_runs if r.status == "error")
 
     return {
@@ -187,6 +203,7 @@ async def get_notifications_summary(
         "upcoming_milestones": upcoming_top,
         "pending_sync_requests": pending_count,
         "pending_reports_count": pending_reports_count,
+        "merch_alerts": merch,
     }
 
 

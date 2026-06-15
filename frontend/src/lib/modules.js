@@ -14,6 +14,7 @@ export const MODULE = {
   FEES: 'fees',
   IQ: 'iq',
   COMMS: 'comms',
+  MERCH: 'merch',
 }
 
 // Module registry — the admin dashboard renders one tile per entry, in order.
@@ -56,6 +57,15 @@ export const MODULE_INFO = [
     group: 'admin',
   },
   {
+    key: MODULE.MERCH,
+    name: 'BetterMerch',
+    blurb: 'Track club stock — apparel, equipment and canteen, with low-stock alerts.',
+    to: '/admin/merch',
+    built: true,
+    caps: [CAP.MANAGE_MERCH],
+    group: 'admin',
+  },
+  {
     key: MODULE.IQ,
     name: 'BetterIQ',
     blurb: 'AI + stats deep-dive: opposition scouting, selection analysis, trends.',
@@ -65,9 +75,9 @@ export const MODULE_INFO = [
   },
 ]
 
-// BetterFees + BetterComms (+ future BetterMerch) are sold separately but
-// presented together as one **BetterAdmin** umbrella tile on the dashboard /
-// sidebar — the club's back office in one place.
+// BetterFees + BetterComms + BetterMerch are sold separately but presented
+// together as one **BetterAdmin** umbrella tile on the dashboard / sidebar —
+// the club's back office in one place.
 export const MODULE_GROUPS = {
   // BetterSocials is an umbrella too: the Post Designer (the socials module)
   // plus the club Website (Core, every club). alwaysOpen keeps the hub reachable for
@@ -110,13 +120,13 @@ export function dashboardTiles() {
 }
 
 // The modular toggles a super admin grants per club. BetterAdmin is the
-// back-office umbrella, so its toggle covers both backend module keys (fees +
-// comms). `modules` are the backend entitlement keys (app/auth/modules.py
+// back-office umbrella, so its toggle covers all three backend module keys (fees
+// + comms + merch). `modules` are the backend entitlement keys (app/auth/modules.py
 // ALL_MODULES); Core (BetterStats) is always on and isn't a toggle.
 export const MODULE_TOGGLES = [
   { key: 'select',  label: 'BetterSelect',  modules: ['select'] },
   { key: 'socials', label: 'BetterSocials', modules: ['socials'] },
-  { key: 'admin',   label: 'BetterAdmin',   modules: ['fees', 'comms'] },
+  { key: 'admin',   label: 'BetterAdmin',   modules: ['fees', 'comms', 'merch'] },
   { key: 'iq',      label: 'BetterIQ',       modules: ['iq'] },
 ]
 
