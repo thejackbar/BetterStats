@@ -81,7 +81,7 @@ echo "==> [4/4] Refreshing nginx-proxy-manager so it resolves the frontend's NEW
 # untangle. We discover the proxy's SERVICE name from the project so we never
 # hardcode a container name.
 NPM_SVC="$(docker compose ps --services 2>/dev/null | grep -iE 'proxy|npm|manager' | head -1)"
-health() { for i in 1 2 3; do curl -s -o /dev/null -w '%{http_code} ' "https://betterstats.cricket/" || printf '000 '; done; }
+health() { for i in 1 2 3; do curl -s -o /dev/null -w '%{http_code} ' "https://betterat.cricket/" || printf '000 '; done; }
 if [ -n "$NPM_SVC" ]; then
   docker compose exec -T "$NPM_SVC" nginx -s reload 2>/dev/null || true
   sleep 3
@@ -102,7 +102,7 @@ docker compose ps betterstats-backend betterstats-frontend
 
 cat <<'NOTE'
 
-Done — https://betterstats.cricket
+Done — https://betterat.cricket
 
 Reminders:
   * NEVER add --remove-orphans (it would delete klubpro-mongo / restreamer — other apps).

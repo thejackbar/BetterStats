@@ -15,7 +15,7 @@ import sys
 import urllib.request
 from datetime import datetime, timezone
 
-BASE = os.environ.get("BS_BASE", "https://betterstats.cricket/api")
+BASE = os.environ.get("BS_BASE", "https://betterat.cricket/api")
 ORG = os.environ.get("BS_ORG", "98d1e039-87d8-eb11-a7ad-2818780da0cc")  # Darwin CC
 GAME = os.environ.get("BS_GAME", "79800d8d-549a-4083-b41c-4a9c595ed11e")  # Darwin v PINT
 SLUG = os.environ.get("BS_SLUG", "darwin-cricket-club")
