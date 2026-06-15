@@ -81,6 +81,39 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
         "social posts, BetterAdmin for fees and comms, and BetterIQ for "
         "analytics and opposition scouting.",
     ),
+    "/modules/betterstats": (
+        "BetterStats — your club's stats and public website | Better Cricket",
+        "The Core every plan starts with: your club's full reconciled history "
+        "turned into a public website with player profiles, leaderboards, "
+        "all-time records, partnerships, season yearbooks and shareable stat "
+        "cards. No manual data entry.",
+    ),
+    "/modules/betterselect": (
+        "BetterSelect — availability & smart team selection | Better Cricket",
+        "Players set their own availability with no account and no app. "
+        "Captains and selectors get a whole-squad grid, drag-and-drop squad "
+        "boards, live fixtures and ladders, and a form and role aware autofill "
+        "that suggests a balanced XI.",
+    ),
+    "/modules/bettersocials": (
+        "BetterSocials — your club website & match-day posts | Better Cricket",
+        "Run your club's public website and turn match data into share-ready "
+        "graphics: lineups, toss, player of the match, results and full "
+        "scorecards, all in your crest, colours and fonts with one-tap export.",
+    ),
+    "/modules/betteradmin": (
+        "BetterAdmin — fees, comms & merch | Better Cricket",
+        "The back office in one place: BetterFees auto-allocates match-fee "
+        "payments and keeps a live Paid, Part-paid and Unpaid picture, "
+        "BetterComms sends bulk member email, and BetterMerch (stock and sales) "
+        "is coming soon.",
+    ),
+    "/modules/betteriq": (
+        "BetterIQ — opposition scouting & analytics | Better Cricket",
+        "Turn your own scorecards into an opposition dossier with danger "
+        "players, head-to-head history and a printable captain's cheat sheet, "
+        "plus player trends, a best-available XI and deep team analysis.",
+    ),
     "/compare": (
         "Compare — Better Cricket vs the tools clubs already use",
         "An honest, side-by-side look at how Better Cricket stacks up against "

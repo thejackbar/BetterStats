@@ -19,18 +19,42 @@ from app.models.db import Organisation, Player, get_db
 
 router = APIRouter(tags=["seo"])
 
-SITE = "https://betterstats.cricket"
+SITE = "https://betterat.cricket"
 
 # Public marketing routes. Keep in sync with App.jsx.
 STATIC_PAGES: list[tuple[str, str, str]] = [
     ("/",         "1.0", "weekly"),
+    ("/overview", "0.9", "monthly"),
     ("/features", "0.9", "monthly"),
+    ("/modules",  "0.9", "monthly"),
     ("/pricing",  "0.9", "monthly"),
+    ("/compare",  "0.8", "monthly"),
     ("/faq",      "0.8", "monthly"),
+    ("/blog",     "0.8", "weekly"),
     ("/about",    "0.7", "monthly"),
     ("/contact",  "0.6", "yearly"),
     ("/terms",    "0.2", "yearly"),
     ("/privacy",  "0.2", "yearly"),
+]
+
+# Module detail pages at /modules/{slug}. Keep in sync with
+# frontend/src/data/modules-marketing.js.
+MODULE_PAGES: list[str] = [
+    "betterstats", "betterselect", "bettersocials", "betteradmin", "betteriq",
+]
+
+# Marketing blog posts at /blog/{slug}. Keep in sync with
+# frontend/src/data/blog.js.
+BLOG_POSTS: list[str] = [
+    "how-to-merge-duplicate-player-records",
+    "why-your-cricket-club-needs-a-public-stats-page",
+    "why-your-clubs-history-keeps-getting-lost",
+    "season-yearbook-automatically-generated",
+    "how-cricket-statistics-build-club-culture",
+    "cricket-milestones-numbers-that-define-a-career",
+    "what-is-a-good-batting-average-in-club-cricket",
+    "5-reasons-your-cricket-club-is-losing-its-stats-history",
+    "understanding-bowling-economy-rate-in-club-cricket",
 ]
 
 # Section pages a connected club exposes publicly.
@@ -61,6 +85,12 @@ async def sitemap(db: AsyncSession = Depends(get_db)):
 
     for path, prio, cf in STATIC_PAGES:
         entries.append(_url_entry(f"{SITE}{path}", lastmod=today, changefreq=cf, priority=prio))
+
+    for slug in MODULE_PAGES:
+        entries.append(_url_entry(f"{SITE}/modules/{slug}", lastmod=today, changefreq="monthly", priority="0.8"))
+
+    for slug in BLOG_POSTS:
+        entries.append(_url_entry(f"{SITE}/blog/{slug}", lastmod=today, changefreq="monthly", priority="0.7"))
 
     # Every active club's public section pages.
     club_rows = (await db.execute(
