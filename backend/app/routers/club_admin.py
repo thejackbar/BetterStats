@@ -2763,7 +2763,8 @@ async def list_milestones_report(
             SELECT
                 m.milestone_type, m.milestone_value, m.achieved_at, m.detail,
                 p.id::text AS player_id,
-                COALESCE(p.display_name_override, p.name) AS player_name
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                p.gender AS gender
             FROM milestones m
             JOIN players p ON p.id = m.player_id
             WHERE p.organisation_id = :org_id
@@ -2781,6 +2782,7 @@ async def list_milestones_report(
         achieved.append({
             "player_id": r["player_id"],
             "player_name": r["player_name"],
+            "gender": r["gender"],
             "type": mt,
             "category": _CAT.get(mt, "matches"),
             "milestone_value": mv,
@@ -2796,6 +2798,7 @@ async def list_milestones_report(
             SELECT
                 p.id::text AS player_id,
                 COALESCE(p.display_name_override, p.name) AS player_name,
+                p.gender AS gender,
                 COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
                 COUNT(DISTINCT ga.game_id) AS matches
             FROM game_appearances ga
@@ -2818,7 +2821,7 @@ async def list_milestones_report(
                 LIMIT 1
             ) gdn ON TRUE
             WHERE s.organisation_id = :org_id AND p.is_player = TRUE
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name),
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender,
                      COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
             HAVING COUNT(DISTINCT ga.game_id) >= 50
         """),
@@ -2833,6 +2836,7 @@ async def list_milestones_report(
             achieved.append({
                 "player_id": r["player_id"],
                 "player_name": r["player_name"],
+                "gender": r["gender"],
                 "type": "grade_matches",
                 "category": "matches",
                 "milestone_value": threshold,
@@ -2858,6 +2862,7 @@ async def list_milestones_report(
             SELECT
                 p.id::text AS player_id,
                 COALESCE(p.display_name_override, p.name) AS player_name,
+                p.gender AS gender,
                 COALESCE(SUM(pss.runs), 0)    AS total_runs,
                 COALESCE(SUM(pss.wickets), 0) AS total_wickets,
                 COALESCE(SUM(pss.matches), 0) AS total_matches,
@@ -2871,7 +2876,7 @@ async def list_milestones_report(
                     WHERE s2.id = pss.season_id AND s2.organisation_id = :org_id
                 )
             WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
             ORDER BY COALESCE(p.display_name_override, p.name)
         """),
         {"org_id": org_id, "cutoff": cutoff},
@@ -2896,6 +2901,7 @@ async def list_milestones_report(
             upcoming.append({
                 "player_id": r["player_id"],
                 "player_name": r["player_name"],
+                "gender": r["gender"],
                 "type": mt,
                 "category": cat,
                 "current": current,
@@ -2917,6 +2923,7 @@ async def list_milestones_report(
             SELECT
                 p.id::text AS player_id,
                 COALESCE(p.display_name_override, p.name) AS player_name,
+                p.gender AS gender,
                 COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
                 COUNT(DISTINCT ga.game_id) AS matches
             FROM game_appearances ga
@@ -2940,7 +2947,7 @@ async def list_milestones_report(
                 LIMIT 1
             ) gdn ON TRUE
             WHERE s.organisation_id = :org_id AND p.is_player = TRUE
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name),
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender,
                      COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
         """),
         {"org_id": org_id, "cutoff": cutoff},
@@ -2959,6 +2966,7 @@ async def list_milestones_report(
         upcoming.append({
             "player_id": r["player_id"],
             "player_name": r["player_name"],
+            "gender": r["gender"],
             "type": "grade_matches",
             "category": "matches",
             "current": n,

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { useClub } from '../../hooks/useClub'
+import { normalizeGender } from '../../lib/playerAttributes'
 
 const CAT_LABELS = {
   batting: 'BATTING',
@@ -60,7 +61,10 @@ export default function AdminMilestones() {
   const [error, setError] = useState(null)
   const [status, setStatus] = useState('upcoming')
   const [category, setCategory] = useState('all')
+  const [gender, setGender] = useState('all')
   const [search, setSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   const { club } = useClub()
   const slug = club?.slug
@@ -77,11 +81,22 @@ export default function AdminMilestones() {
     const q = search.trim().toLowerCase()
     const catMatch = item => category === 'all' || item.category === category
     const nameMatch = item => !q || item.player_name.toLowerCase().includes(q)
-    return {
-      upcomingFiltered: data.upcoming.filter(i => catMatch(i) && nameMatch(i)),
-      achievedFiltered: data.achieved.filter(i => catMatch(i) && nameMatch(i)),
+    const genderMatch = item => gender === 'all' || normalizeGender(item.gender) === gender
+    // Date filter only applies to achieved milestones (by the date achieved).
+    // Items with no achieved_at fall out once a range is set.
+    const dateMatch = item => {
+      if (!dateFrom && !dateTo) return true
+      if (!item.achieved_at) return false
+      const d = item.achieved_at.slice(0, 10)
+      if (dateFrom && d < dateFrom) return false
+      if (dateTo && d > dateTo) return false
+      return true
     }
-  }, [data, category, search])
+    return {
+      upcomingFiltered: data.upcoming.filter(i => catMatch(i) && nameMatch(i) && genderMatch(i)),
+      achievedFiltered: data.achieved.filter(i => catMatch(i) && nameMatch(i) && genderMatch(i) && dateMatch(i)),
+    }
+  }, [data, category, search, gender, dateFrom, dateTo])
 
   const showUpcoming = status === 'upcoming' || status === 'all'
   const showAchieved = status === 'achieved' || status === 'all'
@@ -132,6 +147,24 @@ export default function AdminMilestones() {
             ))}
           </div>
 
+          {/* Gender filter */}
+          <div className="flex border pb-hairline rounded overflow-hidden">
+            {[['all', 'All'], ['male', 'Men'], ['female', 'Women']].map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setGender(val)}
+                className={`px-3 py-1.5 font-mono text-[10px] tracking-wide2 transition-colors ${
+                  gender === val
+                    ? 'bg-pb-surface2 text-pb-text'
+                    : 'text-pb-faint hover:text-pb-text'
+                }`}
+                style={gender === val ? { color: 'var(--pb-accent)' } : {}}
+              >
+                {label.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
           {/* Player search */}
           <input
             type="text"
@@ -140,6 +173,36 @@ export default function AdminMilestones() {
             onChange={e => setSearch(e.target.value)}
             className="px-3 py-1.5 text-sm bg-pb-surface2 border pb-hairline rounded text-pb-text placeholder-pb-faintest focus:outline-none focus:border-pb-accent/50 min-w-[160px]"
           />
+
+          {/* Achieved-date filter (only meaningful when achieved rows show) */}
+          {showAchieved && (
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Achieved</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                aria-label="Achieved from date"
+                className="px-2 py-1.5 text-sm bg-pb-surface2 border pb-hairline rounded text-pb-text focus:outline-none focus:border-pb-accent/50"
+              />
+              <span className="text-pb-faintest text-xs">to</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                aria-label="Achieved to date"
+                className="px-2 py-1.5 text-sm bg-pb-surface2 border pb-hairline rounded text-pb-text focus:outline-none focus:border-pb-accent/50"
+              />
+              {(dateFrom || dateTo) && (
+                <button
+                  onClick={() => { setDateFrom(''); setDateTo('') }}
+                  className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors"
+                >
+                  CLEAR
+                </button>
+              )}
+            </div>
+          )}
 
           {data && (
             <span className="text-pb-faintest font-mono text-[10px] ml-auto">
