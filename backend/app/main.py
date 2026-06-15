@@ -984,6 +984,24 @@ async def lifespan(app: FastAPI):
         ))
         # BetterMerch per-product tracking mode (migration 085).
         await conn.execute(text("ALTER TABLE merch_products ADD COLUMN IF NOT EXISTS for_resale BOOLEAN NOT NULL DEFAULT true"))
+        # BetterMerch category tree (migration 086).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS merch_categories (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                parent_id UUID REFERENCES merch_categories(id) ON DELETE CASCADE,
+                top_category TEXT NOT NULL,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_categories_org ON merch_categories(organisation_id, top_category, parent_id)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE merch_products ADD COLUMN IF NOT EXISTS category_id UUID REFERENCES merch_categories(id) ON DELETE SET NULL"
+        ))
         # BetterMerch Square integration (migration 084) — per-club OAuth + mapping.
         await conn.execute(text("ALTER TABLE merch_products ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'"))
         await conn.execute(text("ALTER TABLE merch_products ADD COLUMN IF NOT EXISTS square_object_id TEXT"))

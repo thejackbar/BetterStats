@@ -1586,6 +1586,7 @@ class FeePayment(Base):
 # history is kept. Individual high-value equipment lives in merch_assets.
 
 MERCH_CATEGORIES = ("apparel", "equipment", "food_drink")
+MERCH_MAX_CATEGORY_DEPTH = 3   # club-defined sub-categories nest 3 levels under a type
 # Signed movements: received/+ , sold/issued/used/write_off/- , adjustment/±,
 # stocktake sets an absolute count (delta = new − old).
 MERCH_MOVEMENT_KINDS = ("received", "sold", "issued", "used", "adjustment", "stocktake", "write_off")
@@ -1593,16 +1594,33 @@ MERCH_ASSET_CONDITIONS = ("new", "good", "fair", "poor", "retired")
 MERCH_ASSET_STATUSES = ("in_service", "out_for_repair", "retired")
 
 
+class MerchCategory(Base):
+    """A club-defined category node for grouping stock items, nested up to three
+    levels under a fixed top type (`top_category`). Created inline as items are
+    added (deduped by name within a parent); reports roll up by node. Deleting a
+    node reparents its children and nulls the products' `category_id`."""
+    __tablename__ = "merch_categories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("merch_categories.id", ondelete="CASCADE"), nullable=True)
+    top_category = Column(Text, nullable=False)   # apparel | equipment | food_drink
+    name = Column(Text, nullable=False)
+    sort_order = Column(Integer, nullable=False, server_default="0")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class MerchProduct(Base):
     """A catalogue line in the club stock register — the 'what'. Stock lives on
     its variants (always at least one). `category` picks the template; the
     `unit_cost`/`unit_price`/`low_stock_threshold` here are defaults a variant
-    can override."""
+    can override. `category_id` files it under a club-defined category node."""
     __tablename__ = "merch_products"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     category = Column(Text, nullable=False, server_default="apparel")
+    category_id = Column(UUID(as_uuid=True), ForeignKey("merch_categories.id", ondelete="SET NULL"), nullable=True)
     name = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     unit_cost = Column(Numeric(10, 2), nullable=True)   # default cost to buy

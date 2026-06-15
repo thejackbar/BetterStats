@@ -307,14 +307,22 @@ export const api = {
   // ─── BetterMerch (BetterAdmin module) — club stock register ─────────────────
   merchOverview: () => request('/club-admin/merch/overview'),
   merchAlerts: () => request('/club-admin/merch/alerts'),
-  merchListProducts: ({ category, q, includeInactive } = {}) => {
+  merchListProducts: ({ category, categoryId, q, includeInactive } = {}) => {
     const p = new URLSearchParams()
     if (category) p.set('category', category)
+    if (categoryId) p.set('category_id', categoryId)
     if (q) p.set('q', q)
     if (includeInactive) p.set('include_inactive', 'true')
     const qs = p.toString()
     return request(`/club-admin/merch/products${qs ? `?${qs}` : ''}`)
   },
+  merchListCategories: () => request('/club-admin/merch/categories'),
+  merchCreateCategory: (data) =>
+    request('/club-admin/merch/categories', { method: 'POST', body: JSON.stringify(data) }),
+  merchRenameCategory: (id, data) =>
+    request(`/club-admin/merch/categories/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  merchDeleteCategory: (id) =>
+    request(`/club-admin/merch/categories/${id}`, { method: 'DELETE' }),
   merchGetProduct: (id) => request(`/club-admin/merch/products/${id}`),
   merchCreateProduct: (data) =>
     request('/club-admin/merch/products', { method: 'POST', body: JSON.stringify(data) }),

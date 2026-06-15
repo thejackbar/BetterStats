@@ -32,12 +32,12 @@ export default function MerchReports() {
           </div>
 
           <div>
-            <h3 className="font-display font-bold text-sm mb-2">Stock value by category</h3>
+            <h3 className="font-display font-bold text-sm mb-2">Stock value by type</h3>
             <div className="pb-card overflow-x-auto">
               <table className="w-full text-[12.5px]">
                 <thead>
                   <tr className="text-left text-pb-faint border-b border-pb-hairline">
-                    <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase">Category</th>
+                    <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase">Type</th>
                     <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">Units</th>
                     <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">At cost</th>
                     <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">At retail</th>
@@ -57,6 +57,37 @@ export default function MerchReports() {
               </table>
             </div>
           </div>
+
+          {(data.by_category_node || []).length > 0 && (
+            <div>
+              <h3 className="font-display font-bold text-sm mb-2">Stock value by category</h3>
+              <div className="pb-card overflow-x-auto">
+                <table className="w-full text-[12.5px]">
+                  <thead>
+                    <tr className="text-left text-pb-faint border-b border-pb-hairline">
+                      <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase">Category</th>
+                      <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">Units</th>
+                      <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">At cost</th>
+                      <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">At retail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.by_category_node.map((n) => (
+                      <tr key={n.id} className="border-b border-pb-hairline/40">
+                        <td className="px-3 py-2">
+                          <span style={{ paddingLeft: `${(n.depth - 1) * 16}px` }}>{n.name}</span>
+                          <span className="text-pb-faintest text-[10px] ml-2">{categoryLabel(n.top_category)}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right">{n.units_on_hand}</td>
+                        <td className="px-3 py-2 text-right">{money(n.stock_value_cost)}</td>
+                        <td className="px-3 py-2 text-right">{money(n.stock_value_retail)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div>
             <h3 className="font-display font-bold text-sm mb-2">Stock value by item</h3>

@@ -385,6 +385,25 @@ Overview / Stock / Equipment / Activity / Reports / Square.
 - **Alerts feed the notification bell**: `notifications.py` count+summary add merch
   alerts when `org_has_module(club,'merch')`. Like the pending-request counts, this
   is current state, not "since last seen".
+- **Per-variant pricing + tracking mode (migration 085)**: each variant carries its
+  own `unit_cost`/`unit_price` (override of the product default via `_eff_cost`/
+  `_eff_price`), so one product holds several priced kinds (e.g. a 4-piece match ball
+  and a 2-piece trainer). `merch_products.for_resale` splits stock into bought-to-sell
+  (cost + price, sold/issued to members) vs **club-use** consumable (a straight cost,
+  no sell price, no owing — e.g. balls); the New Product form defaults equipment to
+  club-use. Club-use products drop sold/issued from the movement picker. Report margin
+  counts only priced items (a `CASE` in `stock_summary`) so club-use cost doesn't drag
+  it down. Money displays two decimals.
+- **Category tree (migration 086)**: `merch_categories` is a self-referencing tree
+  (≤3 levels) per club, partitioned by the fixed top type (`top_category`); products
+  get an optional `category_id`. Created **inline** as items are added (POST
+  `/categories` dedupes a same-named sibling). Endpoints `GET/POST/PATCH/DELETE
+  /merch/categories` (delete reparents children, nulls products via FK SET NULL). The
+  Stock list filters by node+descendants (`_descendant_ids`); reports add `by_item`
+  and a rolled-up `by_category_node` (each node carries its whole subtree's totals).
+  Frontend `CategoryPicker` is cascading with "+ New…". The three fixed types stay as
+  the template drivers (sizes / expiry / club-use default), so they're separate from
+  the category tree.
 
 ### Square POS integration (migration 084, v8.18.1)
 
