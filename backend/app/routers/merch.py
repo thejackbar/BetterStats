@@ -148,6 +148,7 @@ def _product_out(p: MerchProduct, variants: list[MerchVariant] | None = None) ->
         "category": p.category,
         "name": p.name,
         "description": p.description,
+        "for_resale": p.for_resale,
         "unit_cost": _f(p.unit_cost),
         "unit_price": _f(p.unit_price),
         "low_stock_threshold": p.low_stock_threshold,
@@ -229,6 +230,7 @@ class ProductIn(BaseModel):
     category: str = "apparel"
     name: str
     description: Optional[str] = None
+    for_resale: bool = True
     unit_cost: Optional[float] = None
     unit_price: Optional[float] = None
     low_stock_threshold: Optional[int] = None
@@ -241,6 +243,7 @@ class ProductPatch(BaseModel):
     category: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
+    for_resale: Optional[bool] = None
     unit_cost: Optional[float] = None
     unit_price: Optional[float] = None
     low_stock_threshold: Optional[int] = None
@@ -315,6 +318,7 @@ async def create_product(
         category=body.category,
         name=body.name.strip(),
         description=body.description,
+        for_resale=body.for_resale,
         unit_cost=_money(body.unit_cost),
         unit_price=_money(body.unit_price),
         low_stock_threshold=body.low_stock_threshold,
@@ -374,7 +378,7 @@ async def update_product(
     data = body.model_dump(exclude_unset=True)
     if "category" in data and data["category"] not in MERCH_CATEGORIES:
         raise HTTPException(status_code=422, detail=f"Unknown category: {data['category']}")
-    for field in ("category", "name", "description", "low_stock_threshold", "supplier", "notes", "is_active"):
+    for field in ("category", "name", "description", "for_resale", "low_stock_threshold", "supplier", "notes", "is_active"):
         if field in data:
             setattr(p, field, data[field])
     if "unit_cost" in data:

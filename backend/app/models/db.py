@@ -1610,6 +1610,10 @@ class MerchProduct(Base):
     low_stock_threshold = Column(Integer, nullable=True)  # default reorder point (NULL = no alert)
     supplier = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # True: bought to sell — cost + sell price, margin, sold/issued to members
+    # (apparel, canteen). False: club-use consumable — a straight cost, no sell
+    # price and no owing (e.g. match/training balls, stumps).
+    for_resale = Column(Boolean, nullable=False, server_default="true")
     source = Column(Text, nullable=False, server_default="manual")   # 'manual' | 'square'
     square_object_id = Column(Text, nullable=True)                    # Square catalog ITEM id
     is_active = Column(Boolean, nullable=False, server_default="true")
