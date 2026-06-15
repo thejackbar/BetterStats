@@ -17,7 +17,8 @@ Providers
 
 Going live is two ops steps the code can't do for you: create the provider
 account + set ``email_api_key``, and verify the sending domain's SPF/DKIM/DMARC
-(we send from a subdomain of the domain we own, ``betterat.cricket``)
+(we send from a subdomain of ``betterstats.cricket``, where those records live;
+it moves to ``betterat.cricket`` once they are set up there)
 so mail authenticates and lands in the inbox.
 """
 from __future__ import annotations

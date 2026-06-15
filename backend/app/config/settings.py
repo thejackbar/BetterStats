@@ -35,11 +35,11 @@ class Settings(BaseSettings):
     #            a self-hosted MTA (Postal/Listmonk), or a club's own Workspace.
     email_provider: str = "console"  # console | brevo | resend | smtp
     email_api_key: str = ""
-    # From must be a domain with SPF/DKIM/DMARC set up (the "authenticated"
-    # platform domain in comms.py). We're on betterat.cricket now: configure
-    # those DNS records on betterat.cricket before going live, or pin
-    # EMAIL_FROM_ADDRESS=noreply@betterstats.cricket in the server .env until then.
-    email_from_address: str = "noreply@betterat.cricket"
+    # From must be on a domain with SPF/DKIM/DMARC set up (the "authenticated"
+    # platform domain in comms.py). Those records live on betterstats.cricket, so
+    # the From stays there until betterat.cricket's DNS is set up; then flip this
+    # to noreply@betterat.cricket (or set EMAIL_FROM_ADDRESS in the server .env).
+    email_from_address: str = "noreply@betterstats.cricket"
     email_from_name: str = "Better Cricket"
     email_reply_to: str = "betteratcricket@gmail.com"  # global default; per-club reply-to overrides
     # Public origin used to build the (mandatory) one-click unsubscribe link.
