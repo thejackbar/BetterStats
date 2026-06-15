@@ -921,6 +921,36 @@ async def report_summary(
         for cat, cost, retail, units in (await db.execute(cat_q)).all()
     ]
 
+    # Stock value by item (each product, across its variants).
+    item_q = (
+        select(
+            MerchProduct.id, MerchProduct.name, MerchProduct.category, MerchProduct.for_resale,
+            func.coalesce(func.sum(MerchVariant.quantity), 0),
+            func.coalesce(func.sum(MerchVariant.quantity * cost_expr), 0),
+            func.coalesce(func.sum(MerchVariant.quantity * price_expr), 0),
+        )
+        .join(MerchVariant, MerchVariant.product_id == MerchProduct.id)
+        .where(
+            MerchProduct.organisation_id == club.id,
+            MerchProduct.is_active.is_(True),
+            MerchVariant.is_active.is_(True),
+        )
+        .group_by(MerchProduct.id, MerchProduct.name, MerchProduct.category, MerchProduct.for_resale)
+        .order_by(MerchProduct.category, MerchProduct.name)
+    )
+    by_item = [
+        {
+            "product_id": str(pid),
+            "name": name,
+            "category": cat,
+            "for_resale": resale,
+            "units_on_hand": int(units or 0),
+            "stock_value_cost": float(cost or 0),
+            "stock_value_retail": float(retail or 0),
+        }
+        for pid, name, cat, resale, units, cost, retail in (await db.execute(item_q)).all()
+    ]
+
     # Outstanding merch money by player (unpaid sales / issues).
     owed_q = (
         select(
@@ -942,6 +972,7 @@ async def report_summary(
     ]
 
     summary["by_category"] = by_category
+    summary["by_item"] = by_item
     summary["owed_by_player"] = owed_by_player
     return summary
 
