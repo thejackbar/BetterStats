@@ -29,7 +29,7 @@ export default function Blog() {
   usePageMeta({
     title: 'Blog — Cricket Stats Guides & Club Tips | Better Cricket',
     description: 'Cricket statistics guides and club management tips from the Better Cricket team: batting averages, bowling economy, historical data and more.',
-    image: 'https://betterat.cricket/og-image.png',
+    image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/blog',
   })
   return (

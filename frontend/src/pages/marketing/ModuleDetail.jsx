@@ -59,7 +59,7 @@ export default function ModuleDetail() {
   usePageMeta({
     title: m ? `${m.name} — ${m.tagline} | Better Cricket` : 'Modules | Better Cricket',
     description: m ? `${m.name}: ${m.summary}` : 'The Better Cricket platform modules.',
-    image: 'https://betterat.cricket/og-image.png',
+    image: 'https://betterat.cricket/og-cover.png',
     url: m ? `https://betterat.cricket/modules/${m.slug}` : 'https://betterat.cricket/modules',
   })
   if (!m) return <Navigate to="/modules" replace />

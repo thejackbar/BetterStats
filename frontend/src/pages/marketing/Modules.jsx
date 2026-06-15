@@ -139,7 +139,7 @@ export default function Modules() {
     title: 'Modules — BetterSelect, BetterSocials, BetterAdmin & BetterIQ | Better Cricket',
     description:
       'Better Cricket in parts: the BetterStats Core plus four bolt-on modules, BetterSelect (selection), BetterSocials (website & social posts), BetterAdmin (fees, comms & merch) and BetterIQ (analytics & opposition scouting). Start with the BetterStats Core and add the modules you want.',
-    image: 'https://betterat.cricket/og-image.png',
+    image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/modules',
   })
   return (

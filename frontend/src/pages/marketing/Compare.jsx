@@ -86,7 +86,7 @@ export default function Compare() {
     title: 'Compare — Better Cricket vs the tools clubs already use',
     description:
       'An honest, side-by-side look at how Better Cricket stacks up against the spreadsheets, website builders, design apps and bulk email tools your club is already paying for, surface by surface.',
-    image: 'https://betterat.cricket/og-image.png',
+    image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/compare',
   })
 

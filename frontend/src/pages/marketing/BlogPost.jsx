@@ -70,7 +70,7 @@ export default function BlogPost() {
   usePageMeta(post ? {
     title: `${post.title} | Better Cricket`,
     description: post.description,
-    image: post.image ? `https://betterat.cricket${post.image}` : 'https://betterat.cricket/og-image.png',
+    image: post.image ? `https://betterat.cricket${post.image}` : 'https://betterat.cricket/og-cover.png',
     url: `https://betterat.cricket/blog/${post.slug}`,
   } : {})
 

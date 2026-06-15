@@ -17,7 +17,7 @@ const PRICING_JSONLD = {
     'A modular platform for Australian cricket clubs. BetterStats is $399 a year; add BetterSelect, BetterSocials and BetterAdmin for $149 each and BetterIQ for $249, with a set discount when you bundle (up to $146 off the full set, which comes to $949). Annual licence, one price per club.',
   brand: { '@type': 'Brand', name: 'Better Cricket' },
   url: 'https://betterat.cricket/pricing',
-  image: 'https://betterat.cricket/og-image.png',
+  image: 'https://betterat.cricket/og-cover.png',
   offers: {
     '@type': 'AggregateOffer',
     priceCurrency: 'AUD',
@@ -255,7 +255,7 @@ export default function Pricing() {
     title: 'Pricing — modular plans for cricket clubs | Better Cricket',
     description:
       'Modular, flat-rate pricing for Australian cricket clubs. BetterStats is $399 a year; add BetterSelect, BetterSocials and BetterAdmin for $149 each and BetterIQ for $249, with a set discount when you bundle (up to $146 off the full set, which comes to $949). One annual price per club, whatever the size.',
-    image: 'https://betterat.cricket/og-image.png',
+    image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/pricing',
     jsonLd: PRICING_JSONLD,
   })

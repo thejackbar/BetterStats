@@ -473,7 +473,7 @@ export default function Contact() {
   usePageMeta({
     title: 'Contact — Request Access for Your Cricket Club | Better Cricket',
     description: 'Request access for your Australian cricket club, ask a question, or email the Better Cricket team directly at betteratcricket@gmail.com.',
-    image: 'https://betterat.cricket/og-image.png',
+    image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/contact',
   })
   return (

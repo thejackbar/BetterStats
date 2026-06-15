@@ -270,7 +270,7 @@ export default function FAQ() {
   usePageMeta({
     title: 'FAQ — Better Cricket | Cricket club platform questions',
     description: 'Frequently asked questions about Better Cricket: pricing, onboarding, historical data depth, player profiles, season yearbooks, and how it works for Australian cricket clubs.',
-    image: 'https://betterat.cricket/og-image.png',
+    image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/faq',
     jsonLd: FAQ_JSONLD,
   })

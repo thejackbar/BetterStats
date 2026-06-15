@@ -358,7 +358,7 @@ export default function Features() {
   usePageMeta({
     title: 'Features — Automated Cricket Club Stats | BetterStats',
     description: 'Automatic stats sync, rich player profiles, leaderboards, records and season yearbooks, the foundation of every Better Cricket plan. Plus partnership records, StatLab custom queries, awards & honours management, and admin tools.',
-    image: 'https://betterat.cricket/og-image.png',
+    image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/features',
   })
   return (

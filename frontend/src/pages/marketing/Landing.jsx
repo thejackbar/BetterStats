@@ -541,7 +541,7 @@ export default function Landing() {
   usePageMeta({
     title: 'Better Cricket — The platform Australian cricket clubs run on',
     description: "The platform Australian cricket clubs run on: automated stats and a public club site (BetterStats core), plus BetterSelect, BetterSocials, BetterAdmin and BetterIQ analytics, all fed by your club's own match data and synced automatically, with no manual data entry.",
-    image: 'https://betterat.cricket/og-image.png',
+    image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/',
   })
   return (

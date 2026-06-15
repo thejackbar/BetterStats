@@ -174,7 +174,7 @@ export default function About() {
   usePageMeta({
     title: 'About — Better Cricket',
     description: 'Better Cricket puts everything an Australian cricket club runs on in one place: stats and history, weekend availability and selection, social posts, the back office and match prep.',
-    image: 'https://betterat.cricket/og-image.png',
+    image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/about',
   })
   return (
