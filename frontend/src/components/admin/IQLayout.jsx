@@ -8,6 +8,7 @@ import { Icon } from '../../pages/admin/betteriq/ui'
 import { ContextBar } from '../../pages/admin/betteriq/Context'
 import { moduleBrand } from '../../lib/moduleBrand'
 import ModuleLockup from '../ModuleLockup'
+import ModuleSwitcher from './ModuleSwitcher'
 import '../../pages/admin/betteriq/iq-theme.css'
 
 const IQ_BRAND = moduleBrand('iq')
@@ -149,6 +150,7 @@ export default function IQLayout({ children, title, eyebrow, actions }) {
             <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setMobileOpen(false)} />
             <aside className="absolute left-0 top-0 bottom-0 flex flex-col" style={{ width: SIDEBAR_W, background: 'var(--pb-surface)', borderRight: '1px solid var(--pb-hairline)' }}>
               <Brand />
+              <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--pb-hairline)' }}><ModuleSwitcher wrap className="flex" onNavigate={() => setMobileOpen(false)} /></div>
               <div className="flex-1 overflow-y-auto iq-scroll"><NavList onNavigate={() => setMobileOpen(false)} /></div>
             </aside>
           </div>
@@ -165,6 +167,7 @@ export default function IQLayout({ children, title, eyebrow, actions }) {
                 <h1 className="iq-display font-bold text-[18px] md:text-[20px] leading-tight truncate" style={{ letterSpacing: '-0.01em', marginTop: head.eyebrow ? 3 : 0 }}>{head.title}</h1>
               </div>
             </div>
+            <ModuleSwitcher className="hidden md:flex min-w-0" />
             <div className="flex items-center gap-2.5 shrink-0">
               {actions}
               <ThemeToggle theme={theme} onToggle={toggleTheme} />
