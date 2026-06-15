@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration, bookmarks
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -253,6 +253,20 @@ async def lifespan(app: FastAPI):
             await conn.execute(text(
                 f"ALTER TABLE club_onboarding_requests ADD COLUMN IF NOT EXISTS {_col} TEXT"
             ))
+        # Per-user admin bookmarks — favourites pinned to the top of the admin
+        # sidebar for quick access (migration 082). Mirrored here so the API
+        # boots before alembic runs. Keyed to the user, not the club.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_bookmarks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                path TEXT NOT NULL,
+                label TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_user_bookmark_path UNIQUE (user_id, path)
+            )
+        """))
         # Season aliases — admin can mark one season as merged into another so
         # they display and aggregate as a single season (e.g. Summer 25/26 +
         # Winter 25/26 → 2025/26). Soft model: no row rewrites; downstream
@@ -1027,6 +1041,7 @@ app.include_router(yearbooks.router)
 app.include_router(images.router)
 app.include_router(og_preview.router)
 app.include_router(notifications.router)
+app.include_router(bookmarks.router)  # per-user admin sidebar favourites
 app.include_router(seo.router)
 app.include_router(families.router)
 app.include_router(manual_entries.router)
