@@ -1586,6 +1586,7 @@ class FeePayment(Base):
 # history is kept. Individual high-value equipment lives in merch_assets.
 
 MERCH_CATEGORIES = ("apparel", "equipment", "food_drink")
+MERCH_MAX_CATEGORY_DEPTH = 3   # club-defined sub-categories nest 3 levels under a type
 # Signed movements: received/+ , sold/issued/used/write_off/- , adjustment/±,
 # stocktake sets an absolute count (delta = new − old).
 MERCH_MOVEMENT_KINDS = ("received", "sold", "issued", "used", "adjustment", "stocktake", "write_off")
@@ -1593,16 +1594,33 @@ MERCH_ASSET_CONDITIONS = ("new", "good", "fair", "poor", "retired")
 MERCH_ASSET_STATUSES = ("in_service", "out_for_repair", "retired")
 
 
+class MerchCategory(Base):
+    """A club-defined category node for grouping stock items, nested up to three
+    levels under a fixed top type (`top_category`). Created inline as items are
+    added (deduped by name within a parent); reports roll up by node. Deleting a
+    node reparents its children and nulls the products' `category_id`."""
+    __tablename__ = "merch_categories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("merch_categories.id", ondelete="CASCADE"), nullable=True)
+    top_category = Column(Text, nullable=False)   # apparel | equipment | food_drink
+    name = Column(Text, nullable=False)
+    sort_order = Column(Integer, nullable=False, server_default="0")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class MerchProduct(Base):
     """A catalogue line in the club stock register — the 'what'. Stock lives on
     its variants (always at least one). `category` picks the template; the
     `unit_cost`/`unit_price`/`low_stock_threshold` here are defaults a variant
-    can override."""
+    can override. `category_id` files it under a club-defined category node."""
     __tablename__ = "merch_products"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     category = Column(Text, nullable=False, server_default="apparel")
+    category_id = Column(UUID(as_uuid=True), ForeignKey("merch_categories.id", ondelete="SET NULL"), nullable=True)
     name = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     unit_cost = Column(Numeric(10, 2), nullable=True)   # default cost to buy
@@ -1610,6 +1628,12 @@ class MerchProduct(Base):
     low_stock_threshold = Column(Integer, nullable=True)  # default reorder point (NULL = no alert)
     supplier = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # True: bought to sell — cost + sell price, margin, sold/issued to members
+    # (apparel, canteen). False: club-use consumable — a straight cost, no sell
+    # price and no owing (e.g. match/training balls, stumps).
+    for_resale = Column(Boolean, nullable=False, server_default="true")
+    source = Column(Text, nullable=False, server_default="manual")   # 'manual' | 'square'
+    square_object_id = Column(Text, nullable=True)                    # Square catalog ITEM id
     is_active = Column(Boolean, nullable=False, server_default="true")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -1637,6 +1661,7 @@ class MerchVariant(Base):
     quantity = Column(Integer, nullable=False, server_default="0")
     low_stock_threshold = Column(Integer, nullable=True)
     expiry_date = Column(Date, nullable=True)
+    square_object_id = Column(Text, nullable=True)   # Square catalog ITEM_VARIATION id
     is_active = Column(Boolean, nullable=False, server_default="true")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -1667,6 +1692,8 @@ class MerchMovement(Base):
     payment_method = Column(Text, nullable=True)
     note = Column(Text, nullable=True)
     occurred_on = Column(Date, nullable=True)                # business date of the movement
+    source = Column(Text, nullable=False, server_default="manual")   # 'manual' | 'square'
+    external_ref = Column(Text, nullable=True)               # dedupe key for imported rows (e.g. Square order line)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -1692,6 +1719,40 @@ class MerchAsset(Base):
     status = Column(Text, nullable=False, server_default="in_service")
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MerchSquareConnection(Base):
+    """A club's OAuth connection to its own Square account (one per club). Square
+    is the source of truth for canteen/bar stock: we mirror its catalog + current
+    inventory counts into food_drink products, and import completed sales as
+    'sold' movements. Tokens are stored per club (same pattern as other per-club
+    API tokens); the code-flow refresh token does not expire, the access token is
+    refreshed when it nears its 30-day expiry."""
+    __tablename__ = "merch_square_connections"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", name="uq_merch_square_org"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    merchant_id = Column(Text, nullable=True)
+    environment = Column(Text, nullable=False, server_default="production")  # 'sandbox' | 'production'
+    access_token = Column(Text, nullable=True)
+    refresh_token = Column(Text, nullable=True)
+    token_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    scopes = Column(Text, nullable=True)
+    location_id = Column(Text, nullable=True)
+    location_name = Column(Text, nullable=True)
+    sync_enabled = Column(Boolean, nullable=False, server_default="true")
+    sync_sales = Column(Boolean, nullable=False, server_default="true")
+    last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_sync_status = Column(Text, nullable=True)   # 'ok' | 'error'
+    last_sync_error = Column(Text, nullable=True)
+    sales_cursor = Column(TIMESTAMP(timezone=True), nullable=True)  # import orders closed after this
+    connected_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    connected_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

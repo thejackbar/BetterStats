@@ -15,7 +15,7 @@ from __future__ import annotations
 import csv
 import io
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
@@ -24,16 +24,34 @@ from fastapi.responses import Response
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
+from jose import jwt
 
+from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player,
-    MerchProduct, MerchVariant, MerchMovement, MerchAsset,
+    MerchProduct, MerchVariant, MerchMovement, MerchAsset, MerchSquareConnection, MerchCategory,
     MERCH_CATEGORIES, MERCH_MOVEMENT_KINDS, MERCH_ASSET_CONDITIONS, MERCH_ASSET_STATUSES,
+    MERCH_MAX_CATEGORY_DEPTH,
     get_db,
 )
 from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_MERCH
 from app.services import merch as merch_service
+from app.services import square_client, square_sync
+
+# Signed state for the Square OAuth handshake — ties the callback back to the
+# club + user that started it, and self-expires.
+SQUARE_STATE_TYP = "square_oauth"
+
+
+def sign_square_state(org_id, user_id) -> str:
+    payload = {
+        "org": str(org_id),
+        "uid": str(user_id),
+        "typ": SQUARE_STATE_TYP,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=20),
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 router = APIRouter(prefix="/club-admin/merch", tags=["club-admin-merch"])
 
@@ -129,8 +147,10 @@ def _product_out(p: MerchProduct, variants: list[MerchVariant] | None = None) ->
     out = {
         "id": str(p.id),
         "category": p.category,
+        "category_id": str(p.category_id) if p.category_id else None,
         "name": p.name,
         "description": p.description,
+        "for_resale": p.for_resale,
         "unit_cost": _f(p.unit_cost),
         "unit_price": _f(p.unit_price),
         "low_stock_threshold": p.low_stock_threshold,
@@ -193,6 +213,170 @@ async def get_alerts(
 
 
 # ───────────────────────────────────────────────────────────────────────────
+# Category tree (club-defined, nested under the fixed top type)
+# ───────────────────────────────────────────────────────────────────────────
+
+async def _categories_for_org(db: AsyncSession, org_id) -> list:
+    rows = await db.execute(
+        select(MerchCategory).where(MerchCategory.organisation_id == org_id)
+        .order_by(MerchCategory.sort_order, MerchCategory.name)
+    )
+    return list(rows.scalars().all())
+
+
+def _category_index(cats: list):
+    by_id = {c.id: c for c in cats}
+    children: dict = {}
+    for c in cats:
+        children.setdefault(c.parent_id, []).append(c)
+    return by_id, children
+
+
+def _category_path(cat, by_id) -> list[str]:
+    names, node, guard = [], cat, 0
+    while node is not None and guard < 8:
+        names.append(node.name)
+        node = by_id.get(node.parent_id) if node.parent_id else None
+        guard += 1
+    return list(reversed(names))
+
+
+def _descendant_ids(node_id, children) -> list:
+    out, stack = [], [node_id]
+    while stack:
+        nid = stack.pop()
+        out.append(nid)
+        for ch in children.get(nid, []):
+            stack.append(ch.id)
+    return out
+
+
+def _cat_out(c, by_id) -> dict:
+    path = _category_path(c, by_id)
+    return {
+        "id": str(c.id),
+        "parent_id": str(c.parent_id) if c.parent_id else None,
+        "top_category": c.top_category,
+        "name": c.name,
+        "sort_order": c.sort_order,
+        "depth": len(path),
+        "path": path,
+    }
+
+
+class CategoryIn(BaseModel):
+    top_category: str
+    parent_id: Optional[str] = None
+    name: str
+
+
+class CategoryPatch(BaseModel):
+    name: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+@router.get("/categories", dependencies=[_require])
+async def list_categories(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    cats = await _categories_for_org(db, club.id)
+    by_id, _ = _category_index(cats)
+    return {"categories": [_cat_out(c, by_id) for c in cats]}
+
+
+@router.post("/categories", dependencies=[_require])
+async def create_category(
+    body: CategoryIn,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    if body.top_category not in MERCH_CATEGORIES:
+        raise HTTPException(status_code=422, detail=f"Unknown type: {body.top_category}")
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Name is required")
+    cats = await _categories_for_org(db, club.id)
+    by_id, children = _category_index(cats)
+    parent = None
+    if body.parent_id:
+        parent = await _category_or_404(db, club, body.parent_id)
+        if parent.top_category != body.top_category:
+            raise HTTPException(status_code=422, detail="Parent is under a different type")
+        if len(_category_path(parent, by_id)) >= MERCH_MAX_CATEGORY_DEPTH:
+            raise HTTPException(status_code=422, detail="Categories nest at most three levels")
+    pid = parent.id if parent else None
+    # Reuse an existing sibling with the same name (created-as-you-go dedupe).
+    for c in children.get(pid, []):
+        if c.top_category == body.top_category and c.name.strip().lower() == name.lower():
+            return _cat_out(c, by_id)
+    node = MerchCategory(organisation_id=club.id, parent_id=pid, top_category=body.top_category, name=name)
+    db.add(node)
+    await db.commit()
+    await db.refresh(node)
+    by_id[node.id] = node
+    return _cat_out(node, by_id)
+
+
+async def _category_or_404(db: AsyncSession, club: Organisation, cid: str) -> MerchCategory:
+    try:
+        c = await db.get(MerchCategory, uuid.UUID(str(cid)))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid category id")
+    if not c or c.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return c
+
+
+async def _resolve_category(db: AsyncSession, club: Organisation, category_id, top_category):
+    """Validate a category id belongs to the club and sits under the product's
+    type. Returns the UUID, or None for uncategorised."""
+    if not category_id:
+        return None
+    c = await _category_or_404(db, club, category_id)
+    if c.top_category != top_category:
+        raise HTTPException(status_code=422, detail="Category is under a different type")
+    return c.id
+
+
+@router.patch("/categories/{category_id}", dependencies=[_require])
+async def update_category(
+    category_id: str,
+    body: CategoryPatch,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    c = await _category_or_404(db, club, category_id)
+    if body.name is not None and body.name.strip():
+        c.name = body.name.strip()
+    if body.sort_order is not None:
+        c.sort_order = body.sort_order
+    await db.commit()
+    cats = await _categories_for_org(db, club.id)
+    by_id, _ = _category_index(cats)
+    return _cat_out(c, by_id)
+
+
+@router.delete("/categories/{category_id}", dependencies=[_require])
+async def delete_category(
+    category_id: str,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a node: its children move up to its parent, and any products filed
+    under it fall back to uncategorised (FK SET NULL)."""
+    c = await _category_or_404(db, club, category_id)
+    await db.execute(
+        MerchCategory.__table__.update()
+        .where(MerchCategory.parent_id == c.id)
+        .values(parent_id=c.parent_id)
+    )
+    await db.delete(c)
+    await db.commit()
+    return {"ok": True}
+
+
+# ───────────────────────────────────────────────────────────────────────────
 # Products + variants
 # ───────────────────────────────────────────────────────────────────────────
 
@@ -210,8 +394,10 @@ class VariantIn(BaseModel):
 
 class ProductIn(BaseModel):
     category: str = "apparel"
+    category_id: Optional[str] = None
     name: str
     description: Optional[str] = None
+    for_resale: bool = True
     unit_cost: Optional[float] = None
     unit_price: Optional[float] = None
     low_stock_threshold: Optional[int] = None
@@ -222,8 +408,10 @@ class ProductIn(BaseModel):
 
 class ProductPatch(BaseModel):
     category: Optional[str] = None
+    category_id: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
+    for_resale: Optional[bool] = None
     unit_cost: Optional[float] = None
     unit_price: Optional[float] = None
     low_stock_threshold: Optional[int] = None
@@ -254,6 +442,7 @@ def _variant_label(vi: VariantIn) -> str:
 @router.get("/products", dependencies=[_require])
 async def list_products(
     category: Optional[str] = None,
+    category_id: Optional[str] = None,
     q: Optional[str] = None,
     include_inactive: bool = False,
     club: Organisation = Depends(get_current_club),
@@ -264,6 +453,14 @@ async def list_products(
         pq = pq.where(MerchProduct.is_active.is_(True))
     if category:
         pq = pq.where(MerchProduct.category == category)
+    if category_id:
+        cats = await _categories_for_org(db, club.id)
+        _, children = _category_index(cats)
+        try:
+            target = uuid.UUID(category_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="Invalid category id")
+        pq = pq.where(MerchProduct.category_id.in_(_descendant_ids(target, children)))
     if q:
         pq = pq.where(MerchProduct.name.ilike(f"%{q}%"))
     pq = pq.order_by(MerchProduct.category, MerchProduct.name)
@@ -293,11 +490,14 @@ async def create_product(
         raise HTTPException(status_code=422, detail=f"Unknown category: {body.category}")
     if not (body.name or "").strip():
         raise HTTPException(status_code=422, detail="Name is required")
+    cat_id = await _resolve_category(db, club, body.category_id, body.category)
     p = MerchProduct(
         organisation_id=club.id,
         category=body.category,
+        category_id=cat_id,
         name=body.name.strip(),
         description=body.description,
+        for_resale=body.for_resale,
         unit_cost=_money(body.unit_cost),
         unit_price=_money(body.unit_price),
         low_stock_threshold=body.low_stock_threshold,
@@ -357,9 +557,11 @@ async def update_product(
     data = body.model_dump(exclude_unset=True)
     if "category" in data and data["category"] not in MERCH_CATEGORIES:
         raise HTTPException(status_code=422, detail=f"Unknown category: {data['category']}")
-    for field in ("category", "name", "description", "low_stock_threshold", "supplier", "notes", "is_active"):
+    for field in ("category", "name", "description", "for_resale", "low_stock_threshold", "supplier", "notes", "is_active"):
         if field in data:
             setattr(p, field, data[field])
+    if "category_id" in data:
+        p.category_id = await _resolve_category(db, club, data["category_id"], p.category) if data["category_id"] else None
     if "unit_cost" in data:
         p.unit_cost = _money(data["unit_cost"])
     if "unit_price" in data:
@@ -900,6 +1102,62 @@ async def report_summary(
         for cat, cost, retail, units in (await db.execute(cat_q)).all()
     ]
 
+    # Stock value by item (each product, across its variants).
+    item_q = (
+        select(
+            MerchProduct.id, MerchProduct.name, MerchProduct.category, MerchProduct.category_id, MerchProduct.for_resale,
+            func.coalesce(func.sum(MerchVariant.quantity), 0),
+            func.coalesce(func.sum(MerchVariant.quantity * cost_expr), 0),
+            func.coalesce(func.sum(MerchVariant.quantity * price_expr), 0),
+        )
+        .join(MerchVariant, MerchVariant.product_id == MerchProduct.id)
+        .where(
+            MerchProduct.organisation_id == club.id,
+            MerchProduct.is_active.is_(True),
+            MerchVariant.is_active.is_(True),
+        )
+        .group_by(MerchProduct.id, MerchProduct.name, MerchProduct.category, MerchProduct.category_id, MerchProduct.for_resale)
+        .order_by(MerchProduct.category, MerchProduct.name)
+    )
+    by_item = [
+        {
+            "product_id": str(pid),
+            "name": name,
+            "category": cat,
+            "category_id": str(catid) if catid else None,
+            "for_resale": resale,
+            "units_on_hand": int(units or 0),
+            "stock_value_cost": float(cost or 0),
+            "stock_value_retail": float(retail or 0),
+        }
+        for pid, name, cat, catid, resale, units, cost, retail in (await db.execute(item_q)).all()
+    ]
+
+    # Roll item totals up the category tree so each node carries its own subtree.
+    cats = await _categories_for_org(db, club.id)
+    by_id, _children = _category_index(cats)
+    node_tot = {str(c.id): {"units": 0, "cost": 0.0, "retail": 0.0} for c in cats}
+    for it in by_item:
+        cid, guard = it["category_id"], 0
+        while cid and cid in node_tot and guard < 8:
+            node_tot[cid]["units"] += it["units_on_hand"]
+            node_tot[cid]["cost"] += it["stock_value_cost"]
+            node_tot[cid]["retail"] += it["stock_value_retail"]
+            parent = by_id[uuid.UUID(cid)].parent_id
+            cid = str(parent) if parent else None
+            guard += 1
+    by_category_node = []
+    for c in cats:
+        t = node_tot[str(c.id)]
+        node = _cat_out(c, by_id)
+        node.update({
+            "units_on_hand": t["units"],
+            "stock_value_cost": round(t["cost"], 2),
+            "stock_value_retail": round(t["retail"], 2),
+        })
+        by_category_node.append(node)
+    by_category_node.sort(key=lambda n: (n["top_category"], n["path"]))
+
     # Outstanding merch money by player (unpaid sales / issues).
     owed_q = (
         select(
@@ -921,6 +1179,8 @@ async def report_summary(
     ]
 
     summary["by_category"] = by_category
+    summary["by_category_node"] = by_category_node
+    summary["by_item"] = by_item
     summary["owed_by_player"] = owed_by_player
     return summary
 
@@ -966,3 +1226,132 @@ async def export_stock(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=merch-stock.csv"},
     )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Square POS integration (canteen/bar stock + sales)
+# ───────────────────────────────────────────────────────────────────────────
+
+def _square_status(conn: MerchSquareConnection | None) -> dict:
+    return {
+        "configured": settings.square_configured,
+        "connected": bool(conn and conn.access_token),
+        "merchant_id": conn.merchant_id if conn else None,
+        "environment": conn.environment if conn else settings.square_environment,
+        "location_id": conn.location_id if conn else None,
+        "location_name": conn.location_name if conn else None,
+        "sync_enabled": conn.sync_enabled if conn else True,
+        "sync_sales": conn.sync_sales if conn else True,
+        "needs_location": bool(conn and conn.access_token and not conn.location_id),
+        "last_sync_at": conn.last_sync_at.isoformat() if conn and conn.last_sync_at else None,
+        "last_sync_status": conn.last_sync_status if conn else None,
+        "last_sync_error": conn.last_sync_error if conn else None,
+    }
+
+
+@router.get("/square/status", dependencies=[_require])
+async def square_status(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    return _square_status(conn)
+
+
+@router.get("/square/connect-url", dependencies=[_require])
+async def square_connect_url(
+    current_user: User = Depends(require_cap(MANAGE_MERCH)),
+    club: Organisation = Depends(get_current_club),
+):
+    if not settings.square_configured:
+        raise HTTPException(status_code=400, detail="Square is not configured on this server")
+    state = sign_square_state(club.id, current_user.id)
+    return {"url": square_client.authorize_url(state)}
+
+
+@router.get("/square/locations", dependencies=[_require])
+async def square_locations(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Square first")
+    try:
+        token = await square_sync.ensure_fresh_token(db, conn)
+        locs = await square_client.list_locations(token)
+    except square_client.SquareError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"locations": [
+        {"id": l.get("id"), "name": l.get("name"), "status": l.get("status")} for l in locs
+    ]}
+
+
+class SquareLocationIn(BaseModel):
+    location_id: str
+    location_name: Optional[str] = None
+
+
+@router.post("/square/location", dependencies=[_require])
+async def square_set_location(
+    body: SquareLocationIn,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Square first")
+    conn.location_id = body.location_id
+    conn.location_name = body.location_name
+    await db.commit()
+    return _square_status(conn)
+
+
+class SquareSettingsIn(BaseModel):
+    sync_enabled: Optional[bool] = None
+    sync_sales: Optional[bool] = None
+
+
+@router.post("/square/settings", dependencies=[_require])
+async def square_settings(
+    body: SquareSettingsIn,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    if not conn:
+        raise HTTPException(status_code=400, detail="Connect Square first")
+    if body.sync_enabled is not None:
+        conn.sync_enabled = body.sync_enabled
+    if body.sync_sales is not None:
+        conn.sync_sales = body.sync_sales
+    await db.commit()
+    return _square_status(conn)
+
+
+@router.post("/square/sync", dependencies=[_require])
+async def square_sync_now(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await square_sync.sync_square(db, club.id)
+    except square_client.SquareError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/square/disconnect", dependencies=[_require])
+async def square_disconnect(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    if conn:
+        if conn.access_token:
+            try:
+                await square_client.revoke_token(conn.access_token)
+            except Exception:
+                pass  # best-effort; still drop our stored copy
+        await db.delete(conn)
+        await db.commit()
+    return {"ok": True}

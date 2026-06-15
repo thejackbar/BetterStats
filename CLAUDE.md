@@ -355,6 +355,94 @@ A recorded match-fee payment settles a member's games automatically, **oldest ga
 - Because status is derived, adding/removing a payment or editing `days_played` re-allocates automatically — **no migration, no stored flag to keep in sync**.
 - **Legacy, still live**: the `paid_payment_id` column and the `mark-paid` / `unmark` / `payments/bulk` endpoints still exist and still create `match_day` payments (which feed allocation), but no longer drive the per-row display. The old per-row MARK PAID / UNMARK buttons were removed from the member page in favour of a single "Record match-fee payment" box (`RecordMatchFeeForm`). The bulk-payment page still works (it reads the derived `is_paid` and creates payments).
 
+## BetterMerch — club stock register (v8.18, Jun 2026)
+
+Third module under the **BetterAdmin** umbrella (`MODULE_GROUPS.admin` already
+anticipated it; no separate price, the BetterAdmin toggle now covers
+`fees`+`comms`+`merch`). Tracks club stock across three category templates on one
+engine: **apparel** (sized/coloured variants), **equipment** (quantity OR
+individual assets), **food_drink** (canteen/bar, with expiry). Gated by
+`require_module("merch")` + the `MANAGE_MERCH` cap. Surface at `/admin/merch`
+(`BetterMerchLayout`, BetterAdmin amber via `moduleBrand('merch')`); pages
+Overview / Stock / Equipment / Activity / Reports / Square.
+
+- **Migration 083** (mirrored idempotently in `main.py` lifespan): `merch_products`
+  (the catalogue line), `merch_variants` (**stock lives here** as a running
+  `quantity`; one 'Standard' variant for un-varied products so apparel and canteen
+  read through the same code), `merch_movements` (signed in/out audit log:
+  received/sold/issued/used/adjustment/stocktake/write_off), `merch_assets`
+  (individual high-value equipment: condition + service/replace dates).
+- **`services/merch.py`**: `record_movement` (bumps the variant balance + writes the
+  audit row, no commit), `merch_alerts` (low-stock / expiring / service-due,
+  computed on read, no table), `stock_summary`. `routers/merch.py`
+  (`/club-admin/merch`) is products+variants, movements, assets, a player merch
+  view, alerts, reports + CSV.
+- **Player link** (admin-only): a sold/issued movement carries `player_id` + a
+  `paid` flag; outstanding merch money = sum of unpaid movement amounts. Surfaced on
+  the admin player profile modal via the `footer` prop added to
+  `PlayerProfilePanel.Profile` (`PlayerMerchPanel`), gated on
+  `hasModule('merch') && hasCapability(MANAGE_MERCH)`. Never on the public profile.
+- **Alerts feed the notification bell**: `notifications.py` count+summary add merch
+  alerts when `org_has_module(club,'merch')`. Like the pending-request counts, this
+  is current state, not "since last seen".
+- **Per-variant pricing + tracking mode (migration 085)**: each variant carries its
+  own `unit_cost`/`unit_price` (override of the product default via `_eff_cost`/
+  `_eff_price`), so one product holds several priced kinds (e.g. a 4-piece match ball
+  and a 2-piece trainer). `merch_products.for_resale` splits stock into bought-to-sell
+  (cost + price, sold/issued to members) vs **club-use** consumable (a straight cost,
+  no sell price, no owing — e.g. balls); the New Product form defaults equipment to
+  club-use. Club-use products drop sold/issued from the movement picker. Report margin
+  counts only priced items (a `CASE` in `stock_summary`) so club-use cost doesn't drag
+  it down. Money displays two decimals.
+- **Category tree (migration 086)**: `merch_categories` is a self-referencing tree
+  (≤3 levels) per club, partitioned by the fixed top type (`top_category`); products
+  get an optional `category_id`. Created **inline** as items are added (POST
+  `/categories` dedupes a same-named sibling). Endpoints `GET/POST/PATCH/DELETE
+  /merch/categories` (delete reparents children, nulls products via FK SET NULL). The
+  Stock list filters by node+descendants (`_descendant_ids`); reports add `by_item`
+  and a rolled-up `by_category_node` (each node carries its whole subtree's totals).
+  Frontend `CategoryPicker` is cascading with "+ New…". The three fixed types stay as
+  the template drivers (sizes / expiry / club-use default), so they're separate from
+  the category tree.
+
+### Square POS integration (migration 084, v8.18.1)
+
+One-way mirror, **Square → BetterMerch** (Square's till owns the canteen count).
+OAuth code-flow, per club.
+
+- **Migration 084**: `merch_square_connections` (one per club: tokens,
+  `location_id`, `sync_enabled`/`sync_sales`, `sales_cursor`, last-sync status),
+  plus mapping columns `merch_products.source/.square_object_id`,
+  `merch_variants.square_object_id`, `merch_movements.source/.external_ref` (+ a
+  partial unique index on `(org, external_ref)` to dedupe imported rows).
+- **`services/square_client.py`** (httpx) — OAuth obtain/refresh/revoke, locations,
+  `ListCatalog` (ITEMs carry their ITEM_VARIATIONs nested), `BatchRetrieveInventoryCounts`,
+  `SearchOrders` (COMPLETED). Host from `settings.square_environment`
+  (sandbox vs production). `services/square_sync.py` — catalog upsert → sales import →
+  inventory reconcile, **all in ONE transaction** (helpers `flush`, sync commits
+  once) so ORM objects don't expire mid-sync (async `MissingGreenlet` trap);
+  `ensure_fresh_token` refreshes the 30-day access token within a week of expiry
+  (`session.refresh(conn)` after, since that commit expires conn).
+- **Double-count design**: inventory count is the source of truth for `quantity`.
+  Sales are imported as `sold` movements (real negative delta + revenue), THEN we
+  reconcile each variant to Square's current count via a `stocktake` movement. The
+  stocktake is a set-to-absolute, not a second decrement, so sales never double down
+  the stock; receipts/waste show up as the reconcile delta. Re-runs dedupe sales on
+  `external_ref` (`square:{order_id}:{line_uid}`).
+- **OAuth**: gated `GET /square/connect-url` mints a signed JWT `state`
+  (`sign_square_state`, typ `square_oauth`, 20 min) and returns the authorize URL;
+  the **public** `routers/public_square.py` `GET /public/square/callback`
+  (unauthenticated, protected by the signed state) exchanges the code, stores the
+  connection, auto-picks the location if there's one, then 302s back to
+  `/admin/merch/square`. Scheduler runs `sync_all_square` daily at 04:00.
+- **Deploy** (server `.env`): set `SQUARE_APP_ID` + `SQUARE_APP_SECRET` (never
+  commit), `SQUARE_ENVIRONMENT=production` (or `sandbox`), optional
+  `SQUARE_API_VERSION`. In the Square Developer dashboard register the app's OAuth
+  **redirect URL = `https://betterat.cricket/api/public/square/callback`** (matches
+  `settings.square_oauth_redirect`; nginx strips `/api`). The box must reach
+  `connect.squareup.com`. Tokens are stored per club as plain columns (same
+  precedent as `playcricket_api_token`); encryption-at-rest is a hardening follow-up.
+
 ## BetterSelect — Self-service player availability (v8.1, Jun 2026)
 
 Players set their own availability with **no account, no app, no Facebook** — one

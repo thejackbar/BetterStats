@@ -32,12 +32,12 @@ export default function MerchReports() {
           </div>
 
           <div>
-            <h3 className="font-display font-bold text-sm mb-2">Stock value by category</h3>
+            <h3 className="font-display font-bold text-sm mb-2">Stock value by type</h3>
             <div className="pb-card overflow-x-auto">
               <table className="w-full text-[12.5px]">
                 <thead>
                   <tr className="text-left text-pb-faint border-b border-pb-hairline">
-                    <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase">Category</th>
+                    <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase">Type</th>
                     <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">Units</th>
                     <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">At cost</th>
                     <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">At retail</th>
@@ -53,6 +53,66 @@ export default function MerchReports() {
                     </tr>
                   ))}
                   {(data.by_category || []).length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-pb-faint">No stock recorded.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {(data.by_category_node || []).length > 0 && (
+            <div>
+              <h3 className="font-display font-bold text-sm mb-2">Stock value by category</h3>
+              <div className="pb-card overflow-x-auto">
+                <table className="w-full text-[12.5px]">
+                  <thead>
+                    <tr className="text-left text-pb-faint border-b border-pb-hairline">
+                      <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase">Category</th>
+                      <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">Units</th>
+                      <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">At cost</th>
+                      <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">At retail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.by_category_node.map((n) => (
+                      <tr key={n.id} className="border-b border-pb-hairline/40">
+                        <td className="px-3 py-2">
+                          <span style={{ paddingLeft: `${(n.depth - 1) * 16}px` }}>{n.name}</span>
+                          <span className="text-pb-faintest text-[10px] ml-2">{categoryLabel(n.top_category)}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right">{n.units_on_hand}</td>
+                        <td className="px-3 py-2 text-right">{money(n.stock_value_cost)}</td>
+                        <td className="px-3 py-2 text-right">{money(n.stock_value_retail)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <h3 className="font-display font-bold text-sm mb-2">Stock value by item</h3>
+            <div className="pb-card overflow-x-auto">
+              <table className="w-full text-[12.5px]">
+                <thead>
+                  <tr className="text-left text-pb-faint border-b border-pb-hairline">
+                    <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase">Item</th>
+                    <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase">Category</th>
+                    <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">Units</th>
+                    <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">At cost</th>
+                    <th className="px-3 py-2 font-mono text-[10px] tracking-wide2 uppercase text-right">At retail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data.by_item || []).map((it) => (
+                    <tr key={it.product_id} className="border-b border-pb-hairline/40">
+                      <td className="px-3 py-2">{it.name}{!it.for_resale && <span className="text-pb-faint"> (club use)</span>}</td>
+                      <td className="px-3 py-2 text-pb-faint">{categoryLabel(it.category)}</td>
+                      <td className="px-3 py-2 text-right">{it.units_on_hand}</td>
+                      <td className="px-3 py-2 text-right">{money(it.stock_value_cost)}</td>
+                      <td className="px-3 py-2 text-right">{it.for_resale ? money(it.stock_value_retail) : '-'}</td>
+                    </tr>
+                  ))}
+                  {(data.by_item || []).length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-center text-pb-faint">No stock recorded.</td></tr>}
                 </tbody>
               </table>
             </div>

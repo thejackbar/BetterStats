@@ -83,6 +83,7 @@ const MerchStock = lazy(() => import('./pages/admin/bettermerch/MerchStock'))
 const MerchAssets = lazy(() => import('./pages/admin/bettermerch/MerchAssets'))
 const MerchActivity = lazy(() => import('./pages/admin/bettermerch/MerchActivity'))
 const MerchReports = lazy(() => import('./pages/admin/bettermerch/MerchReports'))
+const MerchSquare = lazy(() => import('./pages/admin/bettermerch/MerchSquare'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
 const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
@@ -232,6 +233,7 @@ export default function App() {
           <Route path="/admin/merch/equipment" element={<ProtectedRoute requireModule="merch"><MerchAssets /></ProtectedRoute>} />
           <Route path="/admin/merch/activity" element={<ProtectedRoute requireModule="merch"><MerchActivity /></ProtectedRoute>} />
           <Route path="/admin/merch/reports" element={<ProtectedRoute requireModule="merch"><MerchReports /></ProtectedRoute>} />
+          <Route path="/admin/merch/square" element={<ProtectedRoute requireModule="merch"><MerchSquare /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
           <Route path="/admin/website" element={<ProtectedRoute><AdminWebsite /></ProtectedRoute>} />

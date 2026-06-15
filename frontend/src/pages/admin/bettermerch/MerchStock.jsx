@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
@@ -8,6 +8,88 @@ import {
   money, CATEGORIES, categoryLabel, MOVEMENT_KINDS, kindLabel,
   Btn, Field, TextInput, NumberInput, Select, TextArea, Modal, Pill, Icon,
 } from './ui'
+
+// A labelled cell in the variant editor — the label only renders on the first
+// row but always reserves height so the rows line up.
+function VField({ label, w = '', children }) {
+  return (
+    <div className={w}>
+      <span className="block text-[10.5px] text-pb-faint mb-1">{label || ' '}</span>
+      {children}
+    </div>
+  )
+}
+
+// Build a quick id -> "Parent › Child" path string map for display.
+export function categoryPathMap(categories) {
+  const byId = Object.fromEntries((categories || []).map((c) => [c.id, c]))
+  const map = {}
+  for (const c of categories || []) {
+    const parts = []
+    let n = c, guard = 0
+    while (n && guard < 8) { parts.unshift(n.name); n = n.parent_id ? byId[n.parent_id] : null; guard++ }
+    map[c.id] = parts.join(' › ')
+  }
+  return map
+}
+
+// Cascading category picker (up to three levels under a type). New categories
+// are created inline as you go.
+function CategoryPicker({ topCategory, value, categories, onChange, onCreated }) {
+  const toast = useToast()
+  const [addingAt, setAddingAt] = useState(-1)
+  const [newName, setNewName] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const scoped = (categories || []).filter((c) => c.top_category === topCategory)
+  const byId = Object.fromEntries(scoped.map((c) => [c.id, c]))
+  const path = []
+  let node = value ? byId[value] : null
+  while (node) { path.unshift(node.id); node = node.parent_id ? byId[node.parent_id] : null }
+
+  const optsUnder = (parentId) => scoped.filter((c) => (c.parent_id || null) === (parentId || null))
+
+  const levels = []
+  for (let lvl = 0; lvl < 3; lvl++) {
+    if (lvl > 0 && !path[lvl - 1]) break
+    levels.push({ lvl, parentId: lvl === 0 ? null : path[lvl - 1], opts: optsUnder(lvl === 0 ? null : path[lvl - 1]), selected: path[lvl] || '' })
+  }
+
+  const add = async (parentId) => {
+    const name = newName.trim()
+    if (!name) return
+    setBusy(true)
+    try {
+      const created = await api.merchCreateCategory({ top_category: topCategory, parent_id: parentId || undefined, name })
+      setNewName(''); setAddingAt(-1)
+      await onCreated()
+      onChange(created.id)
+    } catch (e) { toast.error(e.message || 'Could not add category') } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="flex flex-wrap items-start gap-2">
+      {levels.map(({ lvl, parentId, opts, selected }) => (
+        <div key={lvl} className="min-w-[150px]">
+          <Select value={selected} onChange={(e) => {
+            if (e.target.value === '__new') setAddingAt(lvl)
+            else { onChange(e.target.value || (lvl === 0 ? null : path[lvl - 1] || null)); setAddingAt(-1) }
+          }}>
+            <option value="">{lvl === 0 ? 'Uncategorised' : '(none deeper)'}</option>
+            {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            <option value="__new">+ New…</option>
+          </Select>
+          {addingAt === lvl && (
+            <div className="flex gap-1 mt-1">
+              <TextInput value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New category" />
+              <Btn sm variant="primary" onClick={() => add(parentId)} disabled={busy}>Add</Btn>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 // ── Player typeahead (for the 'issued to' field) ─────────────────────────────
 function PlayerPicker({ value, valueName, onPick }) {
@@ -48,10 +130,11 @@ function PlayerPicker({ value, valueName, onPick }) {
 }
 
 // ── Record a stock movement (in / out / stocktake / adjustment) ──────────────
-function MovementModal({ variant, product, onClose, onSaved }) {
+function MovementModal({ variant, product, dir, onClose, onSaved }) {
   const toast = useToast()
-  const meta = MOVEMENT_KINDS
-  const [kind, setKind] = useState(product.category === 'food_drink' ? 'received' : 'received')
+  // Club-use items (no sell price) can't be sold or issued for money.
+  const meta = product.for_resale ? MOVEMENT_KINDS : MOVEMENT_KINDS.filter((m) => !m.money)
+  const [kind, setKind] = useState(dir === 'out' ? (product.for_resale ? 'sold' : 'used') : 'received')
   const [qty, setQty] = useState('')
   const [price, setPrice] = useState(variant.eff_price != null ? String(variant.eff_price) : '')
   const [cost, setCost] = useState(variant.eff_cost != null ? String(variant.eff_cost) : '')
@@ -99,7 +182,7 @@ function MovementModal({ variant, product, onClose, onSaved }) {
         <div className="text-[12.5px] text-pb-faint">On hand now: <b className="text-pb-text">{variant.quantity}</b></div>
         <Field label="What happened?">
           <Select value={kind} onChange={(e) => setKind(e.target.value)}>
-            {meta.map((m) => <option key={m.key} value={m.key}>{m.label} — {m.blurb}</option>)}
+            {meta.map((m) => <option key={m.key} value={m.key}>{m.label} · {m.blurb}</option>)}
           </Select>
         </Field>
         <Field label={qtyLabel}>
@@ -132,21 +215,28 @@ function MovementModal({ variant, product, onClose, onSaved }) {
 }
 
 // ── New product (with an initial variants editor) ────────────────────────────
-function blankVariant() { return { label: '', size: '', colour: '', quantity: '', expiry_date: '' } }
+function blankVariant() { return { label: '', size: '', colour: '', quantity: '', unit_cost: '', unit_price: '', expiry_date: '' } }
 
-function ProductModal({ category, onClose, onSaved }) {
+function ProductModal({ category, categories, onCategoriesChanged, onClose, onSaved }) {
   const toast = useToast()
-  const [cat, setCat] = useState(category && category !== 'all' ? category : 'apparel')
+  const initCat = category && category !== 'all' ? category : 'apparel'
+  const [cat, setCat] = useState(initCat)
+  const [forResale, setForResale] = useState(initCat !== 'equipment')
+  const [categoryId, setCategoryId] = useState(null)
   const [name, setName] = useState('')
   const [cost, setCost] = useState('')
   const [price, setPrice] = useState('')
   const [threshold, setThreshold] = useState('')
   const [supplier, setSupplier] = useState('')
-  const [notes, setNotes] = useState('')
   const [variants, setVariants] = useState([blankVariant()])
   const [busy, setBusy] = useState(false)
   const isApparel = cat === 'apparel'
   const isFood = cat === 'food_drink'
+
+  // Picking a type sets a sensible default mode: equipment is club-use (a
+  // straight cost), everything else is bought to sell. Reset the category too,
+  // since categories are scoped to the type.
+  const onCat = (next) => { setCat(next); setForResale(next !== 'equipment'); setCategoryId(null) }
 
   const setV = (i, k, v) => setVariants((vs) => vs.map((row, j) => (j === i ? { ...row, [k]: v } : row)))
 
@@ -156,18 +246,21 @@ function ProductModal({ category, onClose, onSaved }) {
     try {
       const payload = {
         category: cat,
+        category_id: categoryId || undefined,
         name: name.trim(),
+        for_resale: forResale,
         unit_cost: cost === '' ? undefined : Number(cost),
-        unit_price: price === '' ? undefined : Number(price),
+        unit_price: (forResale && price !== '') ? Number(price) : undefined,
         low_stock_threshold: threshold === '' ? undefined : Number(threshold),
         supplier: supplier || undefined,
-        notes: notes || undefined,
         variants: variants
-          .filter((v) => isApparel ? (v.size || v.colour || v.label) : true)
+          .filter((v) => v.size || v.colour || v.label || v.unit_cost !== '' || v.unit_price !== '' || v.quantity !== '')
           .map((v) => ({
             label: v.label || undefined,
             size: v.size || undefined,
             colour: v.colour || undefined,
+            unit_cost: v.unit_cost === '' ? undefined : Number(v.unit_cost),
+            unit_price: (forResale && v.unit_price !== '') ? Number(v.unit_price) : undefined,
             quantity: v.quantity === '' ? 0 : Number(v.quantity),
             expiry_date: v.expiry_date || undefined,
           })),
@@ -188,15 +281,32 @@ function ProductModal({ category, onClose, onSaved }) {
       <div className="space-y-3">
         <div className="flex gap-2">
           <Field half label="Category">
-            <Select value={cat} onChange={(e) => setCat(e.target.value)}>
+            <Select value={cat} onChange={(e) => onCat(e.target.value)}>
               {CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
             </Select>
           </Field>
           <Field half label="Name"><TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Playing shirt" /></Field>
         </div>
+
+        <Field label="How is it tracked?">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="inline-flex rounded-lg border border-pb-hairline2 overflow-hidden text-[12.5px]">
+              <button type="button" onClick={() => setForResale(true)} className={`px-3 py-1.5 ${forResale ? 'bg-pb-accent text-black' : 'text-pb-faint hover:text-pb-text'}`}>For sale</button>
+              <button type="button" onClick={() => setForResale(false)} className={`px-3 py-1.5 ${!forResale ? 'bg-pb-accent text-black' : 'text-pb-faint hover:text-pb-text'}`}>Club use</button>
+            </div>
+            <span className="text-[11px] text-pb-faint">
+              {forResale ? 'Bought at one price, sold at another. Can be sold or issued to members.' : 'A straight cost the club uses up (e.g. balls). No sell price.'}
+            </span>
+          </div>
+        </Field>
+
+        <Field label="Category (optional)" hint="Group items for reporting. Type a new one and pick + New to create it.">
+          <CategoryPicker topCategory={cat} value={categoryId} categories={categories} onChange={setCategoryId} onCreated={onCategoriesChanged} />
+        </Field>
+
         <div className="flex gap-2">
-          <Field half label="Default cost (buy)"><NumberInput value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" /></Field>
-          <Field half label="Default price (sell)"><NumberInput value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" /></Field>
+          <Field half label={forResale ? 'Default cost (buy)' : 'Default cost'}><NumberInput value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" /></Field>
+          {forResale && <Field half label="Default price (sell)"><NumberInput value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" /></Field>}
         </div>
         <div className="flex gap-2">
           <Field half label="Low-stock alert at" hint="Leave blank for no alert"><NumberInput value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder="e.g. 5" /></Field>
@@ -206,28 +316,34 @@ function ProductModal({ category, onClose, onSaved }) {
         <div className="border-t border-pb-hairline pt-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[12px] font-mono tracking-wide2 text-pb-faint uppercase">
-              {isApparel ? 'Sizes / colours' : 'Stock lines'}
+              {isApparel ? 'Sizes / colours' : 'Options / kinds'}
             </span>
-            {isApparel && <Btn sm icon="plus" onClick={() => setVariants((vs) => [...vs, blankVariant()])}>Add size</Btn>}
+            <Btn sm icon="plus" onClick={() => setVariants((vs) => [...vs, blankVariant()])}>{isApparel ? 'Add size' : 'Add option'}</Btn>
           </div>
           <div className="space-y-2">
             {variants.map((v, i) => (
-              <div key={i} className="flex gap-2 items-end">
+              <div key={i} className="flex flex-wrap items-end gap-2">
                 {isApparel ? (
                   <>
-                    <Field half label={i === 0 ? 'Size' : ''}><TextInput value={v.size} onChange={(e) => setV(i, 'size', e.target.value)} placeholder="M" /></Field>
-                    <Field half label={i === 0 ? 'Colour' : ''}><TextInput value={v.colour} onChange={(e) => setV(i, 'colour', e.target.value)} placeholder="Navy" /></Field>
+                    <VField label={i === 0 ? 'Size' : ''} w="w-16"><TextInput value={v.size} onChange={(e) => setV(i, 'size', e.target.value)} placeholder="M" /></VField>
+                    <VField label={i === 0 ? 'Colour' : ''} w="w-24"><TextInput value={v.colour} onChange={(e) => setV(i, 'colour', e.target.value)} placeholder="Navy" /></VField>
                   </>
                 ) : (
-                  <Field label={i === 0 ? 'Label' : ''}><TextInput value={v.label} onChange={(e) => setV(i, 'label', e.target.value)} placeholder="Standard" /></Field>
+                  <VField label={i === 0 ? 'Kind / name' : ''} w="flex-1 min-w-[150px]"><TextInput value={v.label} onChange={(e) => setV(i, 'label', e.target.value)} placeholder="e.g. Kookaburra 4-piece" /></VField>
                 )}
-                <Field label={i === 0 ? 'Qty' : ''}><NumberInput value={v.quantity} onChange={(e) => setV(i, 'quantity', e.target.value)} placeholder="0" className="w-20" /></Field>
-                {isFood && <Field label={i === 0 ? 'Expiry' : ''}><input type="date" value={v.expiry_date} onChange={(e) => setV(i, 'expiry_date', e.target.value)} className="bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2 py-2 text-[13px]" /></Field>}
-                {variants.length > 1 && <button className="text-pb-faint hover:text-pb-red p-2" onClick={() => setVariants((vs) => vs.filter((_, j) => j !== i))}><Icon name="trash" size={15} /></button>}
+                <VField label={i === 0 ? 'Buy $' : ''} w="w-20"><NumberInput value={v.unit_cost} onChange={(e) => setV(i, 'unit_cost', e.target.value)} placeholder="0.00" /></VField>
+                {forResale && <VField label={i === 0 ? 'Sell $' : ''} w="w-20"><NumberInput value={v.unit_price} onChange={(e) => setV(i, 'unit_price', e.target.value)} placeholder="0.00" /></VField>}
+                <VField label={i === 0 ? 'Qty' : ''} w="w-16"><NumberInput value={v.quantity} onChange={(e) => setV(i, 'quantity', e.target.value)} placeholder="0" /></VField>
+                {isFood && <VField label={i === 0 ? 'Expiry' : ''} w="w-36"><input type="date" value={v.expiry_date} onChange={(e) => setV(i, 'expiry_date', e.target.value)} className="w-full bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2 py-2 text-[13px]" /></VField>}
+                {variants.length > 1 && <button className="text-pb-faint hover:text-pb-red p-2 self-end" onClick={() => setVariants((vs) => vs.filter((_, j) => j !== i))}><Icon name="trash" size={15} /></button>}
               </div>
             ))}
           </div>
-          {!isApparel && <p className="text-[10.5px] text-pb-faintest mt-2">One line is fine for most equipment and canteen items. Apparel can have a line per size.</p>}
+          <p className="text-[10.5px] text-pb-faintest mt-2">
+            {isApparel
+              ? 'A line per size or colour. A price on a line overrides the default above.'
+              : 'Add a line per kind (a match ball and a training ball, say), each with its own price.'}
+          </p>
         </div>
       </div>
     </Modal>
@@ -241,6 +357,9 @@ function VariantRow({ variant, product, onMove }) {
     <div className="flex items-center justify-between gap-3 py-1.5 px-2 rounded hover:bg-pb-surface2/50">
       <div className="min-w-0 flex items-center gap-2">
         <span className="text-[13px] truncate">{variant.label}</span>
+        {product.for_resale
+          ? (variant.eff_price != null && <span className="text-[11px] text-pb-faint shrink-0">{money(variant.eff_price)}</span>)
+          : (variant.eff_cost != null && <span className="text-[11px] text-pb-faint shrink-0">{money(variant.eff_cost)}</span>)}
         {variant.sku && <span className="font-mono text-[10px] text-pb-faintest">{variant.sku}</span>}
         {variant.expiry_date && <Pill tone="amber">exp {variant.expiry_date}</Pill>}
       </div>
@@ -254,7 +373,8 @@ function VariantRow({ variant, product, onMove }) {
   )
 }
 
-function ProductCard({ product, onMove, onAddVariant }) {
+function ProductCard({ product, catPathById, onMove, onAddVariant, onEdit }) {
+  const path = product.category_id ? catPathById[product.category_id] : null
   return (
     <div className="pb-card p-4">
       <div className="flex items-start justify-between gap-3 mb-2">
@@ -262,15 +382,18 @@ function ProductCard({ product, onMove, onAddVariant }) {
           <div className="flex items-center gap-2">
             <h3 className="font-display font-bold text-sm truncate">{product.name}</h3>
             <Pill>{categoryLabel(product.category)}</Pill>
+            {!product.for_resale && <Pill>club use</Pill>}
             {product.low_stock && <Pill tone="amber">low stock</Pill>}
           </div>
+          {path && <div className="text-[10.5px] text-pb-faintest mt-0.5">{path}</div>}
           <div className="text-[11.5px] text-pb-faint mt-0.5">
             {product.on_hand} on hand
             {product.unit_cost != null && <> · cost {money(product.unit_cost)}</>}
-            {product.unit_price != null && <> · sell {money(product.unit_price)}</>}
+            {product.for_resale && product.unit_price != null && <> · sell {money(product.unit_price)}</>}
             {product.supplier && <> · {product.supplier}</>}
           </div>
         </div>
+        <button onClick={() => onEdit(product)} title="Edit product" className="text-pb-faint hover:text-pb-accent p-1 shrink-0"><Icon name="settings" size={15} /></button>
       </div>
       <div className="divide-y divide-pb-hairline/50">
         {(product.variants || []).map((v) => (
@@ -286,24 +409,29 @@ function ProductCard({ product, onMove, onAddVariant }) {
 
 function AddVariantModal({ product, onClose, onSaved }) {
   const toast = useToast()
+  const isApparel = product.category === 'apparel'
+  const forResale = product.for_resale
   const [size, setSize] = useState('')
   const [colour, setColour] = useState('')
   const [label, setLabel] = useState('')
   const [qty, setQty] = useState('')
+  const [cost, setCost] = useState('')
+  const [price, setPrice] = useState('')
   const [busy, setBusy] = useState(false)
-  const isApparel = product.category === 'apparel'
   const submit = async () => {
     setBusy(true)
     try {
       await api.merchAddVariant(product.id, {
         label: label || undefined, size: size || undefined, colour: colour || undefined,
+        unit_cost: cost === '' ? undefined : Number(cost),
+        unit_price: (forResale && price !== '') ? Number(price) : undefined,
         quantity: qty === '' ? 0 : Number(qty),
       })
       toast.success('Line added'); onSaved()
     } catch (e) { toast.error(e.message || 'Could not add line') } finally { setBusy(false) }
   }
   return (
-    <Modal open title={`Add line — ${product.name}`} onClose={onClose}
+    <Modal open title={`Add to ${product.name}`} onClose={onClose}
       footer={<><Btn variant="subtle" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} disabled={busy}>Add</Btn></>}>
       <div className="space-y-3">
         {isApparel ? (
@@ -312,9 +440,86 @@ function AddVariantModal({ product, onClose, onSaved }) {
             <Field half label="Colour"><TextInput value={colour} onChange={(e) => setColour(e.target.value)} placeholder="White" /></Field>
           </div>
         ) : (
-          <Field label="Label"><TextInput value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Standard" /></Field>
+          <Field label="Kind / name"><TextInput value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Training ball" /></Field>
         )}
+        <div className="flex gap-2">
+          <Field half label={forResale ? 'Buy $' : 'Cost $'}><NumberInput value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" /></Field>
+          {forResale && <Field half label="Sell $"><NumberInput value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" /></Field>}
+        </div>
         <Field label="Starting quantity"><NumberInput value={qty} onChange={(e) => setQty(e.target.value)} placeholder="0" /></Field>
+      </div>
+    </Modal>
+  )
+}
+
+function ProductEditModal({ product, categories, onCategoriesChanged, onClose, onSaved }) {
+  const toast = useToast()
+  const [cat, setCat] = useState(product.category)
+  const [forResale, setForResale] = useState(product.for_resale)
+  const [categoryId, setCategoryId] = useState(product.category_id || null)
+  const [name, setName] = useState(product.name)
+  const [cost, setCost] = useState(product.unit_cost != null ? String(product.unit_cost) : '')
+  const [price, setPrice] = useState(product.unit_price != null ? String(product.unit_price) : '')
+  const [threshold, setThreshold] = useState(product.low_stock_threshold != null ? String(product.low_stock_threshold) : '')
+  const [supplier, setSupplier] = useState(product.supplier || '')
+  const [busy, setBusy] = useState(false)
+  const onCat = (next) => { setCat(next); setCategoryId(null) }
+
+  const save = async () => {
+    if (!name.trim()) { toast.error('Name is required'); return }
+    setBusy(true)
+    try {
+      await api.merchUpdateProduct(product.id, {
+        name: name.trim(), category: cat, for_resale: forResale, category_id: categoryId,
+        unit_cost: cost === '' ? null : Number(cost),
+        unit_price: (forResale && price !== '') ? Number(price) : null,
+        low_stock_threshold: threshold === '' ? null : Number(threshold),
+        supplier: supplier || null,
+      })
+      toast.success('Saved'); onSaved()
+    } catch (e) { toast.error(e.message || 'Could not save') } finally { setBusy(false) }
+  }
+  const remove = async () => {
+    if (!window.confirm('Delete this product? Its stock history is kept but it leaves the list.')) return
+    setBusy(true)
+    try { await api.merchDeleteProduct(product.id); toast.success('Deleted'); onSaved() }
+    catch (e) { toast.error(e.message || 'Could not delete') } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open wide title={`Edit ${product.name}`} onClose={onClose}
+      footer={<>
+        <Btn variant="danger" onClick={remove} disabled={busy}>Delete</Btn>
+        <Btn variant="subtle" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" onClick={save} disabled={busy}>Save</Btn>
+      </>}>
+      <div className="space-y-3">
+        <div className="flex gap-2">
+          <Field half label="Type">
+            <Select value={cat} onChange={(e) => onCat(e.target.value)}>
+              {CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </Select>
+          </Field>
+          <Field half label="Name"><TextInput value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        </div>
+        <Field label="How is it tracked?">
+          <div className="inline-flex rounded-lg border border-pb-hairline2 overflow-hidden text-[12.5px]">
+            <button type="button" onClick={() => setForResale(true)} className={`px-3 py-1.5 ${forResale ? 'bg-pb-accent text-black' : 'text-pb-faint hover:text-pb-text'}`}>For sale</button>
+            <button type="button" onClick={() => setForResale(false)} className={`px-3 py-1.5 ${!forResale ? 'bg-pb-accent text-black' : 'text-pb-faint hover:text-pb-text'}`}>Club use</button>
+          </div>
+        </Field>
+        <Field label="Category">
+          <CategoryPicker topCategory={cat} value={categoryId} categories={categories} onChange={setCategoryId} onCreated={onCategoriesChanged} />
+        </Field>
+        <div className="flex gap-2">
+          <Field half label={forResale ? 'Default cost (buy)' : 'Default cost'}><NumberInput value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" /></Field>
+          {forResale && <Field half label="Default price (sell)"><NumberInput value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" /></Field>}
+        </div>
+        <div className="flex gap-2">
+          <Field half label="Low-stock alert at"><NumberInput value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder="e.g. 5" /></Field>
+          <Field half label="Supplier"><TextInput value={supplier} onChange={(e) => setSupplier(e.target.value)} /></Field>
+        </div>
+        <p className="text-[10.5px] text-pb-faintest">Sizes and stock lines are managed on the card. This edits the product details.</p>
       </div>
     </Modal>
   )
@@ -322,61 +527,82 @@ function AddVariantModal({ product, onClose, onSaved }) {
 
 export default function MerchStock() {
   const toast = useToast()
-  const [params] = useSearchParams()
   const [cat, setCat] = useState('all')
+  const [catFilter, setCatFilter] = useState('')
   const [q, setQ] = useState('')
   const [products, setProducts] = useState([])
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
-  const [move, setMove] = useState(null)        // { variant, product }
+  const [move, setMove] = useState(null)        // { variant, product, dir }
   const [addVariantFor, setAddVariantFor] = useState(null)
+  const [editProduct, setEditProduct] = useState(null)
+
+  const catPathById = useMemo(() => categoryPathMap(categories), [categories])
+
+  const loadCategories = useCallback(async () => {
+    try { const d = await api.merchListCategories(); setCategories(d.categories || []) } catch { /* non-fatal */ }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const d = await api.merchListProducts({ category: cat === 'all' ? undefined : cat, q: q || undefined })
+      const d = await api.merchListProducts({ category: cat === 'all' ? undefined : cat, categoryId: catFilter || undefined, q: q || undefined })
       setProducts(d.products || [])
     } catch (e) {
       toast.error(e.message || 'Could not load stock')
     } finally {
       setLoading(false)
     }
-  }, [cat, q])
+  }, [cat, catFilter, q])
 
+  useEffect(() => { loadCategories() }, [loadCategories])
   useEffect(() => { load() }, [load])
 
+  const pickTab = (next) => { setCat(next); setCatFilter('') }
   const onMove = (variant, dir) => {
     const product = products.find((p) => (p.variants || []).some((v) => v.id === variant.id))
     setMove({ variant, product, dir })
   }
+  const scopedCats = categories
+    .filter((c) => cat === 'all' || c.top_category === cat)
+    .slice()
+    .sort((a, b) => (catPathById[a.id] || '').localeCompare(catPathById[b.id] || ''))
 
   return (
     <BetterMerchLayout title="Stock"
       actions={<Btn variant="primary" sm icon="plus" onClick={() => setShowNew(true)}>New product</Btn>}>
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <button onClick={() => setCat('all')} className={`px-3 py-1.5 rounded-lg text-[12.5px] ${cat === 'all' ? 'bg-pb-accent/12 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>All</button>
+        <button onClick={() => pickTab('all')} className={`px-3 py-1.5 rounded-lg text-[12.5px] ${cat === 'all' ? 'bg-pb-accent/12 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>All</button>
         {CATEGORIES.map((c) => (
-          <button key={c.key} onClick={() => setCat(c.key)} className={`px-3 py-1.5 rounded-lg text-[12.5px] ${cat === c.key ? 'bg-pb-accent/12 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>{c.label}</button>
+          <button key={c.key} onClick={() => pickTab(c.key)} className={`px-3 py-1.5 rounded-lg text-[12.5px] ${cat === c.key ? 'bg-pb-accent/12 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>{c.label}</button>
         ))}
-        <div className="ml-auto relative">
-          <TextInput placeholder="Search products…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
+        <div className="ml-auto flex items-center gap-2">
+          {scopedCats.length > 0 && (
+            <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-48">
+              <option value="">All categories</option>
+              {scopedCats.map((c) => <option key={c.id} value={c.id}>{catPathById[c.id]}</option>)}
+            </Select>
+          )}
+          <TextInput placeholder="Search products…" value={q} onChange={(e) => setQ(e.target.value)} className="w-44" />
         </div>
       </div>
 
       {loading ? <PbSpinner message="Loading stock…" /> : products.length === 0 ? (
         <div className="pb-card p-8 text-center text-pb-faint text-sm">
-          No products yet. <button className="text-pb-accent" onClick={() => setShowNew(true)}>Add your first one</button>.
+          {catFilter || q ? 'No products match.' : <>No products yet. <button className="text-pb-accent" onClick={() => setShowNew(true)}>Add your first one</button>.</>}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {products.map((p) => (
-            <ProductCard key={p.id} product={p} onMove={onMove} onAddVariant={setAddVariantFor} />
+            <ProductCard key={p.id} product={p} catPathById={catPathById} onMove={onMove} onAddVariant={setAddVariantFor} onEdit={setEditProduct} />
           ))}
         </div>
       )}
 
-      {showNew && <ProductModal category={cat} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load() }} />}
-      {move && <MovementModal variant={move.variant} product={move.product} onClose={() => setMove(null)} onSaved={() => { setMove(null); load() }} />}
+      {showNew && <ProductModal category={cat} categories={categories} onCategoriesChanged={loadCategories} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load() }} />}
+      {editProduct && <ProductEditModal product={editProduct} categories={categories} onCategoriesChanged={loadCategories} onClose={() => setEditProduct(null)} onSaved={() => { setEditProduct(null); load() }} />}
+      {move && <MovementModal variant={move.variant} product={move.product} dir={move.dir} onClose={() => setMove(null)} onSaved={() => { setMove(null); load() }} />}
       {addVariantFor && <AddVariantModal product={addVariantFor} onClose={() => setAddVariantFor(null)} onSaved={() => { setAddVariantFor(null); load() }} />}
     </BetterMerchLayout>
   )

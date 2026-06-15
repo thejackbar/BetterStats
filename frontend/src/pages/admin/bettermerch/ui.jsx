@@ -2,8 +2,9 @@
 // self-contained, reusing the house Icon + spinner.
 import { Icon } from '../betterselect/ui'
 
+// Costs always show two decimal places.
 export const money = (n) =>
-  `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+  `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 export const CATEGORIES = [
   { key: 'apparel', label: 'Apparel', blurb: 'Playing kit, training gear, caps' },

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import MerchProduct, MerchVariant, MerchMovement, MerchAsset
@@ -56,6 +56,8 @@ def record_movement(
     note: str | None = None,
     occurred_on: date | None = None,
     created_by_user_id=None,
+    source: str = "manual",
+    external_ref: str | None = None,
 ) -> MerchMovement:
     """Apply a stock change: bump the variant's running balance and write the
     audit row. Does NOT commit — the caller owns the transaction."""
@@ -77,6 +79,8 @@ def record_movement(
         note=note,
         occurred_on=occurred_on,
         created_by_user_id=created_by_user_id,
+        source=source,
+        external_ref=external_ref,
     )
     session.add(mv)
     return mv
@@ -205,10 +209,14 @@ async def stock_summary(session: AsyncSession, org_id) -> dict:
     issues to players)."""
     cost_expr = func.coalesce(MerchVariant.unit_cost, MerchProduct.unit_cost)
     price_expr = func.coalesce(MerchVariant.unit_price, MerchProduct.unit_price)
+    # Cost of the items that carry a sell price, so margin = retail − that cost
+    # (club-use items with no sell price never drag the margin down).
+    priced_cost_expr = case((price_expr.isnot(None), MerchVariant.quantity * cost_expr), else_=0)
     val_q = (
         select(
             func.coalesce(func.sum(MerchVariant.quantity * cost_expr), 0),
             func.coalesce(func.sum(MerchVariant.quantity * price_expr), 0),
+            func.coalesce(func.sum(priced_cost_expr), 0),
             func.coalesce(func.sum(MerchVariant.quantity), 0),
             func.count(MerchVariant.id),
         )
@@ -219,7 +227,7 @@ async def stock_summary(session: AsyncSession, org_id) -> dict:
             MerchProduct.is_active.is_(True),
         )
     )
-    cost_value, retail_value, units, variant_count = (await session.execute(val_q)).one()
+    cost_value, retail_value, priced_cost, units, variant_count = (await session.execute(val_q)).one()
 
     owed = await session.scalar(
         select(func.coalesce(func.sum(MerchMovement.amount), 0)).where(
@@ -246,7 +254,7 @@ async def stock_summary(session: AsyncSession, org_id) -> dict:
     return {
         "stock_value_cost": float(cost_value or 0),
         "stock_value_retail": float(retail_value or 0),
-        "stock_margin": float((retail_value or 0) - (cost_value or 0)),
+        "stock_margin": float((retail_value or 0) - (priced_cost or 0)),
         "units_on_hand": int(units or 0),
         "variant_count": int(variant_count or 0),
         "product_count": int(product_count or 0),
