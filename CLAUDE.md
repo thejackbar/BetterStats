@@ -74,11 +74,13 @@ docker compose up -d --no-deps --force-recreate betterstats-frontend betterstats
 
 ## Public Domain
 
-The canonical public domain is **`https://betterstats.cricket`** (no `www`). The old `betterstats.bltbox.com` domain is retired.
+The canonical public domain is **`https://betterat.cricket`** (no `www`), the "Better Cricket" brand. The old `betterstats.cricket` still resolves and serves the same container (both hostnames share the frontend and its `/api` proxy), so existing links keep working, but `betterat.cricket` is the canonical URL used in every public link, OG tag and sitemap. The older `betterstats.bltbox.com` domain is retired.
 
-- Hardcoded references live in `frontend/src/hooks/usePageMeta.js` (`BASE_URL`) and `frontend/index.html` (`og:url`) — keep both on the apex domain.
-- `CORS_ORIGINS` should be `https://betterstats.cricket` in the server `.env`, but note CORS is dormant in practice: the frontend calls the API via a same-origin relative `/api` path, so cross-origin checks never fire. Updating it is hygiene, not a functional requirement.
-- Any new build/config that references the public URL must point to `betterstats.cricket`.
+- **Hardcoded references that MUST stay on the apex `betterat.cricket`**: `frontend/src/hooks/usePageMeta.js` (`BASE_URL`), `frontend/index.html` (`og:url`, canonical, JSON-LD), `frontend/public/{llms.txt,robots.txt,sitemap.xml,site.webmanifest}`, and on the backend `routers/seo.py` (`SITE`, which is the live sitemap + robots nginx proxies), `routers/og_preview.py` (`SITE`) and `config/settings.py` (`public_base_url`, the email unsubscribe link).
+- **Left on `betterstats.cricket` on purpose** (email and infra; do not flip without DNS/infra work): `config/settings.py` `email_from_address` and `email_from_name` (SPF/DKIM/DMARC are configured on `betterstats.cricket`), the `deploy.sh` health-check URL, `cloudflare-worker/worker.js` (a legacy OG-injection worker scoped to `betterstats.cricket/*`, superseded by the nginx + `og_preview` path), and the `tools/sync_watch.py` default base.
+- `CORS_ORIGINS` should be `https://betterat.cricket` in the server `.env`, but CORS is dormant in practice: the frontend calls the API via a same-origin relative `/api` path, so cross-origin checks never fire. Updating it is hygiene, not a functional requirement.
+- Any new build or config that references the public URL must point to `betterat.cricket`.
+- `betterat.cricket` social link-preview cards are server-rendered for the marketing routes by `backend/app/routers/og_preview.py` (`MARKETING_PAGES`), so per-page OG tags work for crawlers that do not run JS; keep that map in sync when marketing routes change.
 
 ## Marketing Contact form → club onboarding requests (Jun 2026)
 

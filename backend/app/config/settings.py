@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # Public origin used to build the (mandatory) one-click unsubscribe link.
     # nginx strips the /api prefix, so the public route resolves at
     # {public_base_url}/api/public/comms/unsubscribe/{token}.
-    public_base_url: str = "https://betterstats.cricket"
+    public_base_url: str = "https://betterat.cricket"
     # SMTP (used when email_provider == "smtp"). SES example:
     #   smtp_host = email-smtp.ap-southeast-2.amazonaws.com  smtp_port = 587
     # Port 465 → implicit TLS; anything else → STARTTLS.
