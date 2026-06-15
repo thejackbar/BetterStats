@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import BetterMerchLayout from '../../../components/admin/BetterMerchLayout'
@@ -33,60 +32,60 @@ export function categoryPathMap(categories) {
   return map
 }
 
-// Cascading category picker (up to three levels under a type). New categories
-// are created inline as you go.
+// Category picker — one dropdown of the type's categories (shown as a path like
+// "Balls › Match"), plus an inline "+ New category" with an optional parent.
 function CategoryPicker({ topCategory, value, categories, onChange, onCreated }) {
   const toast = useToast()
-  const [addingAt, setAddingAt] = useState(-1)
+  const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
+  const [parentId, setParentId] = useState('')
   const [busy, setBusy] = useState(false)
 
   const scoped = (categories || []).filter((c) => c.top_category === topCategory)
   const byId = Object.fromEntries(scoped.map((c) => [c.id, c]))
-  const path = []
-  let node = value ? byId[value] : null
-  while (node) { path.unshift(node.id); node = node.parent_id ? byId[node.parent_id] : null }
-
-  const optsUnder = (parentId) => scoped.filter((c) => (c.parent_id || null) === (parentId || null))
-
-  const levels = []
-  for (let lvl = 0; lvl < 3; lvl++) {
-    if (lvl > 0 && !path[lvl - 1]) break
-    levels.push({ lvl, parentId: lvl === 0 ? null : path[lvl - 1], opts: optsUnder(lvl === 0 ? null : path[lvl - 1]), selected: path[lvl] || '' })
+  const pathOf = (c) => {
+    const parts = []; let n = c, g = 0
+    while (n && g < 8) { parts.unshift(n.name); n = n.parent_id ? byId[n.parent_id] : null; g++ }
+    return parts.join(' › ')
   }
+  const sorted = [...scoped].sort((a, b) => pathOf(a).localeCompare(pathOf(b)))
+  const parentOpts = sorted.filter((c) => c.depth < 3)
 
-  const add = async (parentId) => {
+  const add = async () => {
     const name = newName.trim()
     if (!name) return
     setBusy(true)
     try {
       const created = await api.merchCreateCategory({ top_category: topCategory, parent_id: parentId || undefined, name })
-      setNewName(''); setAddingAt(-1)
+      setNewName(''); setParentId(''); setAdding(false)
       await onCreated()
       onChange(created.id)
     } catch (e) { toast.error(e.message || 'Could not add category') } finally { setBusy(false) }
   }
 
   return (
-    <div className="flex flex-wrap items-start gap-2">
-      {levels.map(({ lvl, parentId, opts, selected }) => (
-        <div key={lvl} className="min-w-[150px]">
-          <Select value={selected} onChange={(e) => {
-            if (e.target.value === '__new') setAddingAt(lvl)
-            else { onChange(e.target.value || (lvl === 0 ? null : path[lvl - 1] || null)); setAddingAt(-1) }
-          }}>
-            <option value="">{lvl === 0 ? 'Uncategorised' : '(none deeper)'}</option>
-            {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            <option value="__new">+ New…</option>
-          </Select>
-          {addingAt === lvl && (
-            <div className="flex gap-1 mt-1">
-              <TextInput value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New category" />
-              <Btn sm variant="primary" onClick={() => add(parentId)} disabled={busy}>Add</Btn>
-            </div>
+    <div className="space-y-2">
+      <Select value={adding ? '__new' : (value || '')} onChange={(e) => {
+        if (e.target.value === '__new') setAdding(true)
+        else { setAdding(false); onChange(e.target.value || null) }
+      }}>
+        <option value="">Uncategorised</option>
+        {sorted.map((c) => <option key={c.id} value={c.id}>{pathOf(c)}</option>)}
+        <option value="__new">+ New category…</option>
+      </Select>
+      {adding && (
+        <div className="flex flex-wrap items-center gap-2">
+          <TextInput value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New category name" className="flex-1 min-w-[150px]" />
+          {parentOpts.length > 0 && (
+            <Select value={parentId} onChange={(e) => setParentId(e.target.value)} className="w-44">
+              <option value="">Top level</option>
+              {parentOpts.map((c) => <option key={c.id} value={c.id}>under {pathOf(c)}</option>)}
+            </Select>
           )}
+          <Btn sm variant="primary" onClick={add} disabled={busy}>Add</Btn>
+          <Btn sm variant="subtle" onClick={() => { setAdding(false); setNewName('') }}>Cancel</Btn>
         </div>
-      ))}
+      )}
     </div>
   )
 }
@@ -351,7 +350,7 @@ function ProductModal({ category, categories, onCategoriesChanged, onClose, onSa
 }
 
 // ── Variant row ──────────────────────────────────────────────────────────────
-function VariantRow({ variant, product, onMove }) {
+function VariantRow({ variant, product, onMove, onEditVariant }) {
   const low = variant.low_stock
   return (
     <div className="flex items-center justify-between gap-3 py-1.5 px-2 rounded hover:bg-pb-surface2/50">
@@ -363,9 +362,10 @@ function VariantRow({ variant, product, onMove }) {
         {variant.sku && <span className="font-mono text-[10px] text-pb-faintest">{variant.sku}</span>}
         {variant.expiry_date && <Pill tone="amber">exp {variant.expiry_date}</Pill>}
       </div>
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
         <span className={`font-display font-bold text-sm ${low ? 'text-pb-amber' : 'text-pb-text'}`}>{variant.quantity}</span>
         {low && <Pill tone="amber">low</Pill>}
+        <button onClick={() => onEditVariant(variant, product)} title="Edit line" className="text-pb-faint hover:text-pb-accent p-1"><Icon name="settings" size={14} /></button>
         <Btn sm icon="plus" onClick={() => onMove(variant, 'in')}>In</Btn>
         <Btn sm icon="minus" onClick={() => onMove(variant, 'out')}>Out</Btn>
       </div>
@@ -373,7 +373,7 @@ function VariantRow({ variant, product, onMove }) {
   )
 }
 
-function ProductCard({ product, catPathById, onMove, onAddVariant, onEdit }) {
+function ProductCard({ product, catPathById, onMove, onAddVariant, onEdit, onEditVariant }) {
   const path = product.category_id ? catPathById[product.category_id] : null
   return (
     <div className="pb-card p-4">
@@ -397,7 +397,7 @@ function ProductCard({ product, catPathById, onMove, onAddVariant, onEdit }) {
       </div>
       <div className="divide-y divide-pb-hairline/50">
         {(product.variants || []).map((v) => (
-          <VariantRow key={v.id} variant={v} product={product} onMove={onMove} />
+          <VariantRow key={v.id} variant={v} product={product} onMove={onMove} onEditVariant={onEditVariant} />
         ))}
       </div>
       <button className="mt-2 text-[11.5px] text-pb-faint hover:text-pb-accent flex items-center gap-1" onClick={() => onAddVariant(product)}>
@@ -525,6 +525,144 @@ function ProductEditModal({ product, categories, onCategoriesChanged, onClose, o
   )
 }
 
+function VariantEditModal({ variant, product, onClose, onSaved }) {
+  const toast = useToast()
+  const isApparel = product.category === 'apparel'
+  const isFood = product.category === 'food_drink'
+  const forResale = product.for_resale
+  const [label, setLabel] = useState(variant.label || '')
+  const [size, setSize] = useState(variant.size || '')
+  const [colour, setColour] = useState(variant.colour || '')
+  const [cost, setCost] = useState(variant.unit_cost != null ? String(variant.unit_cost) : '')
+  const [price, setPrice] = useState(variant.unit_price != null ? String(variant.unit_price) : '')
+  const [threshold, setThreshold] = useState(variant.low_stock_threshold != null ? String(variant.low_stock_threshold) : '')
+  const [expiry, setExpiry] = useState(variant.expiry_date || '')
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      const patch = {
+        unit_cost: cost === '' ? null : Number(cost),
+        low_stock_threshold: threshold === '' ? null : Number(threshold),
+      }
+      if (forResale) patch.unit_price = price === '' ? null : Number(price)
+      if (isApparel) {
+        patch.size = size || null
+        patch.colour = colour || null
+        patch.label = [size, colour].filter(Boolean).join(' / ') || 'Standard'
+      } else {
+        patch.label = label.trim() || 'Standard'
+      }
+      if (isFood) patch.expiry_date = expiry || null
+      await api.merchUpdateVariant(variant.id, patch)
+      toast.success('Saved'); onSaved()
+    } catch (e) { toast.error(e.message || 'Could not save') } finally { setBusy(false) }
+  }
+  const remove = async () => {
+    if (!window.confirm('Remove this line? Its stock history is kept.')) return
+    setBusy(true)
+    try { await api.merchDeleteVariant(variant.id); toast.success('Removed'); onSaved() }
+    catch (e) { toast.error(e.message || 'Could not remove') } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open title={`Edit ${variant.label}`} onClose={onClose}
+      footer={<>
+        <Btn variant="danger" onClick={remove} disabled={busy}>Remove</Btn>
+        <Btn variant="subtle" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" onClick={save} disabled={busy}>Save</Btn>
+      </>}>
+      <div className="space-y-3">
+        {isApparel ? (
+          <div className="flex gap-2">
+            <Field half label="Size"><TextInput value={size} onChange={(e) => setSize(e.target.value)} /></Field>
+            <Field half label="Colour"><TextInput value={colour} onChange={(e) => setColour(e.target.value)} /></Field>
+          </div>
+        ) : (
+          <Field label="Kind / name"><TextInput value={label} onChange={(e) => setLabel(e.target.value)} /></Field>
+        )}
+        <div className="flex gap-2">
+          <Field half label={forResale ? 'Buy $' : 'Cost $'}><NumberInput value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" /></Field>
+          {forResale && <Field half label="Sell $"><NumberInput value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" /></Field>}
+        </div>
+        <div className="flex gap-2">
+          <Field half label="Low-stock alert at" hint="Blank uses the product default"><NumberInput value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder="e.g. 10" /></Field>
+          {isFood && <Field half label="Expiry"><input type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} className="w-full bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2.5 py-2 text-[13.5px]" /></Field>}
+        </div>
+        <p className="text-[10.5px] text-pb-faintest">Quantity is changed with In / Out, not here.</p>
+      </div>
+    </Modal>
+  )
+}
+
+function CategoryManagerModal({ categories, onChanged, onClose }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const [renaming, setRenaming] = useState(null)
+  const [name, setName] = useState('')
+  const pathMap = categoryPathMap(categories)
+  const sorted = [...categories].sort((a, b) =>
+    a.top_category.localeCompare(b.top_category) || (pathMap[a.id] || '').localeCompare(pathMap[b.id] || ''))
+
+  const doRename = async (c) => {
+    if (!name.trim()) { setRenaming(null); return }
+    setBusy(true)
+    try { await api.merchRenameCategory(c.id, { name: name.trim() }); setRenaming(null); await onChanged() }
+    catch (e) { toast.error(e.message || 'Could not rename') } finally { setBusy(false) }
+  }
+  const del = async (c) => {
+    if (!window.confirm(`Delete "${c.name}"? Items under it become uncategorised, and any sub-categories move up a level.`)) return
+    setBusy(true)
+    try { await api.merchDeleteCategory(c.id); await onChanged() }
+    catch (e) { toast.error(e.message || 'Could not delete') } finally { setBusy(false) }
+  }
+  const seed = async () => {
+    setBusy(true)
+    try { const r = await api.merchSeedCategories(); await onChanged(); toast.success(r.created > 0 ? `Added ${r.created} categories` : 'Starter categories already there') }
+    catch (e) { toast.error(e.message || 'Could not add starter set') } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open wide title="Manage categories" onClose={onClose}
+      footer={<>
+        <Btn variant="subtle" onClick={seed} disabled={busy}>Add starter set</Btn>
+        <Btn variant="primary" onClick={onClose}>Done</Btn>
+      </>}>
+      {sorted.length === 0 ? (
+        <div className="text-center py-6">
+          <p className="text-[13px] text-pb-faint mb-3">No categories yet.</p>
+          <Btn variant="primary" onClick={seed} disabled={busy}>Add starter categories</Btn>
+          <p className="text-[11px] text-pb-faintest mt-2">A generic set (Match attire, Balls, Canteen, and so on) you can rename or remove.</p>
+        </div>
+      ) : (
+        <div className="divide-y divide-pb-hairline/50">
+          {sorted.map((c) => (
+            <div key={c.id} className="flex items-center gap-2 py-2">
+              <span className="text-[10px] font-mono text-pb-faintest w-20 shrink-0">{categoryLabel(c.top_category)}</span>
+              {renaming === c.id ? (
+                <>
+                  <TextInput value={name} onChange={(e) => setName(e.target.value)} className="flex-1" />
+                  <Btn sm variant="primary" onClick={() => doRename(c)} disabled={busy}>Save</Btn>
+                  <Btn sm variant="subtle" onClick={() => setRenaming(null)}>Cancel</Btn>
+                </>
+              ) : (
+                <>
+                  <span className="flex-1 text-[13px]" style={{ paddingLeft: `${(c.depth - 1) * 14}px` }}>
+                    {c.name}{c.depth > 1 && <span className="text-pb-faintest text-[11px]"> · {pathMap[c.id]}</span>}
+                  </span>
+                  <button onClick={() => { setRenaming(c.id); setName(c.name) }} className="text-pb-faint hover:text-pb-accent p-1" title="Rename"><Icon name="settings" size={14} /></button>
+                  <button onClick={() => del(c)} className="text-pb-faint hover:text-pb-red p-1" title="Delete"><Icon name="trash" size={14} /></button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 export default function MerchStock() {
   const toast = useToast()
   const [cat, setCat] = useState('all')
@@ -537,6 +675,8 @@ export default function MerchStock() {
   const [move, setMove] = useState(null)        // { variant, product, dir }
   const [addVariantFor, setAddVariantFor] = useState(null)
   const [editProduct, setEditProduct] = useState(null)
+  const [editVariant, setEditVariant] = useState(null)  // { variant, product }
+  const [showCatManager, setShowCatManager] = useState(false)
 
   const catPathById = useMemo(() => categoryPathMap(categories), [categories])
 
@@ -571,7 +711,10 @@ export default function MerchStock() {
 
   return (
     <BetterMerchLayout title="Stock"
-      actions={<Btn variant="primary" sm icon="plus" onClick={() => setShowNew(true)}>New product</Btn>}>
+      actions={<div className="flex items-center gap-2">
+        <Btn sm icon="list" onClick={() => setShowCatManager(true)}>Categories</Btn>
+        <Btn variant="primary" sm icon="plus" onClick={() => setShowNew(true)}>New product</Btn>
+      </div>}>
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button onClick={() => pickTab('all')} className={`px-3 py-1.5 rounded-lg text-[12.5px] ${cat === 'all' ? 'bg-pb-accent/12 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>All</button>
         {CATEGORIES.map((c) => (
@@ -595,7 +738,8 @@ export default function MerchStock() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {products.map((p) => (
-            <ProductCard key={p.id} product={p} catPathById={catPathById} onMove={onMove} onAddVariant={setAddVariantFor} onEdit={setEditProduct} />
+            <ProductCard key={p.id} product={p} catPathById={catPathById} onMove={onMove} onAddVariant={setAddVariantFor}
+              onEdit={setEditProduct} onEditVariant={(v, prod) => setEditVariant({ variant: v, product: prod })} />
           ))}
         </div>
       )}
@@ -604,6 +748,8 @@ export default function MerchStock() {
       {editProduct && <ProductEditModal product={editProduct} categories={categories} onCategoriesChanged={loadCategories} onClose={() => setEditProduct(null)} onSaved={() => { setEditProduct(null); load() }} />}
       {move && <MovementModal variant={move.variant} product={move.product} dir={move.dir} onClose={() => setMove(null)} onSaved={() => { setMove(null); load() }} />}
       {addVariantFor && <AddVariantModal product={addVariantFor} onClose={() => setAddVariantFor(null)} onSaved={() => { setAddVariantFor(null); load() }} />}
+      {editVariant && <VariantEditModal variant={editVariant.variant} product={editVariant.product} onClose={() => setEditVariant(null)} onSaved={() => { setEditVariant(null); load() }} />}
+      {showCatManager && <CategoryManagerModal categories={categories} onChanged={async () => { await loadCategories(); load() }} onClose={() => setShowCatManager(false)} />}
     </BetterMerchLayout>
   )
 }

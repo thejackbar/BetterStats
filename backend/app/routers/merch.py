@@ -264,6 +264,14 @@ def _cat_out(c, by_id) -> dict:
     }
 
 
+# Generic starter categories that fit most clubs (one level, kept simple).
+MERCH_DEFAULT_CATEGORIES = {
+    "apparel": ["Match attire", "Training attire", "Caps", "Club clothing"],
+    "equipment": ["Balls", "Bats", "Protective gear", "Training equipment", "Ground equipment"],
+    "food_drink": ["Canteen", "Bar"],
+}
+
+
 class CategoryIn(BaseModel):
     top_category: str
     parent_id: Optional[str] = None
@@ -316,6 +324,28 @@ async def create_category(
     await db.refresh(node)
     by_id[node.id] = node
     return _cat_out(node, by_id)
+
+
+@router.post("/categories/seed-defaults", dependencies=[_require])
+async def seed_default_categories(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a generic starter set of top-level categories. Idempotent — skips any
+    that already exist for the club."""
+    existing = await _categories_for_org(db, club.id)
+    have = {(c.top_category, c.name.strip().lower()) for c in existing if c.parent_id is None}
+    created = 0
+    for top, names in MERCH_DEFAULT_CATEGORIES.items():
+        for i, name in enumerate(names):
+            if (top, name.lower()) in have:
+                continue
+            db.add(MerchCategory(organisation_id=club.id, top_category=top, name=name, sort_order=i))
+            created += 1
+    await db.commit()
+    cats = await _categories_for_org(db, club.id)
+    by_id, _ = _category_index(cats)
+    return {"created": created, "categories": [_cat_out(c, by_id) for c in cats]}
 
 
 async def _category_or_404(db: AsyncSession, club: Organisation, cid: str) -> MerchCategory:
