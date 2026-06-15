@@ -10,6 +10,7 @@ const NAV = [
   { to: '/admin/merch/equipment', label: 'Equipment', icon: 'settings', cap: CAP.MANAGE_MERCH },
   { to: '/admin/merch/activity', label: 'Activity', icon: 'sheet', cap: CAP.MANAGE_MERCH },
   { to: '/admin/merch/reports', label: 'Reports', icon: 'ladders', cap: CAP.MANAGE_MERCH },
+  { to: '/admin/merch/square', label: 'Square', icon: 'share', cap: CAP.MANAGE_MERCH },
 ]
 
 export default function BetterMerchLayout({ children, title, actions }) {

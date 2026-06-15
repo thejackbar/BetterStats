@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration, bookmarks, merch
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration, bookmarks, merch, public_square
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -982,6 +982,47 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_merch_assets_org ON merch_assets(organisation_id)"
         ))
+        # BetterMerch Square integration (migration 084) — per-club OAuth + mapping.
+        await conn.execute(text("ALTER TABLE merch_products ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'"))
+        await conn.execute(text("ALTER TABLE merch_products ADD COLUMN IF NOT EXISTS square_object_id TEXT"))
+        await conn.execute(text("ALTER TABLE merch_variants ADD COLUMN IF NOT EXISTS square_object_id TEXT"))
+        await conn.execute(text("ALTER TABLE merch_movements ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'"))
+        await conn.execute(text("ALTER TABLE merch_movements ADD COLUMN IF NOT EXISTS external_ref TEXT"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_products_square ON merch_products(organisation_id, square_object_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_merch_variants_square ON merch_variants(organisation_id, square_object_id)"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_merch_movement_external_ref "
+            "ON merch_movements(organisation_id, external_ref) WHERE external_ref IS NOT NULL"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS merch_square_connections (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                merchant_id TEXT,
+                environment TEXT NOT NULL DEFAULT 'production',
+                access_token TEXT,
+                refresh_token TEXT,
+                token_expires_at TIMESTAMPTZ,
+                scopes TEXT,
+                location_id TEXT,
+                location_name TEXT,
+                sync_enabled BOOLEAN NOT NULL DEFAULT true,
+                sync_sales BOOLEAN NOT NULL DEFAULT true,
+                last_sync_at TIMESTAMPTZ,
+                last_sync_status TEXT,
+                last_sync_error TEXT,
+                sales_cursor TIMESTAMPTZ,
+                connected_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                connected_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_merch_square_org UNIQUE (organisation_id)
+            )
+        """))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
@@ -1165,6 +1206,7 @@ app.include_router(net_manager.router, dependencies=[Depends(require_module("sel
 app.include_router(public_availability.router)                                            # BetterSelect (public)
 app.include_router(public_comms.router)                                                   # BetterComms (public unsubscribe)
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)
+app.include_router(public_square.router)                                                  # BetterMerch (Square OAuth callback)
 app.include_router(ladders.router)  # standings power public club pages — not gated
 app.include_router(iq.router, dependencies=[Depends(require_module("iq"))])               # BetterIQ
 

@@ -56,6 +56,8 @@ def record_movement(
     note: str | None = None,
     occurred_on: date | None = None,
     created_by_user_id=None,
+    source: str = "manual",
+    external_ref: str | None = None,
 ) -> MerchMovement:
     """Apply a stock change: bump the variant's running balance and write the
     audit row. Does NOT commit — the caller owns the transaction."""
@@ -77,6 +79,8 @@ def record_movement(
         note=note,
         occurred_on=occurred_on,
         created_by_user_id=created_by_user_id,
+        source=source,
+        external_ref=external_ref,
     )
     session.add(mv)
     return mv

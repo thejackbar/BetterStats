@@ -358,6 +358,16 @@ export const api = {
   merchPlayer: (playerId) => request(`/club-admin/merch/players/${playerId}/merch`),
   merchReportSummary: () => request('/club-admin/merch/reports/summary'),
   merchExportUrl: () => `${BASE}/club-admin/merch/reports/export`,
+  // BetterMerch — Square POS integration
+  merchSquareStatus: () => request('/club-admin/merch/square/status'),
+  merchSquareConnectUrl: () => request('/club-admin/merch/square/connect-url'),
+  merchSquareLocations: () => request('/club-admin/merch/square/locations'),
+  merchSquareSetLocation: (locationId, locationName) =>
+    request('/club-admin/merch/square/location', { method: 'POST', body: JSON.stringify({ location_id: locationId, location_name: locationName }) }),
+  merchSquareSettings: (data) =>
+    request('/club-admin/merch/square/settings', { method: 'POST', body: JSON.stringify(data) }),
+  merchSquareSync: () => request('/club-admin/merch/square/sync', { method: 'POST' }),
+  merchSquareDisconnect: () => request('/club-admin/merch/square/disconnect', { method: 'POST' }),
   // ─── BetterImport — overlap-safe historical CSV/XLSX import ──────────────────
   importPreview: (file) => uploadFile('/club-admin/imports/preview', file),
   importResolve: (payload) =>

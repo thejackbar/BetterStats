@@ -1610,6 +1610,8 @@ class MerchProduct(Base):
     low_stock_threshold = Column(Integer, nullable=True)  # default reorder point (NULL = no alert)
     supplier = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    source = Column(Text, nullable=False, server_default="manual")   # 'manual' | 'square'
+    square_object_id = Column(Text, nullable=True)                    # Square catalog ITEM id
     is_active = Column(Boolean, nullable=False, server_default="true")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -1637,6 +1639,7 @@ class MerchVariant(Base):
     quantity = Column(Integer, nullable=False, server_default="0")
     low_stock_threshold = Column(Integer, nullable=True)
     expiry_date = Column(Date, nullable=True)
+    square_object_id = Column(Text, nullable=True)   # Square catalog ITEM_VARIATION id
     is_active = Column(Boolean, nullable=False, server_default="true")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -1667,6 +1670,8 @@ class MerchMovement(Base):
     payment_method = Column(Text, nullable=True)
     note = Column(Text, nullable=True)
     occurred_on = Column(Date, nullable=True)                # business date of the movement
+    source = Column(Text, nullable=False, server_default="manual")   # 'manual' | 'square'
+    external_ref = Column(Text, nullable=True)               # dedupe key for imported rows (e.g. Square order line)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -1692,6 +1697,40 @@ class MerchAsset(Base):
     status = Column(Text, nullable=False, server_default="in_service")
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MerchSquareConnection(Base):
+    """A club's OAuth connection to its own Square account (one per club). Square
+    is the source of truth for canteen/bar stock: we mirror its catalog + current
+    inventory counts into food_drink products, and import completed sales as
+    'sold' movements. Tokens are stored per club (same pattern as other per-club
+    API tokens); the code-flow refresh token does not expire, the access token is
+    refreshed when it nears its 30-day expiry."""
+    __tablename__ = "merch_square_connections"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", name="uq_merch_square_org"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    merchant_id = Column(Text, nullable=True)
+    environment = Column(Text, nullable=False, server_default="production")  # 'sandbox' | 'production'
+    access_token = Column(Text, nullable=True)
+    refresh_token = Column(Text, nullable=True)
+    token_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    scopes = Column(Text, nullable=True)
+    location_id = Column(Text, nullable=True)
+    location_name = Column(Text, nullable=True)
+    sync_enabled = Column(Boolean, nullable=False, server_default="true")
+    sync_sales = Column(Boolean, nullable=False, server_default="true")
+    last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_sync_status = Column(Text, nullable=True)   # 'ok' | 'error'
+    last_sync_error = Column(Text, nullable=True)
+    sales_cursor = Column(TIMESTAMP(timezone=True), nullable=True)  # import orders closed after this
+    connected_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    connected_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

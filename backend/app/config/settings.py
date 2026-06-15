@@ -54,6 +54,35 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
 
+    # ─── BetterMerch — Square POS integration (canteen/bar stock + sales) ──────
+    # A club connects its own Square account via OAuth. Register ONE Square
+    # application (developer.squareup.com), then set the application ID + secret
+    # here and add the redirect URL (square_oauth_redirect below) to the app's
+    # OAuth settings. Blank app id/secret = the Square page shows "not configured"
+    # and nothing connects. square_api_version is optional — left blank, Square
+    # uses the application's pinned default version.
+    square_app_id: str = ""
+    square_app_secret: str = ""
+    square_environment: str = "production"  # 'sandbox' | 'production'
+    square_api_version: str = ""
+
+    @property
+    def square_api_base(self) -> str:
+        return (
+            "https://connect.squareupsandbox.com"
+            if self.square_environment == "sandbox"
+            else "https://connect.squareup.com"
+        )
+
+    @property
+    def square_oauth_redirect(self) -> str:
+        # nginx strips the /api prefix, so this resolves at the public callback.
+        return f"{self.public_base_url}/api/public/square/callback"
+
+    @property
+    def square_configured(self) -> bool:
+        return bool(self.square_app_id and self.square_app_secret)
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",")]

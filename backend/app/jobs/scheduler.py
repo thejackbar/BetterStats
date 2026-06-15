@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.models.db import Organisation, async_session_maker
 from app.services.sync import sync_organisation
 from app.services.fees import recompute_fee_match_days
+from app.services.square_sync import sync_all_square
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,17 @@ def start_scheduler():
         id="weekly_sync",
         replace_existing=True,
     )
+    # BetterMerch — pull Square canteen/bar stock + sales daily for connected clubs.
+    scheduler.add_job(
+        sync_all_square,
+        trigger="cron",
+        hour=4,
+        minute=0,
+        id="daily_square_sync",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler started — weekly sync every Sunday 03:00")
+    logger.info("Scheduler started — weekly sync Sun 03:00, Square sync daily 04:00")
 
 
 def stop_scheduler():

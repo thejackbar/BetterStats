@@ -15,7 +15,7 @@ from __future__ import annotations
 import csv
 import io
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
@@ -24,16 +24,33 @@ from fastapi.responses import Response
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
+from jose import jwt
 
+from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player,
-    MerchProduct, MerchVariant, MerchMovement, MerchAsset,
+    MerchProduct, MerchVariant, MerchMovement, MerchAsset, MerchSquareConnection,
     MERCH_CATEGORIES, MERCH_MOVEMENT_KINDS, MERCH_ASSET_CONDITIONS, MERCH_ASSET_STATUSES,
     get_db,
 )
 from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_MERCH
 from app.services import merch as merch_service
+from app.services import square_client, square_sync
+
+# Signed state for the Square OAuth handshake — ties the callback back to the
+# club + user that started it, and self-expires.
+SQUARE_STATE_TYP = "square_oauth"
+
+
+def sign_square_state(org_id, user_id) -> str:
+    payload = {
+        "org": str(org_id),
+        "uid": str(user_id),
+        "typ": SQUARE_STATE_TYP,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=20),
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 router = APIRouter(prefix="/club-admin/merch", tags=["club-admin-merch"])
 
@@ -966,3 +983,132 @@ async def export_stock(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=merch-stock.csv"},
     )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Square POS integration (canteen/bar stock + sales)
+# ───────────────────────────────────────────────────────────────────────────
+
+def _square_status(conn: MerchSquareConnection | None) -> dict:
+    return {
+        "configured": settings.square_configured,
+        "connected": bool(conn and conn.access_token),
+        "merchant_id": conn.merchant_id if conn else None,
+        "environment": conn.environment if conn else settings.square_environment,
+        "location_id": conn.location_id if conn else None,
+        "location_name": conn.location_name if conn else None,
+        "sync_enabled": conn.sync_enabled if conn else True,
+        "sync_sales": conn.sync_sales if conn else True,
+        "needs_location": bool(conn and conn.access_token and not conn.location_id),
+        "last_sync_at": conn.last_sync_at.isoformat() if conn and conn.last_sync_at else None,
+        "last_sync_status": conn.last_sync_status if conn else None,
+        "last_sync_error": conn.last_sync_error if conn else None,
+    }
+
+
+@router.get("/square/status", dependencies=[_require])
+async def square_status(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    return _square_status(conn)
+
+
+@router.get("/square/connect-url", dependencies=[_require])
+async def square_connect_url(
+    current_user: User = Depends(require_cap(MANAGE_MERCH)),
+    club: Organisation = Depends(get_current_club),
+):
+    if not settings.square_configured:
+        raise HTTPException(status_code=400, detail="Square is not configured on this server")
+    state = sign_square_state(club.id, current_user.id)
+    return {"url": square_client.authorize_url(state)}
+
+
+@router.get("/square/locations", dependencies=[_require])
+async def square_locations(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Square first")
+    try:
+        token = await square_sync.ensure_fresh_token(db, conn)
+        locs = await square_client.list_locations(token)
+    except square_client.SquareError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"locations": [
+        {"id": l.get("id"), "name": l.get("name"), "status": l.get("status")} for l in locs
+    ]}
+
+
+class SquareLocationIn(BaseModel):
+    location_id: str
+    location_name: Optional[str] = None
+
+
+@router.post("/square/location", dependencies=[_require])
+async def square_set_location(
+    body: SquareLocationIn,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    if not conn or not conn.access_token:
+        raise HTTPException(status_code=400, detail="Connect Square first")
+    conn.location_id = body.location_id
+    conn.location_name = body.location_name
+    await db.commit()
+    return _square_status(conn)
+
+
+class SquareSettingsIn(BaseModel):
+    sync_enabled: Optional[bool] = None
+    sync_sales: Optional[bool] = None
+
+
+@router.post("/square/settings", dependencies=[_require])
+async def square_settings(
+    body: SquareSettingsIn,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    if not conn:
+        raise HTTPException(status_code=400, detail="Connect Square first")
+    if body.sync_enabled is not None:
+        conn.sync_enabled = body.sync_enabled
+    if body.sync_sales is not None:
+        conn.sync_sales = body.sync_sales
+    await db.commit()
+    return _square_status(conn)
+
+
+@router.post("/square/sync", dependencies=[_require])
+async def square_sync_now(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await square_sync.sync_square(db, club.id)
+    except square_client.SquareError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/square/disconnect", dependencies=[_require])
+async def square_disconnect(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    conn = await square_sync.get_connection(db, club.id)
+    if conn:
+        if conn.access_token:
+            try:
+                await square_client.revoke_token(conn.access_token)
+            except Exception:
+                pass  # best-effort; still drop our stored copy
+        await db.delete(conn)
+        await db.commit()
+    return {"ok": True}
