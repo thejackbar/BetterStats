@@ -36,7 +36,7 @@ export function PlayerRadarCard({ radar }) {
 }
 
 export function ReliabilityCard({ deep }) {
-  const rel = deep.reliability
+  const rel = deep?.reliability
   if (!rel) return null
   const ceiling = rel.ceiling || 1
   const tiers = [['Floor', rel.floor], ['Median', rel.median], ['Ceiling', rel.ceiling]]
@@ -325,7 +325,7 @@ export function DeepDiveTab({ detail, deep, bdeep, radar, radarLoading }) {
         {radarLoading && !radar ? (
           <Card eyebrow="profile vs squad average" title="Player radar"><div className="py-16"><LoadingBar label="Building radar…" expectedMs={5000} /></div></Card>
         ) : <PlayerRadarCard radar={radar} />}
-        <ReliabilityCard deep={deep} />
+        {hasDeep && <ReliabilityCard deep={deep} />}
         {hasDeep && <ConversionCard deep={deep} />}
         <MilestonesCard milestones={detail.milestones} />
         {hasDeep && <SelectionValueCard deep={deep} />}
