@@ -401,9 +401,15 @@ Overview / Stock / Equipment / Activity / Reports / Square.
   /merch/categories` (delete reparents children, nulls products via FK SET NULL). The
   Stock list filters by node+descendants (`_descendant_ids`); reports add `by_item`
   and a rolled-up `by_category_node` (each node carries its whole subtree's totals).
-  Frontend `CategoryPicker` is cascading with "+ New…". The three fixed types stay as
-  the template drivers (sizes / expiry / club-use default), so they're separate from
-  the category tree.
+  Frontend `CategoryPicker` is one dropdown (paths like "Balls › Match") + an inline
+  "+ New category" with an optional parent. A `CategoryManagerModal` (the "Categories"
+  button on Stock) renames/deletes nodes; `POST /categories/seed-defaults`
+  (`MERCH_DEFAULT_CATEGORIES`, "Add starter set") seeds a generic one-level set
+  (Match attire / Balls / Canteen…), idempotent. The three fixed types stay as the
+  template drivers (sizes / expiry / club-use default), separate from the tree.
+  Products and individual variants are both editable after creation (product Edit
+  modal via the card gear; per-line `VariantEditModal` via the line gear — label/
+  size/colour, cost/price, threshold, expiry; quantity stays movement-driven).
 
 ### Square POS integration (migration 084, v8.18.1)
 

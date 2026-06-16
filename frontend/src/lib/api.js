@@ -317,6 +317,7 @@ export const api = {
     return request(`/club-admin/merch/products${qs ? `?${qs}` : ''}`)
   },
   merchListCategories: () => request('/club-admin/merch/categories'),
+  merchSeedCategories: () => request('/club-admin/merch/categories/seed-defaults', { method: 'POST' }),
   merchCreateCategory: (data) =>
     request('/club-admin/merch/categories', { method: 'POST', body: JSON.stringify(data) }),
   merchRenameCategory: (id, data) =>
