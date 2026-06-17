@@ -106,7 +106,7 @@ export default function PublicFantasy() {
             <Banner tone="ok">{msg}</Banner>
             <Banner>{error}</Banner>
             <nav className="flex gap-1 mb-5 text-sm">
-              {[['team', 'My team'], ['pick', squad ? 'Edit' : 'Pick'], ['ladder', 'Ladder'], ['leagues', 'Leagues']].map(([k, label]) => (
+              {[['team', 'My team'], ['pick', squad ? 'Edit' : 'Pick'], ['ladder', 'Ladder'], ['leagues', 'Leagues'], ['draft', 'Draft']].map(([k, label]) => (
                 <button key={k} onClick={() => setView(k)}
                   className={`px-3 py-1.5 rounded-lg ${view === k ? 'text-pb-bg' : 'text-pb-faint bg-pb-surface2'}`}
                   style={view === k ? accentStyle : undefined}>{label}</button>
@@ -123,6 +123,7 @@ export default function PublicFantasy() {
             )}
             {view === 'ladder' && <Ladder token={token} />}
             {view === 'leagues' && <Leagues token={token} flash={flash} fail={fail} />}
+            {view === 'draft' && <Draft token={token} flash={flash} fail={fail} />}
           </>
         )}
       </div>
@@ -439,6 +440,110 @@ function Leagues({ token, flash, fail }) {
             <LadderList rows={lg.ladder} />
           </div>
         ))}
+    </div>
+  )
+}
+
+// ── Draft ────────────────────────────────────────────────────────────────────
+
+function Draft({ token, flash, fail }) {
+  const [leagues, setLeagues] = useState(null)
+  const [active, setActive] = useState(null)
+  const [state, setState] = useState(null)
+  const [ladder, setLadder] = useState(null)
+
+  const loadLeagues = useCallback(() => api.fanDraftLeagues(token).then(d => setLeagues(d.leagues)).catch(() => setLeagues([])), [token])
+  useEffect(() => { loadLeagues() }, [loadLeagues])
+
+  const refresh = useCallback(async (id) => {
+    try {
+      const s = await api.fanDraftState(token, id); setState(s)
+      if (s.status === 'complete') setLadder(await api.fanDraftLadder(token, id).catch(() => null))
+    } catch (e) { fail(e) }
+  }, [token, fail])
+
+  useEffect(() => {
+    if (!active || state?.status !== 'in_progress') return
+    const t = setInterval(() => refresh(active), 10000)
+    return () => clearInterval(t)
+  }, [active, state?.status, refresh])
+
+  const enter = async (id) => { setActive(id); setState(null); setLadder(null); await refresh(id) }
+  const join = async (id) => { try { await api.fanJoinDraft(token, id); flash('Joined the draft league.'); await loadLeagues() } catch (e) { fail(e) } }
+  const pick = async (pid) => { try { await api.fanDraftPick(token, active, pid); await refresh(active) } catch (e) { fail(e) } }
+
+  if (active) return <DraftBoard state={state} ladder={ladder} onBack={() => { setActive(null); setState(null) }} onPick={pick} />
+
+  if (leagues === null) return <p className="text-pb-faint text-sm">Loading…</p>
+  if (!leagues.length) return <p className="text-sm text-pb-faint">No draft leagues yet. Your club admin sets these up.</p>
+  return (
+    <div className="space-y-2">
+      {leagues.map(lg => (
+        <div key={lg.id} className="pb-card p-3 flex items-center justify-between text-sm">
+          <div>
+            <div className="font-medium">{lg.name}</div>
+            <div className="text-xs text-pb-faint">{lg.draft_type} · {lg.scoring_type === 'h2h' ? 'head-to-head' : 'total points'} · {lg.members}/{lg.capacity} · {lg.draft_status || 'not started'}</div>
+          </div>
+          {lg.joined
+            ? <button onClick={() => enter(lg.id)} className="px-3 py-1.5 rounded-lg text-pb-bg text-xs" style={accentStyle}>Open</button>
+            : (!lg.draft_status || lg.draft_status === 'scheduled')
+              ? <button onClick={() => join(lg.id)} className="px-3 py-1.5 rounded-lg bg-pb-surface2 text-pb-text text-xs">Join</button>
+              : <span className="text-xs text-pb-faintest">drafting</span>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function DraftBoard({ state, ladder, onBack, onPick }) {
+  if (!state) return <p className="text-pb-faint text-sm">Loading…</p>
+  const needed = (role) => (state.quota?.[role] || 0) - (state.my_role_counts?.[role] || 0)
+  return (
+    <div className="space-y-4">
+      <button onClick={onBack} className="text-xs text-pb-faint underline">← all draft leagues</button>
+      {state.status === 'not_started' && <div className="pb-card p-4 text-sm text-pb-faint">The draft hasn't started yet. Your admin will kick it off.</div>}
+      {state.status === 'in_progress' && (
+        <>
+          <div className="pb-card p-3 text-sm">
+            {state.my_turn
+              ? <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>You're on the clock — pick a player.</span>
+              : <span className="text-pb-faint">On the clock: <span className="text-pb-text">{state.on_clock?.manager}</span> (round {state.on_clock?.round})</span>}
+          </div>
+          {state.my_turn && (
+            <div className="pb-card p-3">
+              <div className="text-xs text-pb-faint mb-2">Still need: {ROLE_ORDER.filter(r => needed(r) > 0).map(r => `${needed(r)} ${ROLE_LABEL[r].toLowerCase()}`).join(', ') || 'nothing'}</div>
+              <div className="space-y-1 max-h-80 overflow-y-auto">
+                {state.available.filter(p => needed(p.role) > 0).slice(0, 60).map(p => (
+                  <button key={p.player_id} onClick={() => onPick(p.player_id)}
+                    className="w-full flex justify-between px-3 py-2 rounded-lg bg-pb-surface text-sm border pb-hairline">
+                    <span>{p.name} <span className="text-pb-faintest text-xs">{ROLE_LABEL[p.role]}</span></span>
+                    <span className="tabular-nums text-pb-faint">{money(p.price)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="pb-card p-3">
+            <div className="text-xs text-pb-faint mb-1">Picks</div>
+            <div className="space-y-0.5 max-h-60 overflow-y-auto text-sm">
+              {state.picks.slice().reverse().map(pk => (
+                <div key={pk.pick} className="flex justify-between">
+                  <span><span className="text-pb-faintest">{pk.pick}.</span> {pk.player}</span>
+                  <span className="text-pb-faint text-xs">{pk.manager}{pk.auto ? ' (auto)' : ''}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+      {state.status === 'complete' && (
+        <>
+          <div className="pb-card p-3 text-sm text-pb-faint">Draft complete. Your squad now scores each round.</div>
+          {ladder && <LadderList rows={ladder.type === 'h2h'
+            ? ladder.ladder.map(r => ({ rank: r.rank, team_name: r.team_name, manager: `${r.w}-${r.l}-${r.d}`, points: r.pts }))
+            : ladder.ladder} />}
+        </>
+      )}
     </div>
   )
 }
