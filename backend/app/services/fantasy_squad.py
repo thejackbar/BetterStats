@@ -80,11 +80,12 @@ def validate_squad(picks: list[dict], pool: dict[str, dict], rules: dict, budget
 
 # ── Round scoring ────────────────────────────────────────────────────────────
 
-def score_squad_round(picks, score_by_player: dict[str, tuple[float, int]], best_n: int, scoring: dict) -> dict:
+def score_squad_round(picks, score_by_player: dict[str, tuple[float, int]], best_n: int, scoring: dict, is_triple: bool = False) -> dict:
     """Score one squad for a round. ``picks`` are its FantasySquadPlayer rows;
     ``score_by_player`` maps player_id -> (round_points, games_counted). The
-    captain's points are doubled (the vice-captain inherits the double if the
-    captain didn't play), then the best ``best_n`` of the squad count."""
+    captain's points are doubled (tripled if the triple-captain chip is on, and
+    the vice-captain inherits the multiplier if the captain didn't play), then
+    the best ``best_n`` of the squad count."""
     scoring = scoring or DEFAULT_SCORING
     cap = next((p for p in picks if p.is_captain), None)
     vice = next((p for p in picks if p.is_vice_captain), None)
@@ -98,7 +99,7 @@ def score_squad_round(picks, score_by_player: dict[str, tuple[float, int]], best
         is_cap = pid == eff_captain_id
         entries.append({
             "player_id": pid, "role": p.role, "points": round(pts, 2),
-            "eff_points": apply_captain(pts, is_cap, False, scoring),
+            "eff_points": apply_captain(pts, is_cap, is_triple, scoring),
             "is_captain": bool(p.is_captain), "is_vice": bool(p.is_vice_captain),
             "captained": is_cap,
         })
@@ -146,12 +147,21 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd) -> int:
     )).all()
     score_by_player = {str(pid): (float(tp), gc) for pid, tp, gc in score_rows}
 
+    # Which squads played the triple-captain chip this round (set by the chip
+    # endpoint, which pre-creates the round-score row).
+    chip_rows = (await session.execute(
+        text("SELECT squad_id, chip_used FROM fantasy_squad_round_scores WHERE round_id = CAST(:rid AS UUID)"),
+        {"rid": str(rnd.id)},
+    )).all()
+    triple_squads = {str(sid) for sid, chip in chip_rows if chip == "triple_captain"}
+
     rules = fs.rules or DEFAULT_RULES
     scoring = fs.scoring or DEFAULT_SCORING
     best_n = rules.get("count_best_n", 11)
 
     for sq in squads:
-        res = score_squad_round(picks_by_squad.get(sq.id, []), score_by_player, best_n, scoring)
+        res = score_squad_round(picks_by_squad.get(sq.id, []), score_by_player, best_n, scoring,
+                                is_triple=str(sq.id) in triple_squads)
         await session.execute(
             text("""
                 INSERT INTO fantasy_squad_round_scores
@@ -187,5 +197,15 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd) -> int:
             WHERE sq.id = t.squad_id AND sq.fantasy_season_id = CAST(:fs AS UUID)
         """),
         {"fs": str(fs.id)},
+    )
+
+    # Rollover: settling this round grants the next round's free transfer, banked
+    # up to the cap. This also resets a wildcard's unlimited window to normal.
+    per = int(rules.get("free_transfers_per_round", 1))
+    cap = per + int(rules.get("max_banked_transfers", 2))
+    await session.execute(
+        text("UPDATE fantasy_squads SET free_transfers = LEAST(free_transfers + :per, :cap) "
+             "WHERE fantasy_season_id = CAST(:fs AS UUID)"),
+        {"per": per, "cap": cap, "fs": str(fs.id)},
     )
     return len(squads)

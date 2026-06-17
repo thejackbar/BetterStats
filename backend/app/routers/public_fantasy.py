@@ -17,6 +17,8 @@ are later phases.
 """
 from __future__ import annotations
 
+import secrets
+import string
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -33,7 +35,7 @@ from app.config.settings import settings
 from app.models.db import (
     Organisation, Player, get_db,
     FantasySeason, FantasyLeague, FantasyManager, FantasySquad, FantasySquadPlayer,
-    FantasyLeagueMember, FantasyPoolPlayer,
+    FantasyLeagueMember, FantasyPoolPlayer, FantasyRound, FantasyTransaction,
 )
 from app.services import rate_limit
 from app.services.fantasy_squad import validate_squad
@@ -456,3 +458,309 @@ async def ladder(token: str, db: AsyncSession = Depends(get_db)):
             for i, (tn, dn, pts) in enumerate(rows, start=1)
         ]
     }
+
+
+# ── transfers, captain, chips ────────────────────────────────────────────────
+
+def _gen_code(n: int = 6) -> str:
+    return "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(n))
+
+
+def _sell_value(purchase, current) -> float:
+    """FPL-style sell-on: realise the buy price plus half of any profit."""
+    profit = max(0.0, float(current) - float(purchase or 0))
+    return round(float(purchase or 0) + profit / 2, 1)
+
+
+async def _current_round(db: AsyncSession, season: FantasySeason) -> Optional[FantasyRound]:
+    return (await db.execute(
+        select(FantasyRound).where(
+            FantasyRound.fantasy_season_id == season.id, FantasyRound.status != "scored",
+        ).order_by(FantasyRound.round_number).limit(1)
+    )).scalar_one_or_none()
+
+
+async def _global_squad(db: AsyncSession, season: FantasySeason, mgr: FantasyManager) -> Optional[FantasySquad]:
+    league = await _global_league(db, season)
+    if league is None:
+        return None
+    return (await db.execute(
+        select(FantasySquad).where(FantasySquad.league_id == league.id, FantasySquad.manager_id == mgr.id)
+    )).scalar_one_or_none()
+
+
+async def _record_round_transfer(db: AsyncSession, squad_id, rnd: Optional[FantasyRound], hit: int) -> None:
+    """Tally a transfer (and any points hit) against the current round's score row,
+    which settlement later reads when it computes points = raw - transfer_hit."""
+    if rnd is None:
+        return
+    await db.execute(
+        text("""
+            INSERT INTO fantasy_squad_round_scores (squad_id, round_id, transfer_hit, transfers_made, lineup)
+            VALUES (CAST(:sid AS UUID), CAST(:rid AS UUID), :hit, 1, '[]')
+            ON CONFLICT (squad_id, round_id) DO UPDATE SET
+                transfer_hit = fantasy_squad_round_scores.transfer_hit + :hit,
+                transfers_made = fantasy_squad_round_scores.transfers_made + 1
+        """),
+        {"sid": str(squad_id), "rid": str(rnd.id), "hit": hit},
+    )
+
+
+class TransferBody(BaseModel):
+    out_player_id: str
+    in_player_id: str
+
+
+@router.post("/{token}/transfer")
+async def transfer(token: str, body: TransferBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Swap one player for another of the same role. The first free transfer of the
+    round is free; further transfers cost the points hit. Budget uses the sell-on
+    value of the player leaving."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None or season.status == "completed":
+        raise HTTPException(status_code=403, detail="Transfers are closed.")
+    squad = await _global_squad(db, season, mgr)
+    if squad is None:
+        raise HTTPException(status_code=400, detail="Build your squad first.")
+    rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
+
+    sps = (await db.execute(
+        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
+    )).scalars().all()
+    out_sp = next((s for s in sps if str(s.player_id) == body.out_player_id), None)
+    if out_sp is None:
+        raise HTTPException(status_code=400, detail="That player isn't in your squad.")
+    if out_sp.is_captain or out_sp.is_vice_captain:
+        raise HTTPException(status_code=400, detail="Change your captain or vice before transferring them out.")
+    if any(str(s.player_id) == body.in_player_id for s in sps):
+        raise HTTPException(status_code=400, detail="You already have that player.")
+
+    in_pool = (await db.execute(
+        select(FantasyPoolPlayer).where(
+            FantasyPoolPlayer.fantasy_season_id == season.id,
+            FantasyPoolPlayer.player_id == body.in_player_id,
+        )
+    )).scalar_one_or_none()
+    if in_pool is None or not in_pool.is_available:
+        raise HTTPException(status_code=400, detail="That player isn't available.")
+    if in_pool.role != out_sp.role:
+        raise HTTPException(status_code=400, detail=f"Transfers must be like-for-like by role ({out_sp.role}).")
+
+    out_pool = (await db.execute(
+        select(FantasyPoolPlayer).where(
+            FantasyPoolPlayer.fantasy_season_id == season.id,
+            FantasyPoolPlayer.player_id == body.out_player_id,
+        )
+    )).scalar_one_or_none()
+    out_current = out_pool.current_price if out_pool else (out_sp.purchase_price or 0)
+    sell = _sell_value(out_sp.purchase_price, out_current)
+    budget = float(squad.budget_remaining or 0) + sell - float(in_pool.current_price)
+    if budget < -1e-6:
+        raise HTTPException(status_code=400, detail="Not enough budget for that transfer.")
+
+    rnd = await _current_round(db, season)
+    if squad.free_transfers and squad.free_transfers > 0:
+        squad.free_transfers -= 1
+        hit = 0
+    else:
+        hit = int((season.rules or DEFAULT_RULES).get("transfer_hit", DEFAULT_RULES["transfer_hit"]))
+
+    await db.delete(out_sp)
+    db.add(FantasySquadPlayer(
+        squad_id=squad.id, player_id=body.in_player_id, role=in_pool.role,
+        purchase_price=in_pool.current_price, added_round=rnd.round_number if rnd else None,
+    ))
+    squad.budget_remaining = round(budget, 1)
+    db.add(FantasyTransaction(squad_id=squad.id, league_id=squad.league_id, round_id=rnd.id if rnd else None,
+                              type="transfer_out", player_id=body.out_player_id, price=sell))
+    db.add(FantasyTransaction(squad_id=squad.id, league_id=squad.league_id, round_id=rnd.id if rnd else None,
+                              type="transfer_in", player_id=body.in_player_id, price=in_pool.current_price))
+    await db.flush()
+    await _record_round_transfer(db, squad.id, rnd, hit)
+    await db.commit()
+    await _recount_ownership(db, season.id)
+    return {"ok": True, "hit": hit, "budget_remaining": squad.budget_remaining, "free_transfers": squad.free_transfers}
+
+
+class CaptainBody(BaseModel):
+    captain_player_id: str
+    vice_player_id: Optional[str] = None
+
+
+@router.post("/{token}/captain")
+async def set_captain(token: str, body: CaptainBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Set the captain (doubles) and optional vice-captain (the fallback)."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        raise HTTPException(status_code=404, detail="No fantasy season")
+    squad = await _global_squad(db, season, mgr)
+    if squad is None:
+        raise HTTPException(status_code=400, detail="Build your squad first.")
+    sps = (await db.execute(
+        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
+    )).scalars().all()
+    ids = {str(s.player_id) for s in sps}
+    if body.captain_player_id not in ids:
+        raise HTTPException(status_code=400, detail="The captain must be in your squad.")
+    if body.vice_player_id and body.vice_player_id not in ids:
+        raise HTTPException(status_code=400, detail="The vice-captain must be in your squad.")
+    if body.vice_player_id and body.vice_player_id == body.captain_player_id:
+        raise HTTPException(status_code=400, detail="Captain and vice must be different players.")
+    for s in sps:
+        s.is_captain = str(s.player_id) == body.captain_player_id
+        s.is_vice_captain = bool(body.vice_player_id) and str(s.player_id) == body.vice_player_id
+    await db.commit()
+    return {"ok": True}
+
+
+class ChipBody(BaseModel):
+    chip: str  # 'wildcard' | 'triple_captain'
+
+
+@router.post("/{token}/chip")
+async def play_chip(token: str, body: ChipBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Play a chip for the current round. Wildcard makes this round's transfers
+    free and unlimited; triple-captain triples the captain. One of each per half."""
+    chip = body.chip
+    if chip not in ("wildcard", "triple_captain"):
+        raise HTTPException(status_code=400, detail="Unknown chip.")
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        raise HTTPException(status_code=404, detail="No fantasy season")
+    squad = await _global_squad(db, season, mgr)
+    if squad is None:
+        raise HTTPException(status_code=400, detail="Build your squad first.")
+    rnd = await _current_round(db, season)
+    if rnd is None:
+        raise HTTPException(status_code=400, detail="No upcoming round to play a chip on.")
+
+    total = (await db.execute(
+        select(func.count()).select_from(FantasyRound).where(FantasyRound.fantasy_season_id == season.id)
+    )).scalar_one() or 1
+    half = 0 if (rnd.round_number - 1) < total / 2 else 1
+    chips = dict(squad.chips_used or {})
+    used = list(chips.get(chip, []))
+    allow = int((season.rules or DEFAULT_RULES).get(
+        "wildcards_per_half" if chip == "wildcard" else "triple_captains_per_half", 1))
+    used_this_half = sum(1 for rn in used if (0 if (rn - 1) < total / 2 else 1) == half)
+    if used_this_half >= allow:
+        raise HTTPException(status_code=409, detail="You've already used that chip this half of the season.")
+
+    if chip == "wildcard":
+        squad.free_transfers = 9999  # unlimited for this round; rollover resets it
+    else:  # triple_captain — flagged on the round score row, read at settlement
+        await db.execute(
+            text("""
+                INSERT INTO fantasy_squad_round_scores (squad_id, round_id, chip_used, lineup)
+                VALUES (CAST(:sid AS UUID), CAST(:rid AS UUID), 'triple_captain', '[]')
+                ON CONFLICT (squad_id, round_id) DO UPDATE SET chip_used = 'triple_captain'
+            """),
+            {"sid": str(squad.id), "rid": str(rnd.id)},
+        )
+    chips[chip] = used + [rnd.round_number]
+    squad.chips_used = chips  # reassign so the JSONB change is flagged
+    db.add(FantasyTransaction(squad_id=squad.id, league_id=squad.league_id, round_id=rnd.id, type="chip",
+                              detail={"chip": chip, "round": rnd.round_number}))
+    await db.commit()
+    return {"ok": True, "chip": chip, "round": rnd.round_number}
+
+
+# ── mini-leagues ─────────────────────────────────────────────────────────────
+
+class LeagueCreate(BaseModel):
+    name: str
+
+
+@router.post("/{token}/leagues")
+async def create_league(token: str, body: LeagueCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    """Create a private mini-league and join it. Members are ranked on the same
+    global salary-cap squads."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        raise HTTPException(status_code=404, detail="No fantasy season")
+    name = (body.name or "").strip() or f"{mgr.display_name}'s league"
+    code = _gen_code()
+    league = FantasyLeague(
+        fantasy_season_id=season.id, organisation_id=club.id, kind="mini_salary_cap",
+        name=name, join_code=code, status="open", created_by_manager_id=mgr.id,
+    )
+    db.add(league)
+    await db.flush()
+    squad = await _global_squad(db, season, mgr)
+    db.add(FantasyLeagueMember(league_id=league.id, manager_id=mgr.id, squad_id=squad.id if squad else None))
+    await db.commit()
+    return {"ok": True, "league": {"id": str(league.id), "name": name, "join_code": code}}
+
+
+class LeagueJoin(BaseModel):
+    code: str
+
+
+@router.post("/{token}/leagues/join")
+async def join_league(token: str, body: LeagueJoin, request: Request, db: AsyncSession = Depends(get_db)):
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        raise HTTPException(status_code=404, detail="No fantasy season")
+    league = (await db.execute(
+        select(FantasyLeague).where(
+            FantasyLeague.fantasy_season_id == season.id,
+            FantasyLeague.kind == "mini_salary_cap",
+            func.upper(FantasyLeague.join_code) == (body.code or "").strip().upper(),
+        )
+    )).scalar_one_or_none()
+    if league is None:
+        raise HTTPException(status_code=404, detail="No league with that code.")
+    member = (await db.execute(
+        select(FantasyLeagueMember).where(
+            FantasyLeagueMember.league_id == league.id, FantasyLeagueMember.manager_id == mgr.id)
+    )).scalar_one_or_none()
+    if member is None:
+        squad = await _global_squad(db, season, mgr)
+        db.add(FantasyLeagueMember(league_id=league.id, manager_id=mgr.id, squad_id=squad.id if squad else None))
+        await db.commit()
+    return {"ok": True, "league": {"id": str(league.id), "name": league.name}}
+
+
+@router.get("/{token}/leagues")
+async def my_leagues(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The mini-leagues this manager is in, each with its ranked ladder."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        return {"leagues": []}
+    leagues = (await db.execute(
+        select(FantasyLeague).join(FantasyLeagueMember, FantasyLeagueMember.league_id == FantasyLeague.id)
+        .where(
+            FantasyLeagueMember.manager_id == mgr.id,
+            FantasyLeague.fantasy_season_id == season.id,
+            FantasyLeague.kind == "mini_salary_cap",
+        )
+    )).scalars().all()
+    out = []
+    for lg in leagues:
+        rows = (await db.execute(
+            select(FantasySquad.team_name, FantasyManager.display_name, FantasySquad.total_points)
+            .join(FantasyLeagueMember, FantasyLeagueMember.squad_id == FantasySquad.id)
+            .join(FantasyManager, FantasyManager.id == FantasySquad.manager_id)
+            .where(FantasyLeagueMember.league_id == lg.id)
+            .order_by(FantasySquad.total_points.desc())
+        )).all()
+        out.append({
+            "id": str(lg.id), "name": lg.name, "join_code": lg.join_code,
+            "ladder": [
+                {"rank": i, "team_name": tn, "manager": dn, "points": float(pts)}
+                for i, (tn, dn, pts) in enumerate(rows, start=1)
+            ],
+        })
+    return {"leagues": out}

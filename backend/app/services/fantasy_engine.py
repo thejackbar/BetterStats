@@ -317,6 +317,14 @@ async def settle_round(session: AsyncSession, fs, rnd) -> int:
     await _refresh_pool_totals(session, fs, rnd)
     # Roll the per-player points up into each squad's best-11 round score + ladder.
     await fantasy_squad.score_squads_for_round(session, fs, rnd)
+    # The season is live once the first round settles — squad changes now go
+    # through transfers, not a full rebuild.
+    if fs.status in ("setup", "open"):
+        await session.execute(
+            text("UPDATE fantasy_seasons SET status = 'active', updated_at = NOW() WHERE id = CAST(:fs AS UUID)"),
+            {"fs": str(fs.id)},
+        )
+        fs.status = "active"
     await _mark_scored(session, rnd, scored)
     return scored
 
