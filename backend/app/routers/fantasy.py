@@ -268,3 +268,20 @@ async def settle_due(season_id: str, club=Depends(get_current_club), db: AsyncSe
         settled += 1
     await db.commit()
     return {"rounds_settled": settled}
+
+
+@router.delete("/season/{season_id}")
+async def delete_season(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Delete a fantasy season and everything under it (pool, rounds, leagues,
+    squads, scores) via the FK cascade. Refused once a round has scored, so a
+    live competition can't be nuked by accident."""
+    fs = await _load_season(db, club, season_id)
+    scored = (await db.execute(
+        select(func.count()).select_from(FantasyRound)
+        .where(FantasyRound.fantasy_season_id == fs.id, FantasyRound.status == "scored")
+    )).scalar_one()
+    if scored:
+        raise HTTPException(status_code=409, detail="This season has scored rounds, so it can't be deleted.")
+    await db.delete(fs)
+    await db.commit()
+    return {"ok": True}

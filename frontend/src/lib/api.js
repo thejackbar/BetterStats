@@ -1377,6 +1377,8 @@ export const api = {
     request(`/club-admin/fantasy/rounds/${roundId}/settle`, { method: 'POST' }),
   fantasySettleDue: (seasonId) =>
     request(`/club-admin/fantasy/season/${seasonId}/settle-due`, { method: 'POST' }),
+  fantasyDeleteSeason: (seasonId) =>
+    request(`/club-admin/fantasy/season/${seasonId}`, { method: 'DELETE' }),
 }
 
 function _iqQs(opponent, fixtureId, team, name) {
