@@ -1359,6 +1359,24 @@ export const api = {
   commsGetSettings: () => request('/club-admin/comms/settings'),
   commsSetSettings: (data) =>
     request('/club-admin/comms/settings', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // BetterFantasyCricket (admin surface)
+  fantasyConfig: () => request('/club-admin/fantasy/config'),
+  fantasyGetSeason: () => request('/club-admin/fantasy/season'),
+  fantasyCreateSeason: (season_year, name) =>
+    request('/club-admin/fantasy/season', { method: 'POST', body: JSON.stringify({ season_year, name }) }),
+  fantasyBuildPool: (seasonId) =>
+    request(`/club-admin/fantasy/season/${seasonId}/build-pool`, { method: 'POST' }),
+  fantasyGenerateRounds: (seasonId) =>
+    request(`/club-admin/fantasy/season/${seasonId}/generate-rounds`, { method: 'POST' }),
+  fantasyListPool: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/pool`),
+  fantasyPatchPool: (poolId, data) =>
+    request(`/club-admin/fantasy/pool/${poolId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  fantasyListRounds: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/rounds`),
+  fantasySettleRound: (roundId) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/settle`, { method: 'POST' }),
+  fantasySettleDue: (seasonId) =>
+    request(`/club-admin/fantasy/season/${seasonId}/settle-due`, { method: 'POST' }),
 }
 
 function _iqQs(opponent, fixtureId, team, name) {
