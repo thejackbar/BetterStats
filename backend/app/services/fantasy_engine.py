@@ -25,6 +25,7 @@ from collections import defaultdict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import fantasy_squad
 from app.services.fantasy_scoring import (
     DEFAULT_SCORING, classify_role, score_player_round,
 )
@@ -305,6 +306,8 @@ async def settle_round(session: AsyncSession, fs, rnd) -> int:
         scored += 1
 
     await _refresh_pool_totals(session, fs, rnd)
+    # Roll the per-player points up into each squad's best-11 round score + ladder.
+    await fantasy_squad.score_squads_for_round(session, fs, rnd)
     await _mark_scored(session, rnd, scored)
     return scored
 
