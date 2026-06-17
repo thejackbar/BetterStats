@@ -57,6 +57,12 @@ export default function FantasyHome() {
   const buildPool = run('pool', () => api.fantasyBuildPool(season.id), (r) => `Pool built: ${r.pool} players.`)
   const genRounds = run('rounds', () => api.fantasyGenerateRounds(season.id), (r) => `Generated ${r.rounds} rounds.`)
   const settleDue = run('settle', () => api.fantasySettleDue(season.id), (r) => `Settled ${r.rounds_settled} rounds.`)
+  const deleteSeason = async () => {
+    if (!window.confirm('Delete this fantasy season and its pool and rounds? This cannot be undone.')) return
+    setBusy('delete'); setErr(null)
+    try { await api.fantasyDeleteSeason(season.id); flash('Season deleted.'); await load() }
+    catch (e) { fail(e) } finally { setBusy('') }
+  }
 
   const setRole = async (pp, role) => {
     try { await api.fantasyPatchPool(pp.id, { role }); await load() } catch (e) { fail(e) }
@@ -105,6 +111,7 @@ export default function FantasyHome() {
                 <Btn kind="ghost" onClick={buildPool} busy={busy === 'pool'}>Build pool</Btn>
                 <Btn kind="ghost" onClick={genRounds} busy={busy === 'rounds'}>Generate rounds</Btn>
                 <Btn onClick={settleDue} busy={busy === 'settle'}>Settle due rounds</Btn>
+                <Btn kind="ghost" onClick={deleteSeason} busy={busy === 'delete'}>Delete season</Btn>
               </div>
             </div>
             {data.link_token && (

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime, time
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,6 +81,8 @@ async def generate_rounds(session: AsyncSession, fs) -> int:
     for n, key in enumerate(sorted(weeks), start=1):
         if n in scored:
             continue  # leave settled rounds untouched
+        # games.played_at is a DATE, so the round window is date-keyed. We don't
+        # hold kick-off times, so the lock is the start of the round's first day.
         dates = sorted(weeks[key])
         await session.execute(
             text("""
@@ -93,8 +96,8 @@ async def generate_rounds(session: AsyncSession, fs) -> int:
             """),
             {
                 "fs": str(fs.id), "org": str(fs.organisation_id), "n": n,
-                "name": f"Round {n}", "lock_at": dates[0],
-                "start": dates[0].date(), "end": dates[-1].date(),
+                "name": f"Round {n}", "lock_at": datetime.combine(dates[0], time()),
+                "start": dates[0], "end": dates[-1],
             },
         )
     return len(weeks)
@@ -103,10 +106,16 @@ async def generate_rounds(session: AsyncSession, fs) -> int:
 # ── Pool build (role + price) ──────────────────────────────────────────────────
 
 async def build_pool(session: AsyncSession, fs) -> int:
-    """Classify and price every eligible player (active, played this season-year)
-    and upsert ``fantasy_pool_players``. An admin role override (role_source =
-    'admin') and the live ``current_price`` are preserved on rebuild. Returns the
-    pool size."""
+    """Classify and price every eligible player and upsert ``fantasy_pool_players``.
+
+    Eligible = an active player who has turned out in the recent window (this
+    season-year or the prior ``PRICE_WINDOW_YEARS - 1``). The recent window
+    matters: a fantasy season is usually set up BEFORE the games begin, so a
+    current-year-only gate would leave the pool empty pre-season; seeding from
+    the last couple of seasons gives the squad you'd expect, and a rebuild once
+    the season is underway naturally picks up anyone new. An admin role override
+    (role_source = 'admin') and the live ``current_price`` are preserved on
+    rebuild. Returns the pool size."""
     recent_from = fs.season_year - (PRICE_WINDOW_YEARS - 1)
     rows = await session.execute(
         text("""
@@ -135,7 +144,7 @@ async def build_pool(session: AsyncSession, fs) -> int:
             WHERE p.organisation_id = CAST(:org AS UUID)
               AND p.status = 'active' AND COALESCE(p.is_player, true)
             GROUP BY p.id, p.player_role, p.skill_positions
-            HAVING BOOL_OR(s.year = :year)
+            HAVING BOOL_OR(s.year >= :rfrom)
         """),
         {"org": str(fs.organisation_id), "year": fs.season_year, "rfrom": recent_from},
     )
