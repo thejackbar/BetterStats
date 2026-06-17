@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.content import blog as blog_content
 from app.models.db import Player, Organisation, get_db
 
 router = APIRouter(prefix="/og-preview", tags=["og-preview"])
@@ -190,6 +191,8 @@ def _parse_route(path: str):
         return None
     if segments[0] == "players" and len(segments) > 1 and UUID_RE.match(segments[1]):
         return {"type": "player", "player_id": segments[1]}
+    if segments[0] == "blog" and len(segments) == 2:
+        return {"type": "blog", "slug": segments[1]}
     if len(segments) >= 2 and segments[1] in CLUB_SECTIONS:
         return {"type": "club", "slug": segments[0]}
     if len(segments) == 1 and segments[0] not in RESERVED_ROOT_SEGMENTS:
@@ -220,10 +223,11 @@ def _html(
     description: str,
     image: str | None,
     url: str,
-    jsonld: dict | None = None,
+    jsonld: dict | list | None = None,
     image_w: int | None = None,
     image_h: int | None = None,
     image_alt: str | None = None,
+    og_type: str = "website",
 ) -> str:
     if image:
         img_tags = f"""
@@ -260,7 +264,7 @@ def _html(
   <meta name="description" content="{_esc(description)}" />
   <link rel="canonical" href="{_esc(url)}" />
   <meta property="og:site_name" content="{SITE_NAME}" />
-  <meta property="og:type" content="website" />
+  <meta property="og:type" content="{_esc(og_type)}" />
   <meta property="og:locale" content="en_AU" />
   <meta property="og:title" content="{_esc(title)}" />
   <meta property="og:description" content="{_esc(description)}" />
@@ -287,6 +291,61 @@ def _marketing_html(path: str, base: str) -> str:
         image_w=COVER_W,
         image_h=COVER_H,
         image_alt=COVER_ALT,
+    )
+
+
+def _blog_html(slug: str, page_url: str, base: str) -> str | None:
+    post = blog_content.get_post(slug)
+    if not post:
+        return None
+
+    image = _abs_url(post.get("image"), base) or _abs_url(OG_COVER, base)
+    # Title mirrors the in-app BlogPost meta so a JS-running crawler and a
+    # plain one see the same card.
+    title = f"{post['title']} | {SITE_NAME}"
+
+    # BlogPosting + breadcrumb, mirroring frontend BlogPost.jsx so search and
+    # AI engines read the article cleanly.
+    jsonld = [
+        {
+            "@context": "https://schema.org",
+            "@type": "BlogPosting",
+            "headline": post["title"],
+            "description": post["description"],
+            "image": image,
+            "datePublished": post["date"],
+            "dateModified": post["date"],
+            "inLanguage": "en-AU",
+            "author": {"@type": "Organization", "name": SITE_NAME, "url": f"{base}/"},
+            "publisher": {
+                "@type": "Organization",
+                "name": "BetterSports",
+                "logo": {"@type": "ImageObject", "url": f"{base}/og-image.png"},
+            },
+            "mainEntityOfPage": {"@type": "WebPage", "@id": page_url},
+            "url": page_url,
+        },
+        {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{base}/"},
+                {"@type": "ListItem", "position": 2, "name": "Blog", "item": f"{base}/blog"},
+                {"@type": "ListItem", "position": 3, "name": post["title"], "item": page_url},
+            ],
+        },
+    ]
+
+    return _html(
+        title,
+        post["description"],
+        image,
+        page_url,
+        jsonld=jsonld,
+        image_w=blog_content.IMAGE_WIDTH,
+        image_h=blog_content.IMAGE_HEIGHT,
+        image_alt=post["title"],
+        og_type="article",
     )
 
 
@@ -385,6 +444,8 @@ async def og_preview(
     html = None
     if route and route["type"] == "player":
         html = await _player_html(route["player_id"], page_url, base, db)
+    elif route and route["type"] == "blog":
+        html = _blog_html(route["slug"], page_url, base)
     elif route and route["type"] == "club":
         html = await _club_html(route["slug"], page_url, base, db)
 

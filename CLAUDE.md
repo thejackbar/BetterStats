@@ -82,6 +82,33 @@ The canonical public domain is **`https://betterat.cricket`** (no `www`), the "B
 - `betterat.cricket` social link-preview cards are server-rendered for the marketing routes by `backend/app/routers/og_preview.py` (`MARKETING_PAGES`), so per-page OG tags work for crawlers that do not run JS; keep that map in sync when marketing routes change.
 - `cloudflare-worker/worker.js` is a pure old-domain redirect, **ready but not yet deployed** (its old OG-injection job is handled by `og_preview`). When ready, `wrangler deploy` it and keep the Cloudflare route `betterstats.cricket/*` active.
 
+## Blog post social-share cards (Jun 2026)
+
+Each blog post (`/blog/{slug}`) gets its own social-share card from
+`backend/app/routers/og_preview.py` (`_blog_html`): the post's own hero image,
+title and description, `og:type=article`, and BlogPosting + Breadcrumb JSON-LD
+that mirrors `frontend/src/pages/marketing/BlogPost.jsx`. Before this, a shared
+post fell through to the generic homepage card, because the SPA's client-side
+`usePageMeta` tags never reach Facebook/LinkedIn crawlers (they read raw HTML,
+not rendered JS).
+
+The backend's blog metadata is in one place, `backend/app/content/blog.py`
+(`BLOG_POSTS`: slug, title, description, image, date). Both `og_preview.py` (the
+card) and `routers/seo.py` (the sitemap, via `BLOG_SLUGS`) read it, so the old
+hand-kept slug list in `seo.py` is gone.
+
+**Adding a future post** is three steps that have to stay in sync:
+1. Drop the hero image in `frontend/public/marketing/blog/` (1920x1080 reads
+   well as a `summary_large_image` card).
+2. Add the full post to `frontend/src/data/blog.js` (the article body and the
+   in-app meta).
+3. Add a matching row to `backend/app/content/blog.py`, copying the
+   title/description/image/date straight from `blog.js` so the card matches the
+   page.
+
+After deploy, re-scrape an already-shared link in Facebook's Sharing Debugger
+(and LinkedIn's Post Inspector) to clear their cached copy of the old card.
+
 ## Marketing Contact form → club onboarding requests (Jun 2026)
 
 The public Contact page (`betterat.cricket/contact`,

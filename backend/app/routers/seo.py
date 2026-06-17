@@ -15,6 +15,7 @@ from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.content.blog import BLOG_SLUGS
 from app.models.db import Organisation, Player, get_db
 
 router = APIRouter(tags=["seo"])
@@ -43,19 +44,8 @@ MODULE_PAGES: list[str] = [
     "betterstats", "betterselect", "bettersocials", "betteradmin", "betteriq",
 ]
 
-# Marketing blog posts at /blog/{slug}. Keep in sync with
-# frontend/src/data/blog.js.
-BLOG_POSTS: list[str] = [
-    "how-to-merge-duplicate-player-records",
-    "why-your-cricket-club-needs-a-public-stats-page",
-    "why-your-clubs-history-keeps-getting-lost",
-    "season-yearbook-automatically-generated",
-    "how-cricket-statistics-build-club-culture",
-    "cricket-milestones-numbers-that-define-a-career",
-    "what-is-a-good-batting-average-in-club-cricket",
-    "5-reasons-your-cricket-club-is-losing-its-stats-history",
-    "understanding-bowling-economy-rate-in-club-cricket",
-]
+# Marketing blog posts at /blog/{slug} come from app.content.blog (BLOG_SLUGS),
+# the shared source the OG-preview cards also read.
 
 # Section pages a connected club exposes publicly.
 CLUB_SECTIONS = ["dashboard", "players", "leaderboard", "records", "games", "yearbook", "statlab", "compare"]
@@ -89,7 +79,7 @@ async def sitemap(db: AsyncSession = Depends(get_db)):
     for slug in MODULE_PAGES:
         entries.append(_url_entry(f"{SITE}/modules/{slug}", lastmod=today, changefreq="monthly", priority="0.8"))
 
-    for slug in BLOG_POSTS:
+    for slug in BLOG_SLUGS:
         entries.append(_url_entry(f"{SITE}/blog/{slug}", lastmod=today, changefreq="monthly", priority="0.7"))
 
     # Every active club's public section pages.
