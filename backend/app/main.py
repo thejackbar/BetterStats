@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration, bookmarks, merch, public_square
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_contact, klubpro_migration, bookmarks, merch, public_square, fantasy, public_fantasy
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -1043,6 +1043,220 @@ async def lifespan(app: FastAPI):
                 CONSTRAINT uq_merch_square_org UNIQUE (organisation_id)
             )
         """))
+        # BetterFantasyCricket — internal club fantasy league (migration 087).
+        # Defensive idempotent creates so the API boots even if the numbered
+        # migration hasn't run yet (mirrors the BetterMerch / BetterComms blocks).
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS fantasy_link_token TEXT"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_seasons (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                season_year INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'setup',
+                included_grade_ids JSONB,
+                scoring JSONB NOT NULL DEFAULT '{}',
+                rules JSONB NOT NULL DEFAULT '{}',
+                registration_open BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fantasy_season_org_year UNIQUE (organisation_id, season_year)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_managers (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                display_name TEXT NOT NULL,
+                email TEXT,
+                credential_hash TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_seen_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_managers_org ON fantasy_managers(organisation_id)"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_fantasy_manager_org_email "
+            "ON fantasy_managers(organisation_id, email) WHERE email IS NOT NULL"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_leagues (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                fantasy_season_id UUID NOT NULL REFERENCES fantasy_seasons(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL DEFAULT 'global_salary_cap',
+                name TEXT NOT NULL,
+                join_code TEXT,
+                draft_type TEXT,
+                scoring_type TEXT,
+                settings JSONB NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'open',
+                created_by_manager_id UUID REFERENCES fantasy_managers(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_leagues_season ON fantasy_leagues(fantasy_season_id, kind)"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_fantasy_league_join_code "
+            "ON fantasy_leagues(fantasy_season_id, join_code) WHERE join_code IS NOT NULL"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_squads (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                fantasy_season_id UUID NOT NULL REFERENCES fantasy_seasons(id) ON DELETE CASCADE,
+                league_id UUID NOT NULL REFERENCES fantasy_leagues(id) ON DELETE CASCADE,
+                manager_id UUID NOT NULL REFERENCES fantasy_managers(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                team_name TEXT NOT NULL,
+                budget_remaining NUMERIC(8,1),
+                free_transfers INTEGER NOT NULL DEFAULT 1,
+                chips_used JSONB NOT NULL DEFAULT '{}',
+                total_points NUMERIC(8,2) NOT NULL DEFAULT 0,
+                joined_round INTEGER,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fantasy_squad_league_manager UNIQUE (league_id, manager_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_squads_season ON fantasy_squads(fantasy_season_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_squad_players (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                squad_id UUID NOT NULL REFERENCES fantasy_squads(id) ON DELETE CASCADE,
+                player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                role TEXT NOT NULL DEFAULT 'batter',
+                is_captain BOOLEAN NOT NULL DEFAULT false,
+                is_vice_captain BOOLEAN NOT NULL DEFAULT false,
+                purchase_price NUMERIC(8,1),
+                added_round INTEGER,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fantasy_squad_player UNIQUE (squad_id, player_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_squad_players_squad ON fantasy_squad_players(squad_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_league_members (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                league_id UUID NOT NULL REFERENCES fantasy_leagues(id) ON DELETE CASCADE,
+                manager_id UUID NOT NULL REFERENCES fantasy_managers(id) ON DELETE CASCADE,
+                squad_id UUID REFERENCES fantasy_squads(id) ON DELETE SET NULL,
+                joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fantasy_league_member UNIQUE (league_id, manager_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_league_members_league ON fantasy_league_members(league_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_pool_players (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                fantasy_season_id UUID NOT NULL REFERENCES fantasy_seasons(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                role TEXT NOT NULL DEFAULT 'batter',
+                role_source TEXT NOT NULL DEFAULT 'auto',
+                base_price NUMERIC(8,1) NOT NULL DEFAULT 0,
+                current_price NUMERIC(8,1) NOT NULL DEFAULT 0,
+                total_points NUMERIC(8,2) NOT NULL DEFAULT 0,
+                last_round_points NUMERIC(8,2) NOT NULL DEFAULT 0,
+                owned_count INTEGER NOT NULL DEFAULT 0,
+                price_change NUMERIC(6,1) NOT NULL DEFAULT 0,
+                is_available BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fantasy_pool_player UNIQUE (fantasy_season_id, player_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_pool_players_season ON fantasy_pool_players(fantasy_season_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_rounds (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                fantasy_season_id UUID NOT NULL REFERENCES fantasy_seasons(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                round_number INTEGER NOT NULL,
+                name TEXT,
+                lock_at TIMESTAMPTZ,
+                start_date DATE,
+                end_date DATE,
+                status TEXT NOT NULL DEFAULT 'upcoming',
+                scored_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fantasy_round_number UNIQUE (fantasy_season_id, round_number)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_rounds_season ON fantasy_rounds(fantasy_season_id, round_number)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_player_round_scores (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                fantasy_season_id UUID NOT NULL REFERENCES fantasy_seasons(id) ON DELETE CASCADE,
+                round_id UUID NOT NULL REFERENCES fantasy_rounds(id) ON DELETE CASCADE,
+                player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                base_points NUMERIC(8,2) NOT NULL DEFAULT 0,
+                total_points NUMERIC(8,2) NOT NULL DEFAULT 0,
+                breakdown JSONB NOT NULL DEFAULT '{}',
+                games_counted INTEGER NOT NULL DEFAULT 0,
+                computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fantasy_player_round_score UNIQUE (round_id, player_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_player_round_scores_round "
+            "ON fantasy_player_round_scores(fantasy_season_id, round_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_squad_round_scores (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                squad_id UUID NOT NULL REFERENCES fantasy_squads(id) ON DELETE CASCADE,
+                round_id UUID NOT NULL REFERENCES fantasy_rounds(id) ON DELETE CASCADE,
+                points NUMERIC(8,2) NOT NULL DEFAULT 0,
+                raw_points NUMERIC(8,2) NOT NULL DEFAULT 0,
+                transfer_hit INTEGER NOT NULL DEFAULT 0,
+                transfers_made INTEGER NOT NULL DEFAULT 0,
+                chip_used TEXT,
+                captain_player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                vice_captain_player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                dropped_player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                lineup JSONB NOT NULL DEFAULT '[]',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fantasy_squad_round_score UNIQUE (squad_id, round_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_squad_round_scores_round ON fantasy_squad_round_scores(round_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_transactions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                squad_id UUID NOT NULL REFERENCES fantasy_squads(id) ON DELETE CASCADE,
+                league_id UUID REFERENCES fantasy_leagues(id) ON DELETE CASCADE,
+                round_id UUID REFERENCES fantasy_rounds(id) ON DELETE SET NULL,
+                type TEXT NOT NULL,
+                player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                counterparty_squad_id UUID REFERENCES fantasy_squads(id) ON DELETE SET NULL,
+                price NUMERIC(8,1),
+                detail JSONB NOT NULL DEFAULT '{}',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_transactions_squad ON fantasy_transactions(squad_id, created_at)"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
@@ -1227,8 +1441,10 @@ app.include_router(public_availability.router)                                  
 app.include_router(public_comms.router)                                                   # BetterComms (public unsubscribe)
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)
 app.include_router(public_square.router)                                                  # BetterMerch (Square OAuth callback)
+app.include_router(public_fantasy.router)                                                 # BetterFantasyCricket (public manager play)
 app.include_router(ladders.router)  # standings power public club pages — not gated
 app.include_router(iq.router, dependencies=[Depends(require_module("iq"))])               # BetterIQ
+app.include_router(fantasy.router, dependencies=[Depends(require_module("fantasy"))])      # BetterFantasyCricket
 
 # Serve uploaded files (hero images, gallery photos)
 _upload_dir = Path("/app/uploads")

@@ -22,6 +22,7 @@ export const CAP = {
   MANAGE_IQ: 'manage_iq',
   MANAGE_COMMS: 'manage_comms',
   MANAGE_MERCH: 'manage_merch',
+  MANAGE_FANTASY: 'manage_fantasy',
 }
 
 // Display metadata for the user-management UI checkboxes.
@@ -47,4 +48,5 @@ export const CAPABILITY_INFO = [
   { key: CAP.MANAGE_IQ, label: 'Manage BetterIQ', hint: 'BetterIQ: opposition scouting + analytics' },
   { key: CAP.MANAGE_COMMS, label: 'Manage BetterComms', hint: 'BetterComms: contacts + bulk email campaigns' },
   { key: CAP.MANAGE_MERCH, label: 'Manage BetterMerch', hint: 'BetterMerch: club stock — apparel, equipment and canteen' },
+  { key: CAP.MANAGE_FANTASY, label: 'Manage BetterFantasyCricket', hint: 'BetterFantasyCricket: fantasy season setup, leagues and round settlement' },
 ]

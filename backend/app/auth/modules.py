@@ -30,11 +30,12 @@ MODULE_FEES = "fees"         # BetterFees    — fee schedules + payment trackin
 MODULE_IQ = "iq"             # BetterIQ      — AI + stats deep-dive
 MODULE_COMMS = "comms"       # BetterComms   — bulk email to the member database
 MODULE_MERCH = "merch"       # BetterMerch   — club stock register (apparel, equipment, food/drink)
+MODULE_FANTASY = "fantasy"   # BetterFantasyCricket — internal club fantasy league
 
 # BetterFees + BetterComms + BetterMerch are presented together on the admin
 # dashboard under the **BetterAdmin** umbrella (see frontend modules.js), but
 # stay separate entitlement keys here so they can be granted à la carte.
-ALL_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ, MODULE_COMMS, MODULE_MERCH)
+ALL_MODULES = (MODULE_SELECT, MODULE_SOCIALS, MODULE_FEES, MODULE_IQ, MODULE_COMMS, MODULE_MERCH, MODULE_FANTASY)
 
 # Display metadata, surfaced to the admin module-tile dashboard. ``built`` flags
 # whether the module exists yet. BetterIQ Phase 1 (opposition analysis) is now
@@ -46,6 +47,9 @@ MODULE_META: dict[str, dict] = {
     MODULE_IQ: {"name": "BetterIQ", "blurb": "AI + stats deep-dive — opposition scouting & selection analysis", "built": True},
     MODULE_COMMS: {"name": "BetterComms", "blurb": "Bulk email to your member database", "built": True},
     MODULE_MERCH: {"name": "BetterMerch", "blurb": "Track club stock — apparel, equipment and canteen", "built": True},
+    # built False until the v1 surfaces ship — the tile shows "Coming soon" and
+    # the gated routes still 402 for unentitled clubs (see docs/betterfantasycricket.md).
+    MODULE_FANTASY: {"name": "BetterFantasyCricket", "blurb": "Run an internal club fantasy cricket league", "built": False},
 }
 
 

@@ -129,6 +129,11 @@ class Organisation(Base):
     availability_link_token = Column(Text, nullable=True)
     availability_self_service_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
     availability_require_pin = Column(Boolean, nullable=False, server_default="true", default=True)
+    # ─── BetterFantasyCricket: public fantasy link (migration 087) ────────────
+    # The per-club magic link members and supporters use to register and play
+    # (mirrors availability_link_token). Rotatable; resolves to the club's
+    # currently-open fantasy season. See docs/betterfantasycricket.md.
+    fantasy_link_token = Column(Text, nullable=True)
     # Net Manager: club default timer/rotation config (batting_minutes, nets,
     # auto_roll, sound, alerts[]). New net sessions seed from this; NULL falls
     # back to net_manager.DEFAULT_NET_SETTINGS.
@@ -1921,4 +1926,253 @@ class KlubproMigrationBackup(Base):
     action = Column(Text, nullable=False)              # 'update' | 'insert'
     before_data = Column(JSONB, nullable=True)         # NULL for inserts
     after_data = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ─── BetterFantasyCricket (migration 087) ─────────────────────────────────────
+# Internal club fantasy league, scored off the club's own games. Players are the
+# club's playing list; matches are the club's fixtures. Fantasy points come from
+# the per-innings stats we already hold. Full design: docs/betterfantasycricket.md.
+
+FANTASY_ROLES = ("keeper", "batter", "allrounder", "bowler")
+FANTASY_LEAGUE_KINDS = ("global_salary_cap", "mini_salary_cap", "draft")
+FANTASY_TXN_TYPES = ("transfer_in", "transfer_out", "draft_pick", "waiver", "trade", "chip")
+
+
+class FantasySeason(Base):
+    """A club's fantasy competition for one real season-year — the umbrella both
+    engines hang off. `scoring`/`rules` are JSONB config seeded from the router
+    defaults; `included_grade_ids` NULL means every grade counts. Keyed on
+    season_year (not a single season_id) because a club year spans several Season
+    rows (comps / per-club grassroots ids), the same reason BetterIQ's MVP is
+    year-based."""
+    __tablename__ = "fantasy_seasons"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "season_year", name="uq_fantasy_season_org_year"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    season_year = Column(Integer, nullable=False)
+    name = Column(Text, nullable=False)
+    status = Column(Text, nullable=False, server_default="setup")   # setup | open | active | completed
+    included_grade_ids = Column(JSONB, nullable=True)               # NULL = all grades
+    scoring = Column(JSONB, nullable=False, server_default="{}")
+    rules = Column(JSONB, nullable=False, server_default="{}")
+    registration_open = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FantasyManager(Base):
+    """A human entrant (member or supporter), per club. Not a BetterStats account —
+    they register through the public fantasy link with a display name and a
+    credential (hashed PIN/passphrase). Email is optional; unique per club when set."""
+    __tablename__ = "fantasy_managers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    display_name = Column(Text, nullable=False)
+    email = Column(Text, nullable=True)
+    credential_hash = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    last_seen_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+
+class FantasyLeague(Base):
+    """A competition grouping within a fantasy season. `kind` is the global
+    salary-cap ladder (auto-created with the season), a private salary-cap
+    mini-league (join code, ranks members' existing global squads), or a draft
+    league (unique ownership, its own squads, snake/auction + total/h2h)."""
+    __tablename__ = "fantasy_leagues"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fantasy_season_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_seasons.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(Text, nullable=False, server_default="global_salary_cap")
+    name = Column(Text, nullable=False)
+    join_code = Column(Text, nullable=True)
+    draft_type = Column(Text, nullable=True)      # snake | auction
+    scoring_type = Column(Text, nullable=True)    # total | h2h
+    settings = Column(JSONB, nullable=False, server_default="{}")
+    status = Column(Text, nullable=False, server_default="open")
+    created_by_manager_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_managers.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FantasySquad(Base):
+    """A manager's team in a league. `budget_remaining` is salary-cap only (NULL
+    for draft). `chips_used` records which chips have been spent. The picks live
+    in FantasySquadPlayer; per-round scoring snapshots into FantasySquadRoundScore."""
+    __tablename__ = "fantasy_squads"
+    __table_args__ = (
+        UniqueConstraint("league_id", "manager_id", name="uq_fantasy_squad_league_manager"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fantasy_season_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_seasons.id", ondelete="CASCADE"), nullable=False)
+    league_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_leagues.id", ondelete="CASCADE"), nullable=False)
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_managers.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    team_name = Column(Text, nullable=False)
+    budget_remaining = Column(Numeric(8, 1), nullable=True)
+    free_transfers = Column(Integer, nullable=False, server_default="1")
+    chips_used = Column(JSONB, nullable=False, server_default="{}")
+    total_points = Column(Numeric(8, 2), nullable=False, server_default="0")
+    joined_round = Column(Integer, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    players = relationship("FantasySquadPlayer", back_populates="squad", cascade="all, delete-orphan")
+
+
+class FantasySquadPlayer(Base):
+    """One pick in a squad. `role` is the slot it fills against the role quota;
+    `is_captain`/`is_vice_captain` drive the scoring multiplier and its fallback;
+    `purchase_price` backs the salary-cap sell-on value."""
+    __tablename__ = "fantasy_squad_players"
+    __table_args__ = (
+        UniqueConstraint("squad_id", "player_id", name="uq_fantasy_squad_player"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    role = Column(Text, nullable=False, server_default="batter")
+    is_captain = Column(Boolean, nullable=False, server_default="false")
+    is_vice_captain = Column(Boolean, nullable=False, server_default="false")
+    purchase_price = Column(Numeric(8, 1), nullable=True)
+    added_round = Column(Integer, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    squad = relationship("FantasySquad", back_populates="players")
+    player = relationship("Player")
+
+
+class FantasyLeagueMember(Base):
+    """Manager ↔ league ↔ the squad ranked in that league. For a mini-league the
+    squad is the manager's global salary-cap squad; for the global or a draft
+    league it's the squad owned there."""
+    __tablename__ = "fantasy_league_members"
+    __table_args__ = (
+        UniqueConstraint("league_id", "manager_id", name="uq_fantasy_league_member"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    league_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_leagues.id", ondelete="CASCADE"), nullable=False)
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_managers.id", ondelete="CASCADE"), nullable=False)
+    squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="SET NULL"), nullable=True)
+    joined_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FantasyPoolPlayer(Base):
+    """The pickable pool, one row per player per fantasy season. Holds the
+    fantasy role (+ where it came from), the dynamic price and cached season
+    totals. Org-scoped so cross-club shared players never leak between clubs."""
+    __tablename__ = "fantasy_pool_players"
+    __table_args__ = (
+        UniqueConstraint("fantasy_season_id", "player_id", name="uq_fantasy_pool_player"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fantasy_season_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_seasons.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    role = Column(Text, nullable=False, server_default="batter")
+    role_source = Column(Text, nullable=False, server_default="auto")   # admin | profile | auto
+    base_price = Column(Numeric(8, 1), nullable=False, server_default="0")
+    current_price = Column(Numeric(8, 1), nullable=False, server_default="0")
+    total_points = Column(Numeric(8, 2), nullable=False, server_default="0")
+    last_round_points = Column(Numeric(8, 2), nullable=False, server_default="0")
+    owned_count = Column(Integer, nullable=False, server_default="0")
+    price_change = Column(Numeric(6, 1), nullable=False, server_default="0")
+    is_available = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    player = relationship("Player")
+
+
+class FantasyRound(Base):
+    """A scoring round (a club weekend), generated from the real game calendar.
+    Locks at the first game's start; settles after the weekly sync. Games are
+    grouped into the round whose window covers their date."""
+    __tablename__ = "fantasy_rounds"
+    __table_args__ = (
+        UniqueConstraint("fantasy_season_id", "round_number", name="uq_fantasy_round_number"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fantasy_season_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_seasons.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    round_number = Column(Integer, nullable=False)
+    name = Column(Text, nullable=True)
+    lock_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    status = Column(Text, nullable=False, server_default="upcoming")   # upcoming | locked | scored
+    scored_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FantasyPlayerRoundScore(Base):
+    """A player's computed fantasy points for one round, with the component
+    breakdown. Idempotent on (round, player) — recomputed in place when a
+    scorecard is re-synced or corrected."""
+    __tablename__ = "fantasy_player_round_scores"
+    __table_args__ = (
+        UniqueConstraint("round_id", "player_id", name="uq_fantasy_player_round_score"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fantasy_season_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_seasons.id", ondelete="CASCADE"), nullable=False)
+    round_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_rounds.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    base_points = Column(Numeric(8, 2), nullable=False, server_default="0")
+    total_points = Column(Numeric(8, 2), nullable=False, server_default="0")   # after role multiplier
+    breakdown = Column(JSONB, nullable=False, server_default="{}")
+    games_counted = Column(Integer, nullable=False, server_default="0")
+    computed_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FantasySquadRoundScore(Base):
+    """A squad's result for one round. `points` is the best-11 total with the
+    captain doubled before the cut, less any transfer hit; `lineup` is the JSONB
+    snapshot of the 12 as they stood at lock (so history survives later transfers)."""
+    __tablename__ = "fantasy_squad_round_scores"
+    __table_args__ = (
+        UniqueConstraint("squad_id", "round_id", name="uq_fantasy_squad_round_score"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="CASCADE"), nullable=False)
+    round_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_rounds.id", ondelete="CASCADE"), nullable=False)
+    points = Column(Numeric(8, 2), nullable=False, server_default="0")
+    raw_points = Column(Numeric(8, 2), nullable=False, server_default="0")
+    transfer_hit = Column(Integer, nullable=False, server_default="0")
+    transfers_made = Column(Integer, nullable=False, server_default="0")
+    chip_used = Column(Text, nullable=True)
+    captain_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    vice_captain_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    dropped_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    lineup = Column(JSONB, nullable=False, server_default="[]")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FantasyTransaction(Base):
+    """Audit log of a squad action — transfer, waiver, draft pick, trade or chip.
+    `counterparty_squad_id` is set for trades; `detail` carries type-specific data."""
+    __tablename__ = "fantasy_transactions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="CASCADE"), nullable=False)
+    league_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_leagues.id", ondelete="CASCADE"), nullable=True)
+    round_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_rounds.id", ondelete="SET NULL"), nullable=True)
+    type = Column(Text, nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    counterparty_squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="SET NULL"), nullable=True)
+    price = Column(Numeric(8, 1), nullable=True)
+    detail = Column(JSONB, nullable=False, server_default="{}")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
