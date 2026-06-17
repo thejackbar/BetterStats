@@ -36,8 +36,9 @@ from app.models.db import (
     Organisation, Player, get_db,
     FantasySeason, FantasyLeague, FantasyManager, FantasySquad, FantasySquadPlayer,
     FantasyLeagueMember, FantasyPoolPlayer, FantasyRound, FantasyTransaction,
+    FantasyDraft, FantasyDraftPick, FantasyDraftWishlist, FantasyWaiverClaim, FantasyTrade,
 )
-from app.services import rate_limit
+from app.services import rate_limit, fantasy_draft
 from app.services.fantasy_squad import validate_squad
 from app.services.fantasy_scoring import DEFAULT_RULES
 
@@ -764,3 +765,280 @@ async def my_leagues(token: str, request: Request, db: AsyncSession = Depends(ge
             ],
         })
     return {"leagues": out}
+
+
+# ── draft mode (public) ──────────────────────────────────────────────────────
+
+async def _draft_for(db: AsyncSession, league_id) -> Optional[FantasyDraft]:
+    return (await db.execute(select(FantasyDraft).where(FantasyDraft.league_id == league_id))).scalar_one_or_none()
+
+
+async def _draft_league(db: AsyncSession, club, season, league_id) -> FantasyLeague:
+    lg = await db.get(FantasyLeague, league_id)
+    if lg is None or str(lg.organisation_id) != str(club.id) or lg.kind != "draft" or str(lg.fantasy_season_id) != str(season.id):
+        raise HTTPException(status_code=404, detail="Draft league not found")
+    return lg
+
+
+@router.get("/{token}/draft-leagues")
+async def list_draft_leagues(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The club's draft leagues, with whether this manager has joined and the size cap."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        return {"leagues": []}
+    rules = season.rules or DEFAULT_RULES
+    size = int(rules.get("squad_size", 12))
+    pool_n = (await db.execute(
+        select(func.count()).select_from(FantasyPoolPlayer).where(FantasyPoolPlayer.fantasy_season_id == season.id)
+    )).scalar_one()
+    leagues = (await db.execute(
+        select(FantasyLeague).where(FantasyLeague.fantasy_season_id == season.id, FantasyLeague.kind == "draft")
+    )).scalars().all()
+    mine = set((await db.execute(
+        select(FantasyLeagueMember.league_id).where(FantasyLeagueMember.manager_id == mgr.id)
+    )).scalars().all())
+    out = []
+    for lg in leagues:
+        members = (await db.execute(
+            select(func.count()).select_from(FantasyLeagueMember).where(FantasyLeagueMember.league_id == lg.id)
+        )).scalar_one()
+        draft = await _draft_for(db, lg.id)
+        out.append({
+            "id": str(lg.id), "name": lg.name, "draft_type": lg.draft_type, "scoring_type": lg.scoring_type,
+            "status": lg.status, "members": members, "capacity": max(2, pool_n // size),
+            "joined": lg.id in mine, "draft_status": draft.status if draft else None,
+        })
+    return {"leagues": out}
+
+
+@router.post("/{token}/draft-leagues/{league_id}/join")
+async def join_draft_league(token: str, league_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        raise HTTPException(status_code=404, detail="No fantasy season")
+    lg = await _draft_league(db, club, season, league_id)
+    draft = await _draft_for(db, lg.id)
+    if draft and draft.status != "scheduled":
+        raise HTTPException(status_code=409, detail="The draft has already started.")
+    member = (await db.execute(
+        select(FantasyLeagueMember).where(FantasyLeagueMember.league_id == lg.id, FantasyLeagueMember.manager_id == mgr.id)
+    )).scalar_one_or_none()
+    if member is not None:
+        return {"ok": True}
+    rules = season.rules or DEFAULT_RULES
+    size = int(rules.get("squad_size", 12))
+    pool_n = (await db.execute(
+        select(func.count()).select_from(FantasyPoolPlayer).where(FantasyPoolPlayer.fantasy_season_id == season.id)
+    )).scalar_one()
+    members = (await db.execute(
+        select(func.count()).select_from(FantasyLeagueMember).where(FantasyLeagueMember.league_id == lg.id)
+    )).scalar_one()
+    if members >= max(2, pool_n // size):
+        raise HTTPException(status_code=409, detail="That draft league is full.")
+    db.add(FantasyLeagueMember(league_id=lg.id, manager_id=mgr.id))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/{token}/draft/{league_id}")
+async def draft_state(token: str, league_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The live draft board: order, picks made, who's on the clock, and the players
+    still available. Resolves any lapsed pick clocks on the way in."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+    draft = await _draft_for(db, lg.id)
+    if draft is None:
+        return {"status": "not_started", "scoring_type": lg.scoring_type}
+    await fantasy_draft.resolve_overdue(db, draft, season)
+    await db.commit()
+    draft = await _draft_for(db, lg.id)
+
+    rules = season.rules or DEFAULT_RULES
+    quota = rules.get("role_quota", DEFAULT_RULES["role_quota"])
+    picks = (await db.execute(
+        select(FantasyDraftPick).where(FantasyDraftPick.draft_id == draft.id).order_by(FantasyDraftPick.pick_index)
+    )).scalars().all()
+    mgr_names = {str(m.id): m.display_name for m in (await db.execute(
+        select(FantasyManager).where(FantasyManager.organisation_id == club.id))).scalars().all()}
+    pool_rows = (await db.execute(
+        select(FantasyPoolPlayer, Player.name).join(Player, Player.id == FantasyPoolPlayer.player_id)
+        .where(FantasyPoolPlayer.fantasy_season_id == season.id, FantasyPoolPlayer.is_available.is_(True))
+    )).all()
+    pool = {str(pp.player_id): {"name": nm, "role": pp.role, "price": float(pp.current_price)} for pp, nm in pool_rows}
+    taken = {str(p.player_id) for p in picks if p.player_id}
+
+    my_counts: dict[str, int] = {}
+    for p in picks:
+        if p.player_id and str(p.manager_id) == str(mgr.id):
+            r = pool.get(str(p.player_id), {}).get("role", "")
+            my_counts[r] = my_counts.get(r, 0) + 1
+
+    cur = picks[draft.current_pick] if draft.current_pick < len(picks) else None
+    return {
+        "status": draft.status, "scoring_type": lg.scoring_type,
+        "order": [mgr_names.get(m, "?") for m in (draft.draft_order or [])],
+        "current_pick": draft.current_pick,
+        "on_clock": None if not cur else {
+            "manager": mgr_names.get(str(cur.manager_id), "?"),
+            "deadline": cur.deadline.isoformat() if cur.deadline else None,
+            "round": cur.round_no + 1,
+        },
+        "my_turn": bool(cur and str(cur.manager_id) == str(mgr.id) and draft.status == "in_progress"),
+        "picks": [
+            {"pick": p.pick_index + 1, "round": p.round_no + 1, "manager": mgr_names.get(str(p.manager_id), "?"),
+             "player": pool.get(str(p.player_id), {}).get("name") if p.player_id else None,
+             "auto": p.auto_picked}
+            for p in picks if p.player_id
+        ],
+        "my_role_counts": my_counts, "quota": quota,
+        "available": sorted(
+            [{"player_id": pid, "name": v["name"], "role": v["role"], "price": v["price"]}
+             for pid, v in pool.items() if pid not in taken],
+            key=lambda x: x["price"], reverse=True,
+        ),
+    }
+
+
+class DraftPick(BaseModel):
+    player_id: str
+
+
+@router.post("/{token}/draft/{league_id}/pick")
+async def draft_pick(token: str, league_id: str, body: DraftPick, request: Request, db: AsyncSession = Depends(get_db)):
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+    draft = await _draft_for(db, lg.id)
+    if draft is None:
+        raise HTTPException(status_code=400, detail="The draft hasn't started.")
+    rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
+    try:
+        await fantasy_draft.make_pick(db, draft, season, str(mgr.id), body.player_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+class Wishlist(BaseModel):
+    player_ids: list[str]
+
+
+@router.put("/{token}/draft/{league_id}/wishlist")
+async def set_wishlist(token: str, league_id: str, body: Wishlist, request: Request, db: AsyncSession = Depends(get_db)):
+    """The ranked auto-pick list used if the manager's clock runs out."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+    draft = await _draft_for(db, lg.id)
+    if draft is None:
+        raise HTTPException(status_code=400, detail="The draft hasn't started.")
+    row = (await db.execute(
+        select(FantasyDraftWishlist).where(
+            FantasyDraftWishlist.draft_id == draft.id, FantasyDraftWishlist.manager_id == mgr.id)
+    )).scalar_one_or_none()
+    if row is None:
+        db.add(FantasyDraftWishlist(draft_id=draft.id, manager_id=mgr.id, player_ids=body.player_ids))
+    else:
+        row.player_ids = body.player_ids
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/{token}/draft/{league_id}/ladder")
+async def draft_ladder(token: str, league_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    club = await _club_for_token(db, token)
+    await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+    if lg.scoring_type == "h2h":
+        return {"type": "h2h", "ladder": await fantasy_draft.h2h_ladder(db, lg.id)}
+    rows = (await db.execute(
+        select(FantasySquad.team_name, FantasyManager.display_name, FantasySquad.total_points)
+        .join(FantasyManager, FantasyManager.id == FantasySquad.manager_id)
+        .where(FantasySquad.league_id == lg.id).order_by(FantasySquad.total_points.desc())
+    )).all()
+    return {"type": "total", "ladder": [
+        {"rank": i, "team_name": tn, "manager": dn, "points": float(pts)}
+        for i, (tn, dn, pts) in enumerate(rows, start=1)
+    ]}
+
+
+class WaiverBody(BaseModel):
+    add_player_id: str
+    drop_player_id: str
+
+
+@router.post("/{token}/draft/{league_id}/waiver")
+async def submit_waiver(token: str, league_id: str, body: WaiverBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Claim an unowned player, dropping one of yours. Processed by the admin in
+    reverse-ladder order."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+    db.add(FantasyWaiverClaim(
+        league_id=lg.id, organisation_id=club.id, manager_id=mgr.id,
+        add_player_id=body.add_player_id, drop_player_id=body.drop_player_id, status="pending",
+    ))
+    await db.commit()
+    return {"ok": True}
+
+
+class TradeBody(BaseModel):
+    receiver_squad_id: str
+    give: list[str]
+    get: list[str]
+
+
+@router.post("/{token}/draft/{league_id}/trade")
+async def propose_trade(token: str, league_id: str, body: TradeBody, request: Request, db: AsyncSession = Depends(get_db)):
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+    mine = (await db.execute(
+        select(FantasySquad).where(FantasySquad.league_id == lg.id, FantasySquad.manager_id == mgr.id)
+    )).scalar_one_or_none()
+    if mine is None:
+        raise HTTPException(status_code=400, detail="You're not in this league.")
+    db.add(FantasyTrade(
+        league_id=lg.id, organisation_id=club.id, proposer_squad_id=mine.id,
+        receiver_squad_id=body.receiver_squad_id, offer={"give": body.give, "get": body.get}, status="proposed",
+    ))
+    await db.commit()
+    return {"ok": True}
+
+
+class TradeRespond(BaseModel):
+    accept: bool
+
+
+@router.post("/{token}/trades/{trade_id}/respond")
+async def respond_trade(token: str, trade_id: str, body: TradeRespond, request: Request, db: AsyncSession = Depends(get_db)):
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    trade = await db.get(FantasyTrade, trade_id)
+    if trade is None or str(trade.organisation_id) != str(club.id) or trade.status != "proposed":
+        raise HTTPException(status_code=404, detail="Trade not found")
+    receiver = await db.get(FantasySquad, trade.receiver_squad_id)
+    if receiver is None or str(receiver.manager_id) != str(mgr.id):
+        raise HTTPException(status_code=403, detail="That trade isn't yours to answer.")
+    if not body.accept:
+        trade.status = "rejected"
+        await db.commit()
+        return {"ok": True, "status": "rejected"}
+    try:
+        await fantasy_draft.apply_trade(db, trade)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return {"ok": True, "status": "accepted"}

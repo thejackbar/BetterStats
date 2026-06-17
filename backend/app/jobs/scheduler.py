@@ -69,6 +69,29 @@ async def settle_all_fantasy():
                 logger.error(f"Fantasy settlement failed for season {fs.id}: {e}")
 
 
+async def resolve_all_drafts():
+    """Advance any in-progress draft whose pick clock has lapsed, so auto-picks
+    happen even if nobody is watching the board."""
+    from app.models.db import FantasyDraft, FantasyLeague, FantasySeason
+    from app.services import fantasy_draft
+
+    async with async_session_maker() as session:
+        drafts = (await session.execute(
+            select(FantasyDraft).where(FantasyDraft.status == "in_progress")
+        )).scalars().all()
+    for d in drafts:
+        async with async_session_maker() as session:
+            try:
+                d = await session.get(FantasyDraft, d.id)
+                lg = await session.get(FantasyLeague, d.league_id)
+                fs = await session.get(FantasySeason, lg.fantasy_season_id)
+                await fantasy_draft.resolve_overdue(session, d, fs)
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Draft auto-resolve failed for draft {d.id}: {e}")
+
+
 def start_scheduler():
     # Weekly sync every Sunday at 3am
     scheduler.add_job(
@@ -99,8 +122,16 @@ def start_scheduler():
         id="daily_fantasy_settle",
         replace_existing=True,
     )
+    # BetterFantasyCricket — advance lapsed draft clocks every 15 minutes.
+    scheduler.add_job(
+        resolve_all_drafts,
+        trigger="interval",
+        minutes=15,
+        id="fantasy_draft_tick",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler started — weekly sync Sun 03:00, Square sync daily 04:00, fantasy settle daily 05:00")
+    logger.info("Scheduler started — weekly sync Sun 03:00, Square 04:00, fantasy settle 05:00, draft tick /15min")
 
 
 def stop_scheduler():
