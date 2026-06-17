@@ -15,6 +15,7 @@ export const MODULE = {
   IQ: 'iq',
   COMMS: 'comms',
   MERCH: 'merch',
+  FANTASY: 'fantasy',
 }
 
 // Module registry — the admin dashboard renders one tile per entry, in order.
@@ -73,6 +74,14 @@ export const MODULE_INFO = [
     built: true,
     caps: [CAP.MANAGE_IQ],
   },
+  {
+    key: MODULE.FANTASY,
+    name: 'BetterFantasyCricket',
+    blurb: 'Run an internal club fantasy league off your own games — salary cap and draft.',
+    to: '/admin/fantasy',
+    built: false,  // surfaces land in later phases — see docs/betterfantasycricket.md
+    caps: [CAP.MANAGE_FANTASY],
+  },
 ]
 
 // BetterFees + BetterComms + BetterMerch are sold separately but presented
@@ -128,6 +137,7 @@ export const MODULE_TOGGLES = [
   { key: 'socials', label: 'BetterSocials', modules: ['socials'] },
   { key: 'admin',   label: 'BetterAdmin',   modules: ['fees', 'comms', 'merch'] },
   { key: 'iq',      label: 'BetterIQ',       modules: ['iq'] },
+  { key: 'fantasy', label: 'BetterFantasyCricket', modules: ['fantasy'] },
 ]
 
 // Subscription statuses — keep in sync with backend ALL_STATUSES /
