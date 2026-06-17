@@ -4,7 +4,7 @@ Hi [first name],
 
 PlayHQ has refused to build the tools clubs actually want and need. So we did.
 
-We're Jack and Elton. BetterStats imports your full match history once and keeps it current: career and season stats, leaderboards, all-time records, player profiles and season yearbooks, all on your club's own site.
+BetterStats imports your full match history once and keeps it current: career and season stats, leaderboards, all-time records, player profiles and season yearbooks, all on your club's own site.
 
 We didn't stop at stats. The same data runs availability and selection, match-day social posts, fees and admin, and an opposition scout for your captains. One place instead of five separate tools.
 
