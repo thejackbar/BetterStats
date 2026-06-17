@@ -19,43 +19,12 @@ from fastapi import APIRouter, Depends
 
 from app.routers.auth import get_current_club
 from app.auth.capabilities import require_cap, MANAGE_FANTASY
+from app.models.db import FANTASY_ROLES
+from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
 
 router = APIRouter(prefix="/club-admin/fantasy", tags=["club-admin-fantasy"])
 
 _require = Depends(require_cap(MANAGE_FANTASY))
-
-
-# ── Default season config ─────────────────────────────────────────────────────
-# Seeded into a fantasy_season at setup, then editable per club. Kept here as the
-# canonical defaults so the frontend can read them before a season exists.
-
-DEFAULT_SCORING = {
-    # batting
-    "run": 1, "four": 1, "six": 2, "fifty": 16, "hundred": 32, "duck": -4,
-    # bowling
-    "wicket": 25, "three_wickets": 8, "five_wickets": 16, "maiden": 8,
-    # fielding
-    "catch": 8, "stumping": 12, "run_out": 12,
-    # appearance + multipliers
-    "appearance": 4,
-    "off_role_multiplier": 1.5,
-    "captain_multiplier": 2,
-    "triple_captain_multiplier": 3,
-}
-
-DEFAULT_RULES = {
-    "squad_size": 12,
-    "count_best_n": 11,
-    "role_quota": {"keeper": 1, "batter": 4, "allrounder": 3, "bowler": 4},
-    "budget": 100.0,
-    "free_transfers_per_round": 1,
-    "max_banked_transfers": 2,
-    "transfer_hit": 4,
-    "wildcards_per_half": 1,
-    "triple_captains_per_half": 1,
-}
-
-FANTASY_ROLES = ("keeper", "batter", "allrounder", "bowler")
 
 
 @router.get("/config")

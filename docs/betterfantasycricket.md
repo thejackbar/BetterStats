@@ -124,14 +124,19 @@ role-weighted.
 
 ### Worked examples (off-role 1.5x)
 
-- Specialist batter, 50 off 5 fours: (50 + 5) = **55**.
-- Specialist bowler, the same 50: 55 × 1.5 = **83**.
-- Specialist bowler, 3 wickets: (75 + 8) = **83**.
-- Specialist batter, the same 3 wickets: 83 × 1.5 = **125**.
+Batting/bowling component only. Each player also gets +4 for taking the field,
+which is added on top and is never role-weighted.
 
-A player's round score is the sum of their components across every game they
-played in the round. A squad's round score is the sum of its best 11 player round
-scores, with the captain's score doubled before the cut.
+- Specialist batter, 50 off 5 fours: 50 + 5 + 16 (fifty bonus) = **71**.
+- Specialist bowler, the same 50: 71 × 1.5 = **106.5**.
+- Specialist bowler, 3 wickets: 75 + 8 (haul bonus) = **83**.
+- Specialist batter, the same 3 wickets: 83 × 1.5 = **124.5**.
+- All-rounder doing both (50 and 3 wickets): 71 + 83 = **154**, both at base.
+
+So a bowler's runs and a batter's wickets are worth half again as much as the
+same feat by a specialist, exactly the intent. A player's round score sums their
+components across every game they played in the round. A squad's round score sums
+its best 11 player round scores, with the captain's score doubled before the cut.
 
 ## Pricing (salary cap only)
 
