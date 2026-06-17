@@ -34,6 +34,41 @@ async def sync_all_organisations():
             logger.error(f"Fee recompute failed for org {org.id}: {e}")
 
 
+async def settle_all_fantasy():
+    """Settle any due fantasy rounds for every club running a fantasy season.
+
+    Runs daily after the weekly sync, so a weekend's scorecards turn into fantasy
+    points (and ladders) without an admin pressing a button. Idempotent — a round
+    already scored is skipped, and re-running over a corrected scorecard
+    recomputes in place. Each season is isolated so one failure can't stop the
+    rest. Imports are local to keep the fantasy engine off the startup path.
+    """
+    from datetime import date
+    from app.models.db import FantasySeason, FantasyRound
+    from app.services import fantasy_engine
+
+    logger.info("Starting scheduled fantasy settlement")
+    async with async_session_maker() as session:
+        seasons = (await session.execute(select(FantasySeason))).scalars().all()
+    for fs in seasons:
+        async with async_session_maker() as session:
+            try:
+                fs = await session.get(FantasySeason, fs.id)
+                rounds = (await session.execute(
+                    select(FantasyRound).where(
+                        FantasyRound.fantasy_season_id == fs.id,
+                        FantasyRound.status != "scored",
+                        FantasyRound.end_date <= date.today(),
+                    ).order_by(FantasyRound.round_number)
+                )).scalars().all()
+                for rnd in rounds:
+                    await fantasy_engine.settle_round(session, fs, rnd)
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Fantasy settlement failed for season {fs.id}: {e}")
+
+
 def start_scheduler():
     # Weekly sync every Sunday at 3am
     scheduler.add_job(
@@ -54,8 +89,18 @@ def start_scheduler():
         id="daily_square_sync",
         replace_existing=True,
     )
+    # BetterFantasyCricket — settle due fantasy rounds daily (after the weekly
+    # sync, and to pick up any mid-week scorecard corrections).
+    scheduler.add_job(
+        settle_all_fantasy,
+        trigger="cron",
+        hour=5,
+        minute=0,
+        id="daily_fantasy_settle",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler started — weekly sync Sun 03:00, Square sync daily 04:00")
+    logger.info("Scheduler started — weekly sync Sun 03:00, Square sync daily 04:00, fantasy settle daily 05:00")
 
 
 def stop_scheduler():
