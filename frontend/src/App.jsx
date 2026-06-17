@@ -114,6 +114,8 @@ const IqTeam = lazy(() => import('./pages/admin/betteriq/TeamAnalysis'))
 const IqReview = lazy(() => import('./pages/admin/betteriq/MatchReview'))
 const IqPreview = lazy(() => import('./pages/admin/betteriq/MatchPreview'))
 const IqCheatSheet = lazy(() => import('./pages/admin/betteriq/CheatSheet'))
+// BetterFantasyCricket (admin surface)
+const FantasyHome = lazy(() => import('./pages/admin/fantasy/FantasyHome'))
 
 // BetterAdmin umbrella (BetterFees + BetterComms + future BetterMerch)
 const BetterAdminHome = lazy(() => import('./pages/admin/BetterAdminHome'))
@@ -234,6 +236,7 @@ export default function App() {
           <Route path="/admin/merch/activity" element={<ProtectedRoute requireModule="merch"><MerchActivity /></ProtectedRoute>} />
           <Route path="/admin/merch/reports" element={<ProtectedRoute requireModule="merch"><MerchReports /></ProtectedRoute>} />
           <Route path="/admin/merch/square" element={<ProtectedRoute requireModule="merch"><MerchSquare /></ProtectedRoute>} />
+          <Route path="/admin/fantasy" element={<ProtectedRoute requireModule="fantasy"><FantasyHome /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
           <Route path="/admin/website" element={<ProtectedRoute><AdminWebsite /></ProtectedRoute>} />

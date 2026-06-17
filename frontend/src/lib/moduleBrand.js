@@ -35,7 +35,7 @@ const ALIAS = {
   bettersocials: 'socials', socials: 'socials',
   betteradmin: 'admin', fees: 'admin', comms: 'admin', merch: 'admin',
   betteriq: 'iq',
-  betterfantasy: 'fantasy', betterfantasycricket: 'fantasy',
+  betterfantasy: 'fantasy', betterfantasycricket: 'fantasy', fantasycricket: 'fantasy',
 }
 
 // Resolve a module key/slug to its brand. Falls back to the Core (green) so a
