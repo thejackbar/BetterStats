@@ -1,6 +1,9 @@
 # BetterFantasyCricket — design and build spec
 
-Status: in build (v1). Branch `claude/gallant-ritchie-xxh4bz`.
+Status: shipped (v8.19.x). Salary-cap and snake-draft modes are both live, end
+to end (admin setup, the priced pool and rounds, member play, settlement, the
+ladders, mini-leagues, waivers and trades). Auction drafts are the one piece
+modelled but not yet runnable. Branch `claude/gallant-ritchie-xxh4bz`.
 
 BetterFantasyCricket is a standalone module that runs an internal fantasy
 cricket competition inside a single club, scored off the club's own real games.
@@ -289,22 +292,27 @@ gambling or trade-promotion exposure in AU or the UK. Paid entry as a club
 fundraiser is a deliberately deferred, jurisdiction-gated follow-up and is out of
 scope for v1.
 
-## Phase plan
+## Build status
 
-1. **Foundation** (this increment): module registration and gating, brand, the
-   admin router skeleton, this spec.
-2. **Data model**: the phase-1 migration and ORM models, lifespan mirror.
-3. **Scoring and pricing core**: role classification, the scoring service, the
-   pricing baseline and movement, round generation and settlement, all unit
-   tested against held data.
-4. **Salary-cap engine**: season setup, squad build and validation, transfers and
-   chips, the club ladder and mini-leagues, the round snapshot.
-5. **Public participation**: the link, self-registration and credential, the
-   member team-builder and ladder screens.
-6. **Draft engine**: draft leagues, the async draft room, waivers, trades, the
-   head-to-head and total-points ladders.
-7. **Polish**: notifications, BetterSocials share cards, admin oversight, flip
-   `built: true`, changelog entry.
+1. **Foundation** — done. Module registration, gating, brand, admin router, spec.
+2. **Data model** — done. Migrations 087 (spine) and 088 (draft), ORM models,
+   lifespan mirror.
+3. **Scoring and pricing core** — done. `fantasy_scoring` (pure, role-weighted)
+   and `fantasy_engine` (round generation, priced pool, settlement). Pure scoring
+   maths verified locally.
+4. **Salary-cap engine** — done. Season setup, squad build and validation,
+   transfers, chips, the club ladder, mini-leagues, per-round snapshots.
+5. **Public participation** — done. The `/fantasy/:token` member app (register,
+   build, transfers, chips, ladder, mini-leagues).
+6. **Draft engine** — done for snake. Draft leagues, the async draft room with an
+   auto-pick clock, finalisation to squads, total-points and head-to-head
+   ladders, waivers and trades. **Auction is modelled but not yet runnable.**
+7. **Automation** — done. A daily settle job and a draft auto-pick tick.
+
+Remaining follow-ups: auction drafts; notifications-bell and BetterSocials
+share-card hooks; the public module price in `pricing.js`; and a full verify
+pass on a deployed database (the engine, draft and member app could not be run in
+the build sandbox).
 
 ## Open defaults to confirm (non-blocking)
 
