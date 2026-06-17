@@ -47,9 +47,7 @@ MODULE_META: dict[str, dict] = {
     MODULE_IQ: {"name": "BetterIQ", "blurb": "AI + stats deep-dive — opposition scouting & selection analysis", "built": True},
     MODULE_COMMS: {"name": "BetterComms", "blurb": "Bulk email to your member database", "built": True},
     MODULE_MERCH: {"name": "BetterMerch", "blurb": "Track club stock — apparel, equipment and canteen", "built": True},
-    # built False until the v1 surfaces ship — the tile shows "Coming soon" and
-    # the gated routes still 402 for unentitled clubs (see docs/betterfantasycricket.md).
-    MODULE_FANTASY: {"name": "BetterFantasyCricket", "blurb": "Run an internal club fantasy cricket league", "built": False},
+    MODULE_FANTASY: {"name": "BetterFantasyCricket", "blurb": "Run an internal club fantasy cricket league", "built": True},
 }
 
 

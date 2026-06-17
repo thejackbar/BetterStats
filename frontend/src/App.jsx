@@ -20,7 +20,7 @@ function ConditionalNavbar() {
     MARKETING_PATHS.includes(pathname) || pathname.startsWith('/blog/') || pathname.startsWith('/modules/')
   // The public self-service availability page is a standalone, white-labelled
   // mobile page — it renders its own minimal header, no club nav.
-  const isStandalone = pathname.startsWith('/avail/')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -154,6 +154,8 @@ const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
 
 // Public, login-free self-service availability (BetterSelect magic link + PIN)
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
+// Public, login-free fantasy play (BetterFantasyCricket magic link + PIN)
+const PublicFantasy = lazy(() => import('./pages/PublicFantasy'))
 
 const PageLoader = () => (
   <div className="flex justify-center py-24">
@@ -203,6 +205,8 @@ export default function App() {
 
           {/* Public self-service availability (no login — magic link + PIN) */}
           <Route path="/avail/:token" element={<PublicAvailability />} />
+          {/* Public fantasy play (no login — magic link + PIN) */}
+          <Route path="/fantasy/:token" element={<PublicFantasy />} />
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
