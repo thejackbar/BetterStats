@@ -1,14 +1,15 @@
-Subject: How many volunteer hours did your club burn this week?
+Subject: The stats page PlayHQ never built for your club
 
 Hi [first name],
 
-Quick question: how many hours did your volunteers spend this week sorting availability, picking teams, posting to socials and chasing up fees?
+PlayHQ has refused to build the tools clubs actually want and need. So we did.
 
-If you're like most clubs we know, the answer is "too many." We know because we've been those volunteers. We're Jack and Elton, and between us we've done just about every thankless job in club cricket.
+BetterStats imports your full match history once and keeps it current: career and season stats, leaderboards, all-time records, player profiles and season yearbooks, all on your club's own site.
 
-We waited for PlayHQ to build what clubs actually asked for. Club history. Easy availability and selection. Help with the social media grind. It never came. So we built BetterCricket ourselves.
+We didn't stop at stats. The same data runs availability and selection, match-day social posts, fees and admin, and an opposition scout for your captains. One place instead of five separate tools.
 
-It handles availability, selection, socials, fees and admin. On top of that, it gives your club statistical analysis nobody's ever put in front of club cricketers before.
+Have a look at a club already running on it:
+https://betterat.cricket/applecross?utm_source=ca&utm_medium=email&utm_campaign=welcome
 
 Explore the modules:
 - BetterStats: Your club's memory, every player, every season, kept forever. https://betterat.cricket/modules/betterstats?utm_source=ca&utm_medium=email&utm_campaign=welcome
@@ -17,19 +18,15 @@ Explore the modules:
 - BetterAdmin: Run the back office, fees, comms and merch in one place. https://betterat.cricket/modules/betteradmin?utm_source=ca&utm_medium=email&utm_campaign=welcome
 - BetterIQ: Broadcast-grade analytics and an opposition scout for your club. https://betterat.cricket/modules/betteriq?utm_source=ca&utm_medium=email&utm_campaign=welcome
 
-See it running at a real club right now:
-https://betterat.cricket/applecross?utm_source=ca&utm_medium=email&utm_campaign=welcome
+It replaces a few of the subscriptions clubs already pay for, so most spend less overall, often by around $1,000 a year.
 
-And because it replaces the subscriptions you're probably already paying for, most clubs save up to $1,000 a year.
-
-Find out more here, or reply and let's chat about your club:
+Reply any time with questions, or take a closer look:
 https://betterat.cricket/?utm_source=ca&utm_medium=email&utm_campaign=welcome
 
-We're offering a 14-day free trial, so you can try everything before paying a cent.
+There's a 14-day free trial if you'd like to try it on your own club's data first.
 
 Request a free trial:
 https://betterat.cricket/contact?utm_source=ca&utm_medium=email&utm_campaign=welcome
 
 Jack & Elton
 BetterCricket
-Built by club cricketers, for club cricketers

@@ -38,7 +38,11 @@ Send yourself a test first and check it on your phone, especially the dark initi
 
 ## Voice
 
-The initial email's body copy was run through the project humanizer to sit with the rest of the site: em dashes taken out (the body, the signature and two module taglines), a doubled "chasing" reworded, and the sign-off split onto its own line. The two site taglines that used an em dash (BetterStats, BetterAdmin) read with a colon in the email instead, so the email itself stays dash-free. If you'd rather the cards quote the live site string exactly, those two are the only spots that differ.
+The initial email opens on the gap PlayHQ left ("the tools clubs actually want and need") and goes straight into BetterStats, then opens out to the other modules so none of them slip. Tone is deliberately plain and understated rather than salesy: the hype lines ("the lot", "no club at your level has had before", "before paying a cent", the "built by club cricketers" sign-off) were cut, and the savings, trial and CTAs are stated straight. Subject matches: "The stats page PlayHQ never built for your club" (swap freely in Gmail).
+
+The three CTAs are spread down the email rather than stacked: "See a club in action" (Applecross) sits right after the intro, "Find out more" (homepage) in the middle after the savings line, and "Request a free trial" (contact page) as the closing CTA above the signature.
+
+Earlier it was run through the project humanizer to sit with the rest of the site: no em dashes anywhere (body, signature, the two module taglines that used one now read with a colon), and the plain Australian voice kept throughout. If you'd rather the cards quote the live site tagline exactly, the BetterStats and BetterAdmin lines are the only spots that differ.
 
 ## Header (initial email)
 
