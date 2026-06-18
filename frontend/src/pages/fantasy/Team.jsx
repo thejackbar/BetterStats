@@ -155,7 +155,7 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
                   <div style={{ font: `700 13px ${DISP}`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text)' }}>{ROLE_GROUP[g.role]}</div>
                   <div style={{ font: `600 10px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 2 }}>{g.rows.length} / {g.quota}</div>
                 </div>
-                <div style={{ flex: 1, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 12, flexWrap: 'nowrap', overflowX: 'auto' }}>
                   {g.rows.map(p => <PlayerCard key={p.player_id} p={p} gw={gwPts?.[p.player_id]} onClick={() => nav('player', { playerId: p.player_id })} />)}
                 </div>
               </div>
@@ -228,18 +228,18 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
 function PlayerCard({ p, gw, onClick }) {
   return (
     <button onClick={onClick} style={{
-      flex: '1 1 200px', minWidth: 190, maxWidth: 360, display: 'flex', alignItems: 'center', gap: 12,
+      flex: '1 1 auto', minWidth: 230, display: 'flex', alignItems: 'center', gap: 12,
       background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 14,
       padding: '13px 15px', cursor: 'pointer', textAlign: 'left',
     }}>
       <Avatar name={p.name} photoUrl={p.photo_url} size={46} />
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ font: `700 14px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+          <span style={{ font: `700 14px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap' }}>{p.name}</span>
           {p.is_captain && <CapBadge />}
           {p.is_vice_captain && <CapBadge vice />}
         </div>
-        <div style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ROLE_LABEL[p.role]} · {money(p.purchase_price)}</div>
+        <div style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 3, whiteSpace: 'nowrap' }}>{ROLE_LABEL[p.role]} · {money(p.purchase_price)}</div>
       </div>
       <div style={{ textAlign: 'right', flex: 'none' }}>
         <div style={{ font: `700 22px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{gw != null ? pts(gw) : '—'}</div>
