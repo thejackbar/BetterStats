@@ -316,6 +316,7 @@ function SettingsCard({ season, flash, fail, onSaved }) {
   const save = async () => {
     setBusy(true)
     try {
+      const windowChanged = +v.price_window_years !== (r.price_window_years ?? 3)
       await api.fantasyUpdateRules(season.id, {
         role_quota: { keeper: +q.keeper, batter: +q.batter, allrounder: +q.allrounder, bowler: +q.bowler },
         budget: +v.budget, count_best_n: +v.count_best_n, transfer_hit: +v.transfer_hit,
@@ -323,7 +324,15 @@ function SettingsCard({ season, flash, fail, onSaved }) {
         wildcards_per_half: +v.wildcards_per_half, triple_captains_per_half: +v.triple_captains_per_half,
         price_window_years: +v.price_window_years,
       })
-      flash('Settings saved.'); await onSaved()
+      // Changing the pricing window only takes effect once the pool is rebuilt;
+      // do it here (forcing a price reset) so the new prices show straight away.
+      if (windowChanged) {
+        const res = await api.fantasyBuildPool(season.id, true)
+        flash(`Settings saved. Prices recalculated for ${res.pool} players.`)
+      } else {
+        flash('Settings saved.')
+      }
+      await onSaved()
     } catch (e) { fail(e) } finally { setBusy(false) }
   }
 
@@ -332,7 +341,7 @@ function SettingsCard({ season, flash, fail, onSaved }) {
       <h3 className="font-display font-bold mb-1">Team make-up & budget</h3>
       <p className="text-xs text-pb-faint mb-3">
         Squad size is the sum of the roles ({size}). Score the best {v.count_best_n} each round. Change this before the season starts.
-        Prices come from each player's runs, wickets, fielding and milestones over the last {v.price_window_years} season{+v.price_window_years === 1 ? '' : 's'}, role-weighted and fitted to the budget. After changing the window, click Build pool to recalculate.
+        Prices come from each player's runs, wickets, fielding and milestones over the last {v.price_window_years} season{+v.price_window_years === 1 ? '' : 's'}, role-weighted and fitted to the budget. Change the window and click Save settings to recalculate prices straight away.
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Field label="Keepers">{num(q.keeper, x => setQ({ ...q, keeper: x }))}</Field>

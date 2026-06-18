@@ -28,6 +28,7 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav }) {
   const [filter, setFilter] = useState('batter')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('price')
+  const [poolOpen, setPoolOpen] = useState(true)
   const [busy, setBusy] = useState(false)
 
   const chosen = Object.values(picked)
@@ -124,26 +125,36 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav }) {
         </select>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '12px 0 0' }}>
-        {list.map(pp => {
-          const on = !!picked[pp.player_id]
-          const blocked = !on && (chosen.length >= size || byRole(pp.role) >= (quota[pp.role] || 0) || Number(pp.price) > left + 1e-6)
-          return (
-            <PlayerRow
-              key={pp.player_id} name={pp.name} photoUrl={pp.photo_url}
-              sub={`${ROLE_LABEL[pp.role]} · ${money(pp.price)}`}
-              tone={on ? 'picked' : 'plain'}
-              onClick={blocked ? undefined : () => toggle(pp)}
-              right={<span style={{
-                width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                font: `800 ${on ? 13 : 16}px 'Hanken Grotesk'`, opacity: blocked ? 0.35 : 1,
-                background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)',
-                color: on ? 'var(--ink)' : 'var(--dim)', border: on ? 'none' : '1px solid var(--hairline2)',
-              }}>{on ? '✓' : '+'}</span>}
-            />
-          )
-        })}
-      </div>
+      <button onClick={() => setPoolOpen(o => !o)} style={{
+        display: 'flex', alignItems: 'center', width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+        padding: '14px 2px 7px',
+      }}>
+        <span style={{ font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--faint)' }}>Player pool · {list.length}</span>
+        <span style={{ marginLeft: 'auto', color: 'var(--faint)', font: `700 11px 'Hanken Grotesk'` }}>{poolOpen ? 'Hide ▾' : 'Show ▸'}</span>
+      </button>
+
+      {poolOpen && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          {list.map(pp => {
+            const on = !!picked[pp.player_id]
+            const blocked = !on && (chosen.length >= size || byRole(pp.role) >= (quota[pp.role] || 0) || Number(pp.price) > left + 1e-6)
+            return (
+              <PlayerRow
+                key={pp.player_id} name={pp.name} photoUrl={pp.photo_url}
+                sub={`${ROLE_LABEL[pp.role]} · ${money(pp.price)}`}
+                tone={on ? 'picked' : 'plain'}
+                onClick={blocked ? undefined : () => toggle(pp)}
+                right={<span style={{
+                  width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  font: `800 ${on ? 13 : 16}px 'Hanken Grotesk'`, opacity: blocked ? 0.35 : 1,
+                  background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)',
+                  color: on ? 'var(--ink)' : 'var(--dim)', border: on ? 'none' : '1px solid var(--hairline2)',
+                }}>{on ? '✓' : '+'}</span>}
+              />
+            )
+          })}
+        </div>
+      )}
 
       {chosen.length > 0 && (
         <div style={{ marginTop: 14, ...{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 14 }, padding: 12 }}>
