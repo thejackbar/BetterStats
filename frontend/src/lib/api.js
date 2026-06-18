@@ -11,8 +11,11 @@ async function request(path, options = {}) {
     } else if (typeof err.detail === 'string') {
       detail = err.detail
     } else if (err.detail && typeof err.detail === 'object') {
-      // Structured errors (e.g. require_module's 402 upsell payload).
-      detail = err.detail.message || err.detail.detail || `HTTP ${res.status}`
+      // Structured errors: a validation list (e.g. squad build) or the
+      // require_module 402 upsell payload.
+      detail = Array.isArray(err.detail.errors)
+        ? err.detail.errors.join(' ')
+        : err.detail.message || err.detail.detail || `HTTP ${res.status}`
     } else {
       detail = `HTTP ${res.status}`
     }
