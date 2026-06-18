@@ -143,7 +143,7 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
     return (
       <div>
         {statRibbon}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, paddingTop: 16, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20, paddingTop: 16, alignItems: 'start' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div style={{ font: `700 12px ${DISP}`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--dim)' }}>Your XI · team sheet</div>
@@ -228,7 +228,7 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
 function PlayerCard({ p, gw, onClick }) {
   return (
     <button onClick={onClick} style={{
-      flex: '1 1 190px', minWidth: 180, maxWidth: 300, display: 'flex', alignItems: 'center', gap: 12,
+      flex: '1 1 200px', minWidth: 190, maxWidth: 360, display: 'flex', alignItems: 'center', gap: 12,
       background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 14,
       padding: '13px 15px', cursor: 'pointer', textAlign: 'left',
     }}>
