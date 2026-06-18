@@ -141,7 +141,7 @@ export default function PublicFantasy() {
   return (
     <FantasyCtx.Provider value={ctx}>
       <div className="bfc-root" data-theme={theme} style={rootSx}>
-        <div style={{ maxWidth: desktop ? 1180 : 540, margin: '0 auto', padding: desktop ? '22px 24px 64px' : '18px 16px 56px' }}>
+        <div style={{ maxWidth: desktop ? 'min(1560px, 95vw)' : 540, margin: '0 auto', padding: desktop ? '22px 28px 64px' : '18px 16px 56px' }}>
           {phase !== 'app' && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', maxWidth: 440, margin: '0 auto 4px' }}>
               <ThemeToggle theme={theme} onToggle={onToggleTheme} />
