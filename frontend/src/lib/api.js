@@ -1436,6 +1436,8 @@ export const api = {
   fantasyRegenerateLink: () => request('/club-admin/fantasy/regenerate-link', { method: 'POST' }),
   fantasyUpdateRules: (seasonId, data) =>
     request(`/club-admin/fantasy/season/${seasonId}/rules`, { method: 'PATCH', body: JSON.stringify(data) }),
+  fantasyUpdateScoring: (seasonId, data) =>
+    request(`/club-admin/fantasy/season/${seasonId}/scoring`, { method: 'PATCH', body: JSON.stringify(data) }),
   fantasyAvailablePlayers: (seasonId, q = '') =>
     request(`/club-admin/fantasy/season/${seasonId}/available-players?q=${encodeURIComponent(q)}`),
   fantasyAddPoolPlayer: (seasonId, data) =>

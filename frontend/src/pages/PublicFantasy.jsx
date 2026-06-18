@@ -31,7 +31,7 @@ import Settings, { HowToPlay } from './fantasy/Settings'
 import Share from './fantasy/Share'
 
 const NAV = [['team', 'My Team'], ['points', 'Points'], ['pick', 'Pick'], ['ladder', 'Ladder'], ['leagues', 'Leagues'], ['draft', 'Draft']]
-const QUICK = [['transfers', 'Transfers'], ['chips', 'Chips'], ['fixtures', 'Fixtures'], ['stats', 'Players'], ['live', 'Live'], ['share', 'Share']]
+const QUICK = [['transfers', 'Transfers'], ['chips', 'Chips'], ['fixtures', 'Fixtures'], ['stats', 'Players'], ['live', 'Live'], ['share', 'Share'], ['help', 'Rules']]
 // Screens with a dedicated desktop layout that should use the full width.
 const WIDE = new Set(['team', 'transfers', 'points', 'stats'])
 
