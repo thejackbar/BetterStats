@@ -54,6 +54,9 @@ DEFAULT_RULES: dict = {
     "transfer_hit": 4,
     "wildcards_per_half": 1,
     "triple_captains_per_half": 1,
+    # How many seasons of form (this year + prior ones) feed the price baseline
+    # and the pickable pool. Configurable at setup.
+    "price_window_years": 3,
 }
 
 
