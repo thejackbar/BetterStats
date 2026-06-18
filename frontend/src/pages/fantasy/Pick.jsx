@@ -55,9 +55,15 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav }) {
     next[pp.player_id] = { player_id: pp.player_id, name: pp.name, role: pp.role, price: pp.price, photo_url: pp.photo_url, is_captain: false, is_vice_captain: false }
     return next
   })
+  // Captain and vice are one each, and a single player can't be both — clear the
+  // opposite flag on the player being set (this was the squad-save 400).
   const setCap = (pid, key) => setPicked(cur => {
+    const other = key === 'is_captain' ? 'is_vice_captain' : 'is_captain'
     const next = {}
-    for (const [id, p] of Object.entries(cur)) next[id] = { ...p, [key]: id === pid ? !p[key] : false }
+    for (const [id, p] of Object.entries(cur)) {
+      const target = id === pid
+      next[id] = { ...p, [key]: target ? !p[key] : false, [other]: target ? false : p[other] }
+    }
     return next
   })
 
@@ -176,9 +182,14 @@ function CaptainEditor({ token, squad, onSaved, fail, flash, nav }) {
   const cap = squad.players.find(p => p.is_captain)?.player_id
   const vice = squad.players.find(p => p.is_vice_captain)?.player_id
   const set = async (pid, asVice) => {
+    if (asVice && cap === pid) return   // can't make the captain the vice; pick a new captain first
+    if (!asVice && cap === pid) return  // already captain
     setBusy(true)
     try {
-      await api.fanSetCaptain(token, asVice ? cap : pid, asVice ? pid : vice)
+      // Never send the same player as both captain and vice.
+      const captainId = asVice ? cap : pid
+      const viceId = asVice ? pid : (vice === pid ? null : vice)
+      await api.fanSetCaptain(token, captainId, viceId)
       flash(asVice ? 'Vice-captain updated.' : 'Captain updated.')
       await onSaved()
     } catch (e) { fail(e) } finally { setBusy(false) }

@@ -4,7 +4,7 @@
 // light/dark and white-labels off `--pb-accent`. Display numbers/titles use
 // Saira Condensed; body copy uses Hanken Grotesk. The look mirrors the design
 // board in docs/design_handoff_betterfantasy_redesign.
-import { createContext, useContext } from 'react'
+import { createContext, useContext, useState, useEffect } from 'react'
 
 export const DISP = "'Saira Condensed', sans-serif"
 export const numSx = { fontFamily: DISP, fontVariantNumeric: 'tabular-nums' }
@@ -41,6 +41,32 @@ export const PINK = '#EC4899'
 
 export const cardSx = {
   background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 14,
+}
+
+// Live breakpoint hook so inline-styled screens can switch to a desktop layout.
+export function useIsDesktop(bp = 1024) {
+  const q = `(min-width: ${bp}px)`
+  const [is, setIs] = useState(() => typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(q).matches : false)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia(q)
+    const on = () => setIs(mq.matches)
+    on()
+    mq.addEventListener?.('change', on)
+    return () => mq.removeEventListener?.('change', on)
+  }, [q])
+  return is
+}
+
+// Light/dark switch button for the app chrome. Shows the sun when dark (tap for
+// light) and the moon when light.
+export function ThemeToggle({ theme, onToggle, size = 30 }) {
+  return (
+    <button onClick={onToggle} aria-label="Switch light or dark" title="Theme" style={{
+      width: size, height: size, borderRadius: '50%', cursor: 'pointer', flex: 'none',
+      background: 'var(--surface2)', border: '1px solid var(--hairline2)', color: 'var(--dim)', font: `400 14px 'Hanken Grotesk'`,
+    }}>{theme === 'light' ? '☾' : '☀'}</button>
+  )
 }
 
 // ── context (club crest + accent + token) ────────────────────────────────────

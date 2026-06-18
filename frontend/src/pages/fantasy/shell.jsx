@@ -2,27 +2,31 @@
 // the FPL gradient rule, the nav pills, per-screen titles, the photo-led player
 // row, and the message banner.
 import {
-  Aurora, GradientRule, Crest, Avatar, DISP, cardSx, tintBg, mix,
+  Aurora, GradientRule, Crest, Avatar, ThemeToggle, DISP, cardSx, tintBg, mix,
   RED, GREEN, AMBER, useFantasy, cx,
 } from './ui'
 
-// The club header on My Team (crest + name + season, search + manager chip),
-// with a soft aurora behind it and the gradient rule under it.
-export function AppHeader({ season, manager, onSearch, onBell, onProfile, unread = 0 }) {
+// The club header (crest + name + season) with the soft aurora behind it and the
+// gradient rule under it. On desktop it carries the nav inline and a manager chip;
+// on mobile it stays compact and the nav sits below. The theme toggle, bell,
+// search and profile live in the right cluster so they're on every screen.
+export function AppHeader({ season, manager, onSearch, onBell, onProfile, unread = 0, theme, onToggleTheme, inlineNav, desktop }) {
   const { club } = useFantasy()
   const seasonName = season?.name || 'Fantasy'
   const mInitials = manager ? (manager.display_name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() : '?'
   return (
-    <div style={{ position: 'relative', overflow: 'hidden', padding: '6px 0 0' }}>
-      <Aurora style={{ inset: '-60% -30% auto', height: '200%' }} blur={46} />
+    <div style={{ position: 'relative', overflow: 'hidden', padding: desktop ? '14px 20px 0' : '6px 0 0', borderRadius: desktop ? 18 : 0 }}>
+      <Aurora style={{ inset: desktop ? '-120% -20% auto' : '-60% -30% auto', height: desktop ? '340%' : '200%' }} blur={desktop ? 50 : 46} />
       <div style={{ position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: desktop ? 14 : 11 }}>
           <Crest size={38} />
           <div style={{ lineHeight: 1 }}>
-            <div style={{ font: `800 17px ${DISP}`, letterSpacing: '.02em', textTransform: 'uppercase', color: 'var(--text)' }}>{club?.name || 'Fantasy Cricket'}</div>
-            <div style={{ font: `600 9px 'Hanken Grotesk'`, letterSpacing: '.2em', textTransform: 'uppercase', color: 'var(--faint)', marginTop: 3 }}>{seasonName}</div>
+            <div style={{ font: `800 ${desktop ? 18 : 17}px ${DISP}`, letterSpacing: '.02em', textTransform: 'uppercase', color: 'var(--text)' }}>{club?.name || 'Fantasy Cricket'}</div>
+            <div style={{ font: `600 ${desktop ? 8.5 : 9}px 'Hanken Grotesk'`, letterSpacing: '.2em', textTransform: 'uppercase', color: 'var(--faint)', marginTop: desktop ? 4 : 3 }}>{seasonName}</div>
           </div>
+          {desktop && inlineNav ? <div style={{ marginLeft: 16 }}>{inlineNav}</div> : null}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 9 }}>
+            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
             <button onClick={onBell} aria-label="Notifications" style={{
               position: 'relative', width: 30, height: 30, borderRadius: '50%', cursor: 'pointer',
               background: 'var(--surface2)', border: '1px solid var(--hairline2)', color: 'var(--dim)', font: `600 13px 'Hanken Grotesk'`,
@@ -35,9 +39,14 @@ export function AppHeader({ season, manager, onSearch, onBell, onProfile, unread
               background: 'var(--surface2)', border: '1px solid var(--hairline2)', color: 'var(--dim)', font: `600 13px 'Hanken Grotesk'`,
             }}>⌕</button>
             <button onClick={onProfile} aria-label="Profile & settings" style={{
-              width: 30, height: 30, borderRadius: '50%', cursor: 'pointer',
-              background: tintBg(18, 'var(--surface)'), border: 'none', color: 'var(--accent-strong)', font: `700 12px 'Hanken Grotesk'`,
-            }}>{mInitials}</button>
+              display: 'flex', alignItems: 'center', gap: 8, height: 32, padding: desktop ? '0 12px 0 6px' : 0, cursor: 'pointer',
+              borderRadius: desktop ? 11 : '50%', width: desktop ? 'auto' : 30,
+              background: desktop ? 'var(--surface)' : tintBg(18, 'var(--surface)'), border: desktop ? '1px solid var(--hairline)' : 'none',
+              color: 'var(--accent-strong)', font: `700 12px 'Hanken Grotesk'`, justifyContent: 'center',
+            }}>
+              <span style={{ width: 24, height: 24, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', font: `800 10px ${DISP}`, background: `linear-gradient(135deg, ${mix('var(--pb-accent, #8C82F0)', 80, '#000')}, var(--pb-accent, #8C82F0))` }}>{mInitials}</span>
+              {desktop && manager && <span style={{ lineHeight: 1.1, textAlign: 'left' }}><span style={{ display: 'block', color: 'var(--text)' }}>{manager.display_name}</span></span>}
+            </button>
           </div>
         </div>
         <GradientRule />
@@ -46,16 +55,16 @@ export function AppHeader({ season, manager, onSearch, onBell, onProfile, unread
   )
 }
 
-export function NavPills({ items, value, onChange }) {
+export function NavPills({ items, value, onChange, inline }) {
   return (
-    <div style={{ display: 'flex', gap: 6, padding: '12px 0 4px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+    <div style={{ display: 'flex', gap: 6, padding: inline ? 0 : '12px 0 4px', overflowX: inline ? 'visible' : 'auto', scrollbarWidth: 'none' }}>
       {items.map(([k, label]) => {
         const on = value === k
         return (
           <button key={k} onClick={() => onChange(k)} style={{
             padding: '7px 13px', borderRadius: 9, border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
             font: `${on ? 700 : 600} 12.5px 'Hanken Grotesk'`,
-            background: on ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)', color: on ? 'var(--ink)' : 'var(--dim)',
+            background: on ? 'var(--pb-accent, #8C82F0)' : (inline ? 'transparent' : 'var(--surface2)'), color: on ? 'var(--ink)' : 'var(--dim)',
           }}>{label}</button>
         )
       })}
