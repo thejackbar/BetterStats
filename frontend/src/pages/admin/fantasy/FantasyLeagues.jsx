@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback } from 'react'
 import BetterFantasyLayout from '../../../components/admin/BetterFantasyLayout'
 import { api } from '../../../lib/api'
 
-// Admin: create draft leagues, watch them fill, start the snake draft and run
-// the waiver wire. Members join and draft from the public link. The salary-cap
-// club ladder and member-created mini-leagues need no admin setup, so this page
-// is just the draft side.
+// Admin: create draft leagues (snake or auction), watch them fill, start the
+// draft and run the waiver wire. Members join and draft from the public link.
+// The salary-cap club ladder and member-created mini-leagues need no admin
+// setup, so this page is just the draft side.
 
 export default function FantasyLeagues() {
   const [season, setSeason] = useState(null)
@@ -57,7 +57,7 @@ export default function FantasyLeagues() {
                 <select className="w-full rounded border pb-hairline bg-pb-surface px-3 py-1.5"
                   value={form.draft_type} onChange={e => setForm({ ...form, draft_type: e.target.value })}>
                   <option value="snake">Snake</option>
-                  <option value="auction" disabled>Auction (coming soon)</option>
+                  <option value="auction">Auction</option>
                 </select>
               </label>
               <label className="text-sm">

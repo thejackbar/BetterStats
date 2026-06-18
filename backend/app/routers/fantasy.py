@@ -691,7 +691,8 @@ async def _load_draft_league(db, club, league_id) -> FantasyLeague:
 
 @router.post("/draft-leagues/{league_id}/start")
 async def start_draft(league_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
-    """Kick off the snake draft for a league. The pick clock starts on pick one."""
+    """Kick off the draft for a league. Snake starts the pick-one clock; auction
+    opens the first nomination. Both run async with the clock auto-advancing."""
     lg = await _load_draft_league(db, club, league_id)
     fs = await db.get(FantasySeason, lg.fantasy_season_id)
     try:

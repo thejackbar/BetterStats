@@ -1635,10 +1635,15 @@ async def draft_state(token: str, league_id: str, request: Request, db: AsyncSes
     lg = await _draft_league(db, club, season, league_id)
     draft = await _draft_for(db, lg.id)
     if draft is None:
-        return {"status": "not_started", "scoring_type": lg.scoring_type}
+        return {"status": "not_started", "scoring_type": lg.scoring_type, "draft_type": lg.draft_type}
     await fantasy_draft.resolve_overdue(db, draft, season)
     await db.commit()
     draft = await _draft_for(db, lg.id)
+
+    if draft.type == "auction":
+        view = await fantasy_draft.auction_view(db, draft, season, str(mgr.id))
+        view["scoring_type"] = lg.scoring_type
+        return view
 
     rules = season.rules or DEFAULT_RULES
     quota = rules.get("role_quota", DEFAULT_RULES["role_quota"])
@@ -1662,7 +1667,7 @@ async def draft_state(token: str, league_id: str, request: Request, db: AsyncSes
 
     cur = picks[draft.current_pick] if draft.current_pick < len(picks) else None
     return {
-        "status": draft.status, "scoring_type": lg.scoring_type,
+        "status": draft.status, "scoring_type": lg.scoring_type, "draft_type": draft.type,
         "order": [mgr_names.get(m, "?") for m in (draft.draft_order or [])],
         "current_pick": draft.current_pick,
         "on_clock": None if not cur else {
@@ -1702,6 +1707,53 @@ async def draft_pick(token: str, league_id: str, body: DraftPick, request: Reque
     rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
     try:
         await fantasy_draft.make_pick(db, draft, season, str(mgr.id), body.player_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+class Nomination(BaseModel):
+    player_id: str
+    opening_bid: Optional[float] = None
+
+
+@router.post("/{token}/draft/{league_id}/nominate")
+async def auction_nominate(token: str, league_id: str, body: Nomination, request: Request, db: AsyncSession = Depends(get_db)):
+    """Auction: put a player up for bidding (you become the opening high bidder)."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+    draft = await _draft_for(db, lg.id)
+    if draft is None:
+        raise HTTPException(status_code=400, detail="The draft hasn't started.")
+    rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
+    try:
+        await fantasy_draft.nominate(db, draft, season, str(mgr.id), body.player_id, body.opening_bid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+class Bid(BaseModel):
+    amount: float
+
+
+@router.post("/{token}/draft/{league_id}/bid")
+async def auction_bid(token: str, league_id: str, body: Bid, request: Request, db: AsyncSession = Depends(get_db)):
+    """Auction: bid on the player currently up for auction."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+    draft = await _draft_for(db, lg.id)
+    if draft is None:
+        raise HTTPException(status_code=400, detail="The draft hasn't started.")
+    rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
+    try:
+        await fantasy_draft.place_bid(db, draft, season, str(mgr.id), body.amount)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

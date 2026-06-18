@@ -1197,6 +1197,10 @@ export const api = {
   fanDraftState: (token, leagueId) => request(`/public/fantasy/${token}/draft/${leagueId}`),
   fanDraftPick: (token, leagueId, player_id) =>
     request(`/public/fantasy/${token}/draft/${leagueId}/pick`, { method: 'POST', body: JSON.stringify({ player_id }) }),
+  fanDraftNominate: (token, leagueId, player_id, opening_bid) =>
+    request(`/public/fantasy/${token}/draft/${leagueId}/nominate`, { method: 'POST', body: JSON.stringify({ player_id, opening_bid }) }),
+  fanDraftBid: (token, leagueId, amount) =>
+    request(`/public/fantasy/${token}/draft/${leagueId}/bid`, { method: 'POST', body: JSON.stringify({ amount }) }),
   fanDraftWishlist: (token, leagueId, player_ids) =>
     request(`/public/fantasy/${token}/draft/${leagueId}/wishlist`, { method: 'PUT', body: JSON.stringify({ player_ids }) }),
   fanDraftLadder: (token, leagueId) => request(`/public/fantasy/${token}/draft/${leagueId}/ladder`),

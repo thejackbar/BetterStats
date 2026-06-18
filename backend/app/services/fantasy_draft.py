@@ -1,14 +1,23 @@
-"""BetterFantasyCricket draft engine — snake draft, waivers, trades, head-to-head.
+"""BetterFantasyCricket draft engine — snake & auction drafts, waivers, trades, h2h.
 
-A draft league owns its players uniquely. The draft runs async: each pick has a
-clock, and if it lapses the system auto-picks the manager's top wishlist player
-(or the best available that still fits their role quota). When the draft fills,
-each manager's picks become a squad and the league plays out on a total-points
-or head-to-head ladder, with a waiver wire and manager-to-manager trades.
+A draft league owns its players uniquely. Both formats run async over a window:
 
-Auction drafts are modelled in the schema (bid_amount) but not yet run here;
-``start_draft`` accepts snake only for now. Full design:
-docs/betterfantasycricket.md.
+- **Snake**: every pick slot is laid out up front (turns reverse each round). Each
+  pick has a clock; if it lapses the system auto-picks the manager's top wishlist
+  player, or the best available that still fits their role quota.
+- **Auction**: managers take turns nominating a player and opening the bidding;
+  others bid up within their budget and role needs; the highest bid when the
+  lot's anti-snipe clock lapses wins. The nominator is the opening high bidder, so
+  an uncontested lot is won by whoever nominated it (the clock never deadlocks).
+  Each manager's budget is derived from the lots they've already won — no extra
+  table. If a nominator's clock lapses, the system auto-nominates their top
+  wishlist player (or the best available in a role they still need) at the minimum
+  bid. A manager's max bid is always held back so they can still fill every empty
+  slot at the minimum.
+
+When the draft fills, each manager's picks become a squad and the league plays out
+on a total-points or head-to-head ladder, with a waiver wire and manager-to-manager
+trades. Full design: docs/betterfantasycricket.md.
 
 NOTE: not exercised in the build sandbox (no database). Verify on a deploy.
 """
@@ -25,15 +34,36 @@ from app.models.db import (
     FantasyDraft, FantasyDraftPick, FantasyDraftWishlist, FantasyLeague,
     FantasyLeagueMember, FantasyManager, FantasyPoolPlayer, FantasyRound,
     FantasySquad, FantasySquadPlayer, FantasyH2HFixture, FantasyWaiverClaim,
-    FantasyTrade,
+    FantasyTrade, Player,
 )
 from app.services.fantasy_scoring import DEFAULT_RULES
 
 H2H_WIN, H2H_DRAW = 4, 2
 
+# Auction floor bid (credits). A manager's max bid is held back by MIN_BID per
+# still-empty slot so they can never strand themselves with an unfillable squad.
+MIN_BID = 1.0
+# Default per-lot clock for an auction (seconds); shorter than the snake per-pick
+# clock since an auction has far more lots. Tunable via rules["auction_lot_seconds"].
+DEFAULT_LOT_SECONDS = 3600
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _squad_size(fs) -> int:
+    return int((fs.rules or DEFAULT_RULES).get("squad_size", 12))
+
+
+def _role_quota(fs) -> dict:
+    return (fs.rules or DEFAULT_RULES).get("role_quota", DEFAULT_RULES["role_quota"])
+
+
+def _draft_budget(fs) -> float:
+    """An auction manager's spend budget. Defaults to the salary-cap budget."""
+    rules = fs.rules or DEFAULT_RULES
+    return float(rules.get("draft_budget") or rules.get("budget") or DEFAULT_RULES["budget"])
 
 
 async def _pool_map(session: AsyncSession, fs) -> dict[str, dict]:
@@ -54,9 +84,11 @@ async def _league_members(session: AsyncSession, league_id) -> list[str]:
 # ── Start the draft ────────────────────────────────────────────────────────────
 
 async def start_draft(session: AsyncSession, league: FantasyLeague, fs) -> FantasyDraft:
-    """Create the draft, shuffle the order and lay out the snake pick slots."""
-    if (league.draft_type or "snake") != "snake":
-        raise ValueError("Only snake drafts can be run right now.")
+    """Create the draft, shuffle the order and open it. Snake lays out every pick
+    slot up front; auction sets the nomination pointer and the first lot clock."""
+    dtype = league.draft_type or "snake"
+    if dtype not in ("snake", "auction"):
+        raise ValueError("Unknown draft type.")
     existing = (await session.execute(
         select(FantasyDraft).where(FantasyDraft.league_id == league.id)
     )).scalar_one_or_none()
@@ -72,17 +104,32 @@ async def start_draft(session: AsyncSession, league: FantasyLeague, fs) -> Fanta
     random.shuffle(order)
 
     draft = existing or FantasyDraft(league_id=league.id, organisation_id=league.organisation_id)
-    draft.type = "snake"
+    draft.type = dtype
     draft.status = "in_progress"
-    draft.pick_seconds = int(getattr(draft, "pick_seconds", None) or 14400)
     draft.current_pick = 0
     draft.draft_order = order
     draft.rounds = rounds
     draft.started_at = _now()
     if existing is None:
         session.add(draft)
-    await session.flush()
 
+    if dtype == "auction":
+        draft.pick_seconds = int(rules.get("auction_lot_seconds") or DEFAULT_LOT_SECONDS)
+        draft.nomination_index = 0
+        draft.lot_player_id = None
+        draft.lot_high_bid = None
+        draft.lot_high_bidder_id = None
+        draft.lot_nominator_id = None
+        draft.lot_auto = False
+        # The first nominator's clock starts now; if they don't nominate in time,
+        # resolve_overdue auto-nominates for them.
+        draft.lot_deadline = _now() + timedelta(seconds=draft.pick_seconds)
+        await session.flush()
+        league.status = "drafting"
+        return draft
+
+    draft.pick_seconds = int(getattr(draft, "pick_seconds", None) or 14400)
+    await session.flush()
     idx = 0
     for r in range(rounds):
         seq = order if r % 2 == 0 else list(reversed(order))
@@ -131,9 +178,12 @@ async def _auto_choice(session, draft, fs, manager_id, taken, role_counts, pool,
 
 
 async def resolve_overdue(session: AsyncSession, draft: FantasyDraft, fs) -> None:
-    """Auto-pick any pick whose clock has lapsed, walking forward until the draft
-    is caught up (or finished). Safe to call on every draft view."""
+    """Advance any clock that has lapsed, walking forward until the draft is caught
+    up (or finished). Safe to call on every draft view and from the scheduler."""
     if draft.status != "in_progress":
+        return
+    if draft.type == "auction":
+        await _resolve_auction(session, draft, fs)
         return
     rules = fs.rules or DEFAULT_RULES
     quota = rules.get("role_quota", DEFAULT_RULES["role_quota"])
@@ -169,6 +219,8 @@ async def resolve_overdue(session: AsyncSession, draft: FantasyDraft, fs) -> Non
 
 async def make_pick(session: AsyncSession, draft: FantasyDraft, fs, manager_id: str, player_id: str) -> None:
     await resolve_overdue(session, draft, fs)
+    if draft.type == "auction":
+        raise ValueError("This is an auction draft — nominate a player and bid instead.")
     if draft.status != "in_progress":
         raise ValueError("The draft isn't running.")
     rules = fs.rules or DEFAULT_RULES
@@ -201,6 +253,312 @@ async def make_pick(session: AsyncSession, draft: FantasyDraft, fs, manager_id: 
         await finalize_draft(session, draft, fs)
 
 
+# ── Auction ──────────────────────────────────────────────────────────────────
+
+async def _auction_state(session: AsyncSession, draft: FantasyDraft, fs):
+    """Derive the auction's live state from the settled lots: the player pool, the
+    won lots, and per-manager spend / squad-fill / role counts. Budget is derived
+    here from the won lots, so there's no per-manager budget row to keep in sync."""
+    pool = await _pool_map(session, fs)
+    picks = (await session.execute(
+        select(FantasyDraftPick).where(FantasyDraftPick.draft_id == draft.id)
+        .order_by(FantasyDraftPick.pick_index)
+    )).scalars().all()
+    spent: dict[str, float] = defaultdict(float)
+    filled: dict[str, int] = defaultdict(int)
+    role_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for p in picks:
+        if not p.player_id:
+            continue
+        mid = str(p.manager_id)
+        spent[mid] += float(p.bid_amount or 0)
+        filled[mid] += 1
+        role_counts[mid][pool.get(str(p.player_id), {}).get("role", "")] += 1
+    taken = {str(p.player_id) for p in picks if p.player_id}
+    return pool, picks, taken, spent, filled, role_counts
+
+
+def _max_bid(budget: float, spent: float, filled: int, squad_size: int) -> float:
+    """The most a manager can bid on the current lot and still afford to fill every
+    remaining slot at the floor bid. <= 0 means they can't bid."""
+    slots_left = squad_size - filled
+    if slots_left <= 0:
+        return 0.0
+    return round(budget - spent - (slots_left - 1) * MIN_BID, 1)
+
+
+def _needed_roles(role_counts_mid: dict, quota: dict) -> set[str]:
+    return {r for r, q in quota.items() if role_counts_mid.get(r, 0) < int(q)}
+
+
+def _can_take(mid, pool, taken, spent, filled, role_counts, quota, squad_size, budget) -> bool:
+    """Can this manager still win another player — a free role slot, an available
+    player to fill it, and enough budget for the floor bid?"""
+    if filled.get(mid, 0) >= squad_size:
+        return False
+    if _max_bid(budget, spent.get(mid, 0.0), filled.get(mid, 0), squad_size) < MIN_BID:
+        return False
+    needed = _needed_roles(role_counts.get(mid, {}), quota)
+    if not needed:
+        return False
+    return any(v["role"] in needed for pid, v in pool.items() if pid not in taken)
+
+
+def _current_nominator(draft, order, pool, taken, spent, filled, role_counts, quota, squad_size, budget):
+    """Walk draft_order from nomination_index to the next manager who can still take
+    a player, leaving nomination_index pointing at them. None ⇒ everyone is done."""
+    n = len(order)
+    if n == 0:
+        return None
+    for _ in range(n):
+        draft.nomination_index %= n
+        mid = str(order[draft.nomination_index])
+        if _can_take(mid, pool, taken, spent, filled, role_counts, quota, squad_size, budget):
+            return mid
+        draft.nomination_index += 1
+    return None
+
+
+async def _wishlist(session, draft, manager_id) -> list[str]:
+    wl = (await session.execute(
+        select(FantasyDraftWishlist.player_ids).where(
+            FantasyDraftWishlist.draft_id == draft.id, FantasyDraftWishlist.manager_id == manager_id)
+    )).scalar_one_or_none() or []
+    return [str(x) for x in wl]
+
+
+async def _auto_nominee(session, draft, manager_id, pool, taken, role_counts, quota) -> str | None:
+    """Who to auto-nominate for a manager whose nomination clock lapsed: their top
+    wishlist player in a role they still need, else the priciest such player."""
+    needed = _needed_roles(role_counts.get(str(manager_id), {}), quota)
+
+    def ok(pid):
+        return pid in pool and pid not in taken and pool[pid]["role"] in needed
+
+    for pid in await _wishlist(session, draft, manager_id):
+        if ok(pid):
+            return pid
+    cands = sorted((pid for pid in pool if ok(pid)), key=lambda x: pool[x]["price"], reverse=True)
+    return cands[0] if cands else None
+
+
+async def _award_lot(session, draft, picks_count) -> None:
+    """Settle the live lot to its high bidder, clear it and advance the nomination
+    pointer. ``picks_count`` is the next pick_index."""
+    winner = draft.lot_high_bidder_id
+    auto = bool(draft.lot_auto) and str(winner) == str(draft.lot_nominator_id)
+    n = len(draft.draft_order or []) or 1
+    session.add(FantasyDraftPick(
+        draft_id=draft.id, pick_index=picks_count, round_no=picks_count // n,
+        manager_id=winner, player_id=draft.lot_player_id, picked_at=_now(),
+        auto_picked=auto, bid_amount=float(draft.lot_high_bid or MIN_BID),
+    ))
+    draft.lot_player_id = None
+    draft.lot_high_bid = None
+    draft.lot_high_bidder_id = None
+    draft.lot_nominator_id = None
+    draft.lot_auto = False
+    draft.current_pick = picks_count + 1
+    draft.nomination_index += 1   # nomination rotates to the next manager
+    draft.lot_deadline = None
+    await session.flush()
+
+
+async def _resolve_auction(session: AsyncSession, draft: FantasyDraft, fs) -> None:
+    """Advance the auction: award a lapsed lot, or auto-nominate for a nominator
+    whose clock ran out, looping until it's live again or complete."""
+    quota = _role_quota(fs)
+    squad_size = _squad_size(fs)
+    budget = _draft_budget(fs)
+    order = draft.draft_order or []
+    guard, limit = 0, squad_size * max(1, len(order)) + len(order) + 5
+    while draft.status == "in_progress" and guard <= limit:
+        guard += 1
+        if draft.lot_player_id is not None:
+            # A lot is live: award it if its clock has lapsed, else leave it.
+            if draft.lot_deadline and _now() > draft.lot_deadline:
+                _pool, picks, *_ = await _auction_state(session, draft, fs)
+                await _award_lot(session, draft, len(picks))
+                continue
+            return
+        # Awaiting a nomination: find who's up.
+        pool, picks, taken, spent, filled, role_counts = await _auction_state(session, draft, fs)
+        nominator = _current_nominator(draft, order, pool, taken, spent, filled, role_counts, quota, squad_size, budget)
+        if nominator is None:
+            await finalize_draft(session, draft, fs)
+            return
+        if not draft.lot_deadline:
+            draft.lot_deadline = _now() + timedelta(seconds=draft.pick_seconds)
+            return
+        if _now() <= draft.lot_deadline:
+            return   # nominator still on the clock
+        # Nomination clock lapsed → auto-nominate at the floor bid.
+        choice = await _auto_nominee(session, draft, nominator, pool, taken, role_counts, quota)
+        if choice is None:   # defensive — _can_take already guaranteed one exists
+            draft.nomination_index += 1
+            draft.lot_deadline = _now() + timedelta(seconds=draft.pick_seconds)
+            continue
+        draft.lot_player_id = choice
+        draft.lot_nominator_id = nominator
+        draft.lot_high_bid = MIN_BID
+        draft.lot_high_bidder_id = nominator
+        draft.lot_auto = True
+        draft.lot_deadline = _now() + timedelta(seconds=draft.pick_seconds)
+        return
+
+
+async def nominate(session: AsyncSession, draft: FantasyDraft, fs, manager_id: str, player_id: str, opening_bid: float | None = None) -> None:
+    """The nominator puts a player up and opens the bidding, becoming the opening
+    high bidder (so an uncontested lot is theirs)."""
+    await resolve_overdue(session, draft, fs)
+    if draft.type != "auction":
+        raise ValueError("This isn't an auction draft.")
+    if draft.status != "in_progress":
+        raise ValueError("The auction isn't running.")
+    if draft.lot_player_id is not None:
+        raise ValueError("A player is already up for auction.")
+    quota, squad_size, budget = _role_quota(fs), _squad_size(fs), _draft_budget(fs)
+    pool, picks, taken, spent, filled, role_counts = await _auction_state(session, draft, fs)
+    nominator = _current_nominator(draft, draft.draft_order or [], pool, taken, spent, filled, role_counts, quota, squad_size, budget)
+    if nominator is None:
+        await finalize_draft(session, draft, fs)
+        raise ValueError("The auction is complete.")
+    if str(nominator) != str(manager_id):
+        raise ValueError("It's not your turn to nominate.")
+    pid = str(player_id)
+    if pid not in pool:
+        raise ValueError("That player isn't in the pool.")
+    if pid in taken:
+        raise ValueError("That player has already been bought.")
+    role = pool[pid]["role"]
+    if role_counts[str(manager_id)].get(role, 0) >= int(quota.get(role, 0)):
+        raise ValueError(f"You already have enough {role}s.")
+    maxb = _max_bid(budget, spent.get(str(manager_id), 0.0), filled.get(str(manager_id), 0), squad_size)
+    ob = float(opening_bid) if opening_bid is not None else MIN_BID
+    if ob < MIN_BID:
+        ob = MIN_BID
+    if ob > maxb:
+        raise ValueError(f"You can open at most {maxb:g} and still fill your squad.")
+    draft.lot_player_id = pid
+    draft.lot_nominator_id = manager_id
+    draft.lot_high_bid = ob
+    draft.lot_high_bidder_id = manager_id
+    draft.lot_auto = False
+    draft.lot_deadline = _now() + timedelta(seconds=draft.pick_seconds)
+
+
+async def place_bid(session: AsyncSession, draft: FantasyDraft, fs, manager_id: str, amount: float) -> None:
+    """Bid on the live lot. Must beat the current high bid and stay within the
+    bidder's role quota and max bid (budget held back to fill remaining slots)."""
+    await resolve_overdue(session, draft, fs)
+    if draft.type != "auction":
+        raise ValueError("This isn't an auction draft.")
+    if draft.status != "in_progress":
+        raise ValueError("The auction isn't running.")
+    if draft.lot_player_id is None:
+        raise ValueError("Nothing is up for auction right now.")
+    mid = str(manager_id)
+    if str(draft.lot_high_bidder_id) == mid:
+        raise ValueError("You're already the top bidder.")
+    amt = float(amount)
+    if amt <= float(draft.lot_high_bid or 0):
+        raise ValueError("Your bid has to beat the current bid.")
+    quota, squad_size, budget = _role_quota(fs), _squad_size(fs), _draft_budget(fs)
+    pool, picks, taken, spent, filled, role_counts = await _auction_state(session, draft, fs)
+    if filled.get(mid, 0) >= squad_size:
+        raise ValueError("Your squad is already full.")
+    role = pool.get(str(draft.lot_player_id), {}).get("role", "")
+    if role_counts[mid].get(role, 0) >= int(quota.get(role, 0)):
+        raise ValueError(f"You already have enough {role}s.")
+    maxb = _max_bid(budget, spent.get(mid, 0.0), filled.get(mid, 0), squad_size)
+    if amt > maxb:
+        raise ValueError(f"You can bid at most {maxb:g} and still fill your squad.")
+    draft.lot_high_bid = amt
+    draft.lot_high_bidder_id = manager_id
+    # Anti-snipe: a fresh bid resets the lot clock so others get a chance to reply.
+    draft.lot_deadline = _now() + timedelta(seconds=draft.pick_seconds)
+
+
+async def auction_view(session: AsyncSession, draft: FantasyDraft, fs, manager_id: str) -> dict:
+    """Member-facing auction board. Read-only — assumes resolve_overdue has already
+    settled the live lot / nominator before this is called."""
+    quota, squad_size, budget = _role_quota(fs), _squad_size(fs), _draft_budget(fs)
+    pool, picks, taken, spent, filled, role_counts = await _auction_state(session, draft, fs)
+    order = [str(m) for m in (draft.draft_order or [])]
+    me = str(manager_id)
+
+    mgr_names = {str(mid): nm for mid, nm in (await session.execute(
+        select(FantasyManager.id, FantasyManager.display_name)
+        .where(FantasyManager.organisation_id == draft.organisation_id))).all()}
+    pnames = {str(pid): nm for pid, nm in (await session.execute(
+        select(FantasyPoolPlayer.player_id, Player.name)
+        .join(Player, Player.id == FantasyPoolPlayer.player_id)
+        .where(FantasyPoolPlayer.fantasy_season_id == fs.id))).all()}
+
+    def remaining(mid):
+        return round(budget - spent.get(mid, 0.0), 1)
+
+    lot = None
+    if draft.lot_player_id is not None:
+        lp = str(draft.lot_player_id)
+        hb = str(draft.lot_high_bidder_id) if draft.lot_high_bidder_id else None
+        high = float(draft.lot_high_bid or 0)
+        role = pool.get(lp, {}).get("role", "")
+        my_max = _max_bid(budget, spent.get(me, 0.0), filled.get(me, 0), squad_size)
+        min_next = round(high + MIN_BID, 1)
+        role_full = role_counts[me].get(role, 0) >= int(quota.get(role, 0))
+        lot = {
+            "player_id": lp, "name": pnames.get(lp, "?"), "role": role,
+            "high_bid": high, "high_bidder": mgr_names.get(hb) if hb else None,
+            "high_bidder_is_me": hb == me,
+            "nominator": mgr_names.get(str(draft.lot_nominator_id)) if draft.lot_nominator_id else None,
+            "auto": bool(draft.lot_auto),
+            "deadline": draft.lot_deadline.isoformat() if draft.lot_deadline else None,
+            "min_next_bid": min_next, "max_bid": my_max,
+            "i_can_bid": (hb != me) and (not role_full) and (filled.get(me, 0) < squad_size) and (my_max >= min_next),
+        }
+
+    nominator_mid = order[draft.nomination_index % len(order)] if (order and draft.lot_player_id is None and draft.status == "in_progress") else None
+
+    my_picks = [(str(p.player_id), float(p.bid_amount or 0)) for p in picks if p.player_id and str(p.manager_id) == me]
+    return {
+        "status": draft.status,
+        "draft_type": "auction",
+        "budget": round(budget, 1),
+        "squad_size": squad_size,
+        "quota": quota,
+        "order": [mgr_names.get(m, "?") for m in order],
+        "nominator": mgr_names.get(nominator_mid) if nominator_mid else None,
+        "my_nomination": bool(nominator_mid and nominator_mid == me),
+        "lot": lot,
+        "my": {
+            "spent": round(spent.get(me, 0.0), 1), "remaining": remaining(me),
+            "filled": filled.get(me, 0),
+            "max_bid": _max_bid(budget, spent.get(me, 0.0), filled.get(me, 0), squad_size),
+            "needed": {r: int(q) - role_counts[me].get(r, 0) for r, q in quota.items()},
+            "squad": [{"player_id": pid, "name": pnames.get(pid, "?"),
+                       "role": pool.get(pid, {}).get("role", ""), "price": bid} for pid, bid in my_picks],
+        },
+        "managers": [{
+            "manager_id": mid, "name": mgr_names.get(mid, "?"),
+            "spent": round(spent.get(mid, 0.0), 1), "remaining": remaining(mid),
+            "filled": filled.get(mid, 0), "is_me": mid == me,
+            "done": filled.get(mid, 0) >= squad_size,
+        } for mid in order],
+        "available": sorted(
+            [{"player_id": pid, "name": pnames.get(pid, "?"), "role": v["role"], "price": v["price"]}
+             for pid, v in pool.items() if pid not in taken],
+            key=lambda x: x["price"], reverse=True,
+        ),
+        "picks": [{
+            "pick": p.pick_index + 1, "manager": mgr_names.get(str(p.manager_id), "?"),
+            "player": pnames.get(str(p.player_id), "?") if p.player_id else None,
+            "role": pool.get(str(p.player_id), {}).get("role", ""),
+            "price": float(p.bid_amount or 0), "auto": bool(p.auto_picked),
+        } for p in picks if p.player_id],
+    }
+
+
 # ── Finalise → squads, then optionally head-to-head fixtures ─────────────────────
 
 async def finalize_draft(session: AsyncSession, draft: FantasyDraft, fs) -> None:
@@ -209,29 +567,35 @@ async def finalize_draft(session: AsyncSession, draft: FantasyDraft, fs) -> None
     picks = (await session.execute(
         select(FantasyDraftPick).where(FantasyDraftPick.draft_id == draft.id)
     )).scalars().all()
-    by_manager: dict[str, list] = defaultdict(list)
+    is_auction = draft.type == "auction"
+    budget = _draft_budget(fs) if is_auction else None
+    by_manager: dict[str, list] = defaultdict(list)   # mid -> [(player_id, bid), ...]
     for p in picks:
         if p.player_id:
-            by_manager[str(p.manager_id)].append(str(p.player_id))
+            by_manager[str(p.manager_id)].append((str(p.player_id), float(p.bid_amount or 0)))
 
     squad_by_manager: dict[str, FantasySquad] = {}
-    for mid, player_ids in by_manager.items():
+    for mid, items in by_manager.items():
         mgr = await session.get(FantasyManager, mid)
+        spent = sum(b for _, b in items)
         squad = FantasySquad(
             fantasy_season_id=fs.id, league_id=league.id, manager_id=mid,
             organisation_id=fs.organisation_id,
-            team_name=f"{mgr.display_name if mgr else 'Team'}'s XI", budget_remaining=None,
+            team_name=f"{mgr.display_name if mgr else 'Team'}'s XI",
+            budget_remaining=(round(budget - spent, 1) if is_auction else None),
         )
         session.add(squad)
         await session.flush()
         squad_by_manager[mid] = squad
-        # Captain the priciest pick, vice the next.
-        ranked = sorted(player_ids, key=lambda pid: pool.get(pid, {}).get("price", 0), reverse=True)
-        for i, pid in enumerate(player_ids):
+        # Captain the marquee pick — the priciest bid (auction) or pool price (snake).
+        ranked = sorted(items, key=(lambda it: it[1]) if is_auction else (lambda it: pool.get(it[0], {}).get("price", 0)), reverse=True)
+        cap = ranked[0][0] if ranked else None
+        vice = ranked[1][0] if len(ranked) > 1 else None
+        for pid, bid in items:
             session.add(FantasySquadPlayer(
                 squad_id=squad.id, player_id=pid, role=pool.get(pid, {}).get("role", "batter"),
-                is_captain=(pid == ranked[0]) if ranked else False,
-                is_vice_captain=(len(ranked) > 1 and pid == ranked[1]),
+                is_captain=(pid == cap), is_vice_captain=(pid == vice),
+                purchase_price=(round(bid, 1) if is_auction else None),
             ))
         # Link the league member to their drafted squad.
         member = (await session.execute(

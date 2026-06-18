@@ -2196,6 +2196,19 @@ class FantasyDraft(Base):
     draft_order = Column(JSONB, nullable=False, server_default="[]")
     rounds = Column(Integer, nullable=False, server_default="12")
     started_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Auction mode (migration 089): the live lot and the nomination pointer. A
+    # snake draft pre-creates its pick slots, so these stay 0 / NULL for snake.
+    # `nomination_index` walks `draft_order` for whose turn it is to nominate;
+    # the `lot_*` columns hold the player currently up for auction, the running
+    # high bid and bidder, who nominated it, the anti-snipe deadline, and whether
+    # the lot was auto-nominated by the clock.
+    nomination_index = Column(Integer, nullable=False, server_default="0")
+    lot_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    lot_high_bid = Column(Numeric(8, 1), nullable=True)
+    lot_high_bidder_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_managers.id", ondelete="SET NULL"), nullable=True)
+    lot_nominator_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_managers.id", ondelete="SET NULL"), nullable=True)
+    lot_deadline = Column(TIMESTAMP(timezone=True), nullable=True)
+    lot_auto = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
