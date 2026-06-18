@@ -196,6 +196,7 @@ export default function FantasyHome() {
 
           <SettingsCard season={season} flash={flash} fail={fail} onSaved={load} />
           <PoolManager season={season} flash={flash} fail={fail} onChanged={load} />
+          <ManagersCard flash={flash} fail={fail} />
 
           {/* Pool */}
           <div className="pb-card p-5">
@@ -426,6 +427,86 @@ function PoolManager({ season, flash, fail, onChanged }) {
           <button onClick={createNew} className="px-3 py-1.5 rounded bg-pb-accent text-white text-sm">Create &amp; add</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Manage the people who have registered to play (edit name/email, reset a locked
+// PIN, or delete a tester/duplicate). Managers are club-scoped, not per season.
+function ManagersCard({ flash, fail }) {
+  const [managers, setManagers] = useState(null)
+  const [q, setQ] = useState('')
+  const [editing, setEditing] = useState(null)   // manager id
+  const [form, setForm] = useState({ display_name: '', email: '', pin: '' })
+  const [busy, setBusy] = useState('')
+
+  const load = useCallback(() => api.fantasyManagers().then(d => setManagers(d.managers)).catch(() => setManagers([])), [])
+  useEffect(() => { load() }, [load])
+
+  const startEdit = (m) => { setEditing(m.id); setForm({ display_name: m.display_name || '', email: m.email || '', pin: '' }) }
+  const save = async (id) => {
+    setBusy(id)
+    try {
+      const body = { display_name: form.display_name, email: form.email }
+      if (form.pin.trim()) body.pin = form.pin.trim()
+      await api.fantasyUpdateManager(id, body)
+      flash('Player updated.'); setEditing(null); await load()
+    } catch (e) { fail(e) } finally { setBusy('') }
+  }
+  const remove = async (m) => {
+    if (!window.confirm(`Delete ${m.display_name}? This removes their team and league entries. This can't be undone.`)) return
+    setBusy(m.id)
+    try { await api.fantasyDeleteManager(m.id); flash('Player deleted.'); await load() }
+    catch (e) { fail(e) } finally { setBusy('') }
+  }
+
+  const list = (managers || []).filter(m => {
+    const t = q.trim().toLowerCase()
+    return !t || (m.display_name || '').toLowerCase().includes(t) || (m.email || '').toLowerCase().includes(t)
+  })
+  const inp = 'rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm'
+
+  return (
+    <div className="pb-card p-5">
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <h3 className="font-display font-bold">Registered players {managers ? `(${managers.length})` : ''}</h3>
+        {!!managers?.length && (
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search players…" className={`${inp} w-48`} />
+        )}
+      </div>
+      <p className="text-xs text-pb-faint mb-3">People who signed up on the public link. Edit a name or email, reset a forgotten PIN, or remove a tester or duplicate.</p>
+
+      {managers === null ? <p className="text-sm text-pb-faint">Loading…</p>
+        : !list.length ? <p className="text-sm text-pb-faint">{managers.length ? 'No players match.' : 'No one has signed up yet.'}</p>
+          : (
+            <div className="divide-y pb-hairline">
+              {list.map(m => (
+                <div key={m.id} className="py-2.5">
+                  {editing === m.id ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} placeholder="Display name" className={`${inp} flex-1 min-w-[140px]`} />
+                      <input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="Email" className={`${inp} flex-1 min-w-[160px]`} />
+                      <input value={form.pin} onChange={e => setForm(f => ({ ...f, pin: e.target.value }))} placeholder="New PIN (optional)" className={`${inp} w-36`} />
+                      <Btn onClick={() => save(m.id)} busy={busy === m.id}>Save</Btn>
+                      <Btn kind="ghost" onClick={() => setEditing(null)}>Cancel</Btn>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">{m.display_name}
+                          {m.team_name && <span className="text-pb-faint font-normal"> · {m.team_name}</span>}
+                          {!m.has_squad && <span className="ml-2 text-[11px] text-pb-faint">no squad</span>}
+                        </div>
+                        <div className="text-xs text-pb-faint truncate">{m.email || 'no email'}{m.total_points != null ? ` · ${fmt(m.total_points)} pts` : ''}</div>
+                      </div>
+                      <button onClick={() => startEdit(m)} className="text-xs underline text-pb-faint hover:text-pb-text">Edit</button>
+                      <button onClick={() => remove(m)} disabled={busy === m.id} className="text-xs underline text-pb-red disabled:opacity-50">Delete</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
     </div>
   )
 }
