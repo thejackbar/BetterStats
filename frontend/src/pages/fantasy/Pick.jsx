@@ -83,6 +83,8 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav }) {
     } catch (e) { fail(e) } finally { setBusy(false) }
   }
 
+  const saveLabel = busy ? 'Saving…' : valid ? 'Save squad · full, captained, in budget' : `${chosen.length}/${size} · pick a full, captained, in-budget squad`
+
   return (
     <div>
       <ScreenTitle title="Build squad" sub={`${size}-man · ${money(budget)} budget`} back onBack={() => nav('team')} />
@@ -95,6 +97,10 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav }) {
 
       <div style={{ padding: '14px 0 0' }}>
         <Field placeholder="Team name" value={teamName} onChange={e => setTeamName(e.target.value)} />
+      </div>
+
+      <div style={{ paddingTop: 12 }}>
+        <Btn full disabled={!valid || busy} onClick={save}>{saveLabel}</Btn>
       </div>
 
       <div style={{ display: 'flex', gap: 6, padding: '12px 0 0' }}>
@@ -178,9 +184,7 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav }) {
       )}
 
       <div style={{ paddingTop: 16 }}>
-        <Btn full disabled={!valid || busy} onClick={save}>
-          {busy ? 'Saving…' : valid ? 'Save squad · full, captained, in budget' : `${chosen.length}/${size} · pick a full, captained, in-budget squad`}
-        </Btn>
+        <Btn full disabled={!valid || busy} onClick={save}>{saveLabel}</Btn>
       </div>
     </div>
   )

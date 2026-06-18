@@ -28,6 +28,7 @@ export default function FantasyHome() {
   const [sort, setSort] = useState({ key: 'current_price', dir: 'desc' })
   const [poolSearch, setPoolSearch] = useState('')
   const [showAllPool, setShowAllPool] = useState(false)
+  const [poolOpen, setPoolOpen] = useState(false)
 
   const flash = (m) => { setMsg(m); setErr(null); setTimeout(() => setMsg(null), 4000) }
   const fail = (e) => { setErr(e.message || String(e)); setMsg(null) }
@@ -201,17 +202,20 @@ export default function FantasyHome() {
 
           {/* Pool */}
           <div className="pb-card p-5">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <h3 className="font-display font-bold">Player pool {pool ? `(${pool.length})` : ''}</h3>
-              {!!pool?.length && (
+            <div className="flex items-center justify-between gap-3">
+              <button type="button" onClick={() => setPoolOpen(o => !o)} className="flex items-center gap-2 text-left">
+                <h3 className="font-display font-bold">Player pool {pool ? `(${pool.length})` : ''}</h3>
+                <span className="text-pb-faint text-xs">{poolOpen ? '▾' : '▸'}</span>
+              </button>
+              {poolOpen && !!pool?.length && (
                 <input value={poolSearch} onChange={e => setPoolSearch(e.target.value)} placeholder="Search pool…"
                   className="rounded border pb-hairline bg-pb-surface px-3 py-1.5 text-sm w-48" />
               )}
             </div>
-            {!pool?.length ? (
-              <p className="text-sm text-pb-faint">No pool yet — click “Build pool”.</p>
+            {poolOpen && (!pool?.length ? (
+              <p className="text-sm text-pb-faint mt-3">No pool yet — click “Build pool”.</p>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto mt-3">
                 <table className="w-full text-sm">
                   <thead className="text-pb-faint">
                     <tr>
@@ -250,7 +254,7 @@ export default function FantasyHome() {
                 )}
                 {poolSearch && <p className="text-xs text-pb-faintest mt-2">{filteredPool.length} match{filteredPool.length === 1 ? '' : 'es'}.</p>}
               </div>
-            )}
+            ))}
           </div>
 
           {/* Rounds */}
