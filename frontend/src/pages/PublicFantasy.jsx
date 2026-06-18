@@ -213,9 +213,11 @@ function Builder({ token, pool, rules, squad, onSaved, fail }) {
   const left = budget - spend
   const byRole = (r) => chosen.filter(p => p.role === r).length
   const poolByRole = useMemo(() => {
-    let list = (pool || []).filter(p => p.role === filter)
+    // A search spans every role; without one, show the selected role tab.
     const term = search.trim().toLowerCase()
-    if (term) list = list.filter(p => p.name.toLowerCase().includes(term))
+    let list = term
+      ? (pool || []).filter(p => p.name.toLowerCase().includes(term))
+      : (pool || []).filter(p => p.role === filter)
     list = [...list]
     if (sort === 'price') list.sort((a, b) => b.price - a.price)
     else if (sort === 'price_asc') list.sort((a, b) => a.price - b.price)
@@ -299,7 +301,7 @@ function Builder({ token, pool, rules, squad, onSaved, fail }) {
             <button key={pp.player_id} onClick={() => toggle(pp)} disabled={blocked}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm border ${on ? 'border-transparent text-pb-bg' : 'pb-hairline bg-pb-surface'} disabled:opacity-40`}
               style={on ? accentStyle : undefined}>
-              <span>{pp.name}</span>
+              <span>{pp.name} <span className="text-pb-faintest text-xs">{ROLE_LABEL[pp.role]}</span></span>
               <span className="tabular-nums">{money(pp.price)}</span>
             </button>
           )

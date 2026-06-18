@@ -306,6 +306,7 @@ function SettingsCard({ season, flash, fail, onSaved }) {
     budget: r.budget ?? 100, count_best_n: r.count_best_n ?? 11, transfer_hit: r.transfer_hit ?? 4,
     free_transfers_per_round: r.free_transfers_per_round ?? 1, max_banked_transfers: r.max_banked_transfers ?? 2,
     wildcards_per_half: r.wildcards_per_half ?? 1, triple_captains_per_half: r.triple_captains_per_half ?? 1,
+    price_window_years: r.price_window_years ?? 3,
   })
   const [busy, setBusy] = useState(false)
   const size = ROLES.reduce((a, role) => a + Number(q[role] || 0), 0)
@@ -320,6 +321,7 @@ function SettingsCard({ season, flash, fail, onSaved }) {
         budget: +v.budget, count_best_n: +v.count_best_n, transfer_hit: +v.transfer_hit,
         free_transfers_per_round: +v.free_transfers_per_round, max_banked_transfers: +v.max_banked_transfers,
         wildcards_per_half: +v.wildcards_per_half, triple_captains_per_half: +v.triple_captains_per_half,
+        price_window_years: +v.price_window_years,
       })
       flash('Settings saved.'); await onSaved()
     } catch (e) { fail(e) } finally { setBusy(false) }
@@ -328,13 +330,25 @@ function SettingsCard({ season, flash, fail, onSaved }) {
   return (
     <div className="pb-card p-5">
       <h3 className="font-display font-bold mb-1">Team make-up & budget</h3>
-      <p className="text-xs text-pb-faint mb-3">Squad size is the sum of the roles ({size}). Score the best {v.count_best_n} each round. Change this before the season starts.</p>
+      <p className="text-xs text-pb-faint mb-3">
+        Squad size is the sum of the roles ({size}). Score the best {v.count_best_n} each round. Change this before the season starts.
+        Prices come from each player's runs, wickets, fielding and milestones over the last {v.price_window_years} season{+v.price_window_years === 1 ? '' : 's'}, role-weighted and fitted to the budget. After changing the window, click Build pool to recalculate.
+      </p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Field label="Keepers">{num(q.keeper, x => setQ({ ...q, keeper: x }))}</Field>
         <Field label="Batters">{num(q.batter, x => setQ({ ...q, batter: x }))}</Field>
         <Field label="All-rounders">{num(q.allrounder, x => setQ({ ...q, allrounder: x }))}</Field>
         <Field label="Bowlers">{num(q.bowler, x => setQ({ ...q, bowler: x }))}</Field>
         <Field label="Budget">{num(v.budget, x => setV({ ...v, budget: x }))}</Field>
+        <Field label="Price on last">
+          <select value={v.price_window_years} onChange={e => setV({ ...v, price_window_years: e.target.value })}
+            className="w-full rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm">
+            <option value="1">1 season</option>
+            <option value="2">2 seasons</option>
+            <option value="3">3 seasons</option>
+            <option value="4">4 seasons</option>
+          </select>
+        </Field>
         <Field label="Score best N">{num(v.count_best_n, x => setV({ ...v, count_best_n: x }))}</Field>
         <Field label="Transfer hit">{num(v.transfer_hit, x => setV({ ...v, transfer_hit: x }))}</Field>
         <Field label="Free transfers / round">{num(v.free_transfers_per_round, x => setV({ ...v, free_transfers_per_round: x }))}</Field>

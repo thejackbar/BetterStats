@@ -253,6 +253,7 @@ class RulesUpdate(BaseModel):
     max_banked_transfers: int | None = None
     wildcards_per_half: int | None = None
     triple_captains_per_half: int | None = None
+    price_window_years: int | None = None
 
 
 @router.patch("/season/{season_id}/rules")
@@ -283,6 +284,8 @@ async def update_rules(season_id: str, body: RulesUpdate, club=Depends(get_curre
         val = getattr(body, fld)
         if val is not None:
             rules[fld] = max(0, int(val))
+    if body.price_window_years is not None:
+        rules["price_window_years"] = max(1, int(body.price_window_years))
     if rules.get("count_best_n", 11) > rules.get("squad_size", 12):
         raise HTTPException(status_code=400, detail="Best-N can't exceed the squad size.")
     fs.rules = rules  # reassign so the JSONB change is flagged

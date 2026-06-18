@@ -114,9 +114,13 @@ async def build_pool(session: AsyncSession, fs) -> int:
     current-year-only gate would leave the pool empty pre-season; seeding from
     the last couple of seasons gives the squad you'd expect, and a rebuild once
     the season is underway naturally picks up anyone new. An admin role override
-    (role_source = 'admin') and the live ``current_price`` are preserved on
-    rebuild. Returns the pool size."""
-    recent_from = fs.season_year - (PRICE_WINDOW_YEARS - 1)
+    (role_source = 'admin') is preserved on rebuild; the live ``current_price`` is
+    kept once the season is live, but reset to the new baseline while the season
+    is still in setup, so changing the pricing window updates the visible prices.
+    Returns the pool size."""
+    window = max(1, int((fs.rules or {}).get("price_window_years", PRICE_WINDOW_YEARS)))
+    recent_from = fs.season_year - (window - 1)
+    reset_price = fs.status in ("setup", "open")
     rows = await session.execute(
         text("""
             SELECT p.id AS player_id, p.player_role, p.skill_positions,
@@ -166,6 +170,8 @@ async def build_pool(session: AsyncSession, fs) -> int:
                         :price, :price)
                 ON CONFLICT (fantasy_season_id, player_id) DO UPDATE SET
                     base_price = EXCLUDED.base_price,
+                    current_price = CASE WHEN :reset THEN EXCLUDED.base_price
+                                ELSE fantasy_pool_players.current_price END,
                     role = CASE WHEN fantasy_pool_players.role_source = 'admin'
                                 THEN fantasy_pool_players.role ELSE EXCLUDED.role END,
                     role_source = CASE WHEN fantasy_pool_players.role_source = 'admin'
@@ -174,7 +180,7 @@ async def build_pool(session: AsyncSession, fs) -> int:
             """),
             {
                 "fs": str(fs.id), "org": str(fs.organisation_id), "pid": str(r["player_id"]),
-                "role": role, "source": source, "price": price,
+                "role": role, "source": source, "price": price, "reset": reset_price,
             },
         )
         count += 1
@@ -209,7 +215,8 @@ async def classify_and_price_one(session: AsyncSession, fs, player_id) -> tuple[
     """Role + baseline price for a single player, used when an admin adds a
     returning player to the pool by hand. Falls back to a batter at the floor
     price when there's no usable history."""
-    recent_from = fs.season_year - (PRICE_WINDOW_YEARS - 1)
+    window = max(1, int((fs.rules or {}).get("price_window_years", PRICE_WINDOW_YEARS)))
+    recent_from = fs.season_year - (window - 1)
     row = (await session.execute(
         text("""
             SELECT p.player_role, p.skill_positions,
