@@ -16,6 +16,7 @@ its public router land in later phases per the spec's phase plan.
 from __future__ import annotations
 
 import secrets
+import uuid
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -237,6 +238,156 @@ async def patch_pool_player(pool_id: str, body: PoolPatch, club=Depends(get_curr
     if body.current_price is not None:
         pp.current_price = round(float(body.current_price), 1)
     pp.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True}
+
+
+# ── team make-up + budget (rules) ──────────────────────────────────────────────
+
+class RulesUpdate(BaseModel):
+    role_quota: dict | None = None
+    budget: float | None = None
+    count_best_n: int | None = None
+    transfer_hit: int | None = None
+    free_transfers_per_round: int | None = None
+    max_banked_transfers: int | None = None
+    wildcards_per_half: int | None = None
+    triple_captains_per_half: int | None = None
+
+
+@router.patch("/season/{season_id}/rules")
+async def update_rules(season_id: str, body: RulesUpdate, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Edit the team make-up (how many of each role), the budget, the best-N count
+    and the transfer/chip allowances. Squad size is derived from the role quota.
+    Best done before the season starts — existing squads are validated against
+    these on their next change."""
+    fs = await _load_season(db, club, season_id)
+    rules = dict(fs.rules or DEFAULT_RULES)
+    if body.role_quota is not None:
+        q = {r: int(body.role_quota.get(r, 0)) for r in FANTASY_ROLES}
+        if any(v < 0 for v in q.values()):
+            raise HTTPException(status_code=400, detail="Role counts can't be negative.")
+        if q["keeper"] < 1:
+            raise HTTPException(status_code=400, detail="A squad needs at least one keeper.")
+        size = sum(q.values())
+        if size < 2:
+            raise HTTPException(status_code=400, detail="A squad needs at least two players.")
+        rules["role_quota"] = q
+        rules["squad_size"] = size
+    if body.budget is not None:
+        if float(body.budget) <= 0:
+            raise HTTPException(status_code=400, detail="Budget must be greater than zero.")
+        rules["budget"] = round(float(body.budget), 1)
+    for fld in ("count_best_n", "transfer_hit", "free_transfers_per_round",
+                "max_banked_transfers", "wildcards_per_half", "triple_captains_per_half"):
+        val = getattr(body, fld)
+        if val is not None:
+            rules[fld] = max(0, int(val))
+    if rules.get("count_best_n", 11) > rules.get("squad_size", 12):
+        raise HTTPException(status_code=400, detail="Best-N can't exceed the squad size.")
+    fs.rules = rules  # reassign so the JSONB change is flagged
+    await db.commit()
+    return {"rules": rules}
+
+
+# ── pool management (add returning / new players) ──────────────────────────────
+
+@router.get("/season/{season_id}/available-players")
+async def available_players(season_id: str, q: str = "", club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Search the club's players who aren't in the pool yet — returning players
+    who fell outside the recent window, or anyone added by hand."""
+    fs = await _load_season(db, club, season_id)
+    in_pool = select(FantasyPoolPlayer.player_id).where(FantasyPoolPlayer.fantasy_season_id == fs.id)
+    stmt = (
+        select(Player.id, Player.name).where(
+            Player.organisation_id == club.id,
+            Player.is_player.isnot(False),
+            Player.id.notin_(in_pool),
+        ).order_by(Player.name).limit(40)
+    )
+    if q.strip():
+        stmt = stmt.where(Player.name.ilike(f"%{q.strip()}%"))
+    rows = (await db.execute(stmt)).all()
+    return {"players": [{"player_id": str(pid), "name": nm} for pid, nm in rows]}
+
+
+class PoolAdd(BaseModel):
+    player_id: str
+    role: str | None = None
+    price: float | None = None
+
+
+@router.post("/season/{season_id}/pool")
+async def add_pool_player(season_id: str, body: PoolAdd, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Add an existing club player to the pool (a returning player). Role and price
+    auto-fill from their history when not given."""
+    fs = await _load_season(db, club, season_id)
+    player = await db.get(Player, body.player_id)
+    if player is None or str(player.organisation_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Player not found")
+    if body.role is not None and body.role not in FANTASY_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    role, price = body.role, body.price
+    if role is None or price is None:
+        auto_role, auto_price = await fantasy_engine.classify_and_price_one(db, fs, body.player_id)
+        role = role or auto_role
+        price = price if price is not None else auto_price
+    price = round(float(price), 1)
+    existing = (await db.execute(
+        select(FantasyPoolPlayer).where(
+            FantasyPoolPlayer.fantasy_season_id == fs.id, FantasyPoolPlayer.player_id == player.id)
+    )).scalar_one_or_none()
+    if existing is not None:
+        existing.role, existing.role_source = role, "admin"
+        existing.base_price = existing.current_price = price
+        existing.is_available = True
+    else:
+        db.add(FantasyPoolPlayer(
+            fantasy_season_id=fs.id, organisation_id=club.id, player_id=player.id,
+            role=role, role_source="admin", base_price=price, current_price=price, is_available=True,
+        ))
+    await db.commit()
+    return {"ok": True, "role": role, "price": price}
+
+
+_FANTASY_TO_PROFILE = {"keeper": "Wicketkeeper", "batter": "Batter", "allrounder": "All Rounder", "bowler": "Bowler"}
+
+
+class NewPlayer(BaseModel):
+    name: str
+    role: str = "batter"
+    price: float = 5.0
+
+
+@router.post("/season/{season_id}/pool/new-player")
+async def add_new_player(season_id: str, body: NewPlayer, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Create a brand-new club player and add them to the pool. They score 0 until
+    their real games are synced to this record (or merged), so this is mainly for
+    pre-season picks of someone not yet in the data."""
+    fs = await _load_season(db, club, season_id)
+    if body.role not in FANTASY_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Enter a name.")
+    pid = uuid.uuid4()
+    db.add(Player(id=pid, name=name, organisation_id=club.id, player_role=_FANTASY_TO_PROFILE.get(body.role)))
+    price = round(float(body.price), 1)
+    db.add(FantasyPoolPlayer(
+        fantasy_season_id=fs.id, organisation_id=club.id, player_id=pid,
+        role=body.role, role_source="admin", base_price=price, current_price=price, is_available=True,
+    ))
+    await db.commit()
+    return {"ok": True, "player_id": str(pid)}
+
+
+@router.delete("/pool/{pool_id}")
+async def remove_pool_player(pool_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Remove a player from the pool (e.g. one added by mistake)."""
+    pp = await db.get(FantasyPoolPlayer, pool_id)
+    if pp is None or str(pp.organisation_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Pool player not found")
+    await db.delete(pp)
     await db.commit()
     return {"ok": True}
 
