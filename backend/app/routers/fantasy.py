@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.routers.auth import get_current_club
 from app.auth.capabilities import require_cap, MANAGE_FANTASY
+from app.auth.modules import org_has_module, MODULE_FANTASY
 from app.models.db import (
     get_db, Organisation, Player,
     FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
@@ -83,8 +84,11 @@ async def get_season(club=Depends(get_current_club), db: AsyncSession = Depends(
         .order_by(FantasySeason.season_year.desc())
         .limit(1)
     )).scalar_one_or_none()
+    # link_active is the club's REAL entitlement (super admins bypass the route
+    # gate, so the admin pages work without it, but the public link won't).
+    link_active = org_has_module(club, MODULE_FANTASY)
     if fs is None:
-        return {"season": None, "link_token": club.fantasy_link_token}
+        return {"season": None, "link_token": club.fantasy_link_token, "link_active": link_active}
 
     pool_n = (await db.execute(
         select(func.count()).select_from(FantasyPoolPlayer).where(FantasyPoolPlayer.fantasy_season_id == fs.id)
@@ -99,8 +103,31 @@ async def get_season(club=Depends(get_current_club), db: AsyncSession = Depends(
     return {
         "season": _season_dict(fs),
         "link_token": club.fantasy_link_token,
+        "link_active": link_active,
         "counts": {"pool": pool_n, "rounds": rounds_total, "rounds_scored": rounds_scored},
     }
+
+
+class RegistrationBody(BaseModel):
+    registration_open: bool
+
+
+@router.post("/season/{season_id}/registration")
+async def set_registration(season_id: str, body: RegistrationBody, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Open or close registration / squad changes for the season."""
+    fs = await _load_season(db, club, season_id)
+    fs.registration_open = body.registration_open
+    await db.commit()
+    return {"ok": True, "registration_open": fs.registration_open}
+
+
+@router.post("/regenerate-link")
+async def regenerate_link(club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Mint a fresh public link token, retiring the old link."""
+    org = await db.get(Organisation, club.id)
+    org.fantasy_link_token = secrets.token_urlsafe(24)
+    await db.commit()
+    return {"link_token": org.fantasy_link_token}
 
 
 class SeasonCreate(BaseModel):

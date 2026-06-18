@@ -1163,6 +1163,7 @@ export const api = {
   fanLogout: (token) => request(`/public/fantasy/${token}/logout`, { method: 'POST' }),
   fanPool: (token) => request(`/public/fantasy/${token}/pool`),
   fanMe: (token) => request(`/public/fantasy/${token}/me`),
+  fanRound: (token, n) => request(`/public/fantasy/${token}/round${n != null ? `?n=${n}` : ''}`),
   fanSaveSquad: (token, data) => request(`/public/fantasy/${token}/squad`, { method: 'POST', body: JSON.stringify(data) }),
   fanTransfer: (token, out_player_id, in_player_id) =>
     request(`/public/fantasy/${token}/transfer`, { method: 'POST', body: JSON.stringify({ out_player_id, in_player_id }) }),
@@ -1412,6 +1413,9 @@ export const api = {
     request(`/club-admin/fantasy/season/${seasonId}/draft-leagues`, { method: 'POST', body: JSON.stringify(data) }),
   fantasyStartDraft: (leagueId) => request(`/club-admin/fantasy/draft-leagues/${leagueId}/start`, { method: 'POST' }),
   fantasyProcessWaivers: (leagueId) => request(`/club-admin/fantasy/draft-leagues/${leagueId}/process-waivers`, { method: 'POST' }),
+  fantasySetRegistration: (seasonId, registration_open) =>
+    request(`/club-admin/fantasy/season/${seasonId}/registration`, { method: 'POST', body: JSON.stringify({ registration_open }) }),
+  fantasyRegenerateLink: () => request('/club-admin/fantasy/regenerate-link', { method: 'POST' }),
 }
 
 function _iqQs(opponent, fixtureId, team, name) {

@@ -42,6 +42,9 @@ function Banner({ tone = 'error', children }) {
 const btn = 'px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50'
 const btnAccent = `${btn} text-pb-bg`
 const accentStyle = { background: 'var(--pb-accent)' }
+const Stat = ({ label, value }) => (
+  <div><div className="text-pb-faint text-[11px] leading-tight">{label}</div><div className="font-bold">{value}</div></div>
+)
 
 export default function PublicFantasy() {
   const { token } = useParams()
@@ -52,7 +55,8 @@ export default function PublicFantasy() {
   const [squad, setSquad] = useState(null)
   const [pool, setPool] = useState(null)
   const [rules, setRules] = useState(null)
-  const [view, setView] = useState('team')         // team | pick | ladder | leagues
+  const [round, setRound] = useState(null)
+  const [view, setView] = useState('team')         // team | points | pick | ladder | leagues | draft
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
 
@@ -62,7 +66,7 @@ export default function PublicFantasy() {
 
   const loadApp = useCallback(async () => {
     const [m, p] = await Promise.all([api.fanMe(token), api.fanPool(token).catch(() => null)])
-    setManager(m.manager); setSquad(m.squad)
+    setManager(m.manager); setSquad(m.squad); setRound(m.round)
     if (p) { setPool(p.players); setRules(p.rules) }
     setView(m.squad ? 'team' : 'pick')
   }, [token])
@@ -105,8 +109,16 @@ export default function PublicFantasy() {
             </div>
             <Banner tone="ok">{msg}</Banner>
             <Banner>{error}</Banner>
-            <nav className="flex gap-1 mb-5 text-sm">
-              {[['team', 'My team'], ['pick', squad ? 'Edit' : 'Pick'], ['ladder', 'Ladder'], ['leagues', 'Leagues'], ['draft', 'Draft']].map(([k, label]) => (
+            {round && round.status !== 'scored' && (
+              <div className="rounded-lg px-3 py-2 mb-4 text-xs"
+                style={{ background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)', color: 'var(--pb-accent)' }}>
+                {round.locked
+                  ? `Round ${round.number} is locked. You can change your team again once it's scored.`
+                  : `Round ${round.number}${round.lock_at ? ` locks ${new Date(round.lock_at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}.`}
+              </div>
+            )}
+            <nav className="flex gap-1 mb-5 text-sm flex-wrap">
+              {[['team', 'My team'], ['points', 'Points'], ['pick', squad ? 'Edit' : 'Pick'], ['ladder', 'Ladder'], ['leagues', 'Leagues'], ['draft', 'Draft']].map(([k, label]) => (
                 <button key={k} onClick={() => setView(k)}
                   className={`px-3 py-1.5 rounded-lg ${view === k ? 'text-pb-bg' : 'text-pb-faint bg-pb-surface2'}`}
                   style={view === k ? accentStyle : undefined}>{label}</button>
@@ -114,9 +126,10 @@ export default function PublicFantasy() {
             </nav>
 
             {view === 'team' && (
-              <MyTeam token={token} squad={squad} season={season} pool={pool} rules={rules}
+              <MyTeam token={token} squad={squad} season={season} pool={pool} rules={rules} round={round}
                 onChange={loadApp} flash={flash} fail={fail} goPick={() => setView('pick')} />
             )}
+            {view === 'points' && <RoundView token={token} />}
             {view === 'pick' && (
               <Builder token={token} pool={pool} rules={rules} squad={squad} season={season}
                 onSaved={async () => { flash('Squad saved.'); await loadApp(); setView('team') }} fail={fail} />
@@ -297,9 +310,10 @@ function Builder({ token, pool, rules, squad, onSaved, fail }) {
 
 // ── My team (with transfers, captain, chips) ──────────────────────────────────
 
-function MyTeam({ token, squad, season, pool, rules, onChange, flash, fail, goPick }) {
+function MyTeam({ token, squad, season, pool, rules, round, onChange, flash, fail, goPick }) {
   const [swapOut, setSwapOut] = useState(null)
   const active = season?.status === 'active'
+  const locked = !!round?.locked
 
   if (!squad) {
     return (
@@ -327,18 +341,24 @@ function MyTeam({ token, squad, season, pool, rules, onChange, flash, fail, goPi
 
   return (
     <div className="space-y-4">
-      <div className="pb-card p-3 flex items-center justify-between text-sm">
-        <div><span className="text-pb-faint">Points</span> <span className="font-bold">{money(squad.total_points)}</span></div>
-        {squad.budget_remaining != null && <div><span className="text-pb-faint">Bank</span> <span className="font-bold">{money(squad.budget_remaining)}</span></div>}
-        <button onClick={goPick} className="text-xs underline text-pb-faint">{active ? '' : 'Edit squad'}</button>
+      <div className="pb-card p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+        <Stat label="Total" value={money(squad.total_points)} />
+        {squad.last_round && <Stat label={`Round ${squad.last_round.number}`} value={money(squad.last_round.points)} />}
+        {squad.value != null && <Stat label="Value" value={money(squad.value)} />}
+        {squad.budget_remaining != null && <Stat label="Bank" value={money(squad.budget_remaining)} />}
+        {active && squad.free_transfers != null && (
+          <Stat label="Free transfers" value={squad.free_transfers > 100 ? '∞' : squad.free_transfers} />
+        )}
       </div>
+      {!active && <button onClick={goPick} className="text-xs underline text-pb-faint">Edit squad</button>}
 
-      {active && (
+      {active && !locked && (
         <div className="flex gap-2 text-xs">
           <button onClick={() => playChip('wildcard')} className="flex-1 px-3 py-2 rounded-lg bg-pb-surface2 text-pb-text">Wildcard</button>
           <button onClick={() => playChip('triple_captain')} className="flex-1 px-3 py-2 rounded-lg bg-pb-surface2 text-pb-text">Triple captain</button>
         </div>
       )}
+      {locked && <div className="text-xs text-pb-faint">Your team is locked for this round.</div>}
 
       {ROLE_ORDER.map(role => {
         const rows = squad.players.filter(p => p.role === role)
@@ -358,7 +378,7 @@ function MyTeam({ token, squad, season, pool, rules, onChange, flash, fail, goPi
                     <span className="tabular-nums text-pb-faint text-xs">{money(p.purchase_price)}</span>
                     {!p.is_captain && <button onClick={() => setCaptain(p.player_id, false)} className="text-[10px] text-pb-faint underline">C</button>}
                     {!p.is_vice_captain && <button onClick={() => setCaptain(p.player_id, true)} className="text-[10px] text-pb-faint underline">V</button>}
-                    {active && !p.is_captain && !p.is_vice_captain && (
+                    {active && !locked && !p.is_captain && !p.is_vice_captain && (
                       <button onClick={() => setSwapOut(swapOut?.player_id === p.player_id ? null : p)} className="text-[10px] underline" style={{ color: 'var(--pb-accent)' }}>swap</button>
                     )}
                   </span>
@@ -542,6 +562,56 @@ function DraftBoard({ state, ladder, onBack, onPick }) {
           {ladder && <LadderList rows={ladder.type === 'h2h'
             ? ladder.ladder.map(r => ({ rank: r.rank, team_name: r.team_name, manager: `${r.w}-${r.l}-${r.d}`, points: r.pts }))
             : ladder.ladder} />}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Points (per-round breakdown) ─────────────────────────────────────────────
+
+function RoundView({ token }) {
+  const [data, setData] = useState(null)
+  const [n, setN] = useState(null)
+  useEffect(() => {
+    let on = true
+    api.fanRound(token, n).then(d => on && setData(d)).catch(() => on && setData({ round: null, rounds: [] }))
+    return () => { on = false }
+  }, [token, n])
+  if (!data) return <p className="text-pb-faint text-sm">Loading…</p>
+  if (!data.round) return <p className="text-sm text-pb-faint">No rounds yet.</p>
+  const mine = data.mine
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <select value={data.round.number} onChange={e => setN(Number(e.target.value))}
+          className="rounded-lg border pb-hairline bg-pb-surface px-2 py-1.5 text-sm">
+          {data.rounds.map(r => <option key={r.number} value={r.number}>Round {r.number}{r.status === 'scored' ? '' : ' (upcoming)'}</option>)}
+        </select>
+        <span className="text-pb-faint text-xs">Avg {data.stats.avg ?? '—'} · High {data.stats.high != null ? money(data.stats.high) : '—'}</span>
+      </div>
+      {!mine ? <p className="text-sm text-pb-faint">This round hasn't been scored yet.</p> : (
+        <>
+          <div className="pb-card p-3 flex items-center gap-3">
+            <span className="font-bold text-lg">{money(mine.points)} pts</span>
+            {mine.transfer_hit ? <span className="text-pb-faint text-sm">−{mine.transfer_hit} hit</span> : null}
+            {mine.chip_used ? <span className="text-sm" style={{ color: 'var(--pb-accent)' }}>{mine.chip_used.replace('_', ' ')}</span> : null}
+          </div>
+          <div className="pb-card p-3">
+            {mine.lineup.map(e => (
+              <div key={e.player_id} className={`flex justify-between py-1 text-sm ${e.counted ? '' : 'opacity-40'}`}>
+                <span>
+                  {e.name}
+                  {e.captained && <span className="ml-1 text-[10px] font-bold" style={{ color: 'var(--pb-accent)' }}>C</span>}
+                  <span className="text-pb-faintest text-xs"> {ROLE_LABEL[e.role]}</span>
+                </span>
+                <span className="tabular-nums">
+                  {money(e.eff_points != null ? e.eff_points : e.points)}
+                  {!e.counted && <span className="text-pb-faintest text-[10px] ml-1">bench</span>}
+                </span>
+              </div>
+            ))}
+          </div>
         </>
       )}
     </div>

@@ -36,6 +36,7 @@ from app.models.db import (
     Organisation, Player, get_db,
     FantasySeason, FantasyLeague, FantasyManager, FantasySquad, FantasySquadPlayer,
     FantasyLeagueMember, FantasyPoolPlayer, FantasyRound, FantasyTransaction,
+    FantasySquadRoundScore,
     FantasyDraft, FantasyDraftPick, FantasyDraftWishlist, FantasyWaiverClaim, FantasyTrade,
 )
 from app.services import rate_limit, fantasy_draft
@@ -328,7 +329,94 @@ async def me(token: str, request: Request, db: AsyncSession = Depends(get_db)):
             .where(FantasySquadPlayer.squad_id == squad.id)
         )).all()
         payload = _squad_payload(squad, picks)
-    return {"manager": {"id": str(mgr.id), "display_name": mgr.display_name}, "squad": payload}
+        payload["free_transfers"] = squad.free_transfers
+        # Team value = what the squad is worth now (current prices) plus the bank.
+        val = (await db.execute(
+            text("""SELECT COALESCE(SUM(pp.current_price), 0) FROM fantasy_squad_players sp
+                    JOIN fantasy_pool_players pp ON pp.player_id = sp.player_id
+                       AND pp.fantasy_season_id = CAST(:fs AS UUID)
+                    WHERE sp.squad_id = CAST(:sid AS UUID)"""),
+            {"fs": str(season.id), "sid": str(squad.id)},
+        )).scalar_one()
+        payload["value"] = round(float(val) + float(squad.budget_remaining or 0), 1)
+        lr = (await db.execute(
+            text("""SELECT r.round_number, srs.points FROM fantasy_squad_round_scores srs
+                    JOIN fantasy_rounds r ON r.id = srs.round_id
+                    WHERE srs.squad_id = CAST(:sid AS UUID) AND r.status = 'scored'
+                    ORDER BY r.round_number DESC LIMIT 1"""),
+            {"sid": str(squad.id)},
+        )).first()
+        if lr:
+            payload["last_round"] = {"number": lr[0], "points": float(lr[1])}
+
+    rnd = await _current_round(db, season)
+    round_info = None
+    if rnd:
+        round_info = {
+            "number": rnd.round_number, "name": rnd.name,
+            "lock_at": rnd.lock_at.isoformat() if rnd.lock_at else None,
+            "locked": _round_locked(rnd), "status": rnd.status,
+        }
+    return {"manager": {"id": str(mgr.id), "display_name": mgr.display_name}, "squad": payload, "round": round_info}
+
+
+@router.get("/{token}/round")
+async def round_view(token: str, request: Request, db: AsyncSession = Depends(get_db), n: Optional[int] = None):
+    """The manager's per-player points for a round (defaults to the latest scored
+    round), plus the round average and high score. The FPL 'Points' screen."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        return {"round": None, "rounds": []}
+    rounds = (await db.execute(
+        select(FantasyRound).where(FantasyRound.fantasy_season_id == season.id).order_by(FantasyRound.round_number)
+    )).scalars().all()
+    if not rounds:
+        return {"round": None, "rounds": []}
+    scored = [r for r in rounds if r.status == "scored"]
+    target = None
+    if n is not None:
+        target = next((r for r in rounds if r.round_number == n), None)
+    if target is None:
+        target = scored[-1] if scored else rounds[0]
+
+    squad = await _global_squad(db, season, mgr)
+    srs = None
+    if squad is not None:
+        srs = (await db.execute(
+            select(FantasySquadRoundScore).where(
+                FantasySquadRoundScore.squad_id == squad.id, FantasySquadRoundScore.round_id == target.id)
+        )).scalar_one_or_none()
+
+    mine = None
+    if srs is not None:
+        lineup = srs.lineup or []
+        names = {}
+        ids = [uuid.UUID(str(e["player_id"])) for e in lineup if e.get("player_id")]
+        if ids:
+            for pid, nm in (await db.execute(select(Player.id, Player.name).where(Player.id.in_(ids)))).all():
+                names[str(pid)] = nm
+        mine = {
+            "points": float(srs.points), "raw_points": float(srs.raw_points),
+            "transfer_hit": srs.transfer_hit, "chip_used": srs.chip_used,
+            "lineup": [
+                {**e, "name": names.get(str(e.get("player_id")), "?")}
+                for e in sorted(lineup, key=lambda e: (not e.get("counted"), e.get("role", "")))
+            ],
+        }
+    stats = (await db.execute(
+        text("""SELECT AVG(points)::float AS avg, MAX(points)::float AS high, COUNT(*) AS teams
+                FROM fantasy_squad_round_scores WHERE round_id = CAST(:rid AS UUID)"""),
+        {"rid": str(target.id)},
+    )).mappings().first()
+    return {
+        "round": {"number": target.round_number, "name": target.name, "status": target.status},
+        "mine": mine,
+        "stats": {"avg": round(stats["avg"], 1) if stats and stats["avg"] is not None else None,
+                  "high": stats["high"] if stats else None, "teams": stats["teams"] if stats else 0},
+        "rounds": [{"number": r.round_number, "status": r.status} for r in rounds],
+    }
 
 
 class Pick(BaseModel):
@@ -354,6 +442,7 @@ async def build_squad(token: str, body: SquadBody, request: Request, db: AsyncSe
         raise HTTPException(status_code=403, detail="The squad window is closed for this club.")
     if season.status == "active":
         raise HTTPException(status_code=409, detail="The season has started — squad changes go through transfers.")
+    await _assert_unlocked(db, season)
     league = await _global_league(db, season)
     if league is None:
         raise HTTPException(status_code=404, detail="No club ladder yet")
@@ -481,6 +570,17 @@ async def _current_round(db: AsyncSession, season: FantasySeason) -> Optional[Fa
     )).scalar_one_or_none()
 
 
+def _round_locked(rnd: Optional[FantasyRound]) -> bool:
+    """A round is locked once its first game has started and before it's scored —
+    teams are frozen for the weekend, the FPL deadline behaviour."""
+    return bool(rnd and rnd.lock_at and datetime.now(timezone.utc) >= rnd.lock_at and rnd.status != "scored")
+
+
+async def _assert_unlocked(db: AsyncSession, season: FantasySeason) -> None:
+    if _round_locked(await _current_round(db, season)):
+        raise HTTPException(status_code=403, detail="This round has locked. You can change your team again once it's scored.")
+
+
 async def _global_squad(db: AsyncSession, season: FantasySeason, mgr: FantasyManager) -> Optional[FantasySquad]:
     league = await _global_league(db, season)
     if league is None:
@@ -526,6 +626,7 @@ async def transfer(token: str, body: TransferBody, request: Request, db: AsyncSe
     if squad is None:
         raise HTTPException(status_code=400, detail="Build your squad first.")
     rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
+    await _assert_unlocked(db, season)
 
     sps = (await db.execute(
         select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
@@ -601,6 +702,7 @@ async def set_captain(token: str, body: CaptainBody, request: Request, db: Async
     squad = await _global_squad(db, season, mgr)
     if squad is None:
         raise HTTPException(status_code=400, detail="Build your squad first.")
+    await _assert_unlocked(db, season)
     sps = (await db.execute(
         select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
     )).scalars().all()
@@ -640,6 +742,8 @@ async def play_chip(token: str, body: ChipBody, request: Request, db: AsyncSessi
     rnd = await _current_round(db, season)
     if rnd is None:
         raise HTTPException(status_code=400, detail="No upcoming round to play a chip on.")
+    if _round_locked(rnd):
+        raise HTTPException(status_code=403, detail="This round has locked.")
 
     total = (await db.execute(
         select(func.count()).select_from(FantasyRound).where(FantasyRound.fantasy_season_id == season.id)
