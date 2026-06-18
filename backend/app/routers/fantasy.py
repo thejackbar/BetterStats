@@ -20,6 +20,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
 
+import bcrypt as _bcrypt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, func
@@ -31,7 +32,7 @@ from app.auth.modules import org_has_module, MODULE_FANTASY
 from app.models.db import (
     get_db, Organisation, Player,
     FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
-    FantasyDraft, FANTASY_ROLES,
+    FantasyManager, FantasySquad, FantasyDraft, FANTASY_ROLES,
 )
 from app.services import fantasy_engine, fantasy_draft
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
@@ -295,6 +296,103 @@ async def update_rules(season_id: str, body: RulesUpdate, club=Depends(get_curre
     fs.rules = rules  # reassign so the JSONB change is flagged
     await db.commit()
     return {"rules": rules}
+
+
+# ── managers (the people who signed up to play) ────────────────────────────────
+
+async def _load_manager(db: AsyncSession, club, manager_id: str) -> FantasyManager:
+    mgr = await db.get(FantasyManager, manager_id)
+    if mgr is None or str(mgr.organisation_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Manager not found")
+    return mgr
+
+
+@router.get("/managers")
+async def list_managers(club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Everyone who has registered to play this club's fantasy, with their team in
+    the latest season's club ladder (so an admin can tidy up duplicates or testers)."""
+    managers = (await db.execute(
+        select(FantasyManager).where(FantasyManager.organisation_id == club.id)
+        .order_by(FantasyManager.created_at.desc())
+    )).scalars().all()
+    season = (await db.execute(
+        select(FantasySeason).where(FantasySeason.organisation_id == club.id)
+        .order_by(FantasySeason.season_year.desc()).limit(1)
+    )).scalar_one_or_none()
+    squads: dict[str, tuple] = {}
+    if season is not None:
+        league = (await db.execute(
+            select(FantasyLeague).where(
+                FantasyLeague.fantasy_season_id == season.id,
+                FantasyLeague.kind == "global_salary_cap",
+            ).limit(1)
+        )).scalar_one_or_none()
+        if league is not None:
+            for sq in (await db.execute(
+                select(FantasySquad).where(FantasySquad.league_id == league.id)
+            )).scalars().all():
+                squads[str(sq.manager_id)] = (sq.team_name, float(sq.total_points))
+    return {
+        "managers": [
+            {
+                "id": str(m.id), "display_name": m.display_name, "email": m.email,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+                "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None,
+                "team_name": squads.get(str(m.id), (None, None))[0],
+                "total_points": squads.get(str(m.id), (None, None))[1],
+                "has_squad": str(m.id) in squads,
+            }
+            for m in managers
+        ]
+    }
+
+
+class ManagerUpdate(BaseModel):
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    pin: Optional[str] = None
+
+
+@router.patch("/managers/{manager_id}")
+async def update_manager(manager_id: str, body: ManagerUpdate, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Edit a registered player's display name or email, or reset their PIN (e.g.
+    if they're locked out)."""
+    mgr = await _load_manager(db, club, manager_id)
+    if body.display_name is not None:
+        name = body.display_name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Display name can't be empty.")
+        mgr.display_name = name
+    if body.email is not None:
+        email = body.email.strip().lower()
+        if email:
+            clash = (await db.execute(
+                select(FantasyManager).where(
+                    FantasyManager.organisation_id == club.id,
+                    func.lower(FantasyManager.email) == email,
+                    FantasyManager.id != mgr.id,
+                )
+            )).scalar_one_or_none()
+            if clash is not None:
+                raise HTTPException(status_code=409, detail="Another player already uses that email.")
+        mgr.email = email or None
+    if body.pin is not None:
+        pin = body.pin.strip()
+        if len(pin) < 4:
+            raise HTTPException(status_code=400, detail="PIN must be at least 4 digits.")
+        mgr.credential_hash = _bcrypt.hashpw(pin.encode(), _bcrypt.gensalt()).decode()
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/managers/{manager_id}")
+async def delete_manager(manager_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Remove a registered player and everything they own (squad, league
+    memberships, draft picks) via the cascade. Use for testers and duplicates."""
+    mgr = await _load_manager(db, club, manager_id)
+    await db.delete(mgr)
+    await db.commit()
+    return {"ok": True}
 
 
 # ── pool management (add returning / new players) ──────────────────────────────

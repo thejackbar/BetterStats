@@ -5,7 +5,7 @@ import { Aurora, Crest, Btn, Segmented, DISP, tintBg, useFantasy } from './ui'
 import { Banner } from './shell'
 
 export default function Auth({ token, season, onAuthed }) {
-  const { club } = useFantasy()
+  const { club, logoUrl } = useFantasy()
   const [mode, setMode] = useState('register')
   const [form, setForm] = useState({ display_name: '', email: '', pin: '' })
   const [busy, setBusy] = useState(false)
@@ -35,11 +35,16 @@ export default function Auth({ token, season, onAuthed }) {
         { c: '#EC4899', a: 'bfcAuroraC', s: 20, pos: { width: '55%', height: '60%', left: '18%', top: '18%' } },
       ]} />
       <div style={{ position: 'relative', padding: '30px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <div style={{
-          width: 64, height: 64, borderRadius: 19, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'var(--pb-accent, #8C82F0)', color: 'var(--ink)', font: `800 22px ${DISP}`,
-          boxShadow: `inset 0 0 0 1px rgba(255,255,255,.18), 0 12px 34px -8px ${tintBg(70)}`,
-        }}>{(club?.short_name || club?.name || 'BFC').slice(0, 4).toUpperCase()}</div>
+        {logoUrl
+          ? <img src={logoUrl} alt="" style={{
+              width: 64, height: 64, borderRadius: 19, objectFit: 'contain', background: '#fff', padding: 8,
+              boxShadow: `inset 0 0 0 1px rgba(255,255,255,.18), 0 12px 34px -8px ${tintBg(70)}`,
+            }} />
+          : <div style={{
+              width: 64, height: 64, borderRadius: 19, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--pb-accent, #8C82F0)', color: 'var(--ink)', font: `800 22px ${DISP}`,
+              boxShadow: `inset 0 0 0 1px rgba(255,255,255,.18), 0 12px 34px -8px ${tintBg(70)}`,
+            }}>{(club?.short_name || club?.name || 'BFC').slice(0, 4).toUpperCase()}</div>}
         <div style={{ font: `800 25px ${DISP}`, textTransform: 'uppercase', letterSpacing: '.02em', color: 'var(--text)', marginTop: 16 }}>{club?.name || 'Fantasy Cricket'}</div>
         <div style={{ font: `600 10px 'Hanken Grotesk'`, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--accent-strong)', marginTop: 5 }}>
           Fantasy Cricket{season?.name ? ` · ${season.name}` : ''}

@@ -1444,6 +1444,11 @@ export const api = {
     request(`/club-admin/fantasy/season/${seasonId}/pool/new-player`, { method: 'POST', body: JSON.stringify(data) }),
   fantasyRemovePoolPlayer: (poolId) =>
     request(`/club-admin/fantasy/pool/${poolId}`, { method: 'DELETE' }),
+  fantasyManagers: () => request('/club-admin/fantasy/managers'),
+  fantasyUpdateManager: (managerId, data) =>
+    request(`/club-admin/fantasy/managers/${managerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  fantasyDeleteManager: (managerId) =>
+    request(`/club-admin/fantasy/managers/${managerId}`, { method: 'DELETE' }),
 }
 
 function _iqQs(opponent, fixtureId, team, name) {

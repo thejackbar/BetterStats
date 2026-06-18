@@ -9,7 +9,7 @@ import { ScreenTitle } from './shell'
 const ordSuffix = (n) => (n % 100 >= 11 && n % 100 <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th')
 
 export default function Share({ token, squad, nav }) {
-  const { club, crest } = useFantasy()
+  const { club, crest, logoUrl } = useFantasy()
   const [round, setRound] = useState(null)
   const [ladder, setLadder] = useState(null)
   const [leagues, setLeagues] = useState([])
@@ -67,7 +67,9 @@ export default function Share({ token, squad, nav }) {
             ]} />
             <div style={{ position: 'relative', height: '100%', padding: 26, display: 'flex', flexDirection: 'column', fontFamily: "'Hanken Grotesk',sans-serif" }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 34, height: 34, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#0a0d14', font: `800 12px ${DISP}` }}>{crest}</div>
+                {logoUrl
+                  ? <img src={logoUrl} alt="" style={{ width: 34, height: 34, borderRadius: 10, objectFit: 'contain', background: '#fff', padding: 4 }} />
+                  : <div style={{ width: 34, height: 34, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#0a0d14', font: `800 12px ${DISP}` }}>{crest}</div>}
                 <div style={{ font: `800 15px ${DISP}`, letterSpacing: '.04em', textTransform: 'uppercase', color: '#fff' }}>{club?.name || 'Club'} Fantasy</div>
                 <div style={{ marginLeft: 'auto', font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.16em', textTransform: 'uppercase', color: 'rgba(255,255,255,.6)' }}>{gwNum ? `Gameweek ${gwNum}` : 'Fantasy'}</div>
               </div>
@@ -119,7 +121,9 @@ export default function Share({ token, squad, nav }) {
               { c: '#EC4899', a: 'bfcAuroraC', s: 20, pos: { width: '75%', height: '40%', left: '0%', bottom: '-8%' } },
             ]} />
             <div style={{ position: 'relative', height: '100%', padding: '26px 24px', display: 'flex', flexDirection: 'column', textAlign: 'center', alignItems: 'center', fontFamily: "'Hanken Grotesk',sans-serif" }}>
-              <div style={{ width: 48, height: 48, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#0a0d14', font: `800 16px ${DISP}` }}>{crest}</div>
+              {logoUrl
+                ? <img src={logoUrl} alt="" style={{ width: 48, height: 48, borderRadius: 14, objectFit: 'contain', background: '#fff', padding: 6 }} />
+                : <div style={{ width: 48, height: 48, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#0a0d14', font: `800 16px ${DISP}` }}>{crest}</div>}
               <div style={{ font: `600 10px 'Hanken Grotesk'`, letterSpacing: '.24em', textTransform: 'uppercase', color: 'rgba(255,255,255,.7)', marginTop: 16 }}>{club?.name || 'Club'} Fantasy</div>
               <div style={{ font: `800 40px/0.95 ${DISP}`, textTransform: 'uppercase', color: '#fff', marginTop: 14 }}>Think you<br />know cricket?</div>
               <div style={{ font: `500 13px 'Hanken Grotesk'`, color: 'rgba(255,255,255,.78)', marginTop: 12, lineHeight: 1.5 }}>Pick 12, captain a gun, and take on the clubhouse every round.</div>

@@ -13,6 +13,7 @@ import {
 } from './fantasy/theme'
 import { FantasyCtx, crestText, DISP, useIsDesktop, ThemeToggle } from './fantasy/ui'
 import { AppHeader, NavPills, Banner } from './fantasy/shell'
+import bcMark from '../assets/bettercricket-black.svg'
 import Auth from './fantasy/Auth'
 import MyTeam from './fantasy/Team'
 import Pick from './fantasy/Pick'
@@ -106,7 +107,8 @@ export default function PublicFantasy() {
   const onAuthed = async () => { const m = await loadApp(); setViewRaw(m.squad ? 'team' : 'pick'); setPhase('app') }
   const logout = async () => { await api.fanLogout(token).catch(() => {}); setManager(null); setSquad(null); setPhase('auth') }
 
-  const ctx = { club, crest: crestText(club), token }
+  // Brand mark: the club's own logo, or the Better Cricket mark when none is set.
+  const ctx = { club, crest: crestText(club), token, logoUrl: club?.logo_url || bcMark }
   const rootSx = {
     minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)',
     fontFamily: "'Hanken Grotesk', -apple-system, sans-serif",
