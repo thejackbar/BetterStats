@@ -18,6 +18,7 @@ from __future__ import annotations
 import secrets
 import uuid
 from datetime import date, datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -173,10 +174,13 @@ async def create_season(body: SeasonCreate, club=Depends(get_current_club), db: 
 # ── pool ─────────────────────────────────────────────────────────────────────
 
 @router.post("/season/{season_id}/build-pool")
-async def build_pool(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
-    """Classify and price every eligible player into the season pool."""
+async def build_pool(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require,
+                     reset: Optional[bool] = None):
+    """Classify and price every eligible player into the season pool. ``reset=true``
+    forces prices back to the freshly-computed baseline (used when the admin
+    changes the pricing window and wants prices recalculated, even mid-season)."""
     fs = await _load_season(db, club, season_id)
-    n = await fantasy_engine.build_pool(db, fs)
+    n = await fantasy_engine.build_pool(db, fs, reset=reset)
     await db.commit()
     return {"pool": n}
 

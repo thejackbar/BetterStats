@@ -1412,8 +1412,8 @@ export const api = {
   fantasyGetSeason: () => request('/club-admin/fantasy/season'),
   fantasyCreateSeason: (season_year, name) =>
     request('/club-admin/fantasy/season', { method: 'POST', body: JSON.stringify({ season_year, name }) }),
-  fantasyBuildPool: (seasonId) =>
-    request(`/club-admin/fantasy/season/${seasonId}/build-pool`, { method: 'POST' }),
+  fantasyBuildPool: (seasonId, reset) =>
+    request(`/club-admin/fantasy/season/${seasonId}/build-pool${reset ? '?reset=true' : ''}`, { method: 'POST' }),
   fantasyGenerateRounds: (seasonId) =>
     request(`/club-admin/fantasy/season/${seasonId}/generate-rounds`, { method: 'POST' }),
   fantasyListPool: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/pool`),

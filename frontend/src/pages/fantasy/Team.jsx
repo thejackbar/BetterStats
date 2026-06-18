@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 import {
   Aurora, StatTile, DISP, tintBg, mix, ROLE_ORDER, ROLE_GROUP, ROLE_LABEL,
-  money, pts, Btn, CapBadge,
+  money, pts, Btn, CapBadge, Avatar,
 } from './ui'
 import { PlayerRow, RowPoints, SectionLabel } from './shell'
 

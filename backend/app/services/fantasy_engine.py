@@ -105,7 +105,7 @@ async def generate_rounds(session: AsyncSession, fs) -> int:
 
 # ── Pool build (role + price) ──────────────────────────────────────────────────
 
-async def build_pool(session: AsyncSession, fs) -> int:
+async def build_pool(session: AsyncSession, fs, reset: bool | None = None) -> int:
     """Classify and price every eligible player and upsert ``fantasy_pool_players``.
 
     Eligible = an active player who has turned out in the recent window (this
@@ -117,10 +117,12 @@ async def build_pool(session: AsyncSession, fs) -> int:
     (role_source = 'admin') is preserved on rebuild; the live ``current_price`` is
     kept once the season is live, but reset to the new baseline while the season
     is still in setup, so changing the pricing window updates the visible prices.
+    ``reset`` overrides that default: the admin's explicit "recalculate prices"
+    passes ``reset=True`` so a window change moves prices even mid-season.
     Returns the pool size."""
     window = max(1, int((fs.rules or {}).get("price_window_years", PRICE_WINDOW_YEARS)))
     recent_from = fs.season_year - (window - 1)
-    reset_price = fs.status in ("setup", "open")
+    reset_price = (fs.status in ("setup", "open")) if reset is None else bool(reset)
     rows = await session.execute(
         text("""
             SELECT p.id AS player_id, p.player_role, p.skill_positions,
