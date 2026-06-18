@@ -79,7 +79,7 @@ export const MODULE_INFO = [
     name: 'BetterFantasyCricket',
     blurb: 'Run an internal club fantasy league off your own games — salary cap and draft.',
     to: '/admin/fantasy',
-    built: false,  // surfaces land in later phases — see docs/betterfantasycricket.md
+    built: true,
     caps: [CAP.MANAGE_FANTASY],
   },
 ]

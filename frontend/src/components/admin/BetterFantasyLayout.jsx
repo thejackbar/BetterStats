@@ -6,6 +6,7 @@ import ModuleLayout from './ModuleLayout'
 // admin's setup and oversight. More pages (leagues, draft) land in later phases.
 const NAV = [
   { to: '/admin/fantasy', label: 'Overview', icon: 'overview', cap: CAP.MANAGE_FANTASY, exact: true },
+  { to: '/admin/fantasy/leagues', label: 'Draft leagues', icon: 'ladders', cap: CAP.MANAGE_FANTASY },
 ]
 
 export default function BetterFantasyLayout({ children, title, actions }) {

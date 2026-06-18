@@ -26,7 +26,7 @@ from datetime import datetime, time
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services import fantasy_squad
+from app.services import fantasy_squad, fantasy_draft
 from app.services.fantasy_scoring import (
     DEFAULT_SCORING, classify_role, score_player_round,
 )
@@ -317,6 +317,16 @@ async def settle_round(session: AsyncSession, fs, rnd) -> int:
     await _refresh_pool_totals(session, fs, rnd)
     # Roll the per-player points up into each squad's best-11 round score + ladder.
     await fantasy_squad.score_squads_for_round(session, fs, rnd)
+    # Fill any head-to-head draft fixtures for this round.
+    await fantasy_draft.settle_h2h(session, fs, rnd)
+    # The season is live once the first round settles — squad changes now go
+    # through transfers, not a full rebuild.
+    if fs.status in ("setup", "open"):
+        await session.execute(
+            text("UPDATE fantasy_seasons SET status = 'active', updated_at = NOW() WHERE id = CAST(:fs AS UUID)"),
+            {"fs": str(fs.id)},
+        )
+        fs.status = "active"
     await _mark_scored(session, rnd, scored)
     return scored
 

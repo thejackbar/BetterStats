@@ -27,10 +27,10 @@ from app.routers.auth import get_current_club
 from app.auth.capabilities import require_cap, MANAGE_FANTASY
 from app.models.db import (
     get_db, Organisation, Player,
-    FantasySeason, FantasyLeague, FantasyRound, FantasyPoolPlayer,
-    FANTASY_ROLES,
+    FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
+    FantasyDraft, FANTASY_ROLES,
 )
-from app.services import fantasy_engine
+from app.services import fantasy_engine, fantasy_draft
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
 
 router = APIRouter(prefix="/club-admin/fantasy", tags=["club-admin-fantasy"])
@@ -285,3 +285,81 @@ async def delete_season(season_id: str, club=Depends(get_current_club), db: Asyn
     await db.delete(fs)
     await db.commit()
     return {"ok": True}
+
+
+# ── draft leagues (admin) ─────────────────────────────────────────────────────
+
+class DraftLeagueCreate(BaseModel):
+    name: str
+    draft_type: str = "snake"
+    scoring_type: str = "total"
+
+
+@router.post("/season/{season_id}/draft-leagues")
+async def create_draft_league(season_id: str, body: DraftLeagueCreate, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Create a draft league. Members join it, then the admin starts the draft."""
+    fs = await _load_season(db, club, season_id)
+    if body.draft_type not in ("snake", "auction"):
+        raise HTTPException(status_code=400, detail="Invalid draft type")
+    if body.scoring_type not in ("total", "h2h"):
+        raise HTTPException(status_code=400, detail="Invalid scoring type")
+    lg = FantasyLeague(
+        fantasy_season_id=fs.id, organisation_id=club.id, kind="draft",
+        name=(body.name or "").strip() or "Draft league", join_code=secrets.token_hex(3).upper(),
+        draft_type=body.draft_type, scoring_type=body.scoring_type, status="open",
+    )
+    db.add(lg)
+    await db.commit()
+    return {"ok": True, "league": {"id": str(lg.id), "name": lg.name, "join_code": lg.join_code,
+                                   "draft_type": lg.draft_type, "scoring_type": lg.scoring_type}}
+
+
+@router.get("/season/{season_id}/draft-leagues")
+async def list_draft_leagues(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    fs = await _load_season(db, club, season_id)
+    leagues = (await db.execute(
+        select(FantasyLeague).where(FantasyLeague.fantasy_season_id == fs.id, FantasyLeague.kind == "draft")
+        .order_by(FantasyLeague.created_at)
+    )).scalars().all()
+    out = []
+    for lg in leagues:
+        members = (await db.execute(
+            select(func.count()).select_from(FantasyLeagueMember).where(FantasyLeagueMember.league_id == lg.id)
+        )).scalar_one()
+        draft = (await db.execute(select(FantasyDraft).where(FantasyDraft.league_id == lg.id))).scalar_one_or_none()
+        out.append({
+            "id": str(lg.id), "name": lg.name, "join_code": lg.join_code,
+            "draft_type": lg.draft_type, "scoring_type": lg.scoring_type, "status": lg.status,
+            "members": members, "draft_status": draft.status if draft else None,
+        })
+    return {"leagues": out}
+
+
+async def _load_draft_league(db, club, league_id) -> FantasyLeague:
+    lg = await db.get(FantasyLeague, league_id)
+    if lg is None or str(lg.organisation_id) != str(club.id) or lg.kind != "draft":
+        raise HTTPException(status_code=404, detail="Draft league not found")
+    return lg
+
+
+@router.post("/draft-leagues/{league_id}/start")
+async def start_draft(league_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Kick off the snake draft for a league. The pick clock starts on pick one."""
+    lg = await _load_draft_league(db, club, league_id)
+    fs = await db.get(FantasySeason, lg.fantasy_season_id)
+    try:
+        await fantasy_draft.start_draft(db, lg, fs)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/draft-leagues/{league_id}/process-waivers")
+async def process_waivers(league_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Run the waiver wire for a draft league, granting claims in reverse-ladder order."""
+    lg = await _load_draft_league(db, club, league_id)
+    fs = await db.get(FantasySeason, lg.fantasy_season_id)
+    granted = await fantasy_draft.process_waivers(db, lg, fs)
+    await db.commit()
+    return {"granted": granted}

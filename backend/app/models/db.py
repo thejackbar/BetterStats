@@ -2176,3 +2176,104 @@ class FantasyTransaction(Base):
     price = Column(Numeric(8, 1), nullable=True)
     detail = Column(JSONB, nullable=False, server_default="{}")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ─── BetterFantasyCricket: draft mode (migration 088) ─────────────────────────
+
+class FantasyDraft(Base):
+    """One draft for a draft league. `draft_order` is the manager id order;
+    `current_pick` walks the snake; `pick_seconds` is the async per-pick clock."""
+    __tablename__ = "fantasy_drafts"
+    __table_args__ = (UniqueConstraint("league_id", name="uq_fantasy_draft_league"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    league_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_leagues.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    type = Column(Text, nullable=False, server_default="snake")          # snake | auction
+    status = Column(Text, nullable=False, server_default="scheduled")    # scheduled | in_progress | complete
+    pick_seconds = Column(Integer, nullable=False, server_default="14400")
+    current_pick = Column(Integer, nullable=False, server_default="0")
+    draft_order = Column(JSONB, nullable=False, server_default="[]")
+    rounds = Column(Integer, nullable=False, server_default="12")
+    started_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FantasyDraftPick(Base):
+    """One slot in the draft order. `player_id` is NULL until the pick is made;
+    `auto_picked` marks a pick the clock made on the manager's behalf."""
+    __tablename__ = "fantasy_draft_picks"
+    __table_args__ = (UniqueConstraint("draft_id", "pick_index", name="uq_fantasy_draft_pick"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    draft_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_drafts.id", ondelete="CASCADE"), nullable=False)
+    pick_index = Column(Integer, nullable=False)
+    round_no = Column(Integer, nullable=False)
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_managers.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    deadline = Column(TIMESTAMP(timezone=True), nullable=True)
+    picked_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    auto_picked = Column(Boolean, nullable=False, server_default="false")
+    bid_amount = Column(Numeric(8, 1), nullable=True)
+
+
+class FantasyDraftWishlist(Base):
+    """A manager's ranked auto-pick preference for a draft (player ids, best first)."""
+    __tablename__ = "fantasy_draft_wishlists"
+    __table_args__ = (UniqueConstraint("draft_id", "manager_id", name="uq_fantasy_draft_wishlist"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    draft_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_drafts.id", ondelete="CASCADE"), nullable=False)
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_managers.id", ondelete="CASCADE"), nullable=False)
+    player_ids = Column(JSONB, nullable=False, server_default="[]")
+
+
+class FantasyWaiverClaim(Base):
+    """A claim on an unowned player in a draft league, processed once a round in
+    priority order (reverse ladder)."""
+    __tablename__ = "fantasy_waiver_claims"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    league_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_leagues.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_managers.id", ondelete="CASCADE"), nullable=False)
+    add_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    drop_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    priority = Column(Integer, nullable=False, server_default="0")
+    status = Column(Text, nullable=False, server_default="pending")   # pending | approved | rejected
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    processed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+
+class FantasyTrade(Base):
+    """A proposed player swap between two squads in a draft league. `offer` is
+    ``{"give": [player_ids], "get": [player_ids]}`` from the proposer's side."""
+    __tablename__ = "fantasy_trades"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    league_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_leagues.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    proposer_squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="CASCADE"), nullable=False)
+    receiver_squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="CASCADE"), nullable=False)
+    offer = Column(JSONB, nullable=False, server_default="{}")
+    status = Column(Text, nullable=False, server_default="proposed")  # proposed | accepted | rejected | cancelled
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    resolved_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+
+class FantasyH2HFixture(Base):
+    """A head-to-head pairing for one round in a draft league. A NULL away squad
+    is a bye. Points fill in when the round settles."""
+    __tablename__ = "fantasy_h2h_fixtures"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    league_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_leagues.id", ondelete="CASCADE"), nullable=False)
+    round_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_rounds.id", ondelete="SET NULL"), nullable=True)
+    round_no = Column(Integer, nullable=False)
+    home_squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="CASCADE"), nullable=False)
+    away_squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="SET NULL"), nullable=True)
+    home_points = Column(Numeric(8, 2), nullable=True)
+    away_points = Column(Numeric(8, 2), nullable=True)
+    result = Column(Text, nullable=True)   # home | away | draw
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

@@ -1257,6 +1257,102 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_fantasy_transactions_squad ON fantasy_transactions(squad_id, created_at)"
         ))
+        # BetterFantasyCricket — draft mode (migration 088). Defensive idempotent
+        # creates so the API boots even if the numbered migration hasn't run yet.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_drafts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                league_id UUID NOT NULL REFERENCES fantasy_leagues(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                type TEXT NOT NULL DEFAULT 'snake',
+                status TEXT NOT NULL DEFAULT 'scheduled',
+                pick_seconds INTEGER NOT NULL DEFAULT 14400,
+                current_pick INTEGER NOT NULL DEFAULT 0,
+                draft_order JSONB NOT NULL DEFAULT '[]',
+                rounds INTEGER NOT NULL DEFAULT 12,
+                started_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_fantasy_draft_league UNIQUE (league_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_draft_picks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                draft_id UUID NOT NULL REFERENCES fantasy_drafts(id) ON DELETE CASCADE,
+                pick_index INTEGER NOT NULL,
+                round_no INTEGER NOT NULL,
+                manager_id UUID NOT NULL REFERENCES fantasy_managers(id) ON DELETE CASCADE,
+                player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                deadline TIMESTAMPTZ,
+                picked_at TIMESTAMPTZ,
+                auto_picked BOOLEAN NOT NULL DEFAULT false,
+                bid_amount NUMERIC(8,1),
+                CONSTRAINT uq_fantasy_draft_pick UNIQUE (draft_id, pick_index)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_draft_picks_draft ON fantasy_draft_picks(draft_id, pick_index)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_draft_wishlists (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                draft_id UUID NOT NULL REFERENCES fantasy_drafts(id) ON DELETE CASCADE,
+                manager_id UUID NOT NULL REFERENCES fantasy_managers(id) ON DELETE CASCADE,
+                player_ids JSONB NOT NULL DEFAULT '[]',
+                CONSTRAINT uq_fantasy_draft_wishlist UNIQUE (draft_id, manager_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_waiver_claims (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                league_id UUID NOT NULL REFERENCES fantasy_leagues(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                manager_id UUID NOT NULL REFERENCES fantasy_managers(id) ON DELETE CASCADE,
+                add_player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                drop_player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                priority INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                processed_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_waiver_claims_league ON fantasy_waiver_claims(league_id, status)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_trades (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                league_id UUID NOT NULL REFERENCES fantasy_leagues(id) ON DELETE CASCADE,
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                proposer_squad_id UUID NOT NULL REFERENCES fantasy_squads(id) ON DELETE CASCADE,
+                receiver_squad_id UUID NOT NULL REFERENCES fantasy_squads(id) ON DELETE CASCADE,
+                offer JSONB NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'proposed',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                resolved_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_trades_league ON fantasy_trades(league_id, status)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fantasy_h2h_fixtures (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                league_id UUID NOT NULL REFERENCES fantasy_leagues(id) ON DELETE CASCADE,
+                round_id UUID REFERENCES fantasy_rounds(id) ON DELETE SET NULL,
+                round_no INTEGER NOT NULL,
+                home_squad_id UUID NOT NULL REFERENCES fantasy_squads(id) ON DELETE CASCADE,
+                away_squad_id UUID REFERENCES fantasy_squads(id) ON DELETE SET NULL,
+                home_points NUMERIC(8,2),
+                away_points NUMERIC(8,2),
+                result TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_fantasy_h2h_fixtures_league ON fantasy_h2h_fixtures(league_id, round_no)"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

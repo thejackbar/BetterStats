@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import BetterFantasyLayout from '../../../components/admin/BetterFantasyLayout'
 import { api } from '../../../lib/api'
 
@@ -8,7 +8,7 @@ import { api } from '../../../lib/api'
 // to verify the backend end to end, then grow into a fuller admin surface.
 
 const ROLES = ['keeper', 'batter', 'allrounder', 'bowler']
-const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString(undefined, { maximumFractionDigits: 1 }))
+const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 
 function Btn({ onClick, busy, children, kind = 'accent' }) {
   const base = 'px-3 py-1.5 rounded text-sm font-medium disabled:opacity-50 transition-opacity'
@@ -25,6 +25,7 @@ export default function FantasyHome() {
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState('')
   const [year, setYear] = useState(new Date().getFullYear())
+  const [sort, setSort] = useState({ key: 'current_price', dir: 'desc' })
 
   const flash = (m) => { setMsg(m); setErr(null); setTimeout(() => setMsg(null), 4000) }
   const fail = (e) => { setErr(e.message || String(e)); setMsg(null) }
@@ -71,6 +72,34 @@ export default function FantasyHome() {
     setBusy(`r:${rid}`); try { const r = await api.fantasySettleRound(rid); flash(`Scored ${r.players_scored} players.`); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
   }
+
+  // Client-side sort of the pool table. Text columns sort A→Z by default,
+  // numbers high→low; clicking a header toggles the direction.
+  const toggleSort = (key) => setSort(s => (
+    s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+                  : { key, dir: (key === 'name' || key === 'role') ? 'asc' : 'desc' }
+  ))
+  const sortedPool = useMemo(() => {
+    const arr = [...(pool || [])]
+    const { key, dir } = sort
+    const text = key === 'name' || key === 'role'
+    arr.sort((a, b) => {
+      if (text) {
+        const av = (a[key] || '').toString().toLowerCase(), bv = (b[key] || '').toString().toLowerCase()
+        return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
+      }
+      return dir === 'asc' ? (Number(a[key]) || 0) - (Number(b[key]) || 0) : (Number(b[key]) || 0) - (Number(a[key]) || 0)
+    })
+    return arr
+  }, [pool, sort])
+
+  const Th = ({ k, children, right }) => (
+    <th className={`py-1.5 pr-3 ${right ? 'text-right' : 'text-left'}`}>
+      <button type="button" onClick={() => toggleSort(k)} className="inline-flex items-center gap-1 hover:text-pb-text">
+        {children}{sort.key === k && <span className="text-[10px]">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
+      </button>
+    </th>
+  )
 
   return (
     <BetterFantasyLayout title="BetterFantasyCricket">
@@ -129,17 +158,17 @@ export default function FantasyHome() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="text-pb-faint text-left">
+                  <thead className="text-pb-faint">
                     <tr>
-                      <th className="py-1.5 pr-3">Player</th>
-                      <th className="py-1.5 pr-3">Role</th>
-                      <th className="py-1.5 pr-3 text-right">Price</th>
-                      <th className="py-1.5 pr-3 text-right">Points</th>
-                      <th className="py-1.5 pr-3 text-right">Owned</th>
+                      <Th k="name">Player</Th>
+                      <Th k="role">Role</Th>
+                      <Th k="current_price" right>Price</Th>
+                      <Th k="total_points" right>Points</Th>
+                      <Th k="owned_count" right>Owned</Th>
                     </tr>
                   </thead>
                   <tbody>
-                    {pool.slice(0, 200).map(p => (
+                    {sortedPool.slice(0, 200).map(p => (
                       <tr key={p.id} className="border-t pb-hairline">
                         <td className="py-1.5 pr-3">{p.name}</td>
                         <td className="py-1.5 pr-3">
@@ -156,7 +185,7 @@ export default function FantasyHome() {
                     ))}
                   </tbody>
                 </table>
-                {pool.length > 200 && <p className="text-xs text-pb-faintest mt-2">Showing top 200 by price.</p>}
+                {pool.length > 200 && <p className="text-xs text-pb-faintest mt-2">Showing the first 200 by the current sort.</p>}
               </div>
             )}
           </div>

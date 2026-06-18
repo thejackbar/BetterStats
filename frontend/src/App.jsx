@@ -20,7 +20,7 @@ function ConditionalNavbar() {
     MARKETING_PATHS.includes(pathname) || pathname.startsWith('/blog/') || pathname.startsWith('/modules/')
   // The public self-service availability page is a standalone, white-labelled
   // mobile page — it renders its own minimal header, no club nav.
-  const isStandalone = pathname.startsWith('/avail/')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/fantasy/')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -116,6 +116,7 @@ const IqPreview = lazy(() => import('./pages/admin/betteriq/MatchPreview'))
 const IqCheatSheet = lazy(() => import('./pages/admin/betteriq/CheatSheet'))
 // BetterFantasyCricket (admin surface)
 const FantasyHome = lazy(() => import('./pages/admin/fantasy/FantasyHome'))
+const FantasyLeagues = lazy(() => import('./pages/admin/fantasy/FantasyLeagues'))
 
 // BetterAdmin umbrella (BetterFees + BetterComms + future BetterMerch)
 const BetterAdminHome = lazy(() => import('./pages/admin/BetterAdminHome'))
@@ -154,6 +155,8 @@ const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
 
 // Public, login-free self-service availability (BetterSelect magic link + PIN)
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
+// Public, login-free fantasy play (BetterFantasyCricket magic link + PIN)
+const PublicFantasy = lazy(() => import('./pages/PublicFantasy'))
 
 const PageLoader = () => (
   <div className="flex justify-center py-24">
@@ -203,6 +206,8 @@ export default function App() {
 
           {/* Public self-service availability (no login — magic link + PIN) */}
           <Route path="/avail/:token" element={<PublicAvailability />} />
+          {/* Public fantasy play (no login — magic link + PIN) */}
+          <Route path="/fantasy/:token" element={<PublicFantasy />} />
 
           {/* Admin (protected) */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
@@ -237,6 +242,7 @@ export default function App() {
           <Route path="/admin/merch/reports" element={<ProtectedRoute requireModule="merch"><MerchReports /></ProtectedRoute>} />
           <Route path="/admin/merch/square" element={<ProtectedRoute requireModule="merch"><MerchSquare /></ProtectedRoute>} />
           <Route path="/admin/fantasy" element={<ProtectedRoute requireModule="fantasy"><FantasyHome /></ProtectedRoute>} />
+          <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
           <Route path="/admin/website" element={<ProtectedRoute><AdminWebsite /></ProtectedRoute>} />
