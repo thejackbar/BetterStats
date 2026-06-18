@@ -84,6 +84,10 @@ export default function FantasyHome() {
     setBusy(`r:${rid}`); try { const r = await api.fantasySettleRound(rid); flash(`Scored ${r.players_scored} players.`); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
   }
+  const removePool = async (id) => {
+    if (!window.confirm('Remove this player from the pool?')) return
+    try { await api.fantasyRemovePoolPlayer(id); await load() } catch (e) { fail(e) }
+  }
 
   // Client-side sort of the pool table. Text columns sort A→Z by default,
   // numbers high→low; clicking a header toggles the direction.
@@ -182,6 +186,9 @@ export default function FantasyHome() {
             )}
           </div>
 
+          <SettingsCard season={season} flash={flash} fail={fail} onSaved={load} />
+          <PoolManager season={season} flash={flash} fail={fail} onChanged={load} />
+
           {/* Pool */}
           <div className="pb-card p-5">
             <h3 className="font-display font-bold mb-3">Player pool {pool ? `(${pool.length})` : ''}</h3>
@@ -197,6 +204,7 @@ export default function FantasyHome() {
                       <Th k="current_price" right>Price</Th>
                       <Th k="total_points" right>Points</Th>
                       <Th k="owned_count" right>Owned</Th>
+                      <th className="py-1.5"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -213,6 +221,10 @@ export default function FantasyHome() {
                         <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(p.current_price)}</td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(p.total_points)}</td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{p.owned_count}</td>
+                        <td className="py-1.5 text-right">
+                          <button onClick={() => removePool(p.id)} title="Remove from pool"
+                            className="text-pb-faintest hover:text-red-400">×</button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -262,5 +274,118 @@ export default function FantasyHome() {
         </div>
       )}
     </BetterFantasyLayout>
+  )
+}
+
+function Field({ label, children }) {
+  return <label className="flex flex-col gap-1"><span className="text-pb-faint text-xs">{label}</span>{children}</label>
+}
+
+function SettingsCard({ season, flash, fail, onSaved }) {
+  const r = season.rules || {}
+  const rq = r.role_quota || {}
+  const [q, setQ] = useState({ keeper: rq.keeper ?? 1, batter: rq.batter ?? 4, allrounder: rq.allrounder ?? 3, bowler: rq.bowler ?? 4 })
+  const [v, setV] = useState({
+    budget: r.budget ?? 100, count_best_n: r.count_best_n ?? 11, transfer_hit: r.transfer_hit ?? 4,
+    free_transfers_per_round: r.free_transfers_per_round ?? 1, max_banked_transfers: r.max_banked_transfers ?? 2,
+    wildcards_per_half: r.wildcards_per_half ?? 1, triple_captains_per_half: r.triple_captains_per_half ?? 1,
+  })
+  const [busy, setBusy] = useState(false)
+  const size = ROLES.reduce((a, role) => a + Number(q[role] || 0), 0)
+  const num = (val, set) => <input type="number" min="0" value={val} onChange={e => set(e.target.value)}
+    className="w-full rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm" />
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      await api.fantasyUpdateRules(season.id, {
+        role_quota: { keeper: +q.keeper, batter: +q.batter, allrounder: +q.allrounder, bowler: +q.bowler },
+        budget: +v.budget, count_best_n: +v.count_best_n, transfer_hit: +v.transfer_hit,
+        free_transfers_per_round: +v.free_transfers_per_round, max_banked_transfers: +v.max_banked_transfers,
+        wildcards_per_half: +v.wildcards_per_half, triple_captains_per_half: +v.triple_captains_per_half,
+      })
+      flash('Settings saved.'); await onSaved()
+    } catch (e) { fail(e) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-5">
+      <h3 className="font-display font-bold mb-1">Team make-up & budget</h3>
+      <p className="text-xs text-pb-faint mb-3">Squad size is the sum of the roles ({size}). Score the best {v.count_best_n} each round. Change this before the season starts.</p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Field label="Keepers">{num(q.keeper, x => setQ({ ...q, keeper: x }))}</Field>
+        <Field label="Batters">{num(q.batter, x => setQ({ ...q, batter: x }))}</Field>
+        <Field label="All-rounders">{num(q.allrounder, x => setQ({ ...q, allrounder: x }))}</Field>
+        <Field label="Bowlers">{num(q.bowler, x => setQ({ ...q, bowler: x }))}</Field>
+        <Field label="Budget">{num(v.budget, x => setV({ ...v, budget: x }))}</Field>
+        <Field label="Score best N">{num(v.count_best_n, x => setV({ ...v, count_best_n: x }))}</Field>
+        <Field label="Transfer hit">{num(v.transfer_hit, x => setV({ ...v, transfer_hit: x }))}</Field>
+        <Field label="Free transfers / round">{num(v.free_transfers_per_round, x => setV({ ...v, free_transfers_per_round: x }))}</Field>
+        <Field label="Max banked transfers">{num(v.max_banked_transfers, x => setV({ ...v, max_banked_transfers: x }))}</Field>
+        <Field label="Wildcards / half">{num(v.wildcards_per_half, x => setV({ ...v, wildcards_per_half: x }))}</Field>
+        <Field label="Triple captains / half">{num(v.triple_captains_per_half, x => setV({ ...v, triple_captains_per_half: x }))}</Field>
+      </div>
+      <button onClick={save} disabled={busy}
+        className="mt-3 px-3 py-1.5 rounded bg-pb-accent text-white text-sm font-medium disabled:opacity-50">Save settings</button>
+    </div>
+  )
+}
+
+function PoolManager({ season, flash, fail, onChanged }) {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState(null)
+  const [np, setNp] = useState({ name: '', role: 'batter', price: 5 })
+  const [busy, setBusy] = useState(false)
+
+  const search = async () => {
+    setBusy(true)
+    try { setResults((await api.fantasyAvailablePlayers(season.id, q)).players) } catch (e) { fail(e) } finally { setBusy(false) }
+  }
+  const add = async (pid) => {
+    try { await api.fantasyAddPoolPlayer(season.id, { player_id: pid }); flash('Added to pool.'); setResults(rs => (rs || []).filter(r => r.player_id !== pid)); await onChanged() }
+    catch (e) { fail(e) }
+  }
+  const createNew = async () => {
+    if (!np.name.trim()) return
+    try { await api.fantasyAddNewPlayer(season.id, { name: np.name, role: np.role, price: +np.price }); flash('Player created and added.'); setNp({ name: '', role: 'batter', price: 5 }); await onChanged() }
+    catch (e) { fail(e) }
+  }
+
+  return (
+    <div className="pb-card p-5 space-y-4">
+      <div>
+        <h3 className="font-display font-bold mb-2">Add a returning player</h3>
+        <div className="flex gap-2">
+          <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && search()}
+            placeholder="Search the club's players…" className="flex-1 rounded border pb-hairline bg-pb-surface px-3 py-1.5 text-sm" />
+          <button onClick={search} disabled={busy} className="px-3 py-1.5 rounded bg-pb-surface2 text-pb-text text-sm">Search</button>
+        </div>
+        {results && (results.length ? (
+          <div className="mt-2">
+            {results.map(r => (
+              <div key={r.player_id} className="flex justify-between items-center text-sm border-t pb-hairline py-1.5">
+                <span>{r.name}</span>
+                <button onClick={() => add(r.player_id)} className="text-xs px-2 py-1 rounded bg-pb-accent text-white">Add</button>
+              </div>
+            ))}
+          </div>
+        ) : <p className="text-xs text-pb-faint mt-2">No players found outside the pool.</p>)}
+      </div>
+      <div className="border-t pb-hairline pt-3">
+        <h3 className="font-display font-bold mb-1">New player</h3>
+        <p className="text-xs text-pb-faint mb-2">For someone not in the data yet. They score 0 until their games sync to this record.</p>
+        <div className="flex flex-wrap gap-2 items-end">
+          <input value={np.name} onChange={e => setNp({ ...np, name: e.target.value })} placeholder="Name"
+            className="rounded border pb-hairline bg-pb-surface px-3 py-1.5 text-sm" />
+          <select value={np.role} onChange={e => setNp({ ...np, role: e.target.value })}
+            className="rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm">
+            {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <input type="number" min="0" value={np.price} onChange={e => setNp({ ...np, price: e.target.value })}
+            className="w-24 rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm" placeholder="Price" />
+          <button onClick={createNew} className="px-3 py-1.5 rounded bg-pb-accent text-white text-sm">Create &amp; add</button>
+        </div>
+      </div>
+    </div>
   )
 }

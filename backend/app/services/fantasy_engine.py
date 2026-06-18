@@ -205,6 +205,49 @@ def _baseline_price(r, role: str) -> float:
     return round(min(max(PRICE_FLOOR + ppg * PRICE_K, PRICE_MIN), PRICE_MAX), 1)
 
 
+async def classify_and_price_one(session: AsyncSession, fs, player_id) -> tuple[str, float]:
+    """Role + baseline price for a single player, used when an admin adds a
+    returning player to the pool by hand. Falls back to a batter at the floor
+    price when there's no usable history."""
+    recent_from = fs.season_year - (PRICE_WINDOW_YEARS - 1)
+    row = (await session.execute(
+        text("""
+            SELECT p.player_role, p.skill_positions,
+                   COALESCE(SUM(pss.batting_innings), 0) AS bat_inns,
+                   COALESCE(SUM(pss.bowling_innings), 0) AS bowl_inns,
+                   COALESCE(SUM(pss.wickets), 0) AS wickets,
+                   COALESCE(SUM(pss.catches_wk), 0) + COALESCE(SUM(pss.stumpings), 0) AS keeper_dis,
+                   COALESCE(SUM(pss.matches) FILTER (WHERE s.year >= :rfrom), 0) AS r_matches,
+                   COALESCE(SUM(pss.runs) FILTER (WHERE s.year >= :rfrom), 0) AS r_runs,
+                   COALESCE(SUM(pss.fours) FILTER (WHERE s.year >= :rfrom), 0) AS r_fours,
+                   COALESCE(SUM(pss.sixes) FILTER (WHERE s.year >= :rfrom), 0) AS r_sixes,
+                   COALESCE(SUM(pss.fifties) FILTER (WHERE s.year >= :rfrom), 0) AS r_fifties,
+                   COALESCE(SUM(pss.hundreds) FILTER (WHERE s.year >= :rfrom), 0) AS r_hundreds,
+                   COALESCE(SUM(pss.wickets) FILTER (WHERE s.year >= :rfrom), 0) AS r_wickets,
+                   COALESCE(SUM(pss.maidens) FILTER (WHERE s.year >= :rfrom), 0) AS r_maidens,
+                   COALESCE(SUM(pss.five_wicket_innings) FILTER (WHERE s.year >= :rfrom), 0) AS r_fivefor,
+                   COALESCE(SUM(pss.catches) FILTER (WHERE s.year >= :rfrom), 0) AS r_catches,
+                   COALESCE(SUM(pss.catches_wk) FILTER (WHERE s.year >= :rfrom), 0) AS r_catches_wk,
+                   COALESCE(SUM(pss.stumpings) FILTER (WHERE s.year >= :rfrom), 0) AS r_stumpings,
+                   COALESCE(SUM(pss.run_outs) FILTER (WHERE s.year >= :rfrom), 0) AS r_run_outs
+            FROM players p
+            LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
+            LEFT JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID)
+            WHERE p.id = CAST(:pid AS UUID)
+            GROUP BY p.id, p.player_role, p.skill_positions
+        """),
+        {"org": str(fs.organisation_id), "pid": str(player_id), "rfrom": recent_from},
+    )).mappings().first()
+    if not row:
+        return "batter", PRICE_MIN
+    role, _src = classify_role(
+        player_role=row["player_role"], skill_positions=row["skill_positions"],
+        bat_innings=int(row["bat_inns"]), wickets=int(row["wickets"]),
+        bowl_innings=int(row["bowl_inns"]), keeper_dismissals=int(row["keeper_dis"]),
+    )
+    return role, _baseline_price(row, role)
+
+
 # ── Round settlement (player points) ───────────────────────────────────────────
 
 async def settle_round(session: AsyncSession, fs, rnd) -> int:

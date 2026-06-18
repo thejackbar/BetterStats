@@ -1416,6 +1416,16 @@ export const api = {
   fantasySetRegistration: (seasonId, registration_open) =>
     request(`/club-admin/fantasy/season/${seasonId}/registration`, { method: 'POST', body: JSON.stringify({ registration_open }) }),
   fantasyRegenerateLink: () => request('/club-admin/fantasy/regenerate-link', { method: 'POST' }),
+  fantasyUpdateRules: (seasonId, data) =>
+    request(`/club-admin/fantasy/season/${seasonId}/rules`, { method: 'PATCH', body: JSON.stringify(data) }),
+  fantasyAvailablePlayers: (seasonId, q = '') =>
+    request(`/club-admin/fantasy/season/${seasonId}/available-players?q=${encodeURIComponent(q)}`),
+  fantasyAddPoolPlayer: (seasonId, data) =>
+    request(`/club-admin/fantasy/season/${seasonId}/pool`, { method: 'POST', body: JSON.stringify(data) }),
+  fantasyAddNewPlayer: (seasonId, data) =>
+    request(`/club-admin/fantasy/season/${seasonId}/pool/new-player`, { method: 'POST', body: JSON.stringify(data) }),
+  fantasyRemovePoolPlayer: (poolId) =>
+    request(`/club-admin/fantasy/pool/${poolId}`, { method: 'DELETE' }),
 }
 
 function _iqQs(opponent, fixtureId, team, name) {

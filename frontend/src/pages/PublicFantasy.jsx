@@ -204,13 +204,25 @@ function Builder({ token, pool, rules, squad, onSaved, fail }) {
   })
   const [teamName, setTeamName] = useState(squad?.team_name || '')
   const [filter, setFilter] = useState('keeper')
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState('price')
   const [busy, setBusy] = useState(false)
 
   const chosen = Object.values(picked)
   const spend = chosen.reduce((s, p) => s + Number(p.price || p.current_price || 0), 0)
   const left = budget - spend
   const byRole = (r) => chosen.filter(p => p.role === r).length
-  const poolByRole = useMemo(() => (pool || []).filter(p => p.role === filter), [pool, filter])
+  const poolByRole = useMemo(() => {
+    let list = (pool || []).filter(p => p.role === filter)
+    const term = search.trim().toLowerCase()
+    if (term) list = list.filter(p => p.name.toLowerCase().includes(term))
+    list = [...list]
+    if (sort === 'price') list.sort((a, b) => b.price - a.price)
+    else if (sort === 'price_asc') list.sort((a, b) => a.price - b.price)
+    else if (sort === 'points') list.sort((a, b) => b.total_points - a.total_points)
+    else list.sort((a, b) => a.name.localeCompare(b.name))
+    return list
+  }, [pool, filter, search, sort])
 
   const toggle = (pp) => {
     setPicked(cur => {
@@ -265,6 +277,18 @@ function Builder({ token, pool, rules, squad, onSaved, fail }) {
             {ROLE_LABEL[r]}<br /><span className="opacity-80">{byRole(r)}/{quota[r] || 0}</span>
           </button>
         ))}
+      </div>
+
+      <div className="flex gap-2">
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search players…"
+          className="flex-1 rounded-lg border pb-hairline bg-pb-surface px-3 py-1.5 text-sm" />
+        <select value={sort} onChange={e => setSort(e.target.value)}
+          className="rounded-lg border pb-hairline bg-pb-surface px-2 py-1.5 text-sm">
+          <option value="price">Price high</option>
+          <option value="price_asc">Price low</option>
+          <option value="points">Points</option>
+          <option value="name">Name</option>
+        </select>
       </div>
 
       <div className="space-y-1.5">
