@@ -134,7 +134,7 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
   )
 
   const statRibbon = (
-    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${desktop ? 6 : 3}, 1fr)`, gap: desktop ? 10 : 7, padding: desktop ? '18px 0 4px' : '10px 0 4px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${desktop ? 6 : 3}, 1fr)`, gap: desktop ? 10 : 7, padding: desktop ? '12px 0 4px' : '10px 0 4px' }}>
       {stats.map(([label, value]) => <StatTile key={label} label={label} value={value} />)}
     </div>
   )
@@ -143,19 +143,19 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
     return (
       <div>
         {statRibbon}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 330px', gap: 22, paddingTop: 18 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, paddingTop: 12, alignItems: 'start' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
               <div style={{ font: `700 12px ${DISP}`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--dim)' }}>Your XI · team sheet</div>
               <button onClick={() => nav('pick')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 11px 'Hanken Grotesk'`, cursor: 'pointer' }}>{active ? 'Captain ›' : 'Edit squad ›'}</button>
             </div>
             {groups.map(g => (
-              <div key={g.role} style={{ display: 'flex', gap: 14, alignItems: 'flex-start', padding: '11px 0', borderTop: '1px solid var(--surface2)' }}>
-                <div style={{ width: 92, flex: 'none', paddingTop: 6 }}>
-                  <div style={{ font: `700 13px ${DISP}`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text)' }}>{ROLE_GROUP[g.role]}</div>
-                  <div style={{ font: `600 10px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 2 }}>{g.rows.length} / {g.quota}</div>
+              <div key={g.role} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '7px 0', borderTop: '1px solid var(--surface2)' }}>
+                <div style={{ width: 84, flex: 'none' }}>
+                  <div style={{ font: `700 12px ${DISP}`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text)' }}>{ROLE_GROUP[g.role]}</div>
+                  <div style={{ font: `600 9.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 1 }}>{g.rows.length} / {g.quota}</div>
                 </div>
-                <div style={{ flex: 1, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {g.rows.map(p => <PlayerCard key={p.player_id} p={p} gw={gwPts?.[p.player_id]} onClick={() => nav('player', { playerId: p.player_id })} />)}
                 </div>
               </div>
@@ -222,18 +222,28 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
   )
 }
 
-// Desktop team-sheet card: avatar, name, role · price, big GW points, C/V badge.
+// Desktop team-sheet card: a compact horizontal row (avatar · name/role · GW
+// points) so all four role groups fit on one screen. C/V badge sits by the name.
 function PlayerCard({ p, gw, onClick }) {
   return (
-    <button onClick={onClick} style={{ position: 'relative', width: 158, background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 13, padding: '12px 10px 11px', textAlign: 'center', cursor: 'pointer' }}>
-      <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 3 }}>
-        {p.is_captain && <CapBadge />}
-        {p.is_vice_captain && <CapBadge vice />}
+    <button onClick={onClick} style={{
+      flex: '1 1 150px', minWidth: 150, maxWidth: 240, display: 'flex', alignItems: 'center', gap: 9,
+      background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 12,
+      padding: '8px 10px', cursor: 'pointer', textAlign: 'left',
+    }}>
+      <Avatar name={p.name} photoUrl={p.photo_url} size={34} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+          {p.is_captain && <CapBadge />}
+          {p.is_vice_captain && <CapBadge vice />}
+        </div>
+        <div style={{ font: `500 9.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ROLE_LABEL[p.role]} · {money(p.purchase_price)}</div>
       </div>
-      <div style={{ margin: '0 auto', width: 44, height: 44 }}><Avatar name={p.name} photoUrl={p.photo_url} size={44} /></div>
-      <div style={{ font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)', marginTop: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-      <div style={{ font: `500 9.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 1 }}>{ROLE_LABEL[p.role]} · {money(p.purchase_price)}</div>
-      <div style={{ font: `700 20px ${DISP}`, color: 'var(--text)', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>{gw != null ? pts(gw) : '—'}<span style={{ font: `600 8px 'Hanken Grotesk'`, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--faint)', marginLeft: 3 }}>pts</span></div>
+      <div style={{ textAlign: 'right', flex: 'none' }}>
+        <div style={{ font: `700 16px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{gw != null ? pts(gw) : '—'}</div>
+        <div style={{ font: `600 7.5px 'Hanken Grotesk'`, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--faint)', marginTop: 2 }}>pts</div>
+      </div>
     </button>
   )
 }
