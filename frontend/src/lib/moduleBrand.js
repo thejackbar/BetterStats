@@ -24,7 +24,7 @@ export const MODULE_BRAND = {
   socials: { name: 'BetterSocials', accent: '#EC4899', accentRgb: '236 72 153', logo: socialsLogo },
   admin:   { name: 'BetterAdmin',   accent: '#F59E0B', accentRgb: '245 158 11', logo: adminLogo },
   iq:      { name: 'BetterIQ',      accent: '#A855F7', accentRgb: '168 85 247', logo: iqLogo },
-  fantasy: { name: 'BetterFantasyCricket', accent: '#06B6D4', accentRgb: '6 182 212', logo: fantasyLogo },
+  fantasy: { name: 'BetterFantasyCricket', accent: '#8C82F0', accentRgb: '140 130 240', logo: fantasyLogo },
 }
 
 // The various registries key modules differently (marketing uses slugs, the
