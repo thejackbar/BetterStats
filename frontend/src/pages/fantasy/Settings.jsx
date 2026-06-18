@@ -3,7 +3,7 @@
 // Plus How to play, whose points table reads the season's real scoring config.
 import { useState } from 'react'
 import { api } from '../../lib/api'
-import { DISP, tintBg, mix, Btn, Field, Segmented, Toggle, RED, useFantasy } from './ui'
+import { DISP, tintBg, mix, Btn, Field, Segmented, Toggle, RED, GREEN, useFantasy } from './ui'
 import { ScreenTitle } from './shell'
 
 const PREFS_KEY = 'bfc-prefs'
@@ -78,7 +78,7 @@ export default function Settings({ token, manager, squad, themePref, setThemePre
       </Group>
 
       <div style={{ paddingTop: 8 }}>
-        <button onClick={() => nav('help')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 12px 'Hanken Grotesk'`, cursor: 'pointer' }}>How scoring works →</button>
+        <button onClick={() => nav('help')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 12px 'Hanken Grotesk'`, cursor: 'pointer' }}>How to play & scoring →</button>
       </div>
     </div>
   )
@@ -108,28 +108,89 @@ const RowBtn = ({ label, onClick, danger, last, disabled }) => (
   }}>{label}<span style={{ marginLeft: 'auto', color: danger ? RED : 'var(--faint)' }}>{'›'}</span></button>
 )
 
-// ── How to play / scoring ──────────────────────────────────────────────────────
+// ── How to play / rules / scoring ───────────────────────────────────────────────
+const RuleSection = ({ children }) => (
+  <div style={{ font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--faint)', padding: '18px 0 8px' }}>{children}</div>
+)
+
 export function HowToPlay({ season, nav }) {
   const sc = season?.scoring || {}
   const rules = season?.rules || {}
   const q = rules.role_quota || { keeper: 1, batter: 4, allrounder: 3, bowler: 4 }
+  const squadSize = rules.squad_size || (q.keeper + q.batter + q.allrounder + q.bowler) || 12
+  const bestN = rules.count_best_n || 11
+  const budget = rules.budget ?? 100
+  const freeT = rules.free_transfers_per_round ?? 1
+  const hit = rules.transfer_hit ?? 4
+  const m = sc.off_role_multiplier ?? 1.5
+  const capMult = sc.captain_multiplier ?? 2
+  const appearance = sc.appearance ?? 4
   const sign = (n) => (n >= 0 ? `+${n}` : `${n}`)
+  const f = (n) => (Number.isInteger(n) ? n : Math.round(n * 100) / 100)
+
+  // The general way the game is played.
+  const steps = [
+    `Sign up with a name and a PIN. There's no app to download and no account to make.`,
+    `Build a squad of ${squadSize} within a $${budget} budget: ${q.batter} batters, ${q.allrounder} all-rounders, ${q.keeper} wicketkeeper and ${q.bowler} bowlers. Better players cost more, so you can't pick all the stars.`,
+    `Name a captain, who scores ×${f(capMult)}, and a vice-captain who steps in if your captain doesn't take the field.`,
+    `Every club weekend is a round, scored off your players' real games. Every grade counts the same: a run in 5ths is worth a run in 1sts.`,
+    `Each round only your best ${bestN} of ${squadSize} count, so a player who has a quiet week or doesn't play just drops out.`,
+    `You get ${freeT} free transfer${freeT === 1 ? '' : 's'} a round; extra ones cost ${hit} points. Save your chips for the big weeks.`,
+    `Climb the club ladder, and start private mini-leagues with a join code to settle it with your mates.`,
+  ]
+
+  // The points table (the scoring structure).
   const table = [
     ['Run scored', sc.run ?? 1], ['Four hit', sc.four ?? 1], ['Six hit', sc.six ?? 2],
     ['Half-century', sc.fifty ?? 16], ['Century', sc.hundred ?? 32],
     ['Wicket taken', sc.wicket ?? 25], ['Three-wicket haul', sc.three_wickets ?? 8], ['Five-wicket haul', sc.five_wickets ?? 16],
     ['Maiden over', sc.maiden ?? 8], ['Catch', sc.catch ?? 8], ['Stumping', sc.stumping ?? 12],
-    ['Run-out', sc.run_out ?? 12], ['Took the field', sc.appearance ?? 4], ['Duck (batter)', sc.duck ?? -4],
+    ['Run-out', sc.run_out ?? 12], ['Took the field', appearance], ['Duck (batter out for 0)', sc.duck ?? -4],
   ]
+
+  // Worked examples, computed from this season's real values so they stay right
+  // even if the club tunes the points.
+  const batPts = (runs, fours, sixes) => {
+    let p = runs * (sc.run ?? 1) + fours * (sc.four ?? 1) + sixes * (sc.six ?? 2)
+    if (runs >= 100) p += sc.hundred ?? 32
+    else if (runs >= 50) p += sc.fifty ?? 16
+    return p
+  }
+  const bowlPts = (wkts) => {
+    let p = wkts * (sc.wicket ?? 25)
+    if (wkts >= 5) p += sc.five_wickets ?? 16
+    else if (wkts >= 3) p += sc.three_wickets ?? 8
+    return p
+  }
+  const fifty = batPts(50, 5, 0)
+  const threeFor = bowlPts(3)
+  const examples = [
+    { title: 'A top-order fifty', line: 'A batter makes 50 with 5 fours.', calc: `50 runs + 5 fours + ${sc.fifty ?? 16} for reaching 50`, pts: fifty },
+    { title: 'A three-wicket haul', line: 'A bowler takes 3 wickets.', calc: `3 × ${sc.wicket ?? 25} + ${sc.three_wickets ?? 8} haul bonus`, pts: threeFor },
+    { title: 'Out of role pays more', line: `Those same 3 wickets, but taken by a batter. Wickets aren't a batter's job, so they're worth ×${f(m)}.`, calc: `${f(threeFor)} × ${f(m)}`, pts: threeFor * m, hot: true },
+  ]
+
   return (
     <div>
-      <ScreenTitle title="How scoring works" sub="Earn points every round" back onBack={() => nav('settings')} />
+      <ScreenTitle title="How to play" sub="Rules & scoring" back onBack={() => nav('team')} />
+
       <div style={{ paddingTop: 14 }}>
-        <div style={{ background: tintBg(9, 'var(--surface)'), border: `1px solid ${tintBg(26)}`, borderRadius: 13, padding: '12px 14px', font: `500 12px 'Hanken Grotesk'`, color: 'var(--text)', lineHeight: 1.5 }}>
-          Pick {rules.squad_size || 12} within a <b>${(rules.budget ?? 100)}</b> budget: {q.batter} batters, {q.allrounder} all-rounders, {q.keeper} wicketkeeper, {q.bowler} bowlers. Your <b style={{ color: 'var(--accent-strong)' }}>captain</b> scores double, and each round counts your best {rules.count_best_n || 11}.
+        <div style={{ background: tintBg(9, 'var(--surface)'), border: `1px solid ${tintBg(26)}`, borderRadius: 13, padding: '12px 14px', font: `500 12.5px 'Hanken Grotesk'`, color: 'var(--text)', lineHeight: 1.5 }}>
+          Build a squad from your club's own players, captain it, and score points off how they really go each weekend. The more runs, wickets and catches your picks rack up, the higher you climb.
         </div>
       </div>
-      <div style={{ font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--faint)', padding: '14px 0 8px' }}>Points table</div>
+
+      <RuleSection>The basics</RuleSection>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 13, overflow: 'hidden' }}>
+        {steps.map((s, i) => (
+          <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'flex-start', padding: '11px 14px', borderBottom: i === steps.length - 1 ? 'none' : '1px solid var(--surface2)' }}>
+            <span style={{ flex: 'none', width: 22, height: 22, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-strong)', background: tintBg(14), font: `800 11px ${DISP}` }}>{i + 1}</span>
+            <span style={{ font: `500 12.5px 'Hanken Grotesk'`, color: 'var(--text)', lineHeight: 1.45 }}>{s}</span>
+          </div>
+        ))}
+      </div>
+
+      <RuleSection>Points table</RuleSection>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 13, overflow: 'hidden' }}>
         {table.map(([act, p], i) => (
           <div key={act} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: i === table.length - 1 ? 'none' : '1px solid var(--surface2)' }}>
@@ -138,7 +199,32 @@ export function HowToPlay({ season, nav }) {
           </div>
         ))}
       </div>
-      <p style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', padding: '12px 2px' }}>Bowler runs and batter wickets score one-and-a-half times, since they're out of role.</p>
+      <p style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', padding: '10px 2px 0' }}>
+        Output outside a player's role scores ×{f(m)}: a bowler's runs, a batter's wickets, and a keeper's batting and dismissals. All-rounders score both at the base rate.
+      </p>
+
+      <RuleSection>Examples</RuleSection>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {examples.map((ex, i) => (
+          <div key={i} style={{ background: ex.hot ? tintBg(9, 'var(--surface)') : 'var(--surface)', border: `1px solid ${ex.hot ? tintBg(26) : 'var(--hairline)'}`, borderRadius: 13, padding: '12px 14px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+              <span style={{ font: `700 13px 'Hanken Grotesk'`, color: 'var(--text)' }}>{ex.title}</span>
+              <span style={{ font: `800 18px ${DISP}`, color: GREEN, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{f(ex.pts)}<span style={{ font: `700 9px 'Hanken Grotesk'`, color: 'var(--faint)', marginLeft: 3 }}>PTS</span></span>
+            </div>
+            <div style={{ font: `500 11.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 4, lineHeight: 1.45 }}>{ex.line}</div>
+            <div style={{ font: `600 11px 'Hanken Grotesk'`, color: 'var(--dim)', marginTop: 5, fontVariantNumeric: 'tabular-nums' }}>{ex.calc} = {f(ex.pts)}</div>
+          </div>
+        ))}
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 13, padding: '12px 14px' }}>
+          <span style={{ font: `700 13px 'Hanken Grotesk'`, color: 'var(--text)' }}>Your captain</span>
+          <div style={{ font: `500 11.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 4, lineHeight: 1.45 }}>
+            Whoever you captain has their whole round score multiplied by {f(capMult)} before your best {bestN} are counted. Pick the player you back to have the biggest weekend.
+          </div>
+        </div>
+      </div>
+      <p style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', padding: '10px 2px 0' }}>
+        Every player who takes the field also gets {sign(appearance)} just for playing, added on top and never multiplied.
+      </p>
     </div>
   )
 }

@@ -195,6 +195,7 @@ export default function FantasyHome() {
           </div>
 
           <SettingsCard season={season} flash={flash} fail={fail} onSaved={load} />
+          <ScoringCard season={season} flash={flash} fail={fail} onSaved={load} />
           <PoolManager season={season} flash={flash} fail={fail} onChanged={load} />
           <ManagersCard flash={flash} fail={fail} />
 
@@ -297,6 +298,97 @@ export default function FantasyHome() {
 
 function Field({ label, children }) {
   return <label className="flex flex-col gap-1"><span className="text-pb-faint text-xs">{label}</span>{children}</label>
+}
+
+// Fallback points table, used before the season's own scoring loads and as the
+// base to spread over (so a key the backend added later still has a value).
+// The live values come from season.scoring; this just guards holes.
+const DEFAULT_SCORING_FALLBACK = {
+  run: 1, four: 1, six: 2, fifty: 16, hundred: 32, duck: -4,
+  wicket: 25, three_wickets: 8, five_wickets: 16, maiden: 8,
+  catch: 8, stumping: 12, run_out: 12, appearance: 4,
+  off_role_multiplier: 1.5, captain_multiplier: 2, triple_captain_multiplier: 3,
+}
+
+// Grouped for the editor; the keys match the backend scoring blob.
+const SCORING_GROUPS = [
+  ['Batting', [
+    ['run', 'Per run'], ['four', 'Per four'], ['six', 'Per six'],
+    ['fifty', 'Reaching 50'], ['hundred', 'Reaching 100'], ['duck', 'Duck (out for 0)'],
+  ]],
+  ['Bowling', [
+    ['wicket', 'Per wicket'], ['three_wickets', '3-wicket haul'],
+    ['five_wickets', '5-wicket haul'], ['maiden', 'Per maiden over'],
+  ]],
+  ['Fielding & appearance', [
+    ['catch', 'Per catch'], ['stumping', 'Per stumping'],
+    ['run_out', 'Per run-out'], ['appearance', 'Took the field'],
+  ]],
+  ['Multipliers', [
+    ['off_role_multiplier', 'Off-role ×'], ['captain_multiplier', 'Captain ×'],
+    ['triple_captain_multiplier', 'Triple captain ×'],
+  ]],
+]
+
+// Edit the points table — what a run, wicket, catch, milestone etc. is worth,
+// plus the off-role and captain multipliers. Saves the season's JSONB scoring
+// blob; new values apply to rounds settled from here on.
+function ScoringCard({ season, flash, fail, onSaved }) {
+  const [v, setV] = useState(() => ({ ...DEFAULT_SCORING_FALLBACK, ...(season.scoring || {}) }))
+  const [defaults, setDefaults] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => { api.fantasyConfig().then(d => setDefaults(d.defaults?.scoring || null)).catch(() => {}) }, [])
+
+  const set = (k, val) => setV(s => ({ ...s, [k]: val }))
+  const numInput = (k) => (
+    <input type="number" step="any" value={v[k] ?? ''} onChange={e => set(k, e.target.value)}
+      className="w-full rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm tabular-nums" />
+  )
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      const payload = {}
+      for (const [, fields] of SCORING_GROUPS) for (const [k] of fields) {
+        const n = Number(v[k])
+        if (Number.isFinite(n)) payload[k] = n
+      }
+      const res = await api.fantasyUpdateScoring(season.id, payload)
+      setV({ ...DEFAULT_SCORING_FALLBACK, ...res.scoring })
+      flash('Scoring saved. New values apply to rounds settled from now on.')
+      await onSaved()
+    } catch (e) { fail(e) } finally { setBusy(false) }
+  }
+  const resetDefaults = () => { if (defaults) setV({ ...DEFAULT_SCORING_FALLBACK, ...defaults }) }
+
+  return (
+    <div className="pb-card p-5">
+      <h3 className="font-display font-bold mb-1">Scoring system</h3>
+      <p className="text-xs text-pb-faint mb-3">
+        How many fantasy points each thing is worth. A player's output outside their role (a bowler's
+        runs, a batter's wickets, a keeper's batting and dismissals) is multiplied by the off-role number,
+        and the captain's round total is multiplied before each squad's best {season.rules?.count_best_n ?? 11} are counted.
+        New values apply to rounds settled from now on. Re-settle a scored round to apply them there too.
+      </p>
+      <div className="space-y-4">
+        {SCORING_GROUPS.map(([group, fields]) => (
+          <div key={group}>
+            <div className="text-[11px] font-medium uppercase tracking-wide text-pb-faintest mb-1.5">{group}</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {fields.map(([k, label]) => <Field key={k} label={label}>{numInput(k)}</Field>)}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex items-center gap-3">
+        <button onClick={save} disabled={busy}
+          className="px-3 py-1.5 rounded bg-pb-accent text-white text-sm font-medium disabled:opacity-50">Save scoring</button>
+        <button onClick={resetDefaults} disabled={!defaults}
+          className="text-xs underline text-pb-faint hover:text-pb-text disabled:opacity-40">Reset to defaults</button>
+      </div>
+    </div>
+  )
 }
 
 function SettingsCard({ season, flash, fail, onSaved }) {

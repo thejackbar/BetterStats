@@ -298,6 +298,70 @@ async def update_rules(season_id: str, body: RulesUpdate, club=Depends(get_curre
     return {"rules": rules}
 
 
+# ── scoring (the points table) ─────────────────────────────────────────────────
+
+# Point-value keys (any number; a duck is meant to be negative) and the
+# multipliers (must be ≥ 1). Mirrors DEFAULT_SCORING in fantasy_scoring.
+_SCORING_POINT_KEYS = (
+    "run", "four", "six", "fifty", "hundred", "duck",
+    "wicket", "three_wickets", "five_wickets", "maiden",
+    "catch", "stumping", "run_out", "appearance",
+)
+_SCORING_MULTIPLIER_KEYS = ("off_role_multiplier", "captain_multiplier", "triple_captain_multiplier")
+
+
+def _clean_number(v: float) -> float:
+    """Round to 2dp and keep integer-valued points as ints, so the stored blob
+    stays as tidy as the seeded defaults (16, not 16.0)."""
+    f = round(float(v), 2)
+    return int(f) if f == int(f) else f
+
+
+class ScoringUpdate(BaseModel):
+    run: float | None = None
+    four: float | None = None
+    six: float | None = None
+    fifty: float | None = None
+    hundred: float | None = None
+    duck: float | None = None
+    wicket: float | None = None
+    three_wickets: float | None = None
+    five_wickets: float | None = None
+    maiden: float | None = None
+    catch: float | None = None
+    stumping: float | None = None
+    run_out: float | None = None
+    appearance: float | None = None
+    off_role_multiplier: float | None = None
+    captain_multiplier: float | None = None
+    triple_captain_multiplier: float | None = None
+
+
+@router.patch("/season/{season_id}/scoring")
+async def update_scoring(season_id: str, body: ScoringUpdate, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Edit the points table — what a run, wicket, catch, milestone etc. is worth,
+    plus the off-role and captain multipliers. Stored in the season's JSONB scoring
+    blob. New values apply to rounds settled from now on; re-settle an already-
+    scored round (the per-round Settle button) to apply them to it as well."""
+    fs = await _load_season(db, club, season_id)
+    scoring = dict(fs.scoring or DEFAULT_SCORING)
+    for key in _SCORING_POINT_KEYS:
+        val = getattr(body, key)
+        if val is not None:
+            if not (-1000 <= float(val) <= 10000):
+                raise HTTPException(status_code=400, detail=f"'{key}' points are out of range.")
+            scoring[key] = _clean_number(val)
+    for key in _SCORING_MULTIPLIER_KEYS:
+        val = getattr(body, key)
+        if val is not None:
+            if not (1 <= float(val) <= 10):
+                raise HTTPException(status_code=400, detail="Multipliers must be between 1 and 10.")
+            scoring[key] = _clean_number(val)
+    fs.scoring = scoring  # reassign so the JSONB change is flagged
+    await db.commit()
+    return {"scoring": scoring}
+
+
 # ── managers (the people who signed up to play) ────────────────────────────────
 
 async def _load_manager(db: AsyncSession, club, manager_id: str) -> FantasyManager:
