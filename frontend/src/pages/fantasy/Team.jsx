@@ -134,7 +134,7 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
   )
 
   const statRibbon = (
-    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${desktop ? 6 : 3}, 1fr)`, gap: desktop ? 10 : 7, padding: desktop ? '12px 0 4px' : '10px 0 4px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${desktop ? 6 : 3}, 1fr)`, gap: desktop ? 10 : 7, padding: desktop ? '16px 0 4px' : '10px 0 4px' }}>
       {stats.map(([label, value]) => <StatTile key={label} label={label} value={value} />)}
     </div>
   )
@@ -143,19 +143,19 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
     return (
       <div>
         {statRibbon}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, paddingTop: 12, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, paddingTop: 16, alignItems: 'start' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div style={{ font: `700 12px ${DISP}`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--dim)' }}>Your XI · team sheet</div>
               <button onClick={() => nav('pick')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 11px 'Hanken Grotesk'`, cursor: 'pointer' }}>{active ? 'Captain ›' : 'Edit squad ›'}</button>
             </div>
             {groups.map(g => (
-              <div key={g.role} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '7px 0', borderTop: '1px solid var(--surface2)' }}>
-                <div style={{ width: 84, flex: 'none' }}>
-                  <div style={{ font: `700 12px ${DISP}`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text)' }}>{ROLE_GROUP[g.role]}</div>
-                  <div style={{ font: `600 9.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 1 }}>{g.rows.length} / {g.quota}</div>
+              <div key={g.role} style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '11px 0', borderTop: '1px solid var(--surface2)' }}>
+                <div style={{ width: 88, flex: 'none' }}>
+                  <div style={{ font: `700 13px ${DISP}`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text)' }}>{ROLE_GROUP[g.role]}</div>
+                  <div style={{ font: `600 10px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 2 }}>{g.rows.length} / {g.quota}</div>
                 </div>
-                <div style={{ flex: 1, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   {g.rows.map(p => <PlayerCard key={p.player_id} p={p} gw={gwPts?.[p.player_id]} onClick={() => nav('player', { playerId: p.player_id })} />)}
                 </div>
               </div>
@@ -222,27 +222,28 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
   )
 }
 
-// Desktop team-sheet card: a compact horizontal row (avatar · name/role · GW
-// points) so all four role groups fit on one screen. C/V badge sits by the name.
+// Desktop team-sheet card: a roomy horizontal card (avatar · name/role · GW
+// points) — substantial enough to read well, compact enough that all four role
+// groups fit on one screen. C/V badge sits by the name.
 function PlayerCard({ p, gw, onClick }) {
   return (
     <button onClick={onClick} style={{
-      flex: '1 1 150px', minWidth: 150, maxWidth: 240, display: 'flex', alignItems: 'center', gap: 9,
-      background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 12,
-      padding: '8px 10px', cursor: 'pointer', textAlign: 'left',
+      flex: '1 1 190px', minWidth: 180, maxWidth: 300, display: 'flex', alignItems: 'center', gap: 12,
+      background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 14,
+      padding: '13px 15px', cursor: 'pointer', textAlign: 'left',
     }}>
-      <Avatar name={p.name} photoUrl={p.photo_url} size={34} />
+      <Avatar name={p.name} photoUrl={p.photo_url} size={46} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ font: `700 14px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
           {p.is_captain && <CapBadge />}
           {p.is_vice_captain && <CapBadge vice />}
         </div>
-        <div style={{ font: `500 9.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ROLE_LABEL[p.role]} · {money(p.purchase_price)}</div>
+        <div style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ROLE_LABEL[p.role]} · {money(p.purchase_price)}</div>
       </div>
       <div style={{ textAlign: 'right', flex: 'none' }}>
-        <div style={{ font: `700 16px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{gw != null ? pts(gw) : '—'}</div>
-        <div style={{ font: `600 7.5px 'Hanken Grotesk'`, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--faint)', marginTop: 2 }}>pts</div>
+        <div style={{ font: `700 22px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{gw != null ? pts(gw) : '—'}</div>
+        <div style={{ font: `600 8px 'Hanken Grotesk'`, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--faint)', marginTop: 3 }}>pts</div>
       </div>
     </button>
   )
