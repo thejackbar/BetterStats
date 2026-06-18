@@ -65,6 +65,18 @@ export default function FantasyHome() {
     catch (e) { fail(e) } finally { setBusy('') }
   }
 
+  const linkUrl = data?.link_token ? `${window.location.origin}/fantasy/${data.link_token}` : ''
+  const copy = async (txt, label) => { try { await navigator.clipboard.writeText(txt); flash(`${label} copied.`) } catch { fail(new Error('Copy failed')) } }
+  const toggleReg = async () => {
+    setBusy('reg'); try { await api.fantasySetRegistration(season.id, !season.registration_open); await load() }
+    catch (e) { fail(e) } finally { setBusy('') }
+  }
+  const regenerate = async () => {
+    if (!window.confirm('Make a new link? The old one stops working.')) return
+    setBusy('regen'); try { await api.fantasyRegenerateLink(); flash('New link created.'); await load() }
+    catch (e) { fail(e) } finally { setBusy('') }
+  }
+
   const setRole = async (pp, role) => {
     try { await api.fantasyPatchPool(pp.id, { role }); await load() } catch (e) { fail(e) }
   }
@@ -144,9 +156,29 @@ export default function FantasyHome() {
               </div>
             </div>
             {data.link_token && (
-              <p className="mt-3 text-xs text-pb-faintest font-mono break-all">
-                Public link: /fantasy/{data.link_token} (member play UI is a later phase)
-              </p>
+              <div className="mt-4 border-t pb-hairline pt-3 space-y-2">
+                {data.link_active === false && (
+                  <div className="rounded bg-amber-500/10 text-amber-400 px-3 py-2 text-xs">
+                    BetterFantasyCricket isn't switched on for this club yet, so the public link won't work for members.
+                    Turn it on in Super Admin → Clubs. (Admin pages work for you because super admins bypass the gate.)
+                  </div>
+                )}
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-pb-faint shrink-0">Public link</span>
+                  <code className="flex-1 truncate font-mono text-pb-faintest">{linkUrl}</code>
+                  <button onClick={() => copy(linkUrl, 'Link')} className="px-2 py-1 rounded bg-pb-surface2 text-pb-text shrink-0">Copy</button>
+                  <button onClick={() => copy(`🏏 Play ${season.name}: ${linkUrl}`, 'Message')} className="px-2 py-1 rounded bg-pb-surface2 text-pb-text shrink-0">Copy message</button>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className={`px-2 py-0.5 rounded ${season.registration_open ? 'bg-green-500/15 text-green-400' : 'bg-pb-surface2 text-pb-faint'}`}>
+                    Registration {season.registration_open ? 'open' : 'closed'}
+                  </span>
+                  <button onClick={toggleReg} disabled={busy === 'reg'} className="px-2 py-1 rounded bg-pb-surface2 text-pb-text">
+                    {season.registration_open ? 'Close' : 'Open'}
+                  </button>
+                  <button onClick={regenerate} disabled={busy === 'regen'} className="px-2 py-1 rounded bg-pb-surface2 text-pb-text ml-auto">New link</button>
+                </div>
+              </div>
             )}
           </div>
 
