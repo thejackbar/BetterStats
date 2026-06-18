@@ -1451,6 +1451,8 @@ export const api = {
     request(`/club-admin/fantasy/managers/${managerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   fantasyDeleteManager: (managerId) =>
     request(`/club-admin/fantasy/managers/${managerId}`, { method: 'DELETE' }),
+  fantasyManagerTeams: (managerId) =>
+    request(`/club-admin/fantasy/managers/${managerId}/teams`),
 }
 
 function _iqQs(opponent, fixtureId, team, name) {
