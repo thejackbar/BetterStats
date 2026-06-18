@@ -26,6 +26,8 @@ export default function FantasyHome() {
   const [busy, setBusy] = useState('')
   const [year, setYear] = useState(new Date().getFullYear())
   const [sort, setSort] = useState({ key: 'current_price', dir: 'desc' })
+  const [poolSearch, setPoolSearch] = useState('')
+  const [showAllPool, setShowAllPool] = useState(false)
 
   const flash = (m) => { setMsg(m); setErr(null); setTimeout(() => setMsg(null), 4000) }
   const fail = (e) => { setErr(e.message || String(e)); setMsg(null) }
@@ -109,6 +111,12 @@ export default function FantasyHome() {
     return arr
   }, [pool, sort])
 
+  const filteredPool = useMemo(() => {
+    const term = poolSearch.trim().toLowerCase()
+    return term ? sortedPool.filter(p => p.name.toLowerCase().includes(term)) : sortedPool
+  }, [sortedPool, poolSearch])
+  const shownPool = (poolSearch || showAllPool) ? filteredPool : filteredPool.slice(0, 200)
+
   const Th = ({ k, children, right }) => (
     <th className={`py-1.5 pr-3 ${right ? 'text-right' : 'text-left'}`}>
       <button type="button" onClick={() => toggleSort(k)} className="inline-flex items-center gap-1 hover:text-pb-text">
@@ -191,7 +199,13 @@ export default function FantasyHome() {
 
           {/* Pool */}
           <div className="pb-card p-5">
-            <h3 className="font-display font-bold mb-3">Player pool {pool ? `(${pool.length})` : ''}</h3>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h3 className="font-display font-bold">Player pool {pool ? `(${pool.length})` : ''}</h3>
+              {!!pool?.length && (
+                <input value={poolSearch} onChange={e => setPoolSearch(e.target.value)} placeholder="Search pool…"
+                  className="rounded border pb-hairline bg-pb-surface px-3 py-1.5 text-sm w-48" />
+              )}
+            </div>
             {!pool?.length ? (
               <p className="text-sm text-pb-faint">No pool yet — click “Build pool”.</p>
             ) : (
@@ -208,7 +222,7 @@ export default function FantasyHome() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedPool.slice(0, 200).map(p => (
+                    {shownPool.map(p => (
                       <tr key={p.id} className="border-t pb-hairline">
                         <td className="py-1.5 pr-3">{p.name}</td>
                         <td className="py-1.5 pr-3">
@@ -229,7 +243,10 @@ export default function FantasyHome() {
                     ))}
                   </tbody>
                 </table>
-                {pool.length > 200 && <p className="text-xs text-pb-faintest mt-2">Showing the first 200 by the current sort.</p>}
+                {!poolSearch && !showAllPool && filteredPool.length > 200 && (
+                  <button onClick={() => setShowAllPool(true)} className="text-xs text-pb-accent underline mt-2">Show all {filteredPool.length}</button>
+                )}
+                {poolSearch && <p className="text-xs text-pb-faintest mt-2">{filteredPool.length} match{filteredPool.length === 1 ? '' : 'es'}.</p>}
               </div>
             )}
           </div>
