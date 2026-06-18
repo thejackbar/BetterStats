@@ -23,7 +23,7 @@ from typing import Optional
 import bcrypt as _bcrypt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.routers.auth import get_current_club
@@ -32,7 +32,7 @@ from app.auth.modules import org_has_module, MODULE_FANTASY
 from app.models.db import (
     get_db, Organisation, Player,
     FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
-    FantasyManager, FantasySquad, FantasyDraft, FANTASY_ROLES,
+    FantasyManager, FantasySquad, FantasySquadPlayer, FantasyDraft, FANTASY_ROLES,
 )
 from app.services import fantasy_engine, fantasy_draft
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
@@ -457,6 +457,48 @@ async def delete_manager(manager_id: str, club=Depends(get_current_club), db: As
     await db.delete(mgr)
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/managers/{manager_id}/teams")
+async def manager_teams(manager_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """The squads a registered player has picked — their salary-cap team (the club
+    ladder) and any draft teams — with the chosen players, captain/vice and each
+    pick's season points. Lets an admin see who someone has selected."""
+    mgr = await _load_manager(db, club, manager_id)
+    rows = (await db.execute(
+        select(FantasySquad, FantasyLeague, FantasySeason)
+        .join(FantasyLeague, FantasyLeague.id == FantasySquad.league_id)
+        .join(FantasySeason, FantasySeason.id == FantasySquad.fantasy_season_id)
+        .where(FantasySquad.manager_id == mgr.id)
+        .order_by(FantasySeason.season_year.desc())
+    )).all()
+    squads = []
+    for sq, lg, ssn in rows:
+        picks = (await db.execute(
+            select(FantasySquadPlayer, Player.name, FantasyPoolPlayer.total_points)
+            .join(Player, Player.id == FantasySquadPlayer.player_id)
+            .join(FantasyPoolPlayer, and_(
+                FantasyPoolPlayer.player_id == FantasySquadPlayer.player_id,
+                FantasyPoolPlayer.fantasy_season_id == sq.fantasy_season_id,
+            ), isouter=True)
+            .where(FantasySquadPlayer.squad_id == sq.id)
+        )).all()
+        squads.append({
+            "squad_id": str(sq.id), "league": lg.name, "kind": lg.kind,
+            "season_year": ssn.season_year, "team_name": sq.team_name,
+            "total_points": float(sq.total_points or 0),
+            "budget_remaining": float(sq.budget_remaining) if sq.budget_remaining is not None else None,
+            "players": [
+                {
+                    "player_id": str(sp.player_id), "name": name, "role": sp.role,
+                    "is_captain": sp.is_captain, "is_vice_captain": sp.is_vice_captain,
+                    "purchase_price": float(sp.purchase_price) if sp.purchase_price is not None else None,
+                    "total_points": float(tp) if tp is not None else None,
+                }
+                for sp, name, tp in picks
+            ],
+        })
+    return {"manager": {"id": str(mgr.id), "display_name": mgr.display_name}, "squads": squads}
 
 
 # ── pool management (add returning / new players) ──────────────────────────────

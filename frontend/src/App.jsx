@@ -116,6 +116,10 @@ const IqPreview = lazy(() => import('./pages/admin/betteriq/MatchPreview'))
 const IqCheatSheet = lazy(() => import('./pages/admin/betteriq/CheatSheet'))
 // BetterFantasyCricket (admin surface)
 const FantasyHome = lazy(() => import('./pages/admin/fantasy/FantasyHome'))
+const FantasySettings = lazy(() => import('./pages/admin/fantasy/FantasySettings'))
+const FantasyScoring = lazy(() => import('./pages/admin/fantasy/FantasyScoring'))
+const FantasyPool = lazy(() => import('./pages/admin/fantasy/FantasyPool'))
+const FantasyPlayers = lazy(() => import('./pages/admin/fantasy/FantasyPlayers'))
 const FantasyLeagues = lazy(() => import('./pages/admin/fantasy/FantasyLeagues'))
 
 // BetterAdmin umbrella (BetterFees + BetterComms + future BetterMerch)
@@ -242,6 +246,10 @@ export default function App() {
           <Route path="/admin/merch/reports" element={<ProtectedRoute requireModule="merch"><MerchReports /></ProtectedRoute>} />
           <Route path="/admin/merch/square" element={<ProtectedRoute requireModule="merch"><MerchSquare /></ProtectedRoute>} />
           <Route path="/admin/fantasy" element={<ProtectedRoute requireModule="fantasy"><FantasyHome /></ProtectedRoute>} />
+          <Route path="/admin/fantasy/settings" element={<ProtectedRoute requireModule="fantasy"><FantasySettings /></ProtectedRoute>} />
+          <Route path="/admin/fantasy/scoring" element={<ProtectedRoute requireModule="fantasy"><FantasyScoring /></ProtectedRoute>} />
+          <Route path="/admin/fantasy/pool" element={<ProtectedRoute requireModule="fantasy"><FantasyPool /></ProtectedRoute>} />
+          <Route path="/admin/fantasy/players" element={<ProtectedRoute requireModule="fantasy"><FantasyPlayers /></ProtectedRoute>} />
           <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute><AdminSponsors /></ProtectedRoute>} />
