@@ -257,11 +257,11 @@ async def classify_and_price_one(session: AsyncSession, fs, player_id) -> tuple[
 
 # ── Round settlement (player points) ───────────────────────────────────────────
 
-async def settle_round(session: AsyncSession, fs, rnd) -> int:
-    """Compute each player's fantasy points for a round from the scorecards of the
-    games in the round window, and upsert ``fantasy_player_round_scores``.
-    Idempotent on (round, player). Marks the round ``scored`` and refreshes the
-    pool's season totals. Returns the number of players scored."""
+async def _round_player_scores(session: AsyncSession, fs, rnd) -> dict[str, dict]:
+    """Read-only: compute each player's fantasy points for a round's window from
+    the scorecards, with no writes. Returns ``{player_id: {base, total,
+    breakdown, games}}``. Shared by round settlement (which then persists) and the
+    live preview (which doesn't), so the two can never disagree."""
     grades = fs.included_grade_ids or None
     base = {"org": str(fs.organisation_id), "year": fs.season_year,
             "start": rnd.start_date, "end": rnd.end_date, "grades": grades}
@@ -279,8 +279,7 @@ async def settle_round(session: AsyncSession, fs, rnd) -> int:
     )
     game_ids = [row[0] for row in games.all()]
     if not game_ids:
-        await _mark_scored(session, rnd, 0)
-        return 0
+        return {}
     gp = {"gids": game_ids}
 
     batting = await session.execute(
@@ -342,10 +341,27 @@ async def settle_round(session: AsyncSession, fs, rnd) -> int:
     for a in appearances.mappings():
         _cell(str(a["player_id"]), a["game_id"])  # ensures the appearance point
 
-    scored = 0
+    out: dict[str, dict] = {}
     for pid, by_game in games_by_player.items():
         role = role_by_player.get(pid, "batter")
         base_pts, total_pts, breakdown = score_player_round(list(by_game.values()), role, fs.scoring or DEFAULT_SCORING)
+        out[pid] = {"base": base_pts, "total": total_pts, "breakdown": breakdown, "games": len(by_game)}
+    return out
+
+
+async def settle_round(session: AsyncSession, fs, rnd) -> int:
+    """Compute each player's fantasy points for a round from the scorecards of the
+    games in the round window, and upsert ``fantasy_player_round_scores``.
+    Idempotent on (round, player). Marks the round ``scored`` and refreshes the
+    pool's season totals. Returns the number of players scored."""
+    by_player = await _round_player_scores(session, fs, rnd)
+    if not by_player:
+        await _mark_scored(session, rnd, 0)
+        return 0
+
+    scored = 0
+    for pid, sc in by_player.items():
+        base_pts, total_pts, breakdown = sc["base"], sc["total"], sc["breakdown"]
         await session.execute(
             text("""
                 INSERT INTO fantasy_player_round_scores
@@ -359,7 +375,7 @@ async def settle_round(session: AsyncSession, fs, rnd) -> int:
             {
                 "fs": str(fs.id), "rid": str(rnd.id), "pid": pid,
                 "base": base_pts, "total": total_pts,
-                "bd": json.dumps(breakdown), "games": len(by_game),
+                "bd": json.dumps(breakdown), "games": sc["games"],
             },
         )
         scored += 1

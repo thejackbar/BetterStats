@@ -154,13 +154,17 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd) -> int:
         {"rid": str(rnd.id)},
     )).all()
     triple_squads = {str(sid) for sid, chip in chip_rows if chip == "triple_captain"}
+    # Bench Boost: for the round it's played, every pick counts (no best-N cut).
+    boost_squads = {str(sid) for sid, chip in chip_rows if chip == "bench_boost"}
 
     rules = fs.rules or DEFAULT_RULES
     scoring = fs.scoring or DEFAULT_SCORING
     best_n = rules.get("count_best_n", 11)
+    squad_size = rules.get("squad_size", 12)
 
     for sq in squads:
-        res = score_squad_round(picks_by_squad.get(sq.id, []), score_by_player, best_n, scoring,
+        sq_best_n = squad_size if str(sq.id) in boost_squads else best_n
+        res = score_squad_round(picks_by_squad.get(sq.id, []), score_by_player, sq_best_n, scoring,
                                 is_triple=str(sq.id) in triple_squads)
         await session.execute(
             text("""

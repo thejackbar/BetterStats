@@ -1,0 +1,75 @@
+// Club ladder — ranked squads with round-on-round movement arrows, the GW and
+// total columns, and the manager's own row highlighted. A "···" marks the jump
+// to the manager's position when they sit below the visible window.
+import { useEffect, useState } from 'react'
+import { api } from '../../lib/api'
+import { DISP, pts, tintBg, MoveArrow } from './ui'
+import { ScreenTitle } from './shell'
+
+export function LadderRow({ r, compact }) {
+  if (r.you) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 12px', margin: '3px 0', borderRadius: 13, background: tintBg(14, 'var(--bg)'), border: `1px solid ${tintBg(40)}` }}>
+        <span style={{ width: 24, textAlign: 'center', font: `700 16px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{r.rank}</span>
+        {!compact && <MoveArrow delta={r.rank_delta} />}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ font: `700 13.5px 'Hanken Grotesk'`, color: 'var(--text)' }}>{r.team_name} <span style={{ font: `700 9px 'Hanken Grotesk'`, color: 'var(--ink)', background: 'var(--pb-accent, #8C82F0)', padding: '1px 5px', borderRadius: 4, verticalAlign: 'middle' }}>YOU</span></div>
+          <div style={{ font: `500 10.5px 'Hanken Grotesk'`, color: 'var(--accent-strong)' }}>{r.manager}</div>
+        </div>
+        {!compact && <span style={{ font: `600 12px ${DISP}`, color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>{pts(r.gw)}</span>}
+        <span style={{ width: 50, textAlign: 'right', font: `700 16px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{pts(r.points)}</span>
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderBottom: '1px solid var(--surface2)' }}>
+      <span style={{ width: 24, textAlign: 'center', font: `700 16px ${DISP}`, color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>{r.rank}</span>
+      {!compact && <MoveArrow delta={r.rank_delta} />}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ font: `700 13.5px 'Hanken Grotesk'`, color: 'var(--text)' }}>{r.team_name}</div>
+        <div style={{ font: `500 10.5px 'Hanken Grotesk'`, color: 'var(--faint)' }}>{r.manager}</div>
+      </div>
+      {!compact && <span style={{ font: `600 12px ${DISP}`, color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>{pts(r.gw)}</span>}
+      <span style={{ width: 50, textAlign: 'right', font: `700 16px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{pts(r.points)}</span>
+    </div>
+  )
+}
+
+const Th = ({ children, w, right }) => (
+  <span style={{ width: w, flex: w ? undefined : 1, textAlign: right ? 'right' : 'left', font: `700 8.5px 'Hanken Grotesk'`, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--faint)' }}>{children}</span>
+)
+
+export default function Ladder({ token, season }) {
+  const [data, setData] = useState(null)
+  useEffect(() => { api.fanLadder(token).then(setData).catch(() => setData({ ladder: [] })) }, [token])
+  if (!data) return <p style={{ color: 'var(--faint)', font: `500 13px 'Hanken Grotesk'` }}>Loading…</p>
+  const rows = data.ladder || []
+  if (!rows.length) return (
+    <div>
+      <ScreenTitle title="Club ladder" />
+      <p style={{ font: `500 13px 'Hanken Grotesk'`, color: 'var(--faint)', paddingTop: 16 }}>No teams yet. Be the first to build a squad.</p>
+    </div>
+  )
+
+  const top = rows.slice(0, 20)
+  const me = rows.find(r => r.you)
+  const showJump = me && !top.some(r => r.you)
+
+  return (
+    <div>
+      <ScreenTitle title="Club ladder" sub={`${rows.length} managers`} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '13px 0 7px' }}>
+        <Th w={24}>#</Th><span style={{ width: 18 }} /><Th>Team</Th><Th>GW</Th><Th w={50} right>Total</Th>
+      </div>
+      <div>
+        {top.map(r => <LadderRow key={r.rank} r={r} />)}
+        {showJump && (
+          <>
+            <div style={{ textAlign: 'center', color: 'var(--faintest)', font: `700 14px ${DISP}`, padding: '4px 0' }}>· · ·</div>
+            <LadderRow r={me} />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}

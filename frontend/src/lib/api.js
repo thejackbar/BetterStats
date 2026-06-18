@@ -1170,10 +1170,25 @@ export const api = {
   fanSetCaptain: (token, captain_player_id, vice_player_id) =>
     request(`/public/fantasy/${token}/captain`, { method: 'POST', body: JSON.stringify({ captain_player_id, vice_player_id }) }),
   fanChip: (token, chip) => request(`/public/fantasy/${token}/chip`, { method: 'POST', body: JSON.stringify({ chip }) }),
+  fanCancelChip: (token, chip) => request(`/public/fantasy/${token}/chip/cancel`, { method: 'POST', body: JSON.stringify({ chip }) }),
   fanLadder: (token) => request(`/public/fantasy/${token}/ladder`),
   fanLeagues: (token) => request(`/public/fantasy/${token}/leagues`),
+  fanLeague: (token, leagueId) => request(`/public/fantasy/${token}/leagues/${leagueId}`),
+  fanLeaveLeague: (token, leagueId) => request(`/public/fantasy/${token}/leagues/${leagueId}/leave`, { method: 'POST' }),
   fanCreateLeague: (token, name) => request(`/public/fantasy/${token}/leagues`, { method: 'POST', body: JSON.stringify({ name }) }),
   fanJoinLeague: (token, code) => request(`/public/fantasy/${token}/leagues/join`, { method: 'POST', body: JSON.stringify({ code }) }),
+  fanH2H: (token, leagueId, { round, opponent_squad_id } = {}) => {
+    const qs = new URLSearchParams()
+    if (round != null) qs.set('round', round)
+    if (opponent_squad_id) qs.set('opponent_squad_id', opponent_squad_id)
+    const q = qs.toString()
+    return request(`/public/fantasy/${token}/h2h/${leagueId}${q ? `?${q}` : ''}`)
+  },
+  fanRounds: (token) => request(`/public/fantasy/${token}/rounds`),
+  fanLive: (token) => request(`/public/fantasy/${token}/live`),
+  fanPlayer: (token, playerId) => request(`/public/fantasy/${token}/player/${playerId}`),
+  fanNotifications: (token) => request(`/public/fantasy/${token}/notifications`),
+  fanUpdateProfile: (token, data) => request(`/public/fantasy/${token}/profile`, { method: 'POST', body: JSON.stringify(data) }),
   fanDraftLeagues: (token) => request(`/public/fantasy/${token}/draft-leagues`),
   fanJoinDraft: (token, leagueId) => request(`/public/fantasy/${token}/draft-leagues/${leagueId}/join`, { method: 'POST' }),
   fanDraftState: (token, leagueId) => request(`/public/fantasy/${token}/draft/${leagueId}`),
