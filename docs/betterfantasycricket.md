@@ -343,15 +343,17 @@ Member share cards are built (a gameweek-result square, a recruit-a-mate story a
 a draft-league recruit story, all rendered to PNG via modern-screenshot for
 web-share / download).
 
-Remaining follow-ups: a full verify pass on a deployed database. A smoke-test
-script ships for this — `python -m app.scripts.verify_fantasy_draft <org>
-[snake|auction|both]` (org = a UUID, slug or name, so `applecross` works) spins up
-a throwaway draft + test managers for an org that
-has a built pool, drives the whole draft through the real engine, asserts the
-invariants (full squads, role quota, one captain + vice, auction budgets, the
-ladder) and deletes its own VERIFY-* rows afterwards. The pure
-budget/nomination/proxy maths are unit-checked; this script is the DB-bound
-bid/award/finalise check, since there's no Postgres in the build sandbox.
+Verified end to end on the live database (Applecross, 2026/27 season, pool of
+210): both a snake and an auction draft passed every invariant check (full
+squads, role quota, one captain plus vice, auction spend within the budget cap,
+and both the h2h and total-points ladders), and each cleaned up after itself. The
+script that runs this, `python -m app.scripts.verify_fantasy_draft <org>
+[snake|auction|both]` (org = a UUID, slug or name), re-runs it any time against a
+club with a built pool: it spins up a throwaway draft plus test managers, drives
+the real engine, asserts the invariants and deletes its own VERIFY-* rows. The
+pure budget/nomination/proxy maths are also unit-checked. This was the DB-bound
+bid/award/finalise check that couldn't run in the build sandbox (no Postgres), now
+green.
 
 ## Open defaults to confirm (non-blocking)
 
