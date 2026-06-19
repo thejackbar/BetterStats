@@ -182,20 +182,24 @@ floor(pool / 12) teams).
   auto-picks.
 - **Auction mechanics (as built)**: managers take turns nominating one player and
   opening the bidding. The nominator is the opening high bidder, so an uncontested
-  lot is theirs and the clock can never deadlock. Others bid up; every bid resets
-  the lot's anti-snipe clock so the rest get a chance to reply; the high bidder
-  when it lapses wins at their bid. A manager's **max bid is held back** by the
-  floor bid for each still-empty slot, so they can never strand themselves with an
-  unfillable squad; role quotas are enforced as they buy. Per-manager budget is
-  **derived from the lots already won** (no extra table). If a nominator's clock
-  lapses, the system auto-nominates their top wishlist player, or the priciest
-  still-available player in a role they still need, at the floor bid. The lot
-  clock defaults to one hour (`rules["auction_lot_seconds"]`, vs the snake
-  per-pick clock); the daily settle job's draft tick advances lapsed lots and
-  nominations. Each settled lot is appended to `fantasy_draft_picks` (winner +
-  `bid_amount`), then the shared finalisation turns every manager's lots into a
-  squad (captain = priciest buy, leftover budget kept) and the league plays out on
-  the same ladder/waiver/trade machinery as snake.
+  lot is theirs and the clock can never deadlock. Bidding is **eBay-style proxy**:
+  every bid is a max the system bids up to, so the price settles at the runner-up's
+  max plus the increment (capped at the leader's max) and a manager can win for
+  less than they were willing to pay. Each bid resets the lot's anti-snipe clock so
+  the rest get a chance to reply; the high bidder when it lapses wins at the settled
+  price. A manager's **max bid is held back** by the floor bid for each still-empty
+  slot, so they can never strand themselves with an unfillable squad; role quotas
+  are enforced as they buy. Per-manager budget is **derived from the lots already
+  won** (no extra table); the per-lot proxy maxes live in `fantasy_drafts.lot_max_bids`
+  (migration 090), cleared when the lot settles. If a nominator's clock lapses, the
+  system auto-nominates their top wishlist player, or the priciest still-available
+  player in a role they still need, at the floor bid. The lot clock defaults to one
+  hour (`rules["auction_lot_seconds"]`, vs the snake per-pick clock); the daily
+  settle job's draft tick advances lapsed lots and nominations. Each settled lot is
+  appended to `fantasy_draft_picks` (winner + `bid_amount`), then the shared
+  finalisation turns every manager's lots into a squad (captain = priciest buy,
+  leftover budget kept) and the league plays out on the same ladder/waiver/trade
+  machinery as snake.
 - **In-season**: a waiver wire for unowned and dropped players with reverse-ladder
   priority, processed once a round; plus manager-to-manager trades (propose,
   accept or reject, optional admin veto window).

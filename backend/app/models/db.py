@@ -2209,6 +2209,10 @@ class FantasyDraft(Base):
     lot_nominator_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_managers.id", ondelete="SET NULL"), nullable=True)
     lot_deadline = Column(TIMESTAMP(timezone=True), nullable=True)
     lot_auto = Column(Boolean, nullable=False, server_default="false")
+    # Per-lot proxy max bids {manager_id: max} (migration 090). Every bid is a max:
+    # the system bids up to it, so the displayed price is the runner-up's max plus
+    # the increment. Cleared when the lot settles.
+    lot_max_bids = Column(JSONB, nullable=False, server_default="{}")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

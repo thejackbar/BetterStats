@@ -121,6 +121,7 @@ async def start_draft(session: AsyncSession, league: FantasyLeague, fs) -> Fanta
         draft.lot_high_bidder_id = None
         draft.lot_nominator_id = None
         draft.lot_auto = False
+        draft.lot_max_bids = {}
         # The first nominator's clock starts now; if they don't nominate in time,
         # resolve_overdue auto-nominates for them.
         draft.lot_deadline = _now() + timedelta(seconds=draft.pick_seconds)
@@ -287,6 +288,24 @@ def _max_bid(budget: float, spent: float, filled: int, squad_size: int) -> float
     return round(budget - spent - (slots_left - 1) * MIN_BID, 1)
 
 
+def _resolve_lot(maxes: dict, incumbent) -> tuple:
+    """eBay-style proxy resolution. Given each contender's max bid for the lot,
+    return ``(leader_id, price)``: the leader is the highest max (the incumbent
+    keeps the lead on an exact tie), and the price is the runner-up's max plus the
+    increment, capped at the leader's max. A sole contender pays their own max
+    (the nominator's opening). ``maxes`` keys are manager-id strings."""
+    if not maxes:
+        return None, 0.0
+    top = max(maxes.values())
+    tied = sorted(m for m, v in maxes.items() if v == top)
+    leader = str(incumbent) if incumbent is not None and str(incumbent) in tied else tied[0]
+    others = [v for m, v in maxes.items() if m != leader]
+    if not others:
+        return leader, round(float(maxes[leader]), 1)
+    second = max(others)
+    return leader, round(min(float(maxes[leader]), float(second) + MIN_BID), 1)
+
+
 def _needed_roles(role_counts_mid: dict, quota: dict) -> set[str]:
     return {r for r, q in quota.items() if role_counts_mid.get(r, 0) < int(q)}
 
@@ -358,6 +377,7 @@ async def _award_lot(session, draft, picks_count) -> None:
     draft.lot_high_bidder_id = None
     draft.lot_nominator_id = None
     draft.lot_auto = False
+    draft.lot_max_bids = {}
     draft.current_pick = picks_count + 1
     draft.nomination_index += 1   # nomination rotates to the next manager
     draft.lot_deadline = None
@@ -403,6 +423,7 @@ async def _resolve_auction(session: AsyncSession, draft: FantasyDraft, fs) -> No
         draft.lot_high_bid = MIN_BID
         draft.lot_high_bidder_id = nominator
         draft.lot_auto = True
+        draft.lot_max_bids = {str(nominator): float(MIN_BID)}
         draft.lot_deadline = _now() + timedelta(seconds=draft.pick_seconds)
         return
 
@@ -444,12 +465,14 @@ async def nominate(session: AsyncSession, draft: FantasyDraft, fs, manager_id: s
     draft.lot_high_bid = ob
     draft.lot_high_bidder_id = manager_id
     draft.lot_auto = False
+    draft.lot_max_bids = {str(manager_id): ob}
     draft.lot_deadline = _now() + timedelta(seconds=draft.pick_seconds)
 
 
 async def place_bid(session: AsyncSession, draft: FantasyDraft, fs, manager_id: str, amount: float) -> None:
-    """Bid on the live lot. Must beat the current high bid and stay within the
-    bidder's role quota and max bid (budget held back to fill remaining slots)."""
+    """Set your max bid on the live lot. Every bid is a proxy max: the system bids
+    up to it, so the price settles at the runner-up's max plus the increment. Must
+    clear the next bid and stay within your role quota and affordability."""
     await resolve_overdue(session, draft, fs)
     if draft.type != "auction":
         raise ValueError("This isn't an auction draft.")
@@ -458,11 +481,14 @@ async def place_bid(session: AsyncSession, draft: FantasyDraft, fs, manager_id: 
     if draft.lot_player_id is None:
         raise ValueError("Nothing is up for auction right now.")
     mid = str(manager_id)
-    if str(draft.lot_high_bidder_id) == mid:
-        raise ValueError("You're already the top bidder.")
     amt = float(amount)
-    if amt <= float(draft.lot_high_bid or 0):
-        raise ValueError("Your bid has to beat the current bid.")
+    maxes = dict(draft.lot_max_bids or {})
+    own_max = float(maxes.get(mid, 0))
+    min_next = round(float(draft.lot_high_bid or 0) + MIN_BID, 1)
+    if amt < min_next:
+        raise ValueError(f"Bid at least {min_next:g}.")
+    if amt <= own_max:
+        raise ValueError("You've already set a max that high.")
     quota, squad_size, budget = _role_quota(fs), _squad_size(fs), _draft_budget(fs)
     pool, picks, taken, spent, filled, role_counts = await _auction_state(session, draft, fs)
     if filled.get(mid, 0) >= squad_size:
@@ -473,8 +499,11 @@ async def place_bid(session: AsyncSession, draft: FantasyDraft, fs, manager_id: 
     maxb = _max_bid(budget, spent.get(mid, 0.0), filled.get(mid, 0), squad_size)
     if amt > maxb:
         raise ValueError(f"You can bid at most {maxb:g} and still fill your squad.")
-    draft.lot_high_bid = amt
-    draft.lot_high_bidder_id = manager_id
+    maxes[mid] = amt
+    leader, price = _resolve_lot(maxes, draft.lot_high_bidder_id)
+    draft.lot_max_bids = maxes
+    draft.lot_high_bid = price
+    draft.lot_high_bidder_id = leader
     # Anti-snipe: a fresh bid resets the lot clock so others get a chance to reply.
     draft.lot_deadline = _now() + timedelta(seconds=draft.pick_seconds)
 
@@ -515,6 +544,8 @@ async def auction_view(session: AsyncSession, draft: FantasyDraft, fs, manager_i
             "auto": bool(draft.lot_auto),
             "deadline": draft.lot_deadline.isoformat() if draft.lot_deadline else None,
             "min_next_bid": min_next, "max_bid": my_max,
+            "my_max": float((draft.lot_max_bids or {}).get(me, 0)) or None,
+            "bidders": len(draft.lot_max_bids or {}),
             "i_can_bid": (hb != me) and (not role_full) and (filled.get(me, 0) < squad_size) and (my_max >= min_next),
         }
 

@@ -214,21 +214,24 @@ function LotCard({ lot, onBid }) {
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 12 }}>
         <span style={{ font: `800 30px ${DISP}`, color: 'var(--accent-strong)', fontVariantNumeric: 'tabular-nums' }}>{money(lot.high_bid)}</span>
-        <span style={{ font: `600 12px 'Hanken Grotesk'`, color: 'var(--dim)' }}>top bid · {lot.high_bidder_is_me ? 'you' : (lot.high_bidder || '—')}</span>
+        <span style={{ font: `600 12px 'Hanken Grotesk'`, color: 'var(--dim)' }}>top bid · {lot.high_bidder_is_me ? 'you' : (lot.high_bidder || '—')}{lot.bidders > 1 ? ` · ${lot.bidders} bidding` : ''}</span>
       </div>
 
       {lot.i_can_bid ? (
         <div style={{ marginTop: 12 }}>
+          {lot.my_max != null && <div style={{ font: `600 11px 'Hanken Grotesk'`, color: RED, marginBottom: 6 }}>Outbid — your max was {money(lot.my_max)}. Raise it to lead.</div>}
           <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
             <Field value={amount} onChange={e => setAmount(e.target.value)} type="number" inputMode="numeric" style={{ flex: 1, padding: '11px 12px' }} />
             <Btn variant="soft" onClick={() => bump(1)} style={{ padding: '11px 13px' }}>+1</Btn>
             <Btn variant="soft" onClick={() => bump(5)} style={{ padding: '11px 13px' }}>+5</Btn>
           </div>
-          <Btn full onClick={() => onBid(amt)} disabled={!valid} style={{ marginTop: 8 }}>Bid {money(amt)}</Btn>
-          <div style={{ font: `500 10.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 7, textAlign: 'center' }}>Min {money(lot.min_next_bid)} · your max {money(lot.max_bid)}</div>
+          <Btn full onClick={() => onBid(amt)} disabled={!valid} style={{ marginTop: 8 }}>Bid up to {money(amt)}</Btn>
+          <div style={{ font: `500 10.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 7, textAlign: 'center' }}>We bid up to your max for you. Min {money(lot.min_next_bid)} · you can afford {money(lot.max_bid)}</div>
         </div>
       ) : (
-        <div style={{ marginTop: 12, font: `600 12px 'Hanken Grotesk'`, color: lot.high_bidder_is_me ? GREEN : 'var(--faint)' }}>{blocked}</div>
+        <div style={{ marginTop: 12, font: `600 12px 'Hanken Grotesk'`, color: lot.high_bidder_is_me ? GREEN : 'var(--faint)' }}>
+          {blocked}{lot.high_bidder_is_me && lot.my_max != null ? ` Your max is ${money(lot.my_max)}.` : ''}
+        </div>
       )}
     </div>
   )

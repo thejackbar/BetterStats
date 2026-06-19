@@ -1295,6 +1295,9 @@ async def lifespan(app: FastAPI):
                 ADD COLUMN IF NOT EXISTS lot_deadline TIMESTAMPTZ,
                 ADD COLUMN IF NOT EXISTS lot_auto BOOLEAN NOT NULL DEFAULT false
         """))
+        await conn.execute(text(
+            "ALTER TABLE fantasy_drafts ADD COLUMN IF NOT EXISTS lot_max_bids JSONB NOT NULL DEFAULT '{}'"
+        ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS fantasy_draft_picks (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
