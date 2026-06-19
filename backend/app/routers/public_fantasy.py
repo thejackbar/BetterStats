@@ -1511,6 +1511,71 @@ async def notifications(token: str, request: Request, db: AsyncSession = Depends
             "title": f"{top[0]} is the top scorer",
             "body": f"{int(float(top[1]))} points across the season so far.",
         })
+
+    # Draft activity: your turn / the live auction lot, trade offers, waiver results.
+    draft_rows = (await db.execute(
+        select(FantasyLeague, FantasyDraft)
+        .join(FantasyLeagueMember, FantasyLeagueMember.league_id == FantasyLeague.id)
+        .outerjoin(FantasyDraft, FantasyDraft.league_id == FantasyLeague.id)
+        .where(FantasyLeagueMember.manager_id == mgr.id,
+               FantasyLeague.kind == "draft", FantasyLeague.fantasy_season_id == season.id)
+    )).all()
+    for lg, draft in draft_rows:
+        if draft is None or draft.status != "in_progress":
+            continue
+        if draft.type == "auction":
+            order = draft.draft_order or []
+            if draft.lot_player_id is None:
+                if order and str(order[draft.nomination_index % len(order)]) == str(mgr.id):
+                    feed.append({"id": f"draft-nom-{lg.id}", "tone": "accent", "badge": "!",
+                                 "title": "You're on the clock to nominate",
+                                 "body": f"Put a player up for auction in {lg.name}."})
+            else:
+                lp = await db.get(Player, draft.lot_player_id)
+                nm = lp.name if lp else "a player"
+                top_bid = float(draft.lot_high_bid or 0)
+                if str(draft.lot_high_bidder_id) == str(mgr.id):
+                    feed.append({"id": f"draft-lot-{lg.id}-{draft.lot_player_id}", "tone": "green", "badge": "▲",
+                                 "title": f"You lead the bidding on {nm}",
+                                 "body": f"Top bid ${top_bid:.0f} in {lg.name}."})
+                else:
+                    feed.append({"id": f"draft-lot-{lg.id}-{draft.lot_player_id}", "tone": "accent", "badge": "!",
+                                 "title": f"Bidding open on {nm}",
+                                 "body": f"Top bid ${top_bid:.0f} in {lg.name}. Get a bid in."})
+        else:
+            cur = (await db.execute(
+                select(FantasyDraftPick).where(
+                    FantasyDraftPick.draft_id == draft.id, FantasyDraftPick.pick_index == draft.current_pick)
+            )).scalar_one_or_none()
+            if cur and str(cur.manager_id) == str(mgr.id):
+                feed.append({"id": f"draft-clock-{lg.id}", "tone": "accent", "badge": "!",
+                             "title": "You're on the clock",
+                             "body": f"Make your pick in {lg.name}."})
+
+    incoming = (await db.execute(
+        select(FantasyTrade).join(FantasySquad, FantasySquad.id == FantasyTrade.receiver_squad_id)
+        .where(FantasySquad.manager_id == mgr.id, FantasyTrade.status == "proposed",
+               FantasyTrade.organisation_id == club.id)
+    )).scalars().all()
+    for t in incoming:
+        prop = await db.get(FantasySquad, t.proposer_squad_id)
+        feed.append({"id": f"trade-{t.id}", "tone": "accent", "badge": "+",
+                     "title": "New trade offer",
+                     "body": f"{prop.team_name if prop else 'A manager'} wants to trade. Open Manage team to respond."})
+
+    claims = (await db.execute(
+        select(FantasyWaiverClaim).where(
+            FantasyWaiverClaim.manager_id == mgr.id, FantasyWaiverClaim.organisation_id == club.id,
+            FantasyWaiverClaim.status.in_(["approved", "rejected"]))
+        .order_by(FantasyWaiverClaim.processed_at.desc()).limit(5)
+    )).scalars().all()
+    for c in claims:
+        addp = await db.get(Player, c.add_player_id)
+        ok = c.status == "approved"
+        feed.append({"id": f"waiver-{c.id}", "tone": "green" if ok else "amber", "badge": "▲" if ok else "▼",
+                     "title": f"Waiver {'granted' if ok else 'missed'}",
+                     "body": f"Your claim for {addp.name if addp else 'a player'} was {c.status}."})
+
     return {"notifications": feed}
 
 

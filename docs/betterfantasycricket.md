@@ -331,11 +331,15 @@ scope for v1.
 7. **Automation** — done. A daily settle job and a draft tick (advances snake
    auto-picks and auction lots/nominations).
 
-Remaining follow-ups: notifications-bell and BetterSocials share-card hooks; the
-public module price in `pricing.js`; and a full verify pass on a deployed
-database (the engine, drafts and member app could not be run in the build
-sandbox — the auction's pure budget/nomination maths are unit-checked, but the
-DB-bound bid/award/finalise flow needs a live run).
+The member notification feed now covers the draft (your turn to pick or nominate,
+the live auction lot, trade offers and waiver results) alongside the round / price
+/ rank items.
+
+Remaining follow-ups: BetterSocials share-card hooks; the public module price in
+`pricing.js`; and a full verify pass on a deployed database (the engine, drafts
+and member app could not be run in the build sandbox — the auction's pure
+budget/nomination maths are unit-checked, but the DB-bound bid/award/finalise
+flow needs a live run).
 
 ## Open defaults to confirm (non-blocking)
 
