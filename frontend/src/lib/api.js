@@ -1439,6 +1439,7 @@ export const api = {
   fantasyCreateDraftLeague: (seasonId, data) =>
     request(`/club-admin/fantasy/season/${seasonId}/draft-leagues`, { method: 'POST', body: JSON.stringify(data) }),
   fantasyStartDraft: (leagueId) => request(`/club-admin/fantasy/draft-leagues/${leagueId}/start`, { method: 'POST' }),
+  fantasyAdvanceDraft: (leagueId) => request(`/club-admin/fantasy/draft-leagues/${leagueId}/advance`, { method: 'POST' }),
   fantasyProcessWaivers: (leagueId) => request(`/club-admin/fantasy/draft-leagues/${leagueId}/process-waivers`, { method: 'POST' }),
   fantasySetRegistration: (seasonId, registration_open) =>
     request(`/club-admin/fantasy/season/${seasonId}/registration`, { method: 'POST', body: JSON.stringify({ registration_open }) }),

@@ -33,6 +33,7 @@ export default function FantasyLeagues() {
     catch (e) { fail(e) } finally { setBusy('') }
   }
   const start = async (id) => { setBusy(id); try { await api.fantasyStartDraft(id); flash('Draft started.'); await load() } catch (e) { fail(e) } finally { setBusy('') } }
+  const advance = async (id) => { setBusy(id); try { const r = await api.fantasyAdvanceDraft(id); flash(r.status === 'complete' ? 'Draft complete.' : 'Draft clock advanced.'); await load() } catch (e) { fail(e) } finally { setBusy('') } }
   const waivers = async (id) => { setBusy(id); try { const r = await api.fantasyProcessWaivers(id); flash(`Granted ${r.granted} waiver claims.`); await load() } catch (e) { fail(e) } finally { setBusy('') } }
 
   return (
@@ -88,6 +89,10 @@ export default function FantasyLeagues() {
                       {(!lg.draft_status || lg.draft_status === 'scheduled') && (
                         <button onClick={() => start(lg.id)} disabled={busy === lg.id || lg.members < 2}
                           className="px-3 py-1.5 rounded bg-pb-accent text-white text-xs font-medium disabled:opacity-50">Start draft</button>
+                      )}
+                      {lg.draft_status === 'in_progress' && (
+                        <button onClick={() => advance(lg.id)} disabled={busy === lg.id}
+                          className="px-3 py-1.5 rounded border pb-hairline text-xs disabled:opacity-50">Advance clock</button>
                       )}
                       {lg.draft_status === 'complete' && (
                         <button onClick={() => waivers(lg.id)} disabled={busy === lg.id}
