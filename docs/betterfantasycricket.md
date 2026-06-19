@@ -350,8 +350,10 @@ bid/award/finalise flow needs a live run).
 
 ## Open defaults to confirm (non-blocking)
 
-- Public price model for the module itself (the club-facing add-on price) — left
-  out of `pricing.js` until set, so no number is invented.
+- Public price: **$49/year, standalone** (set Jun 2026). It's a `FANTASY` constant
+  in `frontend/src/data/pricing.js`, deliberately kept out of `PRICED_MODULES` and
+  the bundle-discount maths, and listed on its own card on the Pricing page (so
+  ALL_IN / the bundle tiers / the competitor comparison are unchanged).
 - Exact budget (default 100.0), off-role multiplier (default 1.5), transfer hit
   (default 4) and milestone bonuses — all live in config and easy to tune once a
   club has played a season.

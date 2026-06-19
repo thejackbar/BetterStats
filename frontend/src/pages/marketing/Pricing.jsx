@@ -4,7 +4,7 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import PricingCalculator from '../../components/marketing/PricingCalculator'
-import { CORE, PRICED_MODULES, ALL_IN, COMPETITOR_STACK, COMPETITOR_TOTAL, SAVING, IMPORT_NOTE } from '../../data/pricing'
+import { CORE, PRICED_MODULES, FANTASY, ALL_IN, COMPETITOR_STACK, COMPETITOR_TOTAL, SAVING, IMPORT_NOTE } from '../../data/pricing'
 import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 
@@ -105,6 +105,22 @@ function PriceList() {
                 <p className="text-[11px] text-pb-faint">/ year</p>
               </div>
             ))}
+          </div>
+        </Reveal>
+        <Reveal>
+          <div className="mt-6 max-w-[560px] mx-auto">
+            <div className="surface p-5 flex items-center gap-4">
+              <img src={FANTASY.logo} alt="" className="w-12 h-12 rounded-lg flex-none" />
+              <div className="flex-1 text-left">
+                <p className="text-sm font-semibold"><ModuleWordmark name={FANTASY.name} accent={FANTASY.accent} /></p>
+                <p className="text-[12px] text-pb-dim mt-0.5">{FANTASY.blurb}</p>
+                <p className="text-[10px] text-pb-faint mt-1">Standalone add-on, priced on its own (not part of the bundle).</p>
+              </div>
+              <div className="text-right flex-none">
+                <p className="text-2xl font-bold tabular-nums">${FANTASY.price}</p>
+                <p className="text-[11px] text-pb-faint">/ year</p>
+              </div>
+            </div>
           </div>
         </Reveal>
       </div>
@@ -212,6 +228,7 @@ function PricingFAQ() {
     { q: 'How much does it cost?', a: "BetterStats is $399 a year and includes your public stats site. BetterSelect, BetterSocials and BetterAdmin are $149 a year each, and BetterIQ is $249. Bundle two or more modules and a set discount applies, up to $146 off the full set, which brings BetterStats plus every module to $949 a year." },
     { q: 'Does the price change based on club size?', a: "No. Every price is a flat rate per club. One team or fifty teams, juniors and seniors, men's and women's, the price is the same. There's no per-team, per-player or per-grade pricing." },
     { q: 'Can I add a single module?', a: "Yes. For a small additional annual charge, any single module can be added to your current subscription." },
+    { q: 'Is there a fantasy game?', a: "Yes. BetterFantasyCricket is a standalone add-on at $49 a year. It runs a club fantasy competition scored off your real games, with salary-cap and draft formats, so members and supporters can play along all season. It's priced on its own, separate from the module bundle." },
     { q: 'Monthly or annual?', a: "Better Cricket is an annual licence, billed once a year." },
     { q: 'Can we add modules later?', a: "Yes. You can add new modules at any time and the entitlements switch on immediately. Adding a module is an annual commitment." },
     { q: 'Are there any setup or migration fees?', a: "Up to two hours of dedicated support is included in your first year on BetterStats. If all of your club's match history is already uploaded, you should be up and running in no time, and we'll guide you through merging players and grades if needed." },
