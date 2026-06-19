@@ -13,15 +13,23 @@ export default function Share({ token, squad, nav }) {
   const [round, setRound] = useState(null)
   const [ladder, setLadder] = useState(null)
   const [leagues, setLeagues] = useState([])
+  const [draftLeagues, setDraftLeagues] = useState([])
   const gwRef = useRef(null)
   const storyRef = useRef(null)
+  const draftRef = useRef(null)
   const [busy, setBusy] = useState('')
 
   useEffect(() => {
     api.fanRound(token).then(setRound).catch(() => {})
     api.fanLadder(token).then(d => setLadder(d.ladder || [])).catch(() => {})
     api.fanLeagues(token).then(d => setLeagues(d.leagues || [])).catch(() => {})
+    api.fanDraftLeagues(token).then(d => setDraftLeagues(d.leagues || [])).catch(() => {})
   }, [token])
+
+  // Feature a draft league worth recruiting to: a joinable one first, else any.
+  const draftLg = draftLeagues.find(l => (!l.draft_status || l.draft_status === 'scheduled') && (l.capacity || 0) > (l.members || 0))
+    || draftLeagues.find(l => l.joined) || draftLeagues[0]
+  const draftSpots = draftLg ? Math.max(0, (draftLg.capacity || 0) - (draftLg.members || 0)) : 0
 
   const total = ladder?.length || 0
   const rank = squad?.overall_rank
@@ -141,6 +149,41 @@ export default function Share({ token, squad, nav }) {
           <Btn full disabled={busy === 'recruit'} onClick={() => exportCard(storyRef, 'recruit', 300, 533)}>{busy === 'recruit' ? 'Rendering…' : 'Share invite'}</Btn>
         </div>
       </div>
+
+      {/* Draft league recruit */}
+      {draftLg && (
+        <div style={{ paddingTop: 24 }}>
+          <div style={{ font: `600 11px 'Hanken Grotesk'`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 10 }}>Recruit to your draft</div>
+          <div style={{ overflowX: 'auto' }}>
+            <div ref={draftRef} data-theme="dark" style={{ position: 'relative', width: 300, height: 533, background: '#0a0d14', borderRadius: 22, overflow: 'hidden', boxShadow: 'var(--frame-shadow)' }}>
+              <Aurora style={{ inset: '-10%', height: 'auto', bottom: '-10%' }} opacity={0.72} blur={50} blobs={[
+                { c: 'var(--pb-accent, #8C82F0)', a: 'bfcAuroraC', s: 18, pos: { width: '70%', height: '40%', left: '-10%', top: '-4%' } },
+                { c: '#00E58E', a: 'bfcAuroraB', s: 23, pos: { width: '65%', height: '38%', right: '-10%', top: '34%' } },
+                { c: '#22D3EE', a: 'bfcAuroraD', s: 20, pos: { width: '75%', height: '40%', left: '0%', bottom: '-8%' } },
+              ]} />
+              <div style={{ position: 'relative', height: '100%', padding: '26px 24px', display: 'flex', flexDirection: 'column', textAlign: 'center', alignItems: 'center', fontFamily: "'Hanken Grotesk',sans-serif" }}>
+                {logoUrl
+                  ? <img src={logoUrl} alt="" style={{ width: 48, height: 48, borderRadius: 14, objectFit: 'contain', background: '#fff', padding: 6 }} />
+                  : <div style={{ width: 48, height: 48, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#0a0d14', font: `800 16px ${DISP}` }}>{crest}</div>}
+                <div style={{ font: `600 10px 'Hanken Grotesk'`, letterSpacing: '.24em', textTransform: 'uppercase', color: 'rgba(255,255,255,.7)', marginTop: 16 }}>{club?.name || 'Club'} Fantasy · Draft</div>
+                <div style={{ font: `800 40px/0.95 ${DISP}`, textTransform: 'uppercase', color: '#fff', marginTop: 14 }}>Draft your<br />own squad</div>
+                <div style={{ font: `500 13px 'Hanken Grotesk'`, color: 'rgba(255,255,255,.78)', marginTop: 12, lineHeight: 1.5 }}>{draftLg.scoring_type === 'h2h' ? 'Go head to head every round, all season long.' : 'Own your players and rack up points all season.'}</div>
+                <div style={{ marginTop: 'auto', width: '100%', background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.16)', borderRadius: 14, padding: 14 }}>
+                  <div style={{ font: `700 9px 'Hanken Grotesk'`, letterSpacing: '.16em', textTransform: 'uppercase', color: 'rgba(255,255,255,.6)' }}>Join the league</div>
+                  <div style={{ font: `800 24px ${DISP}`, textTransform: 'uppercase', color: '#fff', marginTop: 4, lineHeight: 1.05 }}>{draftLg.name}</div>
+                  <div style={{ font: `600 11px 'Hanken Grotesk'`, color: 'rgba(255,255,255,.65)', marginTop: 4, textTransform: 'capitalize' }}>{draftLg.draft_type} draft · {draftLg.scoring_type === 'h2h' ? 'head to head' : 'total points'}</div>
+                  <div style={{ font: `700 11px 'Hanken Grotesk'`, color: draftSpots > 0 ? '#00E58E' : 'rgba(255,255,255,.5)', marginTop: 6 }}>{draftSpots > 0 ? `${draftSpots} spot${draftSpots === 1 ? '' : 's'} left` : 'League full'}</div>
+                </div>
+                <div style={{ marginTop: 14, width: '100%', background: 'var(--pb-accent, #8C82F0)', color: '#11102a', padding: 13, borderRadius: 12, font: `800 14px ${DISP}`, letterSpacing: '.04em', textTransform: 'uppercase' }}>Join in the app →</div>
+                <div style={{ font: `600 10px 'Hanken Grotesk'`, color: 'rgba(255,255,255,.5)', marginTop: 10 }}>{host}/fantasy</div>
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <Btn full disabled={busy === 'draft-invite'} onClick={() => exportCard(draftRef, 'draft-invite', 300, 533)}>{busy === 'draft-invite' ? 'Rendering…' : 'Share draft invite'}</Btn>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

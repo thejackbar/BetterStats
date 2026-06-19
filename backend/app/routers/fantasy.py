@@ -733,7 +733,8 @@ async def _load_draft_league(db, club, league_id) -> FantasyLeague:
 
 @router.post("/draft-leagues/{league_id}/start")
 async def start_draft(league_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
-    """Kick off the snake draft for a league. The pick clock starts on pick one."""
+    """Kick off the draft for a league. Snake starts the pick-one clock; auction
+    opens the first nomination. Both run async with the clock auto-advancing."""
     lg = await _load_draft_league(db, club, league_id)
     fs = await db.get(FantasySeason, lg.fantasy_season_id)
     try:
@@ -752,3 +753,18 @@ async def process_waivers(league_id: str, club=Depends(get_current_club), db: As
     granted = await fantasy_draft.process_waivers(db, lg, fs)
     await db.commit()
     return {"granted": granted}
+
+
+@router.post("/draft-leagues/{league_id}/advance")
+async def advance_draft(league_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Advance a running draft's clock now: snake auto-picks and auction lot awards
+    / auto-nominations that are overdue settle immediately, rather than waiting for
+    the scheduled tick. Handy for running a draft session or clearing a stall."""
+    lg = await _load_draft_league(db, club, league_id)
+    fs = await db.get(FantasySeason, lg.fantasy_season_id)
+    draft = (await db.execute(select(FantasyDraft).where(FantasyDraft.league_id == lg.id))).scalar_one_or_none()
+    if draft is None:
+        raise HTTPException(status_code=400, detail="The draft hasn't started.")
+    await fantasy_draft.resolve_overdue(db, draft, fs)
+    await db.commit()
+    return {"ok": True, "status": draft.status}

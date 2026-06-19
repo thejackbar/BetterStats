@@ -1197,11 +1197,20 @@ export const api = {
   fanDraftState: (token, leagueId) => request(`/public/fantasy/${token}/draft/${leagueId}`),
   fanDraftPick: (token, leagueId, player_id) =>
     request(`/public/fantasy/${token}/draft/${leagueId}/pick`, { method: 'POST', body: JSON.stringify({ player_id }) }),
+  fanDraftNominate: (token, leagueId, player_id, opening_bid) =>
+    request(`/public/fantasy/${token}/draft/${leagueId}/nominate`, { method: 'POST', body: JSON.stringify({ player_id, opening_bid }) }),
+  fanDraftBid: (token, leagueId, amount) =>
+    request(`/public/fantasy/${token}/draft/${leagueId}/bid`, { method: 'POST', body: JSON.stringify({ amount }) }),
   fanDraftWishlist: (token, leagueId, player_ids) =>
     request(`/public/fantasy/${token}/draft/${leagueId}/wishlist`, { method: 'PUT', body: JSON.stringify({ player_ids }) }),
   fanDraftLadder: (token, leagueId) => request(`/public/fantasy/${token}/draft/${leagueId}/ladder`),
   fanDraftWaiver: (token, leagueId, add_player_id, drop_player_id) =>
     request(`/public/fantasy/${token}/draft/${leagueId}/waiver`, { method: 'POST', body: JSON.stringify({ add_player_id, drop_player_id }) }),
+  fanDraftManage: (token, leagueId) => request(`/public/fantasy/${token}/draft/${leagueId}/manage`),
+  fanDraftTrade: (token, leagueId, receiver_squad_id, give, get) =>
+    request(`/public/fantasy/${token}/draft/${leagueId}/trade`, { method: 'POST', body: JSON.stringify({ receiver_squad_id, give, get }) }),
+  fanRespondTrade: (token, tradeId, accept) =>
+    request(`/public/fantasy/${token}/trades/${tradeId}/respond`, { method: 'POST', body: JSON.stringify({ accept }) }),
 
   // ─── BetterSelect: Selection (lineups) ──────────────────
   bsSelectionOverview: () => request('/selection/overview'),
@@ -1430,6 +1439,7 @@ export const api = {
   fantasyCreateDraftLeague: (seasonId, data) =>
     request(`/club-admin/fantasy/season/${seasonId}/draft-leagues`, { method: 'POST', body: JSON.stringify(data) }),
   fantasyStartDraft: (leagueId) => request(`/club-admin/fantasy/draft-leagues/${leagueId}/start`, { method: 'POST' }),
+  fantasyAdvanceDraft: (leagueId) => request(`/club-admin/fantasy/draft-leagues/${leagueId}/advance`, { method: 'POST' }),
   fantasyProcessWaivers: (leagueId) => request(`/club-admin/fantasy/draft-leagues/${leagueId}/process-waivers`, { method: 'POST' }),
   fantasySetRegistration: (seasonId, registration_open) =>
     request(`/club-admin/fantasy/season/${seasonId}/registration`, { method: 'POST', body: JSON.stringify({ registration_open }) }),

@@ -1271,11 +1271,33 @@ async def lifespan(app: FastAPI):
                 draft_order JSONB NOT NULL DEFAULT '[]',
                 rounds INTEGER NOT NULL DEFAULT 12,
                 started_at TIMESTAMPTZ,
+                nomination_index INTEGER NOT NULL DEFAULT 0,
+                lot_player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                lot_high_bid NUMERIC(8,1),
+                lot_high_bidder_id UUID REFERENCES fantasy_managers(id) ON DELETE SET NULL,
+                lot_nominator_id UUID REFERENCES fantasy_managers(id) ON DELETE SET NULL,
+                lot_deadline TIMESTAMPTZ,
+                lot_auto BOOLEAN NOT NULL DEFAULT false,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 CONSTRAINT uq_fantasy_draft_league UNIQUE (league_id)
             )
         """))
+        # Auction-mode columns (migration 089) for a fantasy_drafts table that
+        # pre-dates them — additive, so snake drafts are untouched.
+        await conn.execute(text("""
+            ALTER TABLE fantasy_drafts
+                ADD COLUMN IF NOT EXISTS nomination_index INTEGER NOT NULL DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS lot_player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                ADD COLUMN IF NOT EXISTS lot_high_bid NUMERIC(8,1),
+                ADD COLUMN IF NOT EXISTS lot_high_bidder_id UUID REFERENCES fantasy_managers(id) ON DELETE SET NULL,
+                ADD COLUMN IF NOT EXISTS lot_nominator_id UUID REFERENCES fantasy_managers(id) ON DELETE SET NULL,
+                ADD COLUMN IF NOT EXISTS lot_deadline TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS lot_auto BOOLEAN NOT NULL DEFAULT false
+        """))
+        await conn.execute(text(
+            "ALTER TABLE fantasy_drafts ADD COLUMN IF NOT EXISTS lot_max_bids JSONB NOT NULL DEFAULT '{}'"
+        ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS fantasy_draft_picks (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

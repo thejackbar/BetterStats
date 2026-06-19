@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback } from 'react'
 import BetterFantasyLayout from '../../../components/admin/BetterFantasyLayout'
 import { api } from '../../../lib/api'
 
-// Admin: create draft leagues, watch them fill, start the snake draft and run
-// the waiver wire. Members join and draft from the public link. The salary-cap
-// club ladder and member-created mini-leagues need no admin setup, so this page
-// is just the draft side.
+// Admin: create draft leagues (snake or auction), watch them fill, start the
+// draft and run the waiver wire. Members join and draft from the public link.
+// The salary-cap club ladder and member-created mini-leagues need no admin
+// setup, so this page is just the draft side.
 
 export default function FantasyLeagues() {
   const [season, setSeason] = useState(null)
@@ -33,6 +33,7 @@ export default function FantasyLeagues() {
     catch (e) { fail(e) } finally { setBusy('') }
   }
   const start = async (id) => { setBusy(id); try { await api.fantasyStartDraft(id); flash('Draft started.'); await load() } catch (e) { fail(e) } finally { setBusy('') } }
+  const advance = async (id) => { setBusy(id); try { const r = await api.fantasyAdvanceDraft(id); flash(r.status === 'complete' ? 'Draft complete.' : 'Draft clock advanced.'); await load() } catch (e) { fail(e) } finally { setBusy('') } }
   const waivers = async (id) => { setBusy(id); try { const r = await api.fantasyProcessWaivers(id); flash(`Granted ${r.granted} waiver claims.`); await load() } catch (e) { fail(e) } finally { setBusy('') } }
 
   return (
@@ -57,7 +58,7 @@ export default function FantasyLeagues() {
                 <select className="w-full rounded border pb-hairline bg-pb-surface px-3 py-1.5"
                   value={form.draft_type} onChange={e => setForm({ ...form, draft_type: e.target.value })}>
                   <option value="snake">Snake</option>
-                  <option value="auction" disabled>Auction (coming soon)</option>
+                  <option value="auction">Auction</option>
                 </select>
               </label>
               <label className="text-sm">
@@ -88,6 +89,10 @@ export default function FantasyLeagues() {
                       {(!lg.draft_status || lg.draft_status === 'scheduled') && (
                         <button onClick={() => start(lg.id)} disabled={busy === lg.id || lg.members < 2}
                           className="px-3 py-1.5 rounded bg-pb-accent text-white text-xs font-medium disabled:opacity-50">Start draft</button>
+                      )}
+                      {lg.draft_status === 'in_progress' && (
+                        <button onClick={() => advance(lg.id)} disabled={busy === lg.id}
+                          className="px-3 py-1.5 rounded border pb-hairline text-xs disabled:opacity-50">Advance clock</button>
                       )}
                       {lg.draft_status === 'complete' && (
                         <button onClick={() => waivers(lg.id)} disabled={busy === lg.id}

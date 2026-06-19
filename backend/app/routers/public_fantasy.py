@@ -1511,6 +1511,71 @@ async def notifications(token: str, request: Request, db: AsyncSession = Depends
             "title": f"{top[0]} is the top scorer",
             "body": f"{int(float(top[1]))} points across the season so far.",
         })
+
+    # Draft activity: your turn / the live auction lot, trade offers, waiver results.
+    draft_rows = (await db.execute(
+        select(FantasyLeague, FantasyDraft)
+        .join(FantasyLeagueMember, FantasyLeagueMember.league_id == FantasyLeague.id)
+        .outerjoin(FantasyDraft, FantasyDraft.league_id == FantasyLeague.id)
+        .where(FantasyLeagueMember.manager_id == mgr.id,
+               FantasyLeague.kind == "draft", FantasyLeague.fantasy_season_id == season.id)
+    )).all()
+    for lg, draft in draft_rows:
+        if draft is None or draft.status != "in_progress":
+            continue
+        if draft.type == "auction":
+            order = draft.draft_order or []
+            if draft.lot_player_id is None:
+                if order and str(order[draft.nomination_index % len(order)]) == str(mgr.id):
+                    feed.append({"id": f"draft-nom-{lg.id}", "tone": "accent", "badge": "!",
+                                 "title": "You're on the clock to nominate",
+                                 "body": f"Put a player up for auction in {lg.name}."})
+            else:
+                lp = await db.get(Player, draft.lot_player_id)
+                nm = lp.name if lp else "a player"
+                top_bid = float(draft.lot_high_bid or 0)
+                if str(draft.lot_high_bidder_id) == str(mgr.id):
+                    feed.append({"id": f"draft-lot-{lg.id}-{draft.lot_player_id}", "tone": "green", "badge": "▲",
+                                 "title": f"You lead the bidding on {nm}",
+                                 "body": f"Top bid ${top_bid:.0f} in {lg.name}."})
+                else:
+                    feed.append({"id": f"draft-lot-{lg.id}-{draft.lot_player_id}", "tone": "accent", "badge": "!",
+                                 "title": f"Bidding open on {nm}",
+                                 "body": f"Top bid ${top_bid:.0f} in {lg.name}. Get a bid in."})
+        else:
+            cur = (await db.execute(
+                select(FantasyDraftPick).where(
+                    FantasyDraftPick.draft_id == draft.id, FantasyDraftPick.pick_index == draft.current_pick)
+            )).scalar_one_or_none()
+            if cur and str(cur.manager_id) == str(mgr.id):
+                feed.append({"id": f"draft-clock-{lg.id}", "tone": "accent", "badge": "!",
+                             "title": "You're on the clock",
+                             "body": f"Make your pick in {lg.name}."})
+
+    incoming = (await db.execute(
+        select(FantasyTrade).join(FantasySquad, FantasySquad.id == FantasyTrade.receiver_squad_id)
+        .where(FantasySquad.manager_id == mgr.id, FantasyTrade.status == "proposed",
+               FantasyTrade.organisation_id == club.id)
+    )).scalars().all()
+    for t in incoming:
+        prop = await db.get(FantasySquad, t.proposer_squad_id)
+        feed.append({"id": f"trade-{t.id}", "tone": "accent", "badge": "+",
+                     "title": "New trade offer",
+                     "body": f"{prop.team_name if prop else 'A manager'} wants to trade. Open Manage team to respond."})
+
+    claims = (await db.execute(
+        select(FantasyWaiverClaim).where(
+            FantasyWaiverClaim.manager_id == mgr.id, FantasyWaiverClaim.organisation_id == club.id,
+            FantasyWaiverClaim.status.in_(["approved", "rejected"]))
+        .order_by(FantasyWaiverClaim.processed_at.desc()).limit(5)
+    )).scalars().all()
+    for c in claims:
+        addp = await db.get(Player, c.add_player_id)
+        ok = c.status == "approved"
+        feed.append({"id": f"waiver-{c.id}", "tone": "green" if ok else "amber", "badge": "▲" if ok else "▼",
+                     "title": f"Waiver {'granted' if ok else 'missed'}",
+                     "body": f"Your claim for {addp.name if addp else 'a player'} was {c.status}."})
+
     return {"notifications": feed}
 
 
@@ -1635,10 +1700,15 @@ async def draft_state(token: str, league_id: str, request: Request, db: AsyncSes
     lg = await _draft_league(db, club, season, league_id)
     draft = await _draft_for(db, lg.id)
     if draft is None:
-        return {"status": "not_started", "scoring_type": lg.scoring_type}
+        return {"status": "not_started", "scoring_type": lg.scoring_type, "draft_type": lg.draft_type}
     await fantasy_draft.resolve_overdue(db, draft, season)
     await db.commit()
     draft = await _draft_for(db, lg.id)
+
+    if draft.type == "auction":
+        view = await fantasy_draft.auction_view(db, draft, season, str(mgr.id))
+        view["scoring_type"] = lg.scoring_type
+        return view
 
     rules = season.rules or DEFAULT_RULES
     quota = rules.get("role_quota", DEFAULT_RULES["role_quota"])
@@ -1661,8 +1731,12 @@ async def draft_state(token: str, league_id: str, request: Request, db: AsyncSes
             my_counts[r] = my_counts.get(r, 0) + 1
 
     cur = picks[draft.current_pick] if draft.current_pick < len(picks) else None
+    wl_ids = (await db.execute(
+        select(FantasyDraftWishlist.player_ids).where(
+            FantasyDraftWishlist.draft_id == draft.id, FantasyDraftWishlist.manager_id == mgr.id)
+    )).scalar_one_or_none() or []
     return {
-        "status": draft.status, "scoring_type": lg.scoring_type,
+        "status": draft.status, "scoring_type": lg.scoring_type, "draft_type": draft.type,
         "order": [mgr_names.get(m, "?") for m in (draft.draft_order or [])],
         "current_pick": draft.current_pick,
         "on_clock": None if not cur else {
@@ -1678,6 +1752,8 @@ async def draft_state(token: str, league_id: str, request: Request, db: AsyncSes
             for p in picks if p.player_id
         ],
         "my_role_counts": my_counts, "quota": quota,
+        "my_wishlist": [{"player_id": str(pid), "name": pool.get(str(pid), {}).get("name", "?"),
+                         "role": pool.get(str(pid), {}).get("role", "")} for pid in wl_ids],
         "available": sorted(
             [{"player_id": pid, "name": v["name"], "role": v["role"], "price": v["price"]}
              for pid, v in pool.items() if pid not in taken],
@@ -1702,6 +1778,53 @@ async def draft_pick(token: str, league_id: str, body: DraftPick, request: Reque
     rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
     try:
         await fantasy_draft.make_pick(db, draft, season, str(mgr.id), body.player_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+class Nomination(BaseModel):
+    player_id: str
+    opening_bid: Optional[float] = None
+
+
+@router.post("/{token}/draft/{league_id}/nominate")
+async def auction_nominate(token: str, league_id: str, body: Nomination, request: Request, db: AsyncSession = Depends(get_db)):
+    """Auction: put a player up for bidding (you become the opening high bidder)."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+    draft = await _draft_for(db, lg.id)
+    if draft is None:
+        raise HTTPException(status_code=400, detail="The draft hasn't started.")
+    rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
+    try:
+        await fantasy_draft.nominate(db, draft, season, str(mgr.id), body.player_id, body.opening_bid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+class Bid(BaseModel):
+    amount: float
+
+
+@router.post("/{token}/draft/{league_id}/bid")
+async def auction_bid(token: str, league_id: str, body: Bid, request: Request, db: AsyncSession = Depends(get_db)):
+    """Auction: bid on the player currently up for auction."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+    draft = await _draft_for(db, lg.id)
+    if draft is None:
+        raise HTTPException(status_code=400, detail="The draft hasn't started.")
+    rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
+    try:
+        await fantasy_draft.place_bid(db, draft, season, str(mgr.id), body.amount)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -1751,6 +1874,94 @@ async def draft_ladder(token: str, league_id: str, request: Request, db: AsyncSe
         {"rank": i, "team_name": tn, "manager": dn, "points": float(pts)}
         for i, (tn, dn, pts) in enumerate(rows, start=1)
     ]}
+
+
+@router.get("/{token}/draft/{league_id}/manage")
+async def draft_manage(token: str, league_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """In-season management for a completed draft league: my squad, the other
+    squads' rosters (for trades), the unowned pool (for waivers), my pending
+    waiver claims and any trade offers in or out."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+
+    pool_rows = (await db.execute(
+        select(FantasyPoolPlayer.player_id, Player.name, FantasyPoolPlayer.role, FantasyPoolPlayer.current_price)
+        .join(Player, Player.id == FantasyPoolPlayer.player_id)
+        .where(FantasyPoolPlayer.fantasy_season_id == season.id, FantasyPoolPlayer.is_available.is_(True))
+    )).all()
+    pool = {str(pid): {"name": nm, "role": role, "price": float(pr)} for pid, nm, role, pr in pool_rows}
+
+    squads = (await db.execute(select(FantasySquad).where(FantasySquad.league_id == lg.id))).scalars().all()
+    mgr_names = {str(m.id): m.display_name for m in (await db.execute(
+        select(FantasyManager).where(FantasyManager.organisation_id == club.id))).scalars().all()}
+    sp_rows = (await db.execute(
+        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id.in_([s.id for s in squads]))
+    )).scalars().all() if squads else []
+    by_squad: dict[str, list] = {}
+    owned: set[str] = set()
+    for sp in sp_rows:
+        by_squad.setdefault(str(sp.squad_id), []).append(sp)
+        owned.add(str(sp.player_id))
+
+    def player_obj(sp):
+        info = pool.get(str(sp.player_id), {})
+        return {"player_id": str(sp.player_id), "name": info.get("name", "?"), "role": sp.role,
+                "is_captain": sp.is_captain, "is_vice_captain": sp.is_vice_captain}
+
+    my_squad, squads_out = None, []
+    for s in squads:
+        obj = {"squad_id": str(s.id), "team_name": s.team_name,
+               "manager": mgr_names.get(str(s.manager_id), "?"), "is_me": str(s.manager_id) == str(mgr.id),
+               "players": [player_obj(sp) for sp in by_squad.get(str(s.id), [])]}
+        squads_out.append(obj)
+        if obj["is_me"]:
+            my_squad = obj
+    my_squad_id = my_squad["squad_id"] if my_squad else None
+
+    unowned = sorted(
+        [{"player_id": pid, "name": v["name"], "role": v["role"], "price": v["price"]}
+         for pid, v in pool.items() if pid not in owned],
+        key=lambda x: x["price"], reverse=True,
+    )
+
+    wv = (await db.execute(
+        select(FantasyWaiverClaim).where(
+            FantasyWaiverClaim.league_id == lg.id, FantasyWaiverClaim.manager_id == mgr.id)
+        .order_by(FantasyWaiverClaim.created_at.desc())
+    )).scalars().all()
+    my_waivers = [{
+        "id": str(w.id), "status": w.status,
+        "add": pool.get(str(w.add_player_id), {}).get("name", "?"),
+        "drop": pool.get(str(w.drop_player_id), {}).get("name", "?") if w.drop_player_id else None,
+    } for w in wv]
+
+    squad_team = {str(s.id): s.team_name for s in squads}
+    trade_rows = (await db.execute(
+        select(FantasyTrade).where(FantasyTrade.league_id == lg.id, FantasyTrade.status == "proposed")
+    )).scalars().all()
+
+    def trade_obj(t):
+        give = (t.offer or {}).get("give", [])
+        get = (t.offer or {}).get("get", [])
+        return {"id": str(t.id),
+                "from": squad_team.get(str(t.proposer_squad_id), "?"),
+                "to": squad_team.get(str(t.receiver_squad_id), "?"),
+                "give": [pool.get(str(p), {}).get("name", "?") for p in give],
+                "get": [pool.get(str(p), {}).get("name", "?") for p in get]}
+
+    return {
+        "scoring_type": lg.scoring_type,
+        "my_squad": my_squad,
+        "squads": squads_out,
+        "unowned": unowned,
+        "my_waivers": my_waivers,
+        "trades": {
+            "incoming": [trade_obj(t) for t in trade_rows if str(t.receiver_squad_id) == my_squad_id],
+            "outgoing": [trade_obj(t) for t in trade_rows if str(t.proposer_squad_id) == my_squad_id],
+        },
+    }
 
 
 class WaiverBody(BaseModel):

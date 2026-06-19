@@ -1,9 +1,8 @@
 # BetterFantasyCricket — design and build spec
 
-Status: shipped (v8.19.x). Salary-cap and snake-draft modes are both live, end
-to end (admin setup, the priced pool and rounds, member play, settlement, the
-ladders, mini-leagues, waivers and trades). Auction drafts are the one piece
-modelled but not yet runnable. Branch `claude/gallant-ritchie-xxh4bz`.
+Status: shipped (v8.21.x). Salary-cap, snake-draft and auction-draft modes are
+all live, end to end (admin setup, the priced pool and rounds, member play,
+settlement, the ladders, mini-leagues, the draft rooms, waivers and trades).
 
 BetterFantasyCricket is a standalone module that runs an internal fantasy
 cricket competition inside a single club, scored off the club's own real games.
@@ -181,6 +180,26 @@ floor(pool / 12) teams).
   system auto-picks the manager's highest-ranked still-available player (snake) or
   passes/min-bids (auction). Managers set a ranked wishlist beforehand to drive
   auto-picks.
+- **Auction mechanics (as built)**: managers take turns nominating one player and
+  opening the bidding. The nominator is the opening high bidder, so an uncontested
+  lot is theirs and the clock can never deadlock. Bidding is **eBay-style proxy**:
+  every bid is a max the system bids up to, so the price settles at the runner-up's
+  max plus the increment (capped at the leader's max) and a manager can win for
+  less than they were willing to pay. Each bid resets the lot's anti-snipe clock so
+  the rest get a chance to reply; the high bidder when it lapses wins at the settled
+  price. A manager's **max bid is held back** by the floor bid for each still-empty
+  slot, so they can never strand themselves with an unfillable squad; role quotas
+  are enforced as they buy. Per-manager budget is **derived from the lots already
+  won** (no extra table); the per-lot proxy maxes live in `fantasy_drafts.lot_max_bids`
+  (migration 090), cleared when the lot settles. If a nominator's clock lapses, the
+  system auto-nominates their top wishlist player, or the priciest still-available
+  player in a role they still need, at the floor bid. The lot clock defaults to one
+  hour (`rules["auction_lot_seconds"]`, vs the snake per-pick clock); the daily
+  settle job's draft tick advances lapsed lots and nominations. Each settled lot is
+  appended to `fantasy_draft_picks` (winner + `bid_amount`), then the shared
+  finalisation turns every manager's lots into a squad (captain = priciest buy,
+  leftover budget kept) and the league plays out on the same ladder/waiver/trade
+  machinery as snake.
 - **In-season**: a waiver wire for unowned and dropped players with reverse-ladder
   priority, processed once a round; plus manager-to-manager trades (propose,
   accept or reject, optional admin veto window).
@@ -250,6 +269,10 @@ Shared spine and salary cap (phase 1 migration):
 Draft mechanics (draft phase migration):
 
 - `fantasy_drafts` — per draft league: type, status, pick clock, order, timing.
+  Auction adds (migration 089) the live-lot state: `nomination_index` (whose turn
+  to nominate), `lot_player_id` / `lot_high_bid` / `lot_high_bidder_id` /
+  `lot_nominator_id` / `lot_deadline` (the player up for auction, its running bid
+  and anti-snipe clock) and `lot_auto` (auto-nominated by the clock).
 - `fantasy_draft_picks` — pick index, manager, player, deadline, auto-picked flag,
   bid amount (auction).
 - `fantasy_waiver_claims` — add/drop, priority, status, processed round.
@@ -272,8 +295,9 @@ Draft mechanics (draft phase migration):
 
 Member (public, link + PIN):
 - Build / edit squad, transfers and chips, my team and round breakdown, the club
-  ladder, mini-leagues (create, join, view), fixtures and player prices, draft
-  room (async picks), waivers and trades.
+  ladder, mini-leagues (create, join, view), fixtures and player prices, the draft
+  rooms (snake on-the-clock picks; auction nominate-and-bid), a ranked auto-pick
+  wishlist, and a post-draft Manage team screen (waiver wire + one-for-one trades).
 
 Admin (gated, `manage_fantasy`):
 - Enable the module and create the season, choose grades, review and override
@@ -304,20 +328,36 @@ scope for v1.
    transfers, chips, the club ladder, mini-leagues, per-round snapshots.
 5. **Public participation** — done. The `/fantasy/:token` member app (register,
    build, transfers, chips, ladder, mini-leagues).
-6. **Draft engine** — done for snake. Draft leagues, the async draft room with an
-   auto-pick clock, finalisation to squads, total-points and head-to-head
-   ladders, waivers and trades. **Auction is modelled but not yet runnable.**
-7. **Automation** — done. A daily settle job and a draft auto-pick tick.
+6. **Draft engine** — done for snake and auction. Draft leagues, the async draft
+   rooms (snake's auto-pick clock; auction's nominate-and-bid with budget, role
+   quota, anti-snipe clock and auto-nomination), finalisation to squads,
+   total-points and head-to-head ladders, waivers and trades.
+7. **Automation** — done. A daily settle job and a draft tick (advances snake
+   auto-picks and auction lots/nominations).
 
-Remaining follow-ups: auction drafts; notifications-bell and BetterSocials
-share-card hooks; the public module price in `pricing.js`; and a full verify
-pass on a deployed database (the engine, draft and member app could not be run in
-the build sandbox).
+The member notification feed now covers the draft (your turn to pick or nominate,
+the live auction lot, trade offers and waiver results) alongside the round / price
+/ rank items.
+
+Member share cards are built (a gameweek-result square, a recruit-a-mate story and
+a draft-league recruit story, all rendered to PNG via modern-screenshot for
+web-share / download).
+
+Remaining follow-ups: a full verify pass on a deployed database. A smoke-test
+script ships for this — `python -m app.scripts.verify_fantasy_draft <org_id>
+[snake|auction|both]` spins up a throwaway draft + test managers for an org that
+has a built pool, drives the whole draft through the real engine, asserts the
+invariants (full squads, role quota, one captain + vice, auction budgets, the
+ladder) and deletes its own VERIFY-* rows afterwards. The pure
+budget/nomination/proxy maths are unit-checked; this script is the DB-bound
+bid/award/finalise check, since there's no Postgres in the build sandbox.
 
 ## Open defaults to confirm (non-blocking)
 
-- Public price model for the module itself (the club-facing add-on price) — left
-  out of `pricing.js` until set, so no number is invented.
+- Public price: **$49/year, standalone** (set Jun 2026). It's a `FANTASY` constant
+  in `frontend/src/data/pricing.js`, deliberately kept out of `PRICED_MODULES` and
+  the bundle-discount maths, and listed on its own card on the Pricing page (so
+  ALL_IN / the bundle tiers / the competitor comparison are unchanged).
 - Exact budget (default 100.0), off-role multiplier (default 1.5), transfer hit
   (default 4) and milestone bonuses — all live in config and easy to tune once a
   club has played a season.

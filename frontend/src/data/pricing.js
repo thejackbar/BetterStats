@@ -30,6 +30,21 @@ export const PRICED_MODULES = [
   { key: 'iq',      name: 'BetterIQ',      price: 249, icon: '◇', accent: BRAND.iq.accent,      logo: BRAND.iq.logo,      blurb: 'Deep analytics and opposition scouting' },
 ]
 
+// BetterFantasyCricket is a standalone add-on: a club fantasy competition scored
+// off your real games. It's priced on its own and deliberately kept OUT of
+// PRICED_MODULES and the bundle-discount maths (it isn't one of the four bundled
+// modules), so ALL_IN, the bundle tiers and the competitor comparison are
+// unchanged. It's listed separately on the pricing page.
+export const FANTASY = {
+  key: 'fantasy',
+  name: 'BetterFantasyCricket',
+  price: 49,
+  icon: '★',
+  accent: BRAND.fantasy.accent,
+  logo: BRAND.fantasy.logo,
+  blurb: 'A club fantasy cricket comp, scored off your real games',
+}
+
 // Bundle discount in whole dollars, keyed on how many modules you add (not a
 // percentage). It lines up with the published bundle prices: add two modules
 // and you save $48, three saves $97, all four saves $146. So every bundle lands
