@@ -1,43 +1,25 @@
-/**
- * KlubPro → Better Cricket Cloudflare Worker — rebrand landing page
- *
- * KlubPro has been folded into Better Cricket. This worker sits on the old
- * klubpro.com domain and serves a single on-brand landing page that tells
- * visitors KlubPro is now Better Cricket and sends them on to the new site at
- * betterat.cricket. It answers every path with the same page (a retired domain
- * has nothing else to show) and stays a 200 rather than a redirect, so the
- * announcement is what people actually read before they click through.
- *
- * The CTA links to https://betterat.cricket. Open Graph tags borrow the live
- * site's card art so a shared klubpro.com link still previews on brand.
- *
- * Deployment:
- *   cd cloudflare-worker/klubpro && wrangler deploy
- * Route (Cloudflare dashboard → Workers → Routes), klubpro.com zone:
- *   klubpro.com/*
- */
-
-const NEW_SITE = 'https://betterat.cricket'
-
-const HTML = `<!DOCTYPE html>
+<!DOCTYPE html>
+<!-- klubpro.com rebrand landing page — KlubPro is now Better Cricket.
+     Self-contained static page: drop it in as the index.html for klubpro.com.
+     Links through to https://betterat.cricket. -->
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>KlubPro is now Better Cricket</title>
 <meta name="description" content="KlubPro is now Better Cricket, the platform Australian cricket clubs run on. Head to betterat.cricket for your club's stats, selection, socials, admin and analytics." />
-<link rel="canonical" href="${NEW_SITE}/" />
+<link rel="canonical" href="https://betterat.cricket/" />
 <meta property="og:type" content="website" />
 <meta property="og:title" content="KlubPro is now Better Cricket" />
 <meta property="og:description" content="KlubPro is now Better Cricket, the platform Australian cricket clubs run on. Head to betterat.cricket." />
-<meta property="og:url" content="${NEW_SITE}/" />
-<meta property="og:image" content="${NEW_SITE}/og-image.png" />
+<meta property="og:url" content="https://betterat.cricket/" />
+<meta property="og:image" content="https://betterat.cricket/og-image.png" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="KlubPro is now Better Cricket" />
 <meta name="twitter:description" content="KlubPro is now Better Cricket, the platform Australian cricket clubs run on." />
-<meta name="twitter:image" content="${NEW_SITE}/og-image.png" />
+<meta name="twitter:image" content="https://betterat.cricket/og-image.png" />
 <meta name="theme-color" content="#0a0d14" />
-<link rel="icon" type="image/png" href="${NEW_SITE}/favicon.png" />
+<link rel="icon" type="image/png" href="https://betterat.cricket/favicon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
@@ -221,26 +203,14 @@ const HTML = `<!DOCTYPE html>
       <span class="mpill">BetterAdmin</span>
       <span class="mpill">BetterIQ</span>
     </div>
-    <a class="cta" href="${NEW_SITE}">
+    <a class="cta" href="https://betterat.cricket">
       Take me to Better Cricket
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
     </a>
     <p class="reassure">Same team behind it. Your club is in good hands.</p>
   </main>
   <footer>
-    Find your club's new home at <a href="${NEW_SITE}">betterat.cricket</a>
+    Find your club's new home at <a href="https://betterat.cricket">betterat.cricket</a>
   </footer>
 </body>
-</html>`
-
-export default {
-  async fetch() {
-    return new Response(HTML, {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'public, max-age=3600',
-      },
-    })
-  },
-}
+</html>
