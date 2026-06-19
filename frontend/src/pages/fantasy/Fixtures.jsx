@@ -15,7 +15,7 @@ const when = (r) => {
   return r.status === 'live' ? 'Live now' : 'To be scheduled'
 }
 
-export default function Fixtures({ token, season, nav }) {
+export default function Fixtures({ token, season, nav, desktop }) {
   const [rounds, setRounds] = useState(null)
   useEffect(() => { api.fanRounds(token).then(d => setRounds(d.rounds || [])).catch(() => setRounds([])) }, [token])
 
@@ -27,7 +27,9 @@ export default function Fixtures({ token, season, nav }) {
       {!rounds.length
         ? <p style={{ font: `500 13px 'Hanken Grotesk'`, color: 'var(--faint)', paddingTop: 16 }}>The club admin generates rounds from the fixture list.</p>
         : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 14 }}>
+          <div style={desktop
+            ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 10, paddingTop: 14 }
+            : { display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 14 }}>
             {rounds.map(r => {
               const live = r.status === 'live'
               const scored = r.status === 'scored'
