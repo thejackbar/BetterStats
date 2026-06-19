@@ -343,10 +343,14 @@ Member share cards are built (a gameweek-result square, a recruit-a-mate story a
 a draft-league recruit story, all rendered to PNG via modern-screenshot for
 web-share / download).
 
-Remaining follow-ups: a full verify pass on a deployed database (the engine,
-drafts and member app could not be run in the build sandbox — the auction's pure
-budget/nomination/proxy maths are unit-checked, but the DB-bound
-bid/award/finalise flow needs a live run).
+Remaining follow-ups: a full verify pass on a deployed database. A smoke-test
+script ships for this — `python -m app.scripts.verify_fantasy_draft <org_id>
+[snake|auction|both]` spins up a throwaway draft + test managers for an org that
+has a built pool, drives the whole draft through the real engine, asserts the
+invariants (full squads, role quota, one captain + vice, auction budgets, the
+ladder) and deletes its own VERIFY-* rows afterwards. The pure
+budget/nomination/proxy maths are unit-checked; this script is the DB-bound
+bid/award/finalise check, since there's no Postgres in the build sandbox.
 
 ## Open defaults to confirm (non-blocking)
 
