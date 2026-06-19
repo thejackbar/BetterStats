@@ -339,11 +339,14 @@ The member notification feed now covers the draft (your turn to pick or nominate
 the live auction lot, trade offers and waiver results) alongside the round / price
 / rank items.
 
-Remaining follow-ups: BetterSocials share-card hooks; the public module price in
-`pricing.js`; and a full verify pass on a deployed database (the engine, drafts
-and member app could not be run in the build sandbox — the auction's pure
-budget/nomination maths are unit-checked, but the DB-bound bid/award/finalise
-flow needs a live run).
+Member share cards are built (a gameweek-result square, a recruit-a-mate story and
+a draft-league recruit story, all rendered to PNG via modern-screenshot for
+web-share / download).
+
+Remaining follow-ups: a full verify pass on a deployed database (the engine,
+drafts and member app could not be run in the build sandbox — the auction's pure
+budget/nomination/proxy maths are unit-checked, but the DB-bound
+bid/award/finalise flow needs a live run).
 
 ## Open defaults to confirm (non-blocking)
 
