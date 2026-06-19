@@ -6,6 +6,17 @@ import {
   RED, GREEN, AMBER, useFantasy, cx,
 } from './ui'
 
+// A simple outline bell for the notifications button.
+function BellIcon({ size = 15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ display: 'block' }}>
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  )
+}
+
 // The club header (crest + name + season) with the soft aurora behind it and the
 // gradient rule under it. On desktop it carries the nav inline and a manager chip;
 // on mobile it stays compact and the nav sits below. The theme toggle, bell,
@@ -29,9 +40,10 @@ export function AppHeader({ season, manager, onSearch, onBell, onProfile, unread
             <ThemeToggle theme={theme} onToggle={onToggleTheme} />
             <button onClick={onBell} aria-label="Notifications" style={{
               position: 'relative', width: 30, height: 30, borderRadius: '50%', cursor: 'pointer',
-              background: 'var(--surface2)', border: '1px solid var(--hairline2)', color: 'var(--dim)', font: `600 13px 'Hanken Grotesk'`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--surface2)', border: '1px solid var(--hairline2)', color: 'var(--dim)',
             }}>
-              {'◉'}
+              <BellIcon />
               {unread > 0 && <span style={{ position: 'absolute', top: -3, right: -3, minWidth: 15, height: 15, padding: '0 3px', borderRadius: 8, background: RED, color: '#fff', font: `800 9px ${DISP}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{unread}</span>}
             </button>
             <button onClick={onSearch} aria-label="Search players" style={{

@@ -6,13 +6,17 @@ import { DISP, tintBg, pts, Btn, Field } from './ui'
 import { ScreenTitle } from './shell'
 import { LadderRow } from './Ladder'
 
-export default function Leagues({ token, flash, fail }) {
+export default function Leagues({ token, flash, fail, desktop }) {
   const [open, setOpen] = useState(null)   // league id
-  if (open) return <LeagueDetail token={token} leagueId={open} onBack={() => setOpen(null)} flash={flash} fail={fail} />
-  return <LeaguesHome token={token} onOpen={setOpen} flash={flash} fail={fail} />
+  if (open) return (
+    <div style={desktop ? { maxWidth: 820, margin: '0 auto' } : undefined}>
+      <LeagueDetail token={token} leagueId={open} onBack={() => setOpen(null)} flash={flash} fail={fail} />
+    </div>
+  )
+  return <LeaguesHome token={token} onOpen={setOpen} flash={flash} fail={fail} desktop={desktop} />
 }
 
-function LeaguesHome({ token, onOpen, flash, fail }) {
+function LeaguesHome({ token, onOpen, flash, fail, desktop }) {
   const [leagues, setLeagues] = useState(null)
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
@@ -25,7 +29,7 @@ function LeaguesHome({ token, onOpen, flash, fail }) {
   return (
     <div>
       <ScreenTitle title="Mini-leagues" sub="Play your mates" />
-      <div style={{ paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 9 }}>
+      <div style={{ paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 9, maxWidth: desktop ? 560 : undefined }}>
         <div style={{ font: `600 9.5px 'Hanken Grotesk'`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--faint)' }}>Create a private league</div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Field placeholder="League name…" value={name} onChange={e => setName(e.target.value)} style={{ padding: '10px 12px', fontSize: 12.5 }} />
@@ -37,7 +41,9 @@ function LeaguesHome({ token, onOpen, flash, fail }) {
         </div>
       </div>
 
-      <div style={{ paddingTop: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={desktop
+        ? { paddingTop: 18, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 18, alignItems: 'start' }
+        : { paddingTop: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
         {leagues === null ? <p style={{ color: 'var(--faint)', font: `500 13px 'Hanken Grotesk'` }}>Loading…</p>
           : !leagues.length ? <p style={{ font: `500 13px 'Hanken Grotesk'`, color: 'var(--faint)' }}>You're not in any private leagues yet.</p>
             : leagues.map(lg => {

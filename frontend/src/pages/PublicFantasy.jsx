@@ -30,10 +30,11 @@ import Notifications, { unreadCount } from './fantasy/Notifications'
 import Settings, { HowToPlay } from './fantasy/Settings'
 import Share from './fantasy/Share'
 
-const NAV = [['team', 'My Team'], ['points', 'Points'], ['pick', 'Pick'], ['ladder', 'Ladder'], ['leagues', 'Leagues'], ['draft', 'Draft']]
+const NAV = [['team', 'My Team'], ['points', 'Points'], ['pick', 'Pick Squad'], ['ladder', 'Ladder'], ['leagues', 'Leagues'], ['draft', 'Draft']]
 const QUICK = [['transfers', 'Transfers'], ['chips', 'Chips'], ['fixtures', 'Fixtures'], ['stats', 'Players'], ['live', 'Live'], ['share', 'Share'], ['help', 'Rules']]
-// Screens with a dedicated desktop layout that should use the full width.
-const WIDE = new Set(['team', 'transfers', 'points', 'stats'])
+// Screens with a dedicated desktop layout that should use the full width. The rest
+// (forms, reading, single-item views) stay in a comfortable centred column.
+const WIDE = new Set(['team', 'transfers', 'points', 'stats', 'pick', 'ladder', 'fixtures', 'leagues', 'player'])
 
 export default function PublicFantasy() {
   const { token } = useParams()
@@ -67,7 +68,7 @@ export default function PublicFantasy() {
   }, [themePref])
   const setPref = (p) => { setThemePref(p); saveThemePref(p) }
   const onToggleTheme = () => setPref(theme === 'dark' ? 'light' : 'dark')
-  const navItems = NAV.map(([k, l]) => [k, k === 'pick' && squad ? 'Edit' : l])
+  const navItems = NAV
 
   const accent = club?.accent_color || club?.primary_color || DEFAULT_ACCENT
   const flash = (m) => { setMsg(m); setError(''); setTimeout(() => setMsg(''), 3500) }
@@ -118,18 +119,18 @@ export default function PublicFantasy() {
   const screen = () => {
     switch (view) {
       case 'team': return <MyTeam token={token} manager={manager} squad={squad} season={season} round={round} onChange={loadApp} flash={flash} fail={fail} nav={nav} desktop={desktop} />
-      case 'pick': return <Pick token={token} pool={pool} rules={rules} squad={squad} season={season} onSaved={async () => { flash('Saved.'); await loadApp(); nav('team') }} fail={fail} flash={flash} nav={nav} />
+      case 'pick': return <Pick token={token} pool={pool} rules={rules} squad={squad} season={season} onSaved={async () => { flash('Saved.'); await loadApp(); nav('team') }} fail={fail} flash={flash} nav={nav} desktop={desktop} />
       case 'transfers': return <Transfers token={token} squad={squad} pool={pool} rules={rules} round={round} onChange={loadApp} flash={flash} fail={fail} nav={nav} desktop={desktop} />
       case 'chips': return <Chips token={token} squad={squad} round={round} onChange={loadApp} flash={flash} fail={fail} nav={nav} />
       case 'points': return <Points token={token} nav={nav} desktop={desktop} />
       case 'live': return <Live token={token} nav={nav} />
-      case 'fixtures': return <Fixtures token={token} season={season} nav={nav} />
-      case 'ladder': return <Ladder token={token} season={season} />
-      case 'leagues': return <Leagues token={token} flash={flash} fail={fail} />
+      case 'fixtures': return <Fixtures token={token} season={season} nav={nav} desktop={desktop} />
+      case 'ladder': return <Ladder token={token} season={season} desktop={desktop} />
+      case 'leagues': return <Leagues token={token} flash={flash} fail={fail} desktop={desktop} />
       case 'draft': return <Draft token={token} flash={flash} fail={fail} />
-      case 'player': return <PlayerProfile token={token} playerId={params.playerId} season={season} onBack={() => nav('team')} nav={nav} />
+      case 'player': return <PlayerProfile token={token} playerId={params.playerId} season={season} onBack={() => nav(params.from || 'team')} nav={nav} desktop={desktop} />
       case 'compare': return <Compare token={token} pool={pool} nav={nav} />
-      case 'stats': return <StatsExplorer pool={pool} nav={nav} />
+      case 'stats': return <StatsExplorer pool={pool} nav={nav} desktop={desktop} />
       case 'notifications': return <Notifications token={token} onSeen={() => setUnread(0)} />
       case 'settings': return <Settings token={token} manager={manager} squad={squad} themePref={themePref} setThemePref={setPref} onChange={loadApp} flash={flash} fail={fail} logout={logout} nav={nav} />
       case 'help': return <HowToPlay season={season} nav={nav} />
@@ -186,7 +187,7 @@ export default function PublicFantasy() {
               <Banner>{error}</Banner>
 
               {desktop && !WIDE.has(view)
-                ? <div style={{ maxWidth: 640, margin: '0 auto' }}>{screen()}</div>
+                ? <div style={{ maxWidth: 720, margin: '0 auto' }}>{screen()}</div>
                 : screen()}
             </>
           )}

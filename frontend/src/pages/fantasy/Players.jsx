@@ -13,101 +13,166 @@ const Chip = ({ children, color = 'var(--dim)', bg = 'var(--surface2)', border }
 )
 
 // ── Player profile ─────────────────────────────────────────────────────────────
-export function PlayerProfile({ token, playerId, season, onBack, nav }) {
+const ProfileTile = ({ label, value, color = 'var(--text)' }) => (
+  <div style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '9px 11px' }}>
+    <div style={{ font: `600 8.5px 'Hanken Grotesk'`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--faint)' }}>{label}</div>
+    <div style={{ font: `700 17px ${DISP}`, color, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+  </div>
+)
+const TileGrid = ({ tiles }) => (
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 7 }}>
+    {tiles.map(([l, v, color]) => <ProfileTile key={l} label={l} value={v} color={color} />)}
+  </div>
+)
+const signMoney = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}$${Math.abs(Number(n || 0)).toFixed(1)}`
+
+export function PlayerProfile({ token, playerId, season, onBack, nav, desktop }) {
   const { club } = useFantasy()
   const [p, setP] = useState(null)
   const [err, setErr] = useState(false)
-  useEffect(() => { setP(null); api.fanPlayer(token, playerId).then(setP).catch(() => setErr(true)) }, [token, playerId])
+  useEffect(() => { setP(null); setErr(false); api.fanPlayer(token, playerId).then(setP).catch(() => setErr(true)) }, [token, playerId])
 
   if (err) return <div><ScreenTitle title="Player" back onBack={onBack} /><p style={{ font: `500 13px 'Hanken Grotesk'`, color: 'var(--faint)', paddingTop: 16 }}>Couldn't load this player.</p></div>
   if (!p) return <p style={{ color: 'var(--faint)', font: `500 13px 'Hanken Grotesk'` }}>Loading…</p>
 
+  const ss = p.season_stats || {}
+  const career = p.career_stats || {}
   const max5 = Math.max(1, ...(p.last5 || []).map(f => f.points))
-  const stats = [
-    ['Total pts', pts(p.total_points)],
-    ['Form', p.form],
-    ['Runs', p.season_stats.runs],
-    ['50s / 100s', `${p.season_stats.fifties} / ${p.season_stats.hundreds}`],
-    ['Wickets', p.season_stats.wickets],
-    ['Selected', `${p.selected_pct}%`],
-  ]
   const active = season?.status === 'active'
+  const pc = Number(p.price_change || 0)
+  const pcColor = pc > 0 ? GREEN : pc < 0 ? RED : 'var(--text)'
+  const hasCareer = (career.matches ?? 0) > 0 || (career.seasons ?? 0) > 0
 
-  return (
-    <div>
-      <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 16, padding: '10px 0 16px' }}>
-        <Aurora style={{ inset: '-40% -20% auto', height: '160%' }} blur={46} blobs={[
-          { c: 'var(--pb-accent, #8C82F0)', a: 'bfcAuroraA', s: 18, pos: { width: '55%', height: '60%', left: '6%', top: '0' } },
-          { c: CYAN, a: 'bfcAuroraB', s: 22, pos: { width: '50%', height: '55%', right: '2%', top: '6%' } },
-        ]} />
-        <div style={{ position: 'relative' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={onBack} aria-label="Back" style={{ width: 30, height: 30, borderRadius: '50%', cursor: 'pointer', background: 'var(--surface2)', border: '1px solid var(--hairline2)', color: 'var(--dim)', font: `700 16px 'Hanken Grotesk'` }}>{'‹'}</button>
-            <span style={{ font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--faint)' }}>Player profile</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 14 }}>
-            <Avatar name={p.name} photoUrl={p.photo_url} size={64} />
-            <div>
-              <div style={{ font: `800 23px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)', lineHeight: 1 }}>{p.name}</div>
-              <div style={{ font: `500 12px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 4 }}>{ROLE_LABEL[p.role]}{p.team ? ` · ${p.team}` : club?.name ? ` · ${club.name}` : ''}</div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                <Chip color="var(--accent-strong)" bg={tintBg(14)} border={`1px solid ${tintBg(30)}`}>{money(p.price)}</Chip>
-                <Chip color={GREEN} bg={mix(GREEN, 12)} border={`1px solid ${mix(GREEN, 26)}`}>Form {p.form}</Chip>
-                <Chip>{p.selected_pct}% owned</Chip>
-              </div>
+  // Fantasy scoring breakdown the manager cares about: total, the weekly average,
+  // last round, form, ownership and the season's price move.
+  const fantasyTiles = [
+    ['Total pts', pts(p.total_points)],
+    ['Avg / round', pts(p.weekly_avg ?? 0)],
+    ['Last round', pts(p.last_round_points)],
+    ['Form', p.form],
+    ['Selected', `${p.selected_pct}%`],
+    ['Price change', signMoney(pc), pcColor],
+  ]
+  const seasonTiles = [
+    ['Matches', ss.matches ?? 0],
+    ['Runs', ss.runs ?? 0],
+    ['50s / 100s', `${ss.fifties ?? 0} / ${ss.hundreds ?? 0}`],
+    ['Wickets', ss.wickets ?? 0],
+    ['Catches', ss.catches ?? 0],
+    ['Price', money(p.price)],
+  ]
+  const careerTiles = [
+    ['Seasons', career.seasons ?? 0],
+    ['Matches', career.matches ?? 0],
+    ['Runs', career.runs ?? 0],
+    ['Wickets', career.wickets ?? 0],
+    ['50s / 100s', `${career.fifties ?? 0} / ${career.hundreds ?? 0}`],
+    ['Catches', career.catches ?? 0],
+  ]
+
+  const hero = (
+    <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 16, padding: '10px 0 16px' }}>
+      <Aurora style={{ inset: '-40% -20% auto', height: '160%' }} blur={46} blobs={[
+        { c: 'var(--pb-accent, #8C82F0)', a: 'bfcAuroraA', s: 18, pos: { width: '55%', height: '60%', left: '6%', top: '0' } },
+        { c: CYAN, a: 'bfcAuroraB', s: 22, pos: { width: '50%', height: '55%', right: '2%', top: '6%' } },
+      ]} />
+      <div style={{ position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button onClick={onBack} aria-label="Back" style={{ width: 30, height: 30, borderRadius: '50%', cursor: 'pointer', background: 'var(--surface2)', border: '1px solid var(--hairline2)', color: 'var(--dim)', font: `700 16px 'Hanken Grotesk'` }}>{'‹'}</button>
+          <span style={{ font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--faint)' }}>Player profile</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 14 }}>
+          <Avatar name={p.name} photoUrl={p.photo_url} size={64} />
+          <div>
+            <div style={{ font: `800 23px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)', lineHeight: 1 }}>{p.name}</div>
+            <div style={{ font: `500 12px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 4 }}>{ROLE_LABEL[p.role]}{p.team ? ` · ${p.team}` : club?.name ? ` · ${club.name}` : ''}</div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+              <Chip color="var(--accent-strong)" bg={tintBg(14)} border={`1px solid ${tintBg(30)}`}>{money(p.price)}</Chip>
+              <Chip color={GREEN} bg={mix(GREEN, 12)} border={`1px solid ${mix(GREEN, 26)}`}>Form {p.form}</Chip>
+              <Chip>{p.selected_pct}% owned</Chip>
             </div>
           </div>
         </div>
       </div>
+    </div>
+  )
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 7 }}>
-        {stats.map(([l, v]) => (
-          <div key={l} style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '9px 11px' }}>
-            <div style={{ font: `600 8.5px 'Hanken Grotesk'`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--faint)' }}>{l}</div>
-            <div style={{ font: `700 17px ${DISP}`, color: 'var(--text)', marginTop: 2 }}>{v}</div>
+  const chartBlock = !!(p.last5 || []).length && (
+    <>
+      <SectionLabel>Last 5 rounds</SectionLabel>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 96, padding: '8px 0 0' }}>
+        {p.last5.map(f => {
+          const h = Math.max(6, Math.round((f.points / max5) * 56))
+          const hi = f.points >= max5 * 0.6
+          return (
+            <div key={f.round} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, height: '100%', justifyContent: 'flex-end' }}>
+              <div style={{ font: `700 11px ${DISP}`, color: 'var(--text)' }}>{pts(f.points)}</div>
+              <div style={{ width: '100%', display: 'flex', alignItems: 'flex-end', height: 56 }}>
+                <div style={{ width: '100%', height: h, borderRadius: 5, background: hi ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)' }} />
+              </div>
+              <div style={{ font: `600 9px 'Hanken Grotesk'`, color: 'var(--faint)' }}>R{f.round}</div>
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+
+  const upcomingBlock = !!(p.fixtures || []).length && (
+    <>
+      <SectionLabel>Upcoming</SectionLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {p.fixtures.map(x => (
+          <div key={x.round} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 12px', background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 11 }}>
+            <span style={{ font: `700 11px ${DISP}`, color: 'var(--dim)', width: 30 }}>R{x.round}</span>
+            <span style={{ flex: 1, font: `600 12.5px 'Hanken Grotesk'`, color: 'var(--text)' }}>{x.name || `Round ${x.round}`}</span>
+            <Difficulty d={x.difficulty} />
           </div>
         ))}
       </div>
+    </>
+  )
 
-      {!!(p.last5 || []).length && (
+  const transferBtn = <Btn full onClick={() => nav(active ? 'transfers' : 'pick')}>Transfer in · {money(p.price)}</Btn>
+
+  const statSections = (
+    <>
+      <SectionLabel>Fantasy points</SectionLabel>
+      <TileGrid tiles={fantasyTiles} />
+      <SectionLabel>This season</SectionLabel>
+      <TileGrid tiles={seasonTiles} />
+      {hasCareer && (
         <>
-          <SectionLabel>Last 5 rounds</SectionLabel>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 96, padding: '8px 0 0' }}>
-            {p.last5.map(f => {
-              const h = Math.max(6, Math.round((f.points / max5) * 56))
-              const hi = f.points >= max5 * 0.6
-              return (
-                <div key={f.round} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, height: '100%', justifyContent: 'flex-end' }}>
-                  <div style={{ font: `700 11px ${DISP}`, color: 'var(--text)' }}>{pts(f.points)}</div>
-                  <div style={{ width: '100%', display: 'flex', alignItems: 'flex-end', height: 56 }}>
-                    <div style={{ width: '100%', height: h, borderRadius: 5, background: hi ? 'var(--pb-accent, #8C82F0)' : 'var(--surface2)' }} />
-                  </div>
-                  <div style={{ font: `600 9px 'Hanken Grotesk'`, color: 'var(--faint)' }}>R{f.round}</div>
-                </div>
-              )
-            })}
-          </div>
+          <SectionLabel>Career{career.seasons ? ` · ${career.seasons} season${career.seasons === 1 ? '' : 's'}` : ''}</SectionLabel>
+          <TileGrid tiles={careerTiles} />
         </>
       )}
+    </>
+  )
 
-      {!!(p.fixtures || []).length && (
-        <>
-          <SectionLabel>Upcoming</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {p.fixtures.map(x => (
-              <div key={x.round} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 12px', background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 11 }}>
-                <span style={{ font: `700 11px ${DISP}`, color: 'var(--dim)', width: 30 }}>R{x.round}</span>
-                <span style={{ flex: 1, font: `600 12.5px 'Hanken Grotesk'`, color: 'var(--text)' }}>{x.name || `Round ${x.round}`}</span>
-                <Difficulty d={x.difficulty} />
-              </div>
-            ))}
+  if (desktop) {
+    return (
+      <div style={{ maxWidth: 1080, margin: '0 auto' }}>
+        {hero}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 22, alignItems: 'start', paddingTop: 4 }}>
+          <div>{statSections}</div>
+          <div>
+            {chartBlock}
+            {upcomingBlock}
+            <div style={{ paddingTop: 16 }}>{transferBtn}</div>
           </div>
-        </>
-      )}
-
-      <div style={{ paddingTop: 16 }}>
-        <Btn full onClick={() => nav(active ? 'transfers' : 'pick')}>Transfer in · {money(p.price)}</Btn>
+        </div>
       </div>
+    )
+  }
+
+  return (
+    <div>
+      {hero}
+      {statSections}
+      {chartBlock}
+      {upcomingBlock}
+      <div style={{ paddingTop: 16 }}>{transferBtn}</div>
     </div>
   )
 }
@@ -242,7 +307,11 @@ export function StatsExplorer({ pool, nav }) {
       </div>
       <div>
         {list.map(p => (
-          <div key={p.player_id} style={{ display: 'grid', gridTemplateColumns: '2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr', gap: 0, alignItems: 'center', padding: '10px 4px', borderBottom: '1px solid var(--surface2)' }}>
+          <button key={p.player_id} onClick={() => nav('player', { playerId: p.player_id, from: 'stats' })} style={{
+            display: 'grid', gridTemplateColumns: '2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr', gap: 0, alignItems: 'center',
+            width: '100%', textAlign: 'left', padding: '10px 4px',
+            border: 'none', borderBottom: '1px solid var(--surface2)', background: 'none', cursor: 'pointer',
+          }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
               <Avatar name={p.name} photoUrl={p.photo_url} size={28} />
               <span style={{ font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
@@ -252,7 +321,7 @@ export function StatsExplorer({ pool, nav }) {
             <span style={{ textAlign: 'right', font: `500 11.5px 'Hanken Grotesk'`, color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>{p.selected_pct ?? 0}%</span>
             <span style={{ textAlign: 'right', font: `600 12.5px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{pts(p.last_round_points)}</span>
             <span style={{ textAlign: 'right', font: `700 13.5px ${DISP}`, color: 'var(--accent-strong)', fontVariantNumeric: 'tabular-nums' }}>{pts(p.total_points)}</span>
-          </div>
+          </button>
         ))}
       </div>
     </div>

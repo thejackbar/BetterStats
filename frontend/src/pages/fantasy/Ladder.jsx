@@ -39,7 +39,34 @@ const Th = ({ children, w, right }) => (
   <span style={{ width: w, flex: w ? undefined : 1, textAlign: right ? 'right' : 'left', font: `700 8.5px 'Hanken Grotesk'`, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--faint)' }}>{children}</span>
 )
 
-export default function Ladder({ token, season }) {
+const ordSuffix = (n) => (n % 100 >= 11 && n % 100 <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th')
+
+// A highlight card for the desktop rail — the manager's own row and the leader.
+function PositionCard({ r, label, you }) {
+  return (
+    <div style={{ background: you ? tintBg(10, 'var(--surface)') : 'var(--surface)', border: `1px solid ${you ? tintBg(30) : 'var(--hairline)'}`, borderRadius: 16, padding: 16 }}>
+      <div style={{ font: `700 9.5px 'Hanken Grotesk'`, letterSpacing: '.14em', textTransform: 'uppercase', color: you ? 'var(--accent-strong)' : 'var(--faint)' }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8 }}>
+        <span style={{ font: `800 34px ${DISP}`, color: 'var(--text)', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{r.rank}<span style={{ font: `700 14px ${DISP}`, color: 'var(--faint)' }}>{ordSuffix(r.rank)}</span></span>
+        <MoveArrow delta={r.rank_delta} />
+      </div>
+      <div style={{ font: `800 16px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)', marginTop: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.team_name}</div>
+      <div style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)' }}>{r.manager}</div>
+      <div style={{ display: 'flex', gap: 20, marginTop: 13 }}>
+        <div>
+          <div style={{ font: `700 8.5px 'Hanken Grotesk'`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--faint)' }}>Total</div>
+          <div style={{ font: `800 22px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{pts(r.points)}</div>
+        </div>
+        <div>
+          <div style={{ font: `700 8.5px 'Hanken Grotesk'`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--faint)' }}>This round</div>
+          <div style={{ font: `800 22px ${DISP}`, color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>{pts(r.gw)}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function Ladder({ token, season, desktop }) {
   const [data, setData] = useState(null)
   useEffect(() => { api.fanLadder(token).then(setData).catch(() => setData({ ladder: [] })) }, [token])
   if (!data) return <p style={{ color: 'var(--faint)', font: `500 13px 'Hanken Grotesk'` }}>Loading…</p>
@@ -54,22 +81,48 @@ export default function Ladder({ token, season }) {
   const top = rows.slice(0, 20)
   const me = rows.find(r => r.you)
   const showJump = me && !top.some(r => r.you)
+  const leader = rows[0]
+
+  const header = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '13px 0 7px' }}>
+      <Th w={24}>#</Th><span style={{ width: 18 }} /><Th>Team</Th><Th>GW</Th><Th w={50} right>Total</Th>
+    </div>
+  )
+  const tableRows = (
+    <div>
+      {top.map(r => <LadderRow key={r.rank} r={r} />)}
+      {showJump && (
+        <>
+          <div style={{ textAlign: 'center', color: 'var(--faintest)', font: `700 14px ${DISP}`, padding: '4px 0' }}>· · ·</div>
+          <LadderRow r={me} />
+        </>
+      )}
+    </div>
+  )
+
+  if (desktop) {
+    return (
+      <div>
+        <ScreenTitle title="Club ladder" sub={`${rows.length} managers`} />
+        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 22, alignItems: 'start', paddingTop: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, position: 'sticky', top: 12 }}>
+            {me && <PositionCard r={me} label="Your position" you />}
+            {leader && (!me || !leader.you) && <PositionCard r={leader} label="Top of the table" />}
+          </div>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 16, padding: '4px 16px 12px' }}>
+            {header}
+            {tableRows}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
       <ScreenTitle title="Club ladder" sub={`${rows.length} managers`} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '13px 0 7px' }}>
-        <Th w={24}>#</Th><span style={{ width: 18 }} /><Th>Team</Th><Th>GW</Th><Th w={50} right>Total</Th>
-      </div>
-      <div>
-        {top.map(r => <LadderRow key={r.rank} r={r} />)}
-        {showJump && (
-          <>
-            <div style={{ textAlign: 'center', color: 'var(--faintest)', font: `700 14px ${DISP}`, padding: '4px 0' }}>· · ·</div>
-            <LadderRow r={me} />
-          </>
-        )}
-      </div>
+      {header}
+      {tableRows}
     </div>
   )
 }

@@ -1423,6 +1423,31 @@ async def player_detail(token: str, player_id: str, db: AsyncSession = Depends(g
         {"org": str(club.id), "yr": season.season_year, "pid": str(pool.player_id)},
     )).mappings().first() or {}
 
+    # Career aggregate across every held season for this club (all years).
+    career = (await db.execute(
+        text("""
+            SELECT COALESCE(SUM(pss.runs),0) runs, COALESCE(SUM(pss.wickets),0) wickets,
+                   COALESCE(SUM(pss.fifties),0) fifties, COALESCE(SUM(pss.hundreds),0) hundreds,
+                   COALESCE(SUM(pss.matches),0) matches, COALESCE(SUM(pss.catches),0) catches,
+                   COUNT(DISTINCT s.year) seasons
+            FROM v_effective_player_season_stats pss
+            JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID)
+            WHERE pss.player_id = CAST(:pid AS UUID)
+        """),
+        {"org": str(club.id), "pid": str(pool.player_id)},
+    )).mappings().first() or {}
+
+    # Fantasy scoring breakdown: rounds played and the average points per scored round.
+    scoring = (await db.execute(
+        text("""
+            SELECT COUNT(*) rounds, COALESCE(ROUND(AVG(prs.total_points)::numeric, 1), 0) avg
+            FROM fantasy_player_round_scores prs
+            JOIN fantasy_rounds r ON r.id = prs.round_id AND r.status = 'scored'
+            WHERE prs.fantasy_season_id = CAST(:fs AS UUID) AND prs.player_id = CAST(:pid AS UUID)
+        """),
+        {"fs": str(season.id), "pid": str(pool.player_id)},
+    )).mappings().first() or {}
+
     upcoming = (await db.execute(
         select(FantasyRound).where(
             FantasyRound.fantasy_season_id == season.id, FantasyRound.status != "scored")
@@ -1437,11 +1462,19 @@ async def player_detail(token: str, player_id: str, db: AsyncSession = Depends(g
         "selected_pct": sel, "form": form.get(str(pool.player_id), 0.0),
         "total_points": float(pool.total_points),
         "last_round_points": float(pool.last_round_points),
+        "weekly_avg": float(scoring.get("avg", 0) or 0),
+        "rounds_played": int(scoring.get("rounds", 0) or 0),
         **_player_card(p),
         "season_stats": {
             "runs": int(agg.get("runs", 0)), "wickets": int(agg.get("wickets", 0)),
             "fifties": int(agg.get("fifties", 0)), "hundreds": int(agg.get("hundreds", 0)),
             "matches": int(agg.get("matches", 0)), "catches": int(agg.get("catches", 0)),
+        },
+        "career_stats": {
+            "runs": int(career.get("runs", 0)), "wickets": int(career.get("wickets", 0)),
+            "fifties": int(career.get("fifties", 0)), "hundreds": int(career.get("hundreds", 0)),
+            "matches": int(career.get("matches", 0)), "catches": int(career.get("catches", 0)),
+            "seasons": int(career.get("seasons", 0)),
         },
         "last5": last5,
         "fixtures": [{"round": r.round_number, "name": r.name, "difficulty": "even"} for r in upcoming],
