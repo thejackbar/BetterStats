@@ -291,8 +291,9 @@ Draft mechanics (draft phase migration):
 
 Member (public, link + PIN):
 - Build / edit squad, transfers and chips, my team and round breakdown, the club
-  ladder, mini-leagues (create, join, view), fixtures and player prices, draft
-  room (async picks), waivers and trades.
+  ladder, mini-leagues (create, join, view), fixtures and player prices, the draft
+  rooms (snake on-the-clock picks; auction nominate-and-bid), a ranked auto-pick
+  wishlist, and a post-draft Manage team screen (waiver wire + one-for-one trades).
 
 Admin (gated, `manage_fantasy`):
 - Enable the module and create the season, choose grades, review and override

@@ -1206,6 +1206,11 @@ export const api = {
   fanDraftLadder: (token, leagueId) => request(`/public/fantasy/${token}/draft/${leagueId}/ladder`),
   fanDraftWaiver: (token, leagueId, add_player_id, drop_player_id) =>
     request(`/public/fantasy/${token}/draft/${leagueId}/waiver`, { method: 'POST', body: JSON.stringify({ add_player_id, drop_player_id }) }),
+  fanDraftManage: (token, leagueId) => request(`/public/fantasy/${token}/draft/${leagueId}/manage`),
+  fanDraftTrade: (token, leagueId, receiver_squad_id, give, get) =>
+    request(`/public/fantasy/${token}/draft/${leagueId}/trade`, { method: 'POST', body: JSON.stringify({ receiver_squad_id, give, get }) }),
+  fanRespondTrade: (token, tradeId, accept) =>
+    request(`/public/fantasy/${token}/trades/${tradeId}/respond`, { method: 'POST', body: JSON.stringify({ accept }) }),
 
   // ─── BetterSelect: Selection (lineups) ──────────────────
   bsSelectionOverview: () => request('/selection/overview'),

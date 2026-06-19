@@ -1666,6 +1666,10 @@ async def draft_state(token: str, league_id: str, request: Request, db: AsyncSes
             my_counts[r] = my_counts.get(r, 0) + 1
 
     cur = picks[draft.current_pick] if draft.current_pick < len(picks) else None
+    wl_ids = (await db.execute(
+        select(FantasyDraftWishlist.player_ids).where(
+            FantasyDraftWishlist.draft_id == draft.id, FantasyDraftWishlist.manager_id == mgr.id)
+    )).scalar_one_or_none() or []
     return {
         "status": draft.status, "scoring_type": lg.scoring_type, "draft_type": draft.type,
         "order": [mgr_names.get(m, "?") for m in (draft.draft_order or [])],
@@ -1683,6 +1687,8 @@ async def draft_state(token: str, league_id: str, request: Request, db: AsyncSes
             for p in picks if p.player_id
         ],
         "my_role_counts": my_counts, "quota": quota,
+        "my_wishlist": [{"player_id": str(pid), "name": pool.get(str(pid), {}).get("name", "?"),
+                         "role": pool.get(str(pid), {}).get("role", "")} for pid in wl_ids],
         "available": sorted(
             [{"player_id": pid, "name": v["name"], "role": v["role"], "price": v["price"]}
              for pid, v in pool.items() if pid not in taken],
@@ -1803,6 +1809,94 @@ async def draft_ladder(token: str, league_id: str, request: Request, db: AsyncSe
         {"rank": i, "team_name": tn, "manager": dn, "points": float(pts)}
         for i, (tn, dn, pts) in enumerate(rows, start=1)
     ]}
+
+
+@router.get("/{token}/draft/{league_id}/manage")
+async def draft_manage(token: str, league_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """In-season management for a completed draft league: my squad, the other
+    squads' rosters (for trades), the unowned pool (for waivers), my pending
+    waiver claims and any trade offers in or out."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    lg = await _draft_league(db, club, season, league_id)
+
+    pool_rows = (await db.execute(
+        select(FantasyPoolPlayer.player_id, Player.name, FantasyPoolPlayer.role, FantasyPoolPlayer.current_price)
+        .join(Player, Player.id == FantasyPoolPlayer.player_id)
+        .where(FantasyPoolPlayer.fantasy_season_id == season.id, FantasyPoolPlayer.is_available.is_(True))
+    )).all()
+    pool = {str(pid): {"name": nm, "role": role, "price": float(pr)} for pid, nm, role, pr in pool_rows}
+
+    squads = (await db.execute(select(FantasySquad).where(FantasySquad.league_id == lg.id))).scalars().all()
+    mgr_names = {str(m.id): m.display_name for m in (await db.execute(
+        select(FantasyManager).where(FantasyManager.organisation_id == club.id))).scalars().all()}
+    sp_rows = (await db.execute(
+        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id.in_([s.id for s in squads]))
+    )).scalars().all() if squads else []
+    by_squad: dict[str, list] = {}
+    owned: set[str] = set()
+    for sp in sp_rows:
+        by_squad.setdefault(str(sp.squad_id), []).append(sp)
+        owned.add(str(sp.player_id))
+
+    def player_obj(sp):
+        info = pool.get(str(sp.player_id), {})
+        return {"player_id": str(sp.player_id), "name": info.get("name", "?"), "role": sp.role,
+                "is_captain": sp.is_captain, "is_vice_captain": sp.is_vice_captain}
+
+    my_squad, squads_out = None, []
+    for s in squads:
+        obj = {"squad_id": str(s.id), "team_name": s.team_name,
+               "manager": mgr_names.get(str(s.manager_id), "?"), "is_me": str(s.manager_id) == str(mgr.id),
+               "players": [player_obj(sp) for sp in by_squad.get(str(s.id), [])]}
+        squads_out.append(obj)
+        if obj["is_me"]:
+            my_squad = obj
+    my_squad_id = my_squad["squad_id"] if my_squad else None
+
+    unowned = sorted(
+        [{"player_id": pid, "name": v["name"], "role": v["role"], "price": v["price"]}
+         for pid, v in pool.items() if pid not in owned],
+        key=lambda x: x["price"], reverse=True,
+    )
+
+    wv = (await db.execute(
+        select(FantasyWaiverClaim).where(
+            FantasyWaiverClaim.league_id == lg.id, FantasyWaiverClaim.manager_id == mgr.id)
+        .order_by(FantasyWaiverClaim.created_at.desc())
+    )).scalars().all()
+    my_waivers = [{
+        "id": str(w.id), "status": w.status,
+        "add": pool.get(str(w.add_player_id), {}).get("name", "?"),
+        "drop": pool.get(str(w.drop_player_id), {}).get("name", "?") if w.drop_player_id else None,
+    } for w in wv]
+
+    squad_team = {str(s.id): s.team_name for s in squads}
+    trade_rows = (await db.execute(
+        select(FantasyTrade).where(FantasyTrade.league_id == lg.id, FantasyTrade.status == "proposed")
+    )).scalars().all()
+
+    def trade_obj(t):
+        give = (t.offer or {}).get("give", [])
+        get = (t.offer or {}).get("get", [])
+        return {"id": str(t.id),
+                "from": squad_team.get(str(t.proposer_squad_id), "?"),
+                "to": squad_team.get(str(t.receiver_squad_id), "?"),
+                "give": [pool.get(str(p), {}).get("name", "?") for p in give],
+                "get": [pool.get(str(p), {}).get("name", "?") for p in get]}
+
+    return {
+        "scoring_type": lg.scoring_type,
+        "my_squad": my_squad,
+        "squads": squads_out,
+        "unowned": unowned,
+        "my_waivers": my_waivers,
+        "trades": {
+            "incoming": [trade_obj(t) for t in trade_rows if str(t.receiver_squad_id) == my_squad_id],
+            "outgoing": [trade_obj(t) for t in trade_rows if str(t.proposer_squad_id) == my_squad_id],
+        },
+    }
 
 
 class WaiverBody(BaseModel):

@@ -521,9 +521,12 @@ async def auction_view(session: AsyncSession, draft: FantasyDraft, fs, manager_i
     nominator_mid = order[draft.nomination_index % len(order)] if (order and draft.lot_player_id is None and draft.status == "in_progress") else None
 
     my_picks = [(str(p.player_id), float(p.bid_amount or 0)) for p in picks if p.player_id and str(p.manager_id) == me]
+    wl_ids = await _wishlist(session, draft, manager_id)
     return {
         "status": draft.status,
         "draft_type": "auction",
+        "my_wishlist": [{"player_id": pid, "name": pnames.get(pid, "?"),
+                         "role": pool.get(pid, {}).get("role", "")} for pid in wl_ids],
         "budget": round(budget, 1),
         "squad_size": squad_size,
         "quota": quota,
