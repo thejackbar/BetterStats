@@ -1252,7 +1252,7 @@ async def get_game_fall_of_wickets(session: AsyncSession, game_id: str) -> list[
                 fow.overs_at_fall,
                 COALESCE(p.display_name_override, p.name, fow.batter_name) AS player_name,
                 fow.player_id::text
-            FROM fall_of_wickets fow
+            FROM v_effective_fall_of_wickets fow
             LEFT JOIN players p ON p.id = fow.player_id
             WHERE fow.game_id = :gid
             ORDER BY fow.innings_number, fow.wicket_number
@@ -2591,7 +2591,7 @@ async def get_game_partnerships(session: AsyncSession, game_id: str) -> list[dic
                 pt.batter2_id::text,
                 COALESCE(p1.display_name_override, p1.name) AS batter1_name,
                 COALESCE(p2.display_name_override, p2.name) AS batter2_name
-            FROM partnerships pt
+            FROM v_effective_partnerships pt
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE pt.game_id = :gid

@@ -35,8 +35,10 @@ from app.models.db import (
     ManualBowlingSpell,
     ManualCareerAdjustment,
     ManualEditLog,
+    ManualFallOfWicket,
     ManualFieldingStat,
     ManualGame,
+    ManualPartnership,
     ManualSeasonAdjustment,
     Organisation,
     Player,
@@ -753,6 +755,100 @@ def _parse_date(s: Optional[str]):
         raise HTTPException(status_code=422, detail=f"Invalid played_at date: {s}")
 
 
+def _norm_nm(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _which_out(out_name: Optional[str], b0: dict, b1: dict) -> int:
+    """Of the two batters at the crease, which one (0 or 1) the fall-of-wicket row
+    says is out. Falls back to the batter who's been in longer (slot 0)."""
+    if not out_name:
+        return 0
+    on = _norm_nm(out_name)
+    n0, n1 = _norm_nm(b0.get("name")), _norm_nm(b1.get("name"))
+    if on and on == n0:
+        return 0
+    if on and on == n1:
+        return 1
+    digits = "".join(ch for ch in out_name if ch.isdigit())
+    if digits:
+        d = int(digits)
+        if b0.get("position") == d:
+            return 0
+        if b1.get("position") == d:
+            return 1
+    if on and n1 and on in n1:
+        return 1
+    if on and n0 and on in n0:
+        return 0
+    return 0
+
+
+async def _replace_game_fow_partnerships(db: AsyncSession, game_id: uuid.UUID, payload: Optional[dict]):
+    """Store fall-of-wickets and per-wicket partnerships for an uploaded card.
+
+    Reads the both-team extracted payload. Partnership runs come straight off the card's
+    STAND column (falling back to the score difference), the batter pair is worked out by
+    walking the batting order against the fall-of-wickets, and our batters resolve to a
+    player_id while the opposition stay name-only. Derived, so it is wiped and rebuilt
+    whenever the game is saved."""
+    await db.execute(sa_delete(ManualFallOfWicket).where(ManualFallOfWicket.manual_game_id == game_id))
+    await db.execute(sa_delete(ManualPartnership).where(ManualPartnership.manual_game_id == game_id))
+    if not payload:
+        return
+
+    def _pid(v):
+        try:
+            return uuid.UUID(v) if v else None
+        except (ValueError, TypeError):
+            return None
+
+    for inn in (payload.get("innings") or []):
+        inn_no = inn.get("innings_number") or 1
+        is_our = bool(inn.get("is_our_team"))
+        bats = [b for b in (inn.get("batting") or [])
+                if (b.get("name") or "").strip() and not b.get("did_not_bat")]
+        fow = sorted(
+            [f for f in (inn.get("fall_of_wickets") or []) if f.get("wicket") is not None],
+            key=lambda f: f.get("wicket") or 0,
+        )
+        name_to_pid = {_norm_nm(b.get("name")): b.get("player_id") for b in bats if b.get("player_id")}
+
+        for f in fow:
+            out_name = f.get("batter_out")
+            db.add(ManualFallOfWicket(
+                manual_game_id=game_id, innings_number=inn_no, wicket_number=f.get("wicket"),
+                score_at_fall=f.get("score"), overs_at_fall=None,
+                player_id=_pid(name_to_pid.get(_norm_nm(out_name))) if out_name else None,
+                batter_name=(out_name or None),
+            ))
+
+        if len(bats) >= 2 and fow:
+            at = [0, 1]
+            nxt = 2
+            prev = 0
+            for f in fow:
+                i0, i1 = at[0], at[1]
+                if i0 is None or i1 is None or i0 >= len(bats) or i1 >= len(bats):
+                    break
+                b0, b1 = bats[i0], bats[i1]
+                score, stand = f.get("score"), f.get("stand")
+                runs = stand if stand is not None else (
+                    (score - prev) if (score is not None and prev is not None) else None
+                )
+                db.add(ManualPartnership(
+                    manual_game_id=game_id, innings_number=inn_no, wicket_number=f.get("wicket"),
+                    batter1_id=_pid(b0.get("player_id")), batter2_id=_pid(b1.get("player_id")),
+                    runs=runs, balls=None,
+                    batter1_runs=b0.get("runs"), batter2_runs=b1.get("runs"),
+                    is_club_innings=is_our,
+                ))
+                out_idx = _which_out(f.get("batter_out"), b0, b1)
+                at[out_idx] = nxt if nxt < len(bats) else None
+                nxt += 1 if nxt < len(bats) else 0
+                prev = score if score is not None else prev
+
+
 # ─── AI scorecard upload (Upload Historical Scorecard) ───────────────────────
 
 
@@ -879,6 +975,7 @@ async def create_manual_game(
     db.add(game)
     await db.flush()
     await _replace_game_children(db, game.id, data, club.id)
+    await _replace_game_fow_partnerships(db, game.id, data.extracted_payload)
     await db.flush()
     summary = (
         f"Added manual game ({data.played_at or 'date unknown'})"
@@ -959,6 +1056,8 @@ async def update_manual_game(
     await db.flush()
 
     await _replace_game_children(db, gid, data, club.id)
+    if data.extracted_payload is not None:
+        await _replace_game_fow_partnerships(db, gid, data.extracted_payload)
     await db.flush()
     after = _row_to_dict(game)
     after["children"] = data.model_dump()

@@ -119,6 +119,70 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE manual_games ADD COLUMN IF NOT EXISTS extracted_payload JSONB"
         ))
+        # Manual partnerships + fall of wickets (migration 092): a photographed card
+        # carries its fall-of-wickets table (STAND = partnership runs), so manual games
+        # get their own per-wicket tables (FK'd to manual_games) and v_effective union
+        # views, mirroring migration 038. Defensive idempotent creates so the API boots
+        # even if alembic lags.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS manual_fall_of_wickets (
+                id SERIAL PRIMARY KEY,
+                manual_game_id UUID NOT NULL REFERENCES manual_games(id) ON DELETE CASCADE,
+                innings_number INTEGER NOT NULL,
+                wicket_number INTEGER NOT NULL,
+                score_at_fall INTEGER,
+                overs_at_fall NUMERIC(5,1),
+                player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                batter_name TEXT
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_manual_fow_game ON manual_fall_of_wickets(manual_game_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS manual_partnerships (
+                id SERIAL PRIMARY KEY,
+                manual_game_id UUID NOT NULL REFERENCES manual_games(id) ON DELETE CASCADE,
+                innings_number INTEGER NOT NULL,
+                wicket_number INTEGER NOT NULL,
+                batter1_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                batter2_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                runs INTEGER DEFAULT 0,
+                balls INTEGER,
+                batter1_runs INTEGER,
+                batter2_runs INTEGER,
+                is_club_innings BOOLEAN
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_manual_partnerships_game ON manual_partnerships(manual_game_id)"
+        ))
+        await conn.execute(text("""
+            CREATE OR REPLACE VIEW v_effective_fall_of_wickets AS
+            SELECT id, game_id, innings_number, wicket_number,
+                   score_at_fall, overs_at_fall, player_id, batter_name,
+                   'api'::text AS source
+            FROM fall_of_wickets
+            UNION ALL
+            SELECT id, manual_game_id AS game_id, innings_number, wicket_number,
+                   score_at_fall, overs_at_fall, player_id, batter_name,
+                   'manual'::text AS source
+            FROM manual_fall_of_wickets
+        """))
+        await conn.execute(text("""
+            CREATE OR REPLACE VIEW v_effective_partnerships AS
+            SELECT id, game_id, innings_number, wicket_number,
+                   batter1_id, batter2_id, runs, balls,
+                   batter1_runs, batter2_runs, is_club_innings,
+                   'api'::text AS source
+            FROM partnerships
+            UNION ALL
+            SELECT id, manual_game_id AS game_id, innings_number, wicket_number,
+                   batter1_id, batter2_id, runs, balls,
+                   batter1_runs, batter2_runs, is_club_innings,
+                   'manual'::text AS source
+            FROM manual_partnerships
+        """))
         # BetterSelect → Net Manager: net/practice attendance + batting-queue
         # sessions. Defensive idempotent creates so the API boots even if a
         # numbered migration hasn't run yet (mirrors the self-service block).

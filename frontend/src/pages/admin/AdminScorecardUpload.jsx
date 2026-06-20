@@ -463,6 +463,28 @@ export default function AdminScorecardUpload() {
                     </table>
                   </div>
                 )}
+
+                {/* Fall of wickets / partnerships */}
+                {(inn.fall_of_wickets || []).length > 0 && (
+                  <div className="overflow-x-auto mt-4">
+                    <div className="text-[10px] font-mono text-pb-faint mb-1">FALL OF WICKETS · STAND = partnership runs</div>
+                    <table className="text-sm">
+                      <thead><tr className="border-b pb-hairline">
+                        <th className={TH}>Wkt</th><th className={TH}>Score</th><th className={TH}>Batter out</th><th className={TH}>Stand</th>
+                      </tr></thead>
+                      <tbody>
+                        {(inn.fall_of_wickets || []).map((f, ri) => (
+                          <tr key={ri} className="border-b pb-hairline/40">
+                            <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={f.wicket ?? ''} onChange={e => editRow(ii, 'fall_of_wickets', ri, { wicket: num(e.target.value) })} /></td>
+                            <td className={TD}><input className={`${SMALL_INPUT} w-16`} value={f.score ?? ''} onChange={e => editRow(ii, 'fall_of_wickets', ri, { score: num(e.target.value) })} /></td>
+                            <td className={TD}><input className={`${SMALL_INPUT} min-w-[140px]`} value={f.batter_out || ''} onChange={e => editRow(ii, 'fall_of_wickets', ri, { batter_out: e.target.value })} /></td>
+                            <td className={TD}><input className={`${SMALL_INPUT} w-16`} value={f.stand ?? ''} onChange={e => editRow(ii, 'fall_of_wickets', ri, { stand: num(e.target.value) })} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             ))}
 
