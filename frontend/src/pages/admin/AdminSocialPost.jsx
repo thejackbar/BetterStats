@@ -17,6 +17,7 @@ import {
   ResultsList, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
   DEFAULT_FIXTURES, DEFAULT_RESULTS,
 } from '../../social/round-templates'
+import { exportNodeToPng } from '../../social/exportImage'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE REGISTRY
@@ -99,53 +100,6 @@ const DISPLAY_FONTS = [
   { key: 'abril',        name: 'Abril Fatface',    family: "'Abril Fatface', serif",         weight: 400 },
   { key: 'bungee',       name: 'Bungee',           family: "'Bungee', sans-serif",           weight: 400 },
 ]
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FONT EMBEDDING FOR EXPORT
-// modern-screenshot only embeds fonts from stylesheets it can read, and reading
-// a cross-origin <link> sheet's cssRules throws a SecurityError — so it silently
-// skips them. Our display fonts come from fonts.googleapis.com, meaning they
-// never make it into the captured SVG and the export falls back to a wide system
-// font (text overflows / clips). We fetch those stylesheets ourselves, inline
-// every font file as a data URI, and hand the result to the exporter's
-// `font.cssText` option. Cached after the first successful build.
-// ─────────────────────────────────────────────────────────────────────────────
-let _embeddedFontCssPromise = null
-function getEmbeddedFontCss() {
-  if (!_embeddedFontCssPromise) {
-    _embeddedFontCssPromise = buildEmbeddedFontCss().catch(e => {
-      _embeddedFontCssPromise = null // let the next export retry
-      throw e
-    })
-  }
-  return _embeddedFontCssPromise
-}
-async function buildEmbeddedFontCss() {
-  const hrefs = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
-    .map(l => l.href)
-    .filter(h => /fonts\.googleapis\.com/.test(h))
-  let css = ''
-  for (const href of hrefs) {
-    try { css += (await (await fetch(href)).text()) + '\n' } catch { /* skip unreachable sheet */ }
-  }
-  const urls = Array.from(new Set(
-    Array.from(css.matchAll(/url\((https:\/\/[^)]+?)\)/g)).map(m => m[1].replace(/['"]/g, ''))
-  ))
-  const pairs = await Promise.all(urls.map(async url => {
-    try {
-      const blob = await (await fetch(url)).blob()
-      const dataUri = await new Promise((resolve, reject) => {
-        const fr = new FileReader()
-        fr.onload = () => resolve(fr.result)
-        fr.onerror = reject
-        fr.readAsDataURL(blob)
-      })
-      return [url, dataUri]
-    } catch { return null }
-  }))
-  for (const pair of pairs) { if (pair) css = css.split(pair[0]).join(pair[1]) }
-  return css
-}
 
 function applyTheme(palette, isDark) {
   if (isDark || !palette) return palette
@@ -976,44 +930,21 @@ export default function AdminSocialPost() {
     })
   }, [])
 
-  // Export to JPG. Uses modern-screenshot, which serializes the node into an
-  // SVG <foreignObject> and lets the real browser engine lay it out — so the
-  // capture matches the on-screen render exactly. (Replaces html2canvas, which
-  // re-implemented layout in JS and caused text/image drift.) The render target
-  // is already mounted off-screen at full W×H, so we capture it in place — no
-  // reposition hack needed.
+  // Export to PNG via the shared BetterSocials pipeline (modern-screenshot,
+  // with Google Fonts embedded so the display face survives the capture). The
+  // render target is already mounted off-screen at full W×H.
   const handleExport = async () => {
     if (!renderRef.current) return
     setExporting(true)
     setExportError(null)
     try {
-      await document.fonts.ready
-      const { domToBlob } = await import('modern-screenshot')
-      const el = renderRef.current
       const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
       const H = tmpl.h || 1080
-      // Embed the Google Fonts faces ourselves — modern-screenshot can't read
-      // the cross-origin sheet, so without this the condensed display font is
-      // dropped and the export falls back to a wide system font (text overflows).
-      let font
-      try { font = { cssText: await getEmbeddedFontCss() } } catch { /* fall back to system fonts */ }
-      const blob = await domToBlob(el, {
-        type: 'image/png',          // lossless PNG — exact replica, no JPG artefacts on crisp text
-        scale: 2,                   // 2× for crisp, high-DPI output
+      await exportNodeToPng(renderRef.current, {
         width: W,
         height: H,
-        backgroundColor: '#080808', // fallback for any uncovered area; templates are full-bleed dark
-        font,
+        fileName: `betterstats-${templateId.toLowerCase()}-${Date.now()}.png`,
       })
-      if (!blob) { setExportError('Could not generate image'); return }
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `betterstats-${templateId.toLowerCase()}-${Date.now()}.png`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
     } catch (e) {
       setExportError(e.message || 'Export failed')
     } finally {

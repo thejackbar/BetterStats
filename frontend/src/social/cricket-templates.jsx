@@ -14,7 +14,7 @@ import { useRef, useState, useLayoutEffect } from 'react'
 // the measure runs synchronously via useLayoutEffect before the capture clones
 // the DOM (the computed fontSize is inlined on the node).
 // ─────────────────────────────────────────────────────────────────────────────
-function AutoFitText({ text, children, max, min = 8, lines = 1, pad = 0, style = {}, measureDeps = [], ...rest }) {
+export function AutoFitText({ text, children, max, min = 8, lines = 1, pad = 0, style = {}, measureDeps = [], ...rest }) {
   const ref = useRef(null)
   const [size, setSize] = useState(max)
 
