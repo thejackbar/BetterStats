@@ -818,12 +818,18 @@ async def _replace_game_bowler_wickets(db: AsyncSession, game_id: uuid.UUID, org
         return
     players = (await db.execute(select(Player).where(Player.organisation_id == org_id))).scalars().all()
     index = _build_match_index(players)
+    org_pids = {p.id for p in players}
 
     def _resolve(name):
         if not name:
             return None
         m = _suggest_player(name, index)
         return m.id if m else None
+
+    def _explicit(pid):
+        """A reviewer-picked player id, only if it's one of our players."""
+        u = _as_uuid(pid)
+        return u if u in org_pids else None
 
     for inn in (payload.get("innings") or []):
         if inn.get("is_our_team"):
@@ -841,11 +847,16 @@ async def _replace_game_bowler_wickets(db: AsyncSession, game_id: uuid.UUID, org
             fielder_nm = fielder_nm or bt.get("fielder")
             if not method or method in ("not out", "run out"):
                 continue  # not a bowler's wicket (run outs credit the fielder, handled in fielding)
-            bid = _as_uuid(bowl_by_name.get(_norm_nm(bowler_nm))) if bowler_nm else None
-            bid = bid or _resolve(bowler_nm)
+            # A reviewer's explicit pick wins; otherwise match the bowling line, then the roster.
+            bid = _explicit(bt.get("bowler_id"))
+            if not bid:
+                bid = _as_uuid(bowl_by_name.get(_norm_nm(bowler_nm))) if bowler_nm else None
+                bid = bid or _resolve(bowler_nm)
             if not bid:
                 continue  # bowler_id is NOT NULL — skip if we can't name the bowler
-            fid = _resolve(fielder_nm) if (fielder_nm and method in ("caught", "stumped")) else None
+            fid = _explicit(bt.get("fielder_id"))
+            if not fid and fielder_nm and method in ("caught", "stumped"):
+                fid = _resolve(fielder_nm)
             db.add(ManualBowlerWicket(
                 manual_game_id=game_id, innings_number=inn_no,
                 bowler_id=_as_uuid(bid), fielder_id=_as_uuid(fid),
