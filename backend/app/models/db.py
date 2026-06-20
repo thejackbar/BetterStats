@@ -1075,6 +1075,9 @@ class ManualPartnership(Base):
     batter1_runs = Column(Integer, nullable=True)
     batter2_runs = Column(Integer, nullable=True)
     is_club_innings = Column(Boolean, nullable=True)
+
+
+class ManualSeasonAdjustment(Base):
     __tablename__ = "manual_season_adjustments"
     __table_args__ = (
         UniqueConstraint("player_id", "season_id", "grade_id", name="uq_manual_season_adj_player_season_grade"),
