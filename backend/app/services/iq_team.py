@@ -195,7 +195,7 @@ async def _partnerships(session: AsyncSession, org_id: str, season_id: str | Non
         text(
             f"""
             SELECT p.wicket_number AS wk, ROUND(AVG(p.runs)::numeric, 1) AS avg_p, COUNT(*) AS n
-            FROM partnerships p
+            FROM v_effective_partnerships p
             JOIN v_effective_games g ON g.id = p.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -345,7 +345,7 @@ async def _batting_pairs(session: AsyncSession, org_id: str, season_id: str | No
                 SELECT LEAST(p.batter1_id, p.batter2_id) AS a,
                        GREATEST(p.batter1_id, p.batter2_id) AS b,
                        p.runs AS runs, p.wicket_number AS wk
-                FROM partnerships p
+                FROM v_effective_partnerships p
                 JOIN v_effective_games g ON g.id = p.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
@@ -469,7 +469,7 @@ async def _collapses(session: AsyncSession, org_id: str, season_id: str | None, 
             f"""
             SELECT p.game_id::text AS gid, p.innings_number AS inn,
                    p.wicket_number AS wk, p.runs AS runs
-            FROM partnerships p
+            FROM v_effective_partnerships p
             JOIN v_effective_games g ON g.id = p.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -817,7 +817,7 @@ async def _team_starts(session: AsyncSession, org_id: str, season_id: str | None
         text(
             f"""
             SELECT p.runs AS stand, g.result
-            FROM partnerships p
+            FROM v_effective_partnerships p
             JOIN v_effective_games g ON g.id = p.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id

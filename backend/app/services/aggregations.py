@@ -1222,7 +1222,7 @@ async def get_player_partnerships(session: AsyncSession, player_id: str) -> list
                 COALESCE(SUM(pt.runs), 0) AS total_runs,
                 MAX(pt.runs) AS best_runs,
                 MAX(g.played_at)::text AS last_played
-            FROM partnerships pt
+            FROM v_effective_partnerships pt
             JOIN v_effective_games g ON g.id = pt.game_id
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id

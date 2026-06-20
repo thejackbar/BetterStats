@@ -561,7 +561,7 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
         text(
             """
             SELECT g.id::text AS match_id, pt.innings_number, pt.wicket_number, pt.runs
-            FROM partnerships pt
+            FROM v_effective_partnerships pt
             JOIN v_effective_games g ON g.id = pt.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id

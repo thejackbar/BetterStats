@@ -626,7 +626,7 @@ async def get_superlatives(
                 p1.id AS batter1_id, p2.id AS batter2_id,
                 pt.runs, pt.wicket_number,
                 gm.home_team, gm.away_team
-            FROM partnerships pt
+            FROM v_effective_partnerships pt
             JOIN players p1 ON p1.id = pt.batter1_id
             JOIN players p2 ON p2.id = pt.batter2_id
             JOIN v_effective_games gm ON gm.id = pt.game_id
@@ -872,7 +872,7 @@ async def get_partnership_stats(
                 p1.id AS batter1_id, p2.id AS batter2_id,
                 pt.runs, pt.wicket_number, pt.balls,
                 pt.batter1_runs, pt.batter2_runs
-            FROM partnerships pt
+            FROM v_effective_partnerships pt
             JOIN players p1 ON p1.id = pt.batter1_id
             JOIN players p2 ON p2.id = pt.batter2_id
             JOIN v_effective_games gm ON gm.id = pt.game_id
@@ -894,7 +894,7 @@ async def get_partnership_stats(
                 COALESCE(p2.display_name_override, p2.name) AS batter2_name,
                 p1.id AS batter1_id, p2.id AS batter2_id,
                 pt.runs, pt.balls
-            FROM partnerships pt
+            FROM v_effective_partnerships pt
             JOIN players p1 ON p1.id = pt.batter1_id
             JOIN players p2 ON p2.id = pt.batter2_id
             JOIN v_effective_games gm ON gm.id = pt.game_id
@@ -1755,7 +1755,7 @@ async def generate_narrative(org_id: str, season_id: str, db: AsyncSession = Dep
         SELECT COALESCE(p1.display_name_override, p1.name) AS batter1_name,
                COALESCE(p2.display_name_override, p2.name) AS batter2_name,
                p1.id AS batter1_id, pt.runs, pt.wicket_number
-        FROM partnerships pt
+        FROM v_effective_partnerships pt
         JOIN players p1 ON p1.id = pt.batter1_id JOIN players p2 ON p2.id = pt.batter2_id
         JOIN v_effective_games gm ON gm.id = pt.game_id JOIN grades g ON g.id = gm.grade_id
         WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL) AND p1.organisation_id = :o
