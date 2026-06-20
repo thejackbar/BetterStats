@@ -692,7 +692,7 @@ async def get_bowling_dismissal_breakdown(session: AsyncSession, player_id: str)
                     ELSE COALESCE(bw.dismissal_type, 'unknown')
                 END AS dismissal_type,
                 COUNT(*) AS count
-            FROM bowler_wickets bw
+            FROM v_effective_bowler_wickets bw
             WHERE bw.bowler_id = :pid
             GROUP BY 1
             ORDER BY COUNT(*) DESC
@@ -719,7 +719,7 @@ async def get_bowling_by_batter_position(session: AsyncSession, player_id: str) 
                 p.batting_position,
                 COALESCE(COUNT(bw.id), 0) AS wickets
             FROM positions p
-            LEFT JOIN bowler_wickets bw
+            LEFT JOIN v_effective_bowler_wickets bw
               ON bw.batter_position = p.batting_position
              AND bw.bowler_id = :pid
             GROUP BY p.batting_position

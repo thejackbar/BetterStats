@@ -802,7 +802,7 @@ async def bowler_deep_dive(session: AsyncSession, org_id: str, player_id: str) -
             SELECT bw.batter_position AS pos, bw.batter_runs AS runs,
                    bw.dismissal_type AS dt, bw.caught_behind AS cb, bw.fielder_id::text AS fid,
                    COALESCE(f.display_name_override, f.name) AS fielder
-            FROM bowler_wickets bw
+            FROM v_effective_bowler_wickets bw
             JOIN v_effective_games g ON g.id = bw.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id

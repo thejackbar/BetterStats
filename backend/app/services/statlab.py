@@ -3312,7 +3312,7 @@ async def derived_ducks_inflicted(
             COALESCE(p.display_name_override, p.name) AS player_name,
             COUNT(*)::int AS ducks_inflicted
         FROM game_universe gu
-        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN v_effective_bowler_wickets bw ON bw.game_id = gu.game_id
         JOIN players p ON p.id = bw.bowler_id
         LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
         WHERE p.organisation_id = :org_id
@@ -3344,7 +3344,7 @@ async def derived_golden_ducks_inflicted(
             COALESCE(p.display_name_override, p.name) AS player_name,
             COUNT(*)::int AS golden_ducks_inflicted
         FROM game_universe gu
-        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN v_effective_bowler_wickets bw ON bw.game_id = gu.game_id
         JOIN players p ON p.id = bw.bowler_id
         LEFT JOIN game_appearances gap_b ON gap_b.game_id = gu.game_id AND gap_b.player_id = p.id
         WHERE p.organisation_id = :org_id
@@ -3388,7 +3388,7 @@ async def derived_bowler_fielder_combo(
                 COALESCE(mb.canonical_id, bw.bowler_id)  AS bowler_id,
                 COALESCE(mf.canonical_id, bw.fielder_id) AS fielder_id
             FROM game_universe gu
-            JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+            JOIN v_effective_bowler_wickets bw ON bw.game_id = gu.game_id
             JOIN players pb ON pb.id = bw.bowler_id
             LEFT JOIN merge_map mb ON mb.removed_player_id = bw.bowler_id
             LEFT JOIN merge_map mf ON mf.removed_player_id = bw.fielder_id
@@ -3526,7 +3526,7 @@ async def derived_caught_and_bowled(
         FROM game_universe gu
         JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
         JOIN players p ON p.id = bi.player_id
-        JOIN bowler_wickets bw
+        JOIN v_effective_bowler_wickets bw
           ON bw.game_id = bi.game_id
          AND bw.innings_number = bi.innings_number
          AND LOWER(bw.dismissal_type) IN ('caught and bowled', 'c&b', 'c & b')
@@ -3566,7 +3566,7 @@ async def derived_caught_and_bowled_bowler(
             COALESCE(p.display_name_override, p.name) AS player_name,
             COUNT(*)::int                             AS c_and_b_count
         FROM game_universe gu
-        JOIN bowler_wickets bw ON bw.game_id = gu.game_id
+        JOIN v_effective_bowler_wickets bw ON bw.game_id = gu.game_id
         JOIN players p ON p.id = bw.bowler_id
         LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
         WHERE p.organisation_id = :org_id

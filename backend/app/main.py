@@ -183,6 +183,37 @@ async def lifespan(app: FastAPI):
                    'manual'::text AS source
             FROM manual_partnerships
         """))
+        # Manual bowler wickets (migration 093): per-dismissal bowler/fielder credit for
+        # an uploaded card, mirrored into a v_effective union view like the others.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS manual_bowler_wickets (
+                id SERIAL PRIMARY KEY,
+                manual_game_id UUID NOT NULL REFERENCES manual_games(id) ON DELETE CASCADE,
+                innings_number INTEGER NOT NULL,
+                bowler_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                fielder_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                batter_name TEXT,
+                batter_position INTEGER,
+                batter_runs INTEGER,
+                batter_balls INTEGER,
+                dismissal_type TEXT NOT NULL,
+                caught_behind BOOLEAN
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_manual_bw_game ON manual_bowler_wickets(manual_game_id)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_manual_bw_bowler ON manual_bowler_wickets(bowler_id)"))
+        await conn.execute(text("""
+            CREATE OR REPLACE VIEW v_effective_bowler_wickets AS
+            SELECT id, game_id, innings_number, bowler_id, fielder_id, batter_name,
+                   batter_position, batter_runs, batter_balls, dismissal_type, caught_behind,
+                   'api'::text AS source
+            FROM bowler_wickets
+            UNION ALL
+            SELECT id, manual_game_id AS game_id, innings_number, bowler_id, fielder_id, batter_name,
+                   batter_position, batter_runs, batter_balls, dismissal_type, caught_behind,
+                   'manual'::text AS source
+            FROM manual_bowler_wickets
+        """))
         # BetterSelect → Net Manager: net/practice attendance + batting-queue
         # sessions. Defensive idempotent creates so the API boots even if a
         # numbered migration hasn't run yet (mirrors the self-service block).

@@ -32,6 +32,7 @@ from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
 from app.models.db import (
     Grade,
     ManualBattingInnings,
+    ManualBowlerWicket,
     ManualBowlingSpell,
     ManualCareerAdjustment,
     ManualEditLog,
@@ -759,6 +760,101 @@ def _norm_nm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
+def _as_uuid(v):
+    if v is None:
+        return None
+    if isinstance(v, uuid.UUID):
+        return v
+    try:
+        return uuid.UUID(str(v))
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_dismissal(text: Optional[str], how_out: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Read a dismissal string into (method, fielder_name, bowler_name).
+
+    Handles the usual scorecard shorthand: 'c Smith b Jones', 'c & b Jones',
+    'st Brown b Jones', 'lbw b Jones', 'b Jones', 'run out (Smith)', 'not out'.
+    Falls back to the model's structured how_out when the text doesn't parse."""
+    s = re.sub(r"\s+", " ", (text or "").strip())
+    sl = s.lower()
+    if not sl or "not out" in sl or sl in ("dnb", "did not bat", "absent"):
+        return (None, None, None)
+    m = re.match(r"^c(?:aught)?\s*(?:&|and|\+)\s*b(?:owled)?\.?\s+(.+)$", s, re.I)
+    if m:
+        return ("caught", m.group(1).strip(), m.group(1).strip())
+    m = re.match(r"^st(?:umped)?\.?\s+(.+?)\s+b(?:owled)?\.?\s+(.+)$", s, re.I)
+    if m:
+        return ("stumped", m.group(1).strip(), m.group(2).strip())
+    m = re.match(r"^c(?:aught)?\.?\s+(.+?)\s+b(?:owled)?\.?\s+(.+)$", s, re.I)
+    if m:
+        return ("caught", m.group(1).strip(), m.group(2).strip())
+    m = re.match(r"^lbw(?:\s+b(?:owled)?\.?\s+(.+))?$", s, re.I)
+    if m:
+        return ("lbw", None, (m.group(1) or "").strip() or None)
+    m = re.match(r"^(?:run\s*out|ro)\b\s*\(?\s*([^)]*)\)?$", s, re.I)
+    if m:
+        return ("run out", (m.group(1) or "").strip() or None, None)
+    m = re.match(r"^b(?:owled)?\.?\s+(.+)$", s, re.I)
+    if m:
+        return ("bowled", None, m.group(1).strip())
+    ho = (how_out or "").strip().lower()
+    if not ho or "not out" in ho or ho in ("dnb", "did not bat", "absent"):
+        return (None, None, None)
+    return (ho, None, None)
+
+
+async def _replace_game_bowler_wickets(db: AsyncSession, game_id: uuid.UUID, org_id: uuid.UUID, payload: Optional[dict]):
+    """Per-wicket bowler/fielder credit for our bowlers, from the opposition innings.
+
+    For each opposition batter our side dismissed (the bowling rows in their innings are
+    ours), read the dismissal → method/bowler/fielder, resolve the bowler to the player
+    the reviewer matched on the bowling line (falling back to a roster match) and the
+    catcher/stumper to a roster player, and write a manual_bowler_wickets row. Run outs
+    and not-outs aren't bowler wickets. Derived, so wiped and rebuilt on every save."""
+    await db.execute(sa_delete(ManualBowlerWicket).where(ManualBowlerWicket.manual_game_id == game_id))
+    if not payload:
+        return
+    players = (await db.execute(select(Player).where(Player.organisation_id == org_id))).scalars().all()
+    index = _build_match_index(players)
+
+    def _resolve(name):
+        if not name:
+            return None
+        m = _suggest_player(name, index)
+        return m.id if m else None
+
+    for inn in (payload.get("innings") or []):
+        if inn.get("is_our_team"):
+            continue  # only the opposition's innings → our bowlers' wickets
+        inn_no = inn.get("innings_number") or 1
+        bowl_by_name = {
+            _norm_nm(b.get("name")): b.get("player_id")
+            for b in (inn.get("bowling") or []) if b.get("player_id") and b.get("name")
+        }
+        for bt in (inn.get("batting") or []):
+            if bt.get("did_not_bat"):
+                continue
+            method, fielder_nm, bowler_nm = _parse_dismissal(bt.get("dismissal_text"), bt.get("how_out"))
+            bowler_nm = bowler_nm or bt.get("bowler")
+            fielder_nm = fielder_nm or bt.get("fielder")
+            if not method or method in ("not out", "run out"):
+                continue  # not a bowler's wicket (run outs credit the fielder, handled in fielding)
+            bid = _as_uuid(bowl_by_name.get(_norm_nm(bowler_nm))) if bowler_nm else None
+            bid = bid or _resolve(bowler_nm)
+            if not bid:
+                continue  # bowler_id is NOT NULL — skip if we can't name the bowler
+            fid = _resolve(fielder_nm) if (fielder_nm and method in ("caught", "stumped")) else None
+            db.add(ManualBowlerWicket(
+                manual_game_id=game_id, innings_number=inn_no,
+                bowler_id=_as_uuid(bid), fielder_id=_as_uuid(fid),
+                batter_name=bt.get("name"), batter_position=bt.get("position"),
+                batter_runs=bt.get("runs"), batter_balls=bt.get("balls"),
+                dismissal_type=method, caught_behind=None,
+            ))
+
+
 def _which_out(out_name: Optional[str], b0: dict, b1: dict) -> int:
     """Of the two batters at the crease, which one (0 or 1) the fall-of-wicket row
     says is out. Falls back to the batter who's been in longer (slot 0)."""
@@ -1020,6 +1116,7 @@ async def create_manual_game(
     await db.flush()
     await _replace_game_children(db, game.id, data, club.id)
     await _replace_game_fow_partnerships(db, game.id, data.extracted_payload)
+    await _replace_game_bowler_wickets(db, game.id, club.id, data.extracted_payload)
     await db.flush()
     summary = (
         f"Added manual game ({data.played_at or 'date unknown'})"
@@ -1102,6 +1199,7 @@ async def update_manual_game(
     await _replace_game_children(db, gid, data, club.id)
     if data.extracted_payload is not None:
         await _replace_game_fow_partnerships(db, gid, data.extracted_payload)
+        await _replace_game_bowler_wickets(db, gid, club.id, data.extracted_payload)
     await db.flush()
     after = _row_to_dict(game)
     after["children"] = data.model_dump()

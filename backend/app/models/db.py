@@ -1061,6 +1061,22 @@ class ManualFallOfWicket(Base):
     batter_name = Column(Text, nullable=True)
 
 
+class ManualBowlerWicket(Base):
+    __tablename__ = "manual_bowler_wickets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    manual_game_id = Column(UUID(as_uuid=True), ForeignKey("manual_games.id", ondelete="CASCADE"), nullable=False)
+    innings_number = Column(Integer, nullable=False)
+    bowler_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    fielder_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    batter_name = Column(Text, nullable=True)
+    batter_position = Column(Integer, nullable=True)
+    batter_runs = Column(Integer, nullable=True)
+    batter_balls = Column(Integer, nullable=True)
+    dismissal_type = Column(Text, nullable=False)
+    caught_behind = Column(Boolean, nullable=True)
+
+
 class ManualPartnership(Base):
     __tablename__ = "manual_partnerships"
 
