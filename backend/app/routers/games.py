@@ -293,6 +293,68 @@ async def _gr_scorecard_response(game_id: str) -> Optional[dict]:
     }
 
 
+def _manual_opp_from_payload(payload: dict, innings_totals: dict) -> tuple[list[dict], list[dict]]:
+    """Opposition batting/bowling rows for a manually-uploaded scorecard.
+
+    A manual game built by the AI scorecard upload stores the full both-team card in
+    `extracted_payload`. Our own players come from the manual_* tables (already in
+    batting_flat / bowling_flat); this reads only the OPPOSITION half (player_id stays
+    None) so the match view shows both sides, and fills in each innings' team name and
+    the opposition totals on innings_totals.
+    """
+    opp_batting: list[dict] = []
+    opp_bowling: list[dict] = []
+    for inn in (payload.get("innings") or []):
+        try:
+            n = int(inn.get("innings_number") or 1)
+        except (TypeError, ValueError):
+            n = 1
+        meta = innings_totals.setdefault(n, {"runs": 0, "wickets": 0, "extras": 0})
+        if inn.get("batting_team"):
+            meta["batting_team"] = inn["batting_team"]
+        extras = inn.get("extras") or {}
+        if extras.get("total") is not None:
+            meta["extras"] = extras["total"]
+        if not inn.get("is_our_team"):
+            # Opposition batted → their batters are the opp card; the bowling rows in
+            # this innings are OURS (already in bowling_flat).
+            if inn.get("total_runs") is not None:
+                meta["runs"] = inn["total_runs"]
+            if inn.get("total_wickets") is not None:
+                meta["wickets"] = inn["total_wickets"]
+            for b in (inn.get("batting") or []):
+                opp_batting.append({
+                    "innings_number": n,
+                    "player_id": None,
+                    "player_name": b.get("name"),
+                    "runs": b.get("runs"),
+                    "balls": b.get("balls"),
+                    "fours": b.get("fours"),
+                    "sixes": b.get("sixes"),
+                    "dismissal_type": b.get("dismissal_text") or b.get("how_out"),
+                    "caught_behind": None,
+                    "not_out": bool(b.get("not_out")),
+                    "did_not_bat": bool(b.get("did_not_bat")),
+                    "batting_position": b.get("position"),
+                })
+        else:
+            # We batted → the bowling rows are the OPPOSITION's bowlers.
+            for b in (inn.get("bowling") or []):
+                opp_bowling.append({
+                    "innings_number": n,
+                    "player_id": None,
+                    "player_name": b.get("name"),
+                    "overs": b.get("overs"),
+                    "maidens": b.get("maidens"),
+                    "runs": b.get("runs"),
+                    "wickets": b.get("wickets"),
+                    "wides": b.get("wides"),
+                    "no_balls": b.get("no_balls"),
+                    "economy": None,
+                })
+    return opp_batting, opp_bowling
+
+
 @router.get("/{game_id}/scorecard")
 async def get_scorecard(
     game_id: str,
@@ -799,6 +861,11 @@ async def get_scorecard(
     except Exception as e:
         import traceback
         logger.error(f"get_scorecard: GR live-fetch failed for {game_id}: {e}\n{traceback.format_exc()}")
+
+    # Manual games skip the GR feed; if the card was uploaded with the AI scorecard
+    # tool it carries the opposition half in its stored payload, so render both sides.
+    if is_manual and getattr(game, "extracted_payload", None):
+        opp_batting, opp_bowling = _manual_opp_from_payload(game.extracted_payload, innings_totals)
 
     return {
         "id": str(game.id),

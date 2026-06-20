@@ -152,6 +152,12 @@ class ManualGameIn(BaseModel):
     is_final: bool = False
     match_format: Optional[str] = None
     notes: Optional[str] = None
+    # Opposition club's Grassroots org GUID (from the CA club search) — links the manual
+    # game to head-to-head / BetterIQ opponent matching the same way a synced game does.
+    opp_org_id: Optional[str] = None
+    # Full both-team scorecard from the AI scorecard upload (renders the opposition half
+    # of the match view; the opposition aren't stored as player rows).
+    extracted_payload: Optional[dict] = None
     batting_innings: list[ManualBattingIn] = Field(default_factory=list)
     bowling_spells: list[ManualBowlingIn] = Field(default_factory=list)
     fielding_stats: list[ManualFieldingIn] = Field(default_factory=list)
@@ -747,6 +753,98 @@ def _parse_date(s: Optional[str]):
         raise HTTPException(status_code=422, detail=f"Invalid played_at date: {s}")
 
 
+# ─── AI scorecard upload (Upload Historical Scorecard) ───────────────────────
+
+
+def _name_tokens(s: str) -> list[str]:
+    return [t for t in re.split(r"[^a-z0-9]+", (s or "").lower()) if t]
+
+
+def _build_match_index(players: list[Player]) -> list[dict]:
+    idx: list[dict] = []
+    for p in players:
+        name = (p.display_name_override or p.name or "").strip()
+        toks = _name_tokens(name)
+        if not toks:
+            continue
+        idx.append({"player": p, "tokens": toks, "last": toks[-1], "first_initial": toks[0][0]})
+    return idx
+
+
+def _suggest_player(name: str, index: list[dict]) -> Optional[Player]:
+    """Best-effort match of a scorecard name (often 'Surname Initial') to a roster
+    player. Returns one confident match or None — the reviewer confirms it."""
+    toks = _name_tokens(name)
+    if not toks:
+        return None
+    multis = [t for t in toks if len(t) >= 3]
+    surname = max(multis, key=len) if multis else max(toks, key=len)
+    initials = {t[0] for t in toks if t != surname}
+    cands = [r for r in index if surname == r["last"] or surname in r["tokens"]]
+    if not cands and len(surname) >= 4:
+        cands = [r for r in index if any(surname in t or t in surname for t in r["tokens"])]
+    if len(cands) == 1:
+        return cands[0]["player"]
+    if len(cands) > 1 and initials:
+        narrowed = [r for r in cands if r["first_initial"] in initials]
+        if len(narrowed) == 1:
+            return narrowed[0]["player"]
+    return None
+
+
+@router.post("/scorecard/extract")
+async def extract_scorecard_upload(
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read photographed scorecard(s) with Claude vision and return a structured,
+    both-team scorecard for review. Writes nothing — the admin verifies the
+    extraction, matches our players, picks the season/grade/opponent, then posts to
+    POST /games like any other manual game."""
+    from app.services import scorecard_ocr
+
+    images: list[tuple[bytes, str]] = []
+    for f in files[: scorecard_ocr.MAX_IMAGES]:
+        raw = await f.read()
+        if raw:
+            images.append((raw, scorecard_ocr.guess_media_type(f.content_type, f.filename)))
+    if not images:
+        raise HTTPException(status_code=422, detail="No readable images were uploaded.")
+
+    result = await scorecard_ocr.extract_scorecard(images, club.name)
+    if not result.get("available"):
+        raise HTTPException(status_code=503, detail=result.get("message") or "Scorecard reading is unavailable.")
+
+    players = (await db.execute(select(Player).where(Player.organisation_id == club.id))).scalars().all()
+    index = _build_match_index(players)
+
+    # Suggest roster matches only for names that should be OURS: our batters (our
+    # innings), our bowlers (the opposition's batting innings) and the fielders named
+    # in opposition dismissals. Opposition batters/bowlers stay free text.
+    our_names: set[str] = set()
+    for inn in (result.get("innings") or []):
+        if inn.get("is_our_team"):
+            for b in inn.get("batting") or []:
+                if b.get("name"):
+                    our_names.add(b["name"])
+        else:
+            for b in inn.get("bowling") or []:
+                if b.get("name"):
+                    our_names.add(b["name"])
+            for b in inn.get("batting") or []:
+                if b.get("fielder"):
+                    our_names.add(b["fielder"])
+
+    result["suggestions"] = {nm: (str(m.id) if (m := _suggest_player(nm, index)) else "") for nm in our_names}
+    result["roster"] = [
+        {"id": str(p.id), "name": _player_display_name(p)}
+        for p in sorted(players, key=lambda p: (p.display_name_override or p.name or "").lower())
+    ]
+    return result
+
+
 @router.post("/games")
 async def create_manual_game(
     data: ManualGameIn,
@@ -774,6 +872,8 @@ async def create_manual_game(
         is_final=data.is_final,
         match_format=data.match_format,
         notes=data.notes,
+        opp_org_id=data.opp_org_id,
+        extracted_payload=data.extracted_payload,
         created_by_user_id=current_user.id,
     )
     db.add(game)
@@ -848,6 +948,13 @@ async def update_manual_game(
     game.is_final = data.is_final
     game.match_format = data.match_format
     game.notes = data.notes
+    # Only overwrite the scorecard-upload fields when the caller actually sends them,
+    # so editing a photo-uploaded game through the ordinary Manual Games form (which
+    # doesn't carry these) can't wipe the opponent link or the stored both-team card.
+    if data.opp_org_id is not None:
+        game.opp_org_id = data.opp_org_id
+    if data.extracted_payload is not None:
+        game.extracted_payload = data.extracted_payload
     game.updated_at = datetime.now(timezone.utc)
     await db.flush()
 

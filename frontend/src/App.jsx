@@ -64,6 +64,7 @@ const AdminGrades = lazy(() => import('./pages/admin/AdminGrades'))
 const AdminSync = lazy(() => import('./pages/admin/AdminSync'))
 const AdminPartnershipRecords = lazy(() => import('./pages/admin/AdminPartnershipRecords'))
 const AdminManualEntries = lazy(() => import('./pages/admin/AdminManualEntries'))
+const AdminScorecardUpload = lazy(() => import('./pages/admin/AdminScorecardUpload'))
 const AdminImport = lazy(() => import('./pages/admin/AdminImport'))
 const AdminMilestones = lazy(() => import('./pages/admin/AdminMilestones'))
 const AdminActivityLog = lazy(() => import('./pages/admin/AdminActivityLog'))
@@ -226,6 +227,7 @@ export default function App() {
           <Route path="/admin/sync" element={<ProtectedRoute><AdminSync /></ProtectedRoute>} />
           <Route path="/admin/partnerships" element={<ProtectedRoute><AdminPartnershipRecords /></ProtectedRoute>} />
           <Route path="/admin/manual-entries" element={<ProtectedRoute><AdminManualEntries /></ProtectedRoute>} />
+          <Route path="/admin/upload-scorecard" element={<ProtectedRoute><AdminScorecardUpload /></ProtectedRoute>} />
           <Route path="/admin/import" element={<ProtectedRoute><AdminImport /></ProtectedRoute>} />
           <Route path="/admin/milestones" element={<ProtectedRoute><AdminMilestones /></ProtectedRoute>} />
           <Route path="/admin/activity" element={<ProtectedRoute><AdminActivityLog /></ProtectedRoute>} />
