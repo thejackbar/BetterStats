@@ -30,6 +30,12 @@ MODEL = "claude-opus-4-8"
 MAX_TOKENS = 8000
 MAX_IMAGES = 8
 
+# USD per million tokens for the extraction model (Opus 4.8) — used only to log an
+# estimated cost per upload, so keep it in step with MODEL above. Cache reads/writes
+# are priced at the standard 0.1x / 1.25x of input in case caching is ever added here.
+_PRICE_INPUT_PER_MTOK = 5.00
+_PRICE_OUTPUT_PER_MTOK = 25.00
+
 _ALLOWED_MEDIA = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 _SYSTEM = (
@@ -390,6 +396,24 @@ async def extract_scorecard(images: list[tuple[bytes, str]], our_club_name: str)
     except Exception as e:
         logger.exception("scorecard_ocr: model call failed")
         return {"available": False, "message": f"Couldn't read the scorecard just now ({str(e)[:160]}). Try again shortly."}
+
+    usage = getattr(resp, "usage", None)
+    if usage is not None:
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        est_cost = (
+            in_tok * _PRICE_INPUT_PER_MTOK
+            + cache_write * _PRICE_INPUT_PER_MTOK * 1.25
+            + cache_read * _PRICE_INPUT_PER_MTOK * 0.10
+            + out_tok * _PRICE_OUTPUT_PER_MTOK
+        ) / 1_000_000
+        logger.info(
+            "scorecard_ocr: extract usage model=%s images=%d input_tokens=%d output_tokens=%d "
+            "cache_read=%d cache_write=%d est_cost_usd=%.4f",
+            MODEL, min(len(images), MAX_IMAGES), in_tok, out_tok, cache_read, cache_write, est_cost,
+        )
 
     tool_input = next((b.input for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
     if not tool_input:
